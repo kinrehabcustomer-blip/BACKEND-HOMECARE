@@ -1,0 +1,20 @@
+{
+  "name": "kin-homecare",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "server",
+    "client"
+  ],
+  "scripts": {
+    "dev": "concurrently -n server,client -c cyan,magenta \"npm:dev:server\" \"npm:dev:client\"",
+    "dev:server": "npm run dev --workspace server",
+    "dev:client": "npm run dev --workspace client",
+    "seed": "npm run seed --workspace server"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "playwright": "^1.61.1"
+  }
+}
