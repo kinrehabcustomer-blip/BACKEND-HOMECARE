@@ -1,8 +1,11 @@
-import { db, nextEmployeeId, transaction } from '../db/index.js';
+import { sql, nextEmployeeId, transaction } from '../db/index.js';
+import { hashPassword } from '../lib/auth.js';
 
 const COLUMNS = [
   'first_name',
   'last_name',
+  'first_name_en',
+  'last_name_en',
   'nickname',
   'national_id',
   'phone',
@@ -10,6 +13,7 @@ const COLUMNS = [
   'gender',
   'birth_date',
   'address',
+  'education',
   'position',
   'employment_type',
   'status',
@@ -21,15 +25,29 @@ const COLUMNS = [
   'note',
 ];
 
-export function list({ q, status, position, page, per_page, sort, order }) {
+const NOW = `to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD HH24:MI:SS')`;
+
+// คอลัมน์ที่ส่งออก API ได้ — เขียนชื่อทีละตัวแทน SELECT * เพื่อไม่ให้ password_hash หลุดออกไปหน้าเว็บ
+const PUBLIC = [
+  'employee_id',
+  ...COLUMNS,
+  'role',
+  'must_change_password',
+  'last_login_at',
+  'created_at',
+  'updated_at',
+].join(', ');
+
+export async function list({ q, status, position, page, per_page, sort, order }) {
   const where = [];
   const params = {};
 
   if (q) {
-    // ค้นได้ทั้งรหัสพนักงาน ชื่อ นามสกุล ชื่อเล่น และเบอร์โทร
+    // ค้นได้ทั้งรหัสพนักงาน ชื่อไทย ชื่ออังกฤษ ชื่อเล่น และเบอร์โทร
     where.push(`(
-      employee_id LIKE :q OR first_name LIKE :q OR last_name LIKE :q
-      OR nickname LIKE :q OR phone LIKE :q
+      employee_id ILIKE :q OR first_name ILIKE :q OR last_name ILIKE :q
+      OR first_name_en ILIKE :q OR last_name_en ILIKE :q
+      OR nickname ILIKE :q OR phone ILIKE :q
     )`);
     params.q = `%${q}%`;
   }
@@ -43,124 +61,268 @@ export function list({ q, status, position, page, per_page, sort, order }) {
   }
 
   const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
-  const { total } = db.prepare(`SELECT COUNT(*) AS total FROM employees ${clause}`).get(params);
+  const { total } = await sql.one(`SELECT COUNT(*) AS total FROM employees ${clause}`, params);
 
-  // sort/order ผ่าน enum ของ zod มาแล้ว จึงต่อ string ตรงนี้ได้ (SQLite ไม่ bind ชื่อคอลัมน์)
-  const rows = db
-    .prepare(
-      `SELECT * FROM employees ${clause}
-       ORDER BY ${sort} ${order.toUpperCase()}
-       LIMIT :limit OFFSET :offset`,
-    )
-    .all({ ...params, limit: per_page, offset: (page - 1) * per_page });
+  // sort/order ผ่าน enum ของ zod มาแล้ว จึงต่อ string ตรงนี้ได้ (Postgres ไม่ bind ชื่อคอลัมน์)
+  const rows = await sql.all(
+    `SELECT ${PUBLIC} FROM employees ${clause}
+     ORDER BY ${sort} ${order.toUpperCase()}
+     LIMIT :limit OFFSET :offset`,
+    { ...params, limit: per_page, offset: (page - 1) * per_page },
+  );
+
+  // COUNT(*) เป็น bigint — pg ส่งกลับมาเป็น string เพื่อกันค่าเกิน Number.MAX_SAFE_INTEGER
+  const count = Number(total);
 
   return {
     data: rows,
-    pagination: { page, per_page, total, total_pages: Math.ceil(total / per_page) || 1 },
+    pagination: { page, per_page, total: count, total_pages: Math.ceil(count / per_page) || 1 },
   };
 }
 
 export function findById(employeeId) {
-  return db.prepare('SELECT * FROM employees WHERE employee_id = ?').get(employeeId) ?? null;
+  return sql.one(`SELECT ${PUBLIC} FROM employees WHERE employee_id = :id`, { id: employeeId });
 }
 
-/** ดึงพนักงานพร้อมข้อมูลที่ผูกกับ employee_id จากโมดูลอื่น */
-export function findDetailById(employeeId) {
-  const employee = findById(employeeId);
+/** ดึงพนักงานพร้อมข้อมูลที่ผูกกับ employee_id จากโมดูลอื่น (ใบรับรอง + ผลงาน + เคสที่รับผิดชอบ) */
+export async function findDetailById(employeeId) {
+  const employee = await findById(employeeId);
   if (!employee) return null;
 
-  const certificates = db
-    .prepare('SELECT * FROM employee_certificates WHERE employee_id = ? ORDER BY issued_date DESC')
-    .all(employeeId);
+  const [certificates, portfolio, cases] = await Promise.all([
+    certificates_.listFor(employeeId),
+    portfolio_.listFor(employeeId),
+    // ประวัติการทำงาน: เคสที่กำลังทำอยู่และที่ปิดไปแล้ว — เรียงใหม่สุดขึ้นก่อน
+    sql.all(
+      `SELECT case_id, title, case_type, client_name, status,
+              start_date, end_date, assigned_at, closed_at, fee
+       FROM cases
+       WHERE assigned_to = :id
+       ORDER BY case_id DESC`,
+      { id: employeeId },
+    ),
+  ]);
 
-  return { ...employee, certificates };
+  return { ...employee, certificates, portfolio, cases };
 }
 
 export function create(input) {
-  return transaction(() => {
-    const employeeId = nextEmployeeId();
+  return transaction(async (tx) => {
+    const employeeId = await nextEmployeeId(tx);
     const values = { employee_id: employeeId };
     for (const col of COLUMNS) values[col] = input[col] ?? null;
 
-    db.prepare(
-      `INSERT INTO employees (employee_id, ${COLUMNS.join(', ')})
-       VALUES (:employee_id, ${COLUMNS.map((c) => `:${c}`).join(', ')})`,
-    ).run(values);
+    // รหัสผ่านเริ่มต้นคือรหัสพนักงานของตัวเอง — เก็บเป็น hash ไม่เก็บ plain text
+    values.password_hash = await hashPassword(employeeId);
 
-    return findById(employeeId);
+    return tx.one(
+      `INSERT INTO employees (employee_id, password_hash, ${COLUMNS.join(', ')})
+       VALUES (:employee_id, :password_hash, ${COLUMNS.map((c) => `:${c}`).join(', ')})
+       RETURNING ${PUBLIC}`,
+      values,
+    );
   });
 }
 
-export function update(employeeId, input) {
+export async function update(employeeId, input) {
   const fields = COLUMNS.filter((col) => col in input);
   if (fields.length === 0) return findById(employeeId);
 
   const values = { employee_id: employeeId };
   for (const col of fields) values[col] = input[col] ?? null;
 
-  db.prepare(
+  return sql.one(
     `UPDATE employees
-     SET ${fields.map((c) => `${c} = :${c}`).join(', ')}, updated_at = datetime('now')
-     WHERE employee_id = :employee_id`,
-  ).run(values);
-
-  return findById(employeeId);
+     SET ${fields.map((c) => `${c} = :${c}`).join(', ')}, updated_at = ${NOW}
+     WHERE employee_id = :employee_id
+     RETURNING ${PUBLIC}`,
+    values,
+  );
 }
 
 /** ลาออก: เก็บประวัติไว้ ไม่ลบแถว เพราะ employee_id ยังถูกอ้างอิงจากโมดูลอื่น */
 export function resign(employeeId, resignDate) {
-  db.prepare(
+  return sql.one(
     `UPDATE employees
-     SET status = 'resigned', resign_date = :resign_date, updated_at = datetime('now')
-     WHERE employee_id = :employee_id`,
-  ).run({ employee_id: employeeId, resign_date: resignDate ?? null });
-
-  return findById(employeeId);
+     SET status = 'resigned', resign_date = :resign_date, updated_at = ${NOW}
+     WHERE employee_id = :employee_id
+     RETURNING ${PUBLIC}`,
+    { employee_id: employeeId, resign_date: resignDate ?? null },
+  );
 }
 
-export function remove(employeeId) {
-  const { changes } = db.prepare('DELETE FROM employees WHERE employee_id = ?').run(employeeId);
-  return changes > 0;
+export async function remove(employeeId) {
+  return transaction(async (tx) => {
+    // ปลดเคสที่ถืออยู่ก่อนลบ: เคสที่ยังทำงานอยู่กลับไปเป็น 'ยังไม่จับคู่' รอหาคนใหม่
+    // (ต้องทำเองก่อน DELETE เพราะ FK จะ SET NULL ให้ แต่จะไปชน CHECK ที่ห้ามเคส 'assigned' ไม่มีพนักงาน)
+    await tx.run(
+      `UPDATE cases
+       SET assigned_to = NULL,
+           assigned_at = NULL,
+           status = CASE WHEN status = 'assigned' THEN 'unassigned' ELSE status END,
+           updated_at = ${NOW}
+       WHERE assigned_to = :id`,
+      { id: employeeId },
+    );
+
+    const changes = await tx.run('DELETE FROM employees WHERE employee_id = :id', { id: employeeId });
+    return changes > 0;
+  });
 }
 
-export function summary() {
-  const byStatus = db.prepare('SELECT status, COUNT(*) AS count FROM employees GROUP BY status').all();
-  const byPosition = db.prepare('SELECT position, COUNT(*) AS count FROM employees GROUP BY position').all();
-  const { total } = db.prepare('SELECT COUNT(*) AS total FROM employees').get();
+export async function summary() {
+  const [byStatus, byPosition, totals] = await Promise.all([
+    sql.all('SELECT status, COUNT(*) AS count FROM employees GROUP BY status'),
+    sql.all('SELECT position, COUNT(*) AS count FROM employees GROUP BY position'),
+    sql.one('SELECT COUNT(*) AS total FROM employees'),
+  ]);
 
-  return { total, by_status: byStatus, by_position: byPosition };
+  const toNumber = (rows) => rows.map((row) => ({ ...row, count: Number(row.count) }));
+
+  return {
+    total: Number(totals.total),
+    by_status: toNumber(byStatus),
+    by_position: toNumber(byPosition),
+  };
 }
 
-export const certificates = {
+// คอลัมน์ที่ส่งออก API ได้ — ไม่รวม image_data (ไบนารีรูป) เพราะจะทำให้ทุก response อ้วนขึ้นหลายร้อย KB
+// รูปดึงแยกผ่าน GET .../image เมื่อหน้าเว็บต้องใช้จริงเท่านั้น
+const CERT_PUBLIC = `
+  certificate_id, employee_id, name, issuer, issued_date, expiry_date, created_at,
+  image_mime, image_size,
+  (image_data IS NOT NULL) AS has_image
+`;
+
+const certificates_ = {
   listFor(employeeId) {
-    return db
-      .prepare('SELECT * FROM employee_certificates WHERE employee_id = ? ORDER BY issued_date DESC')
-      .all(employeeId);
+    return sql.all(
+      `SELECT ${CERT_PUBLIC} FROM employee_certificates
+       WHERE employee_id = :id
+       ORDER BY issued_date DESC NULLS LAST`,
+      { id: employeeId },
+    );
   },
 
   add(employeeId, input) {
-    const { lastInsertRowid } = db
-      .prepare(
-        `INSERT INTO employee_certificates (employee_id, name, issuer, issued_date, expiry_date)
-         VALUES (:employee_id, :name, :issuer, :issued_date, :expiry_date)`,
-      )
-      .run({
+    const image = input.image ?? null; // { data: Buffer, mime, size }
+
+    return sql.one(
+      `INSERT INTO employee_certificates
+         (employee_id, name, issuer, issued_date, expiry_date, image_data, image_mime, image_size)
+       VALUES (:employee_id, :name, :issuer, :issued_date, :expiry_date, :image_data, :image_mime, :image_size)
+       RETURNING ${CERT_PUBLIC}`,
+      {
         employee_id: employeeId,
         name: input.name,
         issuer: input.issuer ?? null,
         issued_date: input.issued_date ?? null,
         expiry_date: input.expiry_date ?? null,
-      });
-
-    return db
-      .prepare('SELECT * FROM employee_certificates WHERE certificate_id = ?')
-      .get(lastInsertRowid);
+        image_data: image?.data ?? null,
+        image_mime: image?.mime ?? null,
+        image_size: image?.size ?? null,
+      },
+    );
   },
 
-  remove(employeeId, certificateId) {
-    const { changes } = db
-      .prepare('DELETE FROM employee_certificates WHERE certificate_id = ? AND employee_id = ?')
-      .run(certificateId, employeeId);
+  /** ดึงไบนารีรูป — เรียกเฉพาะตอนหน้าเว็บขอรูปจริง */
+  findImage(employeeId, certificateId) {
+    return sql.one(
+      `SELECT image_data, image_mime FROM employee_certificates
+       WHERE certificate_id = :cert_id AND employee_id = :id AND image_data IS NOT NULL`,
+      { cert_id: certificateId, id: employeeId },
+    );
+  },
+
+  /** แนบรูปใหม่ทับของเดิม (ใบรับรองหนึ่งใบมีรูปได้หนึ่งรูป) */
+  async setImage(employeeId, certificateId, image) {
+    return sql.one(
+      `UPDATE employee_certificates
+       SET image_data = :image_data, image_mime = :image_mime, image_size = :image_size
+       WHERE certificate_id = :cert_id AND employee_id = :id
+       RETURNING ${CERT_PUBLIC}`,
+      {
+        cert_id: certificateId,
+        id: employeeId,
+        image_data: image?.data ?? null,
+        image_mime: image?.mime ?? null,
+        image_size: image?.size ?? null,
+      },
+    );
+  },
+
+  async remove(employeeId, certificateId) {
+    const changes = await sql.run(
+      'DELETE FROM employee_certificates WHERE certificate_id = :cert_id AND employee_id = :id',
+      { cert_id: certificateId, id: employeeId },
+    );
     return changes > 0;
   },
 };
+
+export const certificates = certificates_;
+
+// ---------- ผลงาน (โปรไฟล์) ----------
+// ไม่ส่ง image_data ออก API เช่นเดียวกับใบรับรอง — รูปดึงแยกผ่าน .../image
+const PORTFOLIO_PUBLIC = `portfolio_id, employee_id, title, description, image_mime, image_size, created_at`;
+
+const portfolio_ = {
+  listFor(employeeId) {
+    return sql.all(
+      `SELECT ${PORTFOLIO_PUBLIC} FROM employee_portfolio
+       WHERE employee_id = :id
+       ORDER BY portfolio_id DESC`,
+      { id: employeeId },
+    );
+  },
+
+  add(employeeId, input) {
+    return sql.one(
+      `INSERT INTO employee_portfolio (employee_id, title, description, image_data, image_mime, image_size)
+       VALUES (:employee_id, :title, :description, :image_data, :image_mime, :image_size)
+       RETURNING ${PORTFOLIO_PUBLIC}`,
+      {
+        employee_id: employeeId,
+        title: input.title,
+        description: input.description ?? null,
+        image_data: input.image.data,
+        image_mime: input.image.mime,
+        image_size: input.image.size,
+      },
+    );
+  },
+
+  /** แก้ได้เฉพาะชื่อกับคำอธิบาย — รูปไม่แตะ */
+  update(employeeId, portfolioId, input) {
+    return sql.one(
+      `UPDATE employee_portfolio
+       SET title = :title, description = :description
+       WHERE portfolio_id = :pid AND employee_id = :id
+       RETURNING ${PORTFOLIO_PUBLIC}`,
+      {
+        pid: portfolioId,
+        id: employeeId,
+        title: input.title,
+        description: input.description ?? null,
+      },
+    );
+  },
+
+  findImage(employeeId, portfolioId) {
+    return sql.one(
+      `SELECT image_data, image_mime FROM employee_portfolio
+       WHERE portfolio_id = :pid AND employee_id = :id`,
+      { pid: portfolioId, id: employeeId },
+    );
+  },
+
+  async remove(employeeId, portfolioId) {
+    const changes = await sql.run(
+      'DELETE FROM employee_portfolio WHERE portfolio_id = :pid AND employee_id = :id',
+      { pid: portfolioId, id: employeeId },
+    );
+    return changes > 0;
+  },
+};
+
+export const portfolio = portfolio_;

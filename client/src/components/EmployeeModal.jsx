@@ -1,10 +1,14 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api.js';
+import WorkHistory from './WorkHistory.jsx';
 import {
   POSITION_LABELS, EMPLOYMENT_TYPE_LABELS, STATUS_LABELS, GENDER_LABELS,
   formatBaht, formatDate,
 } from '../labels.js';
+
+// popup เป็นตัวอย่างข้อมูลย่อ — โชว์ประวัติการทำงานแค่ 3 ครั้งล่าสุด ที่เหลือดูที่หน้าเต็ม
+const PREVIEW_HISTORY = 3;
 
 /** อายุงาน/อายุ คำนวณจากวันที่ให้ดูง่าย — ข้อมูลที่ตารางไม่ได้โชว์ */
 function yearsSince(dateStr) {
@@ -87,6 +91,10 @@ export default function EmployeeModal({ employeeId, onClose }) {
               <section>
                 <h3>ข้อมูลส่วนตัว</h3>
                 <div className="field-grid">
+                  <Field
+                    label="ชื่อ-นามสกุล (อังกฤษ)"
+                    value={[employee.first_name_en, employee.last_name_en].filter(Boolean).join(' ')}
+                  />
                   <Field label="เลขบัตรประชาชน" value={employee.national_id} mono />
                   <Field label="เพศ" value={GENDER_LABELS[employee.gender]} />
                   <Field
@@ -100,6 +108,7 @@ export default function EmployeeModal({ employeeId, onClose }) {
                   <Field label="อีเมล" value={employee.email} />
                 </div>
                 <Field label="ที่อยู่" value={employee.address} />
+                <Field label="ประวัติการศึกษา" value={employee.education} />
               </section>
 
               <section>
@@ -130,19 +139,69 @@ export default function EmployeeModal({ employeeId, onClose }) {
                   const expired = c.expiry_date && new Date(c.expiry_date) < new Date();
                   return (
                     <div className="modal-cert" key={c.certificate_id}>
-                      <strong>{c.name}</strong>
-                      <p className="muted">
-                        {c.issuer ?? 'ไม่ระบุผู้ออก'} · ออกเมื่อ {formatDate(c.issued_date)}
-                        {c.expiry_date && (
-                          <>
-                            {' '}· หมดอายุ {formatDate(c.expiry_date)}
-                            {expired && <span className="badge suspended cert-flag">หมดอายุแล้ว</span>}
-                          </>
-                        )}
-                      </p>
+                      {c.has_image && (
+                        <a
+                          className="cert-thumb"
+                          href={api.certificateImageUrl(employee.employee_id, c.certificate_id)}
+                          target="_blank"
+                          rel="noreferrer"
+                          title="กดเพื่อดูรูปเต็ม"
+                        >
+                          <img
+                            src={api.certificateImageUrl(employee.employee_id, c.certificate_id)}
+                            alt={`รูป ${c.name}`}
+                          />
+                        </a>
+                      )}
+                      <div className="cert-info">
+                        <strong>{c.name}</strong>
+                        <p className="muted">
+                          {c.issuer ?? 'ไม่ระบุผู้ออก'} · ออกเมื่อ {formatDate(c.issued_date)}
+                          {c.expiry_date && (
+                            <>
+                              {' '}· หมดอายุ {formatDate(c.expiry_date)}
+                              {expired && <span className="badge suspended cert-flag">หมดอายุแล้ว</span>}
+                            </>
+                          )}
+                        </p>
+                      </div>
                     </div>
                   );
                 })}
+              </section>
+
+              <section>
+                <h3>ผลงาน ({employee.portfolio.length})</h3>
+                {employee.portfolio.length === 0 ? (
+                  <p className="muted">ยังไม่มีผลงาน</p>
+                ) : (
+                  <div className="portfolio-grid">
+                    {employee.portfolio.map((item) => (
+                      <figure className="portfolio-item" key={item.portfolio_id}>
+                        <a
+                          href={api.portfolioImageUrl(employee.employee_id, item.portfolio_id)}
+                          target="_blank"
+                          rel="noreferrer"
+                          title="กดเพื่อดูรูปเต็ม"
+                        >
+                          <img
+                            src={api.portfolioImageUrl(employee.employee_id, item.portfolio_id)}
+                            alt={item.title}
+                          />
+                        </a>
+                        <figcaption>
+                          <strong>{item.title}</strong>
+                          {item.description && <p className="muted">{item.description}</p>}
+                        </figcaption>
+                      </figure>
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              <section>
+                <h3>ประวัติการทำงาน ({employee.cases.length})</h3>
+                <WorkHistory cases={employee.cases} limit={PREVIEW_HISTORY} />
               </section>
 
               <section>
@@ -157,7 +216,6 @@ export default function EmployeeModal({ employeeId, onClose }) {
             </div>
 
             <footer className="modal-foot">
-              <button className="btn" onClick={onClose}>ปิด</button>
               <Link className="btn" to={`/employees/${employee.employee_id}`}>เปิดหน้าเต็ม</Link>
               <Link className="btn primary" to={`/employees/${employee.employee_id}/edit`}>แก้ไขข้อมูล</Link>
             </footer>

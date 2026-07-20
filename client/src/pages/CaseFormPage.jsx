@@ -1,0 +1,645 @@
+import { useEffect, useState } from 'react';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { api } from '../api.js';
+import {
+  CASE_TYPE_LABELS, POSITION_LABELS, GENDER_LABELS, SERVICE_KIND_LABELS, formatBaht, ageFromBirthDate,
+} from '../labels.js';
+
+const TIERS = ['CG', 'NA', 'PN'];
+const CATEGORY_LABELS = { daily: 'รายวัน', weekly: 'รายสัปดาห์', monthly: 'รายเดือน' };
+
+const BLANK = {
+  case_type: 'elderly_care',
+  customer_id: '',
+  patient_id: '',
+  service_kind: '',
+  pkg_format_id: '', pkg_grade_id: '', pkg_staff_tier: '', // [Homecare]
+  physio_package_id: '', // [กายภาพ]
+
+  // ตัวตนผู้ป่วย (มาจากแฟ้ม patient / หรือกรอกเพื่อสร้างแฟ้มใหม่) — client_name/gender/age/medical_history คัดลอกเป็น snapshot ในเคส
+  client_name: '', patient_gender: '', patient_age: '', medical_history: '',
+  // เฉพาะตอนสร้างผู้ป่วยใหม่ — เก็บที่แฟ้มผู้ป่วย ไม่ใช่คอลัมน์ของเคส (ถูกตัดออกก่อนบันทึกเคส)
+  weight_kg: '', height_cm: '', allergies: '', relation_to_customer: '',
+
+  // การประเมิน/อาการครั้งนี้ (ข้อมูลของเคส เปลี่ยนได้ทุกรอบ)
+  current_symptoms: '', medical_devices: '', care_goal: '',
+
+  // รายละเอียดการใช้บริการ
+  service_start_preference: '', address: '', client_phone: '', nurse_call_preference: '',
+
+  start_date: '', end_date: '', fee: '', note: '',
+  assigned_to: '',
+};
+
+// ช่องตัวเลขต้องส่งเป็น number ไม่ใช่ string ไม่งั้น zod ปฏิเสธ
+const NUMERIC = ['fee', 'patient_age', 'weight_kg', 'height_cm', 'pkg_format_id', 'pkg_grade_id', 'physio_package_id'];
+
+/** ช่องว่างต้องส่งเป็น null ไม่ใช่ "" */
+const toPayload = (form) =>
+  Object.fromEntries(
+    Object.entries(form).map(([k, v]) => {
+      if (v === '') return [k, null];
+      if (NUMERIC.includes(k)) return [k, Number(v)];
+      return [k, v];
+    }),
+  );
+
+const shownAge = (p) => {
+  const a = p.age ?? ageFromBirthDate(p.birth_date);
+  return a != null ? `${a} ปี` : null;
+};
+
+export default function CaseFormPage() {
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const isEdit = Boolean(id);
+
+  const [searchParams] = useSearchParams();
+  const [form, setForm] = useState(BLANK);
+  const [staff, setStaff] = useState([]);
+  const [matrix, setMatrix] = useState(null);
+  const [physio, setPhysio] = useState([]);
+  const [error, setError] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  // ค้นหา/เลือกผู้รับการดูแล (patient) เป็นหลัก
+  const [query, setQuery] = useState('');
+  const [matches, setMatches] = useState([]);
+  const [pickedPatient, setPickedPatient] = useState(null);
+
+  // ผู้ว่าจ้าง (customer) — เลือกได้ไม่บังคับ; ถ้าเลือกผู้ป่วยที่ผูกลูกค้าไว้แล้วจะมาเอง
+  const [payer, setPayer] = useState(null);
+  const [payerQuery, setPayerQuery] = useState('');
+  const [payerMatches, setPayerMatches] = useState([]);
+
+  useEffect(() => {
+    api.assignableEmployees().then(setStaff).catch(() => {});
+    // ตารางเรททั้งหมด (เกรด + รูปแบบ + ราคา) — ใช้ให้เลือกเรทตอนเปิดเคส
+    api.packageMatrix().then(setMatrix).catch(() => {});
+    // แพ็คเกจกายภาพบำบัด (เหมาจำนวนครั้ง) — อีกสายที่เลือกได้แทน Homecare
+    api.listPhysioPackages().then(setPhysio).catch(() => {});
+  }, []);
+
+  // ค่าที่เลือกอยู่ (แปลงเป็น number เพื่อเทียบกับ id ในตาราง)
+  const selFormatId = form.pkg_format_id === '' ? null : Number(form.pkg_format_id);
+  const selGradeId = form.pkg_grade_id === '' ? null : Number(form.pkg_grade_id);
+  const selectedFormat = matrix?.formats.find((f) => f.format_id === selFormatId) ?? null;
+  const needGrade = selectedFormat?.graded ?? false;
+
+  const lookupRate = (formatId, gradeId, tier) =>
+    matrix?.rates.find(
+      (r) => r.format_id === formatId && (r.grade_id ?? null) === (gradeId ?? null) && r.staff_tier === tier,
+    ) ?? null;
+
+  const effectiveGrade = needGrade ? selGradeId : null;
+  const currentRate =
+    selectedFormat && form.pkg_staff_tier && (!needGrade || selGradeId)
+      ? lookupRate(selectedFormat.format_id, effectiveGrade, form.pkg_staff_tier)
+      : null;
+
+  /**
+   * ผู้ใช้เปลี่ยนการเลือกเรท -> ถ้าได้ช่องที่ให้บริการได้ คัดลอกค่าบริการมาเป็นค่าจ้าง (fee)
+   * "คัดลอก" ไม่ใช่ "อ้างอิง" — แก้ค่าจ้างทีหลังได้ และเคสเก่าไม่เปลี่ยนตามเมื่อราคาในตารางเรทถูกแก้
+   * ทำเฉพาะตอนผู้ใช้กดเลือกเอง (ไม่ใช่ตอนโหลดเคสมาแก้) จึงไม่ทับ fee ที่บันทึกไว้เดิม
+   */
+  function applySelection(next) {
+    setForm((prev) => {
+      const merged = { ...prev, ...next };
+      const fmt = matrix?.formats.find((f) => f.format_id === Number(merged.pkg_format_id));
+      if (fmt && !fmt.graded) merged.pkg_grade_id = ''; // รูปแบบไม่อิงเกรด ล้างเกรดทิ้ง
+      const gid = fmt?.graded ? (merged.pkg_grade_id === '' ? null : Number(merged.pkg_grade_id)) : null;
+      if (fmt && merged.pkg_staff_tier && (!fmt.graded || gid)) {
+        const r = lookupRate(fmt.format_id, gid, merged.pkg_staff_tier);
+        if (r && r.available && r.customer_price != null) merged.fee = String(r.customer_price);
+      }
+      return merged;
+    });
+  }
+
+  const isHomecare = form.service_kind === 'homecare';
+  const isPhysio = form.service_kind === 'physio';
+
+  const selPhysioId = form.physio_package_id === '' ? null : Number(form.physio_package_id);
+  const selectedPhysio = physio.find((p) => p.physio_package_id === selPhysioId) ?? null;
+
+  // ปกติเสนอเฉพาะแพ็คเกจที่ยังเปิดขาย — แต่เคสเก่าที่ผูกแพ็คเกจซึ่งปิดขายไปแล้วต้องยังเห็นของตัวเอง
+  // ไม่งั้น dropdown จะเด้งเป็นค่าว่างแล้วแพ็คเกจของเคสนั้นหายไปเงียบๆ ตอนกดบันทึก
+  const physioOptions = physio.filter((p) => p.active || p.physio_package_id === selPhysioId);
+
+  /**
+   * เปลี่ยนสายบริการ -> ล้างสิ่งที่เลือกไว้ของสายเดิม
+   * ไม่ล้าง ค่าที่ค้างจะถูกส่งไปบันทึกด้วย กลายเป็นเคสที่มีทั้งเรท Homecare และแพ็คเกจกายภาพบำบัด
+   * (ฝั่ง server ล้างซ้ำให้อีกชั้น — ที่นี่ล้างเพื่อให้สิ่งที่เห็นบนจอตรงกับสิ่งที่จะถูกบันทึก)
+   * ไม่แตะค่าจ้างที่กรอกไว้ — เลือกแพ็คเกจใหม่แล้วมันจะถูกเติมทับให้เอง
+   */
+  function changeKind(kind) {
+    setForm((prev) => ({
+      ...prev,
+      service_kind: kind,
+      ...(kind !== 'homecare' ? { pkg_format_id: '', pkg_grade_id: '', pkg_staff_tier: '' } : null),
+      ...(kind !== 'physio' ? { physio_package_id: '' } : null),
+    }));
+  }
+
+  /** เลือกแพ็คเกจกายภาพบำบัด -> คัดลอกราคาพิเศษมาเป็นค่าจ้าง (คัดลอก ไม่ใช่อ้างอิง เหมือนฝั่ง Homecare) */
+  function applyPhysio(value) {
+    setForm((prev) => {
+      const merged = { ...prev, physio_package_id: value };
+      const p = physio.find((x) => x.physio_package_id === Number(value));
+      if (p && p.special_price != null) merged.fee = String(p.special_price);
+      return merged;
+    });
+  }
+
+  /**
+   * เลือกผู้ป่วย -> ผูก patient_id + คัดลอกข้อมูลตัวตน (snapshot) เข้าเคส และดึงผู้ว่าจ้างที่ผูกไว้มาแสดง
+   * "คัดลอก" ไม่ใช่ "อ้างอิง" — เคสที่ปิดแล้วคงข้อมูล ณ วันให้บริการไว้แม้แฟ้มผู้ป่วยจะแก้ทีหลัง
+   */
+  function pickPatient(p) {
+    setPickedPatient(p);
+    const cust = p.customer ?? (p.customer_id ? { customer_id: p.customer_id, name: p.customer_name } : null);
+    setPayer(cust);
+    setForm((prev) => ({
+      ...prev,
+      patient_id: p.patient_id,
+      customer_id: p.customer_id ?? '',
+      client_name: p.name ?? '',
+      patient_gender: p.gender ?? '',
+      patient_age: p.age ?? ageFromBirthDate(p.birth_date) ?? '',
+      medical_history: p.medical_history ?? '',
+      address: p.address ?? '',
+    }));
+  }
+
+  /** เลิกเลือกผู้ป่วย -> กลับไปโหมดค้นหา/สร้างใหม่ (ข้อมูลที่เติมไว้ไม่ล้าง เผื่อสร้างแฟ้มใหม่จากข้อมูลเดิม) */
+  function unpickPatient() {
+    setPickedPatient(null);
+    setQuery('');
+    setForm((prev) => ({ ...prev, patient_id: '' }));
+  }
+
+  function pickPayer(c) {
+    setPayer(c);
+    setPayerQuery('');
+    setPayerMatches([]);
+    setForm((prev) => ({ ...prev, customer_id: c.customer_id }));
+  }
+
+  function unpickPayer() {
+    setPayer(null);
+    setForm((prev) => ({ ...prev, customer_id: '' }));
+  }
+
+  // ค้นหาผู้ป่วยที่ server — โชว์เฉพาะเมื่อยังไม่ได้เลือกและมีการพิมพ์
+  useEffect(() => {
+    if (form.patient_id || !query.trim()) {
+      setMatches([]);
+      return;
+    }
+    const timer = setTimeout(() => {
+      api.listPatients({ q: query.trim(), per_page: 8 }).then((r) => setMatches(r.data)).catch(() => {});
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [query, form.patient_id]);
+
+  // ค้นหาผู้ว่าจ้าง (customer) สำหรับผูกกับผู้ป่วยใหม่
+  useEffect(() => {
+    if (form.customer_id || !payerQuery.trim()) {
+      setPayerMatches([]);
+      return;
+    }
+    const timer = setTimeout(() => {
+      api.listCustomers({ q: payerQuery.trim(), per_page: 8 }).then((r) => setPayerMatches(r.data)).catch(() => {});
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [payerQuery, form.customer_id]);
+
+  // เปิดเคสจากหน้าผู้รับการดูแล (?patient_id=PAT-0001) -> เลือกผู้ป่วยรายนั้นให้เลย
+  useEffect(() => {
+    if (isEdit) return;
+    const pid = searchParams.get('patient_id');
+    if (!pid) return;
+    api.getPatient(pid).then((p) => pickPatient(p)).catch(() => {});
+  }, [isEdit]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // เปิดเคสจากหน้าลูกค้า (?customer_id=CUS-0001) -> รู้ผู้ว่าจ้างแล้ว เหลือเลือก/สร้างผู้ป่วย
+  useEffect(() => {
+    if (isEdit) return;
+    const cid = searchParams.get('customer_id');
+    if (!cid || searchParams.get('patient_id')) return; // ถ้ามาจากผู้ป่วย ผู้ว่าจ้างมาเองแล้ว
+    api.getCustomer(cid).then((c) => {
+      setPayer(c);
+      setForm((prev) => ({ ...prev, customer_id: c.customer_id }));
+    }).catch(() => {});
+  }, [isEdit]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!isEdit) return;
+    api
+      .getCase(id)
+      .then((c) => {
+        const filled = { ...BLANK };
+        for (const key of Object.keys(BLANK)) filled[key] = c[key] ?? '';
+
+        // เคสที่เปิดก่อนมีสองสายไม่มี service_kind — เดาจากสิ่งที่ผูกไว้จริง
+        // ไม่เดา ชุด dropdown จะถูกซ่อนแล้วบริการที่เลือกไว้จะหายไปจากสายตา (และโดนล้างทิ้งตอนกดบันทึก)
+        if (!filled.service_kind) {
+          if (filled.physio_package_id !== '') filled.service_kind = 'physio';
+          else if (filled.pkg_format_id !== '') filled.service_kind = 'homecare';
+        }
+        setForm(filled);
+      })
+      .catch((err) => setError(err.message));
+  }, [id, isEdit]);
+
+  const field = (key) => ({
+    value: form[key],
+    onChange: (e) => setForm((prev) => ({ ...prev, [key]: e.target.value })),
+  });
+
+  /**
+   * ยังไม่ได้เลือกผู้ป่วย = ผู้ป่วยรายใหม่ -> สร้างแฟ้ม (PAT-xxxx) จากข้อมูลที่กรอก แล้วผูกกับผู้ว่าจ้าง (ถ้ามี)
+   * เก็บ patient_id กลับเข้าฟอร์ม เผื่อบันทึกเคสพลาดแล้วกดใหม่ จะไม่สร้างผู้ป่วยซ้ำ
+   */
+  async function ensurePatient(payload) {
+    if (payload.patient_id) return payload.patient_id;
+
+    const patient = await api.createPatient({
+      name: payload.client_name,
+      gender: payload.patient_gender,
+      age: payload.patient_age,
+      weight_kg: payload.weight_kg,
+      height_cm: payload.height_cm,
+      medical_history: payload.medical_history,
+      allergies: payload.allergies,
+      relation_to_customer: payload.relation_to_customer,
+      address: payload.address,
+      customer_id: payload.customer_id, // ผูกผู้ว่าจ้างตั้งแต่แรก (null ได้ถ้ายังไม่รู้ผู้จ่าย)
+    });
+
+    setForm((prev) => ({ ...prev, patient_id: patient.patient_id }));
+    return patient.patient_id;
+  }
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setSaving(true);
+    setError(null);
+    try {
+      const payload = toPayload(form);
+
+      // เคสใหม่ต้องผูกแฟ้มผู้ป่วยเสมอ — เลือกไว้แล้วใช้เลย ไม่งั้นสร้างใหม่จากข้อมูลที่กรอก
+      if (!isEdit) payload.patient_id = await ensurePatient(payload);
+
+      // ไม่มีช่องชื่อเคสแล้ว — ตั้งชื่ออัตโนมัติจากบริการที่เลือก + ชื่อผู้ป่วย (ใช้สำหรับค้นหา)
+      const gradeName = needGrade ? matrix?.grades.find((g) => g.grade_id === selGradeId)?.name : null;
+      const serviceParts = isPhysio
+        ? [selectedPhysio?.name]
+        : [selectedFormat?.name, gradeName];
+      payload.title =
+        [...serviceParts, payload.client_name].filter(Boolean).join(' · ') || payload.client_name;
+
+      // ฟิลด์เหล่านี้ย้ายไปเก็บที่แฟ้มผู้ป่วยแล้ว ไม่เก็บซ้ำในเคส (allergies/relation ไม่ใช่คอลัมน์ของเคสอยู่แล้ว)
+      delete payload.allergies;
+      delete payload.relation_to_customer;
+      delete payload.weight_kg;
+      delete payload.height_cm;
+
+      if (isEdit) {
+        // การจับคู่พนักงานทำผ่านปุ่มใน popup เท่านั้น เพื่อไม่ให้สถานะเคสกับพนักงานขัดแย้งกัน
+        const { assigned_to, ...rest } = payload;
+        await api.updateCase(id, rest);
+        navigate('/cases');
+      } else {
+        const created = await api.createCase(payload);
+        navigate('/cases', { state: { created: created.case_id } });
+      }
+    } catch (err) {
+      setError(err.message);
+      setSaving(false);
+    }
+  }
+
+  return (
+    <>
+      <header className="page-head">
+        <div>
+          <h1>{isEdit ? `แก้ไขเคส ${id}` : 'เปิดเคสใหม่'}</h1>
+          {!isEdit && <p className="muted">ระบบจะออกรหัสเคส (CASE-xxxx) ให้อัตโนมัติหลังบันทึก</p>}
+        </div>
+        <Link className="btn" to="/cases">ยกเลิก</Link>
+      </header>
+
+      {error && <pre className="error">{error}</pre>}
+
+      <form className="card form" onSubmit={handleSubmit}>
+        <h2>รายละเอียดเคส</h2>
+        <div className="grid">
+          <label>ประเภทเคส *
+            <select required {...field('case_type')}>
+              {Object.entries(CASE_TYPE_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
+          </label>
+          <label>ประเภทบริการ
+            <select value={form.service_kind} onChange={(e) => changeKind(e.target.value)}>
+              <option value="">— ไม่ระบุ —</option>
+              {Object.entries(SERVICE_KIND_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
+          </label>
+
+          {isHomecare && (
+          <label>รูปแบบบริการ
+            <select value={form.pkg_format_id} onChange={(e) => applySelection({ pkg_format_id: e.target.value })}>
+              <option value="">— ไม่ระบุ —</option>
+              {['daily', 'weekly', 'monthly'].map((cat) => {
+                const opts = matrix?.formats.filter((f) => f.category === cat) ?? [];
+                if (opts.length === 0) return null;
+                return (
+                  <optgroup key={cat} label={CATEGORY_LABELS[cat]}>
+                    {opts.map((f) => <option key={f.format_id} value={f.format_id}>{f.name}</option>)}
+                  </optgroup>
+                );
+              })}
+            </select>
+          </label>
+          )}
+
+          {isPhysio && (
+            <label>แพ็คเกจกายภาพบำบัด
+              <select value={form.physio_package_id} onChange={(e) => applyPhysio(e.target.value)}>
+                <option value="">— เลือกแพ็คเกจ —</option>
+                {physioOptions.map((p) => (
+                  <option key={p.physio_package_id} value={p.physio_package_id}>
+                    {p.name} · {p.sessions} ครั้ง
+                    {p.duration_months ? ` · ${p.duration_months} เดือน` : ''}
+                    {` · ${formatBaht(p.special_price)}`}
+                    {p.active ? '' : ' (ปิดขายแล้ว)'}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+
+          {isHomecare && needGrade && (
+            <label>เกรด
+              <select value={form.pkg_grade_id} onChange={(e) => applySelection({ pkg_grade_id: e.target.value })}>
+                <option value="">— เลือกเกรด —</option>
+                {matrix.grades.map((g) => <option key={g.grade_id} value={g.grade_id}>{g.name}</option>)}
+              </select>
+            </label>
+          )}
+          {isHomecare && (
+          <label>ระดับพนักงาน
+            <select
+              value={form.pkg_staff_tier}
+              onChange={(e) => applySelection({ pkg_staff_tier: e.target.value })}
+              disabled={!selectedFormat || (needGrade && !selGradeId)}
+            >
+              <option value="">— เลือกระดับ —</option>
+              {TIERS.map((t) => {
+                const r = selectedFormat && (!needGrade || selGradeId)
+                  ? lookupRate(selectedFormat.format_id, effectiveGrade, t)
+                  : null;
+                const off = r && !r.available;
+                return (
+                  <option key={t} value={t} disabled={off}>
+                    {t}
+                    {r && r.available && r.customer_price != null ? ` · ${formatBaht(r.customer_price)}` : ''}
+                    {off ? ' (ให้บริการไม่ได้)' : ''}
+                  </option>
+                );
+              })}
+            </select>
+          </label>
+          )}
+          {isHomecare && currentRate && currentRate.available && currentRate.customer_price != null && (
+            <p className="form-hint muted">
+              ค่าบริการ <strong>{formatBaht(currentRate.customer_price)}</strong>
+              {currentRate.staff_pay != null && ` · ค่าตอบแทน ${formatBaht(currentRate.staff_pay)}`}
+              {currentRate.margin != null && ` · ส่วนต่าง ${currentRate.margin}%`}
+              {' '}— เติมเป็นค่าจ้างให้แล้ว แก้ได้ในช่องด้านล่าง
+            </p>
+          )}
+          {isPhysio && selectedPhysio && (
+            <p className="form-hint muted">
+              ราคาพิเศษ <strong>{formatBaht(selectedPhysio.special_price)}</strong>
+              {selectedPhysio.original_price != null && ` · จากราคาเดิม ${formatBaht(selectedPhysio.original_price)}`}
+              {selectedPhysio.avg_per_session != null && ` · ตกเฉลี่ย ${formatBaht(selectedPhysio.avg_per_session)}/ครั้ง`}
+              {' '}— เติมเป็นค่าจ้างให้แล้ว แก้ได้ในช่องด้านล่าง
+            </p>
+          )}
+          <label>วันเริ่ม<input type="date" {...field('start_date')} /></label>
+          <label>วันสิ้นสุด (ถ้ามี)<input type="date" {...field('end_date')} /></label>
+          <label>ค่าจ้างที่ได้รับ (บาท)
+            <input type="number" min="0" step="0.01" placeholder="เช่น 15000" {...field('fee')} />
+          </label>
+        </div>
+
+        <h2>ผู้รับการดูแล</h2>
+
+        {isEdit ? (
+          /* แก้ไขเคส: ข้อมูลผู้ป่วยในเคยคือ snapshot ณ วันให้บริการ — แก้ตรงนี้ไม่กระทบแฟ้มผู้ป่วย */
+          <>
+            {form.patient_id && (
+              <p className="notice">
+                ผูกกับแฟ้มผู้ป่วย <Link className="link" to={`/patients/${form.patient_id}`}>{form.patient_id}</Link>
+                {' '}· การแก้ด้านล่างแก้เฉพาะข้อมูลในเคสนี้ (snapshot) ไม่กระทบแฟ้มผู้ป่วย
+              </p>
+            )}
+            <div className="grid">
+              <label>ชื่อผู้ป่วย *<input required {...field('client_name')} /></label>
+              <label>เพศ
+                <select {...field('patient_gender')}>
+                  <option value="">— ไม่ระบุ —</option>
+                  {Object.entries(GENDER_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                </select>
+              </label>
+              <label>อายุ (ปี)<input type="number" min="0" max="130" {...field('patient_age')} /></label>
+              <label className="span-2">โรคประจำตัว
+                <textarea rows={2} placeholder="เช่น เบาหวาน ความดันโลหิตสูง" {...field('medical_history')} />
+              </label>
+            </div>
+          </>
+        ) : pickedPatient ? (
+          /* เปิดเคสใหม่ + เลือกผู้ป่วยแล้ว: โชว์ข้อมูลแบบอ่านอย่างเดียว (ตัวตนมาจากแฟ้ม ไม่พิมพ์ซ้ำ) */
+          <>
+            {pickedPatient.allergies && (
+              <p className="notice allergy-alert">
+                <strong>⚠ แพ้ยา / แพ้อาหาร:</strong> {pickedPatient.allergies}
+              </p>
+            )}
+            <div className="picked-customer">
+              <div>
+                <strong>{pickedPatient.name}</strong>
+                <p className="muted">
+                  <span className="mono">{pickedPatient.patient_id}</span>
+                  {shownAge(pickedPatient) && ` · ${GENDER_LABELS[pickedPatient.gender] ?? ''} ${shownAge(pickedPatient)}`}
+                  {pickedPatient.medical_history && ` · โรคประจำตัว: ${pickedPatient.medical_history}`}
+                </p>
+                <p className="muted">
+                  ผู้ว่าจ้าง: {payer ? `${payer.name} (${payer.customer_id})` : '— ยังไม่ผูกลูกค้า —'}
+                </p>
+              </div>
+              <button type="button" className="btn" onClick={unpickPatient}>เปลี่ยนผู้ป่วย</button>
+            </div>
+          </>
+        ) : (
+          /* เปิดเคสใหม่ + ยังไม่เลือก: ค้นหาผู้ป่วยเดิม หรือกรอกเพื่อสร้างแฟ้มใหม่ */
+          <>
+            <div className="customer-picker">
+              <label className="customer-search">
+                ค้นหาผู้รับการดูแล (รหัส / ชื่อ / เลขบัตร)
+                <input
+                  placeholder="พิมพ์เพื่อค้นหา — ถ้ายังไม่มีในระบบ กรอกด้านล่างเพื่อสร้างแฟ้มใหม่"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                />
+              </label>
+
+              {matches.length > 0 && (
+                <ul className="customer-results">
+                  {matches.map((p) => (
+                    <li key={p.patient_id}>
+                      <button type="button" onClick={() => pickPatient(p)}>
+                        <strong>{p.name}{p.nickname && ` (${p.nickname})`}</strong>
+                        <span className="muted">
+                          <span className="mono">{p.patient_id}</span>
+                          {shownAge(p) && ` · ${shownAge(p)}`}
+                          {p.customer_name && ` · ผู้ว่าจ้าง ${p.customer_name}`}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              {query && matches.length === 0 && (
+                <p className="muted">ไม่พบผู้รับการดูแลที่ตรงกับ "{query}" — กรอกด้านล่างเพื่อสร้างแฟ้มใหม่</p>
+              )}
+
+              <p className="notice picker-note">
+                ยังไม่ได้เลือกผู้ป่วย — ระบบจะ<strong>สร้างแฟ้มผู้รับการดูแลใหม่ (PAT-xxxx)</strong>
+                จากข้อมูลที่กรอกด้านล่างให้อัตโนมัติเมื่อกดบันทึก
+              </p>
+            </div>
+
+            <h3>ข้อมูลผู้ป่วยใหม่</h3>
+            <div className="grid">
+              <label>ชื่อผู้ป่วย *<input required {...field('client_name')} /></label>
+              <label>เพศ
+                <select {...field('patient_gender')}>
+                  <option value="">— ไม่ระบุ —</option>
+                  {Object.entries(GENDER_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                </select>
+              </label>
+              <label>อายุ (ปี)<input type="number" min="0" max="130" {...field('patient_age')} /></label>
+
+              <label>ความสัมพันธ์กับผู้ว่าจ้าง
+                <input placeholder="เช่น บิดา มารดา" {...field('relation_to_customer')} />
+              </label>
+              <label>น้ำหนัก (กก.)<input type="number" min="0" step="0.1" {...field('weight_kg')} /></label>
+              <label>ส่วนสูง (ซม.)<input type="number" min="0" step="0.1" {...field('height_cm')} /></label>
+              <label className="span-2">โรคประจำตัว
+                <textarea rows={2} placeholder="เช่น เบาหวาน ความดันโลหิตสูง" {...field('medical_history')} />
+              </label>
+              <label className="span-2">แพ้ยา / แพ้อาหาร
+                <textarea rows={2} placeholder="เช่น แพ้เพนิซิลลิน — ไม่มีให้เว้นว่าง" {...field('allergies')} />
+              </label>
+            </div>
+
+            {/* ผู้ว่าจ้าง (ไม่บังคับ) — ผูกแฟ้มผู้ป่วยใหม่กับลูกค้าที่เป็นผู้จ่าย */}
+            <div className="customer-picker">
+              {payer ? (
+                <div className="picked-customer">
+                  <div>
+                    <strong>ผู้ว่าจ้าง: {payer.name}</strong>
+                    <p className="muted"><span className="mono">{payer.customer_id}</span></p>
+                  </div>
+                  <button type="button" className="btn" onClick={unpickPayer}>เปลี่ยน / ไม่ผูก</button>
+                </div>
+              ) : (
+                <>
+                  <label className="customer-search">
+                    ผู้ว่าจ้าง (ลูกค้าผู้จ่าย) — ไม่บังคับ
+                    <input
+                      placeholder="ค้นหาลูกค้า — เว้นว่างได้ถ้ายังไม่รู้ว่าใครจ่าย"
+                      value={payerQuery}
+                      onChange={(e) => setPayerQuery(e.target.value)}
+                    />
+                  </label>
+                  {payerMatches.length > 0 && (
+                    <ul className="customer-results">
+                      {payerMatches.map((c) => (
+                        <li key={c.customer_id}>
+                          <button type="button" onClick={() => pickPayer(c)}>
+                            <strong>{c.name}</strong>
+                            <span className="muted">
+                              <span className="mono">{c.customer_id}</span>
+                              {c.phone && ` · ${c.phone}`}
+                            </span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </>
+              )}
+            </div>
+          </>
+        )}
+
+        <h2>การประเมิน / อาการครั้งนี้</h2>
+        <div className="grid">
+          <label className="span-2">อาการปัจจุบัน
+            <textarea rows={2} placeholder="เช่น ติดเตียง ช่วยเหลือตัวเองไม่ได้ กลืนลำบาก" {...field('current_symptoms')} />
+          </label>
+          <label className="span-2">อุปกรณ์ / สายต่างๆ
+            <textarea rows={2} placeholder="เช่น สายให้อาหารทางจมูก สายสวนปัสสาวะ ถังออกซิเจน" {...field('medical_devices')} />
+          </label>
+          <label className="span-2">จุดประสงค์ของญาติในการดูแล
+            <textarea rows={2} placeholder="เช่น ต้องการให้ฟื้นฟูให้ลุกนั่งได้ / ดูแลประคับประคอง" {...field('care_goal')} />
+          </label>
+        </div>
+
+        <h2>รายละเอียดการใช้บริการ</h2>
+        <div className="grid">
+          <label className="span-2">วัน / เวลาที่สะดวกเริ่มใช้บริการ
+            <input placeholder="เช่น เริ่มได้ 20 ก.ค. เป็นต้นไป ช่วงเช้า" {...field('service_start_preference')} />
+          </label>
+          <label>เบอร์ติดต่อคุณญาติ<input {...field('client_phone')} /></label>
+
+          <label className="span-2">ที่อยู่สถานที่ดูแล
+            <textarea rows={2} {...field('address')} />
+          </label>
+          <label>วัน / เวลาที่สะดวกให้พยาบาลโทรประเมินและรับเคส
+            <input placeholder="เช่น จันทร์-ศุกร์ หลัง 18.00 น." {...field('nurse_call_preference')} />
+          </label>
+        </div>
+
+        <h2>{isEdit ? 'หมายเหตุ' : 'จับคู่พนักงาน'}</h2>
+        <div className="grid">
+          {!isEdit && (
+            <label className="span-2">
+              พนักงานที่รับเคส
+              <select {...field('assigned_to')}>
+                <option value="">— ยังไม่จับคู่ (จับคู่ทีหลังได้) —</option>
+                {staff.map((e) => (
+                  <option key={e.employee_id} value={e.employee_id}>
+                    {e.employee_id} · {e.first_name} {e.last_name} ({POSITION_LABELS[e.position]}) · ถืออยู่ {e.active_cases} เคส
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          <label className="span-2">หมายเหตุ<textarea rows={2} {...field('note')} /></label>
+        </div>
+
+        <div className="form-actions">
+          <button className="btn primary" type="submit" disabled={saving}>
+            {saving ? 'กำลังบันทึก…' : isEdit ? 'บันทึกการแก้ไข' : 'เปิดเคส'}
+          </button>
+        </div>
+      </form>
+    </>
+  );
+}

@@ -1,11 +1,14 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { api } from '../api.js';
+import CertificateSection from '../components/CertificateSection.jsx';
+import PortfolioSection from '../components/PortfolioSection.jsx';
 import { POSITION_LABELS, EMPLOYMENT_TYPE_LABELS, STATUS_LABELS, GENDER_LABELS } from '../labels.js';
 
 const BLANK = {
-  first_name: '', last_name: '', nickname: '', national_id: '', phone: '', email: '',
-  gender: '', birth_date: '', address: '',
+  first_name: '', last_name: '', first_name_en: '', last_name_en: '',
+  nickname: '', national_id: '', phone: '', email: '',
+  gender: '', birth_date: '', address: '', education: '',
   position: 'caregiver', employment_type: 'fulltime', status: 'active',
   hire_date: '', base_salary: '',
   emergency_contact_name: '', emergency_contact_phone: '', note: '',
@@ -32,6 +35,8 @@ export default function EmployeeFormPage() {
   const [form, setForm] = useState(BLANK);
   const [error, setError] = useState(null);
   const [saving, setSaving] = useState(false);
+  const certificates = useRef(null); // ส่วนใบรับรอง — สั่งบันทึกใบที่รออยู่ตอนกดปุ่มบันทึก
+  const portfolio = useRef(null); // ส่วนผลงาน — เช่นเดียวกัน
 
   useEffect(() => {
     if (!isEdit) return;
@@ -48,6 +53,7 @@ export default function EmployeeFormPage() {
     onChange: (e) => setForm((prev) => ({ ...prev, [key]: e.target.value })),
   });
 
+  /** ปุ่มบันทึกอันเดียว: บันทึกข้อมูลพนักงานก่อน แล้วค่อยเอาใบรับรองที่รออยู่ไปผูกกับรหัสพนักงาน */
   async function handleSubmit(e) {
     e.preventDefault();
     setSaving(true);
@@ -55,6 +61,11 @@ export default function EmployeeFormPage() {
     try {
       const payload = toPayload(form);
       const saved = isEdit ? await api.updateEmployee(id, payload) : await api.createEmployee(payload);
+
+      // พนักงานใหม่เพิ่งได้รหัสตรงนี้ ใบรับรอง/ผลงานจึงต้องบันทึกหลังพนักงานเสมอ
+      await certificates.current?.save(saved.employee_id);
+      await portfolio.current?.save(saved.employee_id);
+
       navigate(`/employees/${saved.employee_id}`);
     } catch (err) {
       setError(err.message);
@@ -77,9 +88,12 @@ export default function EmployeeFormPage() {
       <form className="card form" onSubmit={handleSubmit}>
         <h2>ข้อมูลส่วนตัว</h2>
         <div className="grid">
-          <label>ชื่อ *<input required {...field('first_name')} /></label>
-          <label>นามสกุล *<input required {...field('last_name')} /></label>
+          <label>ชื่อ (ไทย) *<input required {...field('first_name')} /></label>
+          <label>นามสกุล (ไทย) *<input required {...field('last_name')} /></label>
           <label>ชื่อเล่น<input {...field('nickname')} /></label>
+
+          <label>ชื่อ (อังกฤษ)<input placeholder="Phupha" {...field('first_name_en')} /></label>
+          <label>นามสกุล (อังกฤษ)<input placeholder="Chunyong" {...field('last_name_en')} /></label>
           <label>เลขบัตรประชาชน<input maxLength={13} placeholder="13 หลัก" {...field('national_id')} /></label>
           <label>เพศ
             <select {...field('gender')}>
@@ -91,6 +105,13 @@ export default function EmployeeFormPage() {
           <label>เบอร์โทร<input {...field('phone')} /></label>
           <label>อีเมล<input type="email" {...field('email')} /></label>
           <label className="span-2">ที่อยู่<textarea rows={2} {...field('address')} /></label>
+          <label className="span-2">ประวัติการศึกษา
+            <textarea
+              rows={3}
+              placeholder="เช่น ปวส. การดูแลผู้สูงอายุ · วิทยาลัยอาชีวศึกษา · จบปี 2562&#10;ป.ตรี พยาบาลศาสตร์ · มหาวิทยาลัยมหิดล · จบปี 2565"
+              {...field('education')}
+            />
+          </label>
         </div>
 
         <h2>ข้อมูลการจ้างงาน</h2>
@@ -120,6 +141,10 @@ export default function EmployeeFormPage() {
           <label>เบอร์โทร<input {...field('emergency_contact_phone')} /></label>
           <label className="span-2">หมายเหตุ<textarea rows={2} {...field('note')} /></label>
         </div>
+
+        {/* อยู่ในการ์ดและฟอร์มเดียวกัน — ใช้ปุ่มบันทึกร่วมกันด้านล่าง */}
+        <CertificateSection ref={certificates} employeeId={id ?? null} />
+        <PortfolioSection ref={portfolio} employeeId={id ?? null} />
 
         <div className="form-actions">
           <button className="btn primary" type="submit" disabled={saving}>

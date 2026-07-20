@@ -7,11 +7,15 @@
     "server",
     "client"
   ],
+  "engines": {
+    "node": "22.x"
+  },
   "scripts": {
     "dev": "concurrently -n server,client -c cyan,magenta \"npm:dev:server\" \"npm:dev:client\"",
     "dev:server": "npm run dev --workspace server",
     "dev:client": "npm run dev --workspace client",
-    "seed": "npm run seed --workspace server"
+    "build": "npm run build --workspace client",
+    "migrate": "npm run migrate --workspace server"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",

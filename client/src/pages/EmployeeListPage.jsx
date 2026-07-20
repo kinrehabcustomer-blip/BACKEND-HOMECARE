@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api.js';
 import EmployeeModal from '../components/EmployeeModal.jsx';
-import { POSITION_LABELS, STATUS_LABELS, EMPLOYMENT_TYPE_LABELS, formatBaht } from '../labels.js';
+import { POSITION_LABELS, STATUS_LABELS, EMPLOYMENT_TYPE_LABELS } from '../labels.js';
 
 const EMPTY_FILTERS = { q: '', status: '', position: '' };
 
@@ -73,14 +73,23 @@ export default function EmployeeListPage() {
         </select>
       </div>
 
+      {/* จอแคบ: ให้ตารางเลื่อนแนวนอนในกล่องของตัวเอง ไม่ดันทั้งหน้าให้เลื่อนตาม */}
+      <div className="table-wrap">
       <table className="table">
+        {/* ตรึงความกว้างคอลัมน์ไว้ ไม่ให้ตารางขยับตามความยาวชื่อของแต่ละแถว */}
+        <colgroup>
+          <col style={{ width: '16%' }} />
+          <col style={{ width: '30%' }} />
+          <col style={{ width: '20%' }} />
+          <col style={{ width: '17%' }} />
+          <col style={{ width: '17%' }} />
+        </colgroup>
         <thead>
           <tr>
             <th>รหัสพนักงาน</th>
             <th>ชื่อ-นามสกุล</th>
             <th>ตำแหน่ง</th>
             <th>ประเภท</th>
-            <th>ค่าจ้าง</th>
             <th>สถานะ</th>
           </tr>
         </thead>
@@ -105,7 +114,6 @@ export default function EmployeeListPage() {
               </td>
               <td>{POSITION_LABELS[emp.position]}</td>
               <td>{EMPLOYMENT_TYPE_LABELS[emp.employment_type]}</td>
-              <td>{formatBaht(emp.base_salary)}</td>
               <td>
                 <span className={`badge ${emp.status}`}>{STATUS_LABELS[emp.status]}</span>
               </td>
@@ -113,11 +121,12 @@ export default function EmployeeListPage() {
           ))}
           {result?.data.length === 0 && (
             <tr>
-              <td colSpan={6} className="empty">ไม่พบพนักงานที่ตรงกับเงื่อนไข</td>
+              <td colSpan={5} className="empty">ไม่พบพนักงานที่ตรงกับเงื่อนไข</td>
             </tr>
           )}
         </tbody>
       </table>
+      </div>
 
       {result && result.pagination.total_pages > 1 && (
         <div className="pager">

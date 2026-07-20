@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { api } from '../api.js';
+import WorkHistory from '../components/WorkHistory.jsx';
 import {
   POSITION_LABELS, EMPLOYMENT_TYPE_LABELS, STATUS_LABELS, GENDER_LABELS,
   formatBaht, formatDate,
 } from '../labels.js';
 
-const BLANK_CERT = { name: '', issuer: '', issued_date: '', expiry_date: '' };
 
 function Row({ label, children }) {
   return (
@@ -22,7 +22,6 @@ export default function EmployeeDetailPage() {
   const navigate = useNavigate();
 
   const [employee, setEmployee] = useState(null);
-  const [cert, setCert] = useState(BLANK_CERT);
   const [error, setError] = useState(null);
 
   const reload = () => api.getEmployee(id).then(setEmployee).catch((err) => setError(err.message));
@@ -30,21 +29,6 @@ export default function EmployeeDetailPage() {
   useEffect(() => {
     reload();
   }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  async function addCertificate(e) {
-    e.preventDefault();
-    setError(null);
-    try {
-      const payload = Object.fromEntries(
-        Object.entries(cert).map(([k, v]) => [k, v === '' ? null : v]),
-      );
-      await api.addCertificate(id, payload);
-      setCert(BLANK_CERT);
-      reload();
-    } catch (err) {
-      setError(err.message);
-    }
-  }
 
   async function handleResign() {
     if (!confirm(`บันทึกการลาออกของ ${id}?\nข้อมูลจะยังอยู่ในระบบ แต่สถานะจะเปลี่ยนเป็น "ลาออกแล้ว"`)) return;
@@ -81,12 +65,19 @@ export default function EmployeeDetailPage() {
       <div className="columns">
         <section className="card">
           <h2>ข้อมูลส่วนตัว</h2>
+          <Row label="ชื่อ-นามสกุล (อังกฤษ)">
+            {[employee.first_name_en, employee.last_name_en].filter(Boolean).join(' ')}
+          </Row>
           <Row label="เลขบัตรประชาชน"><span className="mono">{employee.national_id}</span></Row>
           <Row label="เพศ">{GENDER_LABELS[employee.gender]}</Row>
           <Row label="วันเกิด">{formatDate(employee.birth_date)}</Row>
           <Row label="เบอร์โทร">{employee.phone}</Row>
           <Row label="อีเมล">{employee.email}</Row>
           <Row label="ที่อยู่">{employee.address}</Row>
+          {/* ขึ้นบรรทัดใหม่ตามที่กรอกไว้ — ประวัติการศึกษามักมีหลายบรรทัด */}
+          <Row label="ประวัติการศึกษา">
+            {employee.education && <span className="pre-line">{employee.education}</span>}
+          </Row>
           <Row label="ผู้ติดต่อฉุกเฉิน">
             {employee.emergency_contact_name &&
               `${employee.emergency_contact_name} · ${employee.emergency_contact_phone ?? ''}`}
@@ -104,49 +95,84 @@ export default function EmployeeDetailPage() {
         </section>
       </div>
 
+      {/* ดูอย่างเดียว — เพิ่ม/แก้/ลบใบรับรอง ทำที่หน้าแก้ไข */}
       <section className="card">
         <h2>ใบรับรอง / ใบประกอบวิชาชีพ</h2>
-        {employee.certificates.length === 0 && <p className="muted">ยังไม่มีใบรับรอง</p>}
-        {employee.certificates.map((c) => (
-          <div className="cert" key={c.certificate_id}>
-            <div>
-              <strong>{c.name}</strong>
-              <p className="muted">
-                {c.issuer ?? 'ไม่ระบุผู้ออก'} · ออกเมื่อ {formatDate(c.issued_date)}
-                {c.expiry_date && ` · หมดอายุ ${formatDate(c.expiry_date)}`}
-              </p>
-            </div>
-            <button
-              className="btn danger-ghost"
-              onClick={async () => {
-                await api.deleteCertificate(id, c.certificate_id);
-                reload();
-              }}
-            >
-              ลบ
-            </button>
-          </div>
-        ))}
 
-        <form className="cert-form" onSubmit={addCertificate}>
-          <input
-            required placeholder="ชื่อใบรับรอง *"
-            value={cert.name} onChange={(e) => setCert({ ...cert, name: e.target.value })}
-          />
-          <input
-            placeholder="ผู้ออกใบรับรอง"
-            value={cert.issuer} onChange={(e) => setCert({ ...cert, issuer: e.target.value })}
-          />
-          <input
-            type="date" title="วันที่ออก"
-            value={cert.issued_date} onChange={(e) => setCert({ ...cert, issued_date: e.target.value })}
-          />
-          <input
-            type="date" title="วันหมดอายุ"
-            value={cert.expiry_date} onChange={(e) => setCert({ ...cert, expiry_date: e.target.value })}
-          />
-          <button className="btn" type="submit">+ เพิ่ม</button>
-        </form>
+        {employee.certificates.length === 0 ? (
+          <p className="muted">ยังไม่มีใบรับรอง</p>
+        ) : (
+          <ul className="cert-names">
+            {employee.certificates.map((c) => {
+              const expired = c.expiry_date && new Date(c.expiry_date) < new Date();
+              return (
+                <li key={c.certificate_id}>
+                  {/* กดรูปเพื่อเปิดขนาดเต็มในแท็บใหม่ ใบที่ไม่มีรูปแสดงกรอบว่างไว้ให้แถวเรียงตรงกัน */}
+                  {c.has_image ? (
+                    <a
+                      className="cert-thumb"
+                      href={api.certificateImageUrl(id, c.certificate_id)}
+                      target="_blank"
+                      rel="noreferrer"
+                      title="กดเพื่อดูรูปเต็ม"
+                    >
+                      <img src={api.certificateImageUrl(id, c.certificate_id)} alt={`รูป ${c.name}`} />
+                    </a>
+                  ) : (
+                    <div className="cert-thumb empty"><span>ไม่มีรูป</span></div>
+                  )}
+
+                  <div className="cert-info">
+                    <strong>{c.name}</strong>
+                    <p className="muted">
+                      {c.issuer ?? 'ไม่ระบุผู้ออก'} · ออกเมื่อ {formatDate(c.issued_date)}
+                      {c.expiry_date && (
+                        <>
+                          {' '}· หมดอายุ {formatDate(c.expiry_date)}
+                          {expired && <span className="badge suspended cert-flag">หมดอายุแล้ว</span>}
+                        </>
+                      )}
+                    </p>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
+
+      {/* ผลงาน — ดูอย่างเดียว จัดการที่หน้าแก้ไข */}
+      <section className="card">
+        <h2>ผลงาน</h2>
+
+        {employee.portfolio.length === 0 ? (
+          <p className="muted">ยังไม่มีผลงาน</p>
+        ) : (
+          <div className="portfolio-grid">
+            {employee.portfolio.map((item) => (
+              <figure className="portfolio-item" key={item.portfolio_id}>
+                <a
+                  href={api.portfolioImageUrl(id, item.portfolio_id)}
+                  target="_blank"
+                  rel="noreferrer"
+                  title="กดเพื่อดูรูปเต็ม"
+                >
+                  <img src={api.portfolioImageUrl(id, item.portfolio_id)} alt={item.title} />
+                </a>
+                <figcaption>
+                  <strong>{item.title}</strong>
+                  {item.description && <p className="muted">{item.description}</p>}
+                </figcaption>
+              </figure>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* ประวัติการทำงาน — โชว์ 3 เคสล่าสุด ที่เหลือกดปุ่มลูกศรขยายดูได้ */}
+      <section className="card">
+        <h2>ประวัติการทำงาน ({employee.cases.length})</h2>
+        <WorkHistory cases={employee.cases} limit={3} collapsible />
       </section>
 
       <section className="card danger-zone">

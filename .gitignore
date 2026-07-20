@@ -5,3 +5,6 @@ server/data/
 *.db
 *.db-shm
 *.db-wal
+
+.vercel
+.env*

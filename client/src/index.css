@@ -1,17 +1,56 @@
+/* ขนาดฐานของทั้งระบบ — ทุกขนาดในไฟล์นี้เป็น rem จึงคูณตามค่านี้พร้อมกันหมด
+   ผลคือหน้าเว็บ "โตตามจอ" โดยสัดส่วนไม่เพี้ยน: จอ 4K ตัวหนังสือไม่จิ๋ว จอเล็กก็ไม่ล้น
+
+   clamp(ต่ำสุด, ค่าที่โตตามจอ, สูงสุด)
+   - ต่ำสุด 16px  : จอ ≤1280px ใช้ขนาดเดิมทุกอย่าง (มือถือ/แท็บเล็ตพึ่งการจัดเลย์เอาต์ใหม่แทนการย่อ)
+   - 0.47vw+10px : เกิน 1280px เริ่มโตตามความกว้างจอ
+   - สูงสุด 20px  : จอใหญ่มาก (≥2130px) หยุดโต ไม่งั้นบรรทัดจะยาวจนอ่านยาก */
+html {
+  font-size: clamp(16px, calc(0.47vw + 10px), 20px);
+}
+
 :root {
   --bg: #f6f7f9;
   --surface: #ffffff;
+  --surface-2: #fafbfc;      /* พื้นยกเบาๆ เช่น หัวตาราง แถวที่ hover กล่อง meta */
   --border: #e3e6ea;
+  --border-hover: #d3d8dd;
+  --divider: #f0f1f3;        /* เส้นคั่นแบบ dashed จางๆ */
   --text: #1c2024;
   --muted: #6b7280;
+  --text-faint: #b3b8bf;     /* ข้อความจางสุด เช่น "ไม่ได้ระบุ" */
   --brand: #0f7b6c;
+  --brand-hover: #0c665a;
   --brand-soft: #e6f3f1;
   --danger: #c0392b;
-  --radius: 10px;
+  --radius: 0.625rem;
 
   font-family: 'Sarabun', 'Segoe UI', system-ui, sans-serif;
   color: var(--text);
 }
+
+/* โหมดกลางคืน — สลับด้วยปุ่มในหน้าตั้งค่า (data-theme บน <html>)
+   ทุกอย่างในไฟล์นี้อ้างตัวแปรพวกนี้ จึงเปลี่ยนธีมได้ทั้งระบบจากจุดเดียว */
+:root[data-theme='dark'] {
+  --bg: #14181b;
+  --surface: #1e2429;
+  --surface-2: #262d33;
+  --border: #313a42;
+  --border-hover: #3d4750;
+  --divider: #2a323a;
+  --text: #e6e9ec;
+  --muted: #9aa4ad;
+  --text-faint: #6b727b;
+  --brand: #2bb39c;          /* เขียวสว่างขึ้น อ่านออกบนพื้นเข้ม */
+  --brand-hover: #35c4ab;
+  --brand-soft: #16302b;     /* เขียวเข้มจางๆ สำหรับ nav ที่เลือกอยู่ */
+  --danger: #ef6b57;
+}
+/* กล่องข้อความสามแบบต้องเข้มลงในโหมดกลางคืน ไม่งั้นเป็นแผ่นสว่างจ้ากลางจอมืด */
+:root[data-theme='dark'] .error  { background: #3a201d; border-color: #5c322c; color: #f0a89c; }
+:root[data-theme='dark'] .notice { background: #16302b; border-color: #245046; color: #7fd3bd; }
+:root[data-theme='dark'] .banner { background: #34291a; border-color: #574529; color: #e0b877; }
+:root[data-theme='dark'] .banner a { color: #e0b877; }
 
 * { box-sizing: border-box; }
 
@@ -21,21 +60,139 @@ body {
 }
 
 .app { display: flex; min-height: 100vh; }
+.app-loading { padding: 2.5rem; text-align: center; }
+
+/* ---------- หน้าเข้าสู่ระบบ ---------- */
+.login-page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 1.5rem;
+}
+.login-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+  width: 100%;
+  max-width: 23.75rem;
+  padding: 2rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 0.875rem;
+  box-shadow: 0 0.75rem 2rem rgb(0 0 0 / 6%);
+}
+.login-brand { display: flex; flex-direction: column; gap: 2px; margin-bottom: 0.5rem; }
+.login-card h1 { margin: 0; font-size: 1.375rem; }
+.login-card > .muted { margin-top: -0.5rem; }
+.login-card label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3125rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+.login-error { margin: 0; }
+.login-submit { justify-content: center; margin-top: 0.375rem; padding: 0.6875rem; }
+.login-note { margin-top: 0.25rem; text-align: center; line-height: 1.6; }
+.login-note a { color: var(--brand); font-weight: 600; text-decoration: none; }
+.login-note a:hover { text-decoration: underline; }
+
+/* ปุ่มที่หน้าตาเหมือนลิงก์ — ใช้กับ "ส่งรหัสใหม่อีกครั้ง"
+   ต้องเขียน .btn.link-btn ให้ specificity สูงกว่า .btn ที่ประกาศทีหลังในไฟล์นี้ */
+.btn.link-btn {
+  border: none;
+  background: none;
+  color: var(--brand);
+  font-size: 0.8125rem;
+  padding: 0.25rem;
+  justify-content: center;
+}
+.btn.link-btn:hover:not(:disabled) { background: none; text-decoration: underline; }
+
+.otp-input {
+  font-family: ui-monospace, 'Cascadia Mono', monospace;
+  font-size: 1.375rem;
+  letter-spacing: 0.5rem;
+  text-align: center;
+}
+
+/* ข้อความแจ้งผลสำเร็จ — คู่กับ .error ที่เป็นสีแดง */
+/* กล่องข้อความสามแบบ (ผิดพลาด / สำเร็จ / เตือน) ใช้ขนาดและระยะขอบชุดเดียวกัน
+   ต่างกันแค่สี — วางกล่องไหนแทนกันก็ไม่ทำให้เลย์เอาต์ขยับ */
+.error,
+.notice,
+.banner {
+  margin: 0;
+  padding: 0.75rem 0.875rem;
+  border: 1px solid;
+  border-radius: var(--radius);
+  font-family: inherit;
+  font-size: 0.875rem;
+  line-height: 1.6;
+  white-space: pre-wrap; /* error จาก zod มีหลายบรรทัด */
+}
+
+.notice { background: #e3f5ec; border-color: #b8e3cd; color: #1c7a4d; }
+
+/* แถบเตือนว่ายังใช้รหัสผ่านเริ่มต้นอยู่ */
+.banner { background: #fff3dc; border-color: #f2ddb0; color: #9a6700; margin-bottom: 1.125rem; }
+.banner a { color: #9a6700; font-weight: 700; }
 
 /* ---------- sidebar ---------- */
 .sidebar {
-  width: 230px;
+  display: flex;
+  flex-direction: column;
+  width: 14.375rem;
   flex-shrink: 0;
-  padding: 24px 18px;
+  padding: 1.5rem 1.125rem;
   background: var(--surface);
   border-right: 1px solid var(--border);
+
+  /* ล็อกไว้กับที่เวลาเลื่อนหน้า — sticky ค้างที่ top: 0 ส่วนเนื้อหาเลื่อนผ่านไป
+     height + align-self กันไม่ให้ flex ยืด sidebar เต็มความสูงเนื้อหา (ซึ่งจะทำให้ sticky ไม่ทำงาน)
+     overflow-y เผื่อกรณีเมนูสูงเกินจอ ก็เลื่อนดูภายใน sidebar เองได้ */
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  height: 100vh;
+  overflow-y: auto;
 }
-.brand { display: flex; flex-direction: column; gap: 2px; margin-bottom: 28px; }
-.brand-mark { font-size: 24px; font-weight: 800; letter-spacing: 2px; color: var(--brand); }
-.brand-sub { font-size: 12px; color: var(--muted); }
+.sidebar-foot {
+  margin-top: auto; /* ดันข้อมูลผู้ใช้ไปติดขอบล่างเสมอ ไม่ว่าเมนูจะมีกี่อัน */
+  padding-top: 1.125rem;
+  border-top: 1px solid var(--border);
+}
+/* แถวข้อมูลผู้ใช้ + ปุ่มตั้งค่า (ไอคอน) อยู่ระดับเดียวกัน ปุ่มชิดขวา */
+.who-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.625rem;
+}
+.who { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: 0.875rem; }
+.who strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.who .mono { font-size: 0.75rem; }
+
+/* ปุ่มไอคอนล้วน (สี่เหลี่ยมจัตุรัส) — ใช้กับปุ่มตั้งค่า */
+.icon-btn {
+  flex-shrink: 0;
+  justify-content: center;
+  padding: 0.5rem;
+  width: 2.25rem;
+  height: 2.25rem;
+  font-size: 1rem;
+}
+.sidebar-btn { width: 100%; justify-content: center; margin-bottom: 0.5rem; }
+.sidebar-btn:last-child { margin-bottom: 0; }
+.brand { display: flex; flex-direction: column; gap: 2px; margin-bottom: 1.75rem; }
+.brand-mark { font-size: 1.5rem; font-weight: 800; letter-spacing: 2px; color: var(--brand); }
+.brand-sub { font-size: 0.75rem; color: var(--muted); }
 .sidebar nav a {
   display: block;
-  padding: 10px 12px;
+  padding: 0.625rem 0.75rem;
   border-radius: var(--radius);
   color: var(--text);
   text-decoration: none;
@@ -43,47 +200,51 @@ body {
 }
 .sidebar nav a:hover { background: var(--bg); }
 .sidebar nav a.active { background: var(--brand-soft); color: var(--brand); }
-.sidebar-note { margin-top: 28px; font-size: 12px; line-height: 1.7; color: var(--muted); }
-.sidebar-note code { font-size: 11px; background: var(--bg); padding: 1px 4px; border-radius: 4px; }
+.sidebar-note { margin-top: 1.75rem; font-size: 0.75rem; line-height: 1.7; color: var(--muted); }
+.sidebar-note code { font-size: 0.6875rem; background: var(--bg); padding: 1px 0.25rem; border-radius: 0.25rem; }
 
 /* ---------- layout ---------- */
-.content { flex: 1; padding: 32px 36px; max-width: 1100px; }
+/* min-width: 0 — flex item ปริยายหดไม่ต่ำกว่าความกว้างขั้นต่ำของเนื้อหาข้างใน
+   ถ้าไม่ใส่ ตาราง/แถบตัวกรองที่กว้างจะดัน .content ให้ล้นออกนอกจอแทนที่จะหดตาม */
+/* max-width จำกัดความยาวบรรทัดไม่ให้ยาวจนอ่านยากบนจอกว้าง */
+.content { flex: 1; min-width: 0; padding: 2rem 2.25rem; max-width: 68.75rem; }
+
+/* จอกว้างพอ: ดันเนื้อหาไปอยู่กลางพื้นที่ที่เหลือ แทนที่จะกองชิดซ้ายทิ้งที่ว่างไว้ข้างเดียว
+   (ทำเฉพาะจอกว้าง — บนจอแคบ margin auto จะทำให้ flex item เลิกยืดเต็มความกว้างแล้วล้นออกนอกจอ) */
+@media (min-width: 901px) {
+  .content { margin-inline: auto; }
+}
 .page-head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 22px;
+  gap: 1rem;
+  margin-bottom: 1.375rem;
 }
-.page-head h1 { margin: 2px 0 6px; font-size: 24px; }
-.actions { display: flex; gap: 8px; }
-.muted { color: var(--muted); font-size: 13px; margin: 0; }
+.page-head > div { min-width: 0; } /* ให้ข้อความสรุปยาวๆ หดและตัดบรรทัดได้ แทนที่จะดันปุ่มออกนอกจอ */
+.page-head h1 { margin: 2px 0 0.375rem; font-size: 1.5rem; }
+.actions { display: flex; gap: 0.5rem; }
+.muted { color: var(--muted); font-size: 0.8125rem; margin: 0; }
 .mono { font-family: ui-monospace, 'Cascadia Mono', monospace; }
 .link { color: var(--brand); font-weight: 600; text-decoration: none; }
 .link:hover { text-decoration: underline; }
+.strike { text-decoration: line-through; }
 
-.error {
-  padding: 12px 14px;
-  margin-bottom: 16px;
-  background: #fdecea;
-  border: 1px solid #f5c6c2;
-  border-radius: var(--radius);
-  color: var(--danger);
-  white-space: pre-wrap;
-  font-family: inherit;
-}
+.error { background: #fdecea; border-color: #f5c6c2; color: var(--danger); }
+/* ในหน้าที่มีเนื้อหาต่อท้าย (ฟอร์ม/ตาราง) ต้องเว้นระยะใต้กล่อง — ในการ์ด login ใช้ gap ของ flex อยู่แล้ว */
+.content .error { margin-bottom: 1rem; }
 
 /* ---------- controls ---------- */
 .btn {
   display: inline-flex;
   align-items: center;
-  padding: 8px 14px;
+  padding: 0.5rem 0.875rem;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface);
   color: var(--text);
   font: inherit;
-  font-size: 14px;
+  font-size: 0.875rem;
   font-weight: 600;
   text-decoration: none;
   cursor: pointer;
@@ -91,52 +252,97 @@ body {
 .btn:hover:not(:disabled) { background: var(--bg); }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .btn.primary { background: var(--brand); border-color: var(--brand); color: #fff; }
-.btn.primary:hover:not(:disabled) { background: #0c665a; }
+.btn.primary:hover:not(:disabled) { background: var(--brand-hover); }
 .btn.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
 .btn.danger-ghost { color: var(--danger); border-color: transparent; }
 
-.toolbar { display: flex; gap: 10px; margin-bottom: 16px; }
-.toolbar .search { flex: 1; }
+.toolbar { display: flex; gap: 0.625rem; margin-bottom: 1rem; }
+.toolbar .search { flex: 1; min-width: 0; }
+/* ตรึงให้กว้างเท่ากัน ไม่ยืดหดตามความยาวตัวเลือกที่เลือกอยู่ */
+.toolbar select { width: 9.375rem; flex-shrink: 0; }
+
+/* ตัวเลือกช่วงเวลาบนหัวหน้าภาพรวม: ปี + เดือน อยู่คู่กัน */
+.period-picker { display: flex; gap: 0.5rem; flex-shrink: 0; }
+.period-picker select { width: 9.375rem; }
+
+/* dropdown ที่ยังเลือกไม่ได้ (เดือน ก่อนเลือกปี) — จางลงและเคอร์เซอร์บอกว่ากดไม่ได้ */
+select:disabled {
+  background-color: var(--bg);
+  color: var(--text-faint);
+  cursor: not-allowed;
+}
 
 input, select, textarea {
-  padding: 9px 11px;
+  padding: 0.5625rem 0.6875rem;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface);
   font: inherit;
-  font-size: 14px;
+  font-size: 0.875rem;
   color: var(--text);
+  /* ค่าปริยายของเบราว์เซอร์คือห้ามช่องกรอกแคบกว่าข้อความข้างใน — พอจอแคบมันจึงดันจนหน้าล้น
+     สองบรรทัดนี้ยอมให้ช่องหดตามพื้นที่ที่มีจริง */
+  min-width: 0;
+  max-width: 100%;
 }
 input:focus, select:focus, textarea:focus {
   outline: 2px solid var(--brand-soft);
   border-color: var(--brand);
 }
 
+/* ลูกศรของ select ที่เบราว์เซอร์วาดให้มีสไตล์และระยะขอบต่างกันไปในแต่ละเครื่อง
+   จึงปิดของเดิมแล้ววาดเองเป็น SVG (data URI) ให้ทุกเบราว์เซอร์เห็นเหมือนกัน */
+select {
+  appearance: none;
+  padding-right: 2.125rem; /* กันข้อความยาวไปทับลูกศร */
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5 6 6.5l5-5' fill='none' stroke='%236b7280' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.75rem center;
+  cursor: pointer;
+}
+select:focus { background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5 6 6.5l5-5' fill='none' stroke='%230f7b6c' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
+
 /* ---------- table ---------- */
+/* กล่องครอบตาราง: จอแคบให้ปัดตารางแนวนอนได้ในกล่องนี้ ไม่ทำให้ทั้งหน้าเลื่อนซ้ายขวา */
+.table-wrap { overflow-x: auto; }
+
 .table {
   width: 100%;
   border-collapse: collapse;
+  table-layout: fixed; /* ให้ความกว้างมาจาก colgroup เท่านั้น ไม่ใช่จากความยาวเนื้อหา */
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   overflow: hidden;
 }
 .table th, .table td {
-  padding: 12px 14px;
+  padding: 0.75rem 1rem;
   text-align: left;
-  font-size: 14px;
+  font-size: 0.875rem;
   border-bottom: 1px solid var(--border);
+  /* ชื่อยาวเกินช่องให้ตัดด้วย … แทนที่จะดันคอลัมน์อื่นเบี้ยว */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.table th { background: #fafbfc; font-size: 12px; color: var(--muted); letter-spacing: 0.4px; }
+.table tbody td { height: 3.25rem; } /* ทุกแถวสูงเท่ากัน แม้บางแถวจะไม่มี badge */
+/* ตารางที่มีบรรทัดรองในช่อง (เคส) ต้องสูงกว่า ไม่งั้นบรรทัดล่างโดน overflow ตัดหาย */
+.table-2line tbody td { height: 4.125rem; }
+.table th { background: var(--surface-2); font-size: 0.75rem; color: var(--muted); letter-spacing: 0.4px; }
+
+/* ตำแหน่ง / ประเภท / สถานะ เป็นค่าจากชุดที่กำหนดไว้ (ไม่ใช่ข้อความอิสระ) จัดกึ่งกลางให้หัวตารางกับข้อมูลตรงกัน
+   ส่วนรหัสกับชื่อ-นามสกุลคงชิดซ้าย เพราะยาวไม่เท่ากัน อ่านไล่ลงมาง่ายกว่า */
+.table th:nth-child(n + 3),
+.table td:nth-child(n + 3) { text-align: center; }
 .table tbody tr:last-child td { border-bottom: none; }
-.table tbody tr:hover { background: #fafbfc; }
-.empty { text-align: center; color: var(--muted); padding: 32px; }
+.table tbody tr:hover { background: var(--surface-2); }
+.empty { text-align: center; color: var(--muted); padding: 2rem; }
 
 .badge {
   display: inline-block;
-  padding: 3px 9px;
-  border-radius: 999px;
-  font-size: 12px;
+  padding: 0.1875rem 0.5625rem;
+  border-radius: 62.4375rem;
+  font-size: 0.75rem;
   font-weight: 600;
   background: #eef0f2;
   color: var(--muted);
@@ -147,7 +353,52 @@ input:focus, select:focus, textarea:focus {
 .badge.suspended { background: #fdecea; color: var(--danger); }
 .badge.resigned { background: #eef0f2; color: #6b7280; }
 
-.pager { display: flex; align-items: center; gap: 12px; margin-top: 16px; }
+/* สถานะเคส: ยังไม่จับคู่ = ต้องรีบหาคน (ส้ม) · จับคู่แล้ว/รอเริ่ม = พร้อมแต่ยังไม่เริ่ม (ฟ้า)
+   · กำลังให้บริการ = กำลังไปได้ดี (เขียว) · ปิดแล้ว = จบงาน (เทา) · ยกเลิก = ไม่ได้เกิดขึ้น (แดง) */
+.badge.case-unassigned  { background: #fff3dc; color: #9a6700; }
+.badge.case-assigned    { background: #e4eefb; color: #1d5fa8; }
+.badge.case-in_progress { background: #e3f5ec; color: #1c7a4d; }
+.badge.case-closed      { background: #eef0f2; color: #6b7280; }
+.badge.case-cancelled   { background: #fbe4e4; color: #a83232; }
+
+/* สถานะแฟ้มผู้รับการดูแล (active ใช้สีเขียวร่วมกับด้านบน) */
+.badge.inactive { background: #eef0f2; color: #6b7280; }
+
+/* หัวการ์ดที่มีปุ่มอยู่ขวา (เช่น "ผู้รับการดูแล ( ) + เพิ่ม") — h2 ในนี้ไม่ต้องมี margin ล่างซ้ำ */
+.card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.card-head h2 { margin: 0; }
+
+/* บรรทัดรองในช่องตาราง (ชื่อผู้ป่วยใต้ชื่อเคส, รหัสพนักงานใต้ชื่อ) */
+.cell-sub {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+/* กล่องพนักงานที่รับเคส + แถวจับคู่ใน popup */
+.assignee {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.75rem 0.875rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.assignee p { margin: 2px 0 0; }
+
+.assign-form { display: flex; gap: 0.5rem; margin-top: 0.75rem; }
+.assign-form select { flex: 1; min-width: 0; }
+
+.pager { display: flex; align-items: center; gap: 0.75rem; margin-top: 1rem; }
 
 .row-clickable { cursor: pointer; }
 .row-clickable:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }
@@ -160,7 +411,7 @@ input:focus, select:focus, textarea:focus {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 24px;
+  padding: 1.5rem;
   background: rgb(18 24 28 / 55%);
   animation: fade-in 120ms ease-out;
 }
@@ -168,74 +419,108 @@ input:focus, select:focus, textarea:focus {
   display: flex;
   flex-direction: column;
   width: 100%;
-  max-width: 720px;
+  max-width: 45rem;
   max-height: 88vh;
   background: var(--surface);
-  border-radius: 14px;
-  box-shadow: 0 24px 60px rgb(0 0 0 / 22%);
+  border-radius: 0.875rem;
+  box-shadow: 0 1.5rem 3.75rem rgb(0 0 0 / 22%);
   animation: pop-in 140ms ease-out;
 }
 @keyframes fade-in { from { opacity: 0; } }
-@keyframes pop-in { from { opacity: 0; transform: translateY(8px) scale(0.98); } }
+@keyframes pop-in { from { opacity: 0; transform: translateY(0.5rem) scale(0.98); } }
 
-.modal-loading { padding: 40px; text-align: center; }
+.modal-loading { padding: 2.5rem; text-align: center; }
 
 .modal-head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
-  padding: 22px 24px 16px;
+  gap: 0.75rem;
+  padding: 1.375rem 1.5rem 1rem;
   border-bottom: 1px solid var(--border);
 }
-.modal-head h2 { margin: 2px 0 8px; font-size: 20px; }
+.modal-head h2 { margin: 2px 0 0.5rem; font-size: 1.25rem; }
 .modal-close {
   border: none;
   background: none;
-  font-size: 26px;
+  font-size: 1.625rem;
   line-height: 1;
   color: var(--muted);
   cursor: pointer;
-  padding: 0 4px;
+  padding: 0 0.25rem;
 }
 .modal-close:hover { color: var(--text); }
 
-.modal-body { overflow-y: auto; padding: 8px 24px 20px; }
-.modal-body section { padding: 16px 0; border-bottom: 1px solid #f0f1f3; }
+.modal-body { overflow-y: auto; padding: 0.5rem 1.5rem 1.25rem; }
+.modal-body section { padding: 1rem 0; border-bottom: 1px solid var(--divider); }
 .modal-body section:last-child { border-bottom: none; }
 .modal-body h3 {
-  margin: 0 0 12px;
-  font-size: 12px;
+  margin: 0 0 0.75rem;
+  font-size: 0.75rem;
   font-weight: 700;
   letter-spacing: 0.6px;
   color: var(--brand);
 }
 
-.field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 20px; }
-.field { display: flex; flex-direction: column; gap: 2px; padding: 4px 0; }
-.field-label { font-size: 12px; color: var(--muted); }
-.field-value { font-size: 14px; }
-.field-value.is-empty { color: #b3b8bf; font-style: italic; }
+.field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.625rem 1.25rem; }
+.field { display: flex; flex-direction: column; gap: 2px; padding: 0.25rem 0; }
+.field-label { font-size: 0.75rem; color: var(--muted); }
+.field-value { font-size: 0.875rem; }
+.field-value.is-empty { color: var(--text-faint); font-style: italic; }
 
-.modal-cert { padding: 8px 0; }
-.modal-cert:not(:last-child) { border-bottom: 1px dashed #f0f1f3; }
-.cert-flag { margin-left: 8px; }
+.modal-cert { display: flex; align-items: center; gap: 0.75rem; padding: 0.5rem 0; }
+.modal-cert:not(:last-child) { border-bottom: 1px dashed var(--divider); }
+.cert-flag { margin-left: 0.5rem; }
+
+/* ประวัติการทำงานของพนักงาน (เคสที่ทำอยู่ + ที่ปิดแล้ว) */
+.history-summary { margin-bottom: 0.625rem; }
+.history-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.625rem 0;
+}
+.history-item:not(:last-child) { border-bottom: 1px dashed var(--divider); }
+.history-item p { margin: 2px 0 0; }
+.history-item .badge { flex-shrink: 0; }
+
+/* ปุ่มขยาย/ย่อรายการเคสในหน้าเต็ม — ลูกศรชี้ลงตอนย่อ ชี้ขึ้นตอนขยาย */
+.btn.history-toggle {
+  width: 100%;
+  justify-content: center;
+  gap: 0.375rem;
+  margin-top: 0.75rem;
+  border-style: dashed;
+  color: var(--muted);
+  font-size: 0.8125rem;
+}
+.btn.history-toggle:hover:not(:disabled) { color: var(--brand); border-color: var(--brand); }
+.chevron { transition: transform 140ms ease; }
+.chevron.up { transform: rotate(180deg); }
+
+/* หมายเหตุใน popup ว่ายังมีเคสอีก — ชี้ให้ไปดูครบที่หน้าเต็ม */
+.history-more {
+  margin-top: 0.75rem;
+  font-size: 0.8125rem;
+  text-align: center;
+}
 
 .modal-meta {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 20px;
-  background: #fafbfc;
-  margin: 0 -24px -20px;
-  padding: 14px 24px !important;
-  border-radius: 0 0 14px 14px;
+  gap: 1.25rem;
+  background: var(--surface-2);
+  margin: 0 -1.5rem -1.25rem;
+  padding: 0.875rem 1.5rem !important;
+  border-radius: 0 0 0.875rem 0.875rem;
 }
 
 .modal-foot {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
-  padding: 14px 24px;
+  gap: 0.5rem;
+  padding: 0.875rem 1.5rem;
   border-top: 1px solid var(--border);
 }
 
@@ -243,47 +528,510 @@ input:focus, select:focus, textarea:focus {
   .field-grid, .modal-meta { grid-template-columns: 1fr; }
 }
 
-/* ---------- cards & detail ---------- */
-.card {
-  padding: 20px 22px;
-  margin-bottom: 16px;
+/* ---------- ภาพรวม (dashboard) ---------- */
+.hero-card {
+  display: flex;
+  align-items: stretch;
+  gap: 1.75rem;
+  padding: 1.5rem 1.625rem;
+  margin-bottom: 1rem;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
 }
-.card h2 { margin: 0 0 14px; font-size: 15px; color: var(--muted); }
-.card h2:not(:first-child) { margin-top: 26px; }
-.columns { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 
-.row { display: flex; gap: 12px; padding: 7px 0; font-size: 14px; border-bottom: 1px dashed #f0f1f3; }
+/* ตัวเลขนำของหน้า — ตัวเดียวในทั้งหน้า ใช้ฟอนต์เดียวกับที่เหลือ ไม่ใช้ tabular-nums เพราะเลขจะดูโปร่ง */
+.hero { display: flex; flex-direction: column; justify-content: center; padding-right: 1.75rem; border-right: 1px solid var(--border); }
+.hero-label { font-size: 0.8125rem; color: var(--muted); }
+.hero-value { font-size: 3.25rem; font-weight: 700; line-height: 1.1; letter-spacing: -1px; }
+
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: 0.75rem; flex: 1; }
+.tile {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1875rem;
+  padding: 0.875rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  text-decoration: none;
+  color: var(--text);
+}
+.tile:hover { background: var(--surface-2); border-color: var(--border-hover); }
+.tile-label { display: flex; align-items: center; gap: 0.4375rem; font-size: 0.8125rem; color: var(--muted); }
+.tile-value { font-size: 1.75rem; font-weight: 700; line-height: 1.2; }
+.tile-share { font-size: 0.75rem; color: var(--muted); }
+
+/* จุดสีประจำสถานะ — อยู่คู่กับข้อความเสมอ สีไม่ใช่ตัวสื่อความหมายเพียงอย่างเดียว */
+.dot { width: 0.5rem; height: 0.5rem; border-radius: 50%; flex-shrink: 0; }
+.dot.case-unassigned  { background: #d99400; }
+.dot.case-assigned    { background: #2c74c9; }
+.dot.case-in_progress { background: var(--brand); }
+.dot.case-closed      { background: #9aa1a9; }
+.dot.case-cancelled   { background: #c0504d; }
+
+/* แท่งแนวนอน: สีเดียวทุกแท่ง (ประเภทเคสไม่มีลำดับ) ปลายมน 0.25rem ฐานตรง ตัวเลขอยู่ปลายแท่ง */
+.bars { list-style: none; margin: 0; padding: 0; }
+.bars li { display: flex; align-items: center; gap: 0.75rem; padding: 0.4375rem 0; }
+.bar-label { width: 8.125rem; flex-shrink: 0; font-size: 0.8125rem; }
+.bar-track { flex: 1; min-width: 0; }
+.bar-fill {
+  display: block;
+  height: 0.75rem;
+  min-width: 0.1875rem;
+  background: var(--brand);
+  border-radius: 0 0.25rem 0.25rem 0;
+}
+.bar-value {
+  width: 1.75rem;
+  flex-shrink: 0;
+  text-align: right;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums; /* เรียงเป็นคอลัมน์ ต้องกว้างเท่ากันทุกหลัก */
+}
+
+.todo { list-style: none; margin: 0 0 0.75rem; padding: 0; }
+.todo li { padding: 0.625rem 0; border-bottom: 1px solid var(--divider); }
+.todo li:last-child { border-bottom: none; }
+.todo p { margin: 2px 0 0; }
+
+.empty-state { text-align: center; padding: 3rem 1.5rem; }
+.empty-state p { margin: 0 0 0.375rem; }
+.empty-state .btn { margin-top: 1rem; }
+
+@media (max-width: 900px) {
+  .hero-card { flex-direction: column; gap: 1.125rem; }
+  .hero { padding: 0 0 1.125rem; border-right: none; border-bottom: 1px solid var(--border); }
+  .tiles { grid-template-columns: 1fr; }
+}
+
+/* ---------- cards & detail ---------- */
+.card {
+  padding: 1.25rem 1.375rem;
+  margin-bottom: 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.card h2 { margin: 0 0 0.875rem; font-size: 0.9375rem; color: var(--muted); }
+.card h2:not(:first-child) { margin-top: 1.625rem; }
+.columns { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+
+.row { display: flex; gap: 0.75rem; padding: 0.4375rem 0; font-size: 0.875rem; border-bottom: 1px dashed var(--divider); }
 .row:last-child { border-bottom: none; }
-.row-label { width: 150px; flex-shrink: 0; color: var(--muted); }
+.row-label { width: 9.375rem; flex-shrink: 0; color: var(--muted); }
+/* คงการขึ้นบรรทัดใหม่ที่ผู้ใช้พิมพ์ไว้ (ประวัติการศึกษา, หมายเหตุยาวๆ) */
+.pre-line { white-space: pre-line; }
+.field-value { white-space: pre-line; }
 
 .cert {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 0;
+  gap: 0.75rem;
+  padding: 0.75rem 0;
   border-bottom: 1px solid var(--border);
 }
-.cert-form { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
-.cert-form input { flex: 1; min-width: 140px; }
+.cert-form { display: flex; gap: 0.5rem; margin-top: 1rem; flex-wrap: wrap; }
+.cert-form input { flex: 1; min-width: 8.75rem; }
+
+/* ---------- รูปใบรับรอง ---------- */
+.cert-info { flex: 1; min-width: 0; }
+.cert-info p { margin: 0.125rem 0 0; }
+
+/* รูปย่อขนาดคงที่ — ใบรับรองมีทั้งแนวตั้งแนวนอน ใช้ object-fit ครอบให้กรอบเท่ากันหมด */
+.cert-thumb {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 4rem;
+  height: 4rem;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--bg);
+}
+.cert-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.cert-thumb.empty {
+  border-style: dashed;
+  cursor: pointer;
+  font-size: 0.6875rem;
+  color: var(--muted);
+  text-align: center;
+}
+.cert-thumb.empty:hover { border-color: var(--brand); color: var(--brand); }
+
+/* แถวแนบรูปใต้ฟอร์มเพิ่มใบรับรอง */
+.cert-upload { display: flex; align-items: center; gap: 0.75rem; margin-top: 0.75rem; }
+.cert-upload .btn { cursor: pointer; }
+.cert-preview {
+  width: 5rem;
+  height: 5rem;
+  object-fit: cover;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+}
+
+/* ใบที่รอบันทึก — พื้นเหลืองจางบอกว่ายังไม่ได้ลงฐานข้อมูลจริง */
+.cert.pending { background: #fffdf5; border-left: 3px solid #f2ddb0; padding-left: 0.75rem; }
+.cert.pending .cert-thumb.empty { cursor: default; }
+
+/* ---------- ผลงาน (โปรไฟล์พนักงาน) ---------- */
+.portfolio-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  gap: 0.875rem;
+  margin: 0.5rem 0 1rem;
+}
+.portfolio-item {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--surface);
+}
+.portfolio-item img {
+  width: 100%;
+  height: 8rem;
+  object-fit: cover;      /* ผลงานมีทั้งแนวตั้งแนวนอน — ครอบให้กรอบเท่ากันหมด */
+  display: block;
+  background: var(--bg);
+}
+.portfolio-item figcaption { padding: 0.625rem 0.75rem; flex: 1; }
+.portfolio-item figcaption p { margin: 0.125rem 0 0; }
+.portfolio-item .btn { margin: 0 0.75rem 0.75rem; justify-content: center; }
+.portfolio-item.pending { border-color: #f2ddb0; background: #fffdf5; }
+
+.portfolio-actions { display: flex; gap: 0.5rem; margin: 0 0.75rem 0.75rem; }
+.portfolio-actions .btn { flex: 1; margin: 0; justify-content: center; }
+
+/* โหมดแก้ไขชื่อ/คำอธิบายในการ์ดผลงาน */
+.portfolio-edit { display: flex; flex-direction: column; gap: 0.5rem; }
+.portfolio-edit input { width: 100%; font-size: 0.8125rem; }
+
+.portfolio-form { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.75rem; }
+.portfolio-form input[type='text'], .portfolio-form input:not([type]) { flex: 1; min-width: 9rem; }
+.portfolio-form .btn { cursor: pointer; }
+
+.portfolio-preview { display: flex; align-items: center; gap: 0.5rem; }
+.portfolio-preview img {
+  width: 3rem;
+  height: 3rem;
+  object-fit: cover;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+}
+
+/* ข้อความเตือนว่ามีใบรอบันทึกอยู่ — ปุ่มบันทึกของฟอร์มอยู่ใต้ส่วนนี้ */
+.cert-hint { margin-top: 0.75rem; color: #9a6700; }
+
+/* รายการใบรับรองในหน้าข้อมูลฉบับเต็ม — ดูอย่างเดียว มีรูป preview แต่ไม่มีปุ่มแก้ไข */
+.cert-names { list-style: none; margin: 0; padding: 0; }
+.cert-names li {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.625rem 0;
+  border-bottom: 1px dashed var(--divider);
+}
+.cert-names li:last-child { border-bottom: none; }
+.cert-names p { margin: 0.125rem 0 0; }
+
+/* ปุ่มที่แทรกอยู่ในบรรทัดข้อความ (เปลี่ยนรูป / ลบรูป) */
+.inline-link {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-size: inherit;
+  color: var(--brand);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.inline-link.danger { color: var(--danger); }
 
 /* ---------- form ---------- */
-.grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
-.grid label { display: flex; flex-direction: column; gap: 5px; font-size: 13px; font-weight: 600; color: var(--muted); }
+.grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.875rem; }
+/* min-width: 0 — ไม่งั้นช่องในตารางกริดจะกว้างตามเนื้อหาขั้นต่ำของมัน แล้วดันคอลัมน์จนล้นจอแคบ */
+.grid label { display: flex; flex-direction: column; gap: 0.3125rem; min-width: 0; font-size: 0.8125rem; font-weight: 600; color: var(--muted); }
 .grid .span-2 { grid-column: span 2; }
-.form-actions { margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--border); }
+/* ช่อง checkbox เรียงแนวนอน (กล่อง + ข้อความข้างกัน) แทนการเรียงลงของ .grid label */
+.grid label.checkbox-row { flex-direction: row; align-items: center; gap: 0.5rem; grid-column: span 2; }
+.grid label.checkbox-row input { width: auto; }
+/* ฟอร์มในกล่อง popup แคบกว่าฟอร์มเต็มหน้า — สองคอลัมน์กำลังพอดี (ยุบเหลือคอลัมน์เดียวบนจอแคบ ดู media query ท้ายไฟล์) */
+.grid.cols-2 { grid-template-columns: 1fr 1fr; }
+.form-actions { margin-top: 1.5rem; padding-top: 1.125rem; border-top: 1px solid var(--border); }
+/* คำอธิบายใต้ช่องกรอกในฟอร์ม (เช่น บอกว่าเติมข้อมูลจากลูกค้าให้แล้ว) */
+.form-hint { grid-column: 1 / -1; margin-top: -0.5rem; }
+
+/* ---------- ค้นหา/เลือกลูกค้าในฟอร์มเคส ---------- */
+.customer-picker { margin-bottom: 1.125rem; }
+.customer-search { display: flex; flex-direction: column; gap: 0.3125rem; font-size: 0.8125rem; font-weight: 600; color: var(--muted); }
+.picker-note { margin-top: 0.625rem; }
+
+/* ลูกค้าที่เลือกแล้ว */
+.picked-customer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.75rem 0.875rem;
+  background: var(--brand-soft);
+  border: 1px solid #b8ded6;
+  border-radius: var(--radius);
+}
+.picked-customer p { margin: 0.125rem 0 0; }
+
+/* รายชื่อลูกค้าที่ค้นเจอ */
+.customer-results {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.customer-results li:not(:last-child) { border-bottom: 1px solid var(--border); }
+.customer-results button {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  width: 100%;
+  padding: 0.625rem 0.875rem;
+  border: none;
+  background: var(--surface);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.customer-results button:hover { background: var(--bg); }
+.customer-results .muted { font-size: 0.75rem; }
+
+/* ฟอร์มช่องเดียวเรียงลงมา (เปลี่ยนรหัสผ่าน) — ไม่ใช้ .grid สามคอลัมน์ */
+.form.narrow { display: flex; flex-direction: column; gap: 0.875rem; max-width: 26.25rem; }
+.form.narrow label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3125rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+.form.narrow .form-actions { margin-top: 0.625rem; }
+
+/* ---------- หน้าตั้งค่า ---------- */
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.setting-row p { margin: 0.125rem 0 0; }
+.theme-toggle { display: flex; gap: 0.5rem; flex-shrink: 0; }
+.change-pw-note { margin: -0.5rem 0 1rem; }
 
 .danger-zone {
   display: grid;
   grid-template-columns: 1fr auto;
   align-items: center;
-  gap: 14px 20px;
+  gap: 0.875rem 1.25rem;
   border-color: #f0d9d6;
+}
+
+/* =========================================================
+   จอเล็กลง — แท็บเล็ตแนวนอน / แนวตั้ง / มือถือ
+   ========================================================= */
+
+/* แท็บเล็ต: ฟอร์มสามคอลัมน์เหลือสองคอลัมน์ ยังพออ่านง่าย */
+@media (max-width: 1100px) {
+  .grid { grid-template-columns: 1fr 1fr; }
 }
 
 @media (max-width: 900px) {
   .columns, .grid { grid-template-columns: 1fr; }
+  /* .grid.cols-2 มี specificity สูงกว่า .grid จึงต้องยุบให้ตรงนี้ด้วย ไม่งั้นค้างเป็นสองคอลัมน์บนมือถือ */
+  .grid.cols-2 { grid-template-columns: 1fr; }
   .grid .span-2 { grid-column: span 1; }
+
+  /* sidebar แนวตั้งกินความกว้างเกินไปบนจอแคบ — พับเป็นแถบบนที่เลื่อนตามหน้า */
+  .app { flex-direction: column; }
+  .sidebar {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.875rem;
+    width: 100%;
+    /* ล้างค่าจากโหมด desktop: แถบบนต้องสูงตามเนื้อหา ไม่ใช่ 100vh (ไม่งั้นแถบสูงเต็มจอ ดันเนื้อหาหลุด) */
+    height: auto;
+    align-self: stretch;
+    overflow-x: auto; /* เมนูเยอะขึ้นในอนาคตก็ปัดดูได้ ไม่ล้นจอ */
+    overflow-y: visible;
+    padding: 0.625rem 1rem;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+  .brand { margin-bottom: 0; flex-shrink: 0; }
+  .brand-sub { display: none; } /* ประหยัดที่ — เหลือแค่ "KIN" */
+  .sidebar nav { display: flex; gap: 0.25rem; }
+  .sidebar nav a { padding: 0.5rem 0.75rem; white-space: nowrap; }
+
+  .sidebar-foot {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0;
+    margin-left: auto; /* ดันไปชิดขวาแทนที่จะอยู่ล่างสุด */
+    padding-top: 0;
+    border-top: none;
+  }
+  .who { display: none; } /* ชื่อผู้ใช้ดูได้จากหน้าพนักงาน — บนมือถือเอาที่ไปให้ปุ่ม */
+  .who-row { margin-bottom: 0; } /* เหลือแต่ปุ่มตั้งค่า จัดเรียงแนวนอนกับปุ่มออกจากระบบ */
+  .sidebar-btn { width: auto; margin-bottom: 0; white-space: nowrap; }
+
+  .content { padding: 1.25rem 1rem; }
+
+  /* หัวข้อหน้า: ปุ่ม/ตัวกรองตกลงมาบรรทัดใหม่แทนที่จะบีบกันจนล้น */
+  .page-head { flex-wrap: wrap; }
+  .period-picker { width: 100%; }
+  .period-picker select { flex: 1; width: auto; }
+
+  /* ตัวกรอง: ช่องค้นหาเต็มบรรทัด dropdown แบ่งกันคนละครึ่ง */
+  .toolbar { flex-wrap: wrap; }
+  .toolbar .search { flex: 1 0 100%; }
+  .toolbar select { flex: 1; width: auto; min-width: 8.125rem; }
+
+  /* ตารางแคบสุดที่ยังอ่านออก — แคบกว่านี้ให้ปัดแนวนอนเอาในกล่อง .table-wrap
+     ต้องไม่แคบจนรหัส (CASE-0006 / EMP-0001) โดนตัดด้วย … เพราะเป็นตัวระบุหลักที่ต้องอ่านออกเสมอ */
+  .table { min-width: 48.75rem; }
+
+  .danger-zone { grid-template-columns: 1fr; }
+  .modal { max-height: 92vh; }
+}
+
+/* มือถือ */
+@media (max-width: 600px) {
+  .content { padding: 1rem 0.75rem; }
+  .page-head h1 { font-size: 1.25rem; }
+  .hero-value { font-size: 2.625rem; }
+
+  /* บีบระยะขอบในช่องตารางแทนที่จะบีบตัวอักษร — ปัดดูคอลัมน์ที่เหลือได้อยู่แล้ว */
+  .table th, .table td { padding: 0.75rem 0.625rem; }
+
+  /* popup เต็มจอเกือบหมด — จอเล็กไม่มีที่ให้เหลือขอบ */
+  .modal-backdrop { padding: 0; align-items: flex-end; }
+  .modal {
+    max-width: 100%;
+    max-height: 94vh;
+    border-radius: 0.875rem 0.875rem 0 0;
+  }
+  .modal-head, .modal-foot { padding-left: 1rem; padding-right: 1rem; }
+  .modal-body { padding-left: 1rem; padding-right: 1rem; }
+  .modal-meta { margin-left: -1rem; margin-right: -1rem; padding-left: 1rem !important; padding-right: 1rem !important; }
+  .modal-foot { flex-wrap: wrap; }
+  .modal-foot .btn { flex: 1; justify-content: center; }
+
+  /* ฟอร์มจับคู่พนักงาน/ใบรับรอง: ปุ่มตกลงมาใต้ช่องกรอก */
+  .assign-form, .cert-form { flex-direction: column; }
+  .assign-form .btn, .cert-form .btn { justify-content: center; }
+
+  .bar-label { width: 6.25rem; font-size: 0.75rem; }
+  .row { flex-direction: column; gap: 2px; }
+  .row-label { width: auto; }
+}
+
+/* ---------- แพ็คเกจ: ตารางเรท (เกรด × รูปแบบ × CG/NA/PN) ---------- */
+.rate-section { margin-top: 1.5rem; }
+.rate-section > h2 { margin-bottom: 0.25rem; }
+.grade-desc { color: var(--danger); font-size: 0.85rem; margin: 0 0 0.625rem; }
+
+.btn.tiny { padding: 0.15rem 0.5rem; font-size: 0.7rem; }
+.btn.tiny.ghost { border-color: transparent; background: none; margin-left: 0.35rem; }
+
+/* ตารางเรทใช้ layout คงที่ + colgroup — คอลัมน์รูปแบบกว้างเท่ากัน และ CG/NA/PN แบ่งพื้นที่ที่เหลือเท่าๆ กัน
+   ทุกตารางจึงมีความกว้างคอลัมน์เหมือนกันหมด แถบสีหัวตารางตรงกันทุกตาราง ไม่ยืด/หดตามเนื้อหา */
+.rate-table { font-size: 0.8125rem; table-layout: fixed; width: 100%; min-width: 32rem; }
+.rate-col-format { width: 12rem; }
+.rate-table th, .rate-table td {
+  text-align: center;
+  padding: 0.4rem 0.5rem;
+  white-space: nowrap;
+  overflow: visible;
+  text-overflow: clip;
+}
+.rate-table .rate-format-head, .rate-table .rate-format {
+  text-align: left;
+  font-weight: 600;
+  padding-right: 1.25rem; /* เว้นช่องหายใจก่อนถึงคอลัมน์ราคา */
+  white-space: normal;    /* ชื่อรูปแบบยาวตัดบรรทัดได้ในคอลัมน์กว้างคงที่ ไม่ดันตารางเบี้ยว */
+}
+.rate-table thead .tier-head { color: #fff; }
+.tier-head.tier-CG { background: #c026d3; }   /* magenta ตามตัวอย่าง */
+.tier-head.tier-NA { background: #7c3aed; }
+.tier-head.tier-PN { background: #0891b2; }
+
+.rate-price { font-weight: 700; }
+.rate-off { color: var(--text-faint); background: var(--divider); font-style: italic; }
+
+.rate-input input { width: 5.5rem; padding: 0.2rem 0.35rem; text-align: right; }
+.rate-input .btn.tiny { margin-left: 0.35rem; }
+
+/* แพ้ยา/แพ้อาหาร — ข้อมูลความปลอดภัย ต้องสะดุดตากว่าช่องอื่นในหน้าเดียวกัน */
+.allergy-alert {
+  border-color: var(--danger);
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+  margin-bottom: 1rem;
+}
+
+/* ---------- แพ็คเกจกายภาพบำบัด: ตารางเหมาจำนวนครั้ง ---------- */
+/* ไม่มี colgroup เหมือน .rate-table — ให้ความกว้างมาจากเนื้อหา จะได้ไม่ตัดชื่อแพ็คเกจทิ้ง */
+.physio-table { table-layout: auto; width: auto; min-width: 100%; }
+.physio-table th, .physio-table td { overflow: visible; text-overflow: clip; }
+/* สองบรรทัดในช่องเดียว (ชื่อ + "10 ครั้ง · 3 เดือน") ต้องสูงพอ ไม่งั้นบรรทัดล่างโดนตัด */
+.physio-table tbody td { height: 4.125rem; }
+
+.physio-name { font-weight: 600; }
+/* ราคาเดิมเป็นตัวอ้างอิงให้เห็นว่าลดเท่าไร — จางกว่าและขีดฆ่า ไม่ให้แย่งสายตาจากราคาจริง */
+.physio-was { color: var(--muted); }
+/* ราคาพิเศษคือตัวเลขที่ต้องอ่านออกก่อนใคร */
+.physio-special { color: var(--danger); font-weight: 700; font-size: 1rem; }
+.physio-special .cell-sub { color: var(--muted); font-weight: 400; }
+.physio-avg { font-weight: 600; }
+
+.physio-actions { white-space: nowrap; }
+.physio-actions .btn { margin-left: 0.25rem; }
+
+/* แพ็คเกจที่ปิดขาย ยังอยู่ในตารางเพื่อเก็บราคาไว้ แต่ต้องดูออกทันทีว่าไม่ได้ขายแล้ว */
+.physio-table .is-inactive { opacity: 0.55; }
+.muted-badge { background: var(--divider); color: var(--muted); margin-left: 0.4rem; }
+
+/* กล่องสรุปตัวเลขที่คำนวณให้ในฟอร์ม */
+.physio-preview {
+  display: flex;
+  gap: 2rem;
+  padding: 0.75rem 0.875rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.physio-preview > div { display: flex; flex-direction: column; gap: 0.15rem; }
+.physio-preview strong { font-size: 1rem; }
+
+/* แผงจัดการเกรด/รูปแบบ */
+.manage-panel { margin-bottom: 1rem; }
+.manage-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
+.manage-list { list-style: none; margin: 0 0 0.75rem; padding: 0; }
+.manage-list li { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; padding: 0.4rem 0; border-bottom: 1px dashed var(--divider); }
+.manage-list li p { margin: 2px 0 0; font-size: 0.75rem; }
+.manage-add { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; }
+.manage-add input, .manage-add select { padding: 0.35rem 0.5rem; }
+
+@media (max-width: 768px) {
+  .manage-cols { grid-template-columns: 1fr; }
 }

@@ -28,9 +28,11 @@ export function errorHandler(err, req, res, next) {
     return res.status(err.status).json({ error: err.message, details: err.details });
   }
 
-  // ชน UNIQUE constraint (เช่น เลขบัตรประชาชนซ้ำ)
-  if (err?.code === 'ERR_SQLITE_ERROR' && /UNIQUE constraint failed: employees\.national_id/.test(err.message)) {
-    return res.status(409).json({ error: 'เลขบัตรประชาชนนี้ถูกใช้กับพนักงานคนอื่นแล้ว' });
+  // 23505 = unique_violation ของ Postgres (เช่น เลขบัตรประชาชนซ้ำ)
+  // ทั้งพนักงานและลูกค้าห้ามเลขบัตรซ้ำ — ต้องบอกให้ตรงว่าไปชนกับใคร ไม่งั้นคนอ่านตามหาผิดที่
+  if (err?.code === '23505' && err.constraint?.includes('national_id')) {
+    const who = err.constraint.includes('customer') ? 'ลูกค้ารายอื่น' : 'พนักงานคนอื่น';
+    return res.status(409).json({ error: `เลขบัตรประชาชนนี้ถูกใช้กับ${who}แล้ว` });
   }
 
   console.error(err);
