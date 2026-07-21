@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api.js';
+import CaseVisitsModal from './CaseVisitsModal.jsx';
 import {
   CASE_TYPE_LABELS, CASE_STATUS_LABELS, POSITION_LABELS, GENDER_LABELS, SERVICE_KIND_LABELS,
   formatBaht, formatDate,
@@ -46,24 +47,30 @@ export default function CaseModal({ caseId, onClose, onChanged }) {
   const [pick, setPick] = useState('');
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [visits, setVisits] = useState([]);      // ใช้แค่สรุปจำนวนบนปุ่ม การจัดการจริงอยู่ใน popup ย่อย
+  const [visitsOpen, setVisitsOpen] = useState(false);
 
-  // ดึงเคสและรายชื่อพนักงานใหม่พร้อมกัน — จำนวนเคสที่แต่ละคนถืออยู่เปลี่ยนทุกครั้งที่จับคู่/ยกเลิก
+  // ดึงเคส รายชื่อพนักงาน และวันนัดพร้อมกัน — จำนวนเคสที่แต่ละคนถืออยู่เปลี่ยนทุกครั้งที่จับคู่/ยกเลิก
   const load = () =>
-    Promise.all([api.getCase(caseId), api.assignableEmployees()]).then(([c, list]) => {
-      setItem(c);
-      setStaff(list);
-    });
+    Promise.all([api.getCase(caseId), api.assignableEmployees(), api.listVisits(caseId)]).then(
+      ([c, list, v]) => {
+        setItem(c);
+        setStaff(list);
+        setVisits(v);
+      },
+    );
 
   useEffect(() => {
     let cancelled = false;
     setItem(null);
     setError(null);
 
-    Promise.all([api.getCase(caseId), api.assignableEmployees()])
-      .then(([c, list]) => {
+    Promise.all([api.getCase(caseId), api.assignableEmployees(), api.listVisits(caseId)])
+      .then(([c, list, v]) => {
         if (cancelled) return;
         setItem(c);
         setStaff(list);
+        setVisits(v);
         setPick(c.assigned_to ?? '');
       })
       .catch((err) => !cancelled && setError(err.message));
@@ -74,7 +81,8 @@ export default function CaseModal({ caseId, onClose, onChanged }) {
   }, [caseId]);
 
   useEffect(() => {
-    const onKeyDown = (e) => e.key === 'Escape' && onClose();
+    // popup วันนัดเปิดอยู่ = ให้ Escape ปิดตัวนั้นก่อน ไม่ใช่ปิดทั้งสองชั้นพร้อมกัน
+    const onKeyDown = (e) => e.key === 'Escape' && !visitsOpen && onClose();
     document.addEventListener('keydown', onKeyDown);
     document.body.style.overflow = 'hidden';
 
@@ -82,7 +90,7 @@ export default function CaseModal({ caseId, onClose, onChanged }) {
       document.removeEventListener('keydown', onKeyDown);
       document.body.style.overflow = '';
     };
-  }, [onClose]);
+  }, [onClose, visitsOpen]);
 
   /** ทุก action ใช้ทางเดียวกัน: ยิง API -> โหลดเคสใหม่ -> บอกหน้ารายการให้รีเฟรช */
   async function run(action) {
@@ -102,6 +110,10 @@ export default function CaseModal({ caseId, onClose, onChanged }) {
   // สถานะปลายทาง (ปิด/ยกเลิก) = ล็อกการจับคู่/แก้สถานะไว้ ต้องเปิดเคสใหม่ก่อน
   const terminal = item?.status === 'closed' || item?.status === 'cancelled';
   const status = item?.status;
+
+  // วันที่ยกเลิกไม่นับเป็นนัดที่จองไว้ แต่ยังเก็บไว้เป็นประวัติใน popup
+  const bookedVisits = visits.filter((v) => v.status !== 'cancelled').length;
+  const doneVisits = visits.filter((v) => v.status === 'done').length;
 
   /** ยกเลิกเคส — ถามเหตุผล (เว้นว่างได้) แล้วยิง API */
   function cancelCase() {
@@ -194,6 +206,27 @@ export default function CaseModal({ caseId, onClose, onChanged }) {
                 </div>
                 {item.status === 'cancelled' && <Field label="เหตุผลที่ยกเลิก" value={item.cancel_reason} />}
                 <Field label="หมายเหตุ" value={item.note} />
+              </section>
+
+              {/* ลงวันที่จะไปให้บริการจริง — ตัวจัดการอยู่ใน popup แยก ตรงนี้โชว์แค่สรุป */}
+              <section>
+                <h3>วันนัดให้บริการ</h3>
+                <div className="visit-summary">
+                  <p className="muted">
+                    {bookedVisits === 0 ? (
+                      'ยังไม่ได้ลงวันนัด'
+                    ) : (
+                      <>
+                        จองไว้ <strong>{bookedVisits}</strong>
+                        {item.physio_sessions ? ` / ${item.physio_sessions}` : ''} ครั้ง
+                        {' · '}ไปแล้ว {doneVisits} ครั้ง
+                      </>
+                    )}
+                  </p>
+                  <button className="btn" onClick={() => setVisitsOpen(true)}>
+                    {terminal ? 'ดูวันนัด' : 'ลงวันนัด'}
+                  </button>
+                </div>
               </section>
 
               <section>
@@ -297,6 +330,18 @@ export default function CaseModal({ caseId, onClose, onChanged }) {
                 </button>
               )}
             </footer>
+
+            {/* popup ย่อยของการลงวันนัด — ปิดแล้วดึงข้อมูลใหม่ ตัวเลขสรุปบนปุ่มจะได้ตรง */}
+            {visitsOpen && (
+              <CaseVisitsModal
+                caseItem={item}
+                readOnly={terminal}
+                onClose={() => {
+                  setVisitsOpen(false);
+                  load().catch(() => {});
+                }}
+              />
+            )}
           </>
         )}
       </div>

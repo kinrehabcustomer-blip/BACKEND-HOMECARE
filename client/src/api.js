@@ -124,6 +124,18 @@ export const api = {
   updateCase: (id, body) => request(`/cases/${id}`, { method: 'PATCH', body }),
   deleteCase: (id) => request(`/cases/${id}`, { method: 'DELETE' }),
 
+  // ตารางงานรายเดือน — เคสที่ช่วงวันให้บริการคาบเกี่ยวเดือนที่ขอ (employee_id เว้นว่าง = ทุกคน)
+  caseCalendar: ({ year, month, employee_id }) => {
+    const params = new URLSearchParams({ year, month });
+    if (employee_id) params.set('employee_id', employee_id);
+    return request(`/cases/calendar?${params}`);
+  },
+
+  // วันนัดให้บริการของเคส — ทุกตัวคืน "รายการวันนัดล่าสุดทั้งหมด" กลับมา ไม่ต้องดึงซ้ำเอง
+  listVisits: (id) => request(`/cases/${id}/visits`),
+  addVisit: (id, body) => request(`/cases/${id}/visits`, { method: 'POST', body }),
+  updateVisit: (id, visitId, body) => request(`/cases/${id}/visits/${visitId}`, { method: 'PATCH', body }),
+  deleteVisit: (id, visitId) => request(`/cases/${id}/visits/${visitId}`, { method: 'DELETE' }),
   assignCase: (id, employee_id) => request(`/cases/${id}/assign`, { method: 'POST', body: { employee_id } }),
   unassignCase: (id) => request(`/cases/${id}/unassign`, { method: 'POST' }),
   startCase: (id) => request(`/cases/${id}/start`, { method: 'POST' }),

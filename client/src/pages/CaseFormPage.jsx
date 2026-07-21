@@ -66,6 +66,8 @@ export default function CaseFormPage() {
   const [query, setQuery] = useState('');
   const [matches, setMatches] = useState([]);
   const [pickedPatient, setPickedPatient] = useState(null);
+  // ผู้รับการดูแลที่อยู่ใต้ผู้ว่าจ้างที่เลือกไว้ — เสนอให้เลือกเลยโดยไม่ต้องพิมพ์ค้นหา
+  const [ownPatients, setOwnPatients] = useState([]);
 
   // ผู้ว่าจ้าง (customer) — เลือกได้ไม่บังคับ; ถ้าเลือกผู้ป่วยที่ผูกลูกค้าไว้แล้วจะมาเอง
   const [payer, setPayer] = useState(null);
@@ -202,6 +204,21 @@ export default function CaseFormPage() {
     return () => clearTimeout(timer);
   }, [query, form.patient_id]);
 
+  /**
+   * เลือกผู้ว่าจ้างแล้ว -> ดึงผู้รับการดูแลที่อยู่ใต้ลูกค้ารายนั้นมาเสนอให้เลือกทันที
+   * ลูกค้าหนึ่งคนมักจ้างดูแลคนในบ้านเดิมซ้ำๆ (พ่อ/แม่) การให้กดเลือกเลยเร็วกว่าพิมพ์ค้นหาใหม่ทุกครั้ง
+   */
+  useEffect(() => {
+    if (isEdit || !form.customer_id || form.patient_id) {
+      setOwnPatients([]);
+      return;
+    }
+    api
+      .listPatients({ customer_id: form.customer_id, per_page: 20 })
+      .then((r) => setOwnPatients(r.data))
+      .catch(() => setOwnPatients([]));
+  }, [isEdit, form.customer_id, form.patient_id]);
+
   // ค้นหาผู้ว่าจ้าง (customer) สำหรับผูกกับผู้ป่วยใหม่
   useEffect(() => {
     if (form.customer_id || !payerQuery.trim()) {
@@ -333,6 +350,51 @@ export default function CaseFormPage() {
       {error && <pre className="error">{error}</pre>}
 
       <form className="card form" onSubmit={handleSubmit}>
+        {/* ผู้ว่าจ้าง (ผู้จ่ายเงิน) อยู่บนสุด — ต้องเห็นตั้งแต่แรกว่าเคสนี้ผูกกับลูกค้ารายไหน
+            เลือกผู้ป่วยที่ผูกลูกค้าไว้แล้ว ผู้ว่าจ้างจะเด้งมาที่นี่เอง */}
+        {!isEdit && (
+          <>
+            <h2>ผู้ว่าจ้าง</h2>
+            <div className="customer-picker">
+              {payer ? (
+                <div className="picked-customer">
+                  <div>
+                    <strong>ผู้ว่าจ้าง: {payer.name}</strong>
+                    <p className="muted"><span className="mono">{payer.customer_id}</span></p>
+                  </div>
+                  <button type="button" className="btn" onClick={unpickPayer}>เปลี่ยน / ไม่ผูก</button>
+                </div>
+              ) : (
+                <>
+                  <label className="customer-search">
+                    ผู้ว่าจ้าง (ลูกค้าผู้จ่าย) — ไม่บังคับ
+                    <input
+                      placeholder="ค้นหาลูกค้า — เว้นว่างได้ถ้ายังไม่รู้ว่าใครจ่าย"
+                      value={payerQuery}
+                      onChange={(e) => setPayerQuery(e.target.value)}
+                    />
+                  </label>
+                  {payerMatches.length > 0 && (
+                    <ul className="customer-results">
+                      {payerMatches.map((c) => (
+                        <li key={c.customer_id}>
+                          <button type="button" onClick={() => pickPayer(c)}>
+                            <strong>{c.name}</strong>
+                            <span className="muted">
+                              <span className="mono">{c.customer_id}</span>
+                              {c.phone && ` · ${c.phone}`}
+                            </span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </>
+              )}
+            </div>
+          </>
+        )}
+
         <h2>รายละเอียดเคส</h2>
         <div className="grid">
           <label>ประเภทเคส *
@@ -476,9 +538,6 @@ export default function CaseFormPage() {
                   {shownAge(pickedPatient) && ` · ${GENDER_LABELS[pickedPatient.gender] ?? ''} ${shownAge(pickedPatient)}`}
                   {pickedPatient.medical_history && ` · โรคประจำตัว: ${pickedPatient.medical_history}`}
                 </p>
-                <p className="muted">
-                  ผู้ว่าจ้าง: {payer ? `${payer.name} (${payer.customer_id})` : '— ยังไม่ผูกลูกค้า —'}
-                </p>
               </div>
               <button type="button" className="btn" onClick={unpickPatient}>เปลี่ยนผู้ป่วย</button>
             </div>
@@ -495,6 +554,29 @@ export default function CaseFormPage() {
                   onChange={(e) => setQuery(e.target.value)}
                 />
               </label>
+
+              {/* ยังไม่พิมพ์ค้นหา + รู้ผู้ว่าจ้างแล้ว -> เสนอคนในความดูแลของลูกค้ารายนั้นให้กดเลือกเลย */}
+              {!query.trim() && ownPatients.length > 0 && (
+                <>
+                  <p className="muted picker-hint">
+                    ผู้รับการดูแลของ{payer ? ` ${payer.name}` : 'ลูกค้ารายนี้'} — กดเลือกได้เลย
+                  </p>
+                  <ul className="customer-results">
+                    {ownPatients.map((p) => (
+                      <li key={p.patient_id}>
+                        <button type="button" onClick={() => pickPatient(p)}>
+                          <strong>{p.name}{p.nickname && ` (${p.nickname})`}</strong>
+                          <span className="muted">
+                            <span className="mono">{p.patient_id}</span>
+                            {p.relation_to_customer && ` · ${p.relation_to_customer}`}
+                            {shownAge(p) && ` · ${shownAge(p)}`}
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
 
               {matches.length > 0 && (
                 <ul className="customer-results">
@@ -547,44 +629,6 @@ export default function CaseFormPage() {
               </label>
             </div>
 
-            {/* ผู้ว่าจ้าง (ไม่บังคับ) — ผูกแฟ้มผู้ป่วยใหม่กับลูกค้าที่เป็นผู้จ่าย */}
-            <div className="customer-picker">
-              {payer ? (
-                <div className="picked-customer">
-                  <div>
-                    <strong>ผู้ว่าจ้าง: {payer.name}</strong>
-                    <p className="muted"><span className="mono">{payer.customer_id}</span></p>
-                  </div>
-                  <button type="button" className="btn" onClick={unpickPayer}>เปลี่ยน / ไม่ผูก</button>
-                </div>
-              ) : (
-                <>
-                  <label className="customer-search">
-                    ผู้ว่าจ้าง (ลูกค้าผู้จ่าย) — ไม่บังคับ
-                    <input
-                      placeholder="ค้นหาลูกค้า — เว้นว่างได้ถ้ายังไม่รู้ว่าใครจ่าย"
-                      value={payerQuery}
-                      onChange={(e) => setPayerQuery(e.target.value)}
-                    />
-                  </label>
-                  {payerMatches.length > 0 && (
-                    <ul className="customer-results">
-                      {payerMatches.map((c) => (
-                        <li key={c.customer_id}>
-                          <button type="button" onClick={() => pickPayer(c)}>
-                            <strong>{c.name}</strong>
-                            <span className="muted">
-                              <span className="mono">{c.customer_id}</span>
-                              {c.phone && ` · ${c.phone}`}
-                            </span>
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </>
-              )}
-            </div>
           </>
         )}
 

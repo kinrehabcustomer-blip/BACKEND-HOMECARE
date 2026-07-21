@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api.js';
 import EmployeeModal from '../components/EmployeeModal.jsx';
+import SortToggle from '../components/SortToggle.jsx';
 import { POSITION_LABELS, STATUS_LABELS, EMPLOYMENT_TYPE_LABELS } from '../labels.js';
 
 const EMPTY_FILTERS = { q: '', status: '', position: '' };
@@ -9,6 +10,8 @@ const EMPTY_FILTERS = { q: '', status: '', position: '' };
 export default function EmployeeListPage() {
   const [filters, setFilters] = useState(EMPTY_FILTERS);
   const [page, setPage] = useState(1);
+  // เรียงตามรหัสพนักงาน = เรียงตามเวลาที่เพิ่มเข้าระบบ — ปริยาย desc = ล่าสุดขึ้นก่อน
+  const [order, setOrder] = useState('desc');
   const [result, setResult] = useState(null);
   const [summary, setSummary] = useState(null);
   const [error, setError] = useState(null);
@@ -17,7 +20,9 @@ export default function EmployeeListPage() {
   useEffect(() => {
     // หน่วงเล็กน้อยระหว่างพิมพ์ค้นหา จะได้ไม่ยิง API ทุกตัวอักษร
     const timer = setTimeout(() => {
-      const params = Object.fromEntries(Object.entries({ ...filters, page }).filter(([, v]) => v !== ''));
+      const params = Object.fromEntries(
+        Object.entries({ ...filters, page, sort: 'employee_id', order }).filter(([, v]) => v !== ''),
+      );
       api
         .listEmployees(params)
         .then(setResult)
@@ -25,7 +30,7 @@ export default function EmployeeListPage() {
     }, 250);
 
     return () => clearTimeout(timer);
-  }, [filters, page]);
+  }, [filters, page, order]);
 
   useEffect(() => {
     api.summary().then(setSummary).catch(() => {});
@@ -34,6 +39,11 @@ export default function EmployeeListPage() {
   const setFilter = (key, value) => {
     setFilters((prev) => ({ ...prev, [key]: value }));
     setPage(1); // เปลี่ยนตัวกรองแล้วต้องกลับไปหน้าแรก ไม่งั้นอาจค้างอยู่หน้าที่ไม่มีข้อมูล
+  };
+
+  const handleSort = (next) => {
+    setOrder(next);
+    setPage(1);
   };
 
   if (error) return <p className="error">{error}</p>;
@@ -90,7 +100,12 @@ export default function EmployeeListPage() {
             <th>ชื่อ-นามสกุล</th>
             <th>ตำแหน่ง</th>
             <th>ประเภท</th>
-            <th>สถานะ</th>
+            <th>
+              <span className="sort-head-end">
+                สถานะ
+                <SortToggle order={order} onChange={handleSort} />
+              </span>
+            </th>
           </tr>
         </thead>
         <tbody>

@@ -2,27 +2,36 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api.js';
 import PatientModal from '../components/PatientModal.jsx';
+import SortToggle from '../components/SortToggle.jsx';
 import { GENDER_LABELS, PATIENT_STATUS_LABELS, ageFromBirthDate } from '../labels.js';
 
 export default function PatientListPage() {
   const [q, setQ] = useState('');
   const [status, setStatus] = useState('');
   const [page, setPage] = useState(1);
+  // เรียงตามรหัสผู้รับการดูแล = เรียงตามเวลาที่เพิ่มเข้าระบบ — ปริยาย desc = ล่าสุดขึ้นก่อน
+  const [order, setOrder] = useState('desc');
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
   const [openId, setOpenId] = useState(null);
   const [reloadKey, setReloadKey] = useState(0);
 
+  // เปลี่ยนการเรียง = กลับไปหน้าแรกเสมอ ไม่งั้นจะค้างอยู่หน้ากลางของชุดข้อมูลใหม่
+  const handleSort = (next) => {
+    setOrder(next);
+    setPage(1);
+  };
+
   useEffect(() => {
     const timer = setTimeout(() => {
       const params = Object.fromEntries(
-        Object.entries({ q, status, page }).filter(([, v]) => v !== ''),
+        Object.entries({ q, status, page, sort: 'patient_id', order }).filter(([, v]) => v !== ''),
       );
       api.listPatients(params).then(setResult).catch((err) => setError(err.message));
     }, 250);
 
     return () => clearTimeout(timer);
-  }, [q, status, page, reloadKey]);
+  }, [q, status, page, order, reloadKey]);
 
   if (error) return <p className="error">{error}</p>;
 
@@ -63,12 +72,13 @@ export default function PatientListPage() {
       <div className="table-wrap">
         <table className="table">
           <colgroup>
+            <col style={{ width: '13%' }} />
+            <col style={{ width: '24%' }} />
             <col style={{ width: '14%' }} />
-            <col style={{ width: '26%' }} />
-            <col style={{ width: '16%' }} />
-            <col style={{ width: '22%' }} />
-            <col style={{ width: '12%' }} />
-            <col style={{ width: '10%' }} />
+            <col style={{ width: '19%' }} />
+            <col style={{ width: '15%' }} />
+            {/* คอลัมน์สุดท้ายต้องกว้างพอสำหรับป้าย + ปุ่มเรียงที่อยู่ขวาสุด */}
+            <col style={{ width: '15%' }} />
           </colgroup>
           <thead>
             <tr>
@@ -77,7 +87,12 @@ export default function PatientListPage() {
               <th>เพศ / อายุ</th>
               <th>ผู้ว่าจ้าง</th>
               <th>สถานะ</th>
-              <th>เคส</th>
+              <th>
+                <span className="sort-head-end">
+                  เคส
+                  <SortToggle order={order} onChange={handleSort} />
+                </span>
+              </th>
             </tr>
           </thead>
           <tbody>

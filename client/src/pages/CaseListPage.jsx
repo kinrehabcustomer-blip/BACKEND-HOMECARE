@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../api.js';
 import CaseModal from '../components/CaseModal.jsx';
+import SortToggle from '../components/SortToggle.jsx';
 import {
   CASE_TYPE_LABELS, CASE_STATUS_LABELS, MONTH_LABELS, formatPeriod, toBuddhistYear,
 } from '../labels.js';
@@ -20,6 +21,8 @@ export default function CaseListPage() {
   }));
   const [periods, setPeriods] = useState([]);
   const [page, setPage] = useState(1);
+  // เรียงตามรหัสเคส = เรียงตามเวลาที่เปิดเคส — ปริยาย desc = เคสล่าสุดขึ้นก่อน
+  const [order, setOrder] = useState('desc');
   const [result, setResult] = useState(null);
   const [summary, setSummary] = useState(null);
   const [error, setError] = useState(null);
@@ -33,7 +36,7 @@ export default function CaseListPage() {
   useEffect(() => {
     const timer = setTimeout(() => {
       // เดือนที่ไม่มีปีกำกับไม่มีความหมาย — ตัดทิ้งก่อนส่ง
-      const clean = { ...filters, page };
+      const clean = { ...filters, page, sort: 'case_id', order };
       if (!clean.year) clean.month = '';
 
       const params = Object.fromEntries(Object.entries(clean).filter(([, v]) => v !== ''));
@@ -41,7 +44,7 @@ export default function CaseListPage() {
     }, 250);
 
     return () => clearTimeout(timer);
-  }, [filters, page, reloadKey]);
+  }, [filters, page, order, reloadKey]);
 
   // ยอดสรุปด้านบนต้องนับเฉพาะช่วงเวลาที่กรองอยู่ ไม่งั้นตัวเลขจะไม่ตรงกับรายการที่เห็น
   useEffect(() => {
@@ -58,6 +61,11 @@ export default function CaseListPage() {
       // เปลี่ยนปีแล้วล้างเดือน — เดือนเดิมอาจไม่มีข้อมูลในปีใหม่
       ...(key === 'year' ? { month: '' } : null),
     }));
+    setPage(1);
+  };
+
+  const handleSort = (next) => {
+    setOrder(next);
     setPage(1);
   };
 
@@ -135,7 +143,12 @@ export default function CaseListPage() {
             <th>แพ็คเกจ / ลูกค้า</th>
             <th>ประเภท</th>
             <th>พนักงานที่รับ</th>
-            <th>สถานะ</th>
+            <th>
+              <span className="sort-head-end">
+                สถานะ
+                <SortToggle order={order} onChange={handleSort} />
+              </span>
+            </th>
           </tr>
         </thead>
         <tbody>

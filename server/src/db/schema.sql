@@ -324,6 +324,28 @@ ALTER TABLE cases ADD CONSTRAINT case_status_matches_assignee CHECK (
   (status IN ('closed', 'cancelled'))
 );
 
+-- ---------- วันนัดให้บริการของเคส (ลงตารางว่าจะไปทำงานวันไหนบ้าง) ----------
+-- ต่างจาก start_date/end_date ของเคสที่เป็น "ช่วงสัญญา" — ตารางนี้คือ "วันที่ไปจริง" ทีละครั้ง
+-- เช่น แพ็คเกจกายภาพบำบัด 10 ครั้ง = จอง 10 แถวในตารางนี้ (คนละวัน)
+-- ลบเคสแล้ววันนัดหายตาม (CASCADE) เพราะวันนัดไม่มีความหมายถ้าไม่มีเคส
+CREATE TABLE IF NOT EXISTS case_visits (
+  visit_id   INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  case_id    TEXT NOT NULL REFERENCES cases (case_id) ON DELETE CASCADE ON UPDATE CASCADE,
+  visit_date TEXT NOT NULL,  -- 'YYYY-MM-DD'
+
+  -- scheduled = นัดไว้, done = ไปมาแล้ว, cancelled = วันนั้นไม่ได้ไป (เก็บไว้เป็นประวัติ ไม่ลบทิ้ง)
+  status     TEXT NOT NULL DEFAULT 'scheduled' CHECK (status IN ('scheduled', 'done', 'cancelled')),
+  note       TEXT,
+
+  created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD HH24:MI:SS'),
+  updated_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD HH24:MI:SS')
+);
+
+CREATE INDEX IF NOT EXISTS idx_case_visits_case ON case_visits (case_id);
+CREATE INDEX IF NOT EXISTS idx_case_visits_date ON case_visits (visit_date);
+-- เคสเดียวกันจองวันซ้ำไม่ได้ — กดวันเดิมบนปฏิทินซ้ำคือ "ยกเลิกนัด" ไม่ใช่เพิ่มอีกแถว
+CREATE UNIQUE INDEX IF NOT EXISTS idx_case_visits_unique ON case_visits (case_id, visit_date);
+
 -- OTP สำหรับรีเซ็ตรหัสผ่าน — เก็บเป็น hash เหมือนรหัสผ่าน คนที่อ่าน DB ได้ก็เอาไปใช้ไม่ได้
 CREATE TABLE IF NOT EXISTS password_reset_otps (
   otp_id      INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,

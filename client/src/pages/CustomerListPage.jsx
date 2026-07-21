@@ -2,24 +2,35 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api.js';
 import CustomerModal from '../components/CustomerModal.jsx';
+import SortToggle from '../components/SortToggle.jsx';
 import { GENDER_LABELS } from '../labels.js';
 
 export default function CustomerListPage() {
   const [q, setQ] = useState('');
   const [page, setPage] = useState(1);
+  // เรียงตามรหัสลูกค้า = เรียงตามเวลาที่เพิ่มเข้าระบบ — ปริยาย desc = ล่าสุดขึ้นก่อน
+  const [order, setOrder] = useState('desc');
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
   const [openId, setOpenId] = useState(null);
   const [reloadKey, setReloadKey] = useState(0);
 
+  // เปลี่ยนการเรียง = กลับไปหน้าแรกเสมอ ไม่งั้นจะค้างอยู่หน้ากลางของชุดข้อมูลใหม่
+  const handleSort = (next) => {
+    setOrder(next);
+    setPage(1);
+  };
+
   useEffect(() => {
     const timer = setTimeout(() => {
-      const params = Object.fromEntries(Object.entries({ q, page }).filter(([, v]) => v !== ''));
+      const params = Object.fromEntries(
+        Object.entries({ q, page, sort: 'customer_id', order }).filter(([, v]) => v !== ''),
+      );
       api.listCustomers(params).then(setResult).catch((err) => setError(err.message));
     }, 250);
 
     return () => clearTimeout(timer);
-  }, [q, page, reloadKey]);
+  }, [q, page, order, reloadKey]);
 
   if (error) return <p className="error">{error}</p>;
 
@@ -60,7 +71,12 @@ export default function CustomerListPage() {
               <th>ชื่อ</th>
               <th>เพศ / อายุ</th>
               <th>เบอร์โทร</th>
-              <th>จำนวนเคส</th>
+              <th>
+                <span className="sort-head-end">
+                  จำนวนเคส
+                  <SortToggle order={order} onChange={handleSort} />
+                </span>
+              </th>
             </tr>
           </thead>
           <tbody>

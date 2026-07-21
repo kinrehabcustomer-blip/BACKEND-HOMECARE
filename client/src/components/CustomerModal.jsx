@@ -3,7 +3,8 @@ import { Link } from 'react-router-dom';
 import { api } from '../api.js';
 import CustomerCases from './CustomerCases.jsx';
 import {
-  GENDER_LABELS, TITLE_LABELS, MARITAL_STATUS_LABELS, formatDate, ageFromBirthDate,
+  GENDER_LABELS, TITLE_LABELS, MARITAL_STATUS_LABELS, PATIENT_STATUS_LABELS,
+  formatDate, ageFromBirthDate,
 } from '../labels.js';
 
 /** อายุจากวันเกิดแม่นกว่าเลขที่กรอกไว้เมื่อหลายปีก่อน — ใช้ช่อง age เป็นตัวสำรองเมื่อไม่รู้วันเกิด */
@@ -135,6 +136,39 @@ export default function CustomerModal({ customerId, onClose, onChanged }) {
                   <Field label="รู้จักผ่านช่องทาง" value={customer.referral_source} />
                 </div>
                 <Field label="หมายเหตุ" value={customer.note} />
+              </section>
+
+              {/* ผู้รับการดูแลใต้ลูกค้ารายนี้ — ลูกค้าหนึ่งคนดูแลได้หลายคน (พ่อ+แม่) */}
+              <section>
+                <h3>ผู้รับการดูแล ({customer.patients?.length ?? 0})</h3>
+                {(customer.patients?.length ?? 0) === 0 ? (
+                  <p className="muted">ยังไม่มีผู้รับการดูแลในความดูแลของลูกค้ารายนี้</p>
+                ) : (
+                  customer.patients.map((p) => {
+                    const age = ageFromBirthDate(p.birth_date) ?? p.age;
+                    const meta = [
+                      p.relation_to_customer,
+                      GENDER_LABELS[p.gender],
+                      age != null && `${age} ปี`,
+                    ].filter(Boolean).join(' · ');
+                    return (
+                      <div className="history-item" key={p.patient_id}>
+                        <div>
+                          <strong>
+                            <Link className="link" to={`/patients/${p.patient_id}`}>
+                              {p.name}{p.nickname && ` (${p.nickname})`}
+                            </Link>
+                          </strong>
+                          <p className="muted">
+                            <span className="mono">{p.patient_id}</span>
+                            {meta && ` · ${meta}`}
+                          </p>
+                        </div>
+                        <span className={`badge ${p.status}`}>{PATIENT_STATUS_LABELS[p.status]}</span>
+                      </div>
+                    );
+                  })
+                )}
               </section>
 
               <section>

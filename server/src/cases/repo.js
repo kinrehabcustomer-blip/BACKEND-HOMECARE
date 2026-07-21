@@ -288,6 +288,125 @@ export async function remove(caseId) {
   return changes > 0;
 }
 
+// ---------- วันนัดให้บริการ (case_visits) ----------
+
+/** วันนัดทั้งหมดของเคสหนึ่งใบ เรียงตามวัน */
+export function listVisits(caseId) {
+  return sql.all(
+    `SELECT visit_id, case_id, visit_date, status, note
+     FROM case_visits WHERE case_id = :id ORDER BY visit_date, visit_id`,
+    { id: caseId },
+  );
+}
+
+/**
+ * จองวันนัด — วันซ้ำในเคสเดิมถือว่าจองอยู่แล้ว ไม่สร้างซ้ำ (unique index กันไว้อีกชั้น)
+ * ON CONFLICT DO NOTHING แล้วอ่านกลับ เพื่อให้กดรัวๆ หรือสองแท็บพร้อมกันก็ไม่พัง
+ */
+export async function addVisit(caseId, { visit_date, note }) {
+  await sql.run(
+    `INSERT INTO case_visits (case_id, visit_date, note)
+     VALUES (:case_id, :visit_date, :note)
+     ON CONFLICT (case_id, visit_date) DO NOTHING`,
+    { case_id: caseId, visit_date, note: note ?? null },
+  );
+  return listVisits(caseId);
+}
+
+export async function updateVisit(caseId, visitId, input) {
+  const fields = ['visit_date', 'status', 'note'].filter((c) => c in input);
+  if (fields.length === 0) return listVisits(caseId);
+
+  const values = { case_id: caseId, visit_id: visitId };
+  for (const c of fields) values[c] = input[c] ?? null;
+
+  await sql.run(
+    `UPDATE case_visits
+     SET ${fields.map((c) => `${c} = :${c}`).join(', ')}, updated_at = ${NOW}
+     WHERE visit_id = :visit_id AND case_id = :case_id`,
+    values,
+  );
+  return listVisits(caseId);
+}
+
+export async function removeVisit(caseId, visitId) {
+  await sql.run('DELETE FROM case_visits WHERE visit_id = :visit_id AND case_id = :case_id', {
+    visit_id: visitId,
+    case_id: caseId,
+  });
+  return listVisits(caseId);
+}
+
+/**
+ * ตารางงานรายเดือน — ใช้ช่วง start_date..end_date ของเคสเป็นตารางงานโดยตรง (ไม่มีตารางเวรแยก)
+ *
+ * เอาเฉพาะเคสที่ "คาบเกี่ยว" เดือนที่ขอ: เริ่มก่อนขึ้นเดือนถัดไป และยังไม่จบก่อนต้นเดือน
+ * end_date ว่าง = ยังไม่กำหนดวันจบ ถือว่ายังทำอยู่เรื่อยๆ จึงนับว่าคาบเกี่ยวด้วย
+ * เคสที่ไม่มี start_date วางบนปฏิทินไม่ได้ จึงตัดออก
+ *
+ * วันที่เก็บเป็น TEXT 'YYYY-MM-DD' — เทียบแบบข้อความให้ลำดับตรงกับเวลาอยู่แล้ว ไม่ต้อง cast
+ */
+export async function calendar({ year, month, employee_id }) {
+  const monthStart = `${year}-${month}-01`;
+  // ต้นเดือนถัดไป — ใช้ '<' แทนการหาวันสุดท้ายของเดือน (ไม่ต้องสนใจ 28/29/30/31)
+  const next = new Date(Number(year), Number(month), 1);
+  const nextMonthStart = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}-01`;
+  const params = { month_start: monthStart, next_month: nextMonthStart };
+
+  // กรองเฉพาะงานของพนักงานคนเดียว — ไม่ส่งมาคือดูตารางรวมทุกคน
+  // ใส่พารามิเตอร์เฉพาะตอนใช้จริง เพราะตัวแปลง :name จะไล่หาชื่อจาก SQL ที่มีอยู่จริงเท่านั้น
+  const staffFilter = employee_id ? 'AND c.assigned_to = :employee_id' : '';
+  if (employee_id) params.employee_id = employee_id;
+
+  const CASE_FIELDS = `c.case_id, c.title, c.case_type, c.status, c.service_kind,
+            c.client_name, c.assigned_to,
+            e.first_name || ' ' || e.last_name AS assigned_name,
+            e.position                         AS assigned_position,
+            cu.name                            AS customer_name`;
+
+  const JOINS = `LEFT JOIN employees e  ON e.employee_id  = c.assigned_to
+     LEFT JOIN customers cu ON cu.customer_id = c.customer_id`;
+
+  const [ranges, visits] = await Promise.all([
+    // เคสที่ไม่ใช่กายภาพบำบัด — ยังใช้ช่วง start_date..end_date เป็นตารางงาน (ให้บริการต่อเนื่องทุกวัน)
+    // IS DISTINCT FROM กัน NULL ด้วย: เคสเก่าที่ยังไม่มี service_kind ถือเป็นฝั่งนี้
+    sql.all(
+      `SELECT ${CASE_FIELDS}, c.start_date, c.end_date
+       FROM cases c
+       ${JOINS}
+       WHERE c.service_kind IS DISTINCT FROM 'physio'
+         AND c.start_date IS NOT NULL
+         AND c.start_date < :next_month
+         AND (c.end_date IS NULL OR c.end_date >= :month_start)
+         ${staffFilter}
+       ORDER BY c.start_date, c.case_id`,
+      params,
+    ),
+
+    // เคสกายภาพบำบัด — ไปเป็นครั้งๆ ไม่ได้ไปทุกวัน จึงใช้ "วันนัดจริง" ที่ลงไว้ในหน้าจัดการเคสแทนช่วงสัญญา
+    // ตัดวันที่ยกเลิกออก เพราะวันนั้นไม่ได้ไปทำงานจริง
+    sql.all(
+      `SELECT ${CASE_FIELDS}, v.visit_id, v.visit_date, v.status AS visit_status
+       FROM case_visits v
+       JOIN cases c ON c.case_id = v.case_id
+       ${JOINS}
+       WHERE c.service_kind = 'physio'
+         AND v.status <> 'cancelled'
+         AND v.visit_date >= :month_start
+         AND v.visit_date <  :next_month
+         ${staffFilter}
+       ORDER BY v.visit_date, v.visit_id`,
+      params,
+    ),
+  ]);
+
+  // รวมเป็นรายการเดียว ติด kind ไว้ให้หน้าเว็บรู้ว่าแต่ละแถวกินทั้งช่วง หรือเป็นวันเดียว
+  return [
+    ...ranges.map((r) => ({ ...r, kind: 'range' })),
+    ...visits.map((v) => ({ ...v, kind: 'visit' })),
+  ];
+}
+
 /** สรุปเคส — ไม่ส่งปีมาคือรวมทุกปี, ส่งปีอย่างเดียวคือทั้งปีนั้น, ส่งปี+เดือนคือเดือนนั้น */
 export async function summary(period) {
   const where = [];

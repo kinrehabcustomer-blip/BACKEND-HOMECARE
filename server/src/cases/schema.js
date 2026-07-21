@@ -95,6 +95,31 @@ export const periodSchema = z.object({
   month: z.string().regex(/^(0[1-9]|1[0-2])$/, 'เดือนต้องเป็น 01–12').optional(),
 });
 
+// ---------- วันนัดให้บริการ (case_visits) ----------
+export const VISIT_STATUSES = ['scheduled', 'done', 'cancelled'];
+
+export const createVisitSchema = z.object({
+  visit_date: date,
+  note: optionalText,
+});
+
+// แก้ได้ทั้งเลื่อนวัน เปลี่ยนสถานะ (ไปมาแล้ว/ไม่ได้ไป) และหมายเหตุ
+export const updateVisitSchema = z
+  .object({
+    visit_date: date,
+    status: z.enum(VISIT_STATUSES, { errorMap: () => ({ message: 'สถานะวันนัดไม่ถูกต้อง' }) }),
+    note: optionalText,
+  })
+  .partial();
+
+// ปฏิทินตารางงาน — ต้องระบุทั้งปีและเดือน (ต่างจาก periodSchema ที่เว้นได้)
+// employee_id เว้นว่าง = ดูตารางของทุกคนรวมกัน
+export const calendarQuerySchema = z.object({
+  year: z.string().regex(/^\d{4}$/, 'ปีต้องเป็นตัวเลข 4 หลัก (ค.ศ.)'),
+  month: z.string().regex(/^(0[1-9]|1[0-2])$/, 'เดือนต้องเป็น 01–12'),
+  employee_id: z.string().trim().min(1).optional(),
+});
+
 export const listQuerySchema = z.object({
   q: z.string().trim().optional(),
   status: z.enum(CASE_STATUSES).optional(),

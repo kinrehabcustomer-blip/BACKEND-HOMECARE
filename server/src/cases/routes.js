@@ -8,6 +8,9 @@ import {
   cancelSchema,
   listQuerySchema,
   periodSchema,
+  calendarQuerySchema,
+  createVisitSchema,
+  updateVisitSchema,
   CASE_TYPES,
   CASE_STATUSES,
 } from './schema.js';
@@ -53,6 +56,19 @@ casesRouter.get(
 casesRouter.get(
   '/periods',
   asyncRoute(async (req, res) => res.json(await repo.periods())),
+);
+
+/** ตารางงานรายเดือน — เคสที่ช่วงวันให้บริการคาบเกี่ยวเดือนที่ขอ (ต้องมาก่อน '/:id') */
+casesRouter.get(
+  '/calendar',
+  asyncRoute(async (req, res) => {
+    const period = calendarQuerySchema.parse({
+      year: req.query.year,
+      month: req.query.month,
+      employee_id: req.query.employee_id || undefined,
+    });
+    res.json(await repo.calendar(period));
+  }),
 );
 
 /** รายชื่อพนักงานที่รับเคสได้ พร้อมจำนวนเคสที่ถืออยู่ — ให้ dropdown จับคู่ใช้ */
@@ -156,6 +172,36 @@ casesRouter.delete(
   asyncRoute(async (req, res) => {
     await repo.remove(req.params.id);
     res.status(204).end();
+  }),
+);
+
+// ---------- วันนัดให้บริการของเคส (ลงตารางว่าจะไปวันไหนบ้าง) ----------
+
+casesRouter.get(
+  '/:id/visits',
+  asyncRoute(async (req, res) => res.json(await repo.listVisits(req.params.id))),
+);
+
+casesRouter.post(
+  '/:id/visits',
+  asyncRoute(async (req, res) => {
+    const input = createVisitSchema.parse(req.body);
+    res.status(201).json(await repo.addVisit(req.params.id, input));
+  }),
+);
+
+casesRouter.patch(
+  '/:id/visits/:visitId',
+  asyncRoute(async (req, res) => {
+    const input = updateVisitSchema.parse(req.body);
+    res.json(await repo.updateVisit(req.params.id, Number(req.params.visitId), input));
+  }),
+);
+
+casesRouter.delete(
+  '/:id/visits/:visitId',
+  asyncRoute(async (req, res) => {
+    res.json(await repo.removeVisit(req.params.id, Number(req.params.visitId)));
   }),
 );
 
