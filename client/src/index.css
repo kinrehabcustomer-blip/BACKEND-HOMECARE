@@ -1173,6 +1173,18 @@ select:focus { background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xm
 .stale-tag { margin: 0.125rem 0 0 !important; font-size: 0.6875rem; color: var(--danger); font-weight: 600; }
 .invoice-row-actions { display: flex; gap: 0.375rem; flex-shrink: 0; }
 
+/* ฟอร์มรับชำระในหน้า — แทน prompt() ที่เบราว์เซอร์บล็อกได้ */
+.pay-form { display: flex; align-items: flex-end; gap: 0.75rem; flex-wrap: wrap; }
+.pay-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+.pay-form-actions { display: flex; gap: 0.5rem; margin-left: auto; }
+
 /* ---------- เอกสารใบแจ้งหนี้/ใบเสร็จ (ฟอร์มราชการไทย — หน้าจอ + พิมพ์) ----------
    ใช้สีดำ/ขาวตายตัว ไม่อิงตัวแปรธีม เพราะเอกสารต้องหน้าตาเหมือนกันทั้งโหมดสว่าง/มืด และตอนพิมพ์ */
 .invoice-doc {

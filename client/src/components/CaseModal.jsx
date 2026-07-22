@@ -128,16 +128,13 @@ export default function CaseModal({ caseId, onClose, onChanged }) {
   const bookedVisits = visits.filter((v) => v.status !== 'cancelled').length;
   const doneVisits = visits.filter((v) => v.status === 'done').length;
 
-  /**
-   * ยกเลิกใบแจ้งหนี้จากในหน้าเคส แล้วถามต่อว่าจะออกใบใหม่ตามข้อมูลปัจจุบันเลยไหม
-   * ใช้ flow เดียวกับปุ่มยกเลิกใน popup ใบแจ้งหนี้ — จะได้ไม่ต้องเปิดใบก่อนถึงจะจัดการได้
-   */
-  function cancelInvoice(v) {
-    if (!confirm(`ยกเลิกใบแจ้งหนี้ ${v.invoice_id}?\nใบจะยังอยู่ในระบบเป็นประวัติ (เลขเอกสารต้องไม่ข้าม)`)) return;
+  /** ลบใบแจ้งหนี้ทิ้งถาวร แล้วถามต่อว่าจะออกใบใหม่ตามข้อมูลปัจจุบันเลยไหม */
+  function deleteInvoice(v) {
+    if (!confirm(`ลบใบแจ้งหนี้ ${v.invoice_id} ทิ้งถาวร?\nลบแล้วกู้คืนไม่ได้ และเลขที่ใบจะข้าม`)) return;
 
     run(async () => {
-      await api.cancelInvoice(v.invoice_id);
-      if (confirm('ยกเลิกแล้ว — ออกใบใหม่ตามข้อมูลปัจจุบันของเคสเลยไหม?')) {
+      await api.deleteInvoice(v.invoice_id);
+      if (confirm('ลบแล้ว — ออกใบใหม่ตามข้อมูลปัจจุบันของเคสเลยไหม?')) {
         const created = await api.createInvoice({ case_id: item.case_id });
         setOpenInvoiceId(created.invoice_id);
       }
@@ -297,15 +294,13 @@ export default function CaseModal({ caseId, onClose, onChanged }) {
                         <button className="btn tiny" onClick={() => setOpenInvoiceId(v.invoice_id)}>
                           เปิดดู
                         </button>
-                        {v.status !== 'cancelled' && (
-                          <button
-                            className="btn tiny danger-ghost"
-                            disabled={busy}
-                            onClick={() => cancelInvoice(v)}
-                          >
-                            ยกเลิก
-                          </button>
-                        )}
+                        <button
+                          className="btn tiny danger-ghost"
+                          disabled={busy}
+                          onClick={() => deleteInvoice(v)}
+                        >
+                          ลบ
+                        </button>
                       </div>
                     </div>
                   ))

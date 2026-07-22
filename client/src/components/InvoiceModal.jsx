@@ -38,11 +38,20 @@ function paidBy(method, total, status) {
  * เพราะภาษาไทยมีสระ/วรรณยุกต์ซ้อนกัน ไลบรารีฝั่ง JS มักวางตำแหน่งเพี้ยน
  * ส่วนเบราว์เซอร์ใช้ฟอนต์ Sarabun ที่หน้าเว็บโหลดอยู่แล้ว จึงได้ตัวหนังสือไทยถูกต้องแน่นอน
  */
+/** ช่องทางชำระเงิน — ตรงกับ 3 ช่องบนหัวเอกสาร (เงินสด / บัตรเครดิต / โอน) */
+const PAYMENT_METHODS = ['เงินสด', 'โอน', 'บัตรเครดิต'];
+
+const today = () => new Date().toISOString().slice(0, 10);
+
 export default function InvoiceModal({ invoiceId, onClose, onChanged, onReissued }) {
   const { user } = useAuth();
   const [item, setItem] = useState(null);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
+  // ฟอร์มรับชำระ — ทำเป็นฟอร์มในหน้าแทน prompt() เพราะเบราว์เซอร์บล็อกกล่องเด้งได้ กดแล้วจะเหมือนปุ่มเสีย
+  const [payOpen, setPayOpen] = useState(false);
+  const [payDate, setPayDate] = useState(today);
+  const [payMethod, setPayMethod] = useState(PAYMENT_METHODS[0]);
 
   const load = () => api.getInvoice(invoiceId).then(setItem);
 
@@ -92,20 +101,22 @@ export default function InvoiceModal({ invoiceId, onClose, onChanged, onReissued
    * ยกเลิกใบ แล้วถามต่อว่าจะออกใบใหม่ตามข้อมูลปัจจุบันเลยไหม
    * ไม่ออกให้อัตโนมัติ เพราะบางครั้งยกเลิกเพราะไม่เก็บเงินเคสนี้แล้ว ไม่ได้จะออกใบแทน
    */
-  function cancelInvoice() {
+  function deleteInvoice() {
     const warning =
       item.status === 'paid'
-        ? `ยกเลิกใบเสร็จ ${item.invoice_id} ที่รับชำระแล้ว?\nใบจะยังอยู่ในระบบเป็นประวัติ (เลขเอกสารต้องไม่ข้าม)`
-        : `ยกเลิกใบแจ้งหนี้ ${item.invoice_id}?\nใบจะยังอยู่ในระบบเป็นประวัติ (เลขเอกสารต้องไม่ข้าม)`;
+        ? `ลบใบเสร็จ ${item.invoice_id} ที่รับชำระแล้วทิ้งถาวร?\nลบแล้วกู้คืนไม่ได้ และเลขที่ใบจะข้าม`
+        : `ลบใบแจ้งหนี้ ${item.invoice_id} ทิ้งถาวร?\nลบแล้วกู้คืนไม่ได้ และเลขที่ใบจะข้าม`;
     if (!confirm(warning)) return;
 
     run(async () => {
-      await api.cancelInvoice(item.invoice_id);
-      if (!item.case_id) return;
+      await api.deleteInvoice(item.invoice_id);
+      if (!item.case_id) return onClose();
 
-      if (confirm('ยกเลิกแล้ว — ออกใบใหม่ตามข้อมูลปัจจุบันของเคสเลยไหม?')) {
+      if (confirm('ลบแล้ว — ออกใบใหม่ตามข้อมูลปัจจุบันของเคสเลยไหม?')) {
         const created = await api.createInvoice({ case_id: item.case_id });
         onReissued?.(created.invoice_id);
+      } else {
+        onClose(); // ใบที่เปิดอยู่ถูกลบไปแล้ว ค้างหน้าไว้ไม่ได้
       }
     });
   }
@@ -142,6 +153,40 @@ export default function InvoiceModal({ invoiceId, onClose, onChanged, onReissued
               {error && <p className="error no-print">{error}</p>}
 
               {/* ใบร่างระบบอัปเดตตามเคสให้เอง จึงเตือนเฉพาะใบที่ออกไปแล้วและตัวเลขไม่ตรงกับเคส */}
+              {/* ฟอร์มรับชำระ — เปิดจากปุ่มท้าย popup */}
+              {payOpen && (
+                <div className="notice pay-form no-print">
+                  <label>
+                    วันที่ชำระ
+                    <input type="date" value={payDate} onChange={(e) => setPayDate(e.target.value)} />
+                  </label>
+                  <label>
+                    ช่องทาง
+                    <select value={payMethod} onChange={(e) => setPayMethod(e.target.value)}>
+                      {PAYMENT_METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
+                    </select>
+                  </label>
+                  <div className="pay-form-actions">
+                    <button className="btn" disabled={busy} onClick={() => setPayOpen(false)}>ยกเลิก</button>
+                    <button
+                      className="btn primary"
+                      disabled={busy || !payDate}
+                      onClick={() =>
+                        run(async () => {
+                          await api.payInvoice(item.invoice_id, {
+                            paid_at: payDate,
+                            payment_method: payMethod,
+                          });
+                          setPayOpen(false);
+                        })
+                      }
+                    >
+                      ยืนยันรับชำระ {amountText(item.total)} บาท
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {/* ข้อมูลในใบไม่ตรงกับเคสแล้ว — ทางแก้ต่างกันตามสถานะ ใบร่างดึงของใหม่ได้เลย ที่ออกไปแล้วต้องออกใบใหม่ */}
               {item.is_stale && item.status !== 'cancelled' && (
                 <div className="notice stale-notice no-print">
@@ -162,8 +207,8 @@ export default function InvoiceModal({ invoiceId, onClose, onChanged, onReissued
                         รีเฟรชจากเคส
                       </button>
                     ) : (
-                      <button className="btn danger-ghost" disabled={busy} onClick={cancelInvoice}>
-                        ยกเลิกใบนี้
+                      <button className="btn danger-ghost" disabled={busy} onClick={deleteInvoice}>
+                        ลบแล้วออกใบใหม่
                       </button>
                     )}
                   </div>
@@ -293,21 +338,15 @@ export default function InvoiceModal({ invoiceId, onClose, onChanged, onReissued
                 <button
                   className={`btn ${item.status === 'issued' ? 'primary' : ''}`}
                   disabled={busy}
-                  onClick={() => {
-                    const method = prompt('ชำระด้วยช่องทางไหน? (เงินสด / โอน / บัตรเครดิต)', 'เงินสด');
-                    if (method === null) return;
-                    run(() => api.payInvoice(item.invoice_id, { payment_method: method.trim() || null }));
-                  }}
+                  onClick={() => setPayOpen((v) => !v)}
                 >
                   บันทึกการชำระเงิน
                 </button>
               )}
-              {/* ยกเลิกได้ทุกสถานะที่ยังไม่ถูกยกเลิก — รวมใบที่ชำระแล้ว (เช่น ออกผิดยอดแล้วต้องออกใหม่) */}
-              {item.status !== 'cancelled' && (
-                <button className="btn danger-ghost" disabled={busy} onClick={cancelInvoice}>
-                  ยกเลิกใบ
-                </button>
-              )}
+              {/* ลบได้ทุกสถานะ — ออกใบผิดแล้วลบทิ้งออกใหม่ ไม่เหลือใบยกเลิกรกรายการ */}
+              <button className="btn danger-ghost" disabled={busy} onClick={deleteInvoice}>
+                ลบใบนี้
+              </button>
             </footer>
           </>
         )}
