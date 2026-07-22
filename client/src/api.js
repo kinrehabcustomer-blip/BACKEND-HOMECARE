@@ -131,6 +131,18 @@ export const api = {
     return request(`/cases/calendar?${params}`);
   },
 
+  // ---------- ใบแจ้งหนี้ ----------
+  listInvoices: (params = {}) => request(`/invoices?${new URLSearchParams(params)}`),
+  invoiceSummary: () => request('/invoices/summary'),
+  getInvoice: (id) => request(`/invoices/${id}`),
+  createInvoice: (body) => request('/invoices', { method: 'POST', body }),
+  updateInvoice: (id, body) => request(`/invoices/${id}`, { method: 'PATCH', body }),
+  refreshInvoice: (id) => request(`/invoices/${id}/refresh`, { method: 'POST' }),
+  issueInvoice: (id) => request(`/invoices/${id}/issue`, { method: 'POST' }),
+  payInvoice: (id, body) => request(`/invoices/${id}/pay`, { method: 'POST', body }),
+  cancelInvoice: (id) => request(`/invoices/${id}/cancel`, { method: 'POST' }),
+  deleteInvoice: (id) => request(`/invoices/${id}`, { method: 'DELETE' }),
+
   // วันนัดให้บริการของเคส — ทุกตัวคืน "รายการวันนัดล่าสุดทั้งหมด" กลับมา ไม่ต้องดึงซ้ำเอง
   listVisits: (id) => request(`/cases/${id}/visits`),
   addVisit: (id, body) => request(`/cases/${id}/visits`, { method: 'POST', body }),

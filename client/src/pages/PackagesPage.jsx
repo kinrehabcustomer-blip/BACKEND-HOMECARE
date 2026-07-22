@@ -236,7 +236,7 @@ export default function PackagesPage() {
     <>
       <header className="page-head">
         <div>
-          <h1>แพ็คเกจบริการ</h1>
+          <h1>แพ็คเกจบริการ (พนักงานพาร์ทไทม์)</h1>
           <p className="muted">ตารางเรทตามเกรด × รูปแบบบริการ × ระดับพนักงาน (CG / NA / PN)</p>
         </div>
         <div className="actions">

@@ -69,6 +69,17 @@ export const createCustomerSchema = z.object({
   customer_type: optionalShort,
   referral_source: optionalShort,
   note: optionalText,
+
+  // ---------- ข้อมูลออกบิล ----------
+  // เลขผู้เสียภาษี 13 หลัก (นิติบุคคล) — ตรวจแค่รูปแบบ ไม่ตรวจ checksum เพราะบางทีได้มาทางโทรศัพท์
+  tax_id: z
+    .string()
+    .trim()
+    .regex(/^\d{13}$/, 'เลขผู้เสียภาษีต้องเป็นตัวเลข 13 หลัก')
+    .optional()
+    .nullable(),
+  payment_terms: optionalShort,   // เช่น 'เงินสด', 'เครดิต 30 วัน'
+  billing_address: optionalText,  // ว่าง = ใช้ที่อยู่หลัก
 });
 
 export const updateCustomerSchema = createCustomerSchema.partial();

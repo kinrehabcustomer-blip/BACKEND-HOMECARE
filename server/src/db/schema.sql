@@ -346,6 +346,66 @@ CREATE INDEX IF NOT EXISTS idx_case_visits_date ON case_visits (visit_date);
 -- เคสเดียวกันจองวันซ้ำไม่ได้ — กดวันเดิมบนปฏิทินซ้ำคือ "ยกเลิกนัด" ไม่ใช่เพิ่มอีกแถว
 CREATE UNIQUE INDEX IF NOT EXISTS idx_case_visits_unique ON case_visits (case_id, visit_date);
 
+-- ---------- ข้อมูลสำหรับออกบิล (เก็บที่ลูกค้า = ผู้จ่ายเงิน) ----------
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS tax_id          TEXT;  -- เลขผู้เสียภาษี (นิติบุคคล 13 หลัก)
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS payment_terms   TEXT;  -- เช่น 'เงินสด', 'เครดิต 30 วัน' — ใช้คิดวันครบกำหนด
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS billing_address TEXT;  -- ที่อยู่ออกใบเสร็จ ว่าง = ใช้ที่อยู่หลัก
+
+-- ---------- ใบแจ้งหนี้ (1 เคส = 1 ใบ) ----------
+-- ธุรกิจไม่ได้จด VAT จึงไม่มีช่องภาษี — มีแค่ ยอดก่อนลด → ส่วนลด → ยอดสุทธิ
+--
+-- ทุกช่องที่ขึ้นต้นด้วย bill_to_* กับ service_description/amount เป็น "สำเนา ณ วันออกใบ"
+-- ไม่ใช่การอ่านสดจากลูกค้า/เคส เพราะใบที่ส่งให้ลูกค้าไปแล้วต้องไม่เปลี่ยนตามข้อมูลต้นทางที่ถูกแก้ทีหลัง
+CREATE TABLE IF NOT EXISTS invoices (
+  invoice_id      TEXT PRIMARY KEY,          -- INV-0001
+
+  -- ลบเคส/ลูกค้าแล้วใบแจ้งหนี้ต้องไม่หาย (เป็นเอกสารการเงิน) — ข้อมูลที่คัดลอกไว้ยังอยู่ครบ
+  case_id         TEXT REFERENCES cases (case_id)         ON DELETE SET NULL ON UPDATE CASCADE,
+  customer_id     TEXT REFERENCES customers (customer_id) ON DELETE SET NULL ON UPDATE CASCADE,
+
+  issue_date      TEXT NOT NULL,             -- 'YYYY-MM-DD'
+  due_date        TEXT,                      -- ว่าง = ไม่กำหนด (จ่ายทันที)
+  paid_at         TEXT,
+
+  -- draft = ร่าง แก้ได้/ลบได้ · issued = ออกใบแล้ว ส่งให้ลูกค้าแล้ว · paid = ชำระแล้ว · cancelled = ยกเลิก
+  -- "เกินกำหนด" ไม่เก็บเป็นสถานะ เพราะคำนวณจาก issued + วันครบกำหนดที่ผ่านมาแล้วได้ตอนอ่าน
+  status          TEXT NOT NULL DEFAULT 'draft'
+                  CHECK (status IN ('draft', 'issued', 'paid', 'cancelled')),
+
+  -- สำเนาผู้จ่าย ณ วันออกใบ
+  bill_to_name    TEXT NOT NULL,
+  bill_to_tax_id  TEXT,
+  bill_to_address TEXT,
+
+  -- สำเนารายการบริการและราคา ณ วันออกใบ
+  service_description TEXT NOT NULL,
+  amount          DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK (amount >= 0),   -- ยอดก่อนลด
+  discount        DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK (discount >= 0),
+  total           DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK (total >= 0),    -- ยอดสุทธิที่ต้องจ่าย
+
+  payment_method  TEXT,
+  note            TEXT,
+
+  created_at      TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD HH24:MI:SS'),
+  updated_at      TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD HH24:MI:SS')
+);
+
+-- พนักงานที่ทำธุรกรรม — เก็บทั้งรหัส (ไว้ทำรายงาน) และชื่อ ณ ตอนนั้น (ไว้พิมพ์ลงเอกสาร)
+-- ต้องเก็บชื่อไว้ด้วย ไม่อ่านสดจากตารางพนักงาน เพราะใบที่ออกไปแล้วต้องคงชื่อผู้ทำรายการเดิม
+-- แม้พนักงานจะเปลี่ยนชื่อหรือลาออกไปแล้ว (และคนอื่นมาเปิดพิมพ์ทีหลังก็ต้องไม่ขึ้นชื่อตัวเอง)
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS issued_by      TEXT
+  REFERENCES employees (employee_id) ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS issued_by_name TEXT;
+-- ผู้รับชำระเงิน (อาจเป็นคนละคนกับผู้ออกใบ) — ใช้เป็นผู้ลงนามบนใบเสร็จ
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS paid_by        TEXT
+  REFERENCES employees (employee_id) ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS paid_by_name   TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_invoices_customer ON invoices (customer_id);
+CREATE INDEX IF NOT EXISTS idx_invoices_case     ON invoices (case_id);
+CREATE INDEX IF NOT EXISTS idx_invoices_status   ON invoices (status);
+CREATE INDEX IF NOT EXISTS idx_invoices_issued   ON invoices (issue_date);
+
 -- OTP สำหรับรีเซ็ตรหัสผ่าน — เก็บเป็น hash เหมือนรหัสผ่าน คนที่อ่าน DB ได้ก็เอาไปใช้ไม่ได้
 CREATE TABLE IF NOT EXISTS password_reset_otps (
   otp_id      INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,

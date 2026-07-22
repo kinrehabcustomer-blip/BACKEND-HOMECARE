@@ -93,3 +93,4 @@ export const nextEmployeeId = (tx) => nextId(tx, 'employee', 'EMP');
 export const nextCaseId = (tx) => nextId(tx, 'case', 'CASE');
 export const nextCustomerId = (tx) => nextId(tx, 'customer', 'CUS');
 export const nextPatientId = (tx) => nextId(tx, 'patient', 'PAT');
+export const nextInvoiceId = (tx) => nextId(tx, 'invoice', 'INV');

@@ -9,6 +9,7 @@ import EmployeeDetailPage from './pages/EmployeeDetailPage.jsx';
 import CaseListPage from './pages/CaseListPage.jsx';
 import CaseFormPage from './pages/CaseFormPage.jsx';
 import CalendarPage from './pages/CalendarPage.jsx';
+import InvoiceListPage from './pages/InvoiceListPage.jsx';
 import CustomerListPage from './pages/CustomerListPage.jsx';
 import CustomerFormPage from './pages/CustomerFormPage.jsx';
 import CustomerDetailPage from './pages/CustomerDetailPage.jsx';
@@ -39,6 +40,7 @@ function Sidebar() {
         <NavLink to="/dashboard">ภาพรวม</NavLink>
         <NavLink to="/cases">เคส</NavLink>
         <NavLink to="/calendar">ตารางงาน</NavLink>
+        <NavLink to="/invoices">ใบแจ้งหนี้</NavLink>
         <NavLink to="/customers">ลูกค้า</NavLink>
         <NavLink to="/patients">ผู้รับการดูแล</NavLink>
         <NavLink to="/packages">แพ็คเกจ Homecare</NavLink>
@@ -110,6 +112,7 @@ export default function App() {
           <Route path="/cases/:id/edit" element={<AppLayout><CaseFormPage /></AppLayout>} />
 
           <Route path="/calendar" element={<AppLayout><CalendarPage /></AppLayout>} />
+          <Route path="/invoices" element={<AppLayout><InvoiceListPage /></AppLayout>} />
 
           <Route path="/customers" element={<AppLayout><CustomerListPage /></AppLayout>} />
           <Route path="/customers/new" element={<AppLayout><CustomerFormPage /></AppLayout>} />

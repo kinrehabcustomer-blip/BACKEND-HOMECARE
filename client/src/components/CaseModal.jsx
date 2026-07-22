@@ -2,9 +2,10 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api.js';
 import CaseVisitsModal from './CaseVisitsModal.jsx';
+import InvoiceModal from './InvoiceModal.jsx';
 import {
   CASE_TYPE_LABELS, CASE_STATUS_LABELS, POSITION_LABELS, GENDER_LABELS, SERVICE_KIND_LABELS,
-  formatBaht, formatDate,
+  INVOICE_STATUS_LABELS, formatBaht, formatDate,
 } from '../labels.js';
 
 /**
@@ -49,28 +50,40 @@ export default function CaseModal({ caseId, onClose, onChanged }) {
   const [busy, setBusy] = useState(false);
   const [visits, setVisits] = useState([]);      // ใช้แค่สรุปจำนวนบนปุ่ม การจัดการจริงอยู่ใน popup ย่อย
   const [visitsOpen, setVisitsOpen] = useState(false);
+  const [invoices, setInvoices] = useState([]);  // ใบแจ้งหนี้ของเคสนี้ (ปกติมีใบเดียว)
+  const [openInvoiceId, setOpenInvoiceId] = useState(null);
 
   // ดึงเคส รายชื่อพนักงาน และวันนัดพร้อมกัน — จำนวนเคสที่แต่ละคนถืออยู่เปลี่ยนทุกครั้งที่จับคู่/ยกเลิก
   const load = () =>
-    Promise.all([api.getCase(caseId), api.assignableEmployees(), api.listVisits(caseId)]).then(
-      ([c, list, v]) => {
-        setItem(c);
-        setStaff(list);
-        setVisits(v);
-      },
-    );
+    Promise.all([
+      api.getCase(caseId),
+      api.assignableEmployees(),
+      api.listVisits(caseId),
+      api.listInvoices({ case_id: caseId }),
+    ]).then(([c, list, v, inv]) => {
+      setItem(c);
+      setStaff(list);
+      setVisits(v);
+      setInvoices(inv.data);
+    });
 
   useEffect(() => {
     let cancelled = false;
     setItem(null);
     setError(null);
 
-    Promise.all([api.getCase(caseId), api.assignableEmployees(), api.listVisits(caseId)])
-      .then(([c, list, v]) => {
+    Promise.all([
+      api.getCase(caseId),
+      api.assignableEmployees(),
+      api.listVisits(caseId),
+      api.listInvoices({ case_id: caseId }),
+    ])
+      .then(([c, list, v, inv]) => {
         if (cancelled) return;
         setItem(c);
         setStaff(list);
         setVisits(v);
+        setInvoices(inv.data);
         setPick(c.assigned_to ?? '');
       })
       .catch((err) => !cancelled && setError(err.message));
@@ -114,6 +127,22 @@ export default function CaseModal({ caseId, onClose, onChanged }) {
   // วันที่ยกเลิกไม่นับเป็นนัดที่จองไว้ แต่ยังเก็บไว้เป็นประวัติใน popup
   const bookedVisits = visits.filter((v) => v.status !== 'cancelled').length;
   const doneVisits = visits.filter((v) => v.status === 'done').length;
+
+  /**
+   * ยกเลิกใบแจ้งหนี้จากในหน้าเคส แล้วถามต่อว่าจะออกใบใหม่ตามข้อมูลปัจจุบันเลยไหม
+   * ใช้ flow เดียวกับปุ่มยกเลิกใน popup ใบแจ้งหนี้ — จะได้ไม่ต้องเปิดใบก่อนถึงจะจัดการได้
+   */
+  function cancelInvoice(v) {
+    if (!confirm(`ยกเลิกใบแจ้งหนี้ ${v.invoice_id}?\nใบจะยังอยู่ในระบบเป็นประวัติ (เลขเอกสารต้องไม่ข้าม)`)) return;
+
+    run(async () => {
+      await api.cancelInvoice(v.invoice_id);
+      if (confirm('ยกเลิกแล้ว — ออกใบใหม่ตามข้อมูลปัจจุบันของเคสเลยไหม?')) {
+        const created = await api.createInvoice({ case_id: item.case_id });
+        setOpenInvoiceId(created.invoice_id);
+      }
+    });
+  }
 
   /** ยกเลิกเคส — ถามเหตุผล (เว้นว่างได้) แล้วยิง API */
   function cancelCase() {
@@ -229,6 +258,60 @@ export default function CaseModal({ caseId, onClose, onChanged }) {
                 </div>
               </section>
 
+              {/* ออกใบแจ้งหนี้จากเคสนี้ — ระบบคัดลอกผู้จ่าย/ที่อยู่/ค่าจ้างไปให้เอง */}
+              <section>
+                <h3>ใบแจ้งหนี้</h3>
+                {invoices.length === 0 ? (
+                  <div className="visit-summary">
+                    <p className="muted">ยังไม่ได้ออกใบแจ้งหนี้</p>
+                    <button
+                      className="btn"
+                      disabled={busy || item.status === 'cancelled'}
+                      title={item.status === 'cancelled' ? 'เคสที่ยกเลิกแล้วออกใบแจ้งหนี้ไม่ได้' : undefined}
+                      onClick={() =>
+                        run(async () => {
+                          const created = await api.createInvoice({ case_id: item.case_id });
+                          setOpenInvoiceId(created.invoice_id);
+                        })
+                      }
+                    >
+                      ออกใบแจ้งหนี้
+                    </button>
+                  </div>
+                ) : (
+                  invoices.map((v) => (
+                    <div className="history-item" key={v.invoice_id}>
+                      <div>
+                        <strong>{formatBaht(v.total)}</strong>
+                        <p className="muted">
+                          <span className="mono">{v.invoice_id}</span>
+                          {' · '}ออกเมื่อ {formatDate(v.issue_date)}
+                          {' · '}{INVOICE_STATUS_LABELS[v.status]}
+                        </p>
+                        {/* ยอดในใบไม่ตรงกับค่าจ้างเคสแล้ว — ยกเลิกแล้วออกใบใหม่ได้จากตรงนี้เลย */}
+                        {v.is_stale && v.status !== 'cancelled' && (
+                          <p className="stale-tag">⚠ ไม่ตรงกับค่าจ้างเคส ({formatBaht(v.case_fee)})</p>
+                        )}
+                      </div>
+                      <div className="invoice-row-actions">
+                        <button className="btn tiny" onClick={() => setOpenInvoiceId(v.invoice_id)}>
+                          เปิดดู
+                        </button>
+                        {v.status !== 'cancelled' && (
+                          <button
+                            className="btn tiny danger-ghost"
+                            disabled={busy}
+                            onClick={() => cancelInvoice(v)}
+                          >
+                            ยกเลิก
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </section>
+
               <section>
                 <h3>พนักงานที่รับเคส</h3>
 
@@ -338,6 +421,18 @@ export default function CaseModal({ caseId, onClose, onChanged }) {
                 readOnly={terminal}
                 onClose={() => {
                   setVisitsOpen(false);
+                  load().catch(() => {});
+                }}
+              />
+            )}
+
+            {openInvoiceId && (
+              <InvoiceModal
+                invoiceId={openInvoiceId}
+                onChanged={() => load().catch(() => {})}
+                onReissued={(newId) => setOpenInvoiceId(newId)}  /* ออกใบใหม่แล้วสลับไปดูใบใหม่ทันที */
+                onClose={() => {
+                  setOpenInvoiceId(null);
                   load().catch(() => {});
                 }}
               />

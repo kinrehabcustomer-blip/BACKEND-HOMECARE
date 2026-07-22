@@ -65,6 +65,13 @@ export const CASE_STATUS_LABELS = {
   cancelled: 'ยกเลิก',
 };
 
+export const INVOICE_STATUS_LABELS = {
+  draft: 'ร่าง',
+  issued: 'ออกใบแล้ว',
+  paid: 'ชำระแล้ว',
+  cancelled: 'ยกเลิก',
+};
+
 /** สายบริการที่เคสเลือกใช้ — คนละโมเดลราคากัน (ตารางเรท vs แพ็คเกจเหมาครั้ง) */
 export const SERVICE_KIND_LABELS = {
   homecare: 'Homecare',
@@ -110,6 +117,61 @@ export const formatPercent = (value) => {
 
 export const formatDate = (value) =>
   value ? new Date(value).toLocaleDateString('th-TH', { dateStyle: 'medium' }) : '—';
+
+/** ตัวเลขเงินบนเอกสาร — ทศนิยม 2 ตำแหน่งเสมอ ไม่มีสัญลักษณ์บาท (เช่น 12,000.00) */
+export const amountText = (value) =>
+  Number(value ?? 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+/** วันที่แบบราชการบนเอกสาร: 22-07-2569 (วัน-เดือน-พ.ศ.) */
+export function docDate(value) {
+  if (!value) return '—';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '—';
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  return `${dd}-${mm}-${d.getFullYear() + 543}`;
+}
+
+const THAI_DIGITS = ['ศูนย์', 'หนึ่ง', 'สอง', 'สาม', 'สี่', 'ห้า', 'หก', 'เจ็ด', 'แปด', 'เก้า'];
+const THAI_PLACES = ['', 'สิบ', 'ร้อย', 'พัน', 'หมื่น', 'แสน'];
+
+/**
+ * อ่านจำนวนเต็มเป็นภาษาไทย ตามหลักการอ่านเลขไทย
+ *  - หลักสิบ: 1 อ่าน "สิบ" (ไม่ใช่ "หนึ่งสิบ") · 2 อ่าน "ยี่สิบ"
+ *  - หลักหน่วยที่มีหลักอื่นนำหน้า: 1 อ่าน "เอ็ด" (ยี่สิบเอ็ด, หนึ่งร้อยเอ็ด)
+ *  - เกินล้าน: ตัดเป็นก้อนล้านแล้ววนอ่านซ้ำ (หนึ่งล้านสองแสน…)
+ */
+function readThaiInteger(n) {
+  if (n === 0) return 'ศูนย์';
+  if (n >= 1_000_000) {
+    const high = readThaiInteger(Math.floor(n / 1_000_000));
+    const low = n % 1_000_000;
+    return `${high}ล้าน${low ? readThaiInteger(low) : ''}`;
+  }
+
+  const s = String(n);
+  let out = '';
+  for (let i = 0; i < s.length; i += 1) {
+    const digit = Number(s[i]);
+    const place = s.length - i - 1; // 0 = หลักหน่วย
+    if (digit === 0) continue;
+
+    if (place === 0) out += digit === 1 && s.length > 1 ? 'เอ็ด' : THAI_DIGITS[digit];
+    else if (place === 1) out += digit === 1 ? 'สิบ' : `${digit === 2 ? 'ยี่' : THAI_DIGITS[digit]}สิบ`;
+    else out += THAI_DIGITS[digit] + THAI_PLACES[place];
+  }
+  return out;
+}
+
+/** จำนวนเงินเป็นตัวหนังสือไทยสำหรับกำกับบนใบเสร็จ เช่น 12000 -> "หนึ่งหมื่นสองพันบาทถ้วน" */
+export function bahtText(value) {
+  const rounded = Math.round(Number(value ?? 0) * 100) / 100;
+  const baht = Math.floor(rounded);
+  const satang = Math.round((rounded - baht) * 100);
+
+  if (satang === 0) return `${readThaiInteger(baht)}บาทถ้วน`;
+  return `${readThaiInteger(baht)}บาท${readThaiInteger(satang)}สตางค์`;
+}
 
 /** '01' -> 'มกราคม' */
 export const MONTH_LABELS = {

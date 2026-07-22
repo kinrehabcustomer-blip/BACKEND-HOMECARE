@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import * as repo from './repo.js';
 import * as employees from '../employees/repo.js';
+import * as customers from '../customers/repo.js';
+import * as invoices from '../invoices/repo.js';
 import {
   createCaseSchema,
   updateCaseSchema,
@@ -101,7 +103,13 @@ casesRouter.patch(
   '/:id',
   asyncRoute(async (req, res) => {
     const input = updateCaseSchema.parse(req.body);
-    res.json(await repo.update(req.params.id, input));
+    const updated = await repo.update(req.params.id, input);
+
+    // แก้เคสแล้วใบแจ้งหนี้ที่ยังแก้ได้ (ร่าง/ออกใบแล้ว) ต้องตามให้ทัน — ดู syncOpenFromCase
+    const customer = updated.customer_id ? await customers.findById(updated.customer_id) : null;
+    await invoices.syncOpenFromCase(updated, customer);
+
+    res.json(updated);
   }),
 );
 

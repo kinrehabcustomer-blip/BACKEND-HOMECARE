@@ -403,6 +403,13 @@ select:focus { background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xm
 .badge.case-closed,      .cal-chip.case-closed      { background: #eef0f2; color: #6b7280; }
 .badge.case-cancelled,   .cal-chip.case-cancelled   { background: #fbe4e4; color: #a83232; }
 
+/* สถานะใบแจ้งหนี้ — ร่าง (เทา) · ออกแล้วรอชำระ (ฟ้า) · ชำระแล้ว (เขียว) · เกินกำหนด (แดง) · ยกเลิก (แดงจาง) */
+.badge.invoice-draft     { background: #eef0f2; color: #6b7280; }
+.badge.invoice-issued    { background: #e4eefb; color: #1d5fa8; }
+.badge.invoice-paid      { background: #e3f5ec; color: #1c7a4d; }
+.badge.invoice-overdue   { background: #fde8e8; color: #b3261e; }
+.badge.invoice-cancelled { background: #fbe4e4; color: #a83232; }
+
 /* สถานะแฟ้มผู้รับการดูแล (active ใช้สีเขียวร่วมกับด้านบน) */
 .badge.inactive { background: #eef0f2; color: #6b7280; }
 
@@ -1156,6 +1163,84 @@ select:focus { background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xm
 @media (max-width: 40rem) {
   .cal-grid { min-width: 34rem; }
   .cal-cell { height: 6.5rem; }
+}
+
+/* แถบเตือนว่าใบไม่ตรงกับเคสแล้ว — มีปุ่มจัดการอยู่ในตัว จะได้ไม่ต้องเลื่อนไปหาที่ท้าย popup */
+.stale-notice { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+.stale-notice p { margin: 0; flex: 1; min-width: 14rem; }
+.stale-actions { display: flex; gap: 0.5rem; flex-shrink: 0; }
+/* ป้ายเตือนย่อในรายการใบแจ้งหนี้ของเคส */
+.stale-tag { margin: 0.125rem 0 0 !important; font-size: 0.6875rem; color: var(--danger); font-weight: 600; }
+.invoice-row-actions { display: flex; gap: 0.375rem; flex-shrink: 0; }
+
+/* ---------- เอกสารใบแจ้งหนี้/ใบเสร็จ (ฟอร์มราชการไทย — หน้าจอ + พิมพ์) ----------
+   ใช้สีดำ/ขาวตายตัว ไม่อิงตัวแปรธีม เพราะเอกสารต้องหน้าตาเหมือนกันทั้งโหมดสว่าง/มืด และตอนพิมพ์ */
+.invoice-doc {
+  background: #fff;
+  color: #000;
+  font-size: 0.8125rem;
+  line-height: 1.55;
+}
+.invoice-doc p { margin: 0; }
+
+.inv-printed { text-align: right; font-size: 0.6875rem; }
+.inv-header { text-align: center; }
+.inv-logo { display: flex; flex-direction: column; align-items: center; margin: 0.5rem 0 0.75rem; }
+.inv-logo-mark { font-size: 1.75rem; font-weight: 800; letter-spacing: 0.5rem; color: #b08a3e; }
+.inv-logo-sub { font-size: 0.625rem; letter-spacing: 0.08rem; color: #8a7040; }
+.inv-title { margin: 0; font-size: 1.25rem; }
+.inv-copy { font-weight: 600; }
+.inv-org { margin-top: 0.25rem !important; }
+.inv-org-line { font-size: 0.75rem; }
+.inv-rule { width: 60%; margin: 0.5rem auto 0; border: 0; border-top: 1px dashed #000; }
+
+.inv-parties { display: flex; justify-content: space-between; gap: 1rem; margin: 0.75rem 0 0.375rem; }
+.inv-parties-right { text-align: right; }
+
+/* ตารางรายการ — เส้นขอบครบทุกช่องแบบฟอร์มกระดาษ */
+.inv-table { width: 100%; border-collapse: collapse; }
+.inv-table th, .inv-table td { border: 1px solid #000; padding: 0.3125rem 0.5rem; vertical-align: top; }
+.inv-table th { text-align: center; font-weight: 600; background: #fff; }
+.inv-c { text-align: center; }
+.inv-r { text-align: right; }
+.inv-words { text-align: center !important; font-weight: 600; }
+
+.inv-methods { display: flex; gap: 2.5rem; flex-wrap: wrap; margin-top: 0.75rem !important; }
+.inv-line { margin-top: 0.5rem !important; }
+
+/* บล็อกลายเซ็น — ชิดขวาเหมือนฟอร์มตัวอย่าง */
+.inv-signs { display: flex; flex-direction: column; align-items: flex-end; gap: 1.75rem; margin-top: 2.5rem; }
+.inv-sign { display: grid; grid-template-columns: auto auto; gap: 0.25rem 0.75rem; align-items: end; }
+.inv-sign-role { text-align: right; }
+.inv-sign-dots { letter-spacing: 0.02rem; }
+.inv-sign-name { grid-column: 2; text-align: center; }
+
+/* ---------- สั่งพิมพ์ / บันทึกเป็น PDF ----------
+   ซ่อนทั้งหน้าแล้วโชว์เฉพาะ .invoice-doc โดยใช้ visibility (ไม่ใช้ display:none)
+   เพราะ display:none กับ element แม่จะทำให้ลูกที่อยู่ข้างในหายไปด้วย เลยเอาเอกสารออกมาไม่ได้ */
+@media print {
+  @page { size: A4; margin: 15mm; }
+
+  body * { visibility: hidden; }
+  .invoice-doc, .invoice-doc * { visibility: visible; }
+  .no-print { display: none !important; }
+
+  .invoice-doc {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    padding: 0;
+  }
+
+  /* ฉากหลังทึบ/เงา/ขอบมนของ popup ไม่ต้องพิมพ์ลงกระดาษ */
+  .modal-backdrop { position: static; padding: 0; background: none; }
+  .modal { max-width: none; max-height: none; box-shadow: none; border-radius: 0; }
+  .modal-body { padding: 0; overflow: visible; }
+
+  /* กันตารางถูกตัดครึ่งคาบหน้ากระดาษ */
+  .inv-table tr { break-inside: avoid; }
+  .inv-signs { break-inside: avoid; }
 }
 
 /* ---------- ปฏิทินย่อสำหรับลงวันนัดในเคส ---------- */

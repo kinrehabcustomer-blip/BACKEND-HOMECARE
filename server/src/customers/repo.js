@@ -35,6 +35,11 @@ const COLUMNS = [
   'customer_type',
   'referral_source',
   'note',
+
+  // ข้อมูลออกบิล
+  'tax_id',
+  'payment_terms',
+  'billing_address',
 ];
 
 const NOW = `to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD HH24:MI:SS')`;

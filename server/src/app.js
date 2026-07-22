@@ -8,6 +8,7 @@ import { customersRouter } from './customers/routes.js';
 import { patientsRouter } from './patients/routes.js';
 import { packagesRouter } from './packages/routes.js';
 import { physioRouter } from './physio/routes.js';
+import { invoicesRouter } from './invoices/routes.js';
 import { errorHandler } from './lib/errors.js';
 import { requireAuth } from './lib/auth.js';
 
@@ -30,6 +31,7 @@ export function createApp() {
   app.use('/api/patients', requireAuth, patientsRouter);
   app.use('/api/packages', requireAuth, packagesRouter);
   app.use('/api/physio', requireAuth, physioRouter);
+  app.use('/api/invoices', requireAuth, invoicesRouter);
 
   app.use((req, res) => res.status(404).json({ error: `ไม่พบ endpoint: ${req.method} ${req.path}` }));
   app.use(errorHandler);
