@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { api } from '../api.js';
 import EmployeeModal from '../components/EmployeeModal.jsx';
 import SortToggle from '../components/SortToggle.jsx';
+import Avatar from '../components/Avatar.jsx';
 import { POSITION_LABELS, STATUS_LABELS, EMPLOYMENT_TYPE_LABELS } from '../labels.js';
 
 const EMPTY_FILTERS = { q: '', status: '', position: '' };
@@ -124,8 +125,13 @@ export default function EmployeeListPage() {
             >
               <td className="mono link">{emp.employee_id}</td>
               <td>
-                {emp.first_name} {emp.last_name}
-                {emp.nickname && <span className="muted"> ({emp.nickname})</span>}
+                <span className="name-cell">
+                  <Avatar employee={emp} />
+                  <span>
+                    {emp.first_name} {emp.last_name}
+                    {emp.nickname && <span className="muted"> ({emp.nickname})</span>}
+                  </span>
+                </span>
               </td>
               <td>{POSITION_LABELS[emp.position]}</td>
               <td>{EMPLOYMENT_TYPE_LABELS[emp.employment_type]}</td>

@@ -111,6 +111,7 @@ npm run dev              # รัน API (:4000) + หน้าเว็บ (:51
 | GET | `/` `/:id` `/summary` `/meta` | รายการ (ค้นหา/กรอง/แบ่งหน้า), รายละเอียด, สรุปจำนวน, ค่า enum |
 | POST/PATCH | `/` `/:id` | เพิ่ม (ออก `EMP-####` ให้), แก้ไข |
 | DELETE | `/:id` | บันทึกลาออก (soft) · `?hard=true` = ลบถาวร |
+| GET/PUT | `/:id/photo` | รูปพนักงาน (คนละ 1 รูป) — `PUT { image: null }` = ลบรูป |
 | — | `/:id/certificates` · `/:id/portfolio` | ใบรับรอง / portfolio (มีรูปแนบได้) |
 
 ### Customers — `/api/customers` · Patients — `/api/patients`
@@ -150,7 +151,7 @@ npm run dev              # รัน API (:4000) + หน้าเว็บ (:51
 
 | ตาราง | หน้าที่ |
 | --- | --- |
-| `employees` | พนักงาน (PK `employee_id`) + auth (password_hash, role) |
+| `employees` | พนักงาน (PK `employee_id`) + auth (password_hash, role) + รูปพนักงาน (`photo_data` BYTEA) |
 | `employee_certificates` · `employee_portfolio` | ใบรับรอง / ผลงาน — รูปเก็บเป็น `BYTEA` ใน DB (ไม่มี file storage ภายนอก) |
 | `customers` | ผู้ว่าจ้าง (PK `customer_id`) |
 | `patients` | ผู้รับการดูแล (PK `patient_id`) — FK → customers |

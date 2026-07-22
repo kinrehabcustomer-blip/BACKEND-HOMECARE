@@ -48,6 +48,16 @@ export const api = {
     request(`/employees/${id}`, { method: 'DELETE', body: { resign_date } }),
   deleteEmployee: (id) => request(`/employees/${id}?hard=true`, { method: 'DELETE' }),
 
+  /** แนบรูปพนักงานทับของเดิม — ส่ง image: null เพื่อลบรูป (คืนข้อมูลพนักงานที่อัปเดตแล้ว) */
+  setEmployeePhoto: (id, image) => request(`/employees/${id}/photo`, { method: 'PUT', body: { image } }),
+
+  /**
+   * URL รูปพนักงาน — ใส่ตรงๆ ใน <img src> ได้ (เบราว์เซอร์แนบคุกกี้ session ไปเอง)
+   * version = updated_at ของพนักงาน: เปลี่ยนรูปแล้ว URL เปลี่ยนตาม เบราว์เซอร์จึงไม่หยิบรูปเก่าที่แคชไว้มาโชว์
+   */
+  employeePhotoUrl: (id, version) =>
+    `/api/employees/${id}/photo${version ? `?v=${encodeURIComponent(version)}` : ''}`,
+
   listCertificates: (id) => request(`/employees/${id}/certificates`),
   addCertificate: (id, body) => request(`/employees/${id}/certificates`, { method: 'POST', body }),
   deleteCertificate: (id, certificateId) =>

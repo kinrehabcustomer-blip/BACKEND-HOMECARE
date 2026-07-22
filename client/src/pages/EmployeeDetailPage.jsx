@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { api } from '../api.js';
 import WorkHistory from '../components/WorkHistory.jsx';
+import Avatar from '../components/Avatar.jsx';
 import {
   POSITION_LABELS, EMPLOYMENT_TYPE_LABELS, STATUS_LABELS, GENDER_LABELS,
   formatBaht, formatDate,
@@ -48,13 +49,16 @@ export default function EmployeeDetailPage() {
   return (
     <>
       <header className="page-head">
-        <div>
-          <p className="mono muted">{employee.employee_id}</p>
-          <h1>
-            {employee.first_name} {employee.last_name}
-            {employee.nickname && <span className="muted"> ({employee.nickname})</span>}
-          </h1>
-          <span className={`badge ${employee.status}`}>{STATUS_LABELS[employee.status]}</span>
+        <div className="head-identity">
+          <Avatar employee={employee} size="avatar-lg" clickable />
+          <div>
+            <p className="mono muted">{employee.employee_id}</p>
+            <h1>
+              {employee.first_name} {employee.last_name}
+              {employee.nickname && <span className="muted"> ({employee.nickname})</span>}
+            </h1>
+            <span className={`badge ${employee.status}`}>{STATUS_LABELS[employee.status]}</span>
+          </div>
         </div>
         <div className="actions">
           <Link className="btn" to="/employees">← กลับ</Link>

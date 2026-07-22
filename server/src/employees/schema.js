@@ -115,6 +115,13 @@ export const certificateImageSchema = z.object({
   image: imageSchema.nullable(), // null = ลบรูปทิ้ง
 });
 
+// ---------- รูปพนักงาน ----------
+// แยกจาก createEmployeeSchema เพราะรูปไปคนละเส้น (PUT .../photo) — ฟอร์มพนักงานส่ง JSON ก้อนเล็ก
+// ไม่ต้องแบกรูป base64 ไปด้วยทุกครั้งที่แก้แค่เบอร์โทร
+export const employeePhotoSchema = z.object({
+  image: imageSchema.nullable(), // null = ลบรูปทิ้ง
+});
+
 // ---------- ผลงาน (โปรไฟล์พนักงาน) ----------
 export const portfolioSchema = z.object({
   title: z.string().trim().min(1, 'กรุณากรอกชื่อผลงาน').max(200),

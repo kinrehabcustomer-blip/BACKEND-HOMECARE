@@ -524,6 +524,14 @@ ALTER TABLE cases ADD COLUMN IF NOT EXISTS physio_package_id INTEGER
 -- แตะเฉพาะแถวที่ยังว่างและมีรูปแบบบริการอยู่จริง — เคสที่ไม่ได้ระบุบริการเลยยังคงเป็น NULL ตามเดิม
 UPDATE cases SET service_kind = 'homecare' WHERE service_kind IS NULL AND pkg_format_id IS NOT NULL;
 
+-- ---------- รูปพนักงาน (รูปติดบัตร — คนละคนละรูปเดียว) ----------
+-- เก็บไบนารีไว้ใน DB เหมือนรูปใบรับรอง/ผลงาน ไม่ต้องพึ่งบริการเก็บไฟล์ภายนอก
+-- เป็นคอลัมน์ของ employees ไม่ใช่ตารางแยก เพราะหนึ่งคนมีได้รูปเดียว (เปลี่ยนรูป = ทับของเดิม)
+-- ฝั่งเบราว์เซอร์ย่อรูปก่อนส่ง (ด้านยาวสุด 1600px, JPEG) ไฟล์จริงจึงเหลือราว 100–300 KB
+ALTER TABLE employees ADD COLUMN IF NOT EXISTS photo_data BYTEA;
+ALTER TABLE employees ADD COLUMN IF NOT EXISTS photo_mime TEXT;
+ALTER TABLE employees ADD COLUMN IF NOT EXISTS photo_size INTEGER;
+
 -- ตัวนับรหัสพนักงาน: กันเลขซ้ำแม้จะมีการลบพนักงานออกไปแล้ว
 CREATE TABLE IF NOT EXISTS id_counters (
   name  TEXT PRIMARY KEY,

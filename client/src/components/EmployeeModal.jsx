@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api.js';
 import WorkHistory from './WorkHistory.jsx';
+import Avatar from './Avatar.jsx';
 import {
   POSITION_LABELS, EMPLOYMENT_TYPE_LABELS, STATUS_LABELS, GENDER_LABELS,
   formatBaht, formatDate,
@@ -76,13 +77,16 @@ export default function EmployeeModal({ employeeId, onClose }) {
         {employee && (
           <>
             <header className="modal-head">
-              <div>
-                <p className="mono muted">{employee.employee_id}</p>
-                <h2>
-                  {employee.first_name} {employee.last_name}
-                  {employee.nickname && <span className="muted"> ({employee.nickname})</span>}
-                </h2>
-                <span className={`badge ${employee.status}`}>{STATUS_LABELS[employee.status]}</span>
+              <div className="head-identity">
+                <Avatar employee={employee} size="avatar-lg" clickable />
+                <div>
+                  <p className="mono muted">{employee.employee_id}</p>
+                  <h2>
+                    {employee.first_name} {employee.last_name}
+                    {employee.nickname && <span className="muted"> ({employee.nickname})</span>}
+                  </h2>
+                  <span className={`badge ${employee.status}`}>{STATUS_LABELS[employee.status]}</span>
+                </div>
               </div>
               <button className="modal-close" onClick={onClose} aria-label="ปิด">×</button>
             </header>

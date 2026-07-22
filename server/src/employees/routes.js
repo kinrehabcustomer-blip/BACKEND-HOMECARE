@@ -6,6 +6,7 @@ import {
   listQuerySchema,
   certificateSchema,
   certificateImageSchema,
+  employeePhotoSchema,
   decodeImage,
   portfolioSchema,
   portfolioUpdateSchema,
@@ -92,6 +93,32 @@ employeesRouter.delete(
       return res.status(204).end();
     }
     res.json(await repo.resign(req.params.id, req.body?.resign_date));
+  }),
+);
+
+// ---------- รูปพนักงาน ----------
+
+/** แนบรูปทับของเดิม หรือส่ง image: null มาเพื่อลบรูปทิ้ง — คืนข้อมูลพนักงานที่อัปเดตแล้ว */
+employeesRouter.put(
+  '/:id/photo',
+  asyncRoute(async (req, res) => {
+    const { image } = employeePhotoSchema.parse(req.body);
+    res.json(await repo.photo.set(req.params.id, toImage(image)));
+  }),
+);
+
+/** ส่งไฟล์รูปออกไปตรงๆ — แท็ก <img> เรียกเส้นนี้ (คุกกี้ session ถูกส่งไปด้วยอัตโนมัติ) */
+employeesRouter.get(
+  '/:id/photo',
+  asyncRoute(async (req, res, next) => {
+    const row = await repo.photo.find(req.params.id);
+    if (!row) return next(notFound('พนักงานคนนี้ยังไม่มีรูป'));
+
+    res.setHeader('Content-Type', row.photo_mime);
+    // เป็นข้อมูลส่วนบุคคล — แคชได้เฉพาะเครื่องผู้ใช้ (private)
+    // เปลี่ยนรูปแล้วไม่ค้างรูปเก่า เพราะหน้าเว็บต่อ ?v=updated_at ท้าย URL (ดู api.employeePhotoUrl)
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    res.send(row.photo_data);
   }),
 );
 

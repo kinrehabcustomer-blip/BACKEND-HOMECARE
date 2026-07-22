@@ -3,6 +3,7 @@ import { useNavigate, useParams, Link } from 'react-router-dom';
 import { api } from '../api.js';
 import CertificateSection from '../components/CertificateSection.jsx';
 import PortfolioSection from '../components/PortfolioSection.jsx';
+import PhotoField from '../components/PhotoField.jsx';
 import { POSITION_LABELS, EMPLOYMENT_TYPE_LABELS, STATUS_LABELS, GENDER_LABELS } from '../labels.js';
 
 const BLANK = {
@@ -33,10 +34,13 @@ export default function EmployeeFormPage() {
   const isEdit = Boolean(id);
 
   const [form, setForm] = useState(BLANK);
+  // สภาพรูปที่อยู่ใน DB ตอนนี้ — แยกจาก form เพราะรูปไม่ได้ถูกส่งไปกับ JSON ของพนักงาน (ไปคนละเส้น)
+  const [savedPhoto, setSavedPhoto] = useState(null);
   const [error, setError] = useState(null);
   const [saving, setSaving] = useState(false);
   const certificates = useRef(null); // ส่วนใบรับรอง — สั่งบันทึกใบที่รออยู่ตอนกดปุ่มบันทึก
   const portfolio = useRef(null); // ส่วนผลงาน — เช่นเดียวกัน
+  const photo = useRef(null); // รูปพนักงาน — เช่นเดียวกัน
 
   useEffect(() => {
     if (!isEdit) return;
@@ -45,6 +49,7 @@ export default function EmployeeFormPage() {
       const filled = { ...BLANK };
       for (const key of Object.keys(BLANK)) filled[key] = emp[key] ?? '';
       setForm(filled);
+      setSavedPhoto({ has_photo: emp.has_photo, updated_at: emp.updated_at });
     }).catch((err) => setError(err.message));
   }, [id, isEdit]);
 
@@ -62,7 +67,8 @@ export default function EmployeeFormPage() {
       const payload = toPayload(form);
       const saved = isEdit ? await api.updateEmployee(id, payload) : await api.createEmployee(payload);
 
-      // พนักงานใหม่เพิ่งได้รหัสตรงนี้ ใบรับรอง/ผลงานจึงต้องบันทึกหลังพนักงานเสมอ
+      // พนักงานใหม่เพิ่งได้รหัสตรงนี้ รูป/ใบรับรอง/ผลงานจึงต้องบันทึกหลังพนักงานเสมอ
+      await photo.current?.save(saved.employee_id);
       await certificates.current?.save(saved.employee_id);
       await portfolio.current?.save(saved.employee_id);
 
@@ -86,6 +92,9 @@ export default function EmployeeFormPage() {
       {error && <pre className="error">{error}</pre>}
 
       <form className="card form" onSubmit={handleSubmit}>
+        <h2>รูปพนักงาน</h2>
+        <PhotoField ref={photo} employeeId={id ?? null} saved={savedPhoto} />
+
         <h2>ข้อมูลส่วนตัว</h2>
         <div className="grid">
           <label>ชื่อ (ไทย) *<input required {...field('first_name')} /></label>

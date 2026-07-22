@@ -28,6 +28,8 @@ const COLUMNS = [
 const NOW = `to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD HH24:MI:SS')`;
 
 // คอลัมน์ที่ส่งออก API ได้ — เขียนชื่อทีละตัวแทน SELECT * เพื่อไม่ให้ password_hash หลุดออกไปหน้าเว็บ
+// photo_data ก็ไม่อยู่ในนี้ด้วยเหตุผลเดียวกับรูปใบรับรอง: ไบนารีรูปจะทำให้ทุก response อ้วนขึ้นหลายร้อย KB
+// ส่งไปแค่ "มีรูปไหม" ให้หน้าเว็บตัดสินใจว่าจะเรียก GET .../photo มาแสดงหรือไม่
 const PUBLIC = [
   'employee_id',
   ...COLUMNS,
@@ -36,6 +38,8 @@ const PUBLIC = [
   'last_login_at',
   'created_at',
   'updated_at',
+  'photo_size',
+  '(photo_data IS NOT NULL) AS has_photo',
 ].join(', ');
 
 export async function list({ q, status, position, page, per_page, sort, order }) {
@@ -185,6 +189,37 @@ export async function summary() {
     by_position: toNumber(byPosition),
   };
 }
+
+// ---------- รูปพนักงาน (หนึ่งคนหนึ่งรูป) ----------
+export const photo = {
+  /** ดึงไบนารีรูป — เรียกเฉพาะตอนหน้าเว็บขอรูปจริง */
+  find(employeeId) {
+    return sql.one(
+      'SELECT photo_data, photo_mime FROM employees WHERE employee_id = :id AND photo_data IS NOT NULL',
+      { id: employeeId },
+    );
+  },
+
+  /**
+   * แนบรูปใหม่ทับของเดิม (image = null คือลบรูปทิ้ง)
+   * ต้องดัน updated_at ด้วย เพราะหน้าเว็บใช้ค่านี้เป็นตัวกันแคช — ไม่ดันแล้วเปลี่ยนรูปไปก็ยังเห็นรูปเก่า
+   */
+  set(employeeId, image) {
+    return sql.one(
+      `UPDATE employees
+       SET photo_data = :photo_data, photo_mime = :photo_mime, photo_size = :photo_size,
+           updated_at = ${NOW}
+       WHERE employee_id = :id
+       RETURNING ${PUBLIC}`,
+      {
+        id: employeeId,
+        photo_data: image?.data ?? null,
+        photo_mime: image?.mime ?? null,
+        photo_size: image?.size ?? null,
+      },
+    );
+  },
+};
 
 // คอลัมน์ที่ส่งออก API ได้ — ไม่รวม image_data (ไบนารีรูป) เพราะจะทำให้ทุก response อ้วนขึ้นหลายร้อย KB
 // รูปดึงแยกผ่าน GET .../image เมื่อหน้าเว็บต้องใช้จริงเท่านั้น

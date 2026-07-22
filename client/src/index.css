@@ -687,6 +687,65 @@ select:focus { background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xm
 .cert-form { display: flex; gap: 0.5rem; margin-top: 1rem; flex-wrap: wrap; }
 .cert-form input { flex: 1; min-width: 8.75rem; }
 
+/* ---------- รูปพนักงาน ---------- */
+/* หัวเรื่องที่มีรูปนำหน้า (หน้ารายละเอียด + popup) — ตัวหนังสือยังหดได้ปกติเมื่อจอแคบ */
+.head-identity { display: flex; align-items: flex-start; gap: 0.875rem; min-width: 0; }
+.head-identity > div { min-width: 0; }
+
+/* รูปทรงกลม — ใช้ object-fit ครอบ ไม่ให้รูปแนวตั้ง/แนวนอนบิดสัดส่วน */
+.avatar {
+  flex-shrink: 0;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1px solid var(--border);
+  background: var(--bg);
+}
+/* ยังไม่มีรูป = อักษรตัวแรกของชื่อบนพื้นจางๆ (กรอบต้องกว้างเท่ารูปจริง แถวจะได้ไม่ขยับ) */
+.avatar.is-blank {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-size: 0.875rem;
+  font-weight: 600;
+  user-select: none;
+}
+/* รูปโปรไฟล์บนหัวหน้ารายละเอียด/popup — สูงพอๆ กับบล็อกชื่อ+รหัส+สถานะที่อยู่ข้างๆ */
+.avatar-lg { width: 5.5rem; height: 5.5rem; }
+.avatar-lg.is-blank { font-size: 2.25rem; }
+
+/* รูปที่กดดูเต็มได้ — ขอบเปลี่ยนสีตอนชี้ ให้รู้ว่ากดได้ (ไม่ใช้สีอย่างเดียว มี title กำกับด้วย) */
+.avatar-link { display: inline-flex; flex-shrink: 0; border-radius: 50%; }
+.avatar-link:hover .avatar { border-color: var(--brand); }
+
+/* ชื่อในตารางรายชื่อ — รูปกับข้อความอยู่บรรทัดเดียวกัน */
+.name-cell { display: flex; align-items: center; gap: 0.625rem; text-align: left; }
+
+/* ช่องใส่รูปในฟอร์มพนักงาน */
+.photo-field { display: flex; align-items: flex-start; gap: 1rem; margin-bottom: 0.5rem; }
+.photo-side { flex: 1; min-width: 0; }
+.photo-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.5rem; }
+.photo-actions .btn { cursor: pointer; }
+.photo-preview {
+  flex-shrink: 0;
+  width: 9rem;
+  height: 9rem;
+  object-fit: cover;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+.photo-preview.is-blank {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-style: dashed;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
 /* ---------- รูปใบรับรอง ---------- */
 .cert-info { flex: 1; min-width: 0; }
 .cert-info p { margin: 0.125rem 0 0; }
