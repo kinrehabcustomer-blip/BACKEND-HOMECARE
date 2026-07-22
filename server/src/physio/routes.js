@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import * as repo from './repo.js';
 import { physioPackageSchema, physioPackageUpdateSchema, reorderSchema } from './schema.js';
-import { asyncRoute, badRequest, notFound } from '../lib/errors.js';
+import { asyncRoute, notFound } from '../lib/errors.js';
 
 export const physioRouter = Router();
 
@@ -32,16 +32,9 @@ physioRouter.patch(
     const pkg = await repo.findPackage(req.params.id);
     if (!pkg) throw notFound(`ไม่พบแพ็คเกจรหัส ${req.params.id}`);
 
-    // แก้ราคามาแค่ช่องเดียวก็ยังต้องเทียบกับอีกช่องที่อยู่ใน DB
-    // (refine ใน schema เห็นแค่ payload จึงจับกรณีนี้ไม่ได้ เช่น ส่งมาแต่ special_price ที่แพงกว่าราคาเดิมเดิม)
-    const patch = physioPackageUpdateSchema.parse(req.body);
-    const merged = { ...pkg, ...patch };
-    if (merged.original_price != null && merged.original_price < merged.special_price) {
-      throw badRequest('ราคารวมเดิมต้องไม่น้อยกว่าราคาพิเศษ', [
-        { field: 'original_price', message: `ราคาเดิม ${merged.original_price} < ราคาพิเศษ ${merged.special_price}` },
-      ]);
-    }
-    res.json(await repo.updatePackage(req.params.id, patch));
+    // ไม่ต้องเทียบราคาเดิม/ราคาพิเศษที่ชั้นนี้แล้ว — repo คิดราคาสุทธิจาก (ราคาเต็ม − ส่วนลด) ให้เสมอ
+    // จึงเป็นไปไม่ได้ที่ราคาสุทธิจะแพงกว่าราคาเต็ม ไม่ว่าหน้าเว็บจะส่งอะไรมา
+    res.json(await repo.updatePackage(req.params.id, physioPackageUpdateSchema.parse(req.body)));
   }),
 );
 

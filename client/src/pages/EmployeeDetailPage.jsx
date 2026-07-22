@@ -148,7 +148,7 @@ export default function EmployeeDetailPage() {
         {employee.portfolio.length === 0 ? (
           <p className="muted">ยังไม่มีผลงาน</p>
         ) : (
-          <div className="portfolio-grid">
+          <div className="portfolio-grid portfolio-compact">
             {employee.portfolio.map((item) => (
               <figure className="portfolio-item" key={item.portfolio_id}>
                 <a
@@ -172,7 +172,12 @@ export default function EmployeeDetailPage() {
       {/* ประวัติการทำงาน — โชว์ 3 เคสล่าสุด ที่เหลือกดปุ่มลูกศรขยายดูได้ */}
       <section className="card">
         <h2>ประวัติการทำงาน ({employee.cases.length})</h2>
-        <WorkHistory cases={employee.cases} limit={3} collapsible />
+        <WorkHistory
+          cases={employee.cases}
+          limit={3}
+          collapsible
+          employeeName={`${employee.first_name} ${employee.last_name}`}
+        />
       </section>
 
       <section className="card danger-zone">

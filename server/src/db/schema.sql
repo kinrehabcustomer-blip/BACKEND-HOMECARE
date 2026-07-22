@@ -437,6 +437,21 @@ CREATE TABLE IF NOT EXISTS physio_packages (
   updated_at        TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD HH24:MI:SS')
 );
 
+-- ---------- ส่วนลดของแพ็คเกจ (ทั้งสองสายใช้กติกาเดียวกัน) ----------
+-- กรอกได้ทั้งเป็น % หรือเป็นจำนวนเงิน — ถ้ากรอก % ไว้จะใช้ % ก่อน (กันกรณีเผลอกรอกทั้งคู่)
+-- เก็บ "ค่าที่ผู้ใช้กรอก" เท่านั้น ส่วน "ราคาสุทธิ" คำนวณตอนอ่าน ไม่เก็บซ้ำ จะได้ไม่มีวันขัดกับราคาจริง
+ALTER TABLE pkg_rates ADD COLUMN IF NOT EXISTS discount_percent DOUBLE PRECISION
+  CHECK (discount_percent >= 0 AND discount_percent <= 100);
+ALTER TABLE pkg_rates ADD COLUMN IF NOT EXISTS discount_amount  DOUBLE PRECISION
+  CHECK (discount_amount >= 0);
+
+-- กายภาพบำบัดเก็บส่วนลดที่กรอกไว้ด้วย เพื่อให้เปิดฟอร์มแก้ทีหลังแล้วยังเห็นว่าเคยตั้งไว้กี่ %
+-- (special_price ยังเป็นราคาสุทธิที่ใช้จริงเหมือนเดิม — เคสคัดลอกค่านี้ไปเป็นค่าจ้าง)
+ALTER TABLE physio_packages ADD COLUMN IF NOT EXISTS discount_percent DOUBLE PRECISION
+  CHECK (discount_percent >= 0 AND discount_percent <= 100);
+ALTER TABLE physio_packages ADD COLUMN IF NOT EXISTS discount_amount  DOUBLE PRECISION
+  CHECK (discount_amount >= 0);
+
 -- เคสเลือกบริการได้สองสาย: Homecare (ตารางเรท เกรด×รูปแบบ×ระดับ) หรือ กายภาพ (แพ็คเกจเหมาครั้ง)
 -- service_kind บอกว่าเคสใช้สายไหน — เคสเก่าที่เปิดก่อนมีระบบนี้เป็น NULL (ยังอ่านเรท Homecare เดิมได้ตามปกติ)
 ALTER TABLE cases ADD COLUMN IF NOT EXISTS service_kind TEXT CHECK (service_kind IN ('homecare', 'physio'));

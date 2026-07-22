@@ -30,6 +30,14 @@ export const ratesSchema = z.object({
         staff_tier: z.enum(STAFF_TIERS),
         customer_price: z.number().nonnegative('ค่าบริการต้องไม่ติดลบ').nullable().optional(),
         staff_pay: z.number().nonnegative('ค่าตอบแทนต้องไม่ติดลบ').nullable().optional(),
+        // ส่วนลด: กรอกเป็น % หรือเป็นบาทก็ได้ — ใส่ % ไว้จะใช้ % ก่อน
+        discount_percent: z
+          .number()
+          .min(0, 'ส่วนลดต้องไม่ติดลบ')
+          .max(100, 'ส่วนลดต้องไม่เกิน 100%')
+          .nullable()
+          .optional(),
+        discount_amount: z.number().nonnegative('ส่วนลดต้องไม่ติดลบ').nullable().optional(),
         available: z.boolean().optional(),
       }),
     )

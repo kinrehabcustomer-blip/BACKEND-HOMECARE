@@ -7,21 +7,34 @@ const BLANK = {
   sessions: '',
   duration_months: '',
   original_price: '',
-  special_price: '',
+  discount_percent: '',
+  discount_amount: '',
   active: true,
   note: '',
 };
 
 const toNum = (v) => (v === '' || v == null ? null : Number(v));
 
-/** ตกเฉลี่ย/ส่วนลด ที่โชว์ในฟอร์มระหว่างพิมพ์ — สูตรเดียวกับที่ server คำนวณตอนอ่าน */
+/**
+ * ส่วนลดเป็นบาท — สูตรเดียวกับฝั่ง server (physio/repo.js)
+ * กรอก % ไว้ให้ใช้ % ก่อน ไม่งั้นใช้จำนวนเงิน · ตัดไม่ให้เกินราคาเต็ม ราคาสุทธิจะได้ไม่ติดลบ
+ */
+function discountOf(price, percent, amount) {
+  if (price == null || price <= 0) return 0;
+  const raw = percent != null && percent > 0 ? (price * percent) / 100 : (amount ?? 0);
+  return Math.min(Math.max(raw, 0), price);
+}
+
+/** ราคาสุทธิ/ส่วนลด/ตกเฉลี่ย ที่โชว์ในฟอร์มระหว่างพิมพ์ — สูตรเดียวกับที่ server ใช้ */
 function preview(form) {
   const sessions = toNum(form.sessions);
-  const special = toNum(form.special_price);
-  const original = toNum(form.original_price);
+  const full = toNum(form.original_price);
+  const discount = discountOf(full, toNum(form.discount_percent), toNum(form.discount_amount));
+  const net = full != null ? full - discount : null;
   return {
-    avg: sessions > 0 && special != null ? Math.round(special / sessions) : null,
-    discount: original != null && special != null ? original - special : null,
+    discount,
+    net,
+    avg: sessions > 0 && net != null ? Math.round(net / sessions) : null,
   };
 }
 
@@ -85,8 +98,8 @@ export default function PhysioPackagesPage() {
           <thead>
             <tr>
               <th>แพ็กเกจ</th>
-              <th>รวมเดิม (บาท)</th>
-              <th>ราคาพิเศษ (บาท)</th>
+              <th>ราคาเต็ม (บาท)</th>
+              <th>ราคาสุทธิ (บาท)</th>
               <th>ตกเฉลี่ย (บาท/ครั้ง)</th>
               <th>จัดการ</th>
             </tr>
@@ -99,12 +112,17 @@ export default function PhysioPackagesPage() {
                   {!p.active && <span className="badge muted-badge">ปิดขาย</span>}
                   <span className="cell-sub">{detailLine(p)}</span>
                 </td>
+                {/* ขีดฆ่าราคาเต็มเฉพาะตอนมีส่วนลดจริง — ไม่งั้นจะขีดฆ่าเลขเดียวกับราคาสุทธิ ดูสับสน */}
                 <td className="physio-was">
-                  {p.original_price != null ? <s>{formatBaht(p.original_price)}</s> : <span className="muted">—</span>}
+                  {p.discount > 0 ? <s>{formatBaht(p.original_price)}</s> : <span className="muted">—</span>}
                 </td>
                 <td className="physio-special">
                   {formatBaht(p.special_price)}
-                  {p.discount > 0 && <span className="cell-sub">ลด {formatBaht(p.discount)}</span>}
+                  {p.discount > 0 && (
+                    <span className="cell-sub">
+                      ลด {p.discount_percent > 0 ? `${p.discount_percent}%` : formatBaht(p.discount)}
+                    </span>
+                  )}
                 </td>
                 <td className="physio-avg">{formatBaht(p.avg_per_session)}</td>
                 <td className="physio-actions">
@@ -146,8 +164,10 @@ function PackageForm({ initial, onClose, onSaved }) {
     ...initial,
     // ค่า null จาก DB ต้องกลายเป็น '' ไม่งั้น React เตือนเรื่อง controlled input
     duration_months: initial.duration_months ?? '',
-    original_price: initial.original_price ?? '',
-    special_price: initial.special_price ?? '',
+    // แพ็คเกจเก่าที่ไม่เคยตั้งราคาเต็ม ให้ถือว่าราคาที่ขายอยู่คือราคาเต็ม (ส่วนลด 0)
+    original_price: initial.original_price ?? initial.special_price ?? '',
+    discount_percent: initial.discount_percent ?? '',
+    discount_amount: initial.discount_amount ?? '',
     sessions: initial.sessions ?? '',
     note: initial.note ?? '',
   });
@@ -155,8 +175,8 @@ function PackageForm({ initial, onClose, onSaved }) {
   const [error, setError] = useState(null);
 
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
-  const { avg, discount } = preview(form);
-  const canSave = form.name.trim() && toNum(form.sessions) > 0 && toNum(form.special_price) != null;
+  const { avg, discount, net } = preview(form);
+  const canSave = form.name.trim() && toNum(form.sessions) > 0 && toNum(form.original_price) != null;
 
   useEffect(() => {
     const onKey = (e) => e.key === 'Escape' && onClose();
@@ -177,7 +197,10 @@ function PackageForm({ initial, onClose, onSaved }) {
         sessions: toNum(form.sessions),
         duration_months: toNum(form.duration_months),
         original_price: toNum(form.original_price),
-        special_price: toNum(form.special_price),
+        discount_percent: toNum(form.discount_percent),
+        discount_amount: toNum(form.discount_amount),
+        // server คิดราคาสุทธิเองจาก (ราคาเต็ม − ส่วนลด) — ส่งไปด้วยเพื่อให้ schema เดิมผ่าน
+        special_price: net,
         active: form.active,
         note: form.note.trim() || null,
       };
@@ -227,29 +250,43 @@ function PackageForm({ initial, onClose, onSaved }) {
               />
             </label>
 
-            <label>ราคารวมเดิม (บาท)
+            <label className="span-2">ราคาเต็ม (บาท) *
               <input
                 type="number" min="0" step="100" value={form.original_price}
-                placeholder="ไม่มีก็เว้นว่าง"
                 onChange={(e) => set('original_price', e.target.value)}
               />
             </label>
-            <label>ราคาพิเศษ (บาท) *
+
+            {/* กรอกส่วนลดอย่างใดอย่างหนึ่ง — กรอก % ไว้จะใช้ % ก่อน */}
+            <label>ส่วนลด (%)
               <input
-                type="number" min="0" step="100" value={form.special_price}
-                onChange={(e) => set('special_price', e.target.value)}
+                type="number" min="0" max="100" step="1" value={form.discount_percent}
+                placeholder="เช่น 15"
+                onChange={(e) => set('discount_percent', e.target.value)}
+              />
+            </label>
+            <label>ส่วนลด (บาท)
+              <input
+                type="number" min="0" step="100" value={form.discount_amount}
+                placeholder="ใช้เมื่อไม่ได้กรอก %"
+                disabled={toNum(form.discount_percent) > 0}
+                onChange={(e) => set('discount_amount', e.target.value)}
               />
             </label>
 
             {/* ยืนยันตัวเลขให้เห็นก่อนกดบันทึก — ตกเฉลี่ยคือคอลัมน์ที่ลูกค้าใช้เทียบความคุ้ม */}
             <div className="physio-preview span-2">
               <div>
-                <span className="field-label">ตกเฉลี่ย (คำนวณให้)</span>
-                <strong>{avg != null ? `${formatBaht(avg)} / ครั้ง` : '—'}</strong>
+                <span className="field-label">ส่วนลด</span>
+                <strong>{discount > 0 ? formatBaht(discount) : '—'}</strong>
               </div>
               <div>
-                <span className="field-label">ส่วนลดจากราคาเดิม</span>
-                <strong>{discount != null ? formatBaht(discount) : '—'}</strong>
+                <span className="field-label">ราคาสุทธิ (คำนวณให้)</span>
+                <strong className="net-price">{net != null ? formatBaht(net) : '—'}</strong>
+              </div>
+              <div>
+                <span className="field-label">ตกเฉลี่ย</span>
+                <strong>{avg != null ? `${formatBaht(avg)} / ครั้ง` : '—'}</strong>
               </div>
             </div>
 

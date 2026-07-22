@@ -515,31 +515,34 @@ select:focus { background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xm
 .cert-flag { margin-left: 0.5rem; }
 
 /* ประวัติการทำงานของพนักงาน (เคสที่ทำอยู่ + ที่ปิดแล้ว) */
-.history-summary { margin-bottom: 0.625rem; }
+/* รายการเคส (ประวัติการทำงาน / เคสของลูกค้า / เคสของผู้ป่วย) — กระชับ กวาดตาไล่ดูได้เร็ว
+   ตัวหนังสือเล็กลงและระยะแน่นขึ้น เพราะเป็นรายการยาวที่อ่านแบบสแกน ไม่ใช่อ่านทีละบรรทัด */
+.history-summary { margin-bottom: 0.5rem; font-size: 0.75rem; }
 .history-item {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 0.75rem;
-  padding: 0.625rem 0;
+  gap: 0.625rem;
+  padding: 0.4375rem 0;
+  font-size: 0.8125rem;
 }
 .history-item:not(:last-child) { border-bottom: 1px dashed var(--divider); }
-.history-item p { margin: 2px 0 0; }
+.history-item strong { font-weight: 600; }
+.history-item p { margin: 1px 0 0; font-size: 0.75rem; }
 .history-item .badge { flex-shrink: 0; }
 
-/* ปุ่มขยาย/ย่อรายการเคสในหน้าเต็ม — ลูกศรชี้ลงตอนย่อ ชี้ขึ้นตอนขยาย */
+/* ปุ่มเปิดหน้าต่างประวัติการทำงานฉบับเต็ม */
 .btn.history-toggle {
   width: 100%;
   justify-content: center;
   gap: 0.375rem;
-  margin-top: 0.75rem;
+  margin-top: 0.5rem;
+  padding: 0.3125rem 0.5rem;
   border-style: dashed;
   color: var(--muted);
-  font-size: 0.8125rem;
+  font-size: 0.75rem;
 }
 .btn.history-toggle:hover:not(:disabled) { color: var(--brand); border-color: var(--brand); }
-.chevron { transition: transform 140ms ease; }
-.chevron.up { transform: rotate(180deg); }
 
 /* หมายเหตุใน popup ว่ายังมีเคสอีก — ชี้ให้ไปดูครบที่หน้าเต็ม */
 .history-more {
@@ -746,6 +749,23 @@ select:focus { background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xm
 .portfolio-item figcaption p { margin: 0.125rem 0 0; }
 .portfolio-item .btn { margin: 0 0.75rem 0.75rem; justify-content: center; }
 .portfolio-item.pending { border-color: #f2ddb0; background: #fffdf5; }
+
+/* โหมดดูอย่างเดียว (หน้าประวัติพนักงาน) — เล็กและเรียบกว่าโหมดแก้ไข
+   ตัดกรอบการ์ดทิ้ง เหลือรูป + คำบรรยายสั้นๆ ให้กวาดตาดูผลงานได้เร็ว ไม่กินพื้นที่ทั้งหน้า */
+.portfolio-compact {
+  grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr));
+  gap: 0.625rem;
+  margin: 0.25rem 0 0;
+}
+.portfolio-compact .portfolio-item { border: 0; background: none; }
+.portfolio-compact .portfolio-item img {
+  height: 5.5rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+}
+.portfolio-compact .portfolio-item figcaption { padding: 0.3125rem 0.125rem 0; }
+.portfolio-compact .portfolio-item figcaption strong { font-size: 0.75rem; font-weight: 600; }
+.portfolio-compact .portfolio-item figcaption p { font-size: 0.6875rem; }
 
 .portfolio-actions { display: flex; gap: 0.5rem; margin: 0 0.75rem 0.75rem; }
 .portfolio-actions .btn { flex: 1; margin: 0; justify-content: center; }
@@ -1000,6 +1020,8 @@ select:focus { background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xm
 /* ตารางเรทใช้ layout คงที่ + colgroup — คอลัมน์รูปแบบกว้างเท่ากัน และ CG/NA/PN แบ่งพื้นที่ที่เหลือเท่าๆ กัน
    ทุกตารางจึงมีความกว้างคอลัมน์เหมือนกันหมด แถบสีหัวตารางตรงกันทุกตาราง ไม่ยืด/หดตามเนื้อหา */
 .rate-table { font-size: 0.8125rem; table-layout: fixed; width: 100%; min-width: 32rem; }
+/* โหมดแก้ไขมี 3 ช่องกรอกต่อเซลล์ ต้องการที่กว้างกว่า — แคบกว่านี้ให้ปัดแนวนอนใน .table-wrap */
+.rate-table.is-editing { min-width: 46rem; }
 .rate-col-format { width: 12rem; }
 .rate-table th, .rate-table td {
   text-align: center;
@@ -1022,8 +1044,22 @@ select:focus { background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xm
 .rate-price { font-weight: 700; }
 .rate-off { color: var(--text-faint); background: var(--divider); font-style: italic; }
 
-.rate-input input { width: 5.5rem; padding: 0.2rem 0.35rem; text-align: right; }
-.rate-input .btn.tiny { margin-left: 0.35rem; }
+/* ราคาเต็มที่ถูกลด — ขีดฆ่าไว้บนราคาสุทธิ ให้เห็นว่าลดมาจากเท่าไหร่ */
+.rate-was {
+  display: block;
+  font-size: 0.6875rem;
+  font-weight: 400;
+  color: var(--muted);
+  text-decoration: line-through;
+}
+.rate-cut { display: block; font-size: 0.6875rem; font-weight: 600; color: var(--danger); }
+
+/* โหมดแก้ไข: ราคาเต็ม 1 ช่อง + ส่วนลด %/บาท อีก 2 ช่อง + บรรทัดสรุปราคาสุทธิ */
+.rate-edit { display: flex; flex-direction: column; gap: 0.1875rem; align-items: stretch; }
+.rate-edit-row { display: flex; gap: 0.1875rem; align-items: center; }
+.rate-edit-row input { width: 100%; min-width: 0; padding: 0.2rem 0.35rem; text-align: right; }
+.rate-edit .btn.tiny { flex-shrink: 0; }
+.rate-net { font-size: 0.625rem; font-weight: 600; color: var(--brand); text-align: right; }
 
 /* ---------- ปฏิทินตารางงาน ---------- */
 /* เส้นตารางทำด้วย gap 1px บนพื้นสีเส้น — ได้เส้นบางสม่ำเสมอโดยไม่ต้องคุม border ของทุกช่อง */
@@ -1126,6 +1162,8 @@ select:focus { background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xm
 /* popup ซ้อนบน popup อีกชั้น — ต้องสูงกว่า .modal-backdrop (z-index 50) ไม่งั้นโดนฉากหลังของตัวแม่บัง */
 .modal-backdrop.modal-stacked { z-index: 60; }
 .modal.modal-narrow { max-width: 30rem; }
+/* หน้าต่างที่มีตารางอยู่ข้างใน — กว้างกว่า popup ปกติ ไม่งั้นคอลัมน์เบียดจนอ่านไม่ออก */
+.modal.modal-wide { max-width: 60rem; }
 
 /* สรุปวันนัด + ปุ่มเปิด popup ในหน้าเคส */
 .visit-summary {
@@ -1241,7 +1279,8 @@ select:focus { background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xm
 /* กล่องสรุปตัวเลขที่คำนวณให้ในฟอร์ม */
 .physio-preview {
   display: flex;
-  gap: 2rem;
+  flex-wrap: wrap;
+  gap: 1.5rem;
   padding: 0.75rem 0.875rem;
   background: var(--surface-2);
   border: 1px solid var(--border);
@@ -1249,6 +1288,8 @@ select:focus { background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xm
 }
 .physio-preview > div { display: flex; flex-direction: column; gap: 0.15rem; }
 .physio-preview strong { font-size: 1rem; }
+/* ราคาสุทธิคือตัวเลขที่ต้องเห็นชัดที่สุดในกล่องสรุป — เป็นราคาที่ลูกค้าจ่ายจริง */
+.physio-preview .net-price { font-size: 1.25rem; color: var(--brand); }
 
 /* แผงจัดการเกรด/รูปแบบ */
 .manage-panel { margin-bottom: 1rem; }

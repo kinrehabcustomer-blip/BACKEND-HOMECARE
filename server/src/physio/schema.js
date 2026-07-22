@@ -14,6 +14,14 @@ export const physioPackageSchema = z
       .optional(),
     original_price: z.number().nonnegative('ราคารวมเดิมต้องไม่ติดลบ').nullable().optional(),
     special_price: z.number().nonnegative('ราคาพิเศษต้องไม่ติดลบ'),
+    // ส่วนลด: กรอกเป็น % หรือเป็นบาทก็ได้ — ใส่ % ไว้จะใช้ % ก่อน (server คำนวณราคาสุทธิให้เอง)
+    discount_percent: z
+      .number()
+      .min(0, 'ส่วนลดต้องไม่ติดลบ')
+      .max(100, 'ส่วนลดต้องไม่เกิน 100%')
+      .nullable()
+      .optional(),
+    discount_amount: z.number().nonnegative('ส่วนลดต้องไม่ติดลบ').nullable().optional(),
     active: z.boolean().optional(),
     note: z.string().trim().max(1000).nullable().optional(),
     sort_order: z.number().int().optional(),
@@ -33,6 +41,8 @@ export const physioPackageUpdateSchema = z
     duration_months: z.number().int().positive().nullable(),
     original_price: z.number().nonnegative().nullable(),
     special_price: z.number().nonnegative(),
+    discount_percent: z.number().min(0, 'ส่วนลดต้องไม่ติดลบ').max(100, 'ส่วนลดต้องไม่เกิน 100%').nullable(),
+    discount_amount: z.number().nonnegative('ส่วนลดต้องไม่ติดลบ').nullable(),
     active: z.boolean(),
     note: z.string().trim().max(1000).nullable(),
     sort_order: z.number().int(),

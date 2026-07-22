@@ -8,12 +8,25 @@ const NOW = `to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD HH24:MI:SS')`;
 // staff_share เตรียมไว้ใช้คำนวณรายได้ของพนักงานในอนาคต (ฐานคือ staff_pay ที่เก็บจริงในตาราง)
 const withComputed = (r) => {
   const computable = r.customer_price != null && r.customer_price > 0 && r.staff_pay != null;
+  const discount = discountOf(r.customer_price, r.discount_percent, r.discount_amount);
   return {
     ...r,
     margin: computable ? Math.round(((r.customer_price - r.staff_pay) / r.customer_price) * 100) : null,
     staff_share: computable ? Math.round((r.staff_pay / r.customer_price) * 100) : null,
+    discount_value: discount,                                        // ส่วนลดที่คิดได้จริง (บาท)
+    net_price: r.customer_price != null ? r.customer_price - discount : null, // ราคาหลังหักส่วนลด
   };
 };
+
+/**
+ * ส่วนลดเป็นบาทจากค่าที่ผู้ใช้กรอก — กรอก % ไว้ให้ใช้ % ก่อน ไม่งั้นใช้จำนวนเงิน
+ * ตัดไม่ให้เกินราคาเต็ม เพื่อไม่ให้ราคาสุทธิติดลบแม้กรอกส่วนลดมากเกินไป
+ */
+function discountOf(price, percent, amount) {
+  if (price == null || price <= 0) return 0;
+  const raw = percent != null && percent > 0 ? (price * percent) / 100 : (amount ?? 0);
+  return Math.min(Math.max(raw, 0), price);
+}
 
 /** ตารางเรททั้งหมด: เกรด + รูปแบบบริการ + ราคาแต่ละช่อง (หน้าเว็บเอาไปประกอบเป็นตาราง) */
 export async function getMatrix() {
@@ -105,12 +118,16 @@ async function upsertOne(tx, r) {
     staff_tier: r.staff_tier,
     customer_price: r.customer_price ?? null,
     staff_pay: r.staff_pay ?? null,
+    discount_percent: r.discount_percent ?? null,
+    discount_amount: r.discount_amount ?? null,
     available: r.available ?? true,
   };
 
   const updated = await tx.run(
     `UPDATE pkg_rates
-     SET customer_price = :customer_price, staff_pay = :staff_pay, available = :available, updated_at = ${NOW}
+     SET customer_price = :customer_price, staff_pay = :staff_pay,
+         discount_percent = :discount_percent, discount_amount = :discount_amount,
+         available = :available, updated_at = ${NOW}
      WHERE format_id = :format_id
        AND grade_id IS NOT DISTINCT FROM :grade_id
        AND staff_tier = :staff_tier`,
@@ -119,8 +136,10 @@ async function upsertOne(tx, r) {
 
   if (updated === 0) {
     await tx.one(
-      `INSERT INTO pkg_rates (format_id, grade_id, staff_tier, customer_price, staff_pay, available)
-       VALUES (:format_id, :grade_id, :staff_tier, :customer_price, :staff_pay, :available)
+      `INSERT INTO pkg_rates
+         (format_id, grade_id, staff_tier, customer_price, staff_pay, discount_percent, discount_amount, available)
+       VALUES (:format_id, :grade_id, :staff_tier, :customer_price, :staff_pay,
+               :discount_percent, :discount_amount, :available)
        RETURNING rate_id`,
       values,
     );

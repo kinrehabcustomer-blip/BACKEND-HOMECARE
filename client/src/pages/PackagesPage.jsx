@@ -5,7 +5,150 @@ import { formatBaht } from '../labels.js';
 const TIERS = ['CG', 'NA', 'PN'];
 const CATEGORY_LABELS = { daily: 'รายวัน', weekly: 'รายสัปดาห์', monthly: 'รายเดือน' };
 
+/**
+ * ระดับการดูแลของแต่ละเกรด ไล่ตามลำดับเกรด (เกรด 1 = เบาสุด)
+ * ผูกกับ "ลำดับ" ไม่ใช่ชื่อหรือ id — เกรดที่ 4 ขึ้นไปถ้ามีในอนาคตจะไม่มีป้ายกำกับ ไม่พัง
+ */
+const CARE_LEVELS = ['Light Care', 'Medium Care', 'Heavy Care'];
+const careLevelOf = (index) => CARE_LEVELS[index] ?? null;
+
 const cellKey = (formatId, gradeId, tier) => `${formatId}:${gradeId ?? 'x'}:${tier}`;
+
+/** ช่องกรอกว่าง = ไม่ได้ตั้งค่า (null) ไม่ใช่ศูนย์ */
+const num = (v) => (v === '' || v == null ? null : Number(v));
+
+/**
+ * ส่วนลดเป็นบาท — สูตรเดียวกับฝั่ง server (packages/repo.js)
+ * กรอก % ไว้ให้ใช้ % ก่อน ไม่งั้นใช้จำนวนเงิน · ตัดไม่ให้เกินราคาเต็ม ราคาสุทธิจะได้ไม่ติดลบ
+ */
+function discountOf(price, percent, amount) {
+  if (price == null || price <= 0) return 0;
+  const raw = percent != null && percent > 0 ? (price * percent) / 100 : (amount ?? 0);
+  return Math.min(Math.max(raw, 0), price);
+}
+
+/**
+ * เซลล์ราคา 1 ช่อง — โหมดดู: ราคาสุทธิ (+ ราคาเต็มขีดฆ่าถ้ามีส่วนลด) · โหมดแก้: ราคา + ส่วนลด %/บาท
+ *
+ * ประกาศไว้นอก PackagesPage โดยตั้งใจ — ถ้าประกาศข้างในจะกลายเป็น component "ชนิดใหม่" ทุกครั้งที่ state เปลี่ยน
+ * React จะถอด input ทิ้งแล้วสร้างใหม่ทุกตัวอักษรที่พิมพ์ ทำให้โฟกัสหลุดจนพิมพ์ตัวเลขต่อกันไม่ได้
+ */
+function RateCell({ editing, rate, draft, onPatch }) {
+  if (editing) {
+    const dv = draft ?? { customer_price: '', discount_percent: '', discount_amount: '', available: true };
+    if (!dv.available) {
+      return (
+        <td className="rate-off">
+          <button type="button" className="btn tiny" onClick={() => onPatch({ available: true })}>
+            เปิดช่องนี้
+          </button>
+        </td>
+      );
+    }
+
+    const price = dv.customer_price === '' ? null : Number(dv.customer_price);
+    const cut = discountOf(price, num(dv.discount_percent), num(dv.discount_amount));
+
+    return (
+      <td className="rate-input">
+        <div className="rate-edit">
+          <div className="rate-edit-row">
+            <input
+              type="number" min="0" step="100" placeholder="ราคา" value={dv.customer_price}
+              onChange={(e) => onPatch({ customer_price: e.target.value })}
+            />
+            <button
+              type="button" className="btn tiny ghost" title="ปิดช่องนี้ (ให้บริการไม่ได้)"
+              onClick={() => onPatch({ available: false })}
+            >
+              ✕
+            </button>
+          </div>
+          <div className="rate-edit-row">
+            <input
+              type="number" min="0" max="100" step="1" placeholder="ลด %" title="ส่วนลดเป็นเปอร์เซ็นต์"
+              value={dv.discount_percent}
+              onChange={(e) => onPatch({ discount_percent: e.target.value })}
+            />
+            <input
+              type="number" min="0" step="100" placeholder="ลด ฿" title="ส่วนลดเป็นจำนวนเงิน (ใช้เมื่อไม่ได้กรอก %)"
+              value={dv.discount_amount}
+              onChange={(e) => onPatch({ discount_amount: e.target.value })}
+            />
+          </div>
+          {/* คำนวณให้เห็นทันทีระหว่างพิมพ์ — สูตรเดียวกับที่ server ใช้ */}
+          {price != null && (
+            <span className="rate-net">
+              {cut > 0 ? `สุทธิ ${formatBaht(price - cut)}` : 'ไม่มีส่วนลด'}
+            </span>
+          )}
+        </div>
+      </td>
+    );
+  }
+
+  if (!rate || !rate.available) return <td className="rate-off">ให้บริการไม่ได้</td>;
+  if (rate.customer_price == null) return <td className="rate-price">—</td>;
+
+  const discounted = rate.discount_value > 0;
+  return (
+    <td className="rate-price">
+      {discounted && <span className="rate-was">{formatBaht(rate.customer_price)}</span>}
+      {formatBaht(discounted ? rate.net_price : rate.customer_price)}
+      {discounted && (
+        <span className="rate-cut">
+          −{rate.discount_percent > 0 ? `${rate.discount_percent}%` : formatBaht(rate.discount_value)}
+        </span>
+      )}
+    </td>
+  );
+}
+
+/** ตารางเรทหนึ่งกลุ่ม (รายวัน/สัปดาห์ = ไม่อิงเกรด · รายเดือน = แยกตามเกรด) */
+function RateTable({ label, formats, gradeId, editing, rateMap, draft, onPatchCell }) {
+  if (formats.length === 0) return <p className="muted">ยังไม่มีรูปแบบบริการในกลุ่มนี้</p>;
+
+  return (
+    <div className="table-wrap">
+      <table className={`table rate-table ${editing ? 'is-editing' : ''}`}>
+        {/* ล็อกความกว้างคอลัมน์ให้คงที่ — ทุกตารางจึงมีคอลัมน์รูปแบบ + CG/NA/PN เท่ากันหมด แถบสีตรงกันทุกตาราง */}
+        <colgroup>
+          <col className="rate-col-format" />
+          <col />
+          <col />
+          <col />
+        </colgroup>
+        <thead>
+          <tr>
+            <th className="rate-format-head">{label}</th>
+            {TIERS.map((t) => (
+              <th key={t} className={`tier-head tier-${t}`}>{t}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {formats.map((f) => (
+            <tr key={f.format_id}>
+              <td className="rate-format">{f.name}</td>
+              {TIERS.map((t) => {
+                const key = cellKey(f.format_id, gradeId, t);
+                return (
+                  <RateCell
+                    key={t}
+                    editing={editing}
+                    rate={rateMap[key]}
+                    draft={draft[key]}
+                    onPatch={(patch) => onPatchCell(key, patch)}
+                  />
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
 export default function PackagesPage() {
   const [matrix, setMatrix] = useState(null);
@@ -40,6 +183,8 @@ export default function PackagesPage() {
           const r = rateMap[cellKey(f.format_id, gid, tier)];
           d[cellKey(f.format_id, gid, tier)] = {
             customer_price: r?.customer_price ?? '',
+            discount_percent: r?.discount_percent ?? '',
+            discount_amount: r?.discount_amount ?? '',
             available: r ? r.available : true,
           };
         }
@@ -65,6 +210,8 @@ export default function PackagesPage() {
               grade_id: gid,
               staff_tier: tier,
               customer_price: dv.customer_price === '' ? null : Number(dv.customer_price),
+              discount_percent: dv.discount_percent === '' ? null : Number(dv.discount_percent),
+              discount_amount: dv.discount_amount === '' ? null : Number(dv.discount_amount),
               // ค่าตอบแทนไม่มีช่องแก้ในหน้านี้แล้ว — ส่งค่าเดิมกลับไปเพื่อไม่ให้ข้อมูลที่เคยกรอกหาย
               staff_pay: rateMap[key]?.staff_pay ?? null,
               available: dv.available,
@@ -84,79 +231,6 @@ export default function PackagesPage() {
 
   const patchCell = (key, patch) =>
     setDraft((prev) => ({ ...prev, [key]: { ...prev[key], ...patch } }));
-
-  /** เซลล์ราคา 1 ช่อง = 1 คอลัมน์ (ค่าบริการ) */
-  function RateCell({ format, gradeId, tier }) {
-    const key = cellKey(format.format_id, gradeId, tier);
-
-    if (editing) {
-      const dv = draft[key] ?? { customer_price: '', available: true };
-      if (!dv.available) {
-        return (
-          <td className="rate-off">
-            <button type="button" className="btn tiny" onClick={() => patchCell(key, { available: true })}>
-              เปิดช่องนี้
-            </button>
-          </td>
-        );
-      }
-      return (
-        <td className="rate-input">
-          <input
-            type="number" min="0" step="100" value={dv.customer_price}
-            onChange={(e) => patchCell(key, { customer_price: e.target.value })}
-          />
-          <button
-            type="button" className="btn tiny ghost" title="ปิดช่องนี้ (ให้บริการไม่ได้)"
-            onClick={() => patchCell(key, { available: false })}
-          >
-            ✕
-          </button>
-        </td>
-      );
-    }
-
-    const r = rateMap[key];
-    if (!r || !r.available) {
-      return <td className="rate-off">ให้บริการไม่ได้</td>;
-    }
-    return <td className="rate-price">{r.customer_price != null ? formatBaht(r.customer_price) : '—'}</td>;
-  }
-
-  function RateTable({ label, formats, gradeId }) {
-    if (formats.length === 0) return <p className="muted">ยังไม่มีรูปแบบบริการในกลุ่มนี้</p>;
-    return (
-      <div className="table-wrap">
-        <table className="table rate-table">
-          {/* ล็อกความกว้างคอลัมน์ให้คงที่ — ทุกตารางจึงมีคอลัมน์รูปแบบ + CG/NA/PN เท่ากันหมด แถบสีตรงกันทุกตาราง */}
-          <colgroup>
-            <col className="rate-col-format" />
-            <col />
-            <col />
-            <col />
-          </colgroup>
-          <thead>
-            <tr>
-              <th className="rate-format-head">{label}</th>
-              {TIERS.map((t) => (
-                <th key={t} className={`tier-head tier-${t}`}>{t}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {formats.map((f) => (
-              <tr key={f.format_id}>
-                <td className="rate-format">{f.name}</td>
-                {TIERS.map((t) => (
-                  <RateCell key={t} format={f} gradeId={gradeId} tier={t} />
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    );
-  }
 
   return (
     <>
@@ -190,14 +264,24 @@ export default function PackagesPage() {
 
       <section className="rate-section">
         <h2>รายวัน / รายสัปดาห์ <span className="muted">(เรทเดียว ใช้ร่วมทุกเกรด)</span></h2>
-        <RateTable label="รูปแบบบริการ" formats={sharedFormats} gradeId={null} />
+        <RateTable
+          label="รูปแบบบริการ" formats={sharedFormats} gradeId={null}
+          editing={editing} rateMap={rateMap} draft={draft} onPatchCell={patchCell}
+        />
       </section>
 
-      {matrix.grades.map((g) => (
+      {matrix.grades.map((g, i) => (
         <section className="rate-section" key={g.grade_id}>
-          <h2>{g.name} <span className="muted">· รายเดือน</span></h2>
+          <h2>
+            {g.name}
+            {careLevelOf(i) && ` (${careLevelOf(i)})`}
+            {' '}<span className="muted">· รายเดือน</span>
+          </h2>
           {g.description && <p className="grade-desc">{g.description}</p>}
-          <RateTable label="รูปแบบบริการ" formats={gradedFormats} gradeId={g.grade_id} />
+          <RateTable
+            label="รูปแบบบริการ" formats={gradedFormats} gradeId={g.grade_id}
+            editing={editing} rateMap={rateMap} draft={draft} onPatchCell={patchCell}
+          />
         </section>
       ))}
 
@@ -233,10 +317,13 @@ function ManagePanel({ matrix, onChanged, setError }) {
         <div>
           <h3>เกรด</h3>
           <ul className="manage-list">
-            {matrix.grades.map((g) => (
+            {matrix.grades.map((g, i) => (
               <li key={g.grade_id}>
                 <div>
-                  <strong>{g.name}</strong>
+                  <strong>
+                    {g.name}
+                    {careLevelOf(i) && ` (${careLevelOf(i)})`}
+                  </strong>
                   {g.description && <p className="muted">{g.description}</p>}
                 </div>
                 <button

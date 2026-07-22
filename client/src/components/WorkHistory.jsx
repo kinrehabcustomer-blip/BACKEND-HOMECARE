@@ -1,16 +1,19 @@
 import { useState } from 'react';
+import WorkHistoryModal from './WorkHistoryModal.jsx';
 import { CASE_TYPE_LABELS, CASE_STATUS_LABELS, formatBaht, formatDate } from '../labels.js';
 
 /**
  * ประวัติการทำงาน = เคสที่พนักงานคนนี้ถืออยู่ ทั้งที่กำลังทำและที่ปิดไปแล้ว
  * (เคสที่ปิดแล้วยังเก็บ assigned_to ไว้ จึงยังรู้ว่าใครเป็นคนทำ) — เรียงใหม่สุดขึ้นก่อน
  *
- * limit: จำนวนที่โชว์ก่อน (ทั้งสองที่ส่ง 3) — ไม่ส่ง = โชว์ทั้งหมด
- * collapsible: หน้าเต็มส่ง true → มีปุ่มลูกศรกดขยายดูที่เหลือได้
- *              popup ไม่ส่ง → โชว์แค่ limit แล้วบอกว่าเหลืออีกกี่เคส ให้ไปดูที่หน้าเต็ม
+ * ตรงนี้โชว์แค่ย่อๆ เสมอ (limit รายการล่าสุด) — ฉบับเต็มเปิดเป็นหน้าต่างแยกที่คลิกดูรายละเอียดเคสได้
+ *
+ * limit: จำนวนที่โชว์ย่อ — ไม่ส่ง = โชว์ทั้งหมด
+ * collapsible: หน้าเต็มส่ง true → มีปุ่มเปิดหน้าต่างประวัติฉบับเต็ม
+ *              popup ไม่ส่ง → บอกเฉยๆ ว่าเหลืออีกกี่เคส (ซ้อน popup อีกชั้นในนั้นมันลึกเกินไป)
  */
-export default function WorkHistory({ cases = [], limit, collapsible = false }) {
-  const [expanded, setExpanded] = useState(false);
+export default function WorkHistory({ cases = [], limit, collapsible = false, employeeName }) {
+  const [fullOpen, setFullOpen] = useState(false);
 
   if (cases.length === 0) {
     return <p className="muted">ยังไม่เคยรับเคสใดในระบบ</p>;
@@ -21,8 +24,7 @@ export default function WorkHistory({ cases = [], limit, collapsible = false }) 
   const closed = cases.filter((c) => c.status === 'closed');
   const earned = closed.reduce((sum, c) => sum + (c.fee ?? 0), 0);
 
-  const showAll = !limit || (collapsible && expanded);
-  const shown = showAll ? cases : cases.slice(0, limit);
+  const shown = limit ? cases.slice(0, limit) : cases;
   const hidden = cases.length - shown.length;
 
   return (
@@ -53,30 +55,24 @@ export default function WorkHistory({ cases = [], limit, collapsible = false }) 
         </div>
       ))}
 
-      {/* หน้าเต็ม: มีเคสมากกว่า limit → ปุ่มลูกศรขยาย/ย่อ */}
-      {collapsible && cases.length > limit && (
-        <button
-          className="btn history-toggle"
-          onClick={() => setExpanded((v) => !v)}
-          aria-expanded={expanded}
-        >
-          {expanded ? 'ย่อลง' : `แสดงทั้งหมด (อีก ${cases.length - limit} เคส)`}
-          <svg
-            className={`chevron ${expanded ? 'up' : ''}`}
-            width="12" height="8" viewBox="0 0 12 8" aria-hidden="true"
-          >
-            <path
-              d="M1 1.5 6 6.5l5-5"
-              fill="none" stroke="currentColor" strokeWidth="1.6"
-              strokeLinecap="round" strokeLinejoin="round"
-            />
-          </svg>
+      {/* หน้าเต็ม: เปิดประวัติฉบับเต็มเป็นหน้าต่างแยก (ตาราง + คลิกดูรายละเอียดเคสได้) */}
+      {collapsible && (
+        <button className="btn history-toggle" onClick={() => setFullOpen(true)}>
+          ดูประวัติทั้งหมด ({cases.length} เคส)
         </button>
       )}
 
-      {/* popup: ไม่ขยายในตัว บอกตรงๆ ว่ายังมีอีก ให้ไปดูครบที่หน้าเต็ม */}
+      {/* popup: ไม่ซ้อนอีกชั้น บอกตรงๆ ว่ายังมีอีก ให้ไปดูครบที่หน้าเต็ม */}
       {!collapsible && hidden > 0 && (
         <p className="muted history-more">และอีก {hidden} เคส — ดูทั้งหมดได้ที่หน้าเต็ม</p>
+      )}
+
+      {fullOpen && (
+        <WorkHistoryModal
+          employeeName={employeeName}
+          cases={cases}
+          onClose={() => setFullOpen(false)}
+        />
       )}
     </>
   );
