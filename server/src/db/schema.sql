@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS employees (
   birth_date              TEXT,
   address                 TEXT,
 
-  position                TEXT NOT NULL CHECK (position IN ('caregiver', 'assistant_nurse', 'practical_nurse', 'nurse', 'therapist')),
+  position                TEXT NOT NULL CHECK (position IN ('caregiver', 'assistant_nurse', 'practical_nurse', 'nurse', 'therapist', 'manager', 'hr')),
   employment_type         TEXT NOT NULL DEFAULT 'fulltime' CHECK (employment_type IN ('fulltime', 'parttime', 'contract', 'daily')),
   status                  TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'probation', 'on_leave', 'suspended', 'resigned')),
 
@@ -33,11 +33,11 @@ CREATE INDEX IF NOT EXISTS idx_employees_status   ON employees (status);
 CREATE INDEX IF NOT EXISTS idx_employees_position ON employees (position);
 CREATE INDEX IF NOT EXISTS idx_employees_name     ON employees (first_name, last_name);
 
--- ปรับรายการตำแหน่งใหม่ (CG, NA, PN, พยาบาล, นักกายภาพบำบัด) — ตัดธุรการ/ขับรถ/ผู้จัดการออก
+-- รายการตำแหน่ง: สายดูแล (CG, NA, PN, RN, นักกายภาพบำบัด) + สายสำนักงาน (ผู้จัดการ, HR)
 -- ตาราง employees ถูกสร้างไปแล้วในฐานข้อมูลเดิม (CHECK ด้านบนไม่ถูกแตะ) จึงต้อง drop/add constraint ตรงนี้
 ALTER TABLE employees DROP CONSTRAINT IF EXISTS employees_position_check;
 ALTER TABLE employees ADD CONSTRAINT employees_position_check
-  CHECK (position IN ('caregiver', 'assistant_nurse', 'practical_nurse', 'nurse', 'therapist'));
+  CHECK (position IN ('caregiver', 'assistant_nurse', 'practical_nurse', 'nurse', 'therapist', 'manager', 'hr'));
 
 -- ใบรับรอง / ใบประกอบวิชาชีพ ผูกกับพนักงานผ่าน employee_id
 CREATE TABLE IF NOT EXISTS employee_certificates (
@@ -455,7 +455,7 @@ CREATE TABLE IF NOT EXISTS pkg_rates (
   rate_id        INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   format_id      INTEGER NOT NULL REFERENCES pkg_service_formats (format_id) ON DELETE CASCADE,
   grade_id       INTEGER REFERENCES pkg_grades (grade_id) ON DELETE CASCADE,
-  staff_tier     TEXT NOT NULL CHECK (staff_tier IN ('CG', 'NA', 'PN')),
+  staff_tier     TEXT NOT NULL CHECK (staff_tier IN ('CG', 'NA', 'PN', 'RN')),
   customer_price DOUBLE PRECISION CHECK (customer_price >= 0),
   staff_pay      DOUBLE PRECISION CHECK (staff_pay >= 0),
   available      BOOLEAN NOT NULL DEFAULT TRUE,
@@ -473,7 +473,18 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_rates_ungraded
 -- ลบเกรด/รูปแบบแล้วเคสไม่หาย แค่ขาดการเชื่อมโยง (fee ที่คัดลอกไว้ยังอยู่)
 ALTER TABLE cases ADD COLUMN IF NOT EXISTS pkg_grade_id  INTEGER REFERENCES pkg_grades (grade_id) ON DELETE SET NULL;
 ALTER TABLE cases ADD COLUMN IF NOT EXISTS pkg_format_id INTEGER REFERENCES pkg_service_formats (format_id) ON DELETE SET NULL;
-ALTER TABLE cases ADD COLUMN IF NOT EXISTS pkg_staff_tier TEXT CHECK (pkg_staff_tier IN ('CG', 'NA', 'PN'));
+ALTER TABLE cases ADD COLUMN IF NOT EXISTS pkg_staff_tier TEXT CHECK (pkg_staff_tier IN ('CG', 'NA', 'PN', 'RN'));
+
+-- ---------- เพิ่มระดับพนักงาน RN (พยาบาลวิชาชีพ) เป็นระดับที่ 4 ต่อจาก CG/NA/PN ----------
+-- ตาราง pkg_rates และคอลัมน์ cases.pkg_staff_tier ถูกสร้างไปแล้วบนฐานเดิม (CHECK inline ด้านบนจึงไม่ถูกแตะ)
+-- ต้อง drop/add constraint ตรงนี้ เหมือนที่ทำกับ position/status/case_type ก่อนหน้า
+ALTER TABLE pkg_rates DROP CONSTRAINT IF EXISTS pkg_rates_staff_tier_check;
+ALTER TABLE pkg_rates ADD CONSTRAINT pkg_rates_staff_tier_check
+  CHECK (staff_tier IN ('CG', 'NA', 'PN', 'RN'));
+
+ALTER TABLE cases DROP CONSTRAINT IF EXISTS cases_pkg_staff_tier_check;
+ALTER TABLE cases ADD CONSTRAINT cases_pkg_staff_tier_check
+  CHECK (pkg_staff_tier IN ('CG', 'NA', 'PN', 'RN'));
 
 -- ---------- แพ็คเกจกายภาพบำบัด (โมเดลคนละแบบกับ Homecare) ----------
 -- Homecare = ตารางเรท (เกรด × รูปแบบ × ระดับพนักงาน) คิดเป็นรายวัน/เดือน
@@ -537,3 +548,65 @@ CREATE TABLE IF NOT EXISTS id_counters (
   name  TEXT PRIMARY KEY,
   value INTEGER NOT NULL DEFAULT 0
 );
+
+-- ============================================================================
+-- ระบบเช็คอินพนักงานภาคสนาม (homecare) — พนักงานไปทำงานที่บ้านผู้ป่วยตามวันนัด
+-- ยกระดับ case_visits จาก "วันนัด" เป็น "กะงาน": แต่ละแถว = งาน 1 กะ ของพนักงาน 1 คน
+-- เก็บทั้งแผน (ใครไป/เวลานัด) และของจริง (เช็คอิน/เอาท์ พิกัด รูป) ไว้บนแถวเดียวกัน
+-- ============================================================================
+
+-- ---------- พิกัดสถานที่ดูแล (สำหรับ geofence) ----------
+-- snapshot ลงเคสเหมือน client_name/address — ตั้งจากหน้าจัดการเคส (geocode ที่อยู่ หรือปักหมุด)
+-- ว่างได้ = ยังไม่ตั้งพิกัด เทียบระยะไม่ได้ (ตอนเช็คอินยังเก็บพิกัดดิบไว้ แต่ไม่ flag)
+ALTER TABLE cases ADD COLUMN IF NOT EXISTS geo_lat DOUBLE PRECISION;
+ALTER TABLE cases ADD COLUMN IF NOT EXISTS geo_lng DOUBLE PRECISION;
+-- รัศมี geofence เฉพาะเคส (เมตร) — ว่าง = ใช้ค่าปริยายของระบบ (เช่น บ้านในหมู่บ้านกว้างตั้งให้ใหญ่ขึ้นได้)
+ALTER TABLE cases ADD COLUMN IF NOT EXISTS geofence_radius_m INTEGER CHECK (geofence_radius_m > 0);
+
+-- ---------- case_visits: แผนของกะ (ใครไป + เวลานัด) ----------
+-- assigned_to = พนักงานที่นัดให้ไปกะนี้ — การมอบงานจริงย้ายมาที่ระดับกะ รองรับหลายคน/หลายกะต่อเคสต่อวัน
+-- (cases.assigned_to เดิมยังอยู่ = "ผู้รับผิดชอบหลัก" ของเคส)
+ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS assigned_to TEXT
+  REFERENCES employees (employee_id) ON DELETE SET NULL ON UPDATE CASCADE;
+-- เวลานัดเริ่ม/เลิก เก็บ 'HH:MM' (ว่างได้ = ไม่กำหนดเวลา) — ใช้แยกกะ + คำนวณเข้างานเร็ว/สายตอนอ่าน
+ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS planned_start TEXT;
+ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS planned_end   TEXT;
+
+-- วันนัดเดิม (ก่อนมีระบบกะ) ยังไม่มีเจ้าของกะ — เติมด้วยพนักงานที่รับเคสนั้นอยู่
+-- แตะเฉพาะแถวที่ assigned_to ว่าง และเคสมีคนรับ ไม่งั้นวันนัดเก่าจะไม่โผล่ในตารางงานของใครเลย
+UPDATE case_visits v SET assigned_to = c.assigned_to
+  FROM cases c
+  WHERE v.case_id = c.case_id AND v.assigned_to IS NULL AND c.assigned_to IS NOT NULL;
+
+-- ---------- case_visits: การไปจริง (actual) ----------
+-- checked_in_by = คนที่กดเช็คอินจริง (snapshot) — แยกจาก assigned_to เผื่อสลับคนแล้วคนอื่นไปแทน
+ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS checked_in_by TEXT
+  REFERENCES employees (employee_id) ON DELETE SET NULL ON UPDATE CASCADE;
+-- เวลาเป็น TIMESTAMPTZ (ไม่ใช่ TEXT เหมือน created_at) เพราะต้องเอาไปลบกันหาชั่วโมง + ถูกเรื่อง timezone
+-- ตั้งจาก now() ของ server เท่านั้น ไม่เชื่อเวลาเครื่องพนักงาน (กันปลอมเวลา)
+ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS check_in_at         TIMESTAMPTZ;
+ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS check_in_lat        DOUBLE PRECISION;
+ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS check_in_lng        DOUBLE PRECISION;
+ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS check_in_accuracy_m DOUBLE PRECISION;  -- accuracy ที่ GPS เครื่องรายงาน (เมตร)
+ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS check_in_distance_m INTEGER;  -- ระยะจากพิกัดเคส (snapshot; null ถ้าเคสไม่มีพิกัด)
+ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS check_out_at        TIMESTAMPTZ;
+ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS check_out_lat       DOUBLE PRECISION;
+ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS check_out_lng       DOUBLE PRECISION;
+-- true = อยู่นอก geofence / พิกัดน่าสงสัย → เข้ารายการให้ admin ตรวจ (ไม่บล็อกการเช็คอิน)
+ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS location_flagged    BOOLEAN NOT NULL DEFAULT FALSE;
+-- admin แก้เวลา/ปิดกะให้ (ลืมเช็คเอาท์/GPS พัง) — เก็บว่าใครแก้ ไว้ตรวจสอบย้อนหลัง
+ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS adjusted_by TEXT
+  REFERENCES employees (employee_id) ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- ---------- รูปเซลฟี่ตอนเช็คอิน (ไม่บังคับ) ----------
+-- หลักฐานว่าคนไปจริง (กัน GPS ปลอม) — เก็บ BYTEA ใน DB เหมือนรูปพนักงาน/ใบรับรอง เบราว์เซอร์ย่อก่อนส่ง
+ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS check_in_photo_data BYTEA;
+ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS check_in_photo_mime TEXT;
+ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS check_in_photo_size INTEGER;
+
+-- ---------- index ----------
+-- ตารางงานพนักงาน: "กะของฉันในวันที่..." ดึงด้วย (assigned_to, visit_date)
+CREATE INDEX IF NOT EXISTS idx_case_visits_assignee ON case_visits (assigned_to, visit_date);
+-- ปลด unique เดิม (case_id, visit_date) — วันเดียวมีได้หลายกะ/หลายคน (addVisit เลิกใช้ ON CONFLICT แล้ว)
+-- index ค้นตามวัน (idx_case_visits_date) ยังอยู่ ปฏิทินจึงยังเร็วเหมือนเดิม
+DROP INDEX IF EXISTS idx_case_visits_unique;

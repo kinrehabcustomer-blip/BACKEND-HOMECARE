@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api } from '../api.js';
+import LocationMap from '../components/LocationMap.jsx';
 import {
   CASE_TYPE_LABELS, POSITION_LABELS, GENDER_LABELS, SERVICE_KIND_LABELS, formatBaht, ageFromBirthDate,
 } from '../labels.js';
 
-const TIERS = ['CG', 'NA', 'PN'];
+const TIERS = ['CG', 'NA', 'PN', 'RN'];
 const CATEGORY_LABELS = { daily: 'รายวัน', weekly: 'รายสัปดาห์', monthly: 'รายเดือน' };
 
 const BLANK = {
@@ -27,12 +28,16 @@ const BLANK = {
   // รายละเอียดการใช้บริการ
   service_start_preference: '', address: '', client_phone: '', nurse_call_preference: '',
 
+  // พิกัดสถานที่ดูแล (geofence เช็คอิน)
+  geo_lat: '', geo_lng: '', geofence_radius_m: '',
+
   start_date: '', end_date: '', fee: '', note: '',
   assigned_to: '',
 };
 
 // ช่องตัวเลขต้องส่งเป็น number ไม่ใช่ string ไม่งั้น zod ปฏิเสธ
-const NUMERIC = ['fee', 'patient_age', 'weight_kg', 'height_cm', 'pkg_format_id', 'pkg_grade_id', 'physio_package_id'];
+const NUMERIC = ['fee', 'patient_age', 'weight_kg', 'height_cm', 'pkg_format_id', 'pkg_grade_id', 'physio_package_id',
+  'geo_lat', 'geo_lng', 'geofence_radius_m'];
 
 /** ช่องว่างต้องส่งเป็น null ไม่ใช่ "" */
 const toPayload = (form) =>
@@ -61,6 +66,12 @@ export default function CaseFormPage() {
   const [physio, setPhysio] = useState([]);
   const [error, setError] = useState(null);
   const [saving, setSaving] = useState(false);
+  // ตั้งพิกัดสถานที่ดูแล: พิมพ์ชื่อสถานที่เพื่อค้นหา หรือวางลิงก์ Google Maps ก็ได้ (ช่องเดียวกัน)
+  const [locQuery, setLocQuery] = useState('');
+  const [finding, setFinding] = useState(false);
+  const [locError, setLocError] = useState(null);
+  const [candidates, setCandidates] = useState([]);   // ผลค้นหาให้เลือก (กรณีพิมพ์ชื่อ)
+  const [resolvedAddress, setResolvedAddress] = useState(null);
 
   // ค้นหา/เลือกผู้รับการดูแล (patient) เป็นหลัก
   const [query, setQuery] = useState('');
@@ -265,6 +276,10 @@ export default function CaseFormPage() {
           else if (filled.pkg_format_id !== '') filled.service_kind = 'homecare';
         }
         setForm(filled);
+
+        // มีผู้ว่าจ้างผูกไว้แล้ว — โชว์เป็นลูกค้าที่เลือกอยู่ (ใช้ชื่อจาก SELECT ของเคส ไม่ต้องยิงซ้ำ)
+        // ยังไม่มี = ปล่อย payer เป็น null ส่วนผู้ว่าจ้างจะโชว์ช่องค้นหาให้เพิ่มลูกค้าเจ้าของเคส
+        if (c.customer_id) setPayer({ customer_id: c.customer_id, name: c.customer_name });
       })
       .catch((err) => setError(err.message));
   }, [id, isEdit]);
@@ -273,6 +288,57 @@ export default function CaseFormPage() {
     value: form[key],
     onChange: (e) => setForm((prev) => ({ ...prev, [key]: e.target.value })),
   });
+
+  /** ตั้งพิกัดลงฟอร์ม + เติมที่อยู่ให้ถ้าช่องที่อยู่ยังว่าง (ไม่ทับที่พิมพ์ไว้เอง) */
+  function applyLocation(lat, lng, address) {
+    setForm((prev) => ({
+      ...prev,
+      geo_lat: lat.toFixed(6),
+      geo_lng: lng.toFixed(6),
+      address: prev.address?.trim() ? prev.address : (address ?? prev.address),
+    }));
+    setResolvedAddress(address ?? null);
+    setCandidates([]);
+  }
+
+  const looksLikeUrl = (s) => /^https?:\/\//i.test(s.trim());
+
+  /**
+   * ช่องเดียวรับได้ทั้งลิงก์และชื่อสถานที่:
+   *   เป็นลิงก์  -> อ่านพิกัด/ที่อยู่จากลิงก์ (รองรับลิงก์ย่อจากปุ่มแชร์)
+   *   เป็นข้อความ -> ค้นหาชื่อสถานที่ ได้หลายผลก็ให้เลือกจากรายการ
+   */
+  async function findLocation() {
+    const q = locQuery.trim();
+    if (!q) return;
+    setFinding(true);
+    setLocError(null);
+    setCandidates([]);
+    try {
+      if (looksLikeUrl(q)) {
+        const r = await api.resolveMapLink(q);
+        applyLocation(r.lat, r.lng, r.address);
+      } else {
+        const { results } = await api.searchPlace(q);
+        if (results.length === 0) setLocError(`ไม่พบสถานที่ที่ตรงกับ "${q}" — ลองพิมพ์ให้เจาะจงขึ้น หรือวางลิงก์ Google Maps`);
+        else if (results.length === 1) applyLocation(results[0].lat, results[0].lng, results[0].formatted);
+        else setCandidates(results);
+      }
+    } catch (e) {
+      setLocError(e.message);
+    } finally {
+      setFinding(false);
+    }
+  }
+
+  /** ล้างพิกัดที่ตั้งไว้ — กลับไปไม่ตรวจระยะตอนเช็คอิน */
+  const clearGeo = () => {
+    setForm((prev) => ({ ...prev, geo_lat: '', geo_lng: '' }));
+    setResolvedAddress(null);
+    setCandidates([]);
+    setLocQuery('');
+    setLocError(null);
+  };
 
   /**
    * ยังไม่ได้เลือกผู้ป่วย = ผู้ป่วยรายใหม่ -> สร้างแฟ้ม (PAT-xxxx) จากข้อมูลที่กรอก แล้วผูกกับผู้ว่าจ้าง (ถ้ามี)
@@ -351,49 +417,46 @@ export default function CaseFormPage() {
 
       <form className="card form" onSubmit={handleSubmit}>
         {/* ผู้ว่าจ้าง (ผู้จ่ายเงิน) อยู่บนสุด — ต้องเห็นตั้งแต่แรกว่าเคสนี้ผูกกับลูกค้ารายไหน
-            เลือกผู้ป่วยที่ผูกลูกค้าไว้แล้ว ผู้ว่าจ้างจะเด้งมาที่นี่เอง */}
-        {!isEdit && (
-          <>
-            <h2>ผู้ว่าจ้าง</h2>
-            <div className="customer-picker">
-              {payer ? (
-                <div className="picked-customer">
-                  <div>
-                    <strong>ผู้ว่าจ้าง: {payer.name}</strong>
-                    <p className="muted"><span className="mono">{payer.customer_id}</span></p>
-                  </div>
-                  <button type="button" className="btn" onClick={unpickPayer}>เปลี่ยน / ไม่ผูก</button>
-                </div>
-              ) : (
-                <>
-                  <label className="customer-search">
-                    ผู้ว่าจ้าง (ลูกค้าผู้จ่าย) — ไม่บังคับ
-                    <input
-                      placeholder="ค้นหาลูกค้า — เว้นว่างได้ถ้ายังไม่รู้ว่าใครจ่าย"
-                      value={payerQuery}
-                      onChange={(e) => setPayerQuery(e.target.value)}
-                    />
-                  </label>
-                  {payerMatches.length > 0 && (
-                    <ul className="customer-results">
-                      {payerMatches.map((c) => (
-                        <li key={c.customer_id}>
-                          <button type="button" onClick={() => pickPayer(c)}>
-                            <strong>{c.name}</strong>
-                            <span className="muted">
-                              <span className="mono">{c.customer_id}</span>
-                              {c.phone && ` · ${c.phone}`}
-                            </span>
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </>
-              )}
+            เลือกผู้ป่วยที่ผูกลูกค้าไว้แล้ว ผู้ว่าจ้างจะเด้งมาที่นี่เอง
+            โหมดแก้ไข: ถ้าเคสยังไม่มีผู้ว่าจ้าง ให้ค้นหา/เพิ่มลูกค้าเจ้าของเคสได้ที่นี่ (บันทึกแล้วใบแจ้งหนี้จะตามให้เอง) */}
+        <h2>ผู้ว่าจ้าง</h2>
+        <div className="customer-picker">
+          {payer ? (
+            <div className="picked-customer">
+              <div>
+                <strong>ผู้ว่าจ้าง: {payer.name}</strong>
+                <p className="muted"><span className="mono">{payer.customer_id}</span></p>
+              </div>
+              <button type="button" className="btn" onClick={unpickPayer}>เปลี่ยน / ไม่ผูก</button>
             </div>
-          </>
-        )}
+          ) : (
+            <>
+              <label className="customer-search">
+                ผู้ว่าจ้าง (ลูกค้าผู้จ่าย) — ไม่บังคับ
+                <input
+                  placeholder="ค้นหาลูกค้า — เว้นว่างได้ถ้ายังไม่รู้ว่าใครจ่าย"
+                  value={payerQuery}
+                  onChange={(e) => setPayerQuery(e.target.value)}
+                />
+              </label>
+              {payerMatches.length > 0 && (
+                <ul className="customer-results">
+                  {payerMatches.map((c) => (
+                    <li key={c.customer_id}>
+                      <button type="button" onClick={() => pickPayer(c)}>
+                        <strong>{c.name}</strong>
+                        <span className="muted">
+                          <span className="mono">{c.customer_id}</span>
+                          {c.phone && ` · ${c.phone}`}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </>
+          )}
+        </div>
 
         <h2>รายละเอียดเคส</h2>
         <div className="grid">
@@ -659,6 +722,67 @@ export default function CaseFormPage() {
             <input placeholder="เช่น จันทร์-ศุกร์ หลัง 18.00 น." {...field('nurse_call_preference')} />
           </label>
         </div>
+
+        <h2>พิกัดสถานที่ดูแล (สำหรับเช็คอิน)</h2>
+        <p className="muted form-hint">
+          พิมพ์ชื่อสถานที่เพื่อค้นหา หรือวางลิงก์ Google Maps ก็ได้ — ระบบจะดึงพิกัดและที่อยู่ให้เอง ·
+          เว้นว่างได้ (ไม่ตั้งพิกัด = ระบบจะไม่ตรวจระยะตอนเช็คอิน)
+        </p>
+        <div className="grid">
+          <label className="span-2">ค้นหาสถานที่ หรือวางลิงก์ Google Maps
+            <input
+              placeholder='เช่น "โรงพยาบาลบำรุงราษฎร์" หรือวางลิงก์ https://maps.app.goo.gl/...'
+              value={locQuery}
+              onChange={(e) => setLocQuery(e.target.value)}
+              onKeyDown={(e) => {
+                // Enter = ค้นหา ไม่ใช่ submit ทั้งฟอร์ม (กันเคสถูกบันทึกก่อนตั้งใจ)
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  findLocation();
+                }
+              }}
+            />
+          </label>
+          <div className="span-2 geo-row">
+            <button
+              type="button"
+              className="btn"
+              disabled={finding || !locQuery.trim()}
+              onClick={findLocation}
+            >
+              {finding ? 'กำลังค้นหา…' : '🔍 ค้นหา / อ่านลิงก์'}
+            </button>
+            {form.geo_lat !== '' && (
+              <button type="button" className="btn danger-ghost" onClick={clearGeo}>ล้างพิกัด</button>
+            )}
+            {locError && <span className="error geo-error">{locError}</span>}
+          </div>
+        </div>
+
+        {/* พิมพ์ชื่อแล้วเจอหลายที่ — ให้เลือก */}
+        {candidates.length > 0 && (
+          <ul className="customer-results">
+            {candidates.map((c, i) => (
+              <li key={`${c.lat},${c.lng},${i}`}>
+                <button type="button" onClick={() => applyLocation(c.lat, c.lng, c.formatted)}>
+                  <strong>{c.name ?? c.formatted}</strong>
+                  {c.name && c.formatted && <span className="muted">{c.formatted}</span>}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {/* มีพิกัดแล้ว (เพิ่งค้นหา/อ่านลิงก์ หรือโหลดมาจากเคสเดิม) — โชว์ที่อยู่ + แผนที่ยืนยัน */}
+        {form.geo_lat !== '' && form.geo_lng !== '' && (
+          <>
+            <p className="muted form-hint">
+              📍 ตั้งพิกัดแล้ว
+              {resolvedAddress ? <> · {resolvedAddress}</> : <> ({form.geo_lat}, {form.geo_lng})</>}
+            </p>
+            <LocationMap lat={Number(form.geo_lat)} lng={Number(form.geo_lng)} />
+          </>
+        )}
 
         <h2>{isEdit ? 'หมายเหตุ' : 'จับคู่พนักงาน'}</h2>
         <div className="grid">

@@ -13,9 +13,16 @@ import {
   calendarQuerySchema,
   createVisitSchema,
   updateVisitSchema,
+  geocodeSchema,
+  mapLinkSchema,
+  placeSearchSchema,
+  adjustVisitSchema,
+  attendanceQuerySchema,
   CASE_TYPES,
   CASE_STATUSES,
 } from './schema.js';
+import { geocode, reverseGeocode, searchPlaces } from '../lib/geocode.js';
+import { resolveMapLink } from '../lib/maplink.js';
 import { ApiError, asyncRoute, notFound } from '../lib/errors.js';
 
 export const casesRouter = Router();
@@ -77,6 +84,73 @@ casesRouter.get(
 casesRouter.get(
   '/assignable-employees',
   asyncRoute(async (req, res) => res.json(await repo.assignableEmployees())),
+);
+
+// ---------- ระบบเช็คอิน (ฝั่ง admin) — ต้องมาก่อน '/:id' ----------
+
+/** รายการมาทำงานทั้งหมด (เช็คอินแล้ว) — กรองตามเดือน/พนักงาน */
+casesRouter.get(
+  '/attendance',
+  asyncRoute(async (req, res) => {
+    const query = attendanceQuerySchema.parse({
+      month: req.query.month || undefined,
+      employee_id: req.query.employee_id || undefined,
+    });
+    res.json(await repo.attendanceList(query));
+  }),
+);
+
+/** รายการต้องตรวจ — ขาดงาน / ค้างเช็คเอาท์ / นอกพื้นที่ */
+casesRouter.get(
+  '/attendance/exceptions',
+  asyncRoute(async (req, res) => res.json(await repo.attendanceExceptions())),
+);
+
+/** สรุปค่าตอบแทนรายเดือนต่อพนักงาน (payroll) — ไม่ส่งเดือน = เดือนปัจจุบัน (โซนไทย) */
+casesRouter.get(
+  '/attendance/report',
+  asyncRoute(async (req, res) => {
+    const { month } = attendanceQuerySchema.parse({ month: req.query.month || undefined });
+    const ym = month ?? new Date(Date.now() + 7 * 3.6e6).toISOString().slice(0, 7);
+    res.json(await repo.attendanceReport(ym));
+  }),
+);
+
+/** แปลงที่อยู่เป็นพิกัด (ผ่าน Google Geocoding ฝั่ง server) — ให้หน้าเคสตั้งพิกัด */
+casesRouter.post(
+  '/geocode',
+  asyncRoute(async (req, res) => {
+    const { address } = geocodeSchema.parse(req.body);
+    const result = await geocode(address);
+    if (!result) throw new ApiError(404, 'หาพิกัดจากที่อยู่นี้ไม่ได้ — ลองระบุที่อยู่ให้ชัดขึ้น หรือปักหมุด/กรอกพิกัดเอง');
+    res.json(result);
+  }),
+);
+
+/**
+ * อ่านพิกัด + ที่อยู่ จากลิงก์ Google Maps ที่ผู้ใช้วางมา (รองรับลิงก์ย่อจากปุ่มแชร์)
+ * ดึงพิกัดจากลิงก์ก่อน แล้ว reverse-geocode เป็นที่อยู่อ่านออก (ถ้ามี server key)
+ */
+casesRouter.post(
+  '/resolve-map-link',
+  asyncRoute(async (req, res) => {
+    const { url } = mapLinkSchema.parse(req.body);
+    const loc = await resolveMapLink(url);
+    if (!loc) {
+      throw new ApiError(422, 'อ่านพิกัดจากลิงก์นี้ไม่ได้ — แนะนำใช้ลิงก์จากปุ่ม "แชร์" ในแอป Google Maps');
+    }
+    const address = await reverseGeocode(loc.lat, loc.lng);
+    res.json({ lat: loc.lat, lng: loc.lng, address });
+  }),
+);
+
+/** ค้นหาสถานที่จากการพิมพ์ชื่อ/ที่อยู่ — คืนหลายผลลัพธ์ให้ผู้ใช้เลือก */
+casesRouter.post(
+  '/search-place',
+  asyncRoute(async (req, res) => {
+    const { query } = placeSearchSchema.parse(req.body);
+    res.json({ results: await searchPlaces(query) });
+  }),
 );
 
 casesRouter.get(
@@ -210,6 +284,29 @@ casesRouter.delete(
   '/:id/visits/:visitId',
   asyncRoute(async (req, res) => {
     res.json(await repo.removeVisit(req.params.id, Number(req.params.visitId)));
+  }),
+);
+
+/** admin แก้กะที่เช็คอินผิดพลาด (ปิดกะค้าง / แก้เวลา / เคลียร์ธงนอกพื้นที่) — บันทึกผู้แก้ */
+casesRouter.patch(
+  '/:id/visits/:visitId/adjust',
+  asyncRoute(async (req, res) => {
+    const input = adjustVisitSchema.parse(req.body);
+    res.json(
+      await repo.adjustVisit(req.params.id, Number(req.params.visitId), input, req.user.employee_id),
+    );
+  }),
+);
+
+/** รูปเซลฟี่เช็คอินของกะ — ให้ admin เปิดดูยืนยันว่าพนักงานอยู่หน้างานจริง */
+casesRouter.get(
+  '/:id/visits/:visitId/photo',
+  asyncRoute(async (req, res, next) => {
+    const row = await repo.findVisitPhoto(Number(req.params.visitId));
+    if (!row) return next(notFound('กะนี้ไม่มีรูปเช็คอิน'));
+    res.setHeader('Content-Type', row.mime);
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    res.send(row.data);
   }),
 );
 

@@ -9,35 +9,51 @@ const EDITABLE = [
   'service_description', 'amount', 'discount', 'payment_method', 'note',
 ];
 
+// case_payer_name = ชื่อผู้จ่าย "ที่ควรจะเป็น" ของเคสตอนนี้ ไล่ตามลำดับ:
+//   ผู้ว่าจ้างของเคส -> ผู้ว่าจ้างของแฟ้มผู้ป่วย (เผื่อเพิ่งผูกทีหลัง เคสยังไม่มี) -> ชื่อผู้ป่วยในเคส
+// ใช้เทียบกับ bill_to_name ในใบ เพื่อรู้ว่าใบยังตรงกับผู้จ่ายปัจจุบันไหม (ดู withComputed.payer_stale)
 const SELECT_INVOICE = `
   SELECT i.*,
          c.title       AS case_title,
          c.status      AS case_status,
          c.fee         AS case_fee,
          cu.name       AS customer_name,
-         cu.phone      AS customer_phone
+         cu.phone      AS customer_phone,
+         COALESCE(ccu.name, pcu.name, c.client_name) AS case_payer_name
   FROM invoices i
-  LEFT JOIN cases c      ON c.case_id     = i.case_id
+  LEFT JOIN cases c      ON c.case_id      = i.case_id
   LEFT JOIN customers cu ON cu.customer_id = i.customer_id
+  LEFT JOIN customers ccu ON ccu.customer_id = c.customer_id
+  LEFT JOIN patients p    ON p.patient_id   = c.patient_id
+  LEFT JOIN customers pcu ON pcu.customer_id = p.customer_id
 `;
 
 /**
  * "เกินกำหนดชำระ" คำนวณตอนอ่าน ไม่เก็บเป็นสถานะใน DB
  * เพราะมันเปลี่ยนเองตามวันที่ผ่านไป ถ้าเก็บไว้ต้องมีงานคอยไล่อัปเดตทุกวัน แล้วก็มีโอกาสค้างไม่ตรงจริง
  */
-const withComputed = (row) => ({
-  ...row,
-  is_overdue: row.status === 'issued' && row.due_date != null && row.due_date < TODAY(),
-
+const withComputed = (row) => {
   /*
-   * ยอดในใบไม่ตรงกับค่าจ้างของเคสแล้ว
-   * ใบร่างปกติระบบซิงก์ให้เองตอนแก้เคส แต่ยังไม่ตรงได้ถ้าแก้ข้อมูลลูกค้า (ไม่ผ่าน PATCH เคส)
-   * หรือมีคนแก้ยอดในใบเอง — จึงเช็คทุกสถานะ แล้วให้หน้าเว็บเลือกทางแก้ตามสถานะ
-   * (ร่าง = กดรีเฟรช · ออกไปแล้ว = ยกเลิกแล้วออกใบใหม่)
+   * ใบไม่ตรงกับข้อมูลเคสแล้ว — แยกเป็น 2 กรณี เพราะทางแก้/ข้อความที่โชว์ต่างกัน:
+   *   fee_stale   = ยอดในใบไม่ตรงกับค่าจ้างของเคส
+   *   payer_stale = ชื่อผู้จ่ายในใบไม่ตรงกับผู้จ่ายปัจจุบันของเคส
+   *                 (มักเกิดตอนออกใบไปก่อน แล้วเพิ่งมาผูกผู้ว่าจ้างกับผู้ป่วย/เคสทีหลัง)
+   * ใบร่างระบบซิงก์ให้เองตอนแก้เคส/ผูกลูกค้า แต่ยังไม่ตรงได้ถ้ามีคนแก้ยอดในใบเอง — จึงเช็คทุกสถานะ
+   * แล้วให้หน้าเว็บเลือกทางแก้ตามสถานะ (ร่าง/ออกใบแล้ว = กดรีเฟรช · ชำระแล้ว = ยกเลิกแล้วออกใบใหม่)
    */
-  is_stale:
-    row.case_id != null && row.case_fee != null && Number(row.case_fee) !== Number(row.amount),
-});
+  const feeStale =
+    row.case_id != null && row.case_fee != null && Number(row.case_fee) !== Number(row.amount);
+  const payerStale =
+    row.case_id != null && row.case_payer_name != null && row.case_payer_name !== row.bill_to_name;
+
+  return {
+    ...row,
+    is_overdue: row.status === 'issued' && row.due_date != null && row.due_date < TODAY(),
+    fee_stale: feeStale,
+    payer_stale: payerStale,
+    is_stale: feeStale || payerStale,
+  };
+};
 
 export async function list({ q, status, customer_id, case_id, page, per_page, sort, order }) {
   const where = [];
@@ -104,7 +120,9 @@ export function createFromCase(caseRow, input, actor) {
 
   const values = {
     case_id: caseRow.case_id,
-    customer_id: caseRow.customer_id ?? null,
+    // ผู้ว่าจ้างที่ route หามาให้ (อาจมาจากแฟ้มผู้ป่วยถ้าเคสยังไม่มี) — ต้องตรงกับ bill_to ด้านล่าง
+    // ไม่งั้น "รหัสลูกค้า" ว่างแต่ชื่อขึ้น หรือกลับกัน
+    customer_id: customer?.customer_id ?? caseRow.customer_id ?? null,
     issue_date: input.issue_date ?? TODAY(),
     due_date: input.due_date ?? null,
 
@@ -169,7 +187,7 @@ export async function syncOpenFromCase(caseRow, customer) {
      WHERE case_id = :case_id AND status IN ${OPEN_STATUSES}`,
     {
       case_id: caseRow.case_id,
-      customer_id: caseRow.customer_id ?? null,
+      customer_id: customer?.customer_id ?? caseRow.customer_id ?? null,
       bill_to_name: customer?.name ?? caseRow.client_name,
       bill_to_tax_id: customer?.tax_id ?? null,
       bill_to_address:

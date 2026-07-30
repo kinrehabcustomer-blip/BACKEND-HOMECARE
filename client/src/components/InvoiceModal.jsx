@@ -190,12 +190,23 @@ export default function InvoiceModal({ invoiceId, onClose, onChanged, onReissued
               {/* ข้อมูลในใบไม่ตรงกับเคสแล้ว — ทางแก้ต่างกันตามสถานะ ใบร่างดึงของใหม่ได้เลย ที่ออกไปแล้วต้องออกใบใหม่ */}
               {item.is_stale && item.status !== 'cancelled' && (
                 <div className="notice stale-notice no-print">
+                  {/* แยกบรรทัดตามสิ่งที่ไม่ตรง — อาจไม่ตรงทั้งค่าจ้างและผู้จ่ายพร้อมกันได้ */}
+                  {item.payer_stale && (
+                    <p>
+                      ⚠ ผู้จ่ายของเคสตอนนี้คือ <strong>{item.case_payer_name}</strong>
+                      {' '}แต่ใบนี้ออกในชื่อ <strong>{item.bill_to_name}</strong> — ยังไม่ตรงกัน
+                    </p>
+                  )}
+                  {item.fee_stale && (
+                    <p>
+                      ⚠ ค่าจ้างในเคสตอนนี้คือ <strong>{amountText(item.case_fee)}</strong>
+                      {' '}แต่ใบนี้เป็น <strong>{amountText(item.amount)}</strong> — ยังไม่ตรงกัน
+                    </p>
+                  )}
                   <p>
-                    ⚠ ค่าจ้างในเคสตอนนี้คือ <strong>{amountText(item.case_fee)}</strong>
-                    {' '}แต่ใบนี้เป็น <strong>{amountText(item.amount)}</strong> — ข้อมูลไม่ตรงกัน
                     {canEdit
-                      ? ' กดรีเฟรชเพื่อดึงข้อมูลล่าสุดจากเคสมาใส่ใบนี้'
-                      : ' ใบที่ชำระแล้วแก้ยอดไม่ได้ ต้องยกเลิกแล้วออกใบใหม่'}
+                      ? 'กดรีเฟรชเพื่อดึงข้อมูลล่าสุดจากเคสมาใส่ใบนี้'
+                      : 'ใบที่ชำระแล้วแก้ไม่ได้ ต้องยกเลิกแล้วออกใบใหม่'}
                   </p>
                   <div className="stale-actions">
                     {canEdit ? (

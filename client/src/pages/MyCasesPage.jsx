@@ -1,0 +1,80 @@
+import { useEffect, useState } from 'react';
+import { api } from '../api.js';
+import MyCaseModal, { serviceName } from '../components/MyCaseModal.jsx';
+import { CASE_STATUS_LABELS, formatDate } from '../labels.js';
+
+export default function MyCasesPage() {
+  const [list, setList] = useState(null);
+  const [error, setError] = useState(null);
+  const [openId, setOpenId] = useState(null);
+
+  useEffect(() => {
+    api.myCases().then(setList).catch((e) => setError(e.message));
+  }, []);
+
+  if (error) return <p className="error">{error}</p>;
+  if (!list) return <p className="muted">กำลังโหลด…</p>;
+
+  return (
+    <>
+      <header className="page-head">
+        <div>
+          <h1>เคสของฉัน</h1>
+          <p className="muted">เคสที่คุณรับผิดชอบทั้งหมด {list.length} เคส — กดที่เคสเพื่อดูรายละเอียด</p>
+        </div>
+      </header>
+
+      {list.length === 0 ? (
+        <section className="card empty-state">
+          <p>ยังไม่มีเคสที่คุณรับผิดชอบ</p>
+          <p className="muted">เมื่อผู้จัดการจับคู่เคสให้คุณ เคสจะปรากฏที่นี่</p>
+        </section>
+      ) : (
+        <div className="table-wrap">
+          <table className="table">
+            <colgroup>
+              <col style={{ width: '16%' }} />
+              <col style={{ width: '40%' }} />
+              <col style={{ width: '24%' }} />
+              <col style={{ width: '20%' }} />
+            </colgroup>
+            <thead>
+              <tr>
+                <th>รหัสเคส</th>
+                <th>ผู้รับการดูแล / บริการ</th>
+                <th>วันเริ่ม</th>
+                <th>สถานะ</th>
+              </tr>
+            </thead>
+            <tbody>
+              {list.map((c) => (
+                <tr
+                  key={c.case_id}
+                  className="row-clickable"
+                  tabIndex={0}
+                  onClick={() => setOpenId(c.case_id)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      setOpenId(c.case_id);
+                    }
+                  }}
+                >
+                  <td className="mono link">{c.case_id}</td>
+                  <td>
+                    {c.client_name}
+                    <span className="cell-sub">{serviceName(c)}</span>
+                  </td>
+                  <td>{c.start_date ? formatDate(c.start_date) : '—'}</td>
+                  <td><span className={`badge case-${c.status}`}>{CASE_STATUS_LABELS[c.status]}</span></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {openId && <MyCaseModal caseId={openId} onClose={() => setOpenId(null)} />}
+    </>
+  );
+}

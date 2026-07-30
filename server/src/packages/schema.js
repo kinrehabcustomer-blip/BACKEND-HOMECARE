@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const STAFF_TIERS = ['CG', 'NA', 'PN'];
+export const STAFF_TIERS = ['CG', 'NA', 'PN', 'RN'];
 export const FORMAT_CATEGORIES = ['daily', 'weekly', 'monthly'];
 
 // ---------- เกรดการดูแล ----------

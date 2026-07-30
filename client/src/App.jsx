@@ -19,10 +19,15 @@ import PatientDetailPage from './pages/PatientDetailPage.jsx';
 import PackagesPage from './pages/PackagesPage.jsx';
 import PhysioPackagesPage from './pages/PhysioPackagesPage.jsx';
 import DashboardPage from './pages/DashboardPage.jsx';
+import AttendancePage from './pages/AttendancePage.jsx';
+import MyTodayPage from './pages/MyTodayPage.jsx';
+import MyCasesPage from './pages/MyCasesPage.jsx';
+import MyCalendarPage from './pages/MyCalendarPage.jsx';
 
 function Sidebar() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const isAdmin = user.role === 'admin';
 
   async function handleLogout() {
     await logout();
@@ -36,17 +41,27 @@ function Sidebar() {
         <span className="brand-sub">Homecare · หลังบ้าน</span>
       </div>
 
-      <nav>
-        <NavLink to="/dashboard">ภาพรวม</NavLink>
-        <NavLink to="/cases">เคส</NavLink>
-        <NavLink to="/calendar">ตารางงาน</NavLink>
-        <NavLink to="/invoices">ใบแจ้งหนี้</NavLink>
-        <NavLink to="/customers">ลูกค้า</NavLink>
-        <NavLink to="/patients">ผู้รับการดูแล</NavLink>
-        <NavLink to="/packages">แพ็คเกจ Homecare</NavLink>
-        <NavLink to="/physio-packages">แพ็คเกจกายภาพบำบัด</NavLink>
-        <NavLink to="/employees">พนักงาน</NavLink>
-      </nav>
+      {/* เมนูจัดการเห็นเฉพาะผู้ดูแลระบบ (ผู้จัดการ/HR) — พนักงานภาคสนามยังไม่มีส่วนของตัวเอง */}
+      {isAdmin ? (
+        <nav>
+          <NavLink to="/dashboard">ภาพรวม</NavLink>
+          <NavLink to="/cases">เคส</NavLink>
+          <NavLink to="/calendar">ตารางงาน</NavLink>
+          <NavLink to="/attendance">การมาทำงาน</NavLink>
+          <NavLink to="/invoices">ใบแจ้งหนี้</NavLink>
+          <NavLink to="/customers">ลูกค้า</NavLink>
+          <NavLink to="/patients">ผู้รับการดูแล</NavLink>
+          <NavLink to="/packages">แพ็คเกจ Homecare</NavLink>
+          <NavLink to="/physio-packages">แพ็คเกจกายภาพบำบัด</NavLink>
+          <NavLink to="/employees">พนักงาน</NavLink>
+        </nav>
+      ) : (
+        <nav>
+          <NavLink to="/my-today">งานวันนี้</NavLink>
+          <NavLink to="/my-cases">เคสของฉัน</NavLink>
+          <NavLink to="/my-calendar">ตารางงานของฉัน</NavLink>
+        </nav>
+      )}
 
       <div className="sidebar-foot">
         <div className="who-row">
@@ -75,17 +90,31 @@ function DefaultPasswordBanner() {
   );
 }
 
-/** เลย์เอาต์ของหน้าที่ต้อง login (มี sidebar); หน้า login ใช้เลย์เอาต์ของตัวเอง */
-function AppLayout({ children }) {
+/** เนื้อในของเลย์เอาต์ — อยู่หลัง RequireAuth แล้ว จึงมั่นใจว่า user ไม่เป็น null */
+function LayoutInner({ children, admin }) {
+  const { user } = useAuth();
+
+  // หน้าเฉพาะ admin (ผู้จัดการ/HR) — พนักงานภาคสนามเด้งไปหน้า "งานวันนี้" (หน้าหลักของ field)
+  // เป็นแค่การกันฝั่งหน้าเว็บ ตัวจริงกันที่ API (requireAdmin) อีกชั้น
+  if (admin && user.role !== 'admin') return <Navigate to="/my-today" replace />;
+
+  return (
+    <div className="app">
+      <Sidebar />
+      <main className="content">
+        <DefaultPasswordBanner />
+        {children}
+      </main>
+    </div>
+  );
+}
+
+/** เลย์เอาต์ของหน้าที่ต้อง login (มี sidebar); หน้า login ใช้เลย์เอาต์ของตัวเอง
+ *  admin=true = หน้านั้นเข้าได้เฉพาะผู้ดูแลระบบ */
+function AppLayout({ children, admin = false }) {
   return (
     <RequireAuth>
-      <div className="app">
-        <Sidebar />
-        <main className="content">
-          <DefaultPasswordBanner />
-          {children}
-        </main>
-      </div>
+      <LayoutInner admin={admin}>{children}</LayoutInner>
     </RequireAuth>
   );
 }
@@ -101,33 +130,39 @@ export default function App() {
           {/* ลิงก์เดิมที่อาจถูก bookmark ไว้ ให้เด้งไปหน้าตั้งค่าแทน */}
           <Route path="/change-password" element={<Navigate to="/settings" replace />} />
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
-          <Route path="/dashboard" element={<AppLayout><DashboardPage /></AppLayout>} />
-          <Route path="/employees" element={<AppLayout><EmployeeListPage /></AppLayout>} />
-          <Route path="/employees/new" element={<AppLayout><EmployeeFormPage /></AppLayout>} />
-          <Route path="/employees/:id" element={<AppLayout><EmployeeDetailPage /></AppLayout>} />
-          <Route path="/employees/:id/edit" element={<AppLayout><EmployeeFormPage /></AppLayout>} />
+          <Route path="/dashboard" element={<AppLayout admin><DashboardPage /></AppLayout>} />
+          <Route path="/employees" element={<AppLayout admin><EmployeeListPage /></AppLayout>} />
+          <Route path="/employees/new" element={<AppLayout admin><EmployeeFormPage /></AppLayout>} />
+          <Route path="/employees/:id" element={<AppLayout admin><EmployeeDetailPage /></AppLayout>} />
+          <Route path="/employees/:id/edit" element={<AppLayout admin><EmployeeFormPage /></AppLayout>} />
 
-          <Route path="/cases" element={<AppLayout><CaseListPage /></AppLayout>} />
-          <Route path="/cases/new" element={<AppLayout><CaseFormPage /></AppLayout>} />
-          <Route path="/cases/:id/edit" element={<AppLayout><CaseFormPage /></AppLayout>} />
+          <Route path="/cases" element={<AppLayout admin><CaseListPage /></AppLayout>} />
+          <Route path="/cases/new" element={<AppLayout admin><CaseFormPage /></AppLayout>} />
+          <Route path="/cases/:id/edit" element={<AppLayout admin><CaseFormPage /></AppLayout>} />
 
-          <Route path="/calendar" element={<AppLayout><CalendarPage /></AppLayout>} />
-          <Route path="/invoices" element={<AppLayout><InvoiceListPage /></AppLayout>} />
+          <Route path="/calendar" element={<AppLayout admin><CalendarPage /></AppLayout>} />
+          <Route path="/attendance" element={<AppLayout admin><AttendancePage /></AppLayout>} />
+          <Route path="/invoices" element={<AppLayout admin><InvoiceListPage /></AppLayout>} />
 
-          <Route path="/customers" element={<AppLayout><CustomerListPage /></AppLayout>} />
-          <Route path="/customers/new" element={<AppLayout><CustomerFormPage /></AppLayout>} />
-          <Route path="/customers/:id" element={<AppLayout><CustomerDetailPage /></AppLayout>} />
-          <Route path="/customers/:id/edit" element={<AppLayout><CustomerFormPage /></AppLayout>} />
+          {/* หน้าของพนักงานภาคสนาม — เข้าได้ทั้ง field และ admin (แสดงเฉพาะงานที่ตัวเองรับ) */}
+          <Route path="/my-today" element={<AppLayout><MyTodayPage /></AppLayout>} />
+          <Route path="/my-cases" element={<AppLayout><MyCasesPage /></AppLayout>} />
+          <Route path="/my-calendar" element={<AppLayout><MyCalendarPage /></AppLayout>} />
 
-          <Route path="/patients" element={<AppLayout><PatientListPage /></AppLayout>} />
-          <Route path="/patients/new" element={<AppLayout><PatientFormPage /></AppLayout>} />
-          <Route path="/patients/:id" element={<AppLayout><PatientDetailPage /></AppLayout>} />
-          <Route path="/patients/:id/edit" element={<AppLayout><PatientFormPage /></AppLayout>} />
+          <Route path="/customers" element={<AppLayout admin><CustomerListPage /></AppLayout>} />
+          <Route path="/customers/new" element={<AppLayout admin><CustomerFormPage /></AppLayout>} />
+          <Route path="/customers/:id" element={<AppLayout admin><CustomerDetailPage /></AppLayout>} />
+          <Route path="/customers/:id/edit" element={<AppLayout admin><CustomerFormPage /></AppLayout>} />
 
-          <Route path="/packages" element={<AppLayout><PackagesPage /></AppLayout>} />
-          <Route path="/physio-packages" element={<AppLayout><PhysioPackagesPage /></AppLayout>} />
+          <Route path="/patients" element={<AppLayout admin><PatientListPage /></AppLayout>} />
+          <Route path="/patients/new" element={<AppLayout admin><PatientFormPage /></AppLayout>} />
+          <Route path="/patients/:id" element={<AppLayout admin><PatientDetailPage /></AppLayout>} />
+          <Route path="/patients/:id/edit" element={<AppLayout admin><PatientFormPage /></AppLayout>} />
 
-          <Route path="*" element={<AppLayout><p>ไม่พบหน้านี้</p></AppLayout>} />
+          <Route path="/packages" element={<AppLayout admin><PackagesPage /></AppLayout>} />
+          <Route path="/physio-packages" element={<AppLayout admin><PhysioPackagesPage /></AppLayout>} />
+
+          <Route path="*" element={<AppLayout admin><p>ไม่พบหน้านี้</p></AppLayout>} />
         </Routes>
       </AuthProvider>
     </BrowserRouter>

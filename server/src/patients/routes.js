@@ -1,5 +1,8 @@
 import { Router } from 'express';
 import * as repo from './repo.js';
+import * as cases from '../cases/repo.js';
+import * as customers from '../customers/repo.js';
+import * as invoices from '../invoices/repo.js';
 import { createPatientSchema, updatePatientSchema, listQuerySchema } from './schema.js';
 import { asyncRoute, notFound } from '../lib/errors.js';
 
@@ -44,7 +47,19 @@ patientsRouter.patch(
   '/:id',
   asyncRoute(async (req, res) => {
     const input = updatePatientSchema.parse(req.body);
-    res.json(await repo.update(req.params.id, input));
+    const updated = await repo.update(req.params.id, input);
+
+    // เพิ่งผูกผู้ว่าจ้างให้ผู้ป่วย (เคสเปิดไว้ตอนยังไม่รู้ผู้จ่าย) → เติมผู้ว่าจ้างให้เคสที่ยังไม่มี
+    // แล้วอัปเดตชื่อผู้จ่ายในใบแจ้งหนี้ที่ยังแก้ได้ (ร่าง/ออกใบแล้ว) ให้ตรงกัน — ทั้งในระบบและตอนพิมพ์
+    if ('customer_id' in input && updated?.customer_id) {
+      const affected = await cases.backfillCustomerForPatient(updated.patient_id, updated.customer_id);
+      if (affected.length) {
+        const customer = await customers.findById(updated.customer_id);
+        for (const caseRow of affected) await invoices.syncOpenFromCase(caseRow, customer);
+      }
+    }
+
+    res.json(updated);
   }),
 );
 

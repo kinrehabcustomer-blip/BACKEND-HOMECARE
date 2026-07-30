@@ -138,7 +138,7 @@ npm run dev              # รัน API (:4000) + หน้าเว็บ (:51
 | GET/POST/PATCH/DELETE | `/physio/packages` | แพ็คเกจกายภาพบำบัด + `/reorder` จัดลำดับ |
 
 **ค่า enum หลัก**
-- `position` = caregiver, assistant_nurse, practical_nurse, nurse, therapist
+- `position` = caregiver, assistant_nurse, practical_nurse, nurse, therapist, manager, hr
 - `employment_type` = fulltime, parttime, contract, daily
 - พนักงาน `status` = active, probation, on_leave, suspended, resigned
 - เคส `status` = unassigned, assigned, in_progress, closed, cancelled

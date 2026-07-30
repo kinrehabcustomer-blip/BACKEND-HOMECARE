@@ -7,7 +7,8 @@ import CaseVisits from './CaseVisits.jsx';
  * ไม่แตะ document.body.style.overflow เพราะ popup แม่ (CaseModal) ล็อกการเลื่อนไว้อยู่แล้ว
  * ถ้าแตะด้วย พอปิดตัวนี้จะไปปลดล็อกทั้งที่ popup แม่ยังเปิดอยู่
  */
-export default function CaseVisitsModal({ caseItem, readOnly = false, onClose }) {
+export default function CaseVisitsModal({ caseItem, readOnly = false, mode = 'shift', onClose }) {
+  const title = mode === 'appointment' ? 'ตารางนัด' : 'ตารางกะ';
   useEffect(() => {
     const onKeyDown = (e) => e.key === 'Escape' && onClose();
     document.addEventListener('keydown', onKeyDown);
@@ -20,7 +21,7 @@ export default function CaseVisitsModal({ caseItem, readOnly = false, onClose })
         <header className="modal-head">
           <div>
             <p className="mono muted">{caseItem.case_id}</p>
-            <h2>วันนัดให้บริการ</h2>
+            <h2>{title}</h2>
             <p className="muted">{caseItem.client_name}</p>
           </div>
           <button className="modal-close" onClick={onClose} aria-label="ปิด">×</button>
@@ -31,6 +32,7 @@ export default function CaseVisitsModal({ caseItem, readOnly = false, onClose })
             caseId={caseItem.case_id}
             target={caseItem.physio_sessions ?? null}
             readOnly={readOnly}
+            mode={mode}
           />
         </div>
 

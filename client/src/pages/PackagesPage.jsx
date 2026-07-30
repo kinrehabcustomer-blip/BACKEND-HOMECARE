@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { formatBaht } from '../labels.js';
 
-const TIERS = ['CG', 'NA', 'PN'];
+const TIERS = ['CG', 'NA', 'PN', 'RN'];
 const CATEGORY_LABELS = { daily: 'รายวัน', weekly: 'รายสัปดาห์', monthly: 'รายเดือน' };
 
 /**
@@ -111,12 +111,11 @@ function RateTable({ label, formats, gradeId, editing, rateMap, draft, onPatchCe
   return (
     <div className="table-wrap">
       <table className={`table rate-table ${editing ? 'is-editing' : ''}`}>
-        {/* ล็อกความกว้างคอลัมน์ให้คงที่ — ทุกตารางจึงมีคอลัมน์รูปแบบ + CG/NA/PN เท่ากันหมด แถบสีตรงกันทุกตาราง */}
+        {/* ล็อกความกว้างคอลัมน์ให้คงที่ — ทุกตารางจึงมีคอลัมน์รูปแบบ + ระดับพนักงานเท่ากันหมด แถบสีตรงกันทุกตาราง
+            สร้าง <col> ของ tier จาก TIERS เพื่อให้เพิ่ม/ลดระดับพนักงานแล้วจำนวนคอลัมน์ตรงกับหัวตารางเสมอ */}
         <colgroup>
           <col className="rate-col-format" />
-          <col />
-          <col />
-          <col />
+          {TIERS.map((t) => <col key={t} />)}
         </colgroup>
         <thead>
           <tr>
@@ -237,7 +236,7 @@ export default function PackagesPage() {
       <header className="page-head">
         <div>
           <h1>แพ็คเกจบริการ (พนักงานพาร์ทไทม์)</h1>
-          <p className="muted">ตารางเรทตามเกรด × รูปแบบบริการ × ระดับพนักงาน (CG / NA / PN)</p>
+          <p className="muted">ตารางเรทตามเกรด × รูปแบบบริการ × ระดับพนักงาน (CG / NA / PN / RN)</p>
         </div>
         <div className="actions">
           {editing ? (

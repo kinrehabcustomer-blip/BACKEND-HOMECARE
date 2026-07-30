@@ -58,26 +58,18 @@ export default function CalendarPage() {
   const daysInMonth = new Date(year, month, 0).getDate();
 
   /**
-   * กระจายเคสลงในแต่ละวันล่วงหน้าครั้งเดียว แทนการ filter ซ้ำ 31 รอบตอน render
-   * เคสหนึ่งใบกินหลายวัน จึงถูกใส่ในทุกวันที่อยู่ในช่วง start..end (end ว่าง = ยังไม่จบ ลากยาวถึงสิ้นเดือน)
+   * จัดวันนัดเข้าแต่ละวันล่วงหน้าครั้งเดียว แทนการ filter ซ้ำทุกช่องปฏิทิน
+   * ทุกเคสมาเป็น "วันนัด" วันเดียว (ทั้ง Homecare และกายภาพ) จึง group ตาม visit_date ได้ตรงๆ
    */
   const byDay = useMemo(() => {
     const map = new Map();
-    for (let d = 1; d <= daysInMonth; d += 1) {
-      const key = iso(year, month, d);
-      const list = cases.filter((c) =>
-        // กายภาพบำบัดมาเป็น "วันนัด" วันเดียว · เคสอื่นกินทั้งช่วง start..end (end ว่าง = ยังไม่จบ)
-        c.kind === 'visit'
-          ? c.visit_date === key
-          : c.start_date <= key && (!c.end_date || c.end_date >= key),
-      );
-      if (list.length) map.set(key, list);
+    for (const c of cases) {
+      if (!map.has(c.visit_date)) map.set(c.visit_date, []);
+      map.get(c.visit_date).push(c);
     }
     return map;
-  }, [cases, year, month, daysInMonth]);
+  }, [cases]);
 
-  const visitCount = cases.filter((c) => c.kind === 'visit').length;
-  const rangeCount = cases.length - visitCount;
   const selected = staff.find((s) => s.employee_id === employeeId);
 
   if (error) return <p className="error">{error}</p>;
@@ -89,7 +81,7 @@ export default function CalendarPage() {
           <h1>ตารางงาน</h1>
           <p className="muted">
             {selected && <>ตารางของ <strong>{selected.first_name} {selected.last_name}</strong> · </>}
-            เดือนนี้มี {visitCount} วันนัดกายภาพบำบัด · {rangeCount} เคสให้บริการต่อเนื่อง
+            เดือนนี้มี {cases.length} วันนัด
           </p>
         </div>
         <div className="actions">
@@ -150,14 +142,13 @@ export default function CalendarPage() {
               <div className="cal-chips">
                 {list.map((c) => (
                   <button
-                    key={c.kind === 'visit' ? `v${c.visit_id}` : c.case_id}
+                    key={`v${c.visit_id}`}
                     type="button"
-                    className={`cal-chip case-${c.status} ${c.kind === 'visit' ? 'is-visit' : ''}`}
+                    className={`cal-chip case-${c.status}`}
                     onClick={() => setOpenId(c.case_id)}
                     title={[
                       c.case_id,
                       CASE_TYPE_LABELS[c.case_type],
-                      c.kind === 'visit' ? 'วันนัด (กายภาพบำบัด)' : 'ช่วงให้บริการ',
                       c.client_name,
                       c.assigned_name ?? 'ยังไม่จับคู่พนักงาน',
                       CASE_STATUS_LABELS[c.status],
@@ -175,9 +166,8 @@ export default function CalendarPage() {
       </div>
 
       <p className="muted cal-note">
-        <strong>เคสกายภาพบำบัด</strong> แสดงตาม<strong>วันนัดที่ลงไว้</strong>ในหน้าจัดการเคส (กรอบประ) —
-        ยังไม่ลงวันนัดจะไม่ขึ้นบนปฏิทิน · <strong>เคสอื่น</strong> แสดงตลอด<strong>ช่วงวันเริ่ม–วันสิ้นสุด</strong>
-        ของเคส (ไม่มีวันสิ้นสุด = ยังให้บริการต่อเนื่อง) และต้องกรอกวันเริ่มไว้แล้ว
+        ทุกเคส (ทั้ง <strong>Homecare</strong> และ <strong>กายภาพบำบัด</strong>) แสดงตาม
+        <strong>วันนัดที่ลงไว้</strong>ในหน้าจัดการเคส — เคสที่ยังไม่ลงวันนัดจะไม่ขึ้นบนปฏิทิน
       </p>
 
       {openId && (

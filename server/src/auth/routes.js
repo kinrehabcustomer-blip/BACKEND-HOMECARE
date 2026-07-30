@@ -8,6 +8,7 @@ import {
   cookieOptions,
   hashPassword,
   requireAuth,
+  roleForPosition,
   signToken,
   verifyPassword,
 } from '../lib/auth.js';
@@ -231,6 +232,6 @@ const toSession = (e) => ({
   last_name: e.last_name,
   email: e.email,
   position: e.position,
-  role: e.role,
+  role: roleForPosition(e.position), // สิทธิ์คิดจากตำแหน่ง (ผู้จัดการ/HR = admin, ที่เหลือ = field)
   must_change_password: e.must_change_password,
 });

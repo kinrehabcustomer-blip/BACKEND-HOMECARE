@@ -33,6 +33,12 @@ const COLUMNS = [
   'start_date',
   'end_date',
   'fee',
+
+  // พิกัดสถานที่ดูแล (geofence)
+  'geo_lat',
+  'geo_lng',
+  'geofence_radius_m',
+
   'note',
 ];
 
@@ -116,12 +122,45 @@ export function findById(caseId) {
   return sql.one(`${SELECT_CASE} WHERE c.case_id = :id`, { id: caseId });
 }
 
-/** เคสทั้งหมดของพนักงานคนหนึ่ง — เรียกจากหน้าพนักงาน (ผูกด้วย employee_id) */
+/**
+ * เพิ่งผูกผู้ว่าจ้างให้ผู้ป่วย -> เติมผู้ว่าจ้างคนนี้ให้เคสของผู้ป่วยรายนั้น "ที่ยังไม่มีผู้ว่าจ้าง"
+ * แตะเฉพาะเคสที่ customer_id ว่าง — เคสที่มีผู้จ่ายของตัวเองอยู่แล้วไม่ทับ (ผู้จ่ายอาจเป็นคนละคน)
+ * คืนเคส (แบบเต็ม พร้อม join บริการ) ที่ถูกแก้ ให้ผู้เรียกเอาไป sync ใบแจ้งหนี้ต่อ
+ */
+export async function backfillCustomerForPatient(patientId, customerId) {
+  const rows = await sql.all(
+    `UPDATE cases SET customer_id = :customer_id, updated_at = ${NOW}
+     WHERE patient_id = :patient_id AND customer_id IS NULL
+     RETURNING case_id`,
+    { patient_id: patientId, customer_id: customerId },
+  );
+  return Promise.all(rows.map((r) => findById(r.case_id)));
+}
+
+/**
+ * เคสของพนักงานภาคสนาม = เป็นผู้รับผิดชอบหลัก หรือมีกะ (case_visits.assigned_to) ในเคสนั้น
+ * ครอบทั้งสองแบบเพราะระบบกะให้คนที่ไม่ใช่หัวหน้าเคสไปทำกะได้ ก็ต้องเห็นเคสนั้นด้วย
+ */
 export function listForEmployee(employeeId) {
   return sql.all(
-    `${SELECT_CASE} WHERE c.assigned_to = :id ORDER BY c.case_id DESC`,
+    `${SELECT_CASE}
+     WHERE c.assigned_to = :id
+        OR EXISTS (SELECT 1 FROM case_visits v WHERE v.case_id = c.case_id AND v.assigned_to = :id)
+     ORDER BY c.case_id DESC`,
     { id: employeeId },
   );
+}
+
+/** พนักงานภาคสนามเข้าถึงเคสนี้ได้ไหม (เป็นหัวหน้าเคส หรือมีกะในเคส) — ใช้กันดูเคสคนอื่น */
+export async function hasFieldAccess(employeeId, caseId) {
+  const row = await sql.one(
+    `SELECT 1 FROM cases c
+     WHERE c.case_id = :cid
+       AND (c.assigned_to = :eid
+            OR EXISTS (SELECT 1 FROM case_visits v WHERE v.case_id = c.case_id AND v.assigned_to = :eid))`,
+    { cid: caseId, eid: employeeId },
+  );
+  return Boolean(row);
 }
 
 /**
@@ -290,31 +329,50 @@ export async function remove(caseId) {
 
 // ---------- วันนัดให้บริการ (case_visits) ----------
 
-/** วันนัดทั้งหมดของเคสหนึ่งใบ เรียงตามวัน */
+/** กะทั้งหมดของเคสหนึ่งใบ พร้อมชื่อพนักงานที่นัดไว้ + สถานะเช็คอิน (state คำนวณตอนอ่าน) — เรียงตามวัน/เวลานัด */
 export function listVisits(caseId) {
-  return sql.all(
-    `SELECT visit_id, case_id, visit_date, status, note
-     FROM case_visits WHERE case_id = :id ORDER BY visit_date, visit_id`,
-    { id: caseId },
-  );
+  return sql
+    .all(
+      `SELECT v.visit_id, v.case_id, v.visit_date, v.status, v.note,
+              v.assigned_to, v.planned_start, v.planned_end,
+              v.check_in_at, v.check_out_at, v.check_in_distance_m, v.location_flagged,
+              e.first_name || ' ' || e.last_name AS assigned_name,
+              e.nickname                          AS assigned_nickname
+       FROM case_visits v
+       LEFT JOIN employees e ON e.employee_id = v.assigned_to
+       WHERE v.case_id = :id
+       ORDER BY v.visit_date, v.planned_start NULLS FIRST, v.visit_id`,
+      { id: caseId },
+    )
+    .then((rows) => rows.map((v) => withVisitState(v)));
 }
 
 /**
- * จองวันนัด — วันซ้ำในเคสเดิมถือว่าจองอยู่แล้ว ไม่สร้างซ้ำ (unique index กันไว้อีกชั้น)
- * ON CONFLICT DO NOTHING แล้วอ่านกลับ เพื่อให้กดรัวๆ หรือสองแท็บพร้อมกันก็ไม่พัง
+ * จองกะ — วันเดียวมีได้หลายกะ/หลายคน จึงไม่กันวันซ้ำแล้ว (unique index (case_id, visit_date) ถูกปลดในเฟส 2)
+ * ไม่ระบุคนไป = ใช้ผู้รับผิดชอบหลักของเคส (COALESCE กับ cases.assigned_to) — ให้หน้าเดิมที่ส่งแค่ visit_date ยังทำงาน
  */
-export async function addVisit(caseId, { visit_date, note }) {
+export async function addVisit(caseId, { visit_date, assigned_to, planned_start, planned_end, note }) {
   await sql.run(
-    `INSERT INTO case_visits (case_id, visit_date, note)
-     VALUES (:case_id, :visit_date, :note)
-     ON CONFLICT (case_id, visit_date) DO NOTHING`,
-    { case_id: caseId, visit_date, note: note ?? null },
+    `INSERT INTO case_visits (case_id, visit_date, assigned_to, planned_start, planned_end, note)
+     VALUES (:case_id, :visit_date,
+             COALESCE(:assigned_to, (SELECT assigned_to FROM cases WHERE case_id = :case_id)),
+             :planned_start, :planned_end, :note)`,
+    {
+      case_id: caseId,
+      visit_date,
+      assigned_to: assigned_to ?? null,
+      planned_start: planned_start ?? null,
+      planned_end: planned_end ?? null,
+      note: note ?? null,
+    },
   );
   return listVisits(caseId);
 }
 
 export async function updateVisit(caseId, visitId, input) {
-  const fields = ['visit_date', 'status', 'note'].filter((c) => c in input);
+  const fields = ['visit_date', 'assigned_to', 'planned_start', 'planned_end', 'status', 'note'].filter(
+    (c) => c in input,
+  );
   if (fields.length === 0) return listVisits(caseId);
 
   const values = { case_id: caseId, visit_id: visitId };
@@ -337,13 +395,261 @@ export async function removeVisit(caseId, visitId) {
   return listVisits(caseId);
 }
 
+// ---------- เช็คอิน/เอาท์ของพนักงานภาคสนาม (case_visits ระดับกะ) ----------
+// SELECT นี้ไม่ดึง fee/ราคาใดๆ เลย — ฝั่ง field ไม่เห็นข้อมูลการเงิน (ไม่ต้อง strip ทีหลัง)
+const MY_VISIT = `
+  SELECT v.visit_id, v.case_id, v.visit_date, v.status AS visit_status, v.note,
+         v.assigned_to, v.planned_start, v.planned_end,
+         v.check_in_at, v.check_out_at, v.check_in_lat, v.check_in_lng,
+         v.check_in_distance_m, v.location_flagged,
+         (v.check_in_photo_data IS NOT NULL) AS has_photo,
+         c.status AS case_status, c.case_type, c.client_name, c.address, c.client_phone,
+         c.service_kind, c.start_date, c.end_date,
+         c.geo_lat AS case_geo_lat, c.geo_lng AS case_geo_lng, c.geofence_radius_m AS case_radius,
+         c.medical_history, c.current_symptoms, c.medical_devices, c.care_goal,
+         c.patient_gender, c.patient_age,
+         f.name  AS format_name, g.name AS grade_name,
+         pp.name AS physio_package_name, pp.sessions AS physio_sessions
+  FROM case_visits v
+  JOIN cases c ON c.case_id = v.case_id
+  LEFT JOIN pkg_service_formats f ON f.format_id = c.pkg_format_id
+  LEFT JOIN pkg_grades g          ON g.grade_id  = c.pkg_grade_id
+  LEFT JOIN physio_packages pp    ON pp.physio_package_id = c.physio_package_id
+`;
+
+// วันปัจจุบันโซนไทย 'YYYY-MM-DD' — พนักงานอยู่ไทย ปฏิทิน/ขาดงานต้องอิงวันไทย ไม่ใช่ UTC
+const isoDateTH = (d) => new Date(d.getTime() + 7 * 3.6e6).toISOString().slice(0, 10);
+
 /**
- * ตารางงานรายเดือน — ใช้ช่วง start_date..end_date ของเคสเป็นตารางงานโดยตรง (ไม่มีตารางเวรแยก)
+ * สถานะกะที่คำนวณตอนอ่าน (ไม่เก็บใน DB) — จาก timestamps เทียบกับตอนนี้
+ * cancelled · done (เช็คเอาท์แล้ว) · working (เช็คอินแล้วยังไม่ออก) · stale (ค้างเช็คเอาท์เกิน 16 ชม.)
+ * · missed (เลยวันแล้วไม่เช็คอิน) · scheduled (รอเช็คอิน)
+ * worked_minutes = นาทีที่ทำงานจริง (มีค่าเมื่อเช็คเอาท์แล้วเท่านั้น)
+ */
+export function withVisitState(v, now = new Date()) {
+  const vStatus = v.visit_status ?? v.status; // MY_VISIT ใช้ alias visit_status, listVisits ใช้ status
+  let state;
+  if (vStatus === 'cancelled') state = 'cancelled';
+  else if (v.check_out_at) state = 'done';
+  else if (v.check_in_at) state = (now - new Date(v.check_in_at)) / 3.6e6 > 16 ? 'stale' : 'working';
+  else state = v.visit_date < isoDateTH(now) ? 'missed' : 'scheduled';
+
+  const worked =
+    v.check_in_at && v.check_out_at
+      ? Math.round((new Date(v.check_out_at) - new Date(v.check_in_at)) / 60000)
+      : null;
+
+  return { ...v, state, worked_minutes: worked };
+}
+
+/** กะเดี่ยว + ข้อมูลเคส/พิกัดที่จำเป็นต่อการเช็คอิน (ownership เช็คที่ route จาก assigned_to) */
+export const findVisit = (visitId) =>
+  sql.one(`${MY_VISIT} WHERE v.visit_id = :id`, { id: visitId }).then((v) => (v ? withVisitState(v) : null));
+
+/** กะของพนักงานคนหนึ่งในวันที่กำหนด — ตารางงาน "วันนี้" */
+export const visitsForEmployeeOn = (employeeId, date) =>
+  sql
+    .all(
+      `${MY_VISIT} WHERE v.assigned_to = :emp AND v.visit_date = :date
+       ORDER BY v.planned_start NULLS FIRST, v.visit_id`,
+      { emp: employeeId, date },
+    )
+    .then((rows) => rows.map((v) => withVisitState(v)));
+
+/** กะของพนักงานทั้งเดือน (ym = 'YYYY-MM') — ประวัติการมาทำงาน */
+export const attendanceForEmployee = (employeeId, ym) =>
+  sql
+    .all(
+      `${MY_VISIT} WHERE v.assigned_to = :emp AND v.visit_date LIKE :ym
+       ORDER BY v.visit_date DESC, v.planned_start NULLS FIRST`,
+      { emp: employeeId, ym: `${ym}%` },
+    )
+    .then((rows) => rows.map((v) => withVisitState(v)));
+
+/** ไบนารีรูปเซลฟี่ของกะ — ดึงเฉพาะตอนหน้าเว็บขอรูปจริง */
+export const findVisitPhoto = (visitId) =>
+  sql.one(
+    `SELECT check_in_photo_data AS data, check_in_photo_mime AS mime
+     FROM case_visits WHERE visit_id = :id AND check_in_photo_data IS NOT NULL`,
+    { id: visitId },
+  );
+
+/**
+ * เช็คอินกะ + ดันเคสเป็น in_progress ถ้าเป็นการเริ่มกะแรก — คืน null ถ้าเช็คอินไปแล้ว (กันซ้ำ/แข่งกด)
+ * เวลาใช้ now() ของ DB เท่านั้น ไม่รับจาก client (กันปลอมเวลา)
+ */
+export function checkInVisit(visitId, { employee_id, lat, lng, accuracy, distance, flagged, photo }) {
+  return transaction(async (tx) => {
+    const updated = await tx.run(
+      `UPDATE case_visits
+       SET check_in_at = now(), checked_in_by = :emp,
+           check_in_lat = :lat, check_in_lng = :lng, check_in_accuracy_m = :acc,
+           check_in_distance_m = :dist, location_flagged = :flag,
+           check_in_photo_data = :pdata, check_in_photo_mime = :pmime, check_in_photo_size = :psize,
+           updated_at = ${NOW}
+       WHERE visit_id = :id AND check_in_at IS NULL`,
+      {
+        id: visitId, emp: employee_id, lat, lng, acc: accuracy,
+        dist: distance, flag: flagged,
+        pdata: photo?.data ?? null, pmime: photo?.mime ?? null, psize: photo?.size ?? null,
+      },
+    );
+    if (updated === 0) return false; // เช็คอินไปแล้ว
+
+    // เช็คอินขณะเคสยัง 'assigned' = เริ่มให้บริการ (mirror start(): เติม start_date ถ้ายังว่าง)
+    // เงื่อนไข status='assigned' รับประกันว่า cases.assigned_to ไม่เป็น null อยู่แล้ว (ตาม CHECK) จึงเข้า in_progress ได้ไม่ชน constraint
+    await tx.run(
+      `UPDATE cases
+       SET status = 'in_progress',
+           start_date = COALESCE(start_date, to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD')),
+           updated_at = ${NOW}
+       WHERE case_id = (SELECT case_id FROM case_visits WHERE visit_id = :id) AND status = 'assigned'`,
+      { id: visitId },
+    );
+    return true;
+  }).then((ok) => (ok ? findVisit(visitId) : null));
+}
+
+/** เช็คเอาท์กะ — route เช็คเงื่อนไขก่อนแล้ว, WHERE กันแข่งกดอีกชั้น; คืน null ถ้าไม่เข้าเงื่อนไข */
+export const checkOutVisit = (visitId, { lat, lng }) =>
+  sql
+    .run(
+      `UPDATE case_visits
+       SET check_out_at = now(), check_out_lat = :lat, check_out_lng = :lng,
+           status = 'done', updated_at = ${NOW}
+       WHERE visit_id = :id AND check_in_at IS NOT NULL AND check_out_at IS NULL`,
+      { id: visitId, lat, lng },
+    )
+    .then((n) => (n > 0 ? findVisit(visitId) : null));
+
+// ---------- การมาทำงาน (ฝั่ง admin) ----------
+// SELECT สำหรับ admin — เห็นชื่อพนักงานที่เช็คอินจริง + ข้อมูลเคส (ตรงนี้เห็น fee ได้ แต่เราไม่ดึงมาเพราะไม่ใช้)
+const ADMIN_VISIT = `
+  SELECT v.visit_id, v.case_id, v.visit_date, v.status AS visit_status,
+         v.assigned_to, v.checked_in_by, v.planned_start, v.planned_end,
+         v.check_in_at, v.check_out_at, v.check_in_lat, v.check_in_lng,
+         v.check_in_distance_m, v.check_in_accuracy_m, v.location_flagged, v.adjusted_by,
+         (v.check_in_photo_data IS NOT NULL) AS has_photo,
+         COALESCE(ci.first_name || ' ' || ci.last_name, ae.first_name || ' ' || ae.last_name) AS employee_name,
+         c.client_name, c.case_type, c.geo_lat AS case_geo_lat, c.geo_lng AS case_geo_lng
+  FROM case_visits v
+  LEFT JOIN employees ci ON ci.employee_id = v.checked_in_by
+  LEFT JOIN employees ae ON ae.employee_id = v.assigned_to
+  JOIN cases c ON c.case_id = v.case_id
+`;
+
+/** รายการเช็คอินทั้งหมด (admin) — กรองตามเดือน (โซนไทย) และ/หรือพนักงาน */
+export function attendanceList({ month, employee_id }) {
+  const where = ['v.check_in_at IS NOT NULL'];
+  const params = {};
+  if (month) {
+    where.push(`to_char(v.check_in_at AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM') = :month`);
+    params.month = month;
+  }
+  if (employee_id) {
+    where.push('v.checked_in_by = :emp');
+    params.emp = employee_id;
+  }
+  return sql
+    .all(`${ADMIN_VISIT} WHERE ${where.join(' AND ')} ORDER BY v.check_in_at DESC`, params)
+    .then((rows) => rows.map((v) => withVisitState(v)));
+}
+
+/**
+ * รายการที่ต้องตรวจ (admin) — ขาดงาน (เลยวันไม่เช็คอิน) · ค้างเช็คเอาท์ (stale) · นอกพื้นที่ (flagged)
+ * ไม่รวมกะที่กำลังทำงานปกติ (working) เว้นแต่ถูก flag
+ */
+export function attendanceExceptions() {
+  const today = isoDateTH(new Date());
+  return sql
+    .all(
+      `${ADMIN_VISIT}
+       WHERE v.status <> 'cancelled'
+         AND (
+           v.location_flagged = TRUE
+           OR (v.check_in_at IS NOT NULL AND v.check_out_at IS NULL)
+           OR (v.check_in_at IS NULL AND v.visit_date < :today)
+         )
+       ORDER BY v.visit_date DESC, v.check_in_at DESC`,
+      { today },
+    )
+    .then((rows) =>
+      rows
+        .map((v) => withVisitState(v))
+        .filter((v) => v.state === 'missed' || v.state === 'stale' || v.location_flagged),
+    );
+}
+
+/**
+ * admin แก้กะที่เช็คอินผิดพลาด — ปิดกะค้าง / แก้เวลา / เคลียร์ธง / เปลี่ยนสถานะ
+ * เก็บ adjusted_by ไว้เสมอ ให้รู้ว่าใครแก้ (ตรวจสอบย้อนหลังได้)
+ */
+export async function adjustVisit(caseId, visitId, input, adminId) {
+  const sets = ['adjusted_by = :admin', `updated_at = ${NOW}`];
+  const values = { case_id: caseId, visit_id: visitId, admin: adminId };
+
+  for (const col of ['check_in_at', 'check_out_at', 'status', 'location_flagged']) {
+    if (col in input) {
+      sets.push(`${col} = :${col}`);
+      values[col] = input[col] ?? null;
+    }
+  }
+
+  await sql.run(
+    `UPDATE case_visits SET ${sets.join(', ')} WHERE visit_id = :visit_id AND case_id = :case_id`,
+    values,
+  );
+  return findVisit(visitId);
+}
+
+/**
+ * สรุปการมาทำงานรายเดือนต่อพนักงาน (payroll) — นับกะที่เช็คเอาท์แล้ว + รวมนาที
+ * est_pay = ผลรวม staff_pay ของเรทที่เคสอ้างอิง (คิดต่อกะ) — เป็น "ประมาณการ" ตรงกับเรทรายวัน
+ *   ส่วนเรทรายเดือน staff_pay เป็นต่อเดือน (ไม่ใช่ต่อกะ) จึงต้องปรับมือ — priced_shifts บอกว่าครอบกี่กะ
+ * ชั่วโมงจริง (minutes) เป็นตัวเลขที่เชื่อได้เสมอ ต่างจาก est_pay ที่ขึ้นกับกติกาค่าจ้างของธุรกิจ
+ */
+export function attendanceReport(month) {
+  return sql
+    .all(
+      `SELECT v.checked_in_by AS employee_id,
+              e.first_name || ' ' || e.last_name AS employee_name,
+              COUNT(*) FILTER (WHERE v.check_out_at IS NOT NULL) AS shifts,
+              COALESCE(ROUND(SUM(EXTRACT(EPOCH FROM (v.check_out_at - v.check_in_at)) / 60)
+                       FILTER (WHERE v.check_out_at IS NOT NULL)), 0) AS minutes,
+              COALESCE(SUM(r.staff_pay) FILTER (WHERE v.check_out_at IS NOT NULL AND r.staff_pay IS NOT NULL), 0) AS est_pay,
+              COUNT(*) FILTER (WHERE v.check_out_at IS NOT NULL AND r.staff_pay IS NOT NULL) AS priced_shifts
+       FROM case_visits v
+       JOIN employees e ON e.employee_id = v.checked_in_by
+       JOIN cases c     ON c.case_id     = v.case_id
+       LEFT JOIN pkg_rates r ON r.format_id = c.pkg_format_id
+            AND r.grade_id IS NOT DISTINCT FROM c.pkg_grade_id
+            AND r.staff_tier = c.pkg_staff_tier
+       WHERE v.check_in_at IS NOT NULL
+         AND to_char(v.check_in_at AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM') = :month
+       GROUP BY v.checked_in_by, e.first_name, e.last_name
+       ORDER BY employee_name`,
+      { month },
+    )
+    .then((rows) =>
+      rows.map((r) => ({
+        employee_id: r.employee_id,
+        employee_name: r.employee_name,
+        shifts: Number(r.shifts),
+        minutes: Number(r.minutes),
+        est_pay: Number(r.est_pay),
+        priced_shifts: Number(r.priced_shifts),
+      })),
+    );
+}
+
+/**
+ * ตารางงานรายเดือน — ทุกเคส (ทั้ง Homecare และกายภาพบำบัด) ลงตาม"วันนัดจริง" ที่ลงไว้ในหน้าจัดการเคส
  *
- * เอาเฉพาะเคสที่ "คาบเกี่ยว" เดือนที่ขอ: เริ่มก่อนขึ้นเดือนถัดไป และยังไม่จบก่อนต้นเดือน
- * end_date ว่าง = ยังไม่กำหนดวันจบ ถือว่ายังทำอยู่เรื่อยๆ จึงนับว่าคาบเกี่ยวด้วย
- * เคสที่ไม่มี start_date วางบนปฏิทินไม่ได้ จึงตัดออก
+ * เดิม Homecare ลากยาวทั้งช่วง start_date..end_date แต่เปลี่ยนมาใช้วันนัดเหมือนกายภาพ:
+ * พนักงานไปเป็นวันๆ ตามที่นัด ไม่ใช่ทุกวันในช่วงสัญญา ปฏิทินจึงตรงกับงานจริงมากกว่า
+ * ผลที่ตามมา: เคสที่ยังไม่ได้ลงวันนัดจะไม่ขึ้นบนปฏิทิน (ต้องลงวันนัดในหน้าจัดการเคสก่อน)
  *
+ * ตัดวันที่ยกเลิกออก เพราะวันนั้นไม่ได้ไปทำงานจริง
  * วันที่เก็บเป็น TEXT 'YYYY-MM-DD' — เทียบแบบข้อความให้ลำดับตรงกับเวลาอยู่แล้ว ไม่ต้อง cast
  */
 export async function calendar({ year, month, employee_id }) {
@@ -358,53 +664,28 @@ export async function calendar({ year, month, employee_id }) {
   const staffFilter = employee_id ? 'AND c.assigned_to = :employee_id' : '';
   if (employee_id) params.employee_id = employee_id;
 
-  const CASE_FIELDS = `c.case_id, c.title, c.case_type, c.status, c.service_kind,
+  const visits = await sql.all(
+    `SELECT c.case_id, c.title, c.case_type, c.status, c.service_kind,
             c.client_name, c.assigned_to,
             e.first_name || ' ' || e.last_name AS assigned_name,
             e.position                         AS assigned_position,
-            cu.name                            AS customer_name`;
+            cu.name                            AS customer_name,
+            v.visit_id, v.visit_date, v.status AS visit_status,
+            v.check_in_at, v.check_out_at
+     FROM case_visits v
+     JOIN cases c ON c.case_id = v.case_id
+     LEFT JOIN employees e  ON e.employee_id  = c.assigned_to
+     LEFT JOIN customers cu ON cu.customer_id = c.customer_id
+     WHERE v.status <> 'cancelled'
+       AND v.visit_date >= :month_start
+       AND v.visit_date <  :next_month
+       ${staffFilter}
+     ORDER BY v.visit_date, v.visit_id`,
+    params,
+  );
 
-  const JOINS = `LEFT JOIN employees e  ON e.employee_id  = c.assigned_to
-     LEFT JOIN customers cu ON cu.customer_id = c.customer_id`;
-
-  const [ranges, visits] = await Promise.all([
-    // เคสที่ไม่ใช่กายภาพบำบัด — ยังใช้ช่วง start_date..end_date เป็นตารางงาน (ให้บริการต่อเนื่องทุกวัน)
-    // IS DISTINCT FROM กัน NULL ด้วย: เคสเก่าที่ยังไม่มี service_kind ถือเป็นฝั่งนี้
-    sql.all(
-      `SELECT ${CASE_FIELDS}, c.start_date, c.end_date
-       FROM cases c
-       ${JOINS}
-       WHERE c.service_kind IS DISTINCT FROM 'physio'
-         AND c.start_date IS NOT NULL
-         AND c.start_date < :next_month
-         AND (c.end_date IS NULL OR c.end_date >= :month_start)
-         ${staffFilter}
-       ORDER BY c.start_date, c.case_id`,
-      params,
-    ),
-
-    // เคสกายภาพบำบัด — ไปเป็นครั้งๆ ไม่ได้ไปทุกวัน จึงใช้ "วันนัดจริง" ที่ลงไว้ในหน้าจัดการเคสแทนช่วงสัญญา
-    // ตัดวันที่ยกเลิกออก เพราะวันนั้นไม่ได้ไปทำงานจริง
-    sql.all(
-      `SELECT ${CASE_FIELDS}, v.visit_id, v.visit_date, v.status AS visit_status
-       FROM case_visits v
-       JOIN cases c ON c.case_id = v.case_id
-       ${JOINS}
-       WHERE c.service_kind = 'physio'
-         AND v.status <> 'cancelled'
-         AND v.visit_date >= :month_start
-         AND v.visit_date <  :next_month
-         ${staffFilter}
-       ORDER BY v.visit_date, v.visit_id`,
-      params,
-    ),
-  ]);
-
-  // รวมเป็นรายการเดียว ติด kind ไว้ให้หน้าเว็บรู้ว่าแต่ละแถวกินทั้งช่วง หรือเป็นวันเดียว
-  return [
-    ...ranges.map((r) => ({ ...r, kind: 'range' })),
-    ...visits.map((v) => ({ ...v, kind: 'visit' })),
-  ];
+  // แนบ state (รอเช็คอิน/กำลังทำงาน/เสร็จ/ขาดงาน) ให้ปฏิทินระบายสีตามการเช็คอินได้
+  return visits.map((v) => ({ ...withVisitState(v), kind: 'visit' }));
 }
 
 /** สรุปเคส — ไม่ส่งปีมาคือรวมทุกปี, ส่งปีอย่างเดียวคือทั้งปีนั้น, ส่งปี+เดือนคือเดือนนั้น */

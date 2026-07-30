@@ -118,6 +118,19 @@ export const api = {
   updatePatient: (id, body) => request(`/patients/${id}`, { method: 'PATCH', body }),
   deletePatient: (id) => request(`/patients/${id}`, { method: 'DELETE' }),
 
+  // ---------- ของฉัน (พนักงานภาคสนาม — เห็นเฉพาะเคส/กะตัวเอง) ----------
+  myCases: () => request('/my/cases'),
+  myCase: (id) => request(`/my/cases/${id}`),
+  myCalendar: ({ year, month }) => request(`/my/calendar?${new URLSearchParams({ year, month })}`),
+
+  // ตารางงาน + เช็คอิน/เอาท์
+  myToday: () => request('/my/today'),
+  myAttendance: (month) => request(`/my/attendance${month ? `?month=${month}` : ''}`),
+  checkIn: (visitId, body) => request(`/my/visits/${visitId}/check-in`, { method: 'POST', body }),
+  checkOut: (visitId, body) => request(`/my/visits/${visitId}/check-out`, { method: 'POST', body }),
+  /** URL รูปเซลฟี่ตอนเช็คอิน — ใส่ใน <img src> ได้ (คุกกี้ session ไปด้วยอัตโนมัติ) */
+  visitPhotoUrl: (visitId) => `/api/my/visits/${visitId}/photo`,
+
   // ---------- เคส ----------
   caseSummary: ({ year, month } = {}) => {
     const params = new URLSearchParams();
@@ -140,6 +153,28 @@ export const api = {
     if (employee_id) params.set('employee_id', employee_id);
     return request(`/cases/calendar?${params}`);
   },
+
+  // ---------- การมาทำงาน / เช็คอิน (ฝั่ง admin) ----------
+  attendance: ({ month, employee_id } = {}) => {
+    const params = new URLSearchParams();
+    if (month) params.set('month', month);
+    if (employee_id) params.set('employee_id', employee_id);
+    return request(`/cases/attendance${params.size ? `?${params}` : ''}`);
+  },
+  attendanceExceptions: () => request('/cases/attendance/exceptions'),
+  /** สรุปค่าตอบแทนรายเดือนต่อพนักงาน (payroll) */
+  attendanceReport: (month) => request(`/cases/attendance/report${month ? `?month=${month}` : ''}`),
+  /** แปลงที่อยู่เป็นพิกัด (ผ่าน server) — คืน { lat, lng, formatted } */
+  geocodeAddress: (address) => request('/cases/geocode', { method: 'POST', body: { address } }),
+  /** อ่านพิกัด + ที่อยู่ จากลิงก์ Google Maps ที่วางมา */
+  resolveMapLink: (url) => request('/cases/resolve-map-link', { method: 'POST', body: { url } }),
+  /** ค้นหาสถานที่จากการพิมพ์ชื่อ/ที่อยู่ — คืนรายการให้เลือก */
+  searchPlace: (query) => request('/cases/search-place', { method: 'POST', body: { query } }),
+  /** admin แก้กะ (ปิดกะค้าง/แก้เวลา/เคลียร์ธง) */
+  adjustVisit: (caseId, visitId, body) =>
+    request(`/cases/${caseId}/visits/${visitId}/adjust`, { method: 'PATCH', body }),
+  /** URL รูปเซลฟี่เช็คอินของกะ (ฝั่ง admin) — ใส่ใน <img src> ได้ */
+  visitCheckinPhotoUrl: (caseId, visitId) => `/api/cases/${caseId}/visits/${visitId}/photo`,
 
   // ---------- ใบแจ้งหนี้ ----------
   listInvoices: (params = {}) => request(`/invoices?${new URLSearchParams(params)}`),

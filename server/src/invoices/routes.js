@@ -2,6 +2,7 @@ import { Router } from 'express';
 import * as repo from './repo.js';
 import * as cases from '../cases/repo.js';
 import * as customers from '../customers/repo.js';
+import * as patients from '../patients/repo.js';
 import {
   createInvoiceSchema,
   updateInvoiceSchema,
@@ -15,6 +16,20 @@ export const invoicesRouter = Router();
 
 // ใบที่เอกสารยังอยู่ในมือเรา — แก้/รีเฟรชได้ (ส่งมอบให้ลูกค้าครั้งเดียวตอนพิมพ์)
 const OPEN_STATUSES = ['draft', 'issued'];
+
+/**
+ * หาผู้ว่าจ้าง (ผู้จ่าย) ของเคสสำหรับคัดลอกลงใบแจ้งหนี้
+ * เคสมีผู้ว่าจ้างของตัวเองใช้อันนั้น — ไม่มีแต่แฟ้มผู้ป่วยผูกลูกค้าไว้ ให้ใช้ลูกค้าของผู้ป่วยแทน
+ * (กรณีเปิดเคสตอนยังไม่รู้ผู้จ่าย แล้วเพิ่งมาผูกลูกค้ากับผู้ป่วยทีหลัง)
+ */
+async function resolvePayer(caseRow) {
+  if (caseRow.customer_id) return customers.findById(caseRow.customer_id);
+  if (caseRow.patient_id) {
+    const patient = await patients.findById(caseRow.patient_id);
+    if (patient?.customer_id) return customers.findById(patient.customer_id);
+  }
+  return null;
+}
 
 /** โหลดใบแจ้งหนี้ก่อนทุก route ที่มี :id — ไม่มีก็ 404 ตั้งแต่ตรงนี้ */
 invoicesRouter.param('id', (req, res, next, id) => {
@@ -56,7 +71,8 @@ invoicesRouter.post(
     }
 
     // ดึงลูกค้าเต็มๆ เพื่อเอาเลขผู้เสียภาษี/ที่อยู่ออกบิลมาคัดลอก (SELECT ของเคสมีแค่ชื่อ)
-    const customer = caseRow.customer_id ? await customers.findById(caseRow.customer_id) : null;
+    // เคสไม่มีผู้ว่าจ้างแต่ผูกลูกค้าไว้ที่แฟ้มผู้ป่วย → ใช้ลูกค้าของผู้ป่วย ชื่อจะได้ขึ้นในใบ
+    const customer = await resolvePayer(caseRow);
 
     // req.user มาจาก requireAuth = พนักงานที่กำลังทำรายการนี้ → บันทึกเป็นผู้ออกเอกสาร
     res.status(201).json(await repo.createFromCase({ ...caseRow, customer }, input, req.user));
@@ -91,7 +107,7 @@ invoicesRouter.post(
     const caseRow = await cases.findById(req.invoice.case_id);
     if (!caseRow) throw new ApiError(409, 'เคสต้นทางถูกลบไปแล้ว');
 
-    const customer = caseRow.customer_id ? await customers.findById(caseRow.customer_id) : null;
+    const customer = await resolvePayer(caseRow);
     await repo.syncOpenFromCase(caseRow, customer);
 
     res.json(await repo.findById(req.params.id));

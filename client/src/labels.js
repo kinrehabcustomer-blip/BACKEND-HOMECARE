@@ -2,8 +2,10 @@ export const POSITION_LABELS = {
   caregiver: 'CG',
   assistant_nurse: 'NA',
   practical_nurse: 'PN',
-  nurse: 'พยาบาล',
+  nurse: 'RN',   // พยาบาลวิชาชีพ — ใช้ตัวย่อ RN ให้ตรงกับระดับพนักงานในตารางราคาแพ็คเกจ
   therapist: 'นักกายภาพบำบัด',
+  manager: 'ผู้จัดการ',
+  hr: 'HR',
 };
 
 export const EMPLOYMENT_TYPE_LABELS = {
@@ -77,6 +79,28 @@ export const SERVICE_KIND_LABELS = {
   homecare: 'Homecare',
   physio: 'กายภาพบำบัด',
 };
+
+/** สถานะกะของพนักงานภาคสนาม (คำนวณตอนอ่านจากฝั่ง server — ดู withVisitState) */
+export const VISIT_STATE_LABELS = {
+  scheduled: 'รอเช็คอิน',
+  working: 'กำลังทำงาน',
+  done: 'เสร็จแล้ว',
+  stale: 'ค้างเช็คเอาท์',
+  missed: 'ขาดงาน',
+  cancelled: 'ยกเลิก',
+};
+
+/** เวลาแบบ HH:MM (โซนเครื่องผู้ใช้) จาก timestamp เช็คอิน/เอาท์ */
+export const timeText = (value) =>
+  value ? new Date(value).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) : '—';
+
+/** ชั่วโมง:นาที จากจำนวนนาที (เช่น 90 -> '1 ชม. 30 น.') */
+export function durationText(minutes) {
+  if (minutes == null) return '—';
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return [h && `${h} ชม.`, m && `${m} น.`].filter(Boolean).join(' ') || '0 น.';
+}
 
 /**
  * อายุ (ปี) จากวันเกิด — คืน null ถ้าไม่มีวันเกิดหรือวันที่ใช้ไม่ได้

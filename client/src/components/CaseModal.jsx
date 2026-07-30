@@ -124,6 +124,10 @@ export default function CaseModal({ caseId, onClose, onChanged }) {
   const terminal = item?.status === 'closed' || item?.status === 'cancelled';
   const status = item?.status;
 
+  // ระบบนัดกะมีเฉพาะเคส Homecare — กายภาพบำบัดคิดเป็นแพ็คเกจเหมาครั้ง ไม่ต้องจัดกะรายวัน
+  // เคสเก่าที่ service_kind ยังว่างถือเป็น Homecare (มีกะได้) — ดูจากแพ็คเกจกายภาพที่ผูกไว้จริงด้วย
+  const isPhysio = item?.service_kind === 'physio' || item?.physio_package_id != null;
+
   // วันที่ยกเลิกไม่นับเป็นนัดที่จองไว้ แต่ยังเก็บไว้เป็นประวัติใน popup
   const bookedVisits = visits.filter((v) => v.status !== 'cancelled').length;
   const doneVisits = visits.filter((v) => v.status === 'done').length;
@@ -234,23 +238,27 @@ export default function CaseModal({ caseId, onClose, onChanged }) {
                 <Field label="หมายเหตุ" value={item.note} />
               </section>
 
-              {/* ลงวันที่จะไปให้บริการจริง — ตัวจัดการอยู่ใน popup แยก ตรงนี้โชว์แค่สรุป */}
+              {/* Homecare = ตารางกะ (วัน+เวลา+คน) · กายภาพ = ตารางนัดเข้าคอร์ส (นับ X/N ครั้ง) */}
               <section>
-                <h3>วันนัดให้บริการ</h3>
+                <h3>{isPhysio ? 'ตารางนัด' : 'ตารางกะ'}</h3>
                 <div className="visit-summary">
                   <p className="muted">
                     {bookedVisits === 0 ? (
-                      'ยังไม่ได้ลงวันนัด'
-                    ) : (
+                      isPhysio ? 'ยังไม่ได้ลงนัด' : 'ยังไม่ได้นัดกะ'
+                    ) : isPhysio ? (
                       <>
-                        จองไว้ <strong>{bookedVisits}</strong>
+                        นัดแล้ว <strong>{bookedVisits}</strong>
                         {item.physio_sessions ? ` / ${item.physio_sessions}` : ''} ครั้ง
                         {' · '}ไปแล้ว {doneVisits} ครั้ง
                       </>
+                    ) : (
+                      <>นัดไว้ <strong>{bookedVisits}</strong> กะ{' · '}ไปแล้ว {doneVisits} กะ</>
                     )}
                   </p>
                   <button className="btn" onClick={() => setVisitsOpen(true)}>
-                    {terminal ? 'ดูวันนัด' : 'ลงวันนัด'}
+                    {terminal
+                      ? (isPhysio ? 'ดูตารางนัด' : 'ดูตารางกะ')
+                      : (isPhysio ? 'ลงนัด' : 'นัดกะ')}
                   </button>
                 </div>
               </section>
@@ -285,9 +293,11 @@ export default function CaseModal({ caseId, onClose, onChanged }) {
                           {' · '}ออกเมื่อ {formatDate(v.issue_date)}
                           {' · '}{INVOICE_STATUS_LABELS[v.status]}
                         </p>
-                        {/* ยอดในใบไม่ตรงกับค่าจ้างเคสแล้ว — ยกเลิกแล้วออกใบใหม่ได้จากตรงนี้เลย */}
+                        {/* ข้อมูลในใบไม่ตรงกับเคสแล้ว (ค่าจ้าง และ/หรือ ชื่อผู้จ่าย) — เปิดใบเพื่อรีเฟรช/ออกใหม่ */}
                         {v.is_stale && v.status !== 'cancelled' && (
-                          <p className="stale-tag">⚠ ไม่ตรงกับค่าจ้างเคส ({formatBaht(v.case_fee)})</p>
+                          <p className="stale-tag">
+                            {v.payer_stale ? '⚠ ผู้จ่ายในใบไม่ตรงกับเคส' : `⚠ ไม่ตรงกับค่าจ้างเคส (${formatBaht(v.case_fee)})`}
+                          </p>
                         )}
                       </div>
                       <div className="invoice-row-actions">
@@ -414,6 +424,7 @@ export default function CaseModal({ caseId, onClose, onChanged }) {
               <CaseVisitsModal
                 caseItem={item}
                 readOnly={terminal}
+                mode={isPhysio ? 'appointment' : 'shift'}
                 onClose={() => {
                   setVisitsOpen(false);
                   load().catch(() => {});

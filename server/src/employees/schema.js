@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const POSITIONS = ['caregiver', 'assistant_nurse', 'practical_nurse', 'nurse', 'therapist'];
+export const POSITIONS = ['caregiver', 'assistant_nurse', 'practical_nurse', 'nurse', 'therapist', 'manager', 'hr'];
 export const EMPLOYMENT_TYPES = ['fulltime', 'parttime', 'contract', 'daily'];
 export const STATUSES = ['active', 'probation', 'on_leave', 'suspended', 'resigned'];
 

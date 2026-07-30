@@ -200,6 +200,8 @@ body {
 }
 .sidebar nav a:hover { background: var(--bg); }
 .sidebar nav a.active { background: var(--brand-soft); color: var(--brand); }
+/* ข้อความแทนเมนูสำหรับพนักงานภาคสนาม (ไม่มีสิทธิ์เข้าส่วนจัดการ) */
+.sidebar-note { flex: 1; padding: 0.75rem; font-size: 0.8125rem; line-height: 1.5; }
 .sidebar-note { margin-top: 1.75rem; font-size: 0.75rem; line-height: 1.7; color: var(--muted); }
 .sidebar-note code { font-size: 0.6875rem; background: var(--bg); padding: 1px 0.25rem; border-radius: 0.25rem; }
 
@@ -1085,9 +1087,9 @@ select:focus { background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xm
 
 /* ตารางเรทใช้ layout คงที่ + colgroup — คอลัมน์รูปแบบกว้างเท่ากัน และ CG/NA/PN แบ่งพื้นที่ที่เหลือเท่าๆ กัน
    ทุกตารางจึงมีความกว้างคอลัมน์เหมือนกันหมด แถบสีหัวตารางตรงกันทุกตาราง ไม่ยืด/หดตามเนื้อหา */
-.rate-table { font-size: 0.8125rem; table-layout: fixed; width: 100%; min-width: 32rem; }
+.rate-table { font-size: 0.8125rem; table-layout: fixed; width: 100%; min-width: 38rem; }
 /* โหมดแก้ไขมี 3 ช่องกรอกต่อเซลล์ ต้องการที่กว้างกว่า — แคบกว่านี้ให้ปัดแนวนอนใน .table-wrap */
-.rate-table.is-editing { min-width: 46rem; }
+.rate-table.is-editing { min-width: 58rem; }
 .rate-col-format { width: 12rem; }
 .rate-table th, .rate-table td {
   text-align: center;
@@ -1106,6 +1108,7 @@ select:focus { background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xm
 .tier-head.tier-CG { background: #c026d3; }   /* magenta ตามตัวอย่าง */
 .tier-head.tier-NA { background: #7c3aed; }
 .tier-head.tier-PN { background: #0891b2; }
+.tier-head.tier-RN { background: #059669; }   /* เขียว — ระดับพยาบาลวิชาชีพ (RN) */
 
 .rate-price { font-weight: 700; }
 .rate-off { color: var(--text-faint); background: var(--divider); font-style: italic; }
@@ -1213,8 +1216,6 @@ select:focus { background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xm
   white-space: nowrap;
 }
 .cal-chip:hover { filter: brightness(0.95); }
-/* วันนัดกายภาพบำบัด (ไปเป็นครั้งๆ) — กรอบประ แยกจากเคสที่ให้บริการต่อเนื่องทั้งช่วง */
-.cal-chip.is-visit { border: 1px dashed currentColor; }
 .cal-chip-sub { display: block; opacity: 0.75; overflow: hidden; text-overflow: ellipsis; }
 .cal-note { margin-top: 0.75rem; font-size: 0.75rem; }
 
@@ -1354,6 +1355,7 @@ select:focus { background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xm
   color: var(--muted);
 }
 .mini-cal-day {
+  position: relative;
   aspect-ratio: 1;
   display: flex;
   align-items: center;
@@ -1367,6 +1369,22 @@ select:focus { background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xm
   color: var(--text);
   cursor: pointer;
 }
+/* จำนวนกะในวันนั้น (เมื่อมีมากกว่า 1) — มุมขวาบนของช่อง */
+.mini-cal-count {
+  position: absolute;
+  top: -0.3rem;
+  right: -0.3rem;
+  min-width: 1rem;
+  height: 1rem;
+  padding: 0 0.2rem;
+  border-radius: 0.5rem;
+  background: var(--text);
+  color: var(--surface);
+  font-size: 0.5625rem;
+  line-height: 1rem;
+  font-weight: 700;
+}
+.visit-hint { margin: 0 0 0.5rem; font-size: 0.75rem; }
 .mini-cal-day:hover:not(:disabled) { border-color: var(--brand); }
 .mini-cal-day:disabled { cursor: default; }
 .mini-cal-day.is-blank { border: 0; background: none; cursor: default; }
@@ -1459,3 +1477,97 @@ select:focus { background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xm
 @media (max-width: 768px) {
   .manage-cols { grid-template-columns: 1fr; }
 }
+
+/* ---------- ระบบเช็คอินพนักงานภาคสนาม ---------- */
+/* สถานะกะ — โทนเดียวกับ badge.case-* */
+.badge.visit-scheduled { background: #fff3dc; color: #9a6700; }
+.badge.visit-working   { background: #e3f5ec; color: #1c7a4d; }
+.badge.visit-done      { background: #eef0f2; color: #6b7280; }
+.badge.visit-stale     { background: #fde8e8; color: #b3261e; }
+.badge.visit-missed    { background: #fbe4e4; color: #a83232; }
+.badge.visit-cancelled { background: #eef0f2; color: #6b7280; }
+.badge.flag { background: #fde8e8; color: #b3261e; margin-left: 0.4rem; }
+
+/* chip ปฏิทิน field ระบายสีตามสถานะเช็คอิน */
+.cal-chip.visit-scheduled { background: #fff3dc; color: #9a6700; }
+.cal-chip.visit-working   { background: #e3f5ec; color: #1c7a4d; }
+.cal-chip.visit-done      { background: #eef0f2; color: #6b7280; }
+.cal-chip.visit-stale     { background: #fde8e8; color: #b3261e; }
+.cal-chip.visit-missed    { background: #fbe4e4; color: #a83232; }
+.cal-chip.visit-cancelled { background: #eef0f2; color: #6b7280; }
+
+.shift-list { display: flex; flex-direction: column; gap: 0.75rem; }
+.shift-card { display: flex; align-items: center; gap: 1rem; margin-bottom: 0; }
+.shift-card .shift-main { flex: 1; min-width: 0; }
+/* ทับ .card h2 ที่เป็นหัวข้อเล็ก/จาง — ในการ์ดกะให้เป็นชื่อผู้ป่วยตัวหนา */
+.shift-card .shift-title { margin: 0.25rem 0 0.125rem; font-size: 1.0625rem; color: var(--text); font-weight: 700; }
+.shift-when { display: flex; align-items: center; gap: 0.5rem; }
+.shift-time { font-weight: 700; font-size: 0.9375rem; }
+.shift-addr { margin-top: 0.25rem; }
+.shift-times { margin: 0.5rem 0 0; font-size: 0.8125rem; }
+.shift-actions { flex-shrink: 0; }
+.shift-done { color: #1c7a4d; font-weight: 600; font-size: 0.875rem; }
+/* แถบสีซ้ายบอกสถานะกะแบบเร็ว */
+.shift-card.visit-working { border-left: 3px solid var(--brand); }
+.shift-card.visit-done { opacity: 0.8; }
+
+.gps-status {
+  display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+  padding: 0.625rem 0.875rem; margin-bottom: 1rem;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  font-size: 0.875rem; background: var(--bg);
+}
+.gps-status.is-ok   { border-color: #bfe6d5; background: #f2fbf7; color: #1c7a4d; }
+.gps-status.is-warn { border-color: #f2c9c4; background: #fdf3f2; color: #b3261e; }
+:root[data-theme='dark'] .gps-status.is-ok   { background: #16302b; border-color: #245046; color: #7fd3bd; }
+:root[data-theme='dark'] .gps-status.is-warn { background: #3a201d; border-color: #5c322c; color: #f0a89c; }
+.gps-status .btn.tiny { margin-left: auto; }
+
+/* แผนที่ยืนยันจุดเช็คอิน — สูงคงที่ ดูอย่างเดียว */
+.location-map {
+  width: 100%;
+  height: 9rem;
+  margin-bottom: 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.checkin-photo h3 { font-size: 0.875rem; margin: 0 0 0.5rem; }
+.checkin-photo-preview { display: flex; align-items: flex-start; gap: 0.75rem; }
+.checkin-photo-preview img { width: 8rem; height: 8rem; object-fit: cover; border-radius: var(--radius); border: 1px solid var(--border); }
+
+@media (max-width: 768px) {
+  .shift-card { flex-direction: column; align-items: stretch; }
+  .shift-actions { display: flex; }
+  .shift-actions .btn { flex: 1; }
+}
+
+/* ฟอร์มนัดกะ (admin) */
+.shift-form { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; margin-bottom: 1rem; }
+.shift-form input, .shift-form select { padding: 0.4rem 0.55rem; }
+.shift-form select { flex: 1; min-width: 10rem; }
+.visit-who { flex: 1; min-width: 0; font-size: 0.8125rem; }
+
+/* หน้าการมาทำงาน (admin) */
+.att-tabs { display: flex; gap: 0.5rem; margin-bottom: 1rem; border-bottom: 1px solid var(--border); }
+.att-tab {
+  padding: 0.5rem 0.875rem; border: none; background: none; cursor: pointer;
+  color: var(--muted); font-size: 0.875rem; font-weight: 600;
+  border-bottom: 2px solid transparent; margin-bottom: -1px;
+}
+.att-tab.is-active { color: var(--brand); border-bottom-color: var(--brand); }
+.att-filter { margin-bottom: 1rem; }
+.att-filter input { padding: 0.4rem 0.55rem; margin-left: 0.4rem; }
+.att-evidence { display: inline-flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; font-size: 0.8125rem; }
+.att-evidence a { color: var(--brand); }
+.flag-text { color: #b3261e; font-weight: 600; }
+.att-thumb { width: 65px; height: 45px; object-fit: cover; border-radius: 6px; border: 1px solid var(--border); display: block; }
+
+/* แผนที่ปักหมุดในฟอร์มเคส */
+.map-picker { height: 300px; width: 100%; border: 1px solid var(--border); border-radius: var(--radius); margin-top: 0.5rem; }
+.map-note { padding: 1rem; border: 1px dashed var(--border); border-radius: var(--radius); text-align: center; margin-top: 0.5rem; }
+.geo-row { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
+.geo-error { font-size: 0.8125rem; }
+.table tfoot th { background: var(--bg); border-top: 2px solid var(--border); font-weight: 700; }
+.att-filter { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }

@@ -35,7 +35,7 @@ export const createCaseSchema = z.object({
   // [homecare] เลือกเกรด + รูปแบบ + ระดับพนักงาน แล้วระบบเติมค่าจ้างจากค่าบริการให้
   pkg_grade_id: z.number().int().optional().nullable(), // ว่างได้ถ้ารูปแบบไม่อิงเกรด
   pkg_format_id: z.number().int().optional().nullable(),
-  pkg_staff_tier: z.enum(['CG', 'NA', 'PN']).optional().nullable(),
+  pkg_staff_tier: z.enum(['CG', 'NA', 'PN', 'RN']).optional().nullable(),
 
   // [physio] แพ็คเกจกายภาพบำบัดที่ซื้อ — ระบบเติมค่าจ้างจากราคาพิเศษให้
   physio_package_id: z.number().int().optional().nullable(),
@@ -70,6 +70,12 @@ export const createCaseSchema = z.object({
   start_date: date.optional().nullable(),
   end_date: date.optional().nullable(),
   fee: z.number().nonnegative('ค่าจ้างต้องไม่ติดลบ').optional().nullable(),
+
+  // พิกัดสถานที่ดูแล (สำหรับ geofence ตอนเช็คอิน) — ตั้งจาก geocode ที่อยู่ หรือกรอกมือ
+  geo_lat: z.number().min(-90).max(90).optional().nullable(),
+  geo_lng: z.number().min(-180).max(180).optional().nullable(),
+  geofence_radius_m: z.number().int().positive().max(5000).optional().nullable(),
+
   note: optionalText,
 
   // จับคู่พนักงานตั้งแต่ตอนสร้างเคยได้ ถ้าเว้นว่างจะเป็น 'ยังไม่จับคู่พนักงาน'
@@ -95,22 +101,67 @@ export const periodSchema = z.object({
   month: z.string().regex(/^(0[1-9]|1[0-2])$/, 'เดือนต้องเป็น 01–12').optional(),
 });
 
-// ---------- วันนัดให้บริการ (case_visits) ----------
+// ---------- วันนัดให้บริการ = "กะงาน" (case_visits) ----------
 export const VISIT_STATUSES = ['scheduled', 'done', 'cancelled'];
+
+// เวลานัด 'HH:MM' แบบ 24 ชม. — ว่างได้ (บางเคสไม่กำหนดเวลาตายตัว)
+const time = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'เวลาต้องอยู่ในรูปแบบ HH:MM (24 ชม.)');
 
 export const createVisitSchema = z.object({
   visit_date: date,
+  // พนักงานที่นัดให้ไปกะนี้ — เว้นว่าง = ใช้ผู้รับผิดชอบหลักของเคส (repo เติมให้)
+  assigned_to: z.string().trim().min(1).optional().nullable(),
+  planned_start: time.optional().nullable(),
+  planned_end: time.optional().nullable(),
   note: optionalText,
 });
 
-// แก้ได้ทั้งเลื่อนวัน เปลี่ยนสถานะ (ไปมาแล้ว/ไม่ได้ไป) และหมายเหตุ
+// แก้ได้ทั้งเลื่อนวัน เปลี่ยนคนที่ไป เวลานัด สถานะ (ไปมาแล้ว/ไม่ได้ไป) และหมายเหตุ
 export const updateVisitSchema = z
   .object({
     visit_date: date,
+    assigned_to: z.string().trim().min(1).nullable(),
+    planned_start: time.nullable(),
+    planned_end: time.nullable(),
     status: z.enum(VISIT_STATUSES, { errorMap: () => ({ message: 'สถานะวันนัดไม่ถูกต้อง' }) }),
     note: optionalText,
   })
   .partial();
+
+// ---------- ระบบเช็คอิน (ฝั่ง admin) ----------
+
+// geocode ที่อยู่เป็นพิกัด (ผ่าน server) — ตั้งพิกัดเคส
+export const geocodeSchema = z.object({
+  address: z.string().trim().min(1, 'กรุณากรอกที่อยู่'),
+});
+
+// อ่านพิกัดจากลิงก์ Google Maps ที่ผู้ใช้วางมา
+export const mapLinkSchema = z.object({
+  url: z.string().trim().min(1, 'กรุณาวางลิงก์ Google Maps'),
+});
+
+// ค้นหาสถานที่จากการพิมพ์ชื่อ/ที่อยู่
+export const placeSearchSchema = z.object({
+  query: z.string().trim().min(1, 'กรุณาพิมพ์ชื่อสถานที่ที่ต้องการค้นหา'),
+});
+
+// admin แก้กะที่เช็คอินผิดพลาด — ปิดกะที่ค้าง / แก้เวลา / เคลียร์ธงนอกพื้นที่
+// เวลาเป็น ISO timestamp เต็ม (มี timezone) เพราะเป็น TIMESTAMPTZ ในฐานข้อมูล
+const isoDateTime = z.string().datetime({ offset: true, message: 'ต้องเป็นเวลา ISO (เช่น 2026-07-24T09:00:00+07:00)' });
+export const adjustVisitSchema = z
+  .object({
+    check_in_at: isoDateTime.nullable(),
+    check_out_at: isoDateTime.nullable(),
+    status: z.enum(VISIT_STATUSES, { errorMap: () => ({ message: 'สถานะวันนัดไม่ถูกต้อง' }) }),
+    location_flagged: z.boolean(),
+  })
+  .partial();
+
+// รายการมาทำงาน (admin) — เดือน + กรองพนักงาน (เว้นได้ทั้งคู่)
+export const attendanceQuerySchema = z.object({
+  month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'เดือนต้องอยู่ในรูปแบบ YYYY-MM').optional(),
+  employee_id: z.string().trim().min(1).optional(),
+});
 
 // ปฏิทินตารางงาน — ต้องระบุทั้งปีและเดือน (ต่างจาก periodSchema ที่เว้นได้)
 // employee_id เว้นว่าง = ดูตารางของทุกคนรวมกัน
