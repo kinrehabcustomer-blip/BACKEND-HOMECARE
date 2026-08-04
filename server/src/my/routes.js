@@ -89,6 +89,43 @@ myRouter.get(
   }),
 );
 
+/**
+ * สรุปค่าตอบแทนของฉัน (รายเดือน) — ต้องมาก่อน '/attendance' ไม่ให้ path ชนกัน
+ * ใช้ตัวคำนวณเดียวกับหน้า payroll ของ admin แต่บังคับกรองด้วย employee_id จาก session
+ *
+ * ยอดเงินมาจากเคสที่ admin ปิดแล้วเท่านั้น — ส่งรายการเคสไปด้วยเพื่อให้กางดูที่มาของยอดได้
+ * เคสที่ยังทำอยู่ส่งไปแค่ "จำนวน" ไม่ส่งยอด เพราะยังไม่ยืนยันว่าจะได้เท่าไหร่
+ * ยังไม่มีข้อมูลในเดือนนั้น = ไม่มีแถวกลับมา ตอบเป็นศูนย์แทน null ให้หน้าเว็บแสดงได้เลย
+ */
+myRouter.get(
+  '/attendance/report',
+  asyncRoute(async (req, res) => {
+    const { month } = attendanceQuerySchema.parse({ month: req.query.month || undefined });
+    const ym = month ?? todayTH().slice(0, 7);
+    const me = req.user.employee_id;
+
+    const [[row], paidCases, openCases] = await Promise.all([
+      cases.attendanceReport(ym, me),
+      cases.payoutCases(ym, me),
+      cases.openCaseCount(me),
+    ]);
+
+    res.json({
+      ...(row ?? {
+        employee_id: me,
+        employee_name: req.user.name,
+        shifts: 0,
+        minutes: 0,
+        closed_cases: 0,
+        pay: 0,
+        unpriced_cases: 0,
+      }),
+      cases: paidCases,
+      open_cases: openCases,
+    });
+  }),
+);
+
 /** ประวัติการมาทำงานของฉัน (รายเดือน) — ไม่ส่ง month = เดือนปัจจุบัน */
 myRouter.get(
   '/attendance',

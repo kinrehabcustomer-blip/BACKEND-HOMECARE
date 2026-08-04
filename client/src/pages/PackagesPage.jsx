@@ -35,7 +35,9 @@ function discountOf(price, percent, amount) {
  */
 function RateCell({ editing, rate, draft, onPatch }) {
   if (editing) {
-    const dv = draft ?? { customer_price: '', discount_percent: '', discount_amount: '', available: true };
+    const dv = draft ?? {
+      customer_price: '', staff_pay: '', discount_percent: '', discount_amount: '', available: true,
+    };
     if (!dv.available) {
       return (
         <td className="rate-off">
@@ -48,6 +50,10 @@ function RateCell({ editing, rate, draft, onPatch }) {
 
     const price = dv.customer_price === '' ? null : Number(dv.customer_price);
     const cut = discountOf(price, num(dv.discount_percent), num(dv.discount_amount));
+    const net = price != null ? price - cut : null;
+    const pay = num(dv.staff_pay);
+    // กำไรคิดจากราคาสุทธิ (เงินที่เก็บได้จริง) ไม่ใช่ราคาตั้ง — ตั้งส่วนลดแล้วกำไรต้องลดตาม
+    const profit = net != null && pay != null ? net - pay : null;
 
     return (
       <td className="rate-input">
@@ -64,6 +70,14 @@ function RateCell({ editing, rate, draft, onPatch }) {
               ✕
             </button>
           </div>
+          {/* ค่าจ้างพนักงาน — ตัวตั้งของสรุปค่าตอบแทนรายเดือน ไม่มีช่องนี้ระบบคำนวณค่าแรงให้ใครไม่ได้เลย */}
+          <div className="rate-edit-row">
+            <input
+              type="number" min="0" step="100" placeholder="ค่าจ้าง" title="ค่าจ้างพนักงานต่อรอบบริการ"
+              value={dv.staff_pay}
+              onChange={(e) => onPatch({ staff_pay: e.target.value })}
+            />
+          </div>
           <div className="rate-edit-row">
             <input
               type="number" min="0" max="100" step="1" placeholder="ลด %" title="ส่วนลดเป็นเปอร์เซ็นต์"
@@ -79,7 +93,8 @@ function RateCell({ editing, rate, draft, onPatch }) {
           {/* คำนวณให้เห็นทันทีระหว่างพิมพ์ — สูตรเดียวกับที่ server ใช้ */}
           {price != null && (
             <span className="rate-net">
-              {cut > 0 ? `สุทธิ ${formatBaht(price - cut)}` : 'ไม่มีส่วนลด'}
+              {cut > 0 ? `สุทธิ ${formatBaht(net)}` : 'ไม่มีส่วนลด'}
+              {profit != null && ` · กำไร ${formatBaht(profit)}`}
             </span>
           )}
         </div>
@@ -99,6 +114,15 @@ function RateCell({ editing, rate, draft, onPatch }) {
         <span className="rate-cut">
           −{rate.discount_percent > 0 ? `${rate.discount_percent}%` : formatBaht(rate.discount_value)}
         </span>
+      )}
+      {/* ค่าจ้างพนักงาน + กำไรที่เหลือ — ช่องที่ยังไม่ได้ตั้งต้องเห็นชัด เพราะสรุปค่าตอบแทนจะคิดไม่ได้ */}
+      {rate.staff_pay != null ? (
+        <span className="rate-staff">
+          จ้าง {formatBaht(rate.staff_pay)}
+          {rate.margin != null && ` · กำไร ${rate.margin}%`}
+        </span>
+      ) : (
+        <span className="rate-staff is-missing">ยังไม่ตั้งค่าจ้าง</span>
       )}
     </td>
   );
@@ -182,6 +206,7 @@ export default function PackagesPage() {
           const r = rateMap[cellKey(f.format_id, gid, tier)];
           d[cellKey(f.format_id, gid, tier)] = {
             customer_price: r?.customer_price ?? '',
+            staff_pay: r?.staff_pay ?? '',
             discount_percent: r?.discount_percent ?? '',
             discount_amount: r?.discount_amount ?? '',
             available: r ? r.available : true,
@@ -208,11 +233,10 @@ export default function PackagesPage() {
               format_id: f.format_id,
               grade_id: gid,
               staff_tier: tier,
-              customer_price: dv.customer_price === '' ? null : Number(dv.customer_price),
-              discount_percent: dv.discount_percent === '' ? null : Number(dv.discount_percent),
-              discount_amount: dv.discount_amount === '' ? null : Number(dv.discount_amount),
-              // ค่าตอบแทนไม่มีช่องแก้ในหน้านี้แล้ว — ส่งค่าเดิมกลับไปเพื่อไม่ให้ข้อมูลที่เคยกรอกหาย
-              staff_pay: rateMap[key]?.staff_pay ?? null,
+              customer_price: num(dv.customer_price),
+              staff_pay: num(dv.staff_pay),
+              discount_percent: num(dv.discount_percent),
+              discount_amount: num(dv.discount_amount),
               available: dv.available,
             });
           }

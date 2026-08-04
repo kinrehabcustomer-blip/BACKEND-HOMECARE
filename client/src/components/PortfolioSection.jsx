@@ -1,6 +1,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { api } from '../api.js';
-import { ACCEPTED, compressImage, formatFileSize } from '../lib/image.js';
+import FileButton from './FileButton.jsx';
+import { compressImage, formatFileSize } from '../lib/image.js';
 
 const BLANK = { title: '', description: '' };
 
@@ -261,17 +262,7 @@ const PortfolioSection = forwardRef(function PortfolioSection({ employeeId }, re
             <button type="button" className="inline-link danger" onClick={clearImage}>เอารูปออก</button>
           </div>
         ) : (
-          <label className="btn">
-            {busy ? 'กำลังย่อรูป…' : '📎 เลือกไฟล์รูปผลงาน'}
-            <input
-              ref={fileInput}
-              type="file"
-              accept={ACCEPTED}
-              hidden
-              disabled={busy}
-              onChange={pickImage}
-            />
-          </label>
+          <FileButton ref={fileInput} busy={busy} onPick={pickImage}>เลือกไฟล์รูปผลงาน</FileButton>
         )}
 
         <button className="btn" type="button" onClick={stage} disabled={busy}>+ เพิ่ม</button>

@@ -2,10 +2,18 @@ import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import CaseModal from '../components/CaseModal.jsx';
 import {
-  CASE_STATUS_LABELS, CASE_TYPE_LABELS, MONTH_LABELS, POSITION_LABELS, toBuddhistYear,
+  CASE_STATUS_LABELS, CASE_TYPE_LABELS, MONTH_LABELS, POSITION_LABELS, SERVICE_KIND_LABELS,
+  toBuddhistYear,
 } from '../labels.js';
 
 const WEEKDAYS = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
+
+/**
+ * สายบริการของเคส — เคสที่เปิดก่อนมีระบบสองสายยังมี service_kind เป็น null
+ * จึงดูจากแพ็คเกจกายภาพที่ผูกไว้จริงด้วย (กติกาเดียวกับ CaseModal/MyCaseModal)
+ * ไม่ระบุอะไรเลยถือเป็น Homecare — ระบบกะ/วันนัดเป็นของฝั่ง Homecare อยู่แล้ว
+ */
+const kindOf = (c) => (c.service_kind === 'physio' || c.physio_package_id != null ? 'physio' : 'homecare');
 
 /** 'YYYY-MM-DD' จากตัวเลขปี/เดือน/วัน — ประกอบเองไม่ผ่าน toISOString เพราะตัวนั้นแปลงเป็น UTC แล้ววันเพี้ยน */
 const iso = (y, m, d) => `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
@@ -22,6 +30,7 @@ export default function CalendarPage() {
   const [cases, setCases] = useState([]);
   const [staff, setStaff] = useState([]);
   const [employeeId, setEmployeeId] = useState(''); // '' = ดูตารางรวมทุกคน
+  const [kind, setKind] = useState('');             // '' = ดูทั้งสองสายบริการ
   const [error, setError] = useState(null);
   const [openId, setOpenId] = useState(null);
   const [reloadKey, setReloadKey] = useState(0);
@@ -61,14 +70,18 @@ export default function CalendarPage() {
    * จัดวันนัดเข้าแต่ละวันล่วงหน้าครั้งเดียว แทนการ filter ซ้ำทุกช่องปฏิทิน
    * ทุกเคสมาเป็น "วันนัด" วันเดียว (ทั้ง Homecare และกายภาพ) จึง group ตาม visit_date ได้ตรงๆ
    */
+  // กรองสายบริการในหน้าเว็บ ไม่ยิง API ใหม่ — ข้อมูลทั้งเดือนโหลดมาแล้ว สลับดูจึงเปลี่ยนทันที
+  // (ต่างจากตัวกรองพนักงานที่กรองฝั่ง server เพราะ /my/calendar ใช้ตัวเดียวกันบังคับดูของตัวเอง)
+  const shown = useMemo(() => (kind ? cases.filter((c) => kindOf(c) === kind) : cases), [cases, kind]);
+
   const byDay = useMemo(() => {
     const map = new Map();
-    for (const c of cases) {
+    for (const c of shown) {
       if (!map.has(c.visit_date)) map.set(c.visit_date, []);
       map.get(c.visit_date).push(c);
     }
     return map;
-  }, [cases]);
+  }, [shown]);
 
   const selected = staff.find((s) => s.employee_id === employeeId);
 
@@ -81,7 +94,11 @@ export default function CalendarPage() {
           <h1>ตารางงาน</h1>
           <p className="muted">
             {selected && <>ตารางของ <strong>{selected.first_name} {selected.last_name}</strong> · </>}
-            เดือนนี้มี {cases.length} วันนัด
+            {kind && <>เฉพาะ <strong>{SERVICE_KIND_LABELS[kind]}</strong> · </>}
+            เดือนนี้มี {shown.length} วันนัด
+            {kind && cases.length !== shown.length && (
+              <span className="muted"> (จากทั้งหมด {cases.length})</span>
+            )}
           </p>
         </div>
         <div className="actions">
@@ -105,15 +122,25 @@ export default function CalendarPage() {
             </option>
           ))}
         </select>
+
+        <select value={kind} onChange={(e) => setKind(e.target.value)} aria-label="เลือกประเภทบริการ">
+          <option value="">ทุกประเภทบริการ</option>
+          {Object.entries(SERVICE_KIND_LABELS).map(([v, l]) => (
+            <option key={v} value={v}>{l}</option>
+          ))}
+        </select>
       </div>
 
       <h2 className="cal-title">{MONTH_LABELS[mm]} {toBuddhistYear(year)}</h2>
 
-      {cases.length === 0 && (
+      {shown.length === 0 && (
         <p className="notice">
-          {selected
-            ? `${selected.first_name} ${selected.last_name} ไม่มีงานในเดือนนี้`
-            : 'ไม่มีงานในเดือนนี้'}
+          {/* ว่างเพราะตัวกรอง กับ ว่างเพราะไม่มีงานจริง เป็นคนละเรื่อง — บอกให้ตรงเหตุ */}
+          {kind && cases.length > 0
+            ? `เดือนนี้ไม่มีงาน${SERVICE_KIND_LABELS[kind]} (มีงานอื่นอยู่ ${cases.length} วันนัด)`
+            : selected
+              ? `${selected.first_name} ${selected.last_name} ไม่มีงานในเดือนนี้`
+              : 'ไม่มีงานในเดือนนี้'}
         </p>
       )}
 
@@ -148,6 +175,7 @@ export default function CalendarPage() {
                     onClick={() => setOpenId(c.case_id)}
                     title={[
                       c.case_id,
+                      SERVICE_KIND_LABELS[kindOf(c)],
                       CASE_TYPE_LABELS[c.case_type],
                       c.client_name,
                       c.assigned_name ?? 'ยังไม่จับคู่พนักงาน',

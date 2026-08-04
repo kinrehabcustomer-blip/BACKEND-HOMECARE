@@ -221,7 +221,9 @@ export default function CaseModal({ caseId, onClose, onChanged }) {
                       value={[item.format_name, item.grade_name, item.pkg_staff_tier].filter(Boolean).join(' · ')}
                     />
                   )}
-                  <Field label="ค่าจ้างที่ได้รับ" value={item.fee != null && formatBaht(item.fee)} />
+                  <Field label="ค่าบริการที่ได้รับ" value={item.fee != null && formatBaht(item.fee)} />
+                  {/* ยอดที่พนักงานจะเห็นเป็นรายได้ของตัวเองเมื่อปิดเคส — ต้องเห็นก่อนกดปิด */}
+                  <Field label="ค่าจ้างพนักงาน" value={item.staff_pay != null && formatBaht(item.staff_pay)} />
                   <Field label="วันเริ่ม" value={item.start_date && formatDate(item.start_date)} />
                   <Field label="วันสิ้นสุด" value={item.end_date && formatDate(item.end_date)} />
                   {item.started_at && (
@@ -410,7 +412,11 @@ export default function CaseModal({ caseId, onClose, onChanged }) {
                   className={`btn ${status === 'in_progress' ? 'primary' : ''}`}
                   disabled={busy}
                   onClick={() => {
-                    if (!confirm(`ปิดเคส ${item.case_id}?\nเคสจะยังอยู่ในระบบเป็นประวัติ และเปิดใหม่ได้ภายหลัง`)) return;
+                    // ปิดเคส = ยืนยันค่าจ้าง ยอดจะไปโผล่ในหน้าค่าตอบแทนของพนักงานทันที — บอกให้รู้ตัวก่อนกด
+                    const pay = item.staff_pay != null
+                      ? `\nพนักงานจะเห็นค่าจ้าง ${formatBaht(item.staff_pay)} ในสรุปค่าตอบแทนของเดือนนี้`
+                      : '\n⚠ เคสนี้ยังไม่ได้ระบุค่าจ้างพนักงาน — ปิดแล้วพนักงานจะเห็นว่า "ยังไม่ระบุค่าจ้าง"';
+                    if (!confirm(`ปิดเคส ${item.case_id}?${pay}\nเคสจะยังอยู่ในระบบเป็นประวัติ และเปิดใหม่ได้ภายหลัง`)) return;
                     run(() => api.closeCase(item.case_id, new Date().toISOString().slice(0, 10)));
                   }}
                 >

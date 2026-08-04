@@ -32,13 +32,12 @@ export default function LoginPage() {
   return (
     <div className="login-page">
       <form className="login-card" onSubmit={handleSubmit}>
+        {/* โลโก้อย่างเดียว — คำบรรยายใต้โลโก้ซ้ำกับตัวโลโก้ที่มีคำว่า HOME CARE อยู่แล้ว */}
         <div className="login-brand">
-          <span className="brand-mark">KIN</span>
-          <span className="brand-sub">Homecare · ระบบหลังบ้าน</span>
+          <img className="brand-logo login-logo" src="/logo-navbar.webp" alt="KIN Home Care" />
         </div>
 
         <h1>เข้าสู่ระบบ</h1>
-        <p className="muted">ใช้อีเมลของบริษัท และรหัสพนักงานของคุณเป็นรหัสผ่าน</p>
 
         {/* ข้อความส่งต่อมาจากหน้าตั้งรหัสผ่านใหม่ */}
         {location.state?.notice && <p className="notice">{location.state.notice}</p>}

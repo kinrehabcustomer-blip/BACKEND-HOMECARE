@@ -1,6 +1,7 @@
 import { forwardRef, useImperativeHandle, useRef, useState } from 'react';
 import { api } from '../api.js';
-import { ACCEPTED, compressImage, formatFileSize } from '../lib/image.js';
+import FileButton from './FileButton.jsx';
+import { compressImage, formatFileSize } from '../lib/image.js';
 
 /**
  * ช่องใส่รูปพนักงาน — ฝังในฟอร์มพนักงาน ใช้ปุ่มบันทึกร่วมกับฟอร์ม
@@ -72,10 +73,9 @@ const PhotoField = forwardRef(function PhotoField({ employeeId, saved }, ref) {
         {error && <p className="error">{error}</p>}
 
         <div className="photo-actions">
-          <label className="btn">
-            {busy ? 'กำลังย่อรูป…' : preview ? '📎 เปลี่ยนรูป' : '📎 เลือกไฟล์รูป'}
-            <input ref={fileInput} type="file" accept={ACCEPTED} hidden disabled={busy} onChange={pickImage} />
-          </label>
+          <FileButton ref={fileInput} busy={busy} onPick={pickImage}>
+            {preview ? 'เปลี่ยนรูป' : 'เลือกไฟล์รูป'}
+          </FileButton>
 
           {preview && (
             <button type="button" className="btn danger-ghost" onClick={clearImage} disabled={busy}>

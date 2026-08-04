@@ -29,6 +29,32 @@ const SELECT_INVOICE = `
 `;
 
 /**
+ * ราคาเต็มก่อนลดของเคส — กายภาพใช้ราคาเต็มของแพ็คเกจ · Homecare ใช้ค่าบริการในตารางเรท
+ * ว่าง = ไม่ได้ตั้งราคาเต็มไว้ (แพ็คที่ไม่ใช่โปรโมชัน / เคสที่ไม่ได้เลือกบริการ) = ไม่มีส่วนลดให้แสดง
+ */
+const listPriceOf = (c) =>
+  c.service_kind === 'physio' || c.physio_package_id != null
+    ? c.physio_original_price
+    : c.rate_customer_price;
+
+/**
+ * แยกค่าจ้างของเคสเป็น "ยอดก่อนลด + ส่วนลด" เพื่อให้ใบแจ้งหนี้แสดงส่วนลดที่ลูกค้าได้รับ
+ *
+ * fee ของเคสเป็นราคา "หลังลด" อยู่แล้ว (คัดลอกมาจากราคาสุทธิของแพ็คเกจ/เรท) — ถ้าเอาลงใบตรงๆ
+ * บรรทัดส่วนลดจะเป็น 0 เสมอทั้งที่ลูกค้าได้ส่วนลดจริง จึงย้อนกลับด้วยราคาเต็มที่เคสอ้างอิงอยู่
+ * ยอดสุทธิ (total) ยังเท่ากับ fee เสมอ — ตัวเลขที่ลูกค้าต้องจ่ายไม่เปลี่ยน แค่แจกแจงที่มาให้เห็น
+ *
+ * ไม่มีราคาเต็ม หรือราคาเต็มไม่เกินค่าจ้าง (เช่น แก้ค่าจ้างเองให้สูงกว่าราคาตั้ง) = ไม่มีส่วนลด
+ */
+function priceParts(caseRow) {
+  const net = caseRow.fee ?? 0;
+  const list = listPriceOf(caseRow);
+  return list != null && list > net
+    ? { amount: list, discount: list - net }
+    : { amount: net, discount: 0 };
+}
+
+/**
  * "เกินกำหนดชำระ" คำนวณตอนอ่าน ไม่เก็บเป็นสถานะใน DB
  * เพราะมันเปลี่ยนเองตามวันที่ผ่านไป ถ้าเก็บไว้ต้องมีงานคอยไล่อัปเดตทุกวัน แล้วก็มีโอกาสค้างไม่ตรงจริง
  */
@@ -41,8 +67,10 @@ const withComputed = (row) => {
    * ใบร่างระบบซิงก์ให้เองตอนแก้เคส/ผูกลูกค้า แต่ยังไม่ตรงได้ถ้ามีคนแก้ยอดในใบเอง — จึงเช็คทุกสถานะ
    * แล้วให้หน้าเว็บเลือกทางแก้ตามสถานะ (ร่าง/ออกใบแล้ว = กดรีเฟรช · ชำระแล้ว = ยกเลิกแล้วออกใบใหม่)
    */
+  // เทียบกับยอดสุทธิ ไม่ใช่ยอดก่อนลด — amount เป็นราคาเต็มแล้ว ส่วน total คือเงินที่ลูกค้าต้องจ่ายจริง
+  // ซึ่งเป็นตัวที่ต้องตรงกับค่าจ้างของเคส (ดู priceParts)
   const feeStale =
-    row.case_id != null && row.case_fee != null && Number(row.case_fee) !== Number(row.amount);
+    row.case_id != null && row.case_fee != null && Number(row.case_fee) !== Number(row.total);
   const payerStale =
     row.case_id != null && row.case_payer_name != null && row.case_payer_name !== row.bill_to_name;
 
@@ -115,8 +143,11 @@ export const listForCase = (caseId) =>
 export function createFromCase(caseRow, input, actor) {
   const customer = caseRow.customer ?? null;
 
-  const amount = input.amount ?? caseRow.fee ?? 0;
-  const discount = input.discount ?? 0;
+  // ยอดก่อนลด + ส่วนลด แจกแจงมาจากราคาเต็มที่เคสอ้างอิงอยู่ (ดู priceParts)
+  // ส่งยอดมาเองก็ให้ส่วนลดเป็นของผู้เรียกล้วนๆ ไม่เดาจากราคาตั้งของเคส จะได้ไม่ขัดกับยอดที่ตั้งใจ
+  const auto = priceParts(caseRow);
+  const amount = input.amount ?? auto.amount;
+  const discount = input.discount ?? (input.amount != null ? 0 : auto.discount);
 
   const values = {
     case_id: caseRow.case_id,
@@ -171,9 +202,11 @@ const OPEN_STATUSES = "('draft', 'issued')";
 /**
  * เคสถูกแก้ -> ดึงข้อมูลใหม่ลงใบที่ยังแก้ได้ของเคสนั้นให้ตรงกัน
  *
- * ส่วนลดของแต่ละใบไม่ยุ่ง (เป็นข้อตกลงเฉพาะใบ ไม่ได้มาจากเคส) แต่คิดยอดสุทธิใหม่ให้ตามยอดที่เปลี่ยน
+ * ยอดก่อนลด/ส่วนลด ถูกคิดใหม่ทั้งคู่จากราคาของเคส (ดู priceParts) — ทับค่าเดิมในใบ
+ * เพราะสองตัวนี้เป็นคู่กัน ถ้าอัปเดตแค่ตัวเดียวยอดสุทธิจะเพี้ยนทันที
  */
 export async function syncOpenFromCase(caseRow, customer) {
+  const price = priceParts(caseRow);
   const changed = await sql.run(
     `UPDATE invoices
      SET customer_id         = :customer_id,
@@ -182,7 +215,8 @@ export async function syncOpenFromCase(caseRow, customer) {
          bill_to_address     = :bill_to_address,
          service_description = :service_description,
          amount              = :amount,
-         total               = GREATEST(0, :amount - discount),
+         discount            = :discount,
+         total               = GREATEST(0, :amount - :discount),
          updated_at          = ${NOW}
      WHERE case_id = :case_id AND status IN ${OPEN_STATUSES}`,
     {
@@ -193,7 +227,8 @@ export async function syncOpenFromCase(caseRow, customer) {
       bill_to_address:
         customer?.billing_address ?? customer?.address ?? caseRow.address ?? null,
       service_description: describeService(caseRow),
-      amount: caseRow.fee ?? 0,
+      amount: price.amount,
+      discount: price.discount,
     },
   );
   return changed;

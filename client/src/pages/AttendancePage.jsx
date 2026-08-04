@@ -51,14 +51,15 @@ function Payroll() {
   }, [month]);
 
   function exportCsv() {
-    const header = ['รหัสพนักงาน', 'ชื่อ', 'จำนวนกะ', 'ชั่วโมงรวม', 'ค่าตอบแทนประมาณ (บาท)', 'กะที่มีเรท'];
+    const header = ['รหัสพนักงาน', 'ชื่อ', 'เคสที่ปิด', 'ค่าจ้างรวม (บาท)', 'เคสที่ยังไม่ระบุค่าจ้าง', 'จำนวนกะ', 'ชั่วโมงรวม'];
     const lines = rows.map((r) => [
       r.employee_id,
       r.employee_name,
+      r.closed_cases,
+      r.pay,
+      r.unpriced_cases,
       r.shifts,
       (r.minutes / 60).toFixed(1),
-      r.est_pay,
-      `${r.priced_shifts}/${r.shifts}`,
     ]);
     const csv = [header, ...lines].map((a) => a.map(csvCell).join(',')).join('\r\n');
     // ﻿ (BOM) ให้ Excel อ่านภาษาไทยไม่เพี้ยน
@@ -71,9 +72,9 @@ function Payroll() {
     URL.revokeObjectURL(url);
   }
 
-  const totalShifts = rows?.reduce((s, r) => s + r.shifts, 0) ?? 0;
+  const totalCases = rows?.reduce((s, r) => s + r.closed_cases, 0) ?? 0;
   const totalMinutes = rows?.reduce((s, r) => s + r.minutes, 0) ?? 0;
-  const totalPay = rows?.reduce((s, r) => s + r.est_pay, 0) ?? 0;
+  const totalPay = rows?.reduce((s, r) => s + r.pay, 0) ?? 0;
 
   return (
     <>
@@ -85,42 +86,45 @@ function Payroll() {
       </div>
 
       <p className="muted form-hint">
-        ค่าตอบแทนเป็น<strong>ประมาณการ</strong> (staff_pay ของเรทที่เคสใช้ × จำนวนกะ) — ตรงกับเรทรายวัน
-        ส่วนเรทรายเดือนต้องปรับมือ · <strong>ชั่วโมงรวม</strong>คือตัวเลขจริงจากการเช็คอิน/เอาท์
+        ค่าจ้างนับจาก<strong>เคสที่ปิดแล้ว</strong>ในเดือนนั้น (ค่าจ้างที่คัดลอกไว้ในเคสตอนเลือกแพ็คเกจ) —
+        ปิดเคส = ยืนยันยอด แล้วพนักงานจะเห็นตัวเลขนี้ในหน้าของตัวเอง ·
+        <strong>ชั่วโมงรวม</strong>คือเวลาจริงจากการเช็คอิน/เอาท์ ซึ่งเป็นคนละมิติกับค่าจ้าง
       </p>
 
       {error && <p className="error">{error}</p>}
       {!rows ? (
         <p className="muted">กำลังโหลด…</p>
       ) : rows.length === 0 ? (
-        <section className="card empty-state"><p>ยังไม่มีการเช็คอินในเดือนนี้</p></section>
+        <section className="card empty-state"><p>เดือนนี้ยังไม่มีเคสที่ปิดและไม่มีการเช็คอิน</p></section>
       ) : (
         <div className="table-wrap">
           <table className="table">
             <thead>
-              <tr><th>พนักงาน</th><th>จำนวนกะ</th><th>ชั่วโมงรวม</th><th>ค่าตอบแทนประมาณ</th></tr>
+              <tr><th>พนักงาน</th><th>เคสที่ปิด</th><th>ค่าจ้างรวม</th><th>จำนวนกะ</th><th>ชั่วโมงรวม</th></tr>
             </thead>
             <tbody>
               {rows.map((r) => (
                 <tr key={r.employee_id}>
                   <td>{r.employee_name}<span className="cell-sub mono">{r.employee_id}</span></td>
-                  <td>{r.shifts}</td>
-                  <td>{durationText(r.minutes)}</td>
+                  <td>{r.closed_cases}</td>
                   <td>
-                    {formatBaht(r.est_pay)}
-                    {r.priced_shifts < r.shifts && (
-                      <span className="cell-sub">มีเรท {r.priced_shifts}/{r.shifts} กะ</span>
+                    {formatBaht(r.pay)}
+                    {r.unpriced_cases > 0 && (
+                      <span className="cell-sub flag-text">{r.unpriced_cases} เคสยังไม่ระบุค่าจ้าง</span>
                     )}
                   </td>
+                  <td>{r.shifts}</td>
+                  <td>{durationText(r.minutes)}</td>
                 </tr>
               ))}
             </tbody>
             <tfoot>
               <tr>
                 <th>รวม {rows.length} คน</th>
-                <th>{totalShifts}</th>
-                <th>{durationText(totalMinutes)}</th>
+                <th>{totalCases}</th>
                 <th>{formatBaht(totalPay)}</th>
+                <th />
+                <th>{durationText(totalMinutes)}</th>
               </tr>
             </tfoot>
           </table>

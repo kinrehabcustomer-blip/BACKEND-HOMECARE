@@ -23,6 +23,31 @@ import AttendancePage from './pages/AttendancePage.jsx';
 import MyTodayPage from './pages/MyTodayPage.jsx';
 import MyCasesPage from './pages/MyCasesPage.jsx';
 import MyCalendarPage from './pages/MyCalendarPage.jsx';
+import MyAttendancePage from './pages/MyAttendancePage.jsx';
+
+/* ไอคอนเมนูแบบเส้น (Lucide-style) — stroke=currentColor จึง tint ตามสีเมนู (จาง → ทองตอน active) เอง */
+const NAV_ICONS = {
+  dashboard: (<><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /></>),
+  cases: (<><rect x="8" y="2" width="8" height="4" rx="1" /><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" /><path d="M9 12h6M9 16h6" /></>),
+  calendar: (<><rect x="3" y="4" width="18" height="18" rx="2" /><path d="M3 10h18M8 2v4M16 2v4" /></>),
+  clock: (<><circle cx="12" cy="12" r="9" /><path d="M12 8v4l3 2" /></>),
+  invoice: (<><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /><path d="M9 13h6M9 17h6" /></>),
+  users: (<><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" /></>),
+  heart: (<path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.29 1.5 4.04 3 5.5l7 7z" />),
+  home: (<><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><path d="M9 22V12h6v10" /></>),
+  activity: (<path d="M22 12h-4l-3 9L9 3l-3 9H2" />),
+  user: (<><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></>),
+  today: (<><rect x="3" y="4" width="18" height="18" rx="2" /><path d="M3 10h18M8 2v4M16 2v4" /><path d="M9 15l2 2 4-4" /></>),
+};
+
+function NavIcon({ name }) {
+  return (
+    <svg className="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {NAV_ICONS[name]}
+    </svg>
+  );
+}
 
 function Sidebar() {
   const { user, logout } = useAuth();
@@ -37,29 +62,29 @@ function Sidebar() {
   return (
     <aside className="sidebar">
       <div className="brand">
-        <span className="brand-mark">KIN</span>
-        <span className="brand-sub">Homecare · หลังบ้าน</span>
+        <img className="brand-logo" src="/logo-navbar.webp" alt="KIN Home Care" />
       </div>
 
       {/* เมนูจัดการเห็นเฉพาะผู้ดูแลระบบ (ผู้จัดการ/HR) — พนักงานภาคสนามยังไม่มีส่วนของตัวเอง */}
       {isAdmin ? (
         <nav>
-          <NavLink to="/dashboard">ภาพรวม</NavLink>
-          <NavLink to="/cases">เคส</NavLink>
-          <NavLink to="/calendar">ตารางงาน</NavLink>
-          <NavLink to="/attendance">การมาทำงาน</NavLink>
-          <NavLink to="/invoices">ใบแจ้งหนี้</NavLink>
-          <NavLink to="/customers">ลูกค้า</NavLink>
-          <NavLink to="/patients">ผู้รับการดูแล</NavLink>
-          <NavLink to="/packages">แพ็คเกจ Homecare</NavLink>
-          <NavLink to="/physio-packages">แพ็คเกจกายภาพบำบัด</NavLink>
-          <NavLink to="/employees">พนักงาน</NavLink>
+          <NavLink to="/dashboard"><NavIcon name="dashboard" />ภาพรวม</NavLink>
+          <NavLink to="/cases"><NavIcon name="cases" />เคส</NavLink>
+          <NavLink to="/calendar"><NavIcon name="calendar" />ตารางงาน</NavLink>
+          <NavLink to="/attendance"><NavIcon name="clock" />การมาทำงาน</NavLink>
+          <NavLink to="/invoices"><NavIcon name="invoice" />ใบแจ้งหนี้</NavLink>
+          <NavLink to="/customers"><NavIcon name="users" />ลูกค้า</NavLink>
+          <NavLink to="/patients"><NavIcon name="heart" />ผู้รับการดูแล</NavLink>
+          <NavLink to="/packages"><NavIcon name="home" />แพ็คเกจ Homecare</NavLink>
+          <NavLink to="/physio-packages"><NavIcon name="activity" />แพ็คเกจกายภาพบำบัด</NavLink>
+          <NavLink to="/employees"><NavIcon name="user" />พนักงาน</NavLink>
         </nav>
       ) : (
         <nav>
-          <NavLink to="/my-today">งานวันนี้</NavLink>
-          <NavLink to="/my-cases">เคสของฉัน</NavLink>
-          <NavLink to="/my-calendar">ตารางงานของฉัน</NavLink>
+          <NavLink to="/my-today"><NavIcon name="today" />งานวันนี้</NavLink>
+          <NavLink to="/my-cases"><NavIcon name="cases" />เคสของฉัน</NavLink>
+          <NavLink to="/my-calendar"><NavIcon name="calendar" />ตารางงานของฉัน</NavLink>
+          <NavLink to="/my-attendance"><NavIcon name="clock" />ค่าตอบแทนของฉัน</NavLink>
         </nav>
       )}
 
@@ -148,6 +173,7 @@ export default function App() {
           <Route path="/my-today" element={<AppLayout><MyTodayPage /></AppLayout>} />
           <Route path="/my-cases" element={<AppLayout><MyCasesPage /></AppLayout>} />
           <Route path="/my-calendar" element={<AppLayout><MyCalendarPage /></AppLayout>} />
+          <Route path="/my-attendance" element={<AppLayout><MyAttendancePage /></AppLayout>} />
 
           <Route path="/customers" element={<AppLayout admin><CustomerListPage /></AppLayout>} />
           <Route path="/customers/new" element={<AppLayout admin><CustomerFormPage /></AppLayout>} />

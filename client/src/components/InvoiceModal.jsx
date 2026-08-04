@@ -5,8 +5,8 @@ import { INVOICE_STATUS_LABELS, amountText, bahtText, docDate } from '../labels.
 
 /** ข้อมูลผู้ออกเอกสาร — แก้ที่เดียวตรงนี้ เปลี่ยนทุกใบ */
 const ISSUER = {
-  brand: 'KIN',
-  tagline: 'Rehabilitation & Home care',
+  // ไฟล์เดียวกับที่ใช้บนแถบเมนู/หน้าเข้าสู่ระบบ (client/public/) — เปลี่ยนไฟล์ทีเดียวเปลี่ยนทุกที่
+  logo: '/logo-navbar.webp',
   name: 'ศูนย์ฟื้นฟูโรคหลอดเลือดสมองคิน',
   address: '6 ซอยนาคนิวาส 18 ถนนนาคนิวาส แขวงลาดพร้าว เขตลาดพร้าว กรุงเทพมหานคร 10230',
   tel: '020201171',
@@ -200,7 +200,7 @@ export default function InvoiceModal({ invoiceId, onClose, onChanged, onReissued
                   {item.fee_stale && (
                     <p>
                       ⚠ ค่าจ้างในเคสตอนนี้คือ <strong>{amountText(item.case_fee)}</strong>
-                      {' '}แต่ใบนี้เป็น <strong>{amountText(item.amount)}</strong> — ยังไม่ตรงกัน
+                      {' '}แต่ยอดสุทธิของใบนี้เป็น <strong>{amountText(item.total)}</strong> — ยังไม่ตรงกัน
                     </p>
                   )}
                   <p>
@@ -231,10 +231,8 @@ export default function InvoiceModal({ invoiceId, onClose, onChanged, onReissued
                 <p className="inv-printed">วันที่พิมพ์: {printStamp()}</p>
 
                 <div className="inv-header">
-                  {/* ยังไม่มีไฟล์โลโก้ในระบบ — ใช้ตัวอักษรแทนไปก่อน วางไฟล์จริงทับได้ทีหลัง */}
                   <div className="inv-logo">
-                    <span className="inv-logo-mark">{ISSUER.brand}</span>
-                    <span className="inv-logo-sub">{ISSUER.tagline}</span>
+                    <img src={ISSUER.logo} alt={ISSUER.name} />
                   </div>
 
                   <h3 className="inv-title">
@@ -339,6 +337,18 @@ export default function InvoiceModal({ invoiceId, onClose, onChanged, onReissued
 
             <footer className="modal-foot no-print">
               <button className="btn" onClick={() => window.print()}>พิมพ์ / บันทึก PDF</button>
+
+              {/* ใบที่ไม่ตรงกับเคสมีปุ่มรีเฟรชอยู่ในกล่องเตือนแล้ว — ตรงนี้ไว้ให้ใบที่ยอดตรงอยู่แต่
+                  อยากดึงข้อมูลใหม่ (เช่น ใบเก่าที่ยังไม่ได้แจกแจงส่วนลด หรือแก้ที่อยู่ลูกค้าทีหลัง) */}
+              {canEdit && item.case_id && !item.is_stale && (
+                <button
+                  className="btn"
+                  disabled={busy}
+                  onClick={() => run(() => api.refreshInvoice(item.invoice_id))}
+                >
+                  รีเฟรชจากเคส
+                </button>
+              )}
 
               {item.status === 'draft' && (
                 <button className="btn primary" disabled={busy} onClick={() => run(() => api.issueInvoice(item.invoice_id))}>

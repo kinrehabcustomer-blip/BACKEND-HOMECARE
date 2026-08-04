@@ -343,8 +343,9 @@ CREATE TABLE IF NOT EXISTS case_visits (
 
 CREATE INDEX IF NOT EXISTS idx_case_visits_case ON case_visits (case_id);
 CREATE INDEX IF NOT EXISTS idx_case_visits_date ON case_visits (visit_date);
--- เคสเดียวกันจองวันซ้ำไม่ได้ — กดวันเดิมบนปฏิทินซ้ำคือ "ยกเลิกนัด" ไม่ใช่เพิ่มอีกแถว
-CREATE UNIQUE INDEX IF NOT EXISTS idx_case_visits_unique ON case_visits (case_id, visit_date);
+-- เคยมี unique (case_id, visit_date) ตรงนี้ ("กดวันเดิมซ้ำ = ยกเลิกนัด") — ถูกปลดไปแล้วท้ายไฟล์
+-- ตอนขึ้นระบบกะ เพราะวันเดียวมีได้หลายกะ/หลายคน จึงลบคำสั่งสร้างทิ้ง ไม่ใช่แค่ DROP ทีหลัง
+-- ไม่งั้นรันซ้ำรอบถัดไปจะสร้าง index กลับมาบนข้อมูลที่มีวันซ้ำแล้ว แล้วล้มทั้งไฟล์ (23505)
 
 -- ---------- ข้อมูลสำหรับออกบิล (เก็บที่ลูกค้า = ผู้จ่ายเงิน) ----------
 ALTER TABLE customers ADD COLUMN IF NOT EXISTS tax_id          TEXT;  -- เลขผู้เสียภาษี (นิติบุคคล 13 หลัก)
@@ -603,6 +604,40 @@ ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS adjusted_by TEXT
 ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS check_in_photo_data BYTEA;
 ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS check_in_photo_mime TEXT;
 ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS check_in_photo_size INTEGER;
+
+-- ============================================================================
+-- ค่าจ้างพนักงานของเคส — ตัวตั้งของ "สรุปค่าตอบแทน" ที่พนักงานเห็น
+--
+-- คัดลอกจากแพ็คเกจ/เรทตอนเปิดเคส แบบเดียวกับ fee (ค่าบริการฝั่งลูกค้า)
+-- ต้อง snapshot ไม่ใช่อ่านสด เพราะเป็นตัวเลขที่พนักงานเห็นเป็น "รายได้ของตัวเอง"
+-- ถ้าอ่านสดจากตารางเรท วันหนึ่งที่ปรับราคา ยอดของเดือนที่ผ่านไปแล้วจะขยับตาม
+-- ============================================================================
+ALTER TABLE cases ADD COLUMN IF NOT EXISTS staff_pay DOUBLE PRECISION CHECK (staff_pay >= 0);
+
+-- แพ็คเกจกายภาพบำบัดไม่เคยมีช่องค่าจ้าง — เคสสายนี้จึงคำนวณค่าตอบแทนไม่ได้เลย
+-- เพิ่มให้เป็นคู่กับ special_price (ราคาที่ลูกค้าจ่าย) เหมือน pkg_rates ที่มี customer_price คู่กับ staff_pay
+ALTER TABLE physio_packages ADD COLUMN IF NOT EXISTS staff_pay DOUBLE PRECISION CHECK (staff_pay >= 0);
+
+-- เคสเดิมที่เปิดก่อนมีคอลัมน์นี้ — เติมจากเรท/แพ็คเกจที่เคสอ้างอิงอยู่ (เท่าที่ยังหาเจอ)
+-- แตะเฉพาะแถวที่ยังว่าง เคสที่กรอกค่าจ้างเองไว้แล้วไม่ถูกทับ
+-- รันซ้ำได้เรื่อยๆ: ตั้งค่าจ้างในตารางเรท/แพ็คเกจทีหลังแล้วรันอีกครั้ง เคสที่ยังว่างจะได้ค่าไปด้วย
+UPDATE cases c SET staff_pay = r.staff_pay
+  FROM pkg_rates r
+  WHERE c.staff_pay IS NULL
+    AND r.format_id = c.pkg_format_id
+    AND r.grade_id IS NOT DISTINCT FROM c.pkg_grade_id
+    AND r.staff_tier = c.pkg_staff_tier
+    AND r.staff_pay IS NOT NULL;
+
+-- สายกายภาพบำบัดคิดค่าจ้างต่อแพ็คเกจ ไม่มีเรท/ระดับพนักงาน จึงต้องเติมแยกอีกชุด
+UPDATE cases c SET staff_pay = pp.staff_pay
+  FROM physio_packages pp
+  WHERE c.staff_pay IS NULL
+    AND pp.physio_package_id = c.physio_package_id
+    AND pp.staff_pay IS NOT NULL;
+
+-- ค้นเคสที่ปิดแล้วของพนักงานคนหนึ่ง (หน้าสรุปค่าตอบแทน) — ดึงด้วย (assigned_to, status)
+CREATE INDEX IF NOT EXISTS idx_cases_assignee_status ON cases (assigned_to, status);
 
 -- ---------- index ----------
 -- ตารางงานพนักงาน: "กะของฉันในวันที่..." ดึงด้วย (assigned_to, visit_date)

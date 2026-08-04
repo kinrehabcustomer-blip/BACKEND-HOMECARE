@@ -31,13 +31,14 @@ const BLANK = {
   // พิกัดสถานที่ดูแล (geofence เช็คอิน)
   geo_lat: '', geo_lng: '', geofence_radius_m: '',
 
-  start_date: '', end_date: '', fee: '', note: '',
+  // fee = ค่าบริการที่ลูกค้าจ่าย · staff_pay = ค่าจ้างที่พนักงานได้เมื่อปิดเคส (คนละตัวเลข)
+  start_date: '', end_date: '', fee: '', staff_pay: '', note: '',
   assigned_to: '',
 };
 
 // ช่องตัวเลขต้องส่งเป็น number ไม่ใช่ string ไม่งั้น zod ปฏิเสธ
-const NUMERIC = ['fee', 'patient_age', 'weight_kg', 'height_cm', 'pkg_format_id', 'pkg_grade_id', 'physio_package_id',
-  'geo_lat', 'geo_lng', 'geofence_radius_m'];
+const NUMERIC = ['fee', 'staff_pay', 'patient_age', 'weight_kg', 'height_cm', 'pkg_format_id', 'pkg_grade_id',
+  'physio_package_id', 'geo_lat', 'geo_lng', 'geofence_radius_m'];
 
 /** ช่องว่างต้องส่งเป็น null ไม่ใช่ "" */
 const toPayload = (form) =>
@@ -112,6 +113,8 @@ export default function CaseFormPage() {
 
   /**
    * ผู้ใช้เปลี่ยนการเลือกเรท -> ถ้าได้ช่องที่ให้บริการได้ คัดลอกค่าบริการมาเป็นค่าจ้าง (fee)
+   * ใช้ราคา "หลังหักส่วนลด" (net_price) เหมือนฝั่งกายภาพที่คัดลอก special_price
+   * ไม่งั้นส่วนลดที่ตั้งไว้ในตารางเรทจะไม่มีผลกับเคสเลย ลูกค้าโดนเก็บเต็มราคา
    * "คัดลอก" ไม่ใช่ "อ้างอิง" — แก้ค่าจ้างทีหลังได้ และเคสเก่าไม่เปลี่ยนตามเมื่อราคาในตารางเรทถูกแก้
    * ทำเฉพาะตอนผู้ใช้กดเลือกเอง (ไม่ใช่ตอนโหลดเคสมาแก้) จึงไม่ทับ fee ที่บันทึกไว้เดิม
    */
@@ -123,7 +126,11 @@ export default function CaseFormPage() {
       const gid = fmt?.graded ? (merged.pkg_grade_id === '' ? null : Number(merged.pkg_grade_id)) : null;
       if (fmt && merged.pkg_staff_tier && (!fmt.graded || gid)) {
         const r = lookupRate(fmt.format_id, gid, merged.pkg_staff_tier);
-        if (r && r.available && r.customer_price != null) merged.fee = String(r.customer_price);
+        if (r && r.available && r.customer_price != null) {
+          merged.fee = String(r.net_price ?? r.customer_price);
+          // ค่าจ้างพนักงานคัดลอกมาคู่กันเสมอ — เป็นตัวตั้งของยอดที่พนักงานจะเห็นตอนปิดเคส
+          if (r.staff_pay != null) merged.staff_pay = String(r.staff_pay);
+        }
       }
       return merged;
     });
@@ -138,6 +145,26 @@ export default function CaseFormPage() {
   // ปกติเสนอเฉพาะแพ็คเกจที่ยังเปิดขาย — แต่เคสเก่าที่ผูกแพ็คเกจซึ่งปิดขายไปแล้วต้องยังเห็นของตัวเอง
   // ไม่งั้น dropdown จะเด้งเป็นค่าว่างแล้วแพ็คเกจของเคสนั้นหายไปเงียบๆ ตอนกดบันทึก
   const physioOptions = physio.filter((p) => p.active || p.physio_package_id === selPhysioId);
+
+  // ค่าตอบแทนพนักงานที่แพ็คเกจ/เรทซึ่งเลือกอยู่ตอนนี้กำหนดไว้ — ตัวตั้งของช่อง "ค่าจ้างพนักงาน"
+  const packagePay = isPhysio
+    ? selectedPhysio?.staff_pay ?? null
+    : currentRate?.available
+      ? currentRate.staff_pay ?? null
+      : null;
+  const pickedService = isPhysio ? Boolean(selectedPhysio) : Boolean(currentRate);
+
+  /**
+   * ช่องค่าจ้างว่างอยู่ + แพ็คเกจที่เลือกมีค่าตอบแทนกำหนดไว้ -> เติมให้เอง
+   *
+   * ครอบกรณีที่ applySelection/applyPhysio ไม่ครอบ: เปิดฟอร์มแก้เคสเก่าที่ยังไม่มีค่าจ้าง
+   * และเคสที่แพ็คเกจเพิ่งถูกตั้งค่าตอบแทนทีหลัง (ตอนเปิดเคสยังไม่มีตัวเลขให้คัดลอก)
+   * ไม่ทับค่าที่กรอกไว้แล้ว — เคสที่ตกลงค่าจ้างพิเศษต้องคงตัวเลขของตัวเอง
+   */
+  useEffect(() => {
+    if (packagePay == null) return;
+    setForm((prev) => (prev.staff_pay === '' ? { ...prev, staff_pay: String(packagePay) } : prev));
+  }, [packagePay]);
 
   /**
    * เปลี่ยนสายบริการ -> ล้างสิ่งที่เลือกไว้ของสายเดิม
@@ -160,6 +187,7 @@ export default function CaseFormPage() {
       const merged = { ...prev, physio_package_id: value };
       const p = physio.find((x) => x.physio_package_id === Number(value));
       if (p && p.special_price != null) merged.fee = String(p.special_price);
+      if (p && p.staff_pay != null) merged.staff_pay = String(p.staff_pay);
       return merged;
     });
   }
@@ -539,10 +567,12 @@ export default function CaseFormPage() {
           )}
           {isHomecare && currentRate && currentRate.available && currentRate.customer_price != null && (
             <p className="form-hint muted">
-              ค่าบริการ <strong>{formatBaht(currentRate.customer_price)}</strong>
-              {currentRate.staff_pay != null && ` · ค่าตอบแทน ${formatBaht(currentRate.staff_pay)}`}
+              ค่าบริการ <strong>{formatBaht(currentRate.net_price ?? currentRate.customer_price)}</strong>
+              {currentRate.discount_value > 0 &&
+                ` (จากราคาเต็ม ${formatBaht(currentRate.customer_price)} − ส่วนลด ${formatBaht(currentRate.discount_value)})`}
+              {currentRate.staff_pay != null && ` · ค่าตอบแทนพนักงาน ${formatBaht(currentRate.staff_pay)}`}
               {currentRate.margin != null && ` · ส่วนต่าง ${currentRate.margin}%`}
-              {' '}— เติมเป็นค่าจ้างให้แล้ว แก้ได้ในช่องด้านล่าง
+              {' '}— เติมลงช่องด้านล่างให้แล้ว แก้ทับได้
             </p>
           )}
           {isPhysio && selectedPhysio && (
@@ -550,14 +580,49 @@ export default function CaseFormPage() {
               ราคาพิเศษ <strong>{formatBaht(selectedPhysio.special_price)}</strong>
               {selectedPhysio.original_price != null && ` · จากราคาเดิม ${formatBaht(selectedPhysio.original_price)}`}
               {selectedPhysio.avg_per_session != null && ` · ตกเฉลี่ย ${formatBaht(selectedPhysio.avg_per_session)}/ครั้ง`}
-              {' '}— เติมเป็นค่าจ้างให้แล้ว แก้ได้ในช่องด้านล่าง
+              {selectedPhysio.staff_pay != null && ` · ค่าตอบแทนพนักงาน ${formatBaht(selectedPhysio.staff_pay)}`}
+              {selectedPhysio.margin != null && ` · ส่วนต่าง ${selectedPhysio.margin}%`}
+              {' '}— เติมลงช่องด้านล่างให้แล้ว แก้ทับได้
             </p>
           )}
           <label>วันเริ่ม<input type="date" {...field('start_date')} /></label>
           <label>วันสิ้นสุด (ถ้ามี)<input type="date" {...field('end_date')} /></label>
-          <label>ค่าจ้างที่ได้รับ (บาท)
+          <label>ค่าบริการที่ได้รับ (บาท)
             <input type="number" min="0" step="0.01" placeholder="เช่น 15000" {...field('fee')} />
           </label>
+          {/* ยอดที่พนักงานจะเห็นเป็นรายได้ของตัวเองเมื่อปิดเคส — ดึงจากแพ็คเกจให้ แก้ทับได้ */}
+          <label>ค่าจ้างพนักงาน (บาท)
+            <input
+              type="number" min="0" step="0.01"
+              placeholder={packagePay != null ? String(packagePay) : 'ยังไม่มีในแพ็คเกจ'}
+              {...field('staff_pay')}
+            />
+          </label>
+
+          {/* เลือกบริการแล้วแต่แพ็คเกจไม่มีค่าตอบแทน = ดึงมาให้ไม่ได้ ต้องบอกว่าไปตั้งที่ไหน
+              ไม่งั้นจะเข้าใจว่าระบบพัง แล้วปล่อยว่างจนพนักงานเห็น "ยังไม่ระบุค่าจ้าง" ตอนปิดเคส */}
+          {pickedService && packagePay == null && (
+            <p className="form-hint muted">
+              ⚠ {isPhysio ? 'แพ็คเกจกายภาพบำบัด' : 'เรทที่เลือก'}นี้ยังไม่ได้ตั้งค่าตอบแทนพนักงานในระบบ —
+              กรอกเองในช่องด้านบนได้ หรือไปตั้งที่หน้า
+              <Link className="link" to={isPhysio ? '/physio-packages' : '/packages'}>
+                {isPhysio ? ' แพ็คเกจกายภาพบำบัด' : ' แพ็คเกจ Homecare'}
+              </Link>
+              {' '}เพื่อให้เคสอื่นที่ใช้แพ็คเกจเดียวกันได้ด้วย
+            </p>
+          )}
+          {pickedService && packagePay != null && Number(form.staff_pay) !== packagePay && (
+            <p className="form-hint muted">
+              ค่าตอบแทนตามแพ็คเกจคือ <strong>{formatBaht(packagePay)}</strong> — ตอนนี้ใช้ตัวเลขที่กรอกเองแทน{' '}
+              <button
+                type="button"
+                className="inline-link"
+                onClick={() => setForm((prev) => ({ ...prev, staff_pay: String(packagePay) }))}
+              >
+                ใช้ค่าตามแพ็คเกจ
+              </button>
+            </p>
+          )}
         </div>
 
         <h2>ผู้รับการดูแล</h2>
@@ -724,12 +789,13 @@ export default function CaseFormPage() {
         </div>
 
         <h2>พิกัดสถานที่ดูแล (สำหรับเช็คอิน)</h2>
-        <p className="muted form-hint">
-          พิมพ์ชื่อสถานที่เพื่อค้นหา หรือวางลิงก์ Google Maps ก็ได้ — ระบบจะดึงพิกัดและที่อยู่ให้เอง ·
-          เว้นว่างได้ (ไม่ตั้งพิกัด = ระบบจะไม่ตรวจระยะตอนเช็คอิน)
-        </p>
-        <div className="grid">
-          <label className="span-2">ค้นหาสถานที่ หรือวางลิงก์ Google Maps
+        <div className="geo-section">
+          <p className="muted">
+            พิมพ์ชื่อสถานที่เพื่อค้นหา หรือวางลิงก์ Google Maps ก็ได้ — ระบบจะดึงพิกัดและที่อยู่ให้เอง ·
+            เว้นว่างได้ (ไม่ตั้งพิกัด = ระบบจะไม่ตรวจระยะตอนเช็คอิน)
+          </p>
+
+          <label className="geo-label">ค้นหาสถานที่ หรือวางลิงก์ Google Maps
             <input
               placeholder='เช่น "โรงพยาบาลบำรุงราษฎร์" หรือวางลิงก์ https://maps.app.goo.gl/...'
               value={locQuery}
@@ -743,46 +809,43 @@ export default function CaseFormPage() {
               }}
             />
           </label>
-          <div className="span-2 geo-row">
-            <button
-              type="button"
-              className="btn"
-              disabled={finding || !locQuery.trim()}
-              onClick={findLocation}
-            >
+
+          <div className="geo-actions">
+            <button type="button" className="btn" disabled={finding || !locQuery.trim()} onClick={findLocation}>
               {finding ? 'กำลังค้นหา…' : '🔍 ค้นหา / อ่านลิงก์'}
             </button>
             {form.geo_lat !== '' && (
               <button type="button" className="btn danger-ghost" onClick={clearGeo}>ล้างพิกัด</button>
             )}
-            {locError && <span className="error geo-error">{locError}</span>}
           </div>
+
+          {locError && <p className="error geo-error">{locError}</p>}
+
+          {/* พิมพ์ชื่อแล้วเจอหลายที่ — ให้เลือก */}
+          {candidates.length > 0 && (
+            <ul className="customer-results">
+              {candidates.map((c, i) => (
+                <li key={`${c.lat},${c.lng},${i}`}>
+                  <button type="button" onClick={() => applyLocation(c.lat, c.lng, c.formatted)}>
+                    <strong>{c.name ?? c.formatted}</strong>
+                    {c.name && c.formatted && <span className="muted">{c.formatted}</span>}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {/* มีพิกัดแล้ว (เพิ่งค้นหา/อ่านลิงก์ หรือโหลดมาจากเคสเดิม) — โชว์ที่อยู่ + แผนที่ยืนยัน */}
+          {form.geo_lat !== '' && form.geo_lng !== '' && (
+            <div className="geo-result">
+              <p className="geo-set">
+                <span className="geo-set-pin">📍 ตั้งพิกัดแล้ว</span>
+                <span className="geo-set-addr">{resolvedAddress ?? `${form.geo_lat}, ${form.geo_lng}`}</span>
+              </p>
+              <LocationMap lat={Number(form.geo_lat)} lng={Number(form.geo_lng)} />
+            </div>
+          )}
         </div>
-
-        {/* พิมพ์ชื่อแล้วเจอหลายที่ — ให้เลือก */}
-        {candidates.length > 0 && (
-          <ul className="customer-results">
-            {candidates.map((c, i) => (
-              <li key={`${c.lat},${c.lng},${i}`}>
-                <button type="button" onClick={() => applyLocation(c.lat, c.lng, c.formatted)}>
-                  <strong>{c.name ?? c.formatted}</strong>
-                  {c.name && c.formatted && <span className="muted">{c.formatted}</span>}
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-
-        {/* มีพิกัดแล้ว (เพิ่งค้นหา/อ่านลิงก์ หรือโหลดมาจากเคสเดิม) — โชว์ที่อยู่ + แผนที่ยืนยัน */}
-        {form.geo_lat !== '' && form.geo_lng !== '' && (
-          <>
-            <p className="muted form-hint">
-              📍 ตั้งพิกัดแล้ว
-              {resolvedAddress ? <> · {resolvedAddress}</> : <> ({form.geo_lat}, {form.geo_lng})</>}
-            </p>
-            <LocationMap lat={Number(form.geo_lat)} lng={Number(form.geo_lng)} />
-          </>
-        )}
 
         <h2>{isEdit ? 'หมายเหตุ' : 'จับคู่พนักงาน'}</h2>
         <div className="grid">

@@ -32,7 +32,8 @@ const COLUMNS = [
 
   'start_date',
   'end_date',
-  'fee',
+  'fee',       // ค่าบริการที่ลูกค้าจ่าย
+  'staff_pay', // ค่าจ้างที่พนักงานได้ — คัดลอกจากแพ็คเกจ/เรทตอนเลือกบริการ (snapshot เหมือน fee)
 
   // พิกัดสถานที่ดูแล (geofence)
   'geo_lat',
@@ -45,6 +46,10 @@ const COLUMNS = [
 const NOW = `to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD HH24:MI:SS')`;
 
 // ดึงชื่อพนักงานที่รับเคสและชื่อลูกค้ามาด้วยเลย หน้าเว็บจะได้ไม่ต้องยิง API ซ้ำทีละแถว
+//
+// ราคาเต็มก่อนลดของทั้งสองสาย (physio_original_price / rate_customer_price) ดึงมาด้วย
+// เพราะ fee ของเคสเป็น "ราคาสุทธิหลังลด" — ใบแจ้งหนี้ต้องรู้ราคาเต็มถึงจะแยกบรรทัดส่วนลดออกมาได้
+// (ดู invoices/repo.js → priceParts) ส่วนตัวเลขที่ใช้จริงบนใบถูกคัดลอกไว้ในใบตั้งแต่ตอนออก จึงไม่ไหลตามทีหลัง
 const SELECT_CASE = `
   SELECT c.*,
          e.first_name || ' ' || e.last_name AS assigned_name,
@@ -56,13 +61,20 @@ const SELECT_CASE = `
          f.graded                           AS format_graded,
          pp.name                            AS physio_package_name,
          pp.sessions                        AS physio_sessions,
-         pp.duration_months                 AS physio_duration_months
+         pp.duration_months                 AS physio_duration_months,
+         pp.original_price                  AS physio_original_price,
+         pp.staff_pay                       AS physio_staff_pay,
+         r.customer_price                   AS rate_customer_price,
+         r.staff_pay                        AS rate_staff_pay
   FROM cases c
   LEFT JOIN employees e           ON e.employee_id  = c.assigned_to
   LEFT JOIN customers cu          ON cu.customer_id = c.customer_id
   LEFT JOIN pkg_grades g          ON g.grade_id     = c.pkg_grade_id
   LEFT JOIN pkg_service_formats f ON f.format_id    = c.pkg_format_id
   LEFT JOIN physio_packages pp    ON pp.physio_package_id = c.physio_package_id
+  LEFT JOIN pkg_rates r           ON r.format_id  = c.pkg_format_id
+       AND r.grade_id IS NOT DISTINCT FROM c.pkg_grade_id
+       AND r.staff_tier = c.pkg_staff_tier
 `;
 
 /**
@@ -178,12 +190,48 @@ function clearUnusedKind(input) {
   return { ...input, ...HOMECARE, physio_package_id: null }; // ไม่ระบุสาย = ล้างทั้งคู่
 }
 
+/**
+ * ค่าจ้างพนักงานตามแพ็คเกจ/เรทที่เคสเลือกไว้ — คืน null ถ้าไม่ได้เลือกบริการ หรือบริการนั้นยังไม่ตั้งค่าจ้าง
+ *
+ * หาที่ server ไม่รอให้หน้าเว็บส่งมา เพราะเป็นตัวเลขที่กลายเป็นรายได้ของพนักงาน
+ * ปล่อยให้ client เป็นคนคัดลอก แล้ววันหนึ่งหน้าเว็บเวอร์ชันเก่า/หน้าอื่นเรียก API ตรงๆ เคสจะไม่มีค่าจ้างเงียบๆ
+ */
+async function payFromService(input) {
+  if (input.physio_package_id) {
+    const p = await sql.one(
+      'SELECT staff_pay FROM physio_packages WHERE physio_package_id = :id',
+      { id: input.physio_package_id },
+    );
+    return p?.staff_pay ?? null;
+  }
+
+  if (input.pkg_format_id && input.pkg_staff_tier) {
+    const r = await sql.one(
+      `SELECT staff_pay FROM pkg_rates
+       WHERE format_id = :format_id
+         AND grade_id IS NOT DISTINCT FROM :grade_id
+         AND staff_tier = :staff_tier`,
+      {
+        format_id: input.pkg_format_id,
+        grade_id: input.pkg_grade_id ?? null,
+        staff_tier: input.pkg_staff_tier,
+      },
+    );
+    return r?.staff_pay ?? null;
+  }
+
+  return null;
+}
+
 export function create(rawInput) {
   const input = clearUnusedKind(rawInput);
   return transaction(async (tx) => {
     const caseId = await nextCaseId(tx);
     const values = { case_id: caseId };
     for (const col of COLUMNS) values[col] = input[col] ?? null;
+
+    // ไม่ได้ส่งค่าจ้างมา = ใช้ของแพ็คเกจ · ส่งตัวเลขมาเอง (รวม 0) = เคารพตามนั้น
+    if (values.staff_pay == null) values.staff_pay = await payFromService(input);
 
     // ไม่มีช่องกรอกชื่อเคสแล้ว — ปกติหน้าเว็บส่งชื่อที่ประกอบจากแพ็คเกจ+ผู้ป่วยมาให้
     // ถ้าเรียก API ตรงๆ โดยไม่ส่ง title มา ใช้ชื่อผู้ป่วยแทน เพื่อไม่ให้ชน NOT NULL
@@ -216,6 +264,13 @@ export async function update(caseId, rawInput) {
 
   const values = { case_id: caseId };
   for (const col of fields) values[col] = input[col] ?? null;
+
+  // ส่งช่องค่าจ้างมาเป็นค่าว่างทั้งที่เลือกบริการไว้ = ให้ใช้ของแพ็คเกจ (เหมือนตอนสร้างเคส)
+  // ดูจากสิ่งที่เลือกไว้ "หลังแก้" เพราะ PATCH ส่งมาบางฟิลด์ได้ (เช่น แก้แค่หมายเหตุ)
+  if (fields.includes('staff_pay') && values.staff_pay == null) {
+    const current = await findById(caseId);
+    values.staff_pay = await payFromService({ ...current, ...input });
+  }
 
   await sql.run(
     `UPDATE cases
@@ -603,43 +658,123 @@ export async function adjustVisit(caseId, visitId, input, adminId) {
 }
 
 /**
- * สรุปการมาทำงานรายเดือนต่อพนักงาน (payroll) — นับกะที่เช็คเอาท์แล้ว + รวมนาที
- * est_pay = ผลรวม staff_pay ของเรทที่เคสอ้างอิง (คิดต่อกะ) — เป็น "ประมาณการ" ตรงกับเรทรายวัน
- *   ส่วนเรทรายเดือน staff_pay เป็นต่อเดือน (ไม่ใช่ต่อกะ) จึงต้องปรับมือ — priced_shifts บอกว่าครอบกี่กะ
- * ชั่วโมงจริง (minutes) เป็นตัวเลขที่เชื่อได้เสมอ ต่างจาก est_pay ที่ขึ้นกับกติกาค่าจ้างของธุรกิจ
+ * เดือน (โซนไทย) ที่เคสถูกปิด — closed_at เก็บเป็น TEXT เวลา UTC จึงต้องบอกโซนให้ Postgres ก่อนแปลง
+ * เคสที่ปิดตอนเช้ามืดของไทยจะได้ไม่ตกไปนับเป็นเดือนก่อนหน้า
  */
-export function attendanceReport(month) {
-  return sql
-    .all(
+const CLOSED_MONTH_TH = `to_char((c.closed_at::timestamp AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM')`;
+
+/**
+ * สรุปค่าตอบแทนรายเดือนต่อพนักงาน (payroll)
+ *
+ * ค่าจ้างนับจาก "เคสที่ admin ปิดแล้ว" ไม่ใช่ต่อกะ — ปิดเคส = ยืนยันว่างานจบและยอดนี้ถูกต้อง
+ * ก่อนปิดยังไม่นับเป็นรายได้ เพราะยอดอาจเปลี่ยนได้ (เปลี่ยนแพ็คเกจ/ยกเลิกกลางคัน)
+ * ใช้ cases.staff_pay ที่คัดลอกไว้ตอนเปิดเคส ไม่ใช่อ่านสดจากตารางเรท ยอดเดือนที่ผ่านไปแล้วจึงไม่ขยับตามการปรับราคา
+ *
+ * ชั่วโมง/จำนวนกะ ยังนับจากการเช็คอินจริงเหมือนเดิม — เป็นคนละมิติกับค่าจ้าง
+ * (พนักงานอาจเช็คอินหลายกะในเคสเดียว หรือทำกะในเดือนหนึ่งแล้วเคสไปปิดอีกเดือน)
+ *
+ * employeeId = ดูของคนเดียว (ฝั่งพนักงานภาคสนามที่เห็นได้เฉพาะของตัวเอง) — ไม่ส่ง = ทุกคน (admin)
+ */
+export async function attendanceReport(month, employeeId = null) {
+  // ใส่เงื่อนไข (และพารามิเตอร์) เฉพาะตอนใช้จริง — ตัวแปลง :name ไล่หาชื่อจาก SQL ที่มีอยู่จริงเท่านั้น
+  const params = { month };
+  if (employeeId) params.emp = employeeId;
+
+  const [hours, payouts] = await Promise.all([
+    sql.all(
       `SELECT v.checked_in_by AS employee_id,
               e.first_name || ' ' || e.last_name AS employee_name,
               COUNT(*) FILTER (WHERE v.check_out_at IS NOT NULL) AS shifts,
               COALESCE(ROUND(SUM(EXTRACT(EPOCH FROM (v.check_out_at - v.check_in_at)) / 60)
-                       FILTER (WHERE v.check_out_at IS NOT NULL)), 0) AS minutes,
-              COALESCE(SUM(r.staff_pay) FILTER (WHERE v.check_out_at IS NOT NULL AND r.staff_pay IS NOT NULL), 0) AS est_pay,
-              COUNT(*) FILTER (WHERE v.check_out_at IS NOT NULL AND r.staff_pay IS NOT NULL) AS priced_shifts
+                       FILTER (WHERE v.check_out_at IS NOT NULL)), 0) AS minutes
        FROM case_visits v
        JOIN employees e ON e.employee_id = v.checked_in_by
-       JOIN cases c     ON c.case_id     = v.case_id
-       LEFT JOIN pkg_rates r ON r.format_id = c.pkg_format_id
-            AND r.grade_id IS NOT DISTINCT FROM c.pkg_grade_id
-            AND r.staff_tier = c.pkg_staff_tier
        WHERE v.check_in_at IS NOT NULL
          AND to_char(v.check_in_at AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM') = :month
-       GROUP BY v.checked_in_by, e.first_name, e.last_name
-       ORDER BY employee_name`,
-      { month },
+         ${employeeId ? 'AND v.checked_in_by = :emp' : ''}
+       GROUP BY v.checked_in_by, e.first_name, e.last_name`,
+      params,
+    ),
+    sql.all(
+      `SELECT c.assigned_to AS employee_id,
+              e.first_name || ' ' || e.last_name AS employee_name,
+              COUNT(*) AS closed_cases,
+              COALESCE(SUM(c.staff_pay), 0) AS pay,
+              COUNT(*) FILTER (WHERE c.staff_pay IS NULL) AS unpriced_cases
+       FROM cases c
+       JOIN employees e ON e.employee_id = c.assigned_to
+       WHERE c.status = 'closed' AND c.closed_at IS NOT NULL
+         AND ${CLOSED_MONTH_TH} = :month
+         ${employeeId ? 'AND c.assigned_to = :emp' : ''}
+       GROUP BY c.assigned_to, e.first_name, e.last_name`,
+      params,
+    ),
+  ]);
+
+  // คนที่มีกะแต่ยังไม่มีเคสปิด (และกลับกัน) ต้องขึ้นทั้งคู่ — รวมสองฝั่งด้วย employee_id
+  const merged = new Map();
+  const slot = (id, name) => {
+    if (!merged.has(id)) {
+      merged.set(id, {
+        employee_id: id,
+        employee_name: name,
+        shifts: 0,
+        minutes: 0,
+        closed_cases: 0,
+        pay: 0,
+        unpriced_cases: 0,
+      });
+    }
+    return merged.get(id);
+  };
+
+  for (const r of hours) {
+    const row = slot(r.employee_id, r.employee_name);
+    row.shifts = Number(r.shifts);
+    row.minutes = Number(r.minutes);
+  }
+  for (const r of payouts) {
+    const row = slot(r.employee_id, r.employee_name);
+    row.closed_cases = Number(r.closed_cases);
+    row.pay = Number(r.pay);
+    row.unpriced_cases = Number(r.unpriced_cases);
+  }
+
+  return [...merged.values()].sort((a, b) => a.employee_name.localeCompare(b.employee_name, 'th'));
+}
+
+/**
+ * เคสที่ปิดในเดือนนั้นของพนักงานคนหนึ่ง พร้อมค่าจ้างของแต่ละเคส — ที่มาของยอดรวมในสรุปค่าตอบแทน
+ * ให้พนักงานกางดูได้ว่ายอดมาจากเคสไหนบ้าง ไม่ใช่เห็นแค่ตัวเลขก้อนเดียว
+ */
+export function payoutCases(month, employeeId) {
+  return sql
+    .all(
+      `SELECT c.case_id, c.title, c.client_name, c.case_type, c.service_kind,
+              c.closed_at, c.start_date, c.end_date, c.staff_pay,
+              f.name  AS format_name, g.name AS grade_name,
+              pp.name AS physio_package_name, pp.sessions AS physio_sessions
+       FROM cases c
+       LEFT JOIN pkg_service_formats f ON f.format_id = c.pkg_format_id
+       LEFT JOIN pkg_grades g          ON g.grade_id  = c.pkg_grade_id
+       LEFT JOIN physio_packages pp    ON pp.physio_package_id = c.physio_package_id
+       WHERE c.assigned_to = :emp AND c.status = 'closed' AND c.closed_at IS NOT NULL
+         AND ${CLOSED_MONTH_TH} = :month
+       ORDER BY c.closed_at DESC`,
+      { emp: employeeId, month },
     )
-    .then((rows) =>
-      rows.map((r) => ({
-        employee_id: r.employee_id,
-        employee_name: r.employee_name,
-        shifts: Number(r.shifts),
-        minutes: Number(r.minutes),
-        est_pay: Number(r.est_pay),
-        priced_shifts: Number(r.priced_shifts),
-      })),
-    );
+    .then((rows) => rows.map((r) => ({ ...r, staff_pay: r.staff_pay == null ? null : Number(r.staff_pay) })));
+}
+
+/** เคสที่ยังทำอยู่ของพนักงานคนหนึ่ง — ยังไม่ปิด จึงยังไม่นับเป็นรายได้ (โชว์แค่จำนวน ไม่โชว์ยอด) */
+export function openCaseCount(employeeId) {
+  return sql
+    .one(
+      `SELECT COUNT(*) AS n FROM cases
+       WHERE assigned_to = :emp AND status IN ('assigned', 'in_progress')`,
+      { emp: employeeId },
+    )
+    .then((r) => Number(r.n));
 }
 
 /**
@@ -665,7 +800,7 @@ export async function calendar({ year, month, employee_id }) {
   if (employee_id) params.employee_id = employee_id;
 
   const visits = await sql.all(
-    `SELECT c.case_id, c.title, c.case_type, c.status, c.service_kind,
+    `SELECT c.case_id, c.title, c.case_type, c.status, c.service_kind, c.physio_package_id,
             c.client_name, c.assigned_to,
             e.first_name || ' ' || e.last_name AS assigned_name,
             e.position                         AS assigned_position,

@@ -126,6 +126,8 @@ export const api = {
   // ตารางงาน + เช็คอิน/เอาท์
   myToday: () => request('/my/today'),
   myAttendance: (month) => request(`/my/attendance${month ? `?month=${month}` : ''}`),
+  /** สรุปค่าตอบแทนรายเดือนของตัวเอง — คืนแถวเดียว (ตัวเลขของผู้เรียกเท่านั้น) */
+  myAttendanceReport: (month) => request(`/my/attendance/report${month ? `?month=${month}` : ''}`),
   checkIn: (visitId, body) => request(`/my/visits/${visitId}/check-in`, { method: 'POST', body }),
   checkOut: (visitId, body) => request(`/my/visits/${visitId}/check-out`, { method: 'POST', body }),
   /** URL รูปเซลฟี่ตอนเช็คอิน — ใส่ใน <img src> ได้ (คุกกี้ session ไปด้วยอัตโนมัติ) */

@@ -22,6 +22,8 @@ export const physioPackageSchema = z
       .nullable()
       .optional(),
     discount_amount: z.number().nonnegative('ส่วนลดต้องไม่ติดลบ').nullable().optional(),
+    // ค่าจ้างพนักงานต่อแพ็คเกจ — เคสคัดลอกไปเป็น cases.staff_pay ตอนเลือกแพ็คเกจ
+    staff_pay: z.number().nonnegative('ค่าจ้างพนักงานต้องไม่ติดลบ').nullable().optional(),
     active: z.boolean().optional(),
     note: z.string().trim().max(1000).nullable().optional(),
     sort_order: z.number().int().optional(),
@@ -43,6 +45,7 @@ export const physioPackageUpdateSchema = z
     special_price: z.number().nonnegative(),
     discount_percent: z.number().min(0, 'ส่วนลดต้องไม่ติดลบ').max(100, 'ส่วนลดต้องไม่เกิน 100%').nullable(),
     discount_amount: z.number().nonnegative('ส่วนลดต้องไม่ติดลบ').nullable(),
+    staff_pay: z.number().nonnegative('ค่าจ้างพนักงานต้องไม่ติดลบ').nullable(),
     active: z.boolean(),
     note: z.string().trim().max(1000).nullable(),
     sort_order: z.number().int(),

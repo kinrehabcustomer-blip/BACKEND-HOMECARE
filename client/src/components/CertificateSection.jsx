@@ -1,5 +1,6 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { api } from '../api.js';
+import FileButton from './FileButton.jsx';
 import { ACCEPTED, compressImage, formatFileSize } from '../lib/image.js';
 import { formatDate } from '../labels.js';
 
@@ -280,17 +281,9 @@ const CertificateSection = forwardRef(function CertificateSection({ employeeId }
             </div>
           </>
         ) : (
-          <label className="btn">
-            {busy ? 'กำลังย่อรูป…' : '📎 แนบรูปใบรับรอง (ไม่บังคับ)'}
-            <input
-              ref={fileInput}
-              type="file"
-              accept={ACCEPTED}
-              hidden
-              disabled={busy}
-              onChange={pickImage}
-            />
-          </label>
+          <FileButton ref={fileInput} busy={busy} onPick={pickImage}>
+            แนบรูปใบรับรอง <span className="file-btn-hint">(ไม่บังคับ)</span>
+          </FileButton>
         )}
       </div>
 

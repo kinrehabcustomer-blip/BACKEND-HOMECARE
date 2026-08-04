@@ -9,6 +9,7 @@ const BLANK = {
   original_price: '',
   discount_percent: '',
   discount_amount: '',
+  staff_pay: '',
   active: true,
   note: '',
 };
@@ -25,16 +26,19 @@ function discountOf(price, percent, amount) {
   return Math.min(Math.max(raw, 0), price);
 }
 
-/** ราคาสุทธิ/ส่วนลด/ตกเฉลี่ย ที่โชว์ในฟอร์มระหว่างพิมพ์ — สูตรเดียวกับที่ server ใช้ */
+/** ราคาสุทธิ/ส่วนลด/ตกเฉลี่ย/กำไร ที่โชว์ในฟอร์มระหว่างพิมพ์ — สูตรเดียวกับที่ server ใช้ */
 function preview(form) {
   const sessions = toNum(form.sessions);
   const full = toNum(form.original_price);
+  const pay = toNum(form.staff_pay);
   const discount = discountOf(full, toNum(form.discount_percent), toNum(form.discount_amount));
   const net = full != null ? full - discount : null;
   return {
     discount,
     net,
     avg: sessions > 0 && net != null ? Math.round(net / sessions) : null,
+    // กำไรคิดจากราคาที่ขายจริง (หลังลด) ไม่ใช่ราคาตั้ง — ตั้งส่วนลดแล้วกำไรต้องลดตาม
+    profit: net != null && pay != null ? net - pay : null,
   };
 }
 
@@ -101,6 +105,7 @@ export default function PhysioPackagesPage() {
               <th>ราคาเต็ม (บาท)</th>
               <th>ราคาสุทธิ (บาท)</th>
               <th>ตกเฉลี่ย (บาท/ครั้ง)</th>
+              <th>ค่าจ้างพนักงาน (บาท)</th>
               <th>จัดการ</th>
             </tr>
           </thead>
@@ -124,7 +129,17 @@ export default function PhysioPackagesPage() {
                     </span>
                   )}
                 </td>
-                <td className="physio-avg">{formatBaht(p.avg_per_session)}</td>
+                {/* ช่องที่ยังไม่ตั้งต้องเห็นชัด — ไม่มีค่าจ้าง = เคสสายกายภาพคำนวณค่าตอบแทนให้พนักงานไม่ได้เลย */}
+                <td className="physio-pay">
+                  {p.staff_pay == null ? (
+                    <span className="pay-missing">ยังไม่ตั้ง</span>
+                  ) : (
+                    <>
+                      {formatBaht(p.staff_pay)}
+                      {p.margin != null && <span className="cell-sub">กำไร {p.margin}%</span>}
+                    </>
+                  )}
+                </td>
                 <td className="physio-actions">
                   <button className="btn tiny" title="เลื่อนขึ้น" disabled={i === 0} onClick={() => move(i, -1)}>↑</button>
                   <button className="btn tiny" title="เลื่อนลง" disabled={i === items.length - 1} onClick={() => move(i, 1)}>↓</button>
@@ -135,7 +150,7 @@ export default function PhysioPackagesPage() {
             ))}
             {items.length === 0 && (
               <tr>
-                <td colSpan={5} className="empty">ยังไม่มีแพ็คเกจ — กด "+ เพิ่มแพ็คเกจ" เพื่อเริ่ม</td>
+                <td colSpan={6} className="empty">ยังไม่มีแพ็คเกจ — กด "+ เพิ่มแพ็คเกจ" เพื่อเริ่ม</td>
               </tr>
             )}
           </tbody>
@@ -168,6 +183,7 @@ function PackageForm({ initial, onClose, onSaved }) {
     original_price: initial.original_price ?? initial.special_price ?? '',
     discount_percent: initial.discount_percent ?? '',
     discount_amount: initial.discount_amount ?? '',
+    staff_pay: initial.staff_pay ?? '',
     sessions: initial.sessions ?? '',
     note: initial.note ?? '',
   });
@@ -175,7 +191,7 @@ function PackageForm({ initial, onClose, onSaved }) {
   const [error, setError] = useState(null);
 
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
-  const { avg, discount, net } = preview(form);
+  const { avg, discount, net, profit } = preview(form);
   const canSave = form.name.trim() && toNum(form.sessions) > 0 && toNum(form.original_price) != null;
 
   useEffect(() => {
@@ -201,6 +217,7 @@ function PackageForm({ initial, onClose, onSaved }) {
         discount_amount: toNum(form.discount_amount),
         // server คิดราคาสุทธิเองจาก (ราคาเต็ม − ส่วนลด) — ส่งไปด้วยเพื่อให้ schema เดิมผ่าน
         special_price: net,
+        staff_pay: toNum(form.staff_pay),
         active: form.active,
         note: form.note.trim() || null,
       };
@@ -274,6 +291,16 @@ function PackageForm({ initial, onClose, onSaved }) {
               />
             </label>
 
+            {/* ค่าจ้างพนักงานต่อแพ็คเกจ — เคสคัดลอกไปใช้เป็นยอดที่พนักงานได้รับเมื่อปิดเคส
+                ไม่กรอก = เคสสายกายภาพจะคำนวณค่าตอบแทนให้พนักงานไม่ได้ */}
+            <label className="span-2">ค่าจ้างพนักงาน (บาท)
+              <input
+                type="number" min="0" step="100" value={form.staff_pay}
+                placeholder="ยอดที่พนักงานได้รับต่อแพ็คเกจนี้"
+                onChange={(e) => set('staff_pay', e.target.value)}
+              />
+            </label>
+
             {/* ยืนยันตัวเลขให้เห็นก่อนกดบันทึก — ตกเฉลี่ยคือคอลัมน์ที่ลูกค้าใช้เทียบความคุ้ม */}
             <div className="physio-preview span-2">
               <div>
@@ -287,6 +314,10 @@ function PackageForm({ initial, onClose, onSaved }) {
               <div>
                 <span className="field-label">ตกเฉลี่ย</span>
                 <strong>{avg != null ? `${formatBaht(avg)} / ครั้ง` : '—'}</strong>
+              </div>
+              <div>
+                <span className="field-label">กำไรที่บริษัทได้</span>
+                <strong>{profit != null ? formatBaht(profit) : '—'}</strong>
               </div>
             </div>
 

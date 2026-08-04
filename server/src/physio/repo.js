@@ -3,7 +3,7 @@ import { sql, transaction } from '../db/index.js';
 const NOW = `to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD HH24:MI:SS')`;
 const COLUMNS = [
   'name', 'sessions', 'duration_months', 'original_price', 'special_price',
-  'discount_percent', 'discount_amount', 'active', 'note', 'sort_order',
+  'discount_percent', 'discount_amount', 'staff_pay', 'active', 'note', 'sort_order',
 ];
 
 /**
@@ -40,10 +40,15 @@ const withComputed = (p) => {
   // แพ็คเกจเก่าที่ตั้งไว้ก่อนมีช่องส่วนลด — เดาส่วนลดจากผลต่างราคาเต็มกับราคาที่ขายจริง
   const legacy = p.original_price != null ? Math.max(0, p.original_price - p.special_price) : 0;
 
+  // ส่วนต่างที่บริษัทได้จากราคาที่ขายจริง — สูตรเดียวกับตารางเรท Homecare (packages/repo.js)
+  // คิดตอนอ่าน ไม่เก็บซ้ำ จะได้ไม่มีวันขัดกับราคา/ค่าจ้างที่แก้ทีหลัง
+  const computable = p.special_price > 0 && p.staff_pay != null;
+
   return {
     ...p,
     avg_per_session: p.sessions > 0 ? Math.round(p.special_price / p.sessions) : null,
     discount: explicit > 0 ? explicit : legacy, // ส่วนลดเป็นบาทที่คิดได้จริง
+    margin: computable ? Math.round(((p.special_price - p.staff_pay) / p.special_price) * 100) : null,
   };
 };
 
@@ -68,9 +73,9 @@ export async function createPackage(input) {
   const row = await sql.one(
     `INSERT INTO physio_packages
        (name, sessions, duration_months, original_price, special_price,
-        discount_percent, discount_amount, active, note, sort_order)
+        discount_percent, discount_amount, staff_pay, active, note, sort_order)
      VALUES (:name, :sessions, :duration_months, :original_price, :special_price,
-             :discount_percent, :discount_amount, :active, :note, :sort_order)
+             :discount_percent, :discount_amount, :staff_pay, :active, :note, :sort_order)
      RETURNING *`,
     {
       name: input.name,
@@ -80,6 +85,7 @@ export async function createPackage(input) {
       special_price: resolveSpecialPrice(input),
       discount_percent: input.discount_percent ?? null,
       discount_amount: input.discount_amount ?? null,
+      staff_pay: input.staff_pay ?? null,
       active: input.active ?? true,
       note: input.note ?? null,
       sort_order: input.sort_order ?? next,

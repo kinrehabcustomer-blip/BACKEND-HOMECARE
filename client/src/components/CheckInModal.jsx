@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
+import FileButton from './FileButton.jsx';
 import { getPosition } from '../lib/geo.js';
-import { compressImage, ACCEPTED } from '../lib/image.js';
+import { compressImage } from '../lib/image.js';
 import { serviceName } from './MyCaseModal.jsx';
 import LocationMap from './LocationMap.jsx';
 import { CASE_TYPE_LABELS } from '../labels.js';
@@ -120,11 +121,10 @@ export default function CheckInModal({ visit, onDone, onClose }) {
                 </button>
               </div>
             ) : (
-              <label className="btn">
-                {photoBusy ? 'กำลังย่อรูป…' : '📷 ถ่ายรูป'}
-                {/* capture=user = เปิดกล้องหน้าบนมือถือ */}
-                <input type="file" accept={ACCEPTED} capture="user" hidden disabled={photoBusy} onChange={pickPhoto} />
-              </label>
+              // capture=user = เปิดกล้องหน้าบนมือถือ
+              <FileButton icon="camera" capture="user" busy={photoBusy} onPick={pickPhoto}>
+                ถ่ายรูป
+              </FileButton>
             )}
             <p className="muted">ช่วยยืนยันว่าคุณอยู่หน้างานจริง</p>
           </section>

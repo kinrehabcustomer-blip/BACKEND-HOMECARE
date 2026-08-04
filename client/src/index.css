@@ -10,20 +10,23 @@ html {
 }
 
 :root {
-  --bg: #f6f7f9;
+  --bg: #f7f4ee;
   --surface: #ffffff;
-  --surface-2: #fafbfc;      /* พื้นยกเบาๆ เช่น หัวตาราง แถวที่ hover กล่อง meta */
-  --border: #e3e6ea;
-  --border-hover: #d3d8dd;
-  --divider: #f0f1f3;        /* เส้นคั่นแบบ dashed จางๆ */
-  --text: #1c2024;
-  --muted: #6b7280;
-  --text-faint: #b3b8bf;     /* ข้อความจางสุด เช่น "ไม่ได้ระบุ" */
-  --brand: #0f7b6c;
-  --brand-hover: #0c665a;
-  --brand-soft: #e6f3f1;
+  --surface-2: #f4efe5;      /* พื้นยกเบาๆ เช่น หัวตาราง แถวที่ hover กล่อง meta */
+  --border: #e7dfd1;
+  --border-hover: #d8ccb7;
+  --divider: #f1eadd;        /* เส้นคั่นแบบ dashed จางๆ */
+  --text: #241f17;
+  --muted: #857b6a;
+  --text-faint: #b7ac97;     /* ข้อความจางสุด เช่น "ไม่ได้ระบุ" */
+  --brand: #a97b1e;          /* ทอง KIN (เฉดเดียวกับโลโก้) — เข้มพอให้อ่านออกบนพื้นสว่าง */
+  --brand-hover: #8c6414;
+  --brand-soft: #f6ecd6;     /* ทองจางๆ สำหรับ nav ที่เลือกอยู่ / ไฮไลต์ */
+  --brand-ink: #ffffff;      /* ตัวอักษรบนปุ่มสีทอง */
   --danger: #c0392b;
   --radius: 0.625rem;
+  --radius-card: 1rem;       /* การ์ดมนกว่าปุ่ม/ช่องกรอก (แนว dashboard) */
+  --font-mono: ui-monospace, 'Cascadia Mono', 'Segoe UI', monospace;
 
   font-family: 'Sarabun', 'Segoe UI', system-ui, sans-serif;
   color: var(--text);
@@ -32,19 +35,20 @@ html {
 /* โหมดกลางคืน — สลับด้วยปุ่มในหน้าตั้งค่า (data-theme บน <html>)
    ทุกอย่างในไฟล์นี้อ้างตัวแปรพวกนี้ จึงเปลี่ยนธีมได้ทั้งระบบจากจุดเดียว */
 :root[data-theme='dark'] {
-  --bg: #14181b;
-  --surface: #1e2429;
-  --surface-2: #262d33;
-  --border: #313a42;
-  --border-hover: #3d4750;
-  --divider: #2a323a;
-  --text: #e6e9ec;
-  --muted: #9aa4ad;
-  --text-faint: #6b727b;
-  --brand: #2bb39c;          /* เขียวสว่างขึ้น อ่านออกบนพื้นเข้ม */
-  --brand-hover: #35c4ab;
-  --brand-soft: #16302b;     /* เขียวเข้มจางๆ สำหรับ nav ที่เลือกอยู่ */
-  --danger: #ef6b57;
+  --bg: #131210;             /* ดำอุ่นเกือบสนิท (แนว dashboard) */
+  --surface: #1c1a15;        /* การ์ดสีน้ำตาลเข้ม อุ่นแบบ KIN */
+  --surface-2: #241f18;
+  --border: #322c20;
+  --border-hover: #443c2b;
+  --divider: #262115;
+  --text: #f3efe6;           /* ขาวอุ่น */
+  --muted: #a89e8b;
+  --text-faint: #6f6858;
+  --brand: #d7a63f;          /* ทองสว่าง เด่นบนพื้นดำ */
+  --brand-hover: #e6b954;
+  --brand-soft: #2a2216;     /* ทองเข้มจางๆ สำหรับ nav ที่เลือกอยู่ */
+  --brand-ink: #1a160c;      /* ตัวอักษรเข้มบนปุ่มทองสว่าง */
+  --danger: #ff5a4d;
 }
 /* กล่องข้อความสามแบบต้องเข้มลงในโหมดกลางคืน ไม่งั้นเป็นแผ่นสว่างจ้ากลางจอมืด */
 :root[data-theme='dark'] .error  { background: #3a201d; border-color: #5c322c; color: #f0a89c; }
@@ -134,10 +138,10 @@ body {
   white-space: pre-wrap; /* error จาก zod มีหลายบรรทัด */
 }
 
-.notice { background: #e3f5ec; border-color: #b8e3cd; color: #1c7a4d; }
+.notice { background: #e3f5ec; border-color: #b8e3cd; border-left: 3px solid #1c7a4d; color: #1c7a4d; }
 
 /* แถบเตือนว่ายังใช้รหัสผ่านเริ่มต้นอยู่ */
-.banner { background: #fff3dc; border-color: #f2ddb0; color: #9a6700; margin-bottom: 1.125rem; }
+.banner { background: #fff3dc; border-color: #f2ddb0; border-left: 3px solid #d99400; color: #9a6700; margin-bottom: 1.125rem; }
 .banner a { color: #9a6700; font-weight: 700; }
 
 /* ---------- sidebar ---------- */
@@ -187,19 +191,55 @@ body {
 }
 .sidebar-btn { width: 100%; justify-content: center; margin-bottom: 0.5rem; }
 .sidebar-btn:last-child { margin-bottom: 0; }
-.brand { display: flex; flex-direction: column; gap: 2px; margin-bottom: 1.75rem; }
+/* โลโก้แนวนอน ชิดซ้ายบนไซด์บาร์สีขาว (ไม่มีพื้นรอง) */
+.brand { display: flex; align-items: flex-start; margin-bottom: 1.75rem; }
 .brand-mark { font-size: 1.5rem; font-weight: 800; letter-spacing: 2px; color: var(--brand); }
+.brand-logo { height: 2.5rem; width: auto; max-width: 100%; display: block; object-fit: contain; }
+.login-logo { height: 2.75rem; margin: 0 auto; }
 .brand-sub { font-size: 0.75rem; color: var(--muted); }
+/* เมนู minimal + มีลูกเล่น — ไอคอนหน้าเมนู, hover ขยับ+ไอคอนเด้ง, ตัวที่เลือกมีแถบทองด้านซ้าย */
+.sidebar nav { display: flex; flex-direction: column; gap: 0.1875rem; }
 .sidebar nav a {
-  display: block;
-  padding: 0.625rem 0.75rem;
-  border-radius: var(--radius);
-  color: var(--text);
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.625rem;
+  color: var(--muted);
   text-decoration: none;
-  font-weight: 600;
+  font-weight: 500;
+  font-size: 0.9375rem;
+  line-height: 1.5;
+  transition: color 0.15s ease, background 0.15s ease, transform 0.15s ease;
 }
-.sidebar nav a:hover { background: var(--bg); }
-.sidebar nav a.active { background: var(--brand-soft); color: var(--brand); }
+/* ไอคอนเส้น — sizing คงที่, ขยับเบาๆ ด้วย cubic-bezier แบบสปริง */
+.nav-ico {
+  width: 1.25rem;
+  height: 1.25rem;
+  flex-shrink: 0;
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.sidebar nav a:hover { background: var(--surface-2); color: var(--text); transform: translateX(3px); }
+.sidebar nav a:hover .nav-ico { transform: scale(1.15); }
+.sidebar nav a.active {
+  background: var(--brand-soft);
+  color: var(--brand);
+  font-weight: 700;
+}
+.sidebar nav a.active .nav-ico { transform: scale(1.12); }
+/* แถบทองด้านซ้ายบอก "อยู่ตรงนี้" */
+.sidebar nav a.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 0.25rem;
+  height: 1.15rem;
+  border-radius: 0 0.25rem 0.25rem 0;
+  background: var(--brand);
+}
 /* ข้อความแทนเมนูสำหรับพนักงานภาคสนาม (ไม่มีสิทธิ์เข้าส่วนจัดการ) */
 .sidebar-note { flex: 1; padding: 0.75rem; font-size: 0.8125rem; line-height: 1.5; }
 .sidebar-note { margin-top: 1.75rem; font-size: 0.75rem; line-height: 1.7; color: var(--muted); }
@@ -232,7 +272,7 @@ body {
 .link:hover { text-decoration: underline; }
 .strike { text-decoration: line-through; }
 
-.error { background: #fdecea; border-color: #f5c6c2; color: var(--danger); }
+.error { background: #fdecea; border-color: #f5c6c2; border-left: 3px solid var(--danger); color: var(--danger); }
 /* ในหน้าที่มีเนื้อหาต่อท้าย (ฟอร์ม/ตาราง) ต้องเว้นระยะใต้กล่อง — ในการ์ด login ใช้ gap ของ flex อยู่แล้ว */
 .content .error { margin-bottom: 1rem; }
 
@@ -253,10 +293,30 @@ body {
 }
 .btn:hover:not(:disabled) { background: var(--bg); }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
-.btn.primary { background: var(--brand); border-color: var(--brand); color: #fff; }
+.btn.primary { background: var(--brand); border-color: var(--brand); color: var(--brand-ink); }
 .btn.primary:hover:not(:disabled) { background: var(--brand-hover); }
 .btn.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
 .btn.danger-ghost { color: var(--danger); border-color: transparent; }
+
+/* ปุ่มเลือกไฟล์ — เส้นประบอกว่าเป็น "ช่องรอไฟล์" ไม่ใช่ปุ่มสั่งงาน (ภาษาเดียวกับกรอบรูปว่าง .cert-thumb.empty)
+   แตะแล้วเปลี่ยนเป็นสีทองของแบรนด์ ให้รู้ว่ากดได้ ต่างจากปุ่มทั่วไปที่แค่พื้นเปลี่ยนเฉดจางๆ */
+.file-btn {
+  gap: 0.5rem;
+  border-style: dashed;
+  background: none;
+  color: var(--muted);
+  font-weight: 600;
+}
+.file-btn:hover:not([aria-disabled='true']) {
+  border-color: var(--brand);
+  background: var(--brand-soft);
+  color: var(--brand);
+}
+.file-btn-ico { width: 1.05rem; height: 1.05rem; flex-shrink: 0; }
+/* "(ไม่บังคับ)" ต่อท้าย — เบากว่าข้อความหลัก จะได้ไม่แย่งสายตาไปจากสิ่งที่ปุ่มทำ */
+.file-btn-hint { margin-left: 0.25rem; font-weight: 400; opacity: 0.75; }
+/* label ไม่รับ :disabled (ไม่ใช่ปุ่มจริง) — สถานะปิดจึงอ่านจาก aria-disabled ที่ตัว component ตั้งให้ */
+.file-btn[aria-disabled='true'] { opacity: 0.45; cursor: not-allowed; }
 
 .toolbar { display: flex; gap: 0.625rem; margin-bottom: 1rem; }
 .toolbar .search { flex: 1; min-width: 0; }
@@ -597,7 +657,7 @@ select:focus { background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xm
 /* ตัวเลขนำของหน้า — ตัวเดียวในทั้งหน้า ใช้ฟอนต์เดียวกับที่เหลือ ไม่ใช้ tabular-nums เพราะเลขจะดูโปร่ง */
 .hero { display: flex; flex-direction: column; justify-content: center; padding-right: 1.75rem; border-right: 1px solid var(--border); }
 .hero-label { font-size: 0.8125rem; color: var(--muted); }
-.hero-value { font-size: 3.25rem; font-weight: 700; line-height: 1.1; letter-spacing: -1px; }
+.hero-value { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 3.25rem; font-weight: 700; line-height: 1.1; letter-spacing: -1px; }
 
 .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: 0.75rem; flex: 1; }
 .tile {
@@ -611,8 +671,10 @@ select:focus { background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xm
   color: var(--text);
 }
 .tile:hover { background: var(--surface-2); border-color: var(--border-hover); }
+/* ช่องตัวเลขที่กดไม่ได้ (ไม่ใช่ลิงก์) — ไม่ต้องขยับตอน hover จะได้ไม่หลอกว่ากดได้ */
+.tile.is-static:hover { background: none; border-color: var(--border); }
 .tile-label { display: flex; align-items: center; gap: 0.4375rem; font-size: 0.8125rem; color: var(--muted); }
-.tile-value { font-size: 1.75rem; font-weight: 700; line-height: 1.2; }
+.tile-value { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 1.75rem; font-weight: 700; line-height: 1.2; }
 .tile-share { font-size: 0.75rem; color: var(--muted); }
 
 /* จุดสีประจำสถานะ — อยู่คู่กับข้อความเสมอ สีไม่ใช่ตัวสื่อความหมายเพียงอย่างเดียว */
@@ -665,7 +727,7 @@ select:focus { background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xm
   margin-bottom: 1rem;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-card);
 }
 .card h2 { margin: 0 0 0.875rem; font-size: 0.9375rem; color: var(--muted); }
 .card h2:not(:first-child) { margin-top: 1.625rem; }
@@ -912,7 +974,7 @@ select:focus { background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xm
   gap: 0.75rem;
   padding: 0.75rem 0.875rem;
   background: var(--brand-soft);
-  border: 1px solid #b8ded6;
+  border: 1px solid var(--border-hover);
   border-radius: var(--radius);
 }
 .picked-customer p { margin: 0.125rem 0 0; }
@@ -1010,7 +1072,7 @@ select:focus { background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xm
   }
   .brand { margin-bottom: 0; flex-shrink: 0; }
   .brand-sub { display: none; } /* ประหยัดที่ — เหลือแค่ "KIN" */
-  .sidebar nav { display: flex; gap: 0.25rem; }
+  .sidebar nav { display: flex; flex-direction: row; gap: 0.25rem; }
   .sidebar nav a { padding: 0.5rem 0.75rem; white-space: nowrap; }
 
   .sidebar-foot {
@@ -1129,6 +1191,9 @@ select:focus { background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xm
 .rate-edit-row input { width: 100%; min-width: 0; padding: 0.2rem 0.35rem; text-align: right; }
 .rate-edit .btn.tiny { flex-shrink: 0; }
 .rate-net { font-size: 0.625rem; font-weight: 600; color: var(--brand); text-align: right; }
+/* ค่าจ้างพนักงานใต้ราคาขาย — เบากว่าราคาเพราะเป็นข้อมูลประกอบ ไม่ใช่ตัวเลขที่ลูกค้าเห็น */
+.rate-staff { display: block; font-size: 0.6875rem; font-weight: 400; color: var(--muted); }
+.rate-staff.is-missing { color: var(--danger); }
 
 /* ---------- ปฏิทินตารางงาน ---------- */
 /* เส้นตารางทำด้วย gap 1px บนพื้นสีเส้น — ได้เส้นบางสม่ำเสมอโดยไม่ต้องคุม border ของทุกช่อง */
@@ -1194,7 +1259,7 @@ select:focus { background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xm
   padding: 0.0625rem 0.25rem;
   border-radius: 62.4375rem;
   background: var(--brand);
-  color: #fff;
+  color: var(--brand-ink);
   text-align: center;
 }
 
@@ -1258,8 +1323,8 @@ select:focus { background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xm
 .inv-printed { text-align: right; font-size: 0.6875rem; }
 .inv-header { text-align: center; }
 .inv-logo { display: flex; flex-direction: column; align-items: center; margin: 0.5rem 0 0.75rem; }
-.inv-logo-mark { font-size: 1.75rem; font-weight: 800; letter-spacing: 0.5rem; color: #b08a3e; }
-.inv-logo-sub { font-size: 0.625rem; letter-spacing: 0.08rem; color: #8a7040; }
+/* โลโก้ไฟล์เดียวกับแถบเมนู — กำหนดความสูงไว้ ไม่งั้นตอนสั่งพิมพ์รูปจะกินพื้นที่ตามขนาดจริงของไฟล์ */
+.inv-logo img { height: 3.25rem; width: auto; max-width: 60%; object-fit: contain; }
 .inv-title { margin: 0; font-size: 1.25rem; }
 .inv-copy { font-weight: 600; }
 .inv-org { margin-top: 0.25rem !important; }
@@ -1393,7 +1458,7 @@ select:focus { background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xm
 
 /* วันที่จองแล้ว — สีบอกสถานะ: นัดไว้ = เขียวแบรนด์, ไปแล้ว = เขียวเข้ม, ไม่ได้ไป = แดงจาง */
 .mini-cal-day.is-booked { color: #fff; border-color: transparent; font-weight: 700; }
-.mini-cal-day.visit-scheduled { background: var(--brand); }
+.mini-cal-day.visit-scheduled { background: var(--brand); color: var(--brand-ink); }
 .mini-cal-day.visit-done      { background: #1c7a4d; }
 .mini-cal-day.visit-cancelled { background: #c0504d; }
 
@@ -1442,6 +1507,11 @@ select:focus { background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xm
 .physio-special { color: var(--danger); font-weight: 700; font-size: 1rem; }
 .physio-special .cell-sub { color: var(--muted); font-weight: 400; }
 .physio-avg { font-weight: 600; }
+/* ค่าจ้างพนักงาน — น้ำหนักปกติ (ข้อมูลภายใน ไม่ใช่ราคาที่ลูกค้าเห็น)
+   ช่องที่ยังไม่ตั้งขึ้นสีแดง เพราะเคสสายกายภาพจะคำนวณค่าตอบแทนให้พนักงานไม่ได้เลย */
+.physio-pay { font-weight: 600; }
+.physio-pay .cell-sub { color: var(--muted); font-weight: 400; }
+.pay-missing { color: var(--danger); font-weight: 600; font-size: 0.8125rem; }
 
 .physio-actions { white-space: nowrap; }
 .physio-actions .btn { margin-left: 0.25rem; }
@@ -1526,12 +1596,33 @@ select:focus { background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xm
 /* แผนที่ยืนยันจุดเช็คอิน — สูงคงที่ ดูอย่างเดียว */
 .location-map {
   width: 100%;
-  height: 9rem;
-  margin-bottom: 1rem;
+  height: 10rem;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   overflow: hidden;
 }
+
+/* ---------- ตั้งพิกัดสถานที่ดูแล (ฟอร์มเคส) ---------- */
+/* เรียงแนวตั้งด้วย gap สม่ำเสมอ — เลิกใช้ .form-hint/.grid ที่มี margin ลบจนตัวอักษรทับกัน */
+.geo-section { display: flex; flex-direction: column; gap: 0.75rem; }
+.geo-section > p { margin: 0; }
+.geo-label {
+  display: flex; flex-direction: column; gap: 0.3125rem;
+  font-size: 0.8125rem; font-weight: 600; color: var(--muted);
+}
+.geo-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.geo-error { margin: 0; font-size: 0.8125rem; }
+.geo-result { display: flex; flex-direction: column; gap: 0.5rem; }
+
+/* แถบยืนยัน "ตั้งพิกัดแล้ว" — ไอคอน/ป้ายกับที่อยู่แยกคนละส่วน ตัดบรรทัดได้ ไม่ทับกัน */
+.geo-set {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.25rem 0.5rem;
+  margin: 0; padding: 0.5rem 0.75rem;
+  background: var(--brand-soft); border-radius: var(--radius);
+  font-size: 0.8125rem;
+}
+.geo-set-pin { color: var(--brand); font-weight: 700; white-space: nowrap; }
+.geo-set-addr { min-width: 0; color: var(--text); }
 
 .checkin-photo h3 { font-size: 0.875rem; margin: 0 0 0.5rem; }
 .checkin-photo-preview { display: flex; align-items: flex-start; gap: 0.75rem; }
