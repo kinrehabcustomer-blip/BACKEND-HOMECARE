@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api.js';
+import { useToast } from '../toast.jsx';
 import CaseVisitsModal from './CaseVisitsModal.jsx';
 import InvoiceModal from './InvoiceModal.jsx';
 import {
@@ -30,6 +31,8 @@ const weightHeight = (c) =>
     .filter(Boolean)
     .join(' / ');
 
+const FOCUSABLE = 'a[href], button:not(:disabled), input, select, textarea, [tabindex]:not([tabindex="-1"])';
+
 function Field({ label, value, mono }) {
   const empty = value == null || value === '' || value === false;
   return (
@@ -42,7 +45,69 @@ function Field({ label, value, mono }) {
   );
 }
 
-export default function CaseModal({ caseId, onClose, onChanged }) {
+/**
+ * แก้ช่องที่เปลี่ยนบ่อยที่สุดได้ตรงนี้เลย ไม่ต้องออกไปหน้าฟอร์มเต็ม (ที่ยาว 800 บรรทัด)
+ * สถานะไม่อยู่ในนี้เพราะเปลี่ยนผ่านปุ่ม action เฉพาะทาง (เริ่ม/ปิด/ยกเลิก) ที่คุมลำดับสถานะไว้แล้ว
+ */
+function QuickEdit({ item, onDone, onCancel }) {
+  const toast = useToast();
+  const [form, setForm] = useState({
+    start_date: item.start_date ?? '',
+    end_date: item.end_date ?? '',
+    fee: item.fee ?? '',
+    client_phone: item.client_phone ?? '',
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+
+  const field = (key) => ({
+    value: form[key],
+    onChange: (e) => setForm((prev) => ({ ...prev, [key]: e.target.value })),
+  });
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setSaving(true);
+    setError(null);
+    try {
+      // ช่องว่างต้องเป็น null ไม่ใช่ "" ไม่งั้นไม่ผ่าน validation ของวันที่/เบอร์โทร
+      const blank = (v) => (String(v).trim() === '' ? null : String(v).trim());
+      await api.updateCase(item.case_id, {
+        start_date: blank(form.start_date),
+        end_date: blank(form.end_date),
+        fee: form.fee === '' ? null : Number(form.fee),
+        client_phone: blank(form.client_phone),
+      });
+      toast('บันทึกแล้ว');
+      onDone();
+    } catch (err) {
+      setError(err.message);
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form className="quick-edit" onSubmit={handleSubmit}>
+      {error && <p className="error">{error}</p>}
+      <div className="grid cols-2">
+        <label>วันเริ่ม<input type="date" {...field('start_date')} /></label>
+        <label>วันสิ้นสุด<input type="date" {...field('end_date')} /></label>
+        <label>ค่าบริการ (บาท)<input type="number" min="0" step="0.01" {...field('fee')} /></label>
+        <label>เบอร์ติดต่อคุณญาติ<input inputMode="tel" {...field('client_phone')} /></label>
+      </div>
+      <div className="quick-edit-actions">
+        <button className="btn" type="button" onClick={onCancel} disabled={saving}>ยกเลิก</button>
+        <button className="btn primary" type="submit" disabled={saving}>
+          {saving ? 'กำลังบันทึก…' : 'บันทึก'}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, onChanged }) {
+  const boxRef = useRef(null);
+  const [editing, setEditing] = useState(false);
   const [item, setItem] = useState(null);
   const [staff, setStaff] = useState([]);
   const [pick, setPick] = useState('');
@@ -71,6 +136,7 @@ export default function CaseModal({ caseId, onClose, onChanged }) {
     let cancelled = false;
     setItem(null);
     setError(null);
+    setEditing(false); // เปลี่ยนเคสแล้วต้องปิดโหมดแก้ ไม่งั้นค่าที่ค้างอยู่จะไปทับข้อมูลเคสใหม่
 
     Promise.all([
       api.getCase(caseId),
@@ -93,17 +159,59 @@ export default function CaseModal({ caseId, onClose, onChanged }) {
     };
   }, [caseId]);
 
+  /*
+   * ล็อกไม่ให้หน้าหลังเลื่อนตาม + คืนโฟกัสกลับไปที่แถวเดิมตอนปิด (ไม่ใช่ดีดกลับไปต้นหน้า)
+   * ต้องแยกเป็น effect ที่ทำงานครั้งเดียวตลอดอายุกล่อง — ถ้าไปรวมกับ effect ที่มี deps
+   * โฟกัสจะถูกคืนออกไปข้างนอกทุกครั้งที่ deps เปลี่ยน (เช่น ตอนเปิด popup วันนัด)
+   */
   useEffect(() => {
-    // popup วันนัดเปิดอยู่ = ให้ Escape ปิดตัวนั้นก่อน ไม่ใช่ปิดทั้งสองชั้นพร้อมกัน
-    const onKeyDown = (e) => e.key === 'Escape' && !visitsOpen && onClose();
-    document.addEventListener('keydown', onKeyDown);
+    const previous = document.activeElement;
+    boxRef.current?.focus();
     document.body.style.overflow = 'hidden';
 
     return () => {
-      document.removeEventListener('keydown', onKeyDown);
       document.body.style.overflow = '';
+      previous?.focus?.();
     };
-  }, [onClose, visitsOpen]);
+  }, []);
+
+  /* ปิดด้วย Esc + ขังโฟกัสไว้ในกล่อง — ถ้าไม่ขัง Tab จะวิ่งไปโดนลิงก์ที่อยู่หลังฉาก */
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        // popup ย่อยเปิดอยู่ = ให้มันปิดตัวเองก่อน ไม่ใช่ปิดทั้งสองชั้นพร้อมกัน
+        if (visitsOpen || openInvoiceId) return;
+        e.stopPropagation();
+        // กำลังแก้อยู่ Esc ควรยกเลิกการแก้ก่อน ไม่ใช่ปิดทั้งกล่องจนสิ่งที่พิมพ์ไว้หาย
+        if (editing) setEditing(false);
+        else onClose();
+        return;
+      }
+
+      if (e.key !== 'Tab' || visitsOpen || openInvoiceId) return;
+
+      const items = [...(boxRef.current?.querySelectorAll(FOCUSABLE) ?? [])].filter((el) => el.offsetParent !== null);
+      if (items.length === 0) return;
+
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (e.shiftKey && (document.activeElement === first || document.activeElement === boxRef.current)) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [onClose, visitsOpen, openInvoiceId, editing]);
+
+  // ตำแหน่งของเคสนี้ในรายการหน้าปัจจุบัน — ใช้ทำปุ่มดูเคสก่อนหน้า/ถัดไป
+  const index = siblings.indexOf(caseId);
+  const prevId = index > 0 ? siblings[index - 1] : null;
+  const nextId = index >= 0 && index < siblings.length - 1 ? siblings[index + 1] : null;
 
   /** ทุก action ใช้ทางเดียวกัน: ยิง API -> โหลดเคสใหม่ -> บอกหน้ารายการให้รีเฟรช */
   async function run(action) {
@@ -154,7 +262,15 @@ export default function CaseModal({ caseId, onClose, onChanged }) {
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label="รายละเอียดเคส"
+        tabIndex={-1}
+        ref={boxRef}
+        onClick={(e) => e.stopPropagation()}
+      >
         {!item && !error && <p className="muted modal-loading">กำลังโหลด…</p>}
         {!item && error && <pre className="error modal-loading">{error}</pre>}
 
@@ -169,7 +285,17 @@ export default function CaseModal({ caseId, onClose, onChanged }) {
                 <p className="muted">{item.customer_name ?? item.client_name}</p>
                 <span className={`badge case-${item.status}`}>{CASE_STATUS_LABELS[item.status]}</span>
               </div>
-              <button className="modal-close" onClick={onClose} aria-label="ปิด">×</button>
+
+              <div className="modal-head-actions">
+                {/* ไล่ดูทีละเคสได้โดยไม่ต้องปิด-เปิดใหม่ (เฉพาะเคสที่อยู่ในหน้ารายการปัจจุบัน) */}
+                {siblings.length > 1 && (
+                  <span className="modal-nav">
+                    <button className="btn icon-btn" disabled={!prevId} onClick={() => onNavigate?.(prevId)} title="เคสก่อนหน้า" aria-label="เคสก่อนหน้า">‹</button>
+                    <button className="btn icon-btn" disabled={!nextId} onClick={() => onNavigate?.(nextId)} title="เคสถัดไป" aria-label="เคสถัดไป">›</button>
+                  </span>
+                )}
+                <button className="modal-close" onClick={onClose} aria-label="ปิด">×</button>
+              </div>
             </header>
 
             <div className="modal-body">
@@ -202,7 +328,25 @@ export default function CaseModal({ caseId, onClose, onChanged }) {
               </section>
 
               <section>
-                <h3>รายละเอียดเคส</h3>
+                <div className="section-head">
+                  <h3>รายละเอียดเคส</h3>
+                  {/* เคสที่ปิด/ยกเลิกแล้วเป็นข้อเท็จจริงที่จบไปแล้ว — ต้องเปิดเคสใหม่ก่อนถึงจะแก้ได้ */}
+                  {!editing && !terminal && (
+                    <button className="btn tiny" onClick={() => setEditing(true)}>แก้ด่วน</button>
+                  )}
+                </div>
+
+                {editing && (
+                  <QuickEdit
+                    item={item}
+                    onCancel={() => setEditing(false)}
+                    onDone={() => {
+                      setEditing(false);
+                      run(() => Promise.resolve()); // โหลดเคสใหม่ + บอกหน้ารายการให้รีเฟรช
+                    }}
+                  />
+                )}
+
                 <div className="field-grid">
                   <Field label="ประเภทเคส" value={CASE_TYPE_LABELS[item.case_type]} />
                   <Field label="ประเภทบริการ" value={SERVICE_KIND_LABELS[item.service_kind]} />

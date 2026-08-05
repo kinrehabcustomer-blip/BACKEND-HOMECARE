@@ -1,7 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { useAuth } from '../auth.jsx';
+import { useToast } from '../toast.jsx';
 import { INVOICE_STATUS_LABELS, amountText, bahtText, docDate } from '../labels.js';
+
+const FOCUSABLE = 'a[href], button:not(:disabled), input, select, textarea, [tabindex]:not([tabindex="-1"])';
 
 /** ข้อมูลผู้ออกเอกสาร — แก้ที่เดียวตรงนี้ เปลี่ยนทุกใบ */
 const ISSUER = {
@@ -43,8 +46,10 @@ const PAYMENT_METHODS = ['เงินสด', 'โอน', 'บัตรเค�
 
 const today = () => new Date().toISOString().slice(0, 10);
 
-export default function InvoiceModal({ invoiceId, onClose, onChanged, onReissued }) {
+export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onClose, onChanged, onReissued }) {
   const { user } = useAuth();
+  const toast = useToast();
+  const boxRef = useRef(null);
   const [item, setItem] = useState(null);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -68,15 +73,57 @@ export default function InvoiceModal({ invoiceId, onClose, onChanged, onReissued
     };
   }, [invoiceId]);
 
+  /*
+   * ล็อกไม่ให้หน้าหลังเลื่อนตาม + คืนโฟกัสกลับไปที่แถวเดิมตอนปิด (ไม่ใช่ดีดกลับไปต้นหน้า)
+   * แยกเป็น effect ที่ทำงานครั้งเดียวตลอดอายุกล่อง — ถ้าไปรวมกับ effect ที่มี deps
+   * โฟกัสจะถูกคืนออกไปข้างนอกทุกครั้งที่ deps เปลี่ยน
+   */
   useEffect(() => {
-    const onKeyDown = (e) => e.key === 'Escape' && onClose();
-    document.addEventListener('keydown', onKeyDown);
+    const previous = document.activeElement;
+    boxRef.current?.focus();
     document.body.style.overflow = 'hidden';
+
     return () => {
-      document.removeEventListener('keydown', onKeyDown);
       document.body.style.overflow = '';
+      previous?.focus?.();
     };
-  }, [onClose]);
+  }, []);
+
+  /* ปิดด้วย Esc + ขังโฟกัสไว้ในกล่อง — ถ้าไม่ขัง Tab จะวิ่งไปโดนลิงก์ที่อยู่หลังฉาก */
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        // ฟอร์มรับชำระเปิดอยู่ Esc ควรพับฟอร์มก่อน ไม่ใช่ปิดทั้งกล่องจนวันที่/วิธีจ่ายที่เลือกไว้หาย
+        if (payOpen) setPayOpen(false);
+        else onClose();
+        return;
+      }
+
+      if (e.key !== 'Tab') return;
+
+      const items = [...(boxRef.current?.querySelectorAll(FOCUSABLE) ?? [])].filter((el) => el.offsetParent !== null);
+      if (items.length === 0) return;
+
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (e.shiftKey && (document.activeElement === first || document.activeElement === boxRef.current)) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [onClose, payOpen]);
+
+  // ตำแหน่งของใบนี้ในรายการหน้าปัจจุบัน — ใช้ทำปุ่มดูใบก่อนหน้า/ถัดไป
+  const index = siblings.indexOf(invoiceId);
+  const prevId = index > 0 ? siblings[index - 1] : null;
+  const nextId = index >= 0 && index < siblings.length - 1 ? siblings[index + 1] : null;
 
   async function run(action) {
     setBusy(true);
@@ -110,10 +157,12 @@ export default function InvoiceModal({ invoiceId, onClose, onChanged, onReissued
 
     run(async () => {
       await api.deleteInvoice(item.invoice_id);
+      toast(`ลบ ${item.invoice_id} แล้ว`);
       if (!item.case_id) return onClose();
 
       if (confirm('ลบแล้ว — ออกใบใหม่ตามข้อมูลปัจจุบันของเคสเลยไหม?')) {
         const created = await api.createInvoice({ case_id: item.case_id });
+        toast(`ออกใบใหม่ ${created.invoice_id} แล้ว`);
         onReissued?.(created.invoice_id);
       } else {
         onClose(); // ใบที่เปิดอยู่ถูกลบไปแล้ว ค้างหน้าไว้ไม่ได้
@@ -132,7 +181,15 @@ export default function InvoiceModal({ invoiceId, onClose, onChanged, onReissued
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal modal-wide" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="modal modal-wide"
+        role="dialog"
+        aria-modal="true"
+        aria-label="ใบแจ้งหนี้"
+        tabIndex={-1}
+        ref={boxRef}
+        onClick={(e) => e.stopPropagation()}
+      >
         {!item && !error && <p className="muted modal-loading">กำลังโหลด…</p>}
         {!item && error && <pre className="error modal-loading">{error}</pre>}
 
@@ -146,7 +203,16 @@ export default function InvoiceModal({ invoiceId, onClose, onChanged, onReissued
                   {item.is_overdue ? 'เกินกำหนดชำระ' : INVOICE_STATUS_LABELS[item.status]}
                 </span>
               </div>
-              <button className="modal-close" onClick={onClose} aria-label="ปิด">×</button>
+              <div className="modal-head-actions">
+                {/* ไล่ดูทีละใบได้โดยไม่ต้องปิด-เปิดใหม่ (เฉพาะใบที่อยู่ในหน้ารายการปัจจุบัน) */}
+                {siblings.length > 1 && (
+                  <span className="modal-nav">
+                    <button className="btn icon-btn" disabled={!prevId} onClick={() => onNavigate?.(prevId)} title="ใบก่อนหน้า" aria-label="ใบก่อนหน้า">‹</button>
+                    <button className="btn icon-btn" disabled={!nextId} onClick={() => onNavigate?.(nextId)} title="ใบถัดไป" aria-label="ใบถัดไป">›</button>
+                  </span>
+                )}
+                <button className="modal-close" onClick={onClose} aria-label="ปิด">×</button>
+              </div>
             </header>
 
             <div className="modal-body">
@@ -177,6 +243,7 @@ export default function InvoiceModal({ invoiceId, onClose, onChanged, onReissued
                             paid_at: payDate,
                             payment_method: payMethod,
                           });
+                          toast(`รับชำระ ${amountText(item.total)} บาท แล้ว`);
                           setPayOpen(false);
                         })
                       }
@@ -336,6 +403,12 @@ export default function InvoiceModal({ invoiceId, onClose, onChanged, onReissued
             </div>
 
             <footer className="modal-foot no-print">
+              {/* ปุ่มลบดันไปชิดซ้ายสุด แยกออกจากกลุ่มปุ่มที่กดกันจริง — ไม่ให้มือไปโดนตอนเล็งปุ่มข้างๆ
+                  (อีกปุ่มหนึ่งอยู่ในกล่องเตือน "ไม่ตรงกับเคส" ซึ่งเป็นคนละบริบท จงใจให้อยู่ตรงนั้น) */}
+              <button className="btn danger-ghost foot-danger" disabled={busy} onClick={deleteInvoice}>
+                ลบใบนี้
+              </button>
+
               <button className="btn" onClick={() => window.print()}>พิมพ์ / บันทึก PDF</button>
 
               {/* ใบที่ไม่ตรงกับเคสมีปุ่มรีเฟรชอยู่ในกล่องเตือนแล้ว — ตรงนี้ไว้ให้ใบที่ยอดตรงอยู่แต่
@@ -351,7 +424,14 @@ export default function InvoiceModal({ invoiceId, onClose, onChanged, onReissued
               )}
 
               {item.status === 'draft' && (
-                <button className="btn primary" disabled={busy} onClick={() => run(() => api.issueInvoice(item.invoice_id))}>
+                <button
+                  className="btn primary"
+                  disabled={busy}
+                  onClick={() => run(async () => {
+                    await api.issueInvoice(item.invoice_id);
+                    toast(`ออกใบ ${item.invoice_id} แล้ว`);
+                  })}
+                >
                   ออกใบแจ้งหนี้
                 </button>
               )}
@@ -364,10 +444,6 @@ export default function InvoiceModal({ invoiceId, onClose, onChanged, onReissued
                   บันทึกการชำระเงิน
                 </button>
               )}
-              {/* ลบได้ทุกสถานะ — ออกใบผิดแล้วลบทิ้งออกใหม่ ไม่เหลือใบยกเลิกรกรายการ */}
-              <button className="btn danger-ghost" disabled={busy} onClick={deleteInvoice}>
-                ลบใบนี้
-              </button>
             </footer>
           </>
         )}

@@ -187,7 +187,8 @@ export const api = {
 
   // ---------- ใบแจ้งหนี้ ----------
   listInvoices: (params = {}) => request(`/invoices?${new URLSearchParams(params)}`),
-  invoiceSummary: () => request('/invoices/summary'),
+  /** ยอดสรุปใบแจ้งหนี้ — ส่งตัวกรองชุดเดียวกับ listInvoices เพื่อให้ตัวเลขตรงกับรายการที่แสดงอยู่ */
+  invoiceSummary: (params = {}) => request(`/invoices/summary?${new URLSearchParams(params)}`),
   /**
    * รายได้ตามช่วงเวลาสำหรับกราฟ — นับเฉพาะใบที่ชำระแล้ว ยึดวันที่รับเงิน
    * bucket: 'day' (ปริยาย 30 วัน) | 'week' (ปริยาย 12 สัปดาห์) · ช่องที่ไม่มีรายได้คืนมาเป็น 0 ครบทุกช่อง

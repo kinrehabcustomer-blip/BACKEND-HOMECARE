@@ -116,9 +116,11 @@ export async function list({ q, status, case_type, assigned_to, year, month, pag
   const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
   const { total } = await sql.one(`SELECT COUNT(*) AS total FROM cases c ${clause}`, params);
 
+  // NULLS LAST — start_date/title ว่างได้ ถ้าไม่ใส่ การเรียงจากใหม่ไปเก่าจะเอาเคสที่ยังไม่ได้ระบุวันเริ่ม
+  // ขึ้นก่อนเคสที่เริ่มจริง (ค่าปริยายของ Postgres คือ NULLS FIRST เมื่อเรียงจากมากไปน้อย)
   const rows = await sql.all(
     `${SELECT_CASE} ${clause}
-     ORDER BY c.${sort} ${order.toUpperCase()}
+     ORDER BY c.${sort} ${order.toUpperCase()} NULLS LAST
      LIMIT :limit OFFSET :offset`,
     { ...params, limit: per_page, offset: (page - 1) * per_page },
   );
@@ -585,6 +587,9 @@ const ADMIN_VISIT = `
          v.check_in_at, v.check_out_at, v.check_in_lat, v.check_in_lng,
          v.check_in_distance_m, v.check_in_accuracy_m, v.location_flagged, v.adjusted_by,
          (v.check_in_photo_data IS NOT NULL) AS has_photo,
+         -- รหัสของคนที่ employee_name อ้างถึง — ลำดับ COALESCE ต้องตรงกับบรรทัดล่างเป๊ะ
+         -- ไม่งั้นหน้าเว็บจะกรองด้วยรหัสของคนหนึ่งแต่เห็นชื่ออีกคน
+         COALESCE(v.checked_in_by, v.assigned_to) AS employee_id,
          COALESCE(ci.first_name || ' ' || ci.last_name, ae.first_name || ' ' || ae.last_name) AS employee_name,
          c.client_name, c.case_type, c.geo_lat AS case_geo_lat, c.geo_lng AS case_geo_lng
   FROM case_visits v
@@ -794,28 +799,37 @@ export async function calendar({ year, month, employee_id }) {
   const nextMonthStart = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}-01`;
   const params = { month_start: monthStart, next_month: nextMonthStart };
 
-  // กรองเฉพาะงานของพนักงานคนเดียว — ไม่ส่งมาคือดูตารางรวมทุกคน
-  // ใส่พารามิเตอร์เฉพาะตอนใช้จริง เพราะตัวแปลง :name จะไล่หาชื่อจาก SQL ที่มีอยู่จริงเท่านั้น
-  const staffFilter = employee_id ? 'AND c.assigned_to = :employee_id' : '';
+  /*
+   * กรองเฉพาะงานของพนักงานคนเดียว — ไม่ส่งมาคือดูตารางรวมทุกคน
+   * ต้องดูทั้งคนที่ถูกนัดในกะ (v.assigned_to) และผู้รับผิดชอบของเคส (c.assigned_to)
+   * เพราะกะหนึ่งมอบให้คนอื่นแทนได้ ถ้ากรองแค่ระดับเคสจะไม่เห็นกะที่คนนี้ถูกฝากไปทำจริง
+   * ใส่พารามิเตอร์เฉพาะตอนใช้จริง เพราะตัวแปลง :name จะไล่หาชื่อจาก SQL ที่มีอยู่จริงเท่านั้น
+   */
+  const staffFilter = employee_id ? 'AND COALESCE(v.assigned_to, c.assigned_to) = :employee_id' : '';
   if (employee_id) params.employee_id = employee_id;
 
   const visits = await sql.all(
     `SELECT c.case_id, c.title, c.case_type, c.status, c.service_kind, c.physio_package_id,
-            c.client_name, c.assigned_to,
-            e.first_name || ' ' || e.last_name AS assigned_name,
-            e.position                         AS assigned_position,
-            cu.name                            AS customer_name,
+            c.client_name,
+            cu.name AS customer_name,
             v.visit_id, v.visit_date, v.status AS visit_status,
-            v.check_in_at, v.check_out_at
+            v.planned_start, v.planned_end,
+            v.check_in_at, v.check_out_at,
+            -- คนที่ไปทำงานกะนี้จริง = คนที่ถูกนัดในกะ ถ้าไม่ได้ระบุก็ใช้ผู้รับผิดชอบของเคส
+            -- (ต้องตรงกับเงื่อนไขกรองด้านบน ไม่งั้นกรองชื่อหนึ่งแต่เห็นอีกชื่อ)
+            COALESCE(v.assigned_to, c.assigned_to)   AS assigned_to,
+            COALESCE(ve.first_name || ' ' || ve.last_name, ce.first_name || ' ' || ce.last_name) AS assigned_name,
+            COALESCE(ve.position, ce.position)       AS assigned_position
      FROM case_visits v
      JOIN cases c ON c.case_id = v.case_id
-     LEFT JOIN employees e  ON e.employee_id  = c.assigned_to
+     LEFT JOIN employees ve ON ve.employee_id = v.assigned_to
+     LEFT JOIN employees ce ON ce.employee_id = c.assigned_to
      LEFT JOIN customers cu ON cu.customer_id = c.customer_id
      WHERE v.status <> 'cancelled'
        AND v.visit_date >= :month_start
        AND v.visit_date <  :next_month
        ${staffFilter}
-     ORDER BY v.visit_date, v.visit_id`,
+     ORDER BY v.visit_date, v.planned_start NULLS LAST, v.visit_id`,
     params,
   );
 

@@ -46,9 +46,10 @@ invoicesRouter.param('id', (req, res, next, id) => {
 
 invoicesRouter.get('/meta', (req, res) => res.json({ statuses: INVOICE_STATUSES }));
 
+/** ยอดสรุป — รับตัวกรองชุดเดียวกับรายการ เพื่อให้ตัวเลขด้านบนตรงกับสิ่งที่ผู้ใช้เห็นอยู่ */
 invoicesRouter.get(
   '/summary',
-  asyncRoute(async (req, res) => res.json(await repo.summary())),
+  asyncRoute(async (req, res) => res.json(await repo.summary(listQuerySchema.parse(req.query)))),
 );
 
 /** รายได้ตามช่วงเวลาสำหรับกราฟหน้าภาพรวม — ต้องอยู่เหนือ '/:id' ไม่งั้นโดนจับเป็นรหัสใบแจ้งหนี้ */

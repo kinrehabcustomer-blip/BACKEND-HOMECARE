@@ -10,6 +10,13 @@ html {
 }
 
 :root {
+  /* บอกเบราว์เซอร์ว่าหน้านี้ธีมไหน — ของที่เบราว์เซอร์วาดเองและ CSS แตะไม่ถึงจะตามธีมด้วย:
+     รายการที่กางออกจาก <select>, ปฏิทินของ <input type="date/month">, สกรอลล์บาร์
+     ไม่ใส่บรรทัดนี้ โหมดมืดจะเจอรายการ dropdown พื้นขาวตัวอักษรดำเด้งขึ้นมากลางหน้าจอดำ */
+  color-scheme: light;
+  /* checkbox / radio / progress ที่เบราว์เซอร์วาดเอง — ใช้สีทองของแบรนด์แทนสีฟ้าปริยาย */
+  accent-color: #a97b1e;
+
   --bg: #f7f4ee;
   --surface: #ffffff;
   --surface-2: #f4efe5;      /* พื้นยกเบาๆ เช่น หัวตาราง แถวที่ hover กล่อง meta */
@@ -35,6 +42,9 @@ html {
 /* โหมดกลางคืน — สลับด้วยปุ่มในหน้าตั้งค่า (data-theme บน <html>)
    ทุกอย่างในไฟล์นี้อ้างตัวแปรพวกนี้ จึงเปลี่ยนธีมได้ทั้งระบบจากจุดเดียว */
 :root[data-theme='dark'] {
+  color-scheme: dark;
+  accent-color: #d7a63f;
+
   --bg: #131210;             /* ดำอุ่นเกือบสนิท (แนว dashboard) */
   --surface: #1c1a15;        /* การ์ดสีน้ำตาลเข้ม อุ่นแบบ KIN */
   --surface-2: #241f18;
@@ -284,10 +294,34 @@ body {
 }
 .btn:hover:not(:disabled) { background: var(--bg); }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+/* กดค้างแล้วยุบลงนิดเดียว — บอกว่าปุ่มรับแรงกดแล้ว (ปุ่มที่ไม่ขยับเลยรู้สึกเหมือนกดไม่ติด) */
+.btn:active:not(:disabled) { transform: translateY(1px); }
+
+/* วงแหวนโฟกัส — ชุดเดียวกับช่องกรอก (outline ทอง + ขอบทอง)
+   เดิมมีแต่ input/select/textarea ปุ่มไม่มีเลย คนใช้คีย์บอร์ดจึงมองไม่เห็นว่าอยู่ตรงไหน
+   :focus-visible ไม่ใช่ :focus — กดด้วยเมาส์จะไม่ขึ้นวง ขึ้นเฉพาะตอนไล่ด้วย Tab */
+.btn:focus-visible,
+.seg button:focus-visible,
+.att-tab:focus-visible,
+.sort-head:focus-visible,
+.sort-toggle:focus-visible,
+.modal-close:focus-visible,
+.cal-chip:focus-visible,
+.cal-date-btn:focus-visible,
+.toast:focus-visible {
+  outline: 2px solid var(--brand-soft);
+  outline-offset: 1px;
+  border-color: var(--brand);
+}
 .btn.primary { background: var(--brand); border-color: var(--brand); color: var(--brand-ink); }
 .btn.primary:hover:not(:disabled) { background: var(--brand-hover); }
 .btn.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
 .btn.danger-ghost { color: var(--danger); border-color: transparent; }
+
+/* ไอคอนเส้นในปุ่ม (พิมพ์ / ดาวน์โหลด) — ขนาดเดียวกับไอคอนปุ่มเลือกไฟล์
+   gap อยู่ที่นี่ไม่ใช่ที่ .btn เพราะปุ่มส่วนใหญ่มีแต่ข้อความ ไม่ต้องเว้นช่องเผื่อ */
+.btn:has(> .btn-ico) { gap: 0.4375rem; }
+.btn-ico { width: 1.05rem; height: 1.05rem; flex-shrink: 0; }
 
 /* ปุ่มเลือกไฟล์ — เส้นประบอกว่าเป็น "ช่องรอไฟล์" ไม่ใช่ปุ่มสั่งงาน (ภาษาเดียวกับกรอบรูปว่าง .cert-thumb.empty)
    แตะแล้วเปลี่ยนเป็นสีทองของแบรนด์ ให้รู้ว่ากดได้ ต่างจากปุ่มทั่วไปที่แค่พื้นเปลี่ยนเฉดจางๆ */
@@ -309,7 +343,8 @@ body {
 /* label ไม่รับ :disabled (ไม่ใช่ปุ่มจริง) — สถานะปิดจึงอ่านจาก aria-disabled ที่ตัว component ตั้งให้ */
 .file-btn[aria-disabled='true'] { opacity: 0.45; cursor: not-allowed; }
 
-.toolbar { display: flex; gap: 0.625rem; margin-bottom: 1rem; }
+/* flex-wrap — หน้าเคสมีตัวกรอง 6 อัน พอจอไม่กว้างพอต้องตกบรรทัดใหม่ ไม่ใช่บีบกันจนอ่านไม่ออก */
+.toolbar { display: flex; flex-wrap: wrap; gap: 0.625rem; margin-bottom: 1rem; }
 .toolbar .search { flex: 1; min-width: 0; }
 /* ตรึงให้กว้างเท่ากัน ไม่ยืดหดตามความยาวตัวเลือกที่เลือกอยู่ */
 .toolbar select { width: 9.375rem; flex-shrink: 0; }
@@ -344,16 +379,58 @@ input:focus, select:focus, textarea:focus {
 }
 
 /* ลูกศรของ select ที่เบราว์เซอร์วาดให้มีสไตล์และระยะขอบต่างกันไปในแต่ละเครื่อง
-   จึงปิดของเดิมแล้ววาดเองเป็น SVG (data URI) ให้ทุกเบราว์เซอร์เห็นเหมือนกัน */
+   จึงปิดของเดิมแล้ววาดเองเป็น SVG (data URI) ให้ทุกเบราว์เซอร์เห็นเหมือนกัน
+
+   สีฝังอยู่ในตัว data URI แทรก var(--…) เข้าไปไม่ได้ จึงต้องเขียนแยกเป็นชุดตามธีมและสถานะ
+   ค่าที่ใช้คัดลอกมาจากตัวแปรธีมตรงๆ: --muted (ปกติ) · --brand (โฟกัส) · --text-faint (กดไม่ได้) */
 select {
   appearance: none;
   padding-right: 2.125rem; /* กันข้อความยาวไปทับลูกศร */
-  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5 6 6.5l5-5' fill='none' stroke='%236b7280' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5 6 6.5l5-5' fill='none' stroke='%23857b6a' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 0.75rem center;
   cursor: pointer;
 }
-select:focus { background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5 6 6.5l5-5' fill='none' stroke='%230f7b6c' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
+:root[data-theme='dark'] select {
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5 6 6.5l5-5' fill='none' stroke='%23a89e8b' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+/* โฟกัสแล้วลูกศรเป็นสีทองของแบรนด์ ให้เข้าชุดกับกรอบที่เปลี่ยนเป็น --brand พร้อมกัน */
+select:focus {
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5 6 6.5l5-5' fill='none' stroke='%23a97b1e' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+:root[data-theme='dark'] select:focus {
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5 6 6.5l5-5' fill='none' stroke='%23d7a63f' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+/* กดไม่ได้ = ลูกศรต้องจางตามตัวหนังสือด้วย ไม่ใช่เข้มอยู่คนเดียวเหมือนยังกดได้ */
+select:disabled {
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5 6 6.5l5-5' fill='none' stroke='%23b7ac97' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+
+/* รายการที่กางออกจาก <select> เบราว์เซอร์เป็นคนวาด CSS แตะได้จำกัดมาก
+   ทำได้แค่สีพื้น/สีตัวอักษรของแต่ละบรรทัด (Firefox กับ Chrome บน Windows)
+   ส่วนมุมมน เงา ระยะขอบ และสีแถบที่ชี้อยู่ สั่งไม่ได้ — ต้องเขียน dropdown เองถึงจะคุมได้ทั้งหมด */
+select option {
+  background-color: var(--surface);
+  color: var(--text);
+}
+/* ตัวที่เลือกอยู่ — ให้เป็นพื้นทองจางแบบเดียวกับเมนูที่ active ไม่ใช่สีฟ้าปริยายของระบบ */
+select option:checked {
+  background-color: var(--brand-soft);
+  color: var(--brand);
+  font-weight: 600;
+}
+
+/* select ขนาดย่อทุกที่ในระบบ — รวมไว้กฎเดียว
+   เขียน padding แบบย่อในแต่ละที่จะล้าง padding-right ด้านบนทิ้ง แล้วตัวเลือกจะไปทับลูกศร
+   (เคยเกิดมาแล้วกับช่อง "แสดง 20 ต่อหน้า") จึงระบุครบสี่ด้านที่นี่ที่เดียว */
+.per-page select,
+.att-filter select,
+.visit-list select,
+.manage-add select,
+.shift-form select {
+  padding: 0.3125rem 1.625rem 0.3125rem 0.5rem;
+  background-position: right 0.5rem center;
+}
 
 /* ---------- table ---------- */
 /* กล่องครอบตาราง: จอแคบให้ปัดตารางแนวนอนได้ในกล่องนี้ ไม่ทำให้ทั้งหน้าเลื่อนซ้ายขวา */
@@ -512,11 +589,8 @@ select:focus { background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xm
 }
 /* ย่อให้เตี้ยลงได้ แต่ต้องเว้นที่ขวาไว้ให้ลูกศรเสมอ ไม่งั้นตัวเลขไปทับลูกศร
    (padding แบบย่อจะล้าง padding-right: 2.125rem ที่ base select กันที่ไว้) */
-.per-page select {
-  width: auto;
-  padding: 0.3125rem 1.625rem 0.3125rem 0.5rem;
-  background-position: right 0.5rem center;
-}
+/* ระยะขอบ/ตำแหน่งลูกศรมาจากกฎรวมของ select ขนาดย่อด้านบนแล้ว ที่นี่เหลือแค่ความกว้าง */
+.per-page select { width: auto; }
 
 /* ตารางที่มีคอลัมน์ลำดับนำหน้า — เลขลำดับอยู่กลางช่องแคบๆ
    และคอลัมน์ที่ต้องชิดซ้าย (ชื่อ) เลื่อนไปอยู่ช่องที่ 3 จึงต้องล้าง text-align: center
@@ -549,6 +623,22 @@ select:focus { background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xm
 /* แพ้อาหารใช้สีส้มแยกจากแพ้ยา (แดง) — แต่ข้อความบนป้ายบอกอยู่แล้วว่าอันไหนเป็นอันไหน ไม่ต้องพึ่งสี */
 .allergy-flag.food { color: #9a6700; background: #fff3dc; }
 :root[data-theme='dark'] .allergy-flag.food { background: #34291a; color: #e0b877; }
+
+/* ธง "ใบไม่ตรงกับเคส" ในตารางใบแจ้งหนี้ — เตือนว่าต้องกดรีเฟรชก่อนพิมพ์ส่งลูกค้า */
+.stale-flag {
+  display: inline-block;
+  margin-left: 0.375rem;
+  padding: 1px 0.375rem;
+  font-family: inherit;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  white-space: nowrap;
+  color: #9a6700;
+  background: #fff3dc;
+  border-radius: 0.375rem;
+  cursor: help;
+}
+:root[data-theme='dark'] .stale-flag { background: #34291a; color: #e0b877; }
 
 /* แถบบอกว่ากำลังกรองมาจากลิงก์ของอีกหน้า (เช่น ผู้รับการดูแลของลูกค้ารายหนึ่ง) */
 .filter-chip { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
@@ -1313,6 +1403,23 @@ select:focus { background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xm
   .table-cards .name-cell { justify-content: flex-end; }
   .table-cards .cell-sub { display: inline; margin-top: 0; }
   .table-cards .cell-sub::before { content: ' · '; }
+
+  /* ปฏิทิน: 7 คอลัมน์บนจอมือถือคือปัดซ้ายขวาแล้วอ่านไม่ออก — เปลี่ยนเป็นรายการวันแนวตั้ง
+     วันที่ไม่มีงานยุบทิ้งไปเลย เพราะสิ่งที่คนเปิดดูคือ "วันไหนมีงานอะไร" ไม่ใช่โครงตารางเดือน */
+  .table-wrap { overflow-x: visible; }
+  .cal-grid { display: block; border: none; background: none; }
+  .cal-head { display: none; }
+  .cal-cell { display: none; }                    /* ปริยายซ่อน แล้วค่อยเปิดเฉพาะวันที่มีงาน */
+  .cal-cell:has(.cal-chip) { display: block; }
+  .cal-cell.is-today { display: block; }          /* วันนี้ต้องเห็นเสมอ แม้ไม่มีงาน */
+  .cal-cell {
+    height: auto;
+    margin-bottom: 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+  }
+  .cal-chips { max-height: none; overflow: visible; }
+  .cal-chip { font-size: 0.8125rem; }
 }
 
 /* ---------- toast ---------- */
@@ -1360,7 +1467,8 @@ select:focus { background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xm
 .rate-section > h2 { margin-bottom: 0.25rem; }
 .grade-desc { color: var(--danger); font-size: 0.85rem; margin: 0 0 0.625rem; }
 
-.btn.tiny { padding: 0.15rem 0.5rem; font-size: 0.7rem; }
+/* ขนาดเล็กสุดของปุ่ม — ใช้สเกล rem ชุดเดียวกับที่เหลือของระบบ (0.75rem) ไม่ใช่ค่าเฉพาะกิจ */
+.btn.tiny { padding: 0.1875rem 0.5rem; font-size: 0.75rem; }
 .btn.tiny.ghost { border-color: transparent; background: none; margin-left: 0.35rem; }
 
 /* ตารางเรทใช้ layout คงที่ + colgroup — คอลัมน์รูปแบบกว้างเท่ากัน และ CG/NA/PN แบ่งพื้นที่ที่เหลือเท่าๆ กัน
@@ -1498,7 +1606,53 @@ select:focus { background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xm
 }
 .cal-chip:hover { filter: brightness(0.95); }
 .cal-chip-sub { display: block; opacity: 0.75; overflow: hidden; text-overflow: ellipsis; }
+/* เวลานัดนำหน้าชื่อ — ตารางงานที่ไม่บอกว่ากี่โมงใช้วางแผนวันไม่ได้ */
+.cal-chip-time { font-weight: 700; margin-right: 0.25rem; }
 .cal-note { margin-top: 0.75rem; font-size: 0.75rem; }
+
+/* หัววันเป็นปุ่ม — กดเพื่อดูงานทั้งวันแบบเต็ม (ช่องในปฏิทินเล็กเกินกว่าจะใส่รายละเอียดครบ) */
+.cal-date-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.25rem;
+  width: 100%;
+  padding: 0;
+  font: inherit;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+.cal-date-btn:hover .cal-date { color: var(--brand); }
+/* จำนวนกะของวันนั้น — บอกได้ทันทีว่าวันไหนแน่นแม้ chip จะถูกเลื่อนซ่อนอยู่ */
+.cal-count {
+  font-size: 0.625rem;
+  font-weight: 700;
+  color: var(--muted);
+  background: var(--bg);
+  border-radius: 62.4375rem;
+  padding: 0 0.3125rem;
+}
+
+/* มุมมองสัปดาห์ — 7 ช่องแถวเดียว สูงกว่าเดือนเพราะมีที่ให้ใช้ */
+.cal-grid.is-week .cal-cell { min-height: 16rem; }
+
+/* คำอธิบายสี — 5 สีของสถานะกะ ไม่มีอะไรบอกก็เดาไม่ถูกว่าสีไหนคืออะไร */
+.cal-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  margin-bottom: 0.625rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+.cal-legend-item { display: inline-flex; align-items: center; gap: 0.375rem; }
+.cal-swatch { width: 0.75rem; height: 0.75rem; border-radius: 0.25rem; flex-shrink: 0; }
+.cal-swatch.visit-scheduled { background: #fff3dc; }
+.cal-swatch.visit-working   { background: #e3f5ec; }
+.cal-swatch.visit-done      { background: #eef0f2; }
+.cal-swatch.visit-stale     { background: #fde8e8; }
+.cal-swatch.visit-missed    { background: #fbe4e4; }
 
 /* จอแคบ: ปฏิทินเดือนบีบ 7 คอลัมน์ไม่ไหว ให้เลื่อนแนวนอนแทนการบีบจนอ่านไม่ออก */
 @media (max-width: 40rem) {
@@ -1575,7 +1729,10 @@ select:focus { background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xm
   @page { size: A4; margin: 15mm; }
 
   body * { visibility: hidden; }
-  .invoice-doc, .invoice-doc * { visibility: visible; }
+  .invoice-doc, .invoice-doc *,
+  .cal-print, .cal-print *,
+  .cal-title, .cal-title *,
+  .cal-legend, .cal-legend * { visibility: visible; }
   .no-print { display: none !important; }
 
   .invoice-doc {
@@ -1585,6 +1742,11 @@ select:focus { background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xm
     width: 100%;
     padding: 0;
   }
+
+  /* ตารางงานลงกระดาษ — ตัดแถบเลื่อนในช่องออก ไม่งั้นกะที่เลื่อนซ่อนอยู่จะหายไปจากที่พิมพ์ */
+  .cal-print { overflow: visible; }
+  .cal-chips { max-height: none !important; overflow: visible !important; }
+  .cal-cell { break-inside: avoid; }
 
   /* ฉากหลังทึบ/เงา/ขอบมนของ popup ไม่ต้องพิมพ์ลงกระดาษ */
   .modal-backdrop { position: static; padding: 0; background: none; }
@@ -1699,7 +1861,8 @@ select:focus { background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xm
 .visit-list li.visit-cancelled { opacity: 0.55; text-decoration: line-through; }
 .visit-seq { min-width: 4.5rem; font-size: 0.75rem; color: var(--muted); }
 .visit-date { flex: 1; font-weight: 600; }
-.visit-list select { font-size: 0.75rem; padding: 0.125rem 0.25rem; }
+/* padding มาจากกฎรวมของ select ขนาดย่อ — ระบุเองที่นี่จะไปล้างที่ที่กันไว้ให้ลูกศร */
+.visit-list select { font-size: 0.75rem; }
 
 /* แพ้ยา/แพ้อาหาร — ข้อมูลความปลอดภัย ต้องสะดุดตากว่าช่องอื่นในหน้าเดียวกัน */
 .allergy-alert {
@@ -1758,7 +1921,8 @@ select:focus { background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xm
 .manage-list li { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; padding: 0.4rem 0; border-bottom: 1px dashed var(--divider); }
 .manage-list li p { margin: 2px 0 0; font-size: 0.75rem; }
 .manage-add { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; }
-.manage-add input, .manage-add select { padding: 0.35rem 0.5rem; }
+/* เฉพาะ input — select ใช้ padding จากกฎรวมด้านบน (ต้องเว้นที่ขวาไว้ให้ลูกศร) */
+.manage-add input { padding: 0.35rem 0.5rem; }
 
 @media (max-width: 768px) {
   .manage-cols { grid-template-columns: 1fr; }
@@ -1852,7 +2016,8 @@ select:focus { background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xm
 
 /* ฟอร์มนัดกะ (admin) */
 .shift-form { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; margin-bottom: 1rem; }
-.shift-form input, .shift-form select { padding: 0.4rem 0.55rem; }
+/* เฉพาะ input — select ใช้ padding จากกฎรวมด้านบน (ต้องเว้นที่ขวาไว้ให้ลูกศร) */
+.shift-form input { padding: 0.4rem 0.55rem; }
 .shift-form select { flex: 1; min-width: 10rem; }
 .visit-who { flex: 1; min-width: 0; font-size: 0.8125rem; }
 
@@ -1864,8 +2029,30 @@ select:focus { background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xm
   border-bottom: 2px solid transparent; margin-bottom: -1px;
 }
 .att-tab.is-active { color: var(--brand); border-bottom-color: var(--brand); }
+
+/* ตัวเลขงานค้างบนแท็บ — เห็นได้จากแท็บอื่นโดยไม่ต้องกดเข้าไปเช็ค */
+.tab-count {
+  display: inline-block;
+  min-width: 1.25rem;
+  margin-left: 0.375rem;
+  padding: 0 0.3125rem;
+  font-size: 0.6875rem;
+  line-height: 1.25rem;
+  text-align: center;
+  color: #fff;
+  background: var(--danger);
+  border-radius: 0.625rem;
+}
+
 .att-filter { margin-bottom: 1rem; }
 .att-filter input { padding: 0.4rem 0.55rem; margin-left: 0.4rem; }
+.att-filter .search { flex: 1; min-width: 12rem; margin-left: 0; }
+/* ระยะขอบ/ลูกศรมาจากกฎรวมของ select ขนาดย่อด้านบนแล้ว */
+
+/* เลือกเดือนพร้อมปุ่มถอย/เดินหน้า — เดือนที่อยากดูมักอยู่ติดกับเดือนที่เห็นอยู่ */
+.month-step { display: flex; align-items: center; gap: 0.25rem; }
+.month-step input { margin-left: 0; }
+.month-step .icon-btn { padding: 0.125rem 0.5rem; font-size: 1.125rem; line-height: 1.35; }
 .att-evidence { display: inline-flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; font-size: 0.8125rem; }
 .att-evidence a { color: var(--brand); }
 .flag-text { color: #b3261e; font-weight: 600; }

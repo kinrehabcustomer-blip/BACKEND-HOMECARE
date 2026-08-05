@@ -67,6 +67,8 @@ export const listQuerySchema = z.object({
   status: z.enum(INVOICE_STATUSES).optional(),
   customer_id: z.string().trim().optional(),
   case_id: z.string().trim().optional(),
+  // 'yes' = เฉพาะใบที่ออกไปแล้วและเลยวันครบกำหนด — คิดสดจากวันที่ ไม่ใช่สถานะใน DB
+  overdue: z.enum(['yes']).optional(),
   page: z.coerce.number().int().min(1).default(1),
   per_page: z.coerce.number().int().min(1).max(100).default(20),
   sort: z.enum(['invoice_id', 'issue_date', 'total', 'created_at']).default('invoice_id'),

@@ -1,10 +1,125 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../api.js';
+import { useToast } from '../toast.jsx';
+import LineIcon from '../components/LineIcon.jsx';
 import { VISIT_STATE_LABELS, formatBaht, formatDate, timeText, durationText } from '../labels.js';
+
+const TABS = {
+  exceptions: 'รายการต้องตรวจ',
+  log: 'ประวัติเช็คอิน',
+  payroll: 'สรุปค่าตอบแทน',
+};
+
+const LOG_PER_PAGE = 30;
+
+const thisMonth = () => new Date().toISOString().slice(0, 7);
+
+/** เลื่อนเดือนไปข้างหน้า/ข้างหลัง — ใช้ UTC เพราะค่าที่เก็บเป็น 'YYYY-MM' ล้วน ไม่มีโซนเวลาเข้ามาเกี่ยว */
+function shiftMonth(ym, delta) {
+  const [y, m] = ym.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1 + delta, 1)).toISOString().slice(0, 7);
+}
+
+/** จำนวนวันที่ผ่านมาแล้วนับจากวันที่กะ — ใช้บอกว่ากะค้างเช็คเอาท์มานานแค่ไหน */
+function daysAgo(dateStr) {
+  const then = new Date(`${dateStr}T00:00:00`);
+  const days = Math.floor((Date.now() - then.getTime()) / 86_400_000);
+  return days > 0 ? days : 0;
+}
+
+/** escape ค่าเป็นเซลล์ CSV */
+const csvCell = (v) => {
+  const s = String(v ?? '');
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+};
+
+/** ดาวน์โหลดตารางเป็น CSV — BOM นำหน้าให้ Excel อ่านภาษาไทยไม่เพี้ยน */
+function downloadCsv(filename, header, lines) {
+  const csv = [header, ...lines].map((a) => a.map(csvCell).join(',')).join('\r\n');
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+/** เลือกเดือนพร้อมปุ่มถอย/เดินหน้าทีละเดือน — เดือนที่อยากดูมักอยู่ติดกับเดือนปัจจุบัน */
+function MonthPicker({ month, onChange, children }) {
+  return (
+    <div className="att-filter">
+      <span className="month-step">
+        <button className="btn icon-btn" onClick={() => onChange(shiftMonth(month, -1))} title="เดือนก่อนหน้า" aria-label="เดือนก่อนหน้า">‹</button>
+        <input type="month" value={month} onChange={(e) => e.target.value && onChange(e.target.value)} aria-label="เดือน" />
+        <button
+          className="btn icon-btn"
+          onClick={() => onChange(shiftMonth(month, 1))}
+          disabled={month >= thisMonth()}
+          title="เดือนถัดไป"
+          aria-label="เดือนถัดไป"
+        >›</button>
+      </span>
+      {children}
+    </div>
+  );
+}
 
 /** หน้าติดตามการมาทำงานของพนักงานภาคสนาม (admin) */
 export default function AttendancePage() {
-  const [tab, setTab] = useState('exceptions');
+  const [params, setParams] = useSearchParams();
+
+  // รายการต้องตรวจโหลดที่นี่ ไม่ใช่ในแท็บ — ตัวเลขบนแท็บต้องเห็นได้โดยไม่ต้องกดเข้าไปก่อน
+  const [exceptions, setExceptions] = useState(null);
+  const [exError, setExError] = useState(null);
+  const [staff, setStaff] = useState([]);
+
+  const get = (key) => params.get(key) ?? '';
+  const tab = TABS[get('tab')] ? get('tab') : 'exceptions';
+  const employeeId = get('employee_id');
+  // สรุปค่าตอบแทนปริยายเป็นเดือนที่แล้ว — เดือนปัจจุบันยังปิดเคสไม่ครบ ตัวเลขยังไม่ใช่ของจริง
+  const month = /^\d{4}-(0[1-9]|1[0-2])$/.test(get('month'))
+    ? get('month')
+    : (tab === 'payroll' ? shiftMonth(thisMonth(), -1) : thisMonth());
+
+  /** เขียนค่าลงย URL — replace เพื่อไม่ให้การสลับแท็บ/เดือนถมประวัติเบราว์เซอร์ */
+  const patch = (changes) => {
+    const next = new URLSearchParams(params);
+    for (const [key, value] of Object.entries(changes)) {
+      if (value === '' || value == null) next.delete(key);
+      else next.set(key, value);
+    }
+    setParams(next, { replace: true });
+  };
+
+  const loadExceptions = useCallback(() => {
+    return api
+      .attendanceExceptions()
+      .then((r) => {
+        setExceptions(r);
+        setExError(null); // สำเร็จแล้วต้องล้าง error ของรอบก่อน ไม่งั้นเน็ตสะดุดครั้งเดียวหน้าค้างเป็น error ตลอด
+      })
+      .catch((e) => setExError(e.message));
+  }, []);
+
+  useEffect(() => {
+    loadExceptions();
+    api.assignableEmployees().then(setStaff).catch(() => {});
+  }, [loadExceptions]);
+
+  // กรองพนักงานฝั่งหน้าเว็บ — endpoint รายการต้องตรวจไม่รับพารามิเตอร์ (ตั้งใจให้เห็นทุกคนเสมอ)
+  const shownExceptions = exceptions?.filter((v) => !employeeId || v.employee_id === employeeId) ?? null;
+  const pending = exceptions?.length ?? 0;
+
+  const employeePicker = (
+    <select value={employeeId} onChange={(e) => patch({ employee_id: e.target.value, page: '' })} aria-label="พนักงาน">
+      <option value="">พนักงานทุกคน</option>
+      {staff.map((e) => (
+        <option key={e.employee_id} value={e.employee_id}>{e.first_name} {e.last_name}</option>
+      ))}
+    </select>
+  );
 
   return (
     <>
@@ -15,61 +130,75 @@ export default function AttendancePage() {
         </div>
       </header>
 
-      <div className="att-tabs">
-        <button className={`att-tab ${tab === 'exceptions' ? 'is-active' : ''}`} onClick={() => setTab('exceptions')}>
-          รายการต้องตรวจ
-        </button>
-        <button className={`att-tab ${tab === 'log' ? 'is-active' : ''}`} onClick={() => setTab('log')}>
-          ประวัติเช็คอิน
-        </button>
-        <button className={`att-tab ${tab === 'payroll' ? 'is-active' : ''}`} onClick={() => setTab('payroll')}>
-          สรุปค่าตอบแทน
-        </button>
+      <div className="att-tabs" role="tablist" aria-label="มุมมองการมาทำงาน">
+        {Object.entries(TABS).map(([key, label]) => (
+          <button
+            key={key}
+            role="tab"
+            aria-selected={tab === key}
+            className={`att-tab ${tab === key ? 'is-active' : ''}`}
+            onClick={() => patch({ tab: key === 'exceptions' ? '' : key, page: '' })}
+          >
+            {label}
+            {/* ตัวเลขงานค้างต้องเห็นจากแท็บอื่นด้วย ไม่งั้นต้องคอยกดเข้าไปเช็คเอง */}
+            {key === 'exceptions' && pending > 0 && <span className="tab-count">{pending}</span>}
+          </button>
+        ))}
       </div>
 
-      {tab === 'exceptions' && <Exceptions />}
-      {tab === 'log' && <Log />}
-      {tab === 'payroll' && <Payroll />}
+      {tab === 'exceptions' && (
+        <Exceptions
+          rows={shownExceptions}
+          error={exError}
+          onReload={loadExceptions}
+          filters={employeePicker}
+        />
+      )}
+      {tab === 'log' && (
+        <Log
+          month={month}
+          employeeId={employeeId}
+          state={get('state')}
+          q={get('q')}
+          page={Math.max(1, Number(get('page')) || 1)}
+          patch={patch}
+          employeePicker={employeePicker}
+        />
+      )}
+      {tab === 'payroll' && <Payroll month={month} patch={patch} />}
     </>
   );
 }
 
-/** escape ค่าเป็นเซลล์ CSV */
-const csvCell = (v) => {
-  const s = String(v ?? '');
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-};
-
-function Payroll() {
-  const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
+function Payroll({ month, patch }) {
   const [rows, setRows] = useState(null);
   const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    setRows(null);
-    api.attendanceReport(month).then(setRows).catch((e) => setError(e.message));
+    let cancelled = false;
+    setLoading(true);
+    api
+      .attendanceReport(month)
+      .then((r) => {
+        if (cancelled) return;
+        setRows(r);
+        setError(null); // เปลี่ยนเดือนแล้วโหลดผ่าน error ของเดือนก่อนต้องหายไปด้วย
+      })
+      .catch((e) => !cancelled && setError(e.message))
+      .finally(() => !cancelled && setLoading(false));
+
+    return () => { cancelled = true; };
   }, [month]);
 
   function exportCsv() {
-    const header = ['รหัสพนักงาน', 'ชื่อ', 'เคสที่ปิด', 'ค่าจ้างรวม (บาท)', 'เคสที่ยังไม่ระบุค่าจ้าง', 'จำนวนกะ', 'ชั่วโมงรวม'];
-    const lines = rows.map((r) => [
-      r.employee_id,
-      r.employee_name,
-      r.closed_cases,
-      r.pay,
-      r.unpriced_cases,
-      r.shifts,
-      (r.minutes / 60).toFixed(1),
-    ]);
-    const csv = [header, ...lines].map((a) => a.map(csvCell).join(',')).join('\r\n');
-    // ﻿ (BOM) ให้ Excel อ่านภาษาไทยไม่เพี้ยน
-    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `payroll-${month}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    downloadCsv(
+      `payroll-${month}.csv`,
+      ['รหัสพนักงาน', 'ชื่อ', 'เคสที่ปิด', 'ค่าจ้างรวม (บาท)', 'เคสที่ยังไม่ระบุค่าจ้าง', 'จำนวนกะ', 'ชั่วโมงรวม'],
+      rows.map((r) => [
+        r.employee_id, r.employee_name, r.closed_cases, r.pay, r.unpriced_cases, r.shifts, (r.minutes / 60).toFixed(1),
+      ]),
+    );
   }
 
   const totalCases = rows?.reduce((s, r) => s + r.closed_cases, 0) ?? 0;
@@ -78,12 +207,9 @@ function Payroll() {
 
   return (
     <>
-      <div className="att-filter">
-        <label>เดือน <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} /></label>
-        {rows && rows.length > 0 && (
-          <button className="btn" onClick={exportCsv}>⬇ ดาวน์โหลด CSV</button>
-        )}
-      </div>
+      <MonthPicker month={month} onChange={(m) => patch({ month: m })}>
+        {rows?.length > 0 && <button className="btn" onClick={exportCsv}><LineIcon name="download" />ดาวน์โหลด CSV</button>}
+      </MonthPicker>
 
       <p className="muted form-hint">
         ค่าจ้างนับจาก<strong>เคสที่ปิดแล้ว</strong>ในเดือนนั้น (ค่าจ้างที่คัดลอกไว้ในเคสตอนเลือกแพ็คเกจ) —
@@ -92,29 +218,35 @@ function Payroll() {
       </p>
 
       {error && <p className="error">{error}</p>}
-      {!rows ? (
+
+      {loading && !rows ? (
         <p className="muted">กำลังโหลด…</p>
-      ) : rows.length === 0 ? (
+      ) : !error && rows?.length === 0 ? (
         <section className="card empty-state"><p>เดือนนี้ยังไม่มีเคสที่ปิดและไม่มีการเช็คอิน</p></section>
-      ) : (
+      ) : rows?.length > 0 ? (
         <div className="table-wrap">
-          <table className="table">
+          <table className="table table-cards">
             <thead>
               <tr><th>พนักงาน</th><th>เคสที่ปิด</th><th>ค่าจ้างรวม</th><th>จำนวนกะ</th><th>ชั่วโมงรวม</th></tr>
             </thead>
             <tbody>
               {rows.map((r) => (
                 <tr key={r.employee_id}>
-                  <td>{r.employee_name}<span className="cell-sub mono">{r.employee_id}</span></td>
-                  <td>{r.closed_cases}</td>
-                  <td>
+                  <td data-label="พนักงาน">{r.employee_name}<span className="cell-sub mono">{r.employee_id}</span></td>
+                  <td data-label="เคสที่ปิด">{r.closed_cases}</td>
+                  <td data-label="ค่าจ้างรวม">
                     {formatBaht(r.pay)}
+                    {/* กดไปหาเคสที่ปิดของคนนี้ได้เลย — เดิมรู้ว่ามีปัญหาแต่ไม่รู้ว่าเคสไหน */}
                     {r.unpriced_cases > 0 && (
-                      <span className="cell-sub flag-text">{r.unpriced_cases} เคสยังไม่ระบุค่าจ้าง</span>
+                      <span className="cell-sub">
+                        <Link className="link flag-text" to={`/cases?assigned_to=${r.employee_id}&status=closed`}>
+                          {r.unpriced_cases} เคสยังไม่ระบุค่าจ้าง →
+                        </Link>
+                      </span>
                     )}
                   </td>
-                  <td>{r.shifts}</td>
-                  <td>{durationText(r.minutes)}</td>
+                  <td data-label="จำนวนกะ">{r.shifts}</td>
+                  <td data-label="ชั่วโมงรวม">{durationText(r.minutes)}</td>
                 </tr>
               ))}
             </tbody>
@@ -129,7 +261,7 @@ function Payroll() {
             </tfoot>
           </table>
         </div>
-      )}
+      ) : null}
     </>
   );
 }
@@ -165,6 +297,19 @@ function Evidence({ v }) {
   );
 }
 
+/** ชื่อพนักงาน + ผู้รับบริการ + ลิงก์ไปเคส — ใช้ร่วมกันทั้งสองตาราง */
+function WhoCell({ v }) {
+  return (
+    <>
+      {v.employee_name ?? '—'}
+      <span className="cell-sub">
+        {v.client_name} ·{' '}
+        <Link className="link mono" to={`/cases?open=${v.case_id}`}>{v.case_id}</Link>
+      </span>
+    </>
+  );
+}
+
 function reason(v) {
   if (v.state === 'missed') return 'ขาดงาน';
   if (v.state === 'stale') return 'ค้างเช็คเอาท์';
@@ -172,129 +317,216 @@ function reason(v) {
   return VISIT_STATE_LABELS[v.state];
 }
 
-function Exceptions() {
-  const [rows, setRows] = useState(null);
-  const [error, setError] = useState(null);
+function Exceptions({ rows, error, onReload, filters }) {
+  const toast = useToast();
   const [busy, setBusy] = useState(false);
+  const [actionError, setActionError] = useState(null);
 
-  const load = () => api.attendanceExceptions().then(setRows).catch((e) => setError(e.message));
-  useEffect(() => { load(); }, []);
-
-  async function adjust(v, body, confirmMsg) {
+  async function adjust(v, body, confirmMsg, done) {
     if (confirmMsg && !confirm(confirmMsg)) return;
     setBusy(true);
-    setError(null);
+    setActionError(null);
     try {
       await api.adjustVisit(v.case_id, v.visit_id, body);
-      await load();
+      toast(done);
+      await onReload();
     } catch (e) {
-      setError(e.message);
+      setActionError(e.message);
     } finally {
       setBusy(false);
     }
   }
 
-  if (error) return <p className="error">{error}</p>;
-  if (!rows) return <p className="muted">กำลังโหลด…</p>;
-  if (rows.length === 0) {
-    return (
-      <section className="card empty-state">
-        <p>ไม่มีรายการต้องตรวจ 🎉</p>
-        <p className="muted">ทุกกะเช็คอิน/เช็คเอาท์เรียบร้อย</p>
-      </section>
-    );
-  }
-
-  return (
-    <div className="table-wrap">
-      <table className="table">
-        <thead>
-          <tr><th>วันที่</th><th>พนักงาน / เคส</th><th>ปัญหา</th><th>หลักฐาน</th><th></th></tr>
-        </thead>
-        <tbody>
-          {rows.map((v) => (
-            <tr key={v.visit_id}>
-              <td>{formatDate(v.visit_date)}</td>
-              <td>
-                {v.employee_name ?? '—'}
-                <span className="cell-sub">{v.client_name} · <span className="mono">{v.case_id}</span></span>
-              </td>
-              <td><span className={`badge visit-${v.state}`}>{reason(v)}</span></td>
-              <td><Evidence v={v} /></td>
-              <td className="row-actions">
-                {v.state === 'stale' && (
-                  <button className="btn tiny" disabled={busy}
-                    onClick={() => adjust(v, { check_out_at: new Date().toISOString(), status: 'done' },
-                      `ปิดกะนี้ด้วยเวลาปัจจุบัน?\n(${v.employee_name} · ${formatDate(v.visit_date)})`)}>
-                    ปิดกะ
-                  </button>
-                )}
-                {v.state === 'missed' && (
-                  <button className="btn tiny danger-ghost" disabled={busy}
-                    onClick={() => adjust(v, { status: 'cancelled' }, 'ทำเครื่องหมายว่ากะนี้ยกเลิก?')}>
-                    ยกเลิกกะ
-                  </button>
-                )}
-                {v.location_flagged && (
-                  <button className="btn tiny" disabled={busy}
-                    onClick={() => adjust(v, { location_flagged: false })}>
-                    เคลียร์ธง
-                  </button>
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function Log() {
-  const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
-  const [rows, setRows] = useState(null);
-  const [error, setError] = useState(null);
-
-  useEffect(() => {
-    setRows(null);
-    api.attendance({ month }).then(setRows).catch((e) => setError(e.message));
-  }, [month]);
-
   return (
     <>
-      <div className="att-filter">
-        <label>เดือน <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} /></label>
-      </div>
+      <div className="att-filter">{filters}</div>
 
+      {/* error เป็นแถบเหนือตาราง ไม่ทับทั้งหน้า — แท็บกับตัวกรองต้องไม่หายเพราะเน็ตสะดุด */}
       {error && <p className="error">{error}</p>}
+      {actionError && <p className="error">{actionError}</p>}
+
       {!rows ? (
-        <p className="muted">กำลังโหลด…</p>
+        !error && <p className="muted">กำลังโหลด…</p>
       ) : rows.length === 0 ? (
-        <section className="card empty-state"><p>ยังไม่มีการเช็คอินในเดือนนี้</p></section>
+        <section className="card empty-state">
+          <p>ไม่มีรายการต้องตรวจ 🎉</p>
+          <p className="muted">ทุกกะเช็คอิน/เช็คเอาท์เรียบร้อย</p>
+        </section>
       ) : (
         <div className="table-wrap">
-          <table className="table">
+          <table className="table table-cards table-2line">
             <thead>
-              <tr><th>วันที่</th><th>พนักงาน / เคส</th><th>เข้า–ออก</th><th>รวม</th><th>สถานะ</th><th>หลักฐาน</th></tr>
+              <tr><th>วันที่</th><th>พนักงาน / เคส</th><th>ปัญหา</th><th>หลักฐาน</th><th></th></tr>
             </thead>
             <tbody>
               {rows.map((v) => (
                 <tr key={v.visit_id}>
-                  <td>{formatDate(v.visit_date)}</td>
-                  <td>
-                    {v.employee_name ?? '—'}
-                    <span className="cell-sub">{v.client_name} · <span className="mono">{v.case_id}</span></span>
+                  <td data-label="วันที่">
+                    {formatDate(v.visit_date)}
+                    {/* ค้างมานานแค่ไหนคือสิ่งที่บอกว่าควรจัดการอันไหนก่อน */}
+                    {v.state === 'stale' && daysAgo(v.visit_date) > 0 && (
+                      <span className="cell-sub flag-text">ค้างมา {daysAgo(v.visit_date)} วัน</span>
+                    )}
                   </td>
-                  <td>{timeText(v.check_in_at)} – {v.check_out_at ? timeText(v.check_out_at) : '…'}</td>
-                  <td>{durationText(v.worked_minutes)}</td>
-                  <td><span className={`badge visit-${v.state}`}>{VISIT_STATE_LABELS[v.state]}</span></td>
-                  <td><Evidence v={v} /></td>
+                  <td data-label="พนักงาน / เคส"><WhoCell v={v} /></td>
+                  <td data-label="ปัญหา"><span className={`badge visit-${v.state}`}>{reason(v)}</span></td>
+                  <td data-label="หลักฐาน"><Evidence v={v} /></td>
+                  <td className="row-actions">
+                    {v.state === 'stale' && (
+                      <button className="btn tiny" disabled={busy}
+                        onClick={() => adjust(v, { check_out_at: new Date().toISOString(), status: 'done' },
+                          `ปิดกะนี้ด้วยเวลาปัจจุบัน?\n(${v.employee_name} · ${formatDate(v.visit_date)})`,
+                          'ปิดกะแล้ว')}>
+                        ปิดกะ
+                      </button>
+                    )}
+                    {v.state === 'missed' && (
+                      <button className="btn tiny danger-ghost" disabled={busy}
+                        onClick={() => adjust(v, { status: 'cancelled' }, 'ทำเครื่องหมายว่ากะนี้ยกเลิก?', 'ยกเลิกกะแล้ว')}>
+                        ยกเลิกกะ
+                      </button>
+                    )}
+                    {v.location_flagged && (
+                      <button className="btn tiny" disabled={busy}
+                        onClick={() => adjust(v, { location_flagged: false }, null, 'เคลียร์ธงแล้ว')}>
+                        เคลียร์ธง
+                      </button>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       )}
+    </>
+  );
+}
+
+function Log({ month, employeeId, state, q, page, patch, employeePicker }) {
+  const [rows, setRows] = useState(null);
+  const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    api
+      .attendance({ month, employee_id: employeeId })
+      .then((r) => {
+        if (cancelled) return;
+        setRows(r);
+        setError(null); // เปลี่ยนเดือนแล้วโหลดผ่าน error ของเดือนก่อนต้องหายไปด้วย
+      })
+      .catch((e) => !cancelled && setError(e.message))
+      .finally(() => !cancelled && setLoading(false));
+
+    return () => { cancelled = true; };
+  }, [month, employeeId]);
+
+  /* กรองสถานะกับคำค้นฝั่งหน้าเว็บ — endpoint คืนทั้งเดือนมาแล้ว (เดือนหนึ่งไม่กี่ร้อยแถว)
+     ยิงซ้ำเพื่อกรองจึงช้ากว่าและไม่ได้อะไรเพิ่ม */
+  const term = q.trim().toLowerCase();
+  const filteredRows = (rows ?? []).filter((v) => {
+    if (state && v.state !== state) return false;
+    if (!term) return true;
+    return [v.employee_name, v.client_name, v.case_id].some((s) => String(s ?? '').toLowerCase().includes(term));
+  });
+
+  const totalPages = Math.max(1, Math.ceil(filteredRows.length / LOG_PER_PAGE));
+  const safePage = Math.min(page, totalPages);
+  const shown = filteredRows.slice((safePage - 1) * LOG_PER_PAGE, safePage * LOG_PER_PAGE);
+  const filtered = Boolean(state || term || employeeId);
+
+  function exportCsv() {
+    downloadCsv(
+      `attendance-${month}.csv`,
+      ['วันที่', 'พนักงาน', 'ผู้รับบริการ', 'รหัสเคส', 'เข้า', 'ออก', 'ชั่วโมง', 'สถานะ', 'ห่างจากจุดเคส (ม.)'],
+      // ส่งออก "ทุกแถวที่กรองอยู่" ไม่ใช่แค่หน้าปัจจุบัน — คนกด export ต้องการทั้งชุดไปตรวจ
+      filteredRows.map((v) => [
+        v.visit_date, v.employee_name, v.client_name, v.case_id,
+        v.check_in_at ? timeText(v.check_in_at) : '',
+        v.check_out_at ? timeText(v.check_out_at) : '',
+        v.worked_minutes != null ? (v.worked_minutes / 60).toFixed(1) : '',
+        VISIT_STATE_LABELS[v.state] ?? v.state,
+        v.check_in_distance_m ?? '',
+      ]),
+    );
+  }
+
+  return (
+    <>
+      <MonthPicker month={month} onChange={(m) => patch({ month: m, page: '' })}>
+        {employeePicker}
+        <select value={state} onChange={(e) => patch({ state: e.target.value, page: '' })} aria-label="สถานะกะ">
+          <option value="">ทุกสถานะ</option>
+          {Object.entries(VISIT_STATE_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+        </select>
+        <input
+          className="search"
+          placeholder="ค้นหา ชื่อพนักงาน / ผู้รับบริการ / รหัสเคส"
+          value={q}
+          onChange={(e) => patch({ q: e.target.value, page: '' })}
+        />
+        {filtered && (
+          <button className="btn" onClick={() => patch({ state: '', q: '', employee_id: '', page: '' })}>
+            ล้างตัวกรอง
+          </button>
+        )}
+        {filteredRows.length > 0 && <button className="btn" onClick={exportCsv}><LineIcon name="download" />ดาวน์โหลด CSV</button>}
+      </MonthPicker>
+
+      {error && <p className="error">{error}</p>}
+
+      {loading && !rows ? (
+        !error && <p className="muted">กำลังโหลด…</p>
+      ) : !error && filteredRows.length === 0 ? (
+        <section className="card empty-state">
+          <p>{filtered ? 'ไม่พบกะที่ตรงกับเงื่อนไข' : 'ยังไม่มีการเช็คอินในเดือนนี้'}</p>
+          {filtered && (
+            <button className="btn" onClick={() => patch({ state: '', q: '', employee_id: '', page: '' })}>
+              ล้างตัวกรอง
+            </button>
+          )}
+        </section>
+      ) : filteredRows.length > 0 ? (
+        <>
+          <div className="table-wrap">
+            <table className="table table-cards table-2line">
+              <thead>
+                <tr><th>วันที่</th><th>พนักงาน / เคส</th><th>เข้า–ออก</th><th>รวม</th><th>สถานะ</th><th>หลักฐาน</th></tr>
+              </thead>
+              <tbody>
+                {shown.map((v) => (
+                  <tr key={v.visit_id}>
+                    <td data-label="วันที่">{formatDate(v.visit_date)}</td>
+                    <td data-label="พนักงาน / เคส"><WhoCell v={v} /></td>
+                    <td data-label="เข้า–ออก">{timeText(v.check_in_at)} – {v.check_out_at ? timeText(v.check_out_at) : '…'}</td>
+                    <td data-label="รวม">{durationText(v.worked_minutes)}</td>
+                    <td data-label="สถานะ"><span className={`badge visit-${v.state}`}>{VISIT_STATE_LABELS[v.state]}</span></td>
+                    <td data-label="หลักฐาน"><Evidence v={v} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="pager">
+            {totalPages > 1 && (
+              <>
+                <button className="btn" disabled={safePage <= 1} onClick={() => patch({ page: String(safePage - 1) })}>
+                  ก่อนหน้า
+                </button>
+                <span className="muted">หน้า {safePage} / {totalPages}</span>
+                <button className="btn" disabled={safePage >= totalPages} onClick={() => patch({ page: String(safePage + 1) })}>
+                  ถัดไป
+                </button>
+              </>
+            )}
+            <span className="muted per-page">ทั้งหมด {filteredRows.length} กะ</span>
+          </div>
+        </>
+      ) : null}
     </>
   );
 }

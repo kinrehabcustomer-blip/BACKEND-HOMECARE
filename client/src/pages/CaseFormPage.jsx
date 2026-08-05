@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api } from '../api.js';
+import { useToast } from '../toast.jsx';
 import LocationMap from '../components/LocationMap.jsx';
 import {
   CASE_TYPE_LABELS, POSITION_LABELS, GENDER_LABELS, SERVICE_KIND_LABELS, formatBaht, ageFromBirthDate,
@@ -58,6 +59,7 @@ const shownAge = (p) => {
 export default function CaseFormPage() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const toast = useToast();
   const isEdit = Boolean(id);
 
   const [searchParams] = useSearchParams();
@@ -66,7 +68,12 @@ export default function CaseFormPage() {
   const [matrix, setMatrix] = useState(null);
   const [physio, setPhysio] = useState([]);
   const [error, setError] = useState(null);
+  const [fieldErrors, setFieldErrors] = useState({});
   const [saving, setSaving] = useState(false);
+  const formEl = useRef(null);
+
+  // ค่าตั้งต้นไว้เทียบว่าผู้ใช้แก้อะไรไปแล้วบ้าง (ใช้เตือนก่อนออกจากหน้า)
+  const initial = useRef(JSON.stringify(BLANK));
   // ตั้งพิกัดสถานที่ดูแล: พิมพ์ชื่อสถานที่เพื่อค้นหา หรือวางลิงก์ Google Maps ก็ได้ (ช่องเดียวกัน)
   const [locQuery, setLocQuery] = useState('');
   const [finding, setFinding] = useState(false);
@@ -304,6 +311,7 @@ export default function CaseFormPage() {
           else if (filled.pkg_format_id !== '') filled.service_kind = 'homecare';
         }
         setForm(filled);
+        initial.current = JSON.stringify(filled);
 
         // มีผู้ว่าจ้างผูกไว้แล้ว — โชว์เป็นลูกค้าที่เลือกอยู่ (ใช้ชื่อจาก SELECT ของเคส ไม่ต้องยิงซ้ำ)
         // ยังไม่มี = ปล่อย payer เป็น null ส่วนผู้ว่าจ้างจะโชว์ช่องค้นหาให้เพิ่มลูกค้าเจ้าของเคส
@@ -312,10 +320,39 @@ export default function CaseFormPage() {
       .catch((err) => setError(err.message));
   }, [id, isEdit]);
 
+  const isDirty = () => JSON.stringify(form) !== initial.current;
+
+  /*
+   * ปิดแท็บ/กดรีเฟรชทั้งที่ยังกรอกค้าง — ให้เบราว์เซอร์ถามก่อน
+   * ฟอร์มเปิดเคสเป็นฟอร์มที่ยาวที่สุดในระบบ เสียไปทั้งหมดเพราะเผลอกดปุ่มเดียวคือกู้คืนไม่ได้
+   * (เบราว์เซอร์บังคับใช้ข้อความมาตรฐานของตัวเอง กำหนดเองไม่ได้)
+   */
+  useEffect(() => {
+    const onBeforeUnload = (e) => {
+      if (saving || !isDirty()) return;
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  });
+
   const field = (key) => ({
     value: form[key],
-    onChange: (e) => setForm((prev) => ({ ...prev, [key]: e.target.value })),
+    'aria-invalid': fieldErrors[key] ? true : undefined,
+    onChange: (e) => {
+      setForm((prev) => ({ ...prev, [key]: e.target.value }));
+      // แก้ช่องที่เพิ่งโดนทักแล้ว ข้อความเตือนควรหายไปทันที ไม่ใช่ค้างจนกว่าจะกดบันทึกอีกรอบ
+      setFieldErrors((prev) => (prev[key] ? { ...prev, [key]: undefined } : prev));
+    },
   });
+
+  /** ออกจากหน้าโดยยังไม่บันทึก — ถามก่อน */
+  const confirmLeave = (e) => {
+    if (isDirty() && !window.confirm('ยังไม่ได้บันทึก — ออกจากหน้านี้แล้วข้อมูลที่กรอกไว้จะหาย')) {
+      e.preventDefault();
+    }
+  };
 
   /** ตั้งพิกัดลงฟอร์ม + เติมที่อยู่ให้ถ้าช่องที่อยู่ยังว่าง (ไม่ทับที่พิมพ์ไว้เอง) */
   function applyLocation(lat, lng, address) {
@@ -418,17 +455,30 @@ export default function CaseFormPage() {
       delete payload.weight_kg;
       delete payload.height_cm;
 
+      // ล้างสถานะ "ยังไม่บันทึก" ก่อนเปลี่ยนหน้า ไม่งั้น beforeunload จะเตือนทั้งที่บันทึกสำเร็จแล้ว
+      initial.current = JSON.stringify(form);
+
       if (isEdit) {
         // การจับคู่พนักงานทำผ่านปุ่มใน popup เท่านั้น เพื่อไม่ให้สถานะเคสกับพนักงานขัดแย้งกัน
-        const { assigned_to, ...rest } = payload;
+        const { assigned_to: _unused, ...rest } = payload;
         await api.updateCase(id, rest);
-        navigate('/cases');
+        toast('บันทึกการแก้ไขแล้ว');
+        navigate(`/cases?open=${id}`);
       } else {
         const created = await api.createCase(payload);
-        navigate('/cases', { state: { created: created.case_id } });
+        toast(`เปิดเคส ${created.case_id} แล้ว`);
+        // เด้งกลับรายการพร้อมเปิดเคสที่เพิ่งสร้าง — เห็นผลทันทีและกดจับคู่พนักงานต่อได้เลย
+        navigate(`/cases?open=${created.case_id}`);
       }
     } catch (err) {
       setError(err.message);
+
+      // zod บอกมาเป็นรายช่อง — เอาไปแปะใต้ช่องที่ผิด แล้วเลื่อนไปหาช่องแรกให้เลย
+      if (err.fields) {
+        setFieldErrors(Object.fromEntries(err.fields.map((f) => [f.field, f.message])));
+        const first = err.fields[0]?.field;
+        formEl.current?.querySelector(`[name="${first}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      }
       setSaving(false);
     }
   }
@@ -440,12 +490,12 @@ export default function CaseFormPage() {
           <h1>{isEdit ? `แก้ไขเคส ${id}` : 'เปิดเคสใหม่'}</h1>
           {!isEdit && <p className="muted">ระบบจะออกรหัสเคส (CASE-xxxx) ให้อัตโนมัติหลังบันทึก</p>}
         </div>
-        <Link className="btn" to="/cases">ยกเลิก</Link>
+        <Link className="btn" to="/cases" onClick={confirmLeave}>ยกเลิก</Link>
       </header>
 
       {error && <pre className="error">{error}</pre>}
 
-      <form className="card form" onSubmit={handleSubmit}>
+      <form className="card form" ref={formEl} onSubmit={handleSubmit}>
         {/* ผู้ว่าจ้าง (ผู้จ่ายเงิน) อยู่บนสุด — ต้องเห็นตั้งแต่แรกว่าเคสนี้ผูกกับลูกค้ารายไหน
             เลือกผู้ป่วยที่ผูกลูกค้าไว้แล้ว ผู้ว่าจ้างจะเด้งมาที่นี่เอง
             โหมดแก้ไข: ถ้าเคสยังไม่มีผู้ว่าจ้าง ให้ค้นหา/เพิ่มลูกค้าเจ้าของเคสได้ที่นี่ (บันทึกแล้วใบแจ้งหนี้จะตามให้เอง) */}
@@ -875,10 +925,12 @@ export default function CaseFormPage() {
           <label className="span-2">หมายเหตุ<textarea rows={2} {...field('note')} /></label>
         </div>
 
-        <div className="form-actions">
+        {/* ติดขอบล่างจอ — ฟอร์มนี้ยาวที่สุดในระบบ แก้คำเดียวก็ไม่ควรต้องเลื่อนสุดทางไปกดปุ่ม */}
+        <div className="form-actions sticky">
           <button className="btn primary" type="submit" disabled={saving}>
             {saving ? 'กำลังบันทึก…' : isEdit ? 'บันทึกการแก้ไข' : 'เปิดเคส'}
           </button>
+          <Link className="btn" to="/cases" onClick={confirmLeave}>ยกเลิก</Link>
         </div>
       </form>
     </>

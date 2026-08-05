@@ -83,7 +83,11 @@ const withComputed = (row) => {
   };
 };
 
-export async function list({ q, status, customer_id, case_id, page, per_page, sort, order }) {
+/**
+ * เงื่อนไขกรองที่ใช้ร่วมกันระหว่างรายการกับยอดสรุป — ต้องเป็นก้อนเดียวกันจริงๆ
+ * ไม่งั้นตัวเลขสรุปด้านบนจะไม่ตรงกับรายการที่เห็นข้างล่าง (เช่น กรอง "ชำระแล้ว" แต่ยังขึ้น "รอชำระ 5 ใบ")
+ */
+function buildWhere({ q, status, customer_id, case_id, overdue }) {
   const where = [];
   const params = {};
 
@@ -103,13 +107,23 @@ export async function list({ q, status, customer_id, case_id, page, per_page, so
     where.push('i.case_id = :case_id');
     params.case_id = case_id;
   }
+  // "เกินกำหนด" ไม่ใช่สถานะใน DB — คิดสดจากวันครบกำหนดที่ผ่านมาแล้ว (นิยามเดียวกับ withComputed)
+  if (overdue === 'yes') {
+    where.push("i.status = 'issued' AND i.due_date IS NOT NULL AND i.due_date < :today");
+    params.today = TODAY();
+  }
 
-  const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  return { clause: where.length ? `WHERE ${where.join(' AND ')}` : '', params };
+}
+
+export async function list({ q, status, customer_id, case_id, overdue, page, per_page, sort, order }) {
+  const { clause, params } = buildWhere({ q, status, customer_id, case_id, overdue });
   const { total } = await sql.one(`SELECT COUNT(*) AS total FROM invoices i ${clause}`, params);
 
+  // NULLS LAST — due_date/paid_at ว่างได้ ถ้าไม่ใส่ การเรียงจากมากไปน้อยจะเอาใบที่ยังไม่ได้ระบุขึ้นก่อน
   const rows = await sql.all(
     `${SELECT_INVOICE} ${clause}
-     ORDER BY i.${sort} ${order.toUpperCase()}
+     ORDER BY i.${sort} ${order.toUpperCase()} NULLS LAST
      LIMIT :limit OFFSET :offset`,
     { ...params, limit: per_page, offset: (page - 1) * per_page },
   );
@@ -312,8 +326,16 @@ export async function cancel(invoiceId) {
 export const remove = (invoiceId) =>
   sql.run('DELETE FROM invoices WHERE invoice_id = :id', { id: invoiceId }).then((n) => n > 0);
 
-export async function summary() {
-  const rows = await sql.all('SELECT status, COUNT(*) AS count, SUM(total) AS amount FROM invoices GROUP BY status');
+/**
+ * ยอดสรุปแยกตามสถานะ — รับตัวกรองชุดเดียวกับ list() เพื่อให้ตัวเลขด้านบนตรงกับรายการที่เห็น
+ * ไม่ส่งตัวกรองมา = นับทั้งระบบเหมือนเดิม
+ */
+export async function summary(filters = {}) {
+  const { clause, params } = buildWhere(filters);
+  const rows = await sql.all(
+    `SELECT i.status, COUNT(*) AS count, SUM(i.total) AS amount FROM invoices i ${clause} GROUP BY i.status`,
+    params,
+  );
   return rows.map((r) => ({ ...r, count: Number(r.count), amount: Number(r.amount ?? 0) }));
 }
 

@@ -1,12 +1,17 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { api } from '../api.js';
 import CaseModal from '../components/CaseModal.jsx';
+import LineIcon from '../components/LineIcon.jsx';
 import {
-  CASE_STATUS_LABELS, CASE_TYPE_LABELS, MONTH_LABELS, POSITION_LABELS, SERVICE_KIND_LABELS,
-  toBuddhistYear,
+  CASE_TYPE_LABELS, MONTH_LABELS, POSITION_LABELS, SERVICE_KIND_LABELS, VISIT_STATE_LABELS,
+  formatDate, toBuddhistYear,
 } from '../labels.js';
 
 const WEEKDAYS = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
+
+// สถานะกะที่ขึ้นบนปฏิทินได้จริง (ยกเลิกถูกตัดออกตั้งแต่ฝั่ง server)
+const CAL_STATES = ['scheduled', 'working', 'done', 'stale', 'missed'];
 
 /**
  * สายบริการของเคส — เคสที่เปิดก่อนมีระบบสองสายยังมี service_kind เป็น null
@@ -17,62 +22,106 @@ const kindOf = (c) => (c.service_kind === 'physio' || c.physio_package_id != nul
 
 /** 'YYYY-MM-DD' จากตัวเลขปี/เดือน/วัน — ประกอบเองไม่ผ่าน toISOString เพราะตัวนั้นแปลงเป็น UTC แล้ววันเพี้ยน */
 const iso = (y, m, d) => `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+const isoOf = (date) => iso(date.getFullYear(), date.getMonth() + 1, date.getDate());
+const todayISO = () => isoOf(new Date());
 
-const todayISO = () => {
-  const t = new Date();
-  return iso(t.getFullYear(), t.getMonth() + 1, t.getDate());
-};
+/** ช่วงเวลานัดของกะ — เก็บเป็น 'HH:MM' อยู่แล้ว ไม่ต้องแปลงโซนเวลา */
+const timeRange = (v) =>
+  v.planned_start ? `${v.planned_start}${v.planned_end ? `–${v.planned_end}` : ''}` : null;
 
 export default function CalendarPage() {
-  const now = new Date();
-  const [year, setYear] = useState(now.getFullYear());
-  const [month, setMonth] = useState(now.getMonth() + 1); // 1-12
-  const [cases, setCases] = useState([]);
+  const [params, setParams] = useSearchParams();
+
+  const [visits, setVisits] = useState(null);
+  const [unscheduled, setUnscheduled] = useState([]);
   const [staff, setStaff] = useState([]);
-  const [employeeId, setEmployeeId] = useState(''); // '' = ดูตารางรวมทุกคน
-  const [kind, setKind] = useState('');             // '' = ดูทั้งสองสายบริการ
   const [error, setError] = useState(null);
-  const [openId, setOpenId] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [reloadKey, setReloadKey] = useState(0);
 
+  const get = (key) => params.get(key) ?? '';
+  const view = get('view') === 'week' ? 'week' : 'month';
+  // วันอ้างอิงจุดเดียว — มุมมองเดือนใช้ปี/เดือนของมัน มุมมองสัปดาห์ใช้สัปดาห์ที่มันอยู่
+  const anchor = /^\d{4}-\d{2}-\d{2}$/.test(get('date')) ? get('date') : todayISO();
+  const employeeId = get('employee_id');
+  const kind = SERVICE_KIND_LABELS[get('kind')] ? get('kind') : '';
+  const state = CAL_STATES.includes(get('state')) ? get('state') : '';
+  const openDay = /^\d{4}-\d{2}-\d{2}$/.test(get('day')) ? get('day') : '';
+  const openId = get('open');
+
+  const patch = (changes) => {
+    const next = new URLSearchParams(params);
+    for (const [key, value] of Object.entries(changes)) {
+      if (value === '' || value == null) next.delete(key);
+      else next.set(key, value);
+    }
+    setParams(next, { replace: true });
+  };
+
+  const anchorDate = new Date(`${anchor}T00:00:00`);
+  const year = anchorDate.getFullYear();
+  const month = anchorDate.getMonth() + 1;
   const mm = String(month).padStart(2, '0');
   const today = todayISO();
+
+  // ช่วงวันที่แสดงอยู่ — มุมมองสัปดาห์เริ่มวันอาทิตย์ตามหัวตาราง
+  const weekStart = new Date(anchorDate);
+  weekStart.setDate(weekStart.getDate() - weekStart.getDay());
+  const days = useMemo(() => {
+    if (view === 'week') {
+      return Array.from({ length: 7 }, (_, i) => {
+        const d = new Date(weekStart);
+        d.setDate(d.getDate() + i);
+        return isoOf(d);
+      });
+    }
+    const total = new Date(year, month, 0).getDate();
+    return Array.from({ length: total }, (_, i) => iso(year, month, i + 1));
+  }, [view, anchor, year, month]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     api.assignableEmployees().then(setStaff).catch(() => {});
   }, []);
 
   useEffect(() => {
-    api
-      .caseCalendar({ year: String(year), month: mm, employee_id: employeeId })
-      .then(setCases)
-      .catch((e) => setError(e.message));
-  }, [year, mm, employeeId, reloadKey]);
+    let cancelled = false;
+    setLoading(true);
 
-  /** ขยับเดือน — ให้ Date คำนวณข้ามปีให้เอง (ธ.ค. -> ม.ค. ปีถัดไป) */
-  function shiftMonth(delta) {
-    const d = new Date(year, month - 1 + delta, 1);
-    setYear(d.getFullYear());
-    setMonth(d.getMonth() + 1);
-  }
+    // สัปดาห์คาบสองเดือนได้ — ต้องโหลดทั้งสองเดือนแล้วรวมกัน ไม่งั้นครึ่งสัปดาห์หาย
+    const months = [...new Set(days.map((d) => d.slice(0, 7)))];
 
-  function goToday() {
-    const t = new Date();
-    setYear(t.getFullYear());
-    setMonth(t.getMonth() + 1);
-  }
+    Promise.all(
+      months.map((ym) => api.caseCalendar({ year: ym.slice(0, 4), month: ym.slice(5, 7), employee_id: employeeId })),
+    )
+      .then((chunks) => {
+        if (cancelled) return; // ผลของเดือนเก่าที่มาถึงช้ากว่า ต้องไม่ทับเดือนที่กำลังดูอยู่
+        setVisits(chunks.flat());
+        setError(null); // สำเร็จแล้วต้องล้าง error ของรอบก่อน ไม่งั้นเน็ตสะดุดครั้งเดียวหน้าค้างเป็น error ตลอด
+      })
+      .catch((e) => !cancelled && setError(e.message))
+      .finally(() => !cancelled && setLoading(false));
 
-  // ช่องว่างนำหน้าให้วันที่ 1 ตกวันในสัปดาห์ที่ถูกต้อง + จำนวนวันของเดือน (วันที่ 0 ของเดือนถัดไป = วันสุดท้ายของเดือนนี้)
-  const leading = new Date(year, month - 1, 1).getDay();
-  const daysInMonth = new Date(year, month, 0).getDate();
+    return () => { cancelled = true; };
+  }, [days, employeeId, reloadKey]);
 
-  /**
-   * จัดวันนัดเข้าแต่ละวันล่วงหน้าครั้งเดียว แทนการ filter ซ้ำทุกช่องปฏิทิน
-   * ทุกเคสมาเป็น "วันนัด" วันเดียว (ทั้ง Homecare และกายภาพ) จึง group ตาม visit_date ได้ตรงๆ
-   */
-  // กรองสายบริการในหน้าเว็บ ไม่ยิง API ใหม่ — ข้อมูลทั้งเดือนโหลดมาแล้ว สลับดูจึงเปลี่ยนทันที
-  // (ต่างจากตัวกรองพนักงานที่กรองฝั่ง server เพราะ /my/calendar ใช้ตัวเดียวกันบังคับดูของตัวเอง)
-  const shown = useMemo(() => (kind ? cases.filter((c) => kindOf(c) === kind) : cases), [cases, kind]);
+  /* เคสที่รับงานแล้วแต่ยังไม่มีวันนัดในช่วงที่ดูอยู่ — เดิมหน้านี้บอกแค่ว่า "จะไม่ขึ้นบนปฏิทิน"
+     แต่ไม่มีทางรู้ว่าเคสไหนบ้าง ทั้งที่นี่คือรายการที่ต้องลงนัดต่อ */
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([
+      api.listCases({ status: 'assigned', per_page: 100 }),
+      api.listCases({ status: 'in_progress', per_page: 100 }),
+    ])
+      .then(([a, b]) => !cancelled && setUnscheduled([...a.data, ...b.data]))
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [reloadKey]);
+
+  // กรองสายบริการ/สถานะกะในหน้าเว็บ ไม่ยิง API ใหม่ — ข้อมูลทั้งช่วงโหลดมาแล้ว สลับดูจึงเปลี่ยนทันที
+  const shown = useMemo(
+    () => (visits ?? []).filter((c) => (!kind || kindOf(c) === kind) && (!state || c.state === state)),
+    [visits, kind, state],
+  );
 
   const byDay = useMemo(() => {
     const map = new Map();
@@ -83,37 +132,54 @@ export default function CalendarPage() {
     return map;
   }, [shown]);
 
-  const selected = staff.find((s) => s.employee_id === employeeId);
+  const scheduledCaseIds = useMemo(() => new Set((visits ?? []).map((v) => v.case_id)), [visits]);
+  const needSchedule = unscheduled.filter((c) => !scheduledCaseIds.has(c.case_id));
 
-  if (error) return <p className="error">{error}</p>;
+  const selected = staff.find((s) => s.employee_id === employeeId);
+  const filtered = Boolean(employeeId || kind || state);
+
+  /** ขยับช่วงที่ดู — เดือนละก้าว หรือสัปดาห์ละก้าวตามมุมมอง */
+  function shift(delta) {
+    const d = new Date(anchorDate);
+    if (view === 'week') d.setDate(d.getDate() + delta * 7);
+    else d.setMonth(d.getMonth() + delta);
+    patch({ date: isoOf(d) });
+  }
+
+  const rangeTitle =
+    view === 'week'
+      ? `${formatDate(days[0])} – ${formatDate(days[6])}`
+      : `${MONTH_LABELS[mm]} ${toBuddhistYear(year)}`;
 
   return (
     <>
-      <header className="page-head">
+      <header className="page-head no-print">
         <div>
           <h1>ตารางงาน</h1>
           <p className="muted">
             {selected && <>ตารางของ <strong>{selected.first_name} {selected.last_name}</strong> · </>}
             {kind && <>เฉพาะ <strong>{SERVICE_KIND_LABELS[kind]}</strong> · </>}
-            เดือนนี้มี {shown.length} วันนัด
-            {kind && cases.length !== shown.length && (
-              <span className="muted"> (จากทั้งหมด {cases.length})</span>
+            {state && <>เฉพาะ <strong>{VISIT_STATE_LABELS[state]}</strong> · </>}
+            {view === 'week' ? 'สัปดาห์นี้' : 'เดือนนี้'}มี {shown.length} กะ
+            {filtered && visits && visits.length !== shown.length && (
+              <span className="muted"> (จากทั้งหมด {visits.length})</span>
             )}
           </p>
         </div>
         <div className="actions">
-          <button className="btn" onClick={() => shiftMonth(-1)} aria-label="เดือนก่อนหน้า">←</button>
-          <button className="btn" onClick={goToday}>วันนี้</button>
-          <button className="btn" onClick={() => shiftMonth(1)} aria-label="เดือนถัดไป">→</button>
+          <button className="btn" onClick={() => shift(-1)} aria-label={view === 'week' ? 'สัปดาห์ก่อนหน้า' : 'เดือนก่อนหน้า'}>←</button>
+          <button className="btn" onClick={() => patch({ date: '' })}>วันนี้</button>
+          <button className="btn" onClick={() => shift(1)} aria-label={view === 'week' ? 'สัปดาห์ถัดไป' : 'เดือนถัดไป'}>→</button>
         </div>
       </header>
 
-      <div className="toolbar">
-        <select
-          value={employeeId}
-          onChange={(e) => setEmployeeId(e.target.value)}
-          aria-label="เลือกพนักงาน"
-        >
+      <div className="toolbar no-print">
+        <span className="seg">
+          <button className={view === 'month' ? 'on' : ''} onClick={() => patch({ view: '' })}>เดือน</button>
+          <button className={view === 'week' ? 'on' : ''} onClick={() => patch({ view: 'week' })}>สัปดาห์</button>
+        </span>
+
+        <select value={employeeId} onChange={(e) => patch({ employee_id: e.target.value })} aria-label="เลือกพนักงาน">
           <option value="">พนักงานทุกคน</option>
           {staff.map((s) => (
             <option key={s.employee_id} value={s.employee_id}>
@@ -123,88 +189,202 @@ export default function CalendarPage() {
           ))}
         </select>
 
-        <select value={kind} onChange={(e) => setKind(e.target.value)} aria-label="เลือกประเภทบริการ">
+        <select value={kind} onChange={(e) => patch({ kind: e.target.value })} aria-label="เลือกประเภทบริการ">
           <option value="">ทุกประเภทบริการ</option>
-          {Object.entries(SERVICE_KIND_LABELS).map(([v, l]) => (
-            <option key={v} value={v}>{l}</option>
-          ))}
+          {Object.entries(SERVICE_KIND_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
         </select>
+
+        <select value={state} onChange={(e) => patch({ state: e.target.value })} aria-label="เลือกสถานะกะ">
+          <option value="">ทุกสถานะกะ</option>
+          {CAL_STATES.map((s) => <option key={s} value={s}>{VISIT_STATE_LABELS[s]}</option>)}
+        </select>
+
+        {filtered && (
+          <button className="btn" onClick={() => patch({ employee_id: '', kind: '', state: '' })}>ล้างตัวกรอง</button>
+        )}
+        <button className="btn" onClick={() => window.print()}>
+          <LineIcon name="printer" />พิมพ์
+        </button>
       </div>
 
-      <h2 className="cal-title">{MONTH_LABELS[mm]} {toBuddhistYear(year)}</h2>
+      {/* error เป็นแถบเหนือปฏิทิน ไม่ทับทั้งหน้า — ตัวกรองที่ตั้งไว้ต้องไม่หายเพราะเน็ตสะดุด */}
+      {error && <p className="error no-print">{error}</p>}
 
-      {shown.length === 0 && (
-        <p className="notice">
+      <h2 className="cal-title">
+        {rangeTitle}
+        {loading && <span className="muted"> · กำลังโหลด…</span>}
+      </h2>
+
+      {/* คำอธิบายสี — ชิปมี 5 สีตามสถานะกะ ไม่มีอะไรบอกก็เดาไม่ถูก */}
+      <div className="cal-legend">
+        {CAL_STATES.map((s) => (
+          <span key={s} className="cal-legend-item">
+            <i className={`cal-swatch visit-${s}`} aria-hidden="true" />
+            {VISIT_STATE_LABELS[s]}
+          </span>
+        ))}
+      </div>
+
+      {!loading && shown.length === 0 && (
+        <p className="notice no-print">
           {/* ว่างเพราะตัวกรอง กับ ว่างเพราะไม่มีงานจริง เป็นคนละเรื่อง — บอกให้ตรงเหตุ */}
-          {kind && cases.length > 0
-            ? `เดือนนี้ไม่มีงาน${SERVICE_KIND_LABELS[kind]} (มีงานอื่นอยู่ ${cases.length} วันนัด)`
-            : selected
-              ? `${selected.first_name} ${selected.last_name} ไม่มีงานในเดือนนี้`
-              : 'ไม่มีงานในเดือนนี้'}
+          {filtered && visits?.length > 0
+            ? `ช่วงนี้ไม่มีกะที่ตรงกับตัวกรอง (มีทั้งหมด ${visits.length} กะ)`
+            : 'ไม่มีกะในช่วงนี้'}
         </p>
       )}
 
       {/* จอแคบ: ให้ปฏิทินเลื่อนแนวนอนในกล่องของตัวเอง ไม่ดันทั้งหน้าให้เลื่อนตาม */}
-      <div className="table-wrap">
-      <div className="cal-grid">
-        {WEEKDAYS.map((w) => (
-          <div key={w} className="cal-head">{w}</div>
-        ))}
+      <div className="table-wrap cal-print">
+        <div className={`cal-grid ${view === 'week' ? 'is-week' : ''}`}>
+          {WEEKDAYS.map((w) => <div key={w} className="cal-head">{w}</div>)}
 
-        {/* ช่องว่างก่อนวันที่ 1 — ให้คอลัมน์ตรงกับวันในสัปดาห์ */}
-        {Array.from({ length: leading }, (_, i) => (
-          <div key={`pad-${i}`} className="cal-cell is-empty" />
-        ))}
+          {/* ช่องว่างก่อนวันแรก — ให้คอลัมน์ตรงกับวันในสัปดาห์ (มุมมองสัปดาห์เริ่มวันอาทิตย์อยู่แล้ว) */}
+          {view === 'month' &&
+            Array.from({ length: new Date(year, month - 1, 1).getDay() }, (_, i) => (
+              <div key={`pad-${i}`} className="cal-cell is-empty" />
+            ))}
 
-        {Array.from({ length: daysInMonth }, (_, i) => {
-          const day = i + 1;
-          const key = iso(year, month, day);
-          const list = byDay.get(key) ?? [];
+          {days.map((key) => {
+            const list = byDay.get(key) ?? [];
+            return (
+              <div key={key} className={`cal-cell ${key === today ? 'is-today' : ''}`}>
+                {/* กดหัววันเพื่อดูงานทั้งวันแบบเต็ม — ช่องในปฏิทินเล็กเกินกว่าจะใส่รายละเอียดครบ */}
+                <button
+                  type="button"
+                  className="cal-date-btn"
+                  onClick={() => patch({ day: key })}
+                  title={`ดูงานของ ${formatDate(key)}`}
+                >
+                  <span className="cal-date">{Number(key.slice(8))}</span>
+                  {list.length > 0 && <span className="cal-count">{list.length}</span>}
+                </button>
 
-          return (
-            <div key={day} className={`cal-cell ${key === today ? 'is-today' : ''}`}>
-              <span className="cal-date">{day}</span>
-
-              {/* เคสเยอะกว่าที่ช่องรับไหว = เลื่อนดูในช่องได้เลย ไม่ตัดทิ้ง */}
-              <div className="cal-chips">
-                {list.map((c) => (
-                  <button
-                    key={`v${c.visit_id}`}
-                    type="button"
-                    className={`cal-chip case-${c.status}`}
-                    onClick={() => setOpenId(c.case_id)}
-                    title={[
-                      c.case_id,
-                      SERVICE_KIND_LABELS[kindOf(c)],
-                      CASE_TYPE_LABELS[c.case_type],
-                      c.client_name,
-                      c.assigned_name ?? 'ยังไม่จับคู่พนักงาน',
-                      CASE_STATUS_LABELS[c.status],
-                    ].filter(Boolean).join(' · ')}
-                  >
-                    {c.assigned_name ?? '— ยังไม่จับคู่ —'}
-                    <span className="cal-chip-sub">{c.client_name}</span>
-                  </button>
-                ))}
+                {/* กะเยอะกว่าที่ช่องรับไหว = เลื่อนดูในช่องได้เลย ไม่ตัดทิ้ง */}
+                <div className="cal-chips">
+                  {list.map((c) => (
+                    <button
+                      key={`v${c.visit_id}`}
+                      type="button"
+                      /* สีตามสถานะ "กะ" (เช็คอินแล้วหรือยัง) ไม่ใช่สถานะ "เคส" — คนดูตารางงาน
+                         อยากรู้ว่ากะนี้เรียบร้อยไหม ไม่ใช่ว่าเคสอยู่ขั้นไหนของสัญญา */
+                      className={`cal-chip visit-${c.state}`}
+                      onClick={() => patch({ open: c.case_id })}
+                      title={[
+                        timeRange(c),
+                        c.case_id,
+                        SERVICE_KIND_LABELS[kindOf(c)],
+                        CASE_TYPE_LABELS[c.case_type],
+                        c.client_name,
+                        c.assigned_name ?? 'ยังไม่จับคู่พนักงาน',
+                        VISIT_STATE_LABELS[c.state],
+                      ].filter(Boolean).join(' · ')}
+                    >
+                      {timeRange(c) && <span className="cal-chip-time">{timeRange(c)}</span>}
+                      {c.assigned_name ?? '— ยังไม่จับคู่ —'}
+                      <span className="cal-chip-sub">{c.client_name}</span>
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
       </div>
 
-      <p className="muted cal-note">
+      <p className="muted cal-note no-print">
         ทุกเคส (ทั้ง <strong>Homecare</strong> และ <strong>กายภาพบำบัด</strong>) แสดงตาม
         <strong>วันนัดที่ลงไว้</strong>ในหน้าจัดการเคส — เคสที่ยังไม่ลงวันนัดจะไม่ขึ้นบนปฏิทิน
       </p>
 
+      {needSchedule.length > 0 && (
+        <details className="card no-print">
+          <summary>เคสที่รับงานแล้วแต่ยังไม่มีวันนัด ({needSchedule.length})</summary>
+          <ul className="todo">
+            {needSchedule.map((c) => (
+              <li key={c.case_id}>
+                <div>
+                  <strong>{c.title}</strong>
+                  <p className="muted">
+                    <span className="mono">{c.case_id}</span>
+                    {' · '}{c.assigned_name ?? 'ยังไม่จับคู่'}
+                    {' · '}{CASE_TYPE_LABELS[c.case_type]}
+                  </p>
+                </div>
+                <button className="btn tiny" onClick={() => patch({ open: c.case_id })}>ลงวันนัด</button>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+
+      {openDay && (
+        <DayPanel
+          day={openDay}
+          list={byDay.get(openDay) ?? []}
+          onOpenCase={(id) => patch({ day: '', open: id })}
+          onClose={() => patch({ day: '' })}
+        />
+      )}
+
       {openId && (
         <CaseModal
           caseId={openId}
-          onClose={() => setOpenId(null)}
+          onClose={() => patch({ open: '' })}
           onChanged={() => setReloadKey((k) => k + 1)}
         />
       )}
     </>
+  );
+}
+
+/** งานทั้งวันแบบเต็ม — ช่องในปฏิทินเล็กเกินกว่าจะใส่เวลา/สถานะ/ผู้รับบริการครบในที่เดียว */
+function DayPanel({ day, list, onOpenCase, onClose }) {
+  useEffect(() => {
+    const onKeyDown = (e) => e.key === 'Escape' && onClose();
+    document.addEventListener('keydown', onKeyDown);
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      document.body.style.overflow = '';
+    };
+  }, [onClose]);
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal modal-narrow" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+        <header className="modal-head">
+          <div>
+            <p className="mono muted">{day}</p>
+            <h2>{formatDate(day)}</h2>
+            <p className="muted">{list.length === 0 ? 'ไม่มีกะในวันนี้' : `${list.length} กะ`}</p>
+          </div>
+          <button className="modal-close" onClick={onClose} aria-label="ปิด">×</button>
+        </header>
+
+        <div className="modal-body">
+          {list.map((c) => (
+            <div className="history-item" key={c.visit_id}>
+              <div>
+                <strong>{timeRange(c) ?? 'ไม่ระบุเวลา'} · {c.assigned_name ?? '— ยังไม่จับคู่ —'}</strong>
+                <p className="muted">
+                  {c.client_name} · {CASE_TYPE_LABELS[c.case_type]} · {SERVICE_KIND_LABELS[kindOf(c)]}
+                </p>
+                <p className="muted">
+                  <button className="btn link-btn" onClick={() => onOpenCase(c.case_id)}>
+                    <span className="mono">{c.case_id}</span> — เปิดเคส
+                  </button>
+                </p>
+              </div>
+              <span className={`badge visit-${c.state}`}>{VISIT_STATE_LABELS[c.state]}</span>
+            </div>
+          ))}
+        </div>
+
+        <footer className="modal-foot">
+          <button className="btn" onClick={onClose}>ปิด</button>
+        </footer>
+      </div>
+    </div>
   );
 }
