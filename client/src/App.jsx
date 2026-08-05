@@ -1,5 +1,7 @@
-import { BrowserRouter, Routes, Route, NavLink, Navigate, Link, useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { BrowserRouter, Routes, Route, NavLink, Navigate, Link, useNavigate, useLocation } from 'react-router-dom';
 import { AuthProvider, RequireAuth, useAuth } from './auth.jsx';
+import LineIcon from './components/LineIcon.jsx';
 import LoginPage from './pages/LoginPage.jsx';
 import ForgotPasswordPage from './pages/ForgotPasswordPage.jsx';
 import SettingsPage from './pages/SettingsPage.jsx';
@@ -52,7 +54,22 @@ function NavIcon({ name }) {
 function Sidebar() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const isAdmin = user.role === 'admin';
+
+  // เมนูพับได้เฉพาะจอแคบ (CSS ซ่อนปุ่มบนจอกว้าง) — บนจอกว้างค่านี้ไม่มีผลกับอะไรเลย
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  // เปลี่ยนหน้าแล้วต้องพับเมนูเอง ไม่งั้นเมนูค้างบังเนื้อหาที่เพิ่งกดเข้าไปดู
+  useEffect(() => setMenuOpen(false), [location.pathname]);
+
+  // Esc = พับเมนู — ทางออกมาตรฐานของทุกอย่างที่กางทับหน้าจอ
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onKeyDown = (e) => e.key === 'Escape' && setMenuOpen(false);
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [menuOpen]);
 
   async function handleLogout() {
     await logout();
@@ -60,14 +77,27 @@ function Sidebar() {
   }
 
   return (
-    <aside className="sidebar">
+    <aside className={`sidebar ${menuOpen ? 'is-open' : ''}`}>
       <div className="brand">
         <img className="brand-logo" src="/logo-navbar.webp" alt="KIN Home Care" />
       </div>
 
+      {/* ปุ่มพับ/กางเมนู — โผล่เฉพาะจอแคบ (ดู @media ใน index.css)
+          aria-expanded + aria-controls บอกโปรแกรมอ่านหน้าจอว่าปุ่มนี้คุมกล่องไหนและตอนนี้กางอยู่ไหม */}
+      <button
+        type="button"
+        className="nav-toggle"
+        aria-expanded={menuOpen}
+        aria-controls="main-nav"
+        aria-label={menuOpen ? 'ปิดเมนู' : 'เปิดเมนู'}
+        onClick={() => setMenuOpen((v) => !v)}
+      >
+        <LineIcon name={menuOpen ? 'close' : 'menu'} className="nav-toggle-ico" />
+      </button>
+
       {/* เมนูจัดการเห็นเฉพาะผู้ดูแลระบบ (ผู้จัดการ/HR) — พนักงานภาคสนามยังไม่มีส่วนของตัวเอง */}
       {isAdmin ? (
-        <nav>
+        <nav id="main-nav">
           <NavLink to="/dashboard"><NavIcon name="dashboard" />ภาพรวม</NavLink>
           <NavLink to="/cases"><NavIcon name="cases" />เคส</NavLink>
           <NavLink to="/calendar"><NavIcon name="calendar" />ตารางงาน</NavLink>
@@ -80,7 +110,7 @@ function Sidebar() {
           <NavLink to="/employees"><NavIcon name="user" />พนักงาน</NavLink>
         </nav>
       ) : (
-        <nav>
+        <nav id="main-nav">
           <NavLink to="/my-today"><NavIcon name="today" />งานวันนี้</NavLink>
           <NavLink to="/my-cases"><NavIcon name="cases" />เคสของฉัน</NavLink>
           <NavLink to="/my-calendar"><NavIcon name="calendar" />ตารางงานของฉัน</NavLink>

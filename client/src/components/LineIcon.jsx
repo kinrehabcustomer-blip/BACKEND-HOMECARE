@@ -21,6 +21,14 @@ const PATHS = {
       <path d="M12 15V3" />
     </>
   ),
+  menu: (
+    <>
+      <path d="M4 7h16" />
+      <path d="M4 12h16" />
+      <path d="M4 17h16" />
+    </>
+  ),
+  close: <path d="M6 6l12 12M18 6L6 18" />,
 };
 
 export default function LineIcon({ name, className = 'btn-ico' }) {

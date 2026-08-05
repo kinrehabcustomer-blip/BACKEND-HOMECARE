@@ -208,6 +208,24 @@ body {
 .login-logo { height: 2.75rem; margin: 0 auto; }
 .brand-sub { font-size: 0.75rem; color: var(--muted); }
 /* เมนู minimal + มีลูกเล่น — ไอคอนหน้าเมนู, hover ขยับ+ไอคอนเด้ง, ตัวที่เลือกมีแถบทองด้านซ้าย */
+/* ปุ่มพับเมนู — ซ่อนบนจอกว้าง (เมนูกางอยู่ตลอดอยู่แล้ว) เปิดใช้ใน @media จอแคบ */
+.nav-toggle {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 2.5rem;
+  height: 2.5rem;
+  padding: 0;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 0.875rem;   /* มนกว่าปุ่มทั่วไป — เป็นปุ่มไอคอนสี่เหลี่ยมจัตุรัส ไม่ใช่ปุ่มข้อความ */
+  cursor: pointer;
+}
+.nav-toggle:hover { background: var(--brand-soft); color: var(--brand); }
+.nav-toggle-ico { width: 1.375rem; height: 1.375rem; }
+
 .sidebar nav { display: flex; flex-direction: column; gap: 0.1875rem; }
 .sidebar nav a {
   display: flex;
@@ -1291,16 +1309,33 @@ select option:checked {
     /* ล้างค่าจากโหมด desktop: แถบบนต้องสูงตามเนื้อหา ไม่ใช่ 100vh (ไม่งั้นแถบสูงเต็มจอ ดันเนื้อหาหลุด) */
     height: auto;
     align-self: stretch;
-    overflow-x: auto; /* เมนูเยอะขึ้นในอนาคตก็ปัดดูได้ ไม่ล้นจอ */
-    overflow-y: visible;
+    /* flex-wrap — เมนูที่กางออกมาตกไปอยู่บรรทัดใหม่เต็มความกว้าง ไม่เบียดกับโลโก้/ปุ่มออกจากระบบ */
+    flex-wrap: wrap;
+    overflow: visible;
     padding: 0.625rem 1rem;
     border-right: none;
     border-bottom: 1px solid var(--border);
   }
   .brand { margin-bottom: 0; flex-shrink: 0; }
   .brand-sub { display: none; } /* ประหยัดที่ — เหลือแค่ "KIN" */
-  .sidebar nav { display: flex; flex-direction: row; gap: 0.25rem; }
-  .sidebar nav a { padding: 0.5rem 0.75rem; white-space: nowrap; }
+
+  /* เมนู 10 รายการเรียงแนวนอนบนจอมือถือต้องปัดซ้ายขวาหาเมนูที่ต้องการ ซึ่งมองไม่เห็นว่ามีอะไรบ้าง
+     เปลี่ยนเป็นพับไว้ใต้ปุ่ม ☰ แล้วกางลงมาเป็นรายการแนวตั้งอ่านครบในครั้งเดียว */
+  .nav-toggle { display: inline-flex; }
+  .sidebar nav { display: none; }
+  .sidebar.is-open nav {
+    display: flex;
+    flex-direction: column;
+    flex-basis: 100%;        /* กินเต็มบรรทัดของตัวเอง ใต้แถวโลโก้ */
+    order: 10;               /* ดันไปท้ายสุดของแถบ ไม่แทรกกลางระหว่างโลโก้กับปุ่มขวา */
+    gap: 0.25rem;
+    margin-top: 0.5rem;
+    padding-top: 0.625rem;
+    border-top: 1px solid var(--border);
+  }
+  .sidebar nav a { padding: 0.625rem 0.75rem; white-space: nowrap; }
+  /* จอแคบไม่มีเมาส์ให้ hover — เอฟเฟกต์เลื่อนออกด้านข้างเลยไม่มีประโยชน์ และทำให้แถวขยับตอนแตะ */
+  .sidebar nav a:hover { transform: none; }
 
   .sidebar-foot {
     display: flex;
