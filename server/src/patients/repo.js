@@ -19,7 +19,8 @@ const COLUMNS = [
   'weight_kg',
   'height_cm',
   'medical_history',
-  'allergies',
+  'allergies',      // แพ้ยา
+  'food_allergies', // แพ้อาหาร — แยกกันเพราะคนละคนที่ต้องรู้ (ให้ยา vs เตรียมอาหาร)
   'blood_type',
   'medical_rights',
 
@@ -41,7 +42,7 @@ const COLUMNS = [
 
 const NOW = `to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD HH24:MI:SS')`;
 
-export async function list({ q, customer_id, status, page, per_page, sort, order }) {
+export async function list({ q, customer_id, has_customer, status, page, per_page, sort, order }) {
   const where = [];
   const params = {};
 
@@ -58,14 +59,19 @@ export async function list({ q, customer_id, status, page, per_page, sort, order
     where.push('p.status = :status');
     params.status = status;
   }
+  // แฟ้มที่ยังไม่ผูกผู้ว่าจ้าง = ยังไม่รู้ว่าใครจ่าย ต้องตามเก็บ จึงต้องกรองหาได้
+  if (has_customer === 'yes' || has_customer === 'no') {
+    where.push(`p.customer_id IS ${has_customer === 'no' ? '' : 'NOT '}NULL`);
+  }
 
   const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
   const { total } = await sql.one(`SELECT COUNT(*) AS total FROM patients p ${clause}`, params);
 
-  // ดึงชื่อผู้ว่าจ้างและจำนวนเคสของผู้ป่วยมาด้วย หน้าเว็บจะได้ไม่ต้องยิง API ซ้ำทีละแถว
+  // ดึงชื่อ/เบอร์ผู้ว่าจ้างและจำนวนเคสของผู้ป่วยมาด้วย หน้าเว็บจะได้ไม่ต้องยิง API ซ้ำทีละแถว
+  // (ผู้รับการดูแลไม่มีเบอร์ของตัวเอง — เบอร์ที่โทรจริงคือเบอร์ผู้ว่าจ้าง)
   // ต้องใส่ prefix p. ให้ sort เพราะ join customers ที่มีคอลัมน์ name/created_at ชื่อชนกัน
   const rows = await sql.all(
-    `SELECT p.*, cu.name AS customer_name,
+    `SELECT p.*, cu.name AS customer_name, cu.phone AS customer_phone,
             (SELECT COUNT(*) FROM cases WHERE patient_id = p.patient_id) AS case_count
      FROM patients p
      LEFT JOIN customers cu ON cu.customer_id = p.customer_id

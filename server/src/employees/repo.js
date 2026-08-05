@@ -68,9 +68,11 @@ export async function list({ q, status, position, page, per_page, sort, order })
   const { total } = await sql.one(`SELECT COUNT(*) AS total FROM employees ${clause}`, params);
 
   // sort/order ผ่าน enum ของ zod มาแล้ว จึงต่อ string ตรงนี้ได้ (Postgres ไม่ bind ชื่อคอลัมน์)
+  // NULLS LAST — hire_date ว่างได้ ถ้าไม่ใส่ การเรียงจากใหม่ไปเก่าจะเอาคนที่ยังไม่ได้กรอกวันเริ่มงาน
+  // ขึ้นก่อนคนที่เพิ่งเริ่มงานจริง (ค่าปริยายของ Postgres คือ NULLS FIRST เมื่อเรียงจากมากไปน้อย)
   const rows = await sql.all(
     `SELECT ${PUBLIC} FROM employees ${clause}
-     ORDER BY ${sort} ${order.toUpperCase()}
+     ORDER BY ${sort} ${order.toUpperCase()} NULLS LAST
      LIMIT :limit OFFSET :offset`,
     { ...params, limit: per_page, offset: (page - 1) * per_page },
   );

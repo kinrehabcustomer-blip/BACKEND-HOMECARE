@@ -86,6 +86,8 @@ export const updateCustomerSchema = createCustomerSchema.partial();
 
 export const listQuerySchema = z.object({
   q: z.string().trim().optional(),
+  // 'no' = ลูกค้าที่ยังไม่เคยเปิดเคสเลย (กลุ่มที่ต้องตามต่อ) · 'yes' = เคยใช้บริการแล้ว
+  has_cases: z.enum(['yes', 'no']).optional(),
   page: z.coerce.number().int().min(1).default(1),
   per_page: z.coerce.number().int().min(1).max(100).default(20),
   sort: z.enum(['customer_id', 'name', 'created_at']).default('customer_id'),

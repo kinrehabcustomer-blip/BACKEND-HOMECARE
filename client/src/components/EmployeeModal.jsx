@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api.js';
+import { useToast } from '../toast.jsx';
 import WorkHistory from './WorkHistory.jsx';
 import Avatar from './Avatar.jsx';
 import {
@@ -10,6 +11,8 @@ import {
 
 // popup เป็นตัวอย่างข้อมูลย่อ — โชว์ประวัติการทำงานแค่ 3 ครั้งล่าสุด ที่เหลือดูที่หน้าเต็ม
 const PREVIEW_HISTORY = 3;
+
+const FOCUSABLE = 'a[href], button:not(:disabled), input, select, textarea, [tabindex]:not([tabindex="-1"])';
 
 /** อายุงาน/อายุ คำนวณจากวันที่ให้ดูง่าย — ข้อมูลที่ตารางไม่ได้โชว์ */
 function yearsSince(dateStr) {
@@ -35,15 +38,84 @@ function Field({ label, value, mono }) {
   );
 }
 
-export default function EmployeeModal({ employeeId, onClose }) {
+/**
+ * แก้ช่องที่เปลี่ยนบ่อยที่สุดได้ตรงนี้เลย ไม่ต้องออกไปหน้าฟอร์มเต็ม
+ * เลือกมาสามช่องเพราะเป็นสิ่งที่แก้กันจริงในงานประจำวัน (ย้ายตำแหน่ง, เปลี่ยนเบอร์, ลาพัก/กลับมา)
+ * ที่เหลือยังต้องไปหน้าฟอร์ม — ช่องพวกนั้นแก้กันปีละครั้ง ไม่คุ้มกับความเสี่ยงที่จะกดพลาดในนี้
+ */
+function QuickEdit({ employee, onDone, onCancel }) {
+  const toast = useToast();
+  const [form, setForm] = useState({
+    status: employee.status,
+    position: employee.position,
+    phone: employee.phone ?? '',
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+
+  const field = (key) => ({
+    value: form[key],
+    onChange: (e) => setForm((prev) => ({ ...prev, [key]: e.target.value })),
+  });
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setSaving(true);
+    setError(null);
+    try {
+      // ช่องว่างต้องเป็น null ไม่ใช่ "" ไม่งั้นไม่ผ่าน validation ของเบอร์โทร
+      const updated = await api.updateEmployee(employee.employee_id, {
+        ...form,
+        phone: form.phone.trim() === '' ? null : form.phone.trim(),
+      });
+      toast('บันทึกแล้ว');
+      onDone(updated);
+    } catch (err) {
+      setError(err.message);
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form className="quick-edit" onSubmit={handleSubmit}>
+      {error && <p className="error">{error}</p>}
+      <div className="grid cols-2">
+        <label>สถานะ
+          <select {...field('status')}>
+            {Object.entries(STATUS_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          </select>
+        </label>
+        <label>ตำแหน่ง
+          <select {...field('position')}>
+            {Object.entries(POSITION_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          </select>
+        </label>
+        <label className="span-2">เบอร์โทร
+          <input placeholder="เช่น 081-234-5678" {...field('phone')} />
+        </label>
+      </div>
+      <div className="quick-edit-actions">
+        <button className="btn" type="button" onClick={onCancel} disabled={saving}>ยกเลิก</button>
+        <button className="btn primary" type="submit" disabled={saving}>
+          {saving ? 'กำลังบันทึก…' : 'บันทึก'}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+export default function EmployeeModal({ employeeId, siblings = [], onNavigate, onSaved, onClose }) {
   const [employee, setEmployee] = useState(null);
   const [error, setError] = useState(null);
+  const [editing, setEditing] = useState(false);
+  const boxRef = useRef(null);
 
   // ตารางรายชื่อมีข้อมูลไม่ครบ (ไม่มีใบรับรอง) จึงดึงข้อมูลเต็มด้วย employee_id อีกรอบ
   useEffect(() => {
     let cancelled = false;
     setEmployee(null);
     setError(null);
+    setEditing(false); // เปลี่ยนคนแล้วต้องปิดโหมดแก้ ไม่งั้นค่าที่ค้างอยู่จะไปทับข้อมูลคนใหม่
 
     api
       .getEmployee(employeeId)
@@ -55,22 +127,80 @@ export default function EmployeeModal({ employeeId, onClose }) {
     };
   }, [employeeId]);
 
-  // ปิดด้วย Esc + ล็อกไม่ให้หน้าหลังเลื่อนตาม
+  /*
+   * ล็อกไม่ให้หน้าหลังเลื่อนตาม + คืนโฟกัสกลับไปที่แถวเดิมตอนปิด (ไม่ใช่ดีดกลับไปต้นหน้า)
+   * ต้องแยกออกมาเป็น effect ที่ทำงานครั้งเดียวตลอดอายุกล่อง — ถ้าไปรวมกับ effect ที่มี deps
+   * โฟกัสจะถูกคืนออกไปข้างนอกทุกครั้งที่ deps เปลี่ยน (เช่น ตอนกดเข้าโหมดแก้ด่วน)
+   */
   useEffect(() => {
-    const onKeyDown = (e) => e.key === 'Escape' && onClose();
-    document.addEventListener('keydown', onKeyDown);
+    const previous = document.activeElement;
+    boxRef.current?.focus();
     document.body.style.overflow = 'hidden';
 
     return () => {
-      document.removeEventListener('keydown', onKeyDown);
       document.body.style.overflow = '';
+      previous?.focus?.();
     };
-  }, [onClose]);
+  }, []);
+
+  /*
+   * ปิดด้วย Esc + ขังโฟกัสไว้ในกล่อง
+   * ถ้าไม่ขัง Tab จะวิ่งไปโดนลิงก์/ปุ่มที่อยู่หลังฉาก ซึ่งคนใช้คีย์บอร์ดจะหลงทางทันที
+   */
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        // กำลังแก้อยู่ Esc ควรยกเลิกการแก้ก่อน ไม่ใช่ปิดทั้งกล่องจนสิ่งที่พิมพ์ไว้หาย
+        if (editing) setEditing(false);
+        else onClose();
+        return;
+      }
+
+      if (e.key !== 'Tab') return;
+
+      const items = [...(boxRef.current?.querySelectorAll(FOCUSABLE) ?? [])].filter((el) => el.offsetParent !== null);
+      if (items.length === 0) return;
+
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (e.shiftKey && (document.activeElement === first || document.activeElement === boxRef.current)) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [onClose, editing]);
+
+  // ตำแหน่งของคนนี้ในรายการหน้าปัจจุบัน — ใช้ทำปุ่มดูคนก่อนหน้า/ถัดไป
+  const index = siblings.indexOf(employeeId);
+  const prevId = index > 0 ? siblings[index - 1] : null;
+  const nextId = index >= 0 && index < siblings.length - 1 ? siblings[index + 1] : null;
+
+  /** แก้ด่วนสำเร็จ — เอาข้อมูลใหม่มาแสดงทันที แล้วบอกหน้ารายการให้ดึงใหม่ ตัวเลขสรุปจะได้ตรง */
+  const handleSaved = (updated) => {
+    setEmployee((prev) => ({ ...prev, ...updated }));
+    setEditing(false);
+    onSaved?.();
+  };
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
       {/* กันไม่ให้คลิกในกล่องทะลุไปโดน backdrop จนปิดเอง */}
-      <div className="modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label="ข้อมูลพนักงาน"
+        tabIndex={-1}
+        ref={boxRef}
+        onClick={(e) => e.stopPropagation()}
+      >
         {error && <pre className="error">{error}</pre>}
         {!employee && !error && <p className="muted modal-loading">กำลังโหลด…</p>}
 
@@ -88,10 +218,59 @@ export default function EmployeeModal({ employeeId, onClose }) {
                   <span className={`badge ${employee.status}`}>{STATUS_LABELS[employee.status]}</span>
                 </div>
               </div>
-              <button className="modal-close" onClick={onClose} aria-label="ปิด">×</button>
+
+              <div className="modal-head-actions">
+                {/* ไล่ดูทีละคนได้โดยไม่ต้องปิด-เปิดใหม่ (เฉพาะคนที่อยู่ในหน้ารายการปัจจุบัน) */}
+                {siblings.length > 1 && (
+                  <span className="modal-nav">
+                    <button
+                      className="btn icon-btn"
+                      disabled={!prevId}
+                      onClick={() => onNavigate?.(prevId)}
+                      title="คนก่อนหน้า"
+                      aria-label="คนก่อนหน้า"
+                    >‹</button>
+                    <button
+                      className="btn icon-btn"
+                      disabled={!nextId}
+                      onClick={() => onNavigate?.(nextId)}
+                      title="คนถัดไป"
+                      aria-label="คนถัดไป"
+                    >›</button>
+                  </span>
+                )}
+                <button className="modal-close" onClick={onClose} aria-label="ปิด">×</button>
+              </div>
             </header>
 
             <div className="modal-body">
+              {/* ข้อมูลติดต่อขึ้นก่อนทุกอย่าง — คนส่วนใหญ่เปิด popup นี้มาหาเบอร์โทร */}
+              <section>
+                <div className="section-head">
+                  <h3>ติดต่อ &amp; งานปัจจุบัน</h3>
+                  {!editing && (
+                    <button className="btn tiny" onClick={() => setEditing(true)}>แก้ด่วน</button>
+                  )}
+                </div>
+
+                {editing ? (
+                  <QuickEdit employee={employee} onDone={handleSaved} onCancel={() => setEditing(false)} />
+                ) : (
+                  <div className="field-grid">
+                    <Field
+                      label="เบอร์โทร"
+                      value={employee.phone && <a className="link" href={`tel:${employee.phone}`}>{employee.phone}</a>}
+                    />
+                    <Field
+                      label="อีเมล"
+                      value={employee.email && <a className="link" href={`mailto:${employee.email}`}>{employee.email}</a>}
+                    />
+                    <Field label="ตำแหน่ง" value={POSITION_LABELS[employee.position]} />
+                    <Field label="ประเภทการจ้าง" value={EMPLOYMENT_TYPE_LABELS[employee.employment_type]} />
+                  </div>
+                )}
+              </section>
+
               <section>
                 <h3>ข้อมูลส่วนตัว</h3>
                 <div className="field-grid">
@@ -108,8 +287,6 @@ export default function EmployeeModal({ employeeId, onClose }) {
                       `${formatDate(employee.birth_date)} (อายุ ${yearsSince(employee.birth_date)?.split(' ปี')[0]} ปี)`
                     }
                   />
-                  <Field label="เบอร์โทร" value={employee.phone} />
-                  <Field label="อีเมล" value={employee.email} />
                 </div>
                 <Field label="ที่อยู่" value={employee.address} />
                 <Field label="ประวัติการศึกษา" value={employee.education} />
@@ -118,8 +295,6 @@ export default function EmployeeModal({ employeeId, onClose }) {
               <section>
                 <h3>ข้อมูลการจ้างงาน</h3>
                 <div className="field-grid">
-                  <Field label="ตำแหน่ง" value={POSITION_LABELS[employee.position]} />
-                  <Field label="ประเภทการจ้าง" value={EMPLOYMENT_TYPE_LABELS[employee.employment_type]} />
                   {/* ส่ง null เมื่อไม่มีค่า ให้ Field ขึ้น "ไม่ได้ระบุ" แทนที่จะเป็นขีด — */}
                   <Field label="ค่าจ้าง" value={employee.base_salary != null && formatBaht(employee.base_salary)} />
                   <Field label="วันเริ่มงาน" value={employee.hire_date && formatDate(employee.hire_date)} />
@@ -132,7 +307,13 @@ export default function EmployeeModal({ employeeId, onClose }) {
                 <h3>ผู้ติดต่อฉุกเฉิน</h3>
                 <div className="field-grid">
                   <Field label="ชื่อผู้ติดต่อ" value={employee.emergency_contact_name} />
-                  <Field label="เบอร์โทร" value={employee.emergency_contact_phone} />
+                  <Field
+                    label="เบอร์โทร"
+                    value={
+                      employee.emergency_contact_phone &&
+                      <a className="link" href={`tel:${employee.emergency_contact_phone}`}>{employee.emergency_contact_phone}</a>
+                    }
+                  />
                 </div>
               </section>
 
@@ -179,27 +360,27 @@ export default function EmployeeModal({ employeeId, onClose }) {
                 {employee.portfolio.length === 0 ? (
                   <p className="muted">ยังไม่มีผลงาน</p>
                 ) : (
-                  <div className="portfolio-grid">
-                    {employee.portfolio.map((item) => (
-                      <figure className="portfolio-item" key={item.portfolio_id}>
-                        <a
-                          href={api.portfolioImageUrl(employee.employee_id, item.portfolio_id)}
-                          target="_blank"
-                          rel="noreferrer"
-                          title="กดเพื่อดูรูปเต็ม"
-                        >
-                          <img
-                            src={api.portfolioImageUrl(employee.employee_id, item.portfolio_id)}
-                            alt={item.title}
-                          />
-                        </a>
-                        <figcaption>
-                          <strong>{item.title}</strong>
-                          {item.description && <p className="muted">{item.description}</p>}
-                        </figcaption>
-                      </figure>
-                    ))}
-                  </div>
+                  // แถวรูปย่อ + ข้อความ ขนาดเดียวกับใบรับรองด้านบน (ดู .media-* ใน index.css)
+                  employee.portfolio.map((item) => (
+                    <figure className="media-row" key={item.portfolio_id}>
+                      <a
+                        className="media-thumb"
+                        href={api.portfolioImageUrl(employee.employee_id, item.portfolio_id)}
+                        target="_blank"
+                        rel="noreferrer"
+                        title="กดเพื่อดูรูปเต็ม"
+                      >
+                        <img
+                          src={api.portfolioImageUrl(employee.employee_id, item.portfolio_id)}
+                          alt={item.title}
+                        />
+                      </a>
+                      <figcaption className="media-info">
+                        <strong>{item.title}</strong>
+                        {item.description && <p className="muted">{item.description}</p>}
+                      </figcaption>
+                    </figure>
+                  ))
                 )}
               </section>
 
@@ -221,7 +402,7 @@ export default function EmployeeModal({ employeeId, onClose }) {
 
             <footer className="modal-foot">
               <Link className="btn" to={`/employees/${employee.employee_id}`}>เปิดหน้าเต็ม</Link>
-              <Link className="btn primary" to={`/employees/${employee.employee_id}/edit`}>แก้ไขข้อมูล</Link>
+              <Link className="btn primary" to={`/employees/${employee.employee_id}/edit`}>แก้ไขทั้งหมด</Link>
             </footer>
           </>
         )}

@@ -66,10 +66,16 @@ export default function PatientDetailPage() {
         </div>
       </header>
 
-      {/* แพ้ยา/แพ้อาหาร อยู่บนสุด — พนักงานต้องเห็นก่อนเข้าเคส ไม่ใช่ต้องเลื่อนหา */}
+      {/* การแพ้อยู่บนสุด — พนักงานต้องเห็นก่อนเข้าเคส ไม่ใช่ต้องเลื่อนหา
+          แยกสองแถบ เพราะคนละคนที่ต้องรู้ (คนให้ยา vs คนเตรียมอาหาร) */}
       {patient.allergies && (
         <p className="notice allergy-alert">
-          <strong>⚠ แพ้ยา / แพ้อาหาร:</strong> {patient.allergies}
+          <strong>⚠ แพ้ยา:</strong> {patient.allergies}
+        </p>
+      )}
+      {patient.food_allergies && (
+        <p className="notice allergy-alert">
+          <strong>⚠ แพ้อาหาร:</strong> {patient.food_allergies}
         </p>
       )}
 
@@ -100,8 +106,11 @@ export default function PatientDetailPage() {
           <Row label="โรคประจำตัว">
             {patient.medical_history && <span className="pre-line">{patient.medical_history}</span>}
           </Row>
-          <Row label="แพ้ยา / แพ้อาหาร">
+          <Row label="แพ้ยา">
             {patient.allergies && <span className="pre-line">{patient.allergies}</span>}
+          </Row>
+          <Row label="แพ้อาหาร">
+            {patient.food_allergies && <span className="pre-line">{patient.food_allergies}</span>}
           </Row>
         </section>
 

@@ -20,5 +20,8 @@
   "devDependencies": {
     "concurrently": "^9.1.2",
     "playwright": "^1.61.1"
+  },
+  "dependencies": {
+    "echarts": "^6.1.0"
   }
 }

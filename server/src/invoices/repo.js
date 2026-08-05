@@ -316,3 +316,60 @@ export async function summary() {
   const rows = await sql.all('SELECT status, COUNT(*) AS count, SUM(total) AS amount FROM invoices GROUP BY status');
   return rows.map((r) => ({ ...r, count: Number(r.count), amount: Number(r.amount ?? 0) }));
 }
+
+// ความละเอียดของแกนเวลาในกราฟรายได้ — ค่ามาจาก enum ใน schema แล้ว จึงต่อเข้า SQL ตรงๆ ได้
+// (สัปดาห์ของ date_trunc เริ่มวันจันทร์ ตรงกับที่คนไทยนับสัปดาห์)
+const BUCKETS = {
+  day: { unit: 'day', step: '1 day' },
+  week: { unit: 'week', step: '1 week' },
+};
+
+/**
+ * รายได้ตามช่วงเวลา สำหรับกราฟเส้นในหน้าภาพรวม
+ *
+ * นับเฉพาะใบที่ "ชำระแล้ว" และยึด paid_at (วันที่เงินเข้า) ไม่ใช่ issue_date — ใบที่ออกไปแล้ว
+ * แต่ยังไม่เก็บเงินไม่ใช่รายได้ และวันที่ออกใบกับวันที่รับเงินมักคนละวัน
+ *
+ * ช่วงเวลาถูกกางด้วย generate_series ก่อนแล้วค่อย LEFT JOIN — วันที่ไม่มีใบชำระเลยต้องได้ 0
+ * ไม่ใช่หายไปจากผลลัพธ์ ไม่งั้นกราฟเส้นจะลากข้ามช่องว่างเหมือนวันนั้นมีรายได้ต่อเนื่อง
+ *
+ * หมายเหตุ: "วันนี้" อิงวันที่ UTC เหมือน TODAY() ที่ใช้ตอนบันทึกชำระ — ให้เส้นแบ่งวันของกราฟ
+ * ตรงกับเส้นแบ่งวันของข้อมูลที่บันทึกไว้ (ต่างจากเวลาไทย 00:00–07:00 อยู่หนึ่งวัน)
+ */
+export async function revenue({ bucket, points }) {
+  const { unit, step } = BUCKETS[bucket];
+
+  const rows = await sql.all(
+    `WITH buckets AS (
+       SELECT generate_series(
+                date_trunc('${unit}', :today::date) - :span::interval,
+                date_trunc('${unit}', :today::date),
+                '${step}'::interval
+              )::date AS bucket
+     )
+     SELECT to_char(b.bucket, 'YYYY-MM-DD') AS period,
+            COALESCE(SUM(i.total), 0)       AS revenue,
+            COUNT(i.invoice_id)             AS invoices
+     FROM buckets b
+     LEFT JOIN invoices i
+            ON i.status = 'paid'
+           AND i.paid_at IS NOT NULL
+           AND date_trunc('${unit}', LEFT(i.paid_at, 10)::date)::date = b.bucket
+     GROUP BY b.bucket
+     ORDER BY b.bucket`,
+    { today: TODAY(), span: `${points - 1} ${unit}` },
+  );
+
+  const data = rows.map((r) => ({
+    period: r.period,
+    revenue: Number(r.revenue),
+    invoices: Number(r.invoices),
+  }));
+
+  return {
+    bucket,
+    data,
+    total: data.reduce((sum, r) => sum + r.revenue, 0),
+    invoices: data.reduce((sum, r) => sum + r.invoices, 0),
+  };
+}

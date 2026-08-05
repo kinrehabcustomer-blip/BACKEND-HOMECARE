@@ -21,7 +21,14 @@ async function request(path, options = {}) {
 
     // รวม error ของแต่ละ field จาก zod ให้เป็นข้อความเดียวที่อ่านรู้เรื่อง
     const fields = data?.details?.map((d) => `${d.field}: ${d.message}`).join('\n');
-    throw new Error(fields ? `${data.error}\n${fields}` : (data?.error ?? `เรียก API ไม่สำเร็จ (HTTP ${res.status})`));
+    const error = new Error(
+      fields ? `${data.error}\n${fields}` : (data?.error ?? `เรียก API ไม่สำเร็จ (HTTP ${res.status})`),
+    );
+
+    // แนบรายละเอียดรายช่องไว้ด้วย ให้ฟอร์มเอาไปแปะข้อความใต้ช่องที่ผิดได้ตรงจุด
+    // (ยังคงข้อความรวมไว้เหมือนเดิม — หน้าที่ยังไม่ได้ใช้ fields จะไม่เปลี่ยนพฤติกรรม)
+    if (data?.details) error.fields = data.details;
+    throw error;
   }
 
   if (!data) throw new Error('เซิร์ฟเวอร์ตอบกลับไม่สมบูรณ์ — กรุณาลองใหม่อีกครั้ง');
@@ -181,6 +188,15 @@ export const api = {
   // ---------- ใบแจ้งหนี้ ----------
   listInvoices: (params = {}) => request(`/invoices?${new URLSearchParams(params)}`),
   invoiceSummary: () => request('/invoices/summary'),
+  /**
+   * รายได้ตามช่วงเวลาสำหรับกราฟ — นับเฉพาะใบที่ชำระแล้ว ยึดวันที่รับเงิน
+   * bucket: 'day' (ปริยาย 30 วัน) | 'week' (ปริยาย 12 สัปดาห์) · ช่องที่ไม่มีรายได้คืนมาเป็น 0 ครบทุกช่อง
+   */
+  invoiceRevenue: ({ bucket = 'day', points } = {}) => {
+    const params = new URLSearchParams({ bucket });
+    if (points) params.set('points', points);
+    return request(`/invoices/revenue?${params}`);
+  },
   getInvoice: (id) => request(`/invoices/${id}`),
   createInvoice: (body) => request('/invoices', { method: 'POST', body }),
   updateInvoice: (id, body) => request(`/invoices/${id}`, { method: 'PATCH', body }),

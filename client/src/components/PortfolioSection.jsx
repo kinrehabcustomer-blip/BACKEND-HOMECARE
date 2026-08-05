@@ -32,6 +32,9 @@ const PortfolioSection = forwardRef(function PortfolioSection({ employeeId }, re
 
   /** ฟอร์มพนักงานเรียกตอนกดปุ่มบันทึก — บันทึกทั้งที่อยู่ในคิวและที่กรอกค้างไว้ */
   useImperativeHandle(ref, () => ({
+    /** มีผลงานที่ยังไม่ได้บันทึกค้างอยู่ไหม — ฟอร์มใช้เตือนก่อนออกจากหน้า */
+    dirty: () => pending.length > 0 || draft.title.trim() !== '' || Boolean(image),
+
     async save(targetId) {
       const queue = [...pending];
       if (draft.title.trim() && image) queue.push({ ...draft, image, key: 'draft' });

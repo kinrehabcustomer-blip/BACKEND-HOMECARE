@@ -27,11 +27,15 @@ export default function WorkHistoryModal({ employeeName, cases = [], onClose }) 
   const closed = cases.filter((c) => c.status === 'closed');
   const earned = closed.reduce((sum, c) => sum + (c.fee ?? 0), 0);
 
-  /** วันที่ที่สนใจต่างกันตามสถานะ: เคสจบแล้วสนใจว่าจบเมื่อไหร่ เคสที่ทำอยู่สนใจว่ารับมาเมื่อไหร่ */
+  /**
+   * วันที่ที่สนใจต่างกันตามสถานะ: เคสจบแล้วสนใจว่าจบเมื่อไหร่ เคสที่ทำอยู่สนใจว่ารับมาเมื่อไหร่
+   * ในช่องโชว์แค่ตัววันที่ — คำนำหน้ากินความกว้างจนวันที่โดนตัด ซึ่งเป็นตัวเลขที่คนมาอ่านจริงๆ
+   * ว่าเป็นวันไหนดูได้จากคอลัมน์สถานะที่อยู่ติดกัน และมีข้อความเต็มใน title ตอนเอาเมาส์ชี้
+   */
   const whenOf = (c) =>
-    c.status === 'closed'
-      ? `ปิดเคสเมื่อ ${formatDate(c.closed_at ?? c.end_date)}`
-      : `รับเคสเมื่อ ${formatDate(c.assigned_at)}`;
+    c.status === 'closed' ? formatDate(c.closed_at ?? c.end_date) : formatDate(c.assigned_at);
+
+  const whenLabel = (c) => (c.status === 'closed' ? 'ปิดเคสเมื่อ' : 'รับเคสเมื่อ');
 
   const openCase = (id) => setOpenCaseId(id);
 
@@ -90,7 +94,7 @@ export default function WorkHistoryModal({ employeeName, cases = [], onClose }) 
                         <span className="cell-sub">{c.client_name}</span>
                       </td>
                       <td>{CASE_TYPE_LABELS[c.case_type]}</td>
-                      <td>
+                      <td title={`${whenLabel(c)} ${whenOf(c)}`}>
                         {whenOf(c)}
                         {c.fee != null && <span className="cell-sub">{formatBaht(c.fee)}</span>}
                       </td>

@@ -183,7 +183,7 @@ CREATE TABLE IF NOT EXISTS patients (
 
   -- การแพทย์เชิงคงที่ (อาการปัจจุบัน/อุปกรณ์ที่เปลี่ยนได้ อยู่ที่เคส ไม่ใช่ที่นี่)
   medical_history TEXT,   -- โรคประจำตัว
-  allergies       TEXT,   -- แพ้ยา/แพ้อาหาร — พนักงานต้องเห็นก่อนเข้าเคส
+  allergies       TEXT,   -- แพ้ยา — พนักงานต้องเห็นก่อนเข้าเคส (แพ้อาหารอยู่ที่ food_allergies)
   blood_type      TEXT CHECK (blood_type IN ('A', 'B', 'AB', 'O')),
   medical_rights  TEXT,   -- สิทธิการรักษา
 
@@ -224,6 +224,11 @@ ALTER TABLE patients ADD CONSTRAINT patients_status_check
 -- น้ำหนัก/ส่วนสูง อยู่ที่แฟ้มผู้ป่วย (ย้ายมาจากเคส) — เพิ่มด้วย ALTER เพราะตาราง patients ถูกสร้างไปแล้ว
 ALTER TABLE patients ADD COLUMN IF NOT EXISTS weight_kg DOUBLE PRECISION CHECK (weight_kg > 0);
 ALTER TABLE patients ADD COLUMN IF NOT EXISTS height_cm DOUBLE PRECISION CHECK (height_cm > 0);
+
+-- แยก "แพ้อาหาร" ออกจาก allergies ที่เดิมเก็บรวมกัน — คนละเรื่องกันในทางปฏิบัติ
+-- (แพ้ยาเป็นเรื่องของการให้ยา/พยาบาล · แพ้อาหารเป็นเรื่องของการเตรียมอาหาร คนละคนที่ต้องรู้)
+-- ข้อมูลเดิมยังอยู่ในช่องแพ้ยาทั้งก้อน แยกอัตโนมัติไม่ได้เพราะเป็นข้อความอิสระ ต้องให้คนมาแยกเอง
+ALTER TABLE patients ADD COLUMN IF NOT EXISTS food_allergies TEXT;
 
 -- ---------- เคส (งานดูแลผู้รับบริการหนึ่งราย) ----------
 CREATE TABLE IF NOT EXISTS cases (

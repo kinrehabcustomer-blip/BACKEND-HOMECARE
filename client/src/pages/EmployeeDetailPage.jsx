@@ -152,10 +152,12 @@ export default function EmployeeDetailPage() {
         {employee.portfolio.length === 0 ? (
           <p className="muted">ยังไม่มีผลงาน</p>
         ) : (
-          <div className="portfolio-grid portfolio-compact">
+          // แถวรูปย่อ + ข้อความ ขนาดเดียวกับใบรับรองในการ์ดด้านบน (ดู .media-* ใน index.css)
+          <div>
             {employee.portfolio.map((item) => (
-              <figure className="portfolio-item" key={item.portfolio_id}>
+              <figure className="media-row" key={item.portfolio_id}>
                 <a
+                  className="media-thumb"
                   href={api.portfolioImageUrl(id, item.portfolio_id)}
                   target="_blank"
                   rel="noreferrer"
@@ -163,7 +165,7 @@ export default function EmployeeDetailPage() {
                 >
                   <img src={api.portfolioImageUrl(id, item.portfolio_id)} alt={item.title} />
                 </a>
-                <figcaption>
+                <figcaption className="media-info">
                   <strong>{item.title}</strong>
                   {item.description && <p className="muted">{item.description}</p>}
                 </figcaption>

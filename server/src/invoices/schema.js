@@ -51,6 +51,17 @@ export const paySchema = z.object({
   payment_method: optionalText,
 });
 
+/**
+ * กราฟรายได้ — bucket = ความละเอียดของแกนเวลา · points = จำนวนช่องย้อนหลัง (รวมช่องปัจจุบัน)
+ * ปริยายต่างกันตาม bucket: รายวันดู 30 วัน · รายสัปดาห์ดู 12 สัปดาห์ (ยาวพอเห็นแนวโน้ม ไม่แน่นเกินอ่าน)
+ */
+export const revenueQuerySchema = z
+  .object({
+    bucket: z.enum(['day', 'week']).default('day'),
+    points: z.coerce.number().int().min(2).max(90).optional(),
+  })
+  .transform((q) => ({ ...q, points: q.points ?? (q.bucket === 'week' ? 12 : 30) }));
+
 export const listQuerySchema = z.object({
   q: z.string().trim().optional(),
   status: z.enum(INVOICE_STATUSES).optional(),

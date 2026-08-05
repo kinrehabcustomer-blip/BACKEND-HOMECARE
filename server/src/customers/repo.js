@@ -44,7 +44,7 @@ const COLUMNS = [
 
 const NOW = `to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD HH24:MI:SS')`;
 
-export async function list({ q, page, per_page, sort, order }) {
+export async function list({ q, has_cases, page, per_page, sort, order }) {
   const where = [];
   const params = {};
 
@@ -55,8 +55,18 @@ export async function list({ q, page, per_page, sort, order }) {
     params.q = `%${q}%`;
   }
 
+  // "ยังไม่เคยเปิดเคส" = ลูกค้าที่ติดต่อเข้ามาแล้วแต่ยังไม่ได้ใช้บริการ — กลุ่มที่ต้องตามต่อ
+  // ใช้ EXISTS ไม่ใช่ COUNT(*) > 0 เพราะหยุดทันทีที่เจอแถวแรก ไม่ต้องนับให้ครบ
+  if (has_cases === 'yes' || has_cases === 'no') {
+    const not = has_cases === 'no' ? 'NOT ' : '';
+    where.push(`${not}EXISTS (SELECT 1 FROM cases WHERE cases.customer_id = c.customer_id)`);
+  }
+
   const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
-  const { total } = await sql.one(`SELECT COUNT(*) AS total FROM customers ${clause}`, params);
+
+  // ต้องมี alias c ทั้งสอง query — เงื่อนไข has_cases อ้าง c.customer_id
+  // (เงื่อนไขอื่นเขียนชื่อคอลัมน์เปล่าๆ ซึ่งยังทำงานได้ตามปกติเมื่อมี alias)
+  const { total } = await sql.one(`SELECT COUNT(*) AS total FROM customers c ${clause}`, params);
 
   // นับเคสของลูกค้าแต่ละคนมาด้วย หน้าเว็บจะได้ไม่ต้องยิง API ซ้ำทีละแถว
   const rows = await sql.all(

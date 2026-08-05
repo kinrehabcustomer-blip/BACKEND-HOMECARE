@@ -48,7 +48,8 @@ export const createPatientSchema = z.object({
   weight_kg: z.number().positive('น้ำหนักต้องมากกว่า 0').max(500).optional().nullable(),
   height_cm: z.number().positive('ส่วนสูงต้องมากกว่า 0').max(300).optional().nullable(),
   medical_history: optionalLongText,
-  allergies: optionalLongText,
+  allergies: optionalLongText,      // แพ้ยา
+  food_allergies: optionalLongText, // แพ้อาหาร
   blood_type: z.enum(BLOOD_TYPES).optional().nullable(),
   medical_rights: optionalShort,
 
@@ -76,6 +77,8 @@ export const updatePatientSchema = createPatientSchema.partial();
 export const listQuerySchema = z.object({
   q: z.string().trim().optional(),
   customer_id: z.string().trim().optional(),
+  // 'no' = แฟ้มที่ยังไม่ได้ผูกผู้ว่าจ้าง (ยังไม่รู้ว่าใครเป็นคนจ่าย) — กลุ่มที่ต้องตามเก็บ
+  has_customer: z.enum(['yes', 'no']).optional(),
   status: z.enum(PATIENT_STATUSES).optional(),
   page: z.coerce.number().int().min(1).default(1),
   per_page: z.coerce.number().int().min(1).max(100).default(20),

@@ -20,7 +20,7 @@ const BLANK = {
   // ตัวตนผู้ป่วย (มาจากแฟ้ม patient / หรือกรอกเพื่อสร้างแฟ้มใหม่) — client_name/gender/age/medical_history คัดลอกเป็น snapshot ในเคส
   client_name: '', patient_gender: '', patient_age: '', medical_history: '',
   // เฉพาะตอนสร้างผู้ป่วยใหม่ — เก็บที่แฟ้มผู้ป่วย ไม่ใช่คอลัมน์ของเคส (ถูกตัดออกก่อนบันทึกเคส)
-  weight_kg: '', height_cm: '', allergies: '', relation_to_customer: '',
+  weight_kg: '', height_cm: '', allergies: '', food_allergies: '', relation_to_customer: '',
 
   // การประเมิน/อาการครั้งนี้ (ข้อมูลของเคส เปลี่ยนได้ทุกรอบ)
   current_symptoms: '', medical_devices: '', care_goal: '',
@@ -383,6 +383,7 @@ export default function CaseFormPage() {
       height_cm: payload.height_cm,
       medical_history: payload.medical_history,
       allergies: payload.allergies,
+      food_allergies: payload.food_allergies,
       relation_to_customer: payload.relation_to_customer,
       address: payload.address,
       customer_id: payload.customer_id, // ผูกผู้ว่าจ้างตั้งแต่แรก (null ได้ถ้ายังไม่รู้ผู้จ่าย)
@@ -412,6 +413,7 @@ export default function CaseFormPage() {
 
       // ฟิลด์เหล่านี้ย้ายไปเก็บที่แฟ้มผู้ป่วยแล้ว ไม่เก็บซ้ำในเคส (allergies/relation ไม่ใช่คอลัมน์ของเคสอยู่แล้ว)
       delete payload.allergies;
+      delete payload.food_allergies;
       delete payload.relation_to_customer;
       delete payload.weight_kg;
       delete payload.height_cm;
@@ -655,7 +657,12 @@ export default function CaseFormPage() {
           <>
             {pickedPatient.allergies && (
               <p className="notice allergy-alert">
-                <strong>⚠ แพ้ยา / แพ้อาหาร:</strong> {pickedPatient.allergies}
+                <strong>⚠ แพ้ยา:</strong> {pickedPatient.allergies}
+              </p>
+            )}
+            {pickedPatient.food_allergies && (
+              <p className="notice allergy-alert">
+                <strong>⚠ แพ้อาหาร:</strong> {pickedPatient.food_allergies}
               </p>
             )}
             <div className="picked-customer">
@@ -752,8 +759,11 @@ export default function CaseFormPage() {
               <label className="span-2">โรคประจำตัว
                 <textarea rows={2} placeholder="เช่น เบาหวาน ความดันโลหิตสูง" {...field('medical_history')} />
               </label>
-              <label className="span-2">แพ้ยา / แพ้อาหาร
-                <textarea rows={2} placeholder="เช่น แพ้เพนิซิลลิน — ไม่มีให้เว้นว่าง" {...field('allergies')} />
+              <label className="span-2">แพ้ยา
+                <textarea rows={2} placeholder="เช่น เพนิซิลลิน แอสไพริน — ไม่มีให้เว้นว่าง" {...field('allergies')} />
+              </label>
+              <label className="span-2">แพ้อาหาร
+                <textarea rows={2} placeholder="เช่น อาหารทะเล ถั่ว นมวัว — ไม่มีให้เว้นว่าง" {...field('food_allergies')} />
               </label>
             </div>
 

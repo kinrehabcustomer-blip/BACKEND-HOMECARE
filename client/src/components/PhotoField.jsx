@@ -24,6 +24,9 @@ const PhotoField = forwardRef(function PhotoField({ employeeId, saved }, ref) {
 
   /** ฟอร์มพนักงานเรียกตอนกดปุ่มบันทึก — ไม่ได้แตะรูปเลยก็ไม่ต้องยิงอะไร */
   useImperativeHandle(ref, () => ({
+    /** มีรูปที่เลือก/ลบไว้แต่ยังไม่ได้บันทึกไหม — ฟอร์มใช้เตือนก่อนออกจากหน้า */
+    dirty: () => dirty,
+
     async save(targetId) {
       if (image) await api.setEmployeePhoto(targetId, image);
       else if (removed && hasSaved) await api.setEmployeePhoto(targetId, null);

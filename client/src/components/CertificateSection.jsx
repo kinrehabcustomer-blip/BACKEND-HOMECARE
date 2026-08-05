@@ -39,6 +39,9 @@ const CertificateSection = forwardRef(function CertificateSection({ employeeId }
    * บันทึกทั้งใบที่กด "+ เพิ่ม" ไว้ และใบที่ยังค้างอยู่ในช่องกรอก (กันผู้ใช้ลืมกดเพิ่มแล้วข้อมูลหาย)
    */
   useImperativeHandle(ref, () => ({
+    /** มีใบที่ยังไม่ได้บันทึกค้างอยู่ไหม (ทั้งในคิวและในช่องกรอก) — ฟอร์มใช้เตือนก่อนออกจากหน้า */
+    dirty: () => pending.length > 0 || cert.name.trim() !== '' || Boolean(image),
+
     async save(targetId) {
       const queue = [...pending];
       if (cert.name.trim()) queue.push({ ...cert, image });

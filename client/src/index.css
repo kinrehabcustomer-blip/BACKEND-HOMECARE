@@ -200,7 +200,6 @@ body {
 /* เมนู minimal + มีลูกเล่น — ไอคอนหน้าเมนู, hover ขยับ+ไอคอนเด้ง, ตัวที่เลือกมีแถบทองด้านซ้าย */
 .sidebar nav { display: flex; flex-direction: column; gap: 0.1875rem; }
 .sidebar nav a {
-  position: relative;
   display: flex;
   align-items: center;
   gap: 0.625rem;
@@ -228,18 +227,8 @@ body {
   font-weight: 700;
 }
 .sidebar nav a.active .nav-ico { transform: scale(1.12); }
-/* แถบทองด้านซ้ายบอก "อยู่ตรงนี้" */
-.sidebar nav a.active::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 0.25rem;
-  height: 1.15rem;
-  border-radius: 0 0.25rem 0.25rem 0;
-  background: var(--brand);
-}
+/* เมนูที่อยู่ตอนนี้บอกด้วยพื้นทอง + ตัวหนา + ไอคอนใหญ่ขึ้น (กฎด้านบน) — สามอย่างนี้พอแล้ว
+   เคยมีแถบทองด้านซ้ายอีกชั้น ตัดออกเพราะมันซ้ำกับพื้นทองที่ล้อมมันอยู่ */
 /* ข้อความแทนเมนูสำหรับพนักงานภาคสนาม (ไม่มีสิทธิ์เข้าส่วนจัดการ) */
 .sidebar-note { flex: 1; padding: 0.75rem; font-size: 0.8125rem; line-height: 1.5; }
 .sidebar-note { margin-top: 1.75rem; font-size: 0.75rem; line-height: 1.7; color: var(--muted); }
@@ -248,8 +237,10 @@ body {
 /* ---------- layout ---------- */
 /* min-width: 0 — flex item ปริยายหดไม่ต่ำกว่าความกว้างขั้นต่ำของเนื้อหาข้างใน
    ถ้าไม่ใส่ ตาราง/แถบตัวกรองที่กว้างจะดัน .content ให้ล้นออกนอกจอแทนที่จะหดตาม */
-/* max-width จำกัดความยาวบรรทัดไม่ให้ยาวจนอ่านยากบนจอกว้าง */
-.content { flex: 1; min-width: 0; padding: 2rem 2.25rem; max-width: 68.75rem; }
+/* max-width จำกัดความกว้างไม่ให้ยืดจนอ่านยากบนจอกว้างมากๆ
+   100rem (1600px) — จอโน้ตบุ๊ก/มอนิเตอร์ทั่วไป (1440–1920) ได้ใช้พื้นที่เกือบเต็ม
+   ส่วนจอ ultrawide ยังไม่ปล่อยให้แถวตารางยาวจนสายตาวิ่งจากรหัสไปหาสถานะไม่ไหว */
+.content { flex: 1; min-width: 0; padding: 2rem 2.25rem; max-width: 100rem; }
 
 /* จอกว้างพอ: ดันเนื้อหาไปอยู่กลางพื้นที่ที่เหลือ แทนที่จะกองชิดซ้ายทิ้งที่ว่างไว้ข้างเดียว
    (ทำเฉพาะจอกว้าง — บนจอแคบ margin auto จะทำให้ flex item เลิกยืดเต็มความกว้างแล้วล้นออกนอกจอ) */
@@ -510,6 +501,75 @@ select:focus { background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xm
 .assign-form select { flex: 1; min-width: 0; }
 
 .pager { display: flex; align-items: center; gap: 0.75rem; margin-top: 1rem; }
+/* จำนวนแถวต่อหน้า — ดันไปชิดขวา แยกจากปุ่มเลื่อนหน้าที่อยู่ซ้าย */
+.per-page {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  margin-left: auto;
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+/* ย่อให้เตี้ยลงได้ แต่ต้องเว้นที่ขวาไว้ให้ลูกศรเสมอ ไม่งั้นตัวเลขไปทับลูกศร
+   (padding แบบย่อจะล้าง padding-right: 2.125rem ที่ base select กันที่ไว้) */
+.per-page select {
+  width: auto;
+  padding: 0.3125rem 1.625rem 0.3125rem 0.5rem;
+  background-position: right 0.5rem center;
+}
+
+/* ตารางที่มีคอลัมน์ลำดับนำหน้า — เลขลำดับอยู่กลางช่องแคบๆ
+   และคอลัมน์ที่ต้องชิดซ้าย (ชื่อ) เลื่อนไปอยู่ช่องที่ 3 จึงต้องล้าง text-align: center
+   ที่กฎ .table td:nth-child(n + 3) ใส่ไว้ให้ */
+/* ต้องเขียน .table.table-indexed — กฎ .table td:nth-child(n + 3) มี specificity สูงกว่า
+   .table-indexed td:nth-child(3) เฉยๆ (มี element selector เพิ่มมา) จะทับไม่ลง */
+.table.table-indexed th:first-child,
+.table.table-indexed td:first-child { text-align: center; }
+.table.table-indexed th:nth-child(3),
+.table.table-indexed td:nth-child(3) { text-align: left; }
+
+/* เลขลำดับเป็นข้อมูลประกอบ ไม่ใช่ตัวระบุตัวตน — ให้จางกว่ารหัสที่อยู่ข้างๆ */
+.row-index { font-variant-numeric: tabular-nums; color: var(--muted); }
+
+/* ป้ายเตือนแพ้ยาในตารางผู้รับการดูแล — ไอคอน + คำว่า "แพ้ยา" คู่กันเสมอ ไม่ใช้สีสื่อความหมายอย่างเดียว
+   (รายละเอียดว่าแพ้อะไรอยู่ใน title เพราะยาวเกินกว่าจะใส่ในช่องตาราง) */
+.allergy-flag {
+  display: inline-block;
+  margin-left: 0.375rem;
+  padding: 1px 0.375rem;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  white-space: nowrap;
+  color: #b3261e;
+  background: #fde8e8;
+  border-radius: 0.375rem;
+  cursor: help;
+}
+:root[data-theme='dark'] .allergy-flag { background: #3a201d; color: #f0a89c; }
+/* แพ้อาหารใช้สีส้มแยกจากแพ้ยา (แดง) — แต่ข้อความบนป้ายบอกอยู่แล้วว่าอันไหนเป็นอันไหน ไม่ต้องพึ่งสี */
+.allergy-flag.food { color: #9a6700; background: #fff3dc; }
+:root[data-theme='dark'] .allergy-flag.food { background: #34291a; color: #e0b877; }
+
+/* แถบบอกว่ากำลังกรองมาจากลิงก์ของอีกหน้า (เช่น ผู้รับการดูแลของลูกค้ารายหนึ่ง) */
+.filter-chip { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+
+/* หัวคอลัมน์ที่กดเรียงได้ — หน้าตาเหมือนข้อความหัวตารางเดิมจนกว่าจะชี้/ใช้งานอยู่ */
+.sort-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3125rem;
+  padding: 0;
+  font: inherit;
+  letter-spacing: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+.sort-head:hover { color: var(--text); }
+.sort-head.on { color: var(--brand); }
+/* จองที่ของลูกศรไว้เสมอ ไม่งั้นหัวตารางขยับตอนสลับคอลัมน์ที่เรียง */
+.sort-head-ico { display: inline-flex; width: 10px; justify-content: center; }
 
 .row-clickable { cursor: pointer; }
 .row-clickable:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }
@@ -551,6 +611,26 @@ select:focus { background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xm
   border-bottom: 1px solid var(--border);
 }
 .modal-head h2 { margin: 2px 0 0.5rem; font-size: 1.25rem; }
+.modal-head-actions { display: flex; align-items: flex-start; gap: 0.5rem; flex-shrink: 0; }
+/* ปุ่มทำลายอยู่คนละฝั่งกับปุ่มที่กดกันจริง — ระยะห่างคือสิ่งที่กันการกดพลาด */
+.modal-foot .foot-danger { margin-right: auto; }
+.modal-nav { display: flex; gap: 0.25rem; }
+.modal-nav .icon-btn { padding: 0.125rem 0.5rem; font-size: 1.125rem; line-height: 1.2; }
+
+/* หัวข้อในโมดัลที่มีปุ่มอยู่ขวา (เช่น "ติดต่อ" + แก้ด่วน) */
+.section-head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; }
+.section-head h3 { margin-bottom: 0 !important; }
+
+/* ฟอร์มแก้ด่วนในโมดัล — คุมโทนให้ต่างจากส่วนอ่านอย่างเดียวรอบๆ ว่าตรงนี้กำลังแก้อยู่ */
+.quick-edit {
+  margin-top: 0.75rem;
+  padding: 0.875rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.quick-edit .error { margin-bottom: 0.75rem; }
+.quick-edit-actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 0.875rem; }
 .modal-close {
   border: none;
   background: none;
@@ -579,8 +659,11 @@ select:focus { background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xm
 .field-value { font-size: 0.875rem; }
 .field-value.is-empty { color: var(--text-faint); font-style: italic; }
 
-.modal-cert { display: flex; align-items: center; gap: 0.75rem; padding: 0.5rem 0; }
-.modal-cert:not(:last-child) { border-bottom: 1px dashed var(--divider); }
+/* margin: 0 — .media-row ใช้กับ <figure> ด้วย ซึ่งเบราว์เซอร์ใส่ margin ซ้ายขวามาให้เอง */
+.modal-cert,
+.media-row { display: flex; align-items: center; gap: 0.75rem; margin: 0; padding: 0.5rem 0; }
+.modal-cert:not(:last-child),
+.media-row:not(:last-child) { border-bottom: 1px dashed var(--divider); }
 .cert-flag { margin-left: 0.5rem; }
 
 /* ประวัติการทำงานของพนักงาน (เคสที่ทำอยู่ + ที่ปิดแล้ว) */
@@ -733,6 +816,32 @@ select:focus { background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xm
 .card h2:not(:first-child) { margin-top: 1.625rem; }
 .columns { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
 
+/* ---------- กราฟ ---------- */
+/* ปุ่มสลับมุมมองในหัวการ์ด (รายวัน/รายสัปดาห์) — เป็นกลุ่มเดียวกัน จึงใช้กรอบร่วมอันเดียว */
+.seg {
+  display: flex;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.seg button {
+  padding: 0.3125rem 0.75rem;
+  font: inherit;
+  font-size: 0.8125rem;
+  color: var(--muted);
+  background: none;
+  border: none;
+  border-left: 1px solid var(--border);
+  cursor: pointer;
+}
+.seg button:first-child { border-left: none; }
+.seg button:hover { color: var(--text); background: var(--brand-soft); }
+.seg button.on { color: var(--brand-ink); background: var(--brand); }
+
+/* ยอดรวมของช่วงที่กราฟแสดงอยู่ — อ่านตัวเลขจริงได้โดยไม่ต้องเอาเมาส์ไปชี้ */
+.chart-total { margin: 0 0 0.25rem; font-size: 0.875rem; }
+.chart-total strong { font-size: 1.375rem; font-variant-numeric: tabular-nums; }
+
 .row { display: flex; gap: 0.75rem; padding: 0.4375rem 0; font-size: 0.875rem; border-bottom: 1px dashed var(--divider); }
 .row:last-child { border-bottom: none; }
 .row-label { width: 9.375rem; flex-shrink: 0; color: var(--muted); }
@@ -811,11 +920,17 @@ select:focus { background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xm
 }
 
 /* ---------- รูปใบรับรอง ---------- */
-.cert-info { flex: 1; min-width: 0; }
-.cert-info p { margin: 0.125rem 0 0; }
+/* .media-* คือชื่อกลางของ "แถวรูปย่อ + ข้อความ" ที่ใบรับรองกับผลงานใช้ร่วมกัน
+   จงใจให้หน้าตาเหมือนกันเป๊ะ เพราะสองบล็อกนี้อยู่ติดกันในหน้าประวัติพนักงาน —
+   ถ้ารูปคนละขนาดจะอ่านเหมือนคนละระดับความสำคัญ ทั้งที่เป็นข้อมูลประกอบเหมือนกัน */
+.cert-info,
+.media-info { flex: 1; min-width: 0; }
+.cert-info p,
+.media-info p { margin: 0.125rem 0 0; }
 
-/* รูปย่อขนาดคงที่ — ใบรับรองมีทั้งแนวตั้งแนวนอน ใช้ object-fit ครอบให้กรอบเท่ากันหมด */
-.cert-thumb {
+/* รูปย่อขนาดคงที่ — รูปมีทั้งแนวตั้งแนวนอน ใช้ object-fit ครอบให้กรอบเท่ากันหมด */
+.cert-thumb,
+.media-thumb {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -827,7 +942,9 @@ select:focus { background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xm
   border-radius: 0.5rem;
   background: var(--bg);
 }
-.cert-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.cert-thumb img,
+.media-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.media-thumb:hover { border-color: var(--brand); }
 .cert-thumb.empty {
   border-style: dashed;
   cursor: pointer;
@@ -880,22 +997,8 @@ select:focus { background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xm
 .portfolio-item .btn { margin: 0 0.75rem 0.75rem; justify-content: center; }
 .portfolio-item.pending { border-color: #f2ddb0; background: #fffdf5; }
 
-/* โหมดดูอย่างเดียว (หน้าประวัติพนักงาน) — เล็กและเรียบกว่าโหมดแก้ไข
-   ตัดกรอบการ์ดทิ้ง เหลือรูป + คำบรรยายสั้นๆ ให้กวาดตาดูผลงานได้เร็ว ไม่กินพื้นที่ทั้งหน้า */
-.portfolio-compact {
-  grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr));
-  gap: 0.625rem;
-  margin: 0.25rem 0 0;
-}
-.portfolio-compact .portfolio-item { border: 0; background: none; }
-.portfolio-compact .portfolio-item img {
-  height: 5.5rem;
-  border: 1px solid var(--border);
-  border-radius: 0.5rem;
-}
-.portfolio-compact .portfolio-item figcaption { padding: 0.3125rem 0.125rem 0; }
-.portfolio-compact .portfolio-item figcaption strong { font-size: 0.75rem; font-weight: 600; }
-.portfolio-compact .portfolio-item figcaption p { font-size: 0.6875rem; }
+/* โหมดดูอย่างเดียว (หน้าประวัติ/popup พนักงาน) ย้ายไปใช้ .media-row แล้ว — แถวเดียวกับใบรับรอง
+   .portfolio-grid ด้านบนเหลือไว้ใช้เฉพาะโหมดแก้ไขในฟอร์ม ที่ยังต้องการการ์ดใหญ่พอให้กดปุ่มลบได้ */
 
 .portfolio-actions { display: flex; gap: 0.5rem; margin: 0 0.75rem 0.75rem; }
 .portfolio-actions .btn { flex: 1; margin: 0; justify-content: center; }
@@ -956,6 +1059,40 @@ select:focus { background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xm
 /* ฟอร์มในกล่อง popup แคบกว่าฟอร์มเต็มหน้า — สองคอลัมน์กำลังพอดี (ยุบเหลือคอลัมน์เดียวบนจอแคบ ดู media query ท้ายไฟล์) */
 .grid.cols-2 { grid-template-columns: 1fr 1fr; }
 .form-actions { margin-top: 1.5rem; padding-top: 1.125rem; border-top: 1px solid var(--border); }
+
+/* แถบบันทึกติดขอบล่างจอ — ฟอร์มพนักงานยาวมาก ไม่ควรต้องเลื่อนสุดทางเพื่อกดปุ่มเดียว
+   ยืดออกไปเต็มความกว้างการ์ด (ชดเชย padding ของ .card) ให้ดูเป็นแถบจริงๆ ไม่ใช่ปุ่มลอย */
+.form-actions.sticky {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  display: flex;
+  gap: 0.5rem;
+  margin: 1.5rem -1.375rem 0;
+  padding: 0.875rem 1.375rem;
+  background: var(--surface);
+  border-radius: 0 0 var(--radius-card) var(--radius-card);
+}
+
+/* ส่วนที่พับได้ในฟอร์ม — ตอนเพิ่มคนใหม่ไม่ต้องเจอทุกช่องพร้อมกัน */
+.form-section { margin-top: 1.625rem; border-top: 1px solid var(--divider); }
+.form-section > summary {
+  padding: 0.875rem 0 0.75rem;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+  list-style-position: inside;
+}
+.form-section > summary:hover { color: var(--text); }
+.form-section[open] > summary { color: var(--text); }
+.form-sub { margin: 0 0 0.625rem; font-size: 0.8125rem; font-weight: 600; color: var(--muted); }
+
+/* ข้อความเตือนใต้ช่องที่กรอกผิด — คู่กับ aria-invalid บน input เสมอ ไม่ใช้สีสื่อความหมายอย่างเดียว */
+.field-error { margin-top: 0.25rem; font-size: 0.75rem; font-weight: 400; color: var(--danger); }
+.form input[aria-invalid='true'],
+.form select[aria-invalid='true'],
+.form textarea[aria-invalid='true'] { border-color: var(--danger); }
 /* คำอธิบายใต้ช่องกรอกในฟอร์ม (เช่น บอกว่าเติมข้อมูลจากลูกค้าให้แล้ว) */
 .form-hint { grid-column: 1 / -1; margin-top: -0.5rem; }
 
@@ -1137,6 +1274,85 @@ select:focus { background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xm
   .bar-label { width: 6.25rem; font-size: 0.75rem; }
   .row { flex-direction: column; gap: 2px; }
   .row-label { width: auto; }
+
+  /* ตารางที่ทำเป็นการ์ดได้ (.table-cards): จอเล็กเลิกเป็นตาราง กลายเป็นการ์ดต่อหนึ่งแถว
+     ปัดซ้ายขวาเพื่ออ่านคอลัมน์ที่เหลือคือท่าที่ใช้ยากที่สุดบนมือถือ — ยอมให้สูงขึ้นแทน
+     ป้ายกำกับของแต่ละช่องมาจาก data-label บน <td> เพราะหัวตารางถูกซ่อนไปแล้ว */
+  .table.table-cards { min-width: 0; width: 100%; border: none; background: none; }
+  .table-cards thead { display: none; }
+  .table-cards, .table-cards tbody, .table-cards tr, .table-cards td { display: block; }
+
+  .table-cards tbody tr {
+    margin-bottom: 0.625rem;
+    padding: 0.75rem 0.875rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+  }
+  .table-cards tbody tr:last-child { margin-bottom: 0; }
+
+  .table-cards tbody td,
+  .table-cards.table-2line tbody td {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    height: auto;              /* ล้างความสูงคงที่ของแถวตาราง */
+    padding: 0.3125rem 0;
+    text-align: right;         /* ล้าง text-align: center ของคอลัมน์ที่ 3 เป็นต้นไป */
+    border-bottom: none;
+  }
+  .table-cards tbody td[data-label]::before {
+    content: attr(data-label);
+    flex-shrink: 0;
+    font-size: 0.75rem;
+    color: var(--muted);
+  }
+  /* ช่องสถานะว่าง/กำลังโหลด กินเต็มการ์ด ไม่ต้องมีป้ายกำกับ */
+  .table-cards tbody td:not([data-label]) { justify-content: center; text-align: center; }
+  .table-cards .name-cell { justify-content: flex-end; }
+  .table-cards .cell-sub { display: inline; margin-top: 0; }
+  .table-cards .cell-sub::before { content: ' · '; }
+}
+
+/* ---------- toast ---------- */
+.toasts {
+  position: fixed;
+  bottom: 1.25rem;
+  right: 1.25rem;
+  z-index: 100;               /* เหนือ popup (60) — ยืนยันผลของสิ่งที่เพิ่งทำใน popup ต้องมองเห็น */
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.5rem;
+  pointer-events: none;       /* ตัวกล่องไม่บังการคลิก มีแต่ตัว toast เองที่กดได้ */
+}
+.toast {
+  pointer-events: auto;
+  max-width: 22rem;
+  padding: 0.625rem 0.875rem;
+  font: inherit;
+  font-size: 0.8125rem;
+  text-align: left;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid #1c7a4d;
+  border-radius: var(--radius);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.14);
+  cursor: pointer;
+  animation: toast-in 0.16s ease-out;
+}
+.toast-error { border-left-color: var(--danger); }
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(0.5rem); }
+  to   { opacity: 1; transform: none; }
+}
+
+@media (max-width: 600px) {
+  .toasts { left: 0.75rem; right: 0.75rem; bottom: 0.75rem; align-items: stretch; }
+  .toast { max-width: none; }
 }
 
 /* ---------- แพ็คเกจ: ตารางเรท (เกรด × รูปแบบ × CG/NA/PN) ---------- */

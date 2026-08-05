@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api.js';
+import RevenueChart from '../components/RevenueChart.jsx';
 import {
   CASE_TYPE_LABELS, CASE_STATUS_LABELS, MONTH_LABELS,
   formatDate, formatPeriod, toBuddhistYear,
@@ -213,6 +214,10 @@ export default function DashboardPage() {
               )}
             </section>
           </div>
+
+          {/* อยู่ใต้ทุกอย่างที่ตัวกรองด้านบนควบคุม เพราะการ์ดนี้มีช่วงเวลาของตัวเอง (บอกไว้ในหัวการ์ด)
+              ไม่ได้ขึ้นกับปี/เดือนที่เลือก — วางแทรกกลางจะอ่านเหมือนถูกกรองไปด้วย */}
+          <RevenueChart />
         </>
       )}
     </>

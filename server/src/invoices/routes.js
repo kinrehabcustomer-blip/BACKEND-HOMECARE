@@ -8,6 +8,7 @@ import {
   updateInvoiceSchema,
   paySchema,
   listQuerySchema,
+  revenueQuerySchema,
   INVOICE_STATUSES,
 } from './schema.js';
 import { ApiError, asyncRoute, notFound } from '../lib/errors.js';
@@ -48,6 +49,12 @@ invoicesRouter.get('/meta', (req, res) => res.json({ statuses: INVOICE_STATUSES 
 invoicesRouter.get(
   '/summary',
   asyncRoute(async (req, res) => res.json(await repo.summary())),
+);
+
+/** รายได้ตามช่วงเวลาสำหรับกราฟหน้าภาพรวม — ต้องอยู่เหนือ '/:id' ไม่งั้นโดนจับเป็นรหัสใบแจ้งหนี้ */
+invoicesRouter.get(
+  '/revenue',
+  asyncRoute(async (req, res) => res.json(await repo.revenue(revenueQuerySchema.parse(req.query)))),
 );
 
 invoicesRouter.get(
