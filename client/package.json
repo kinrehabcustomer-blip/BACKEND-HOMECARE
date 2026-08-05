@@ -9,17 +9,18 @@
     "lint": "oxlint",
     "preview": "vite preview"
   },
+  "//": "vite และ @vitejs/plugin-react อยู่ใน dependencies ไม่ใช่ devDependencies โดยตั้งใจ — ตัว build ของ Vercel ลงเฉพาะ dependencies ทำให้ `vite build` ล้มด้วย 'vite: command not found' (เป็นเครื่องมือ build ไม่ได้ถูก bundle ลงหน้าเว็บ จึงไม่กระทบขนาดไฟล์ที่ผู้ใช้โหลด)",
   "dependencies": {
+    "@vitejs/plugin-react": "^6.0.3",
     "echarts": "^6.1.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
-    "react-router-dom": "^7.1.1"
+    "react-router-dom": "^7.1.1",
+    "vite": "^8.1.1"
   },
   "devDependencies": {
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^6.0.3",
-    "oxlint": "^1.71.0",
-    "vite": "^8.1.1"
+    "oxlint": "^1.71.0"
   }
 }
