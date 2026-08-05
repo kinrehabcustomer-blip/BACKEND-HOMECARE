@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
+import { useSheetSwipe } from '../lib/sheetSwipe.js';
 import FileButton from './FileButton.jsx';
 import { getPosition } from '../lib/geo.js';
 import { compressImage } from '../lib/image.js';
@@ -13,6 +14,7 @@ import { CASE_TYPE_LABELS } from '../labels.js';
  * onDone(updatedVisit) เมื่อเช็คอินสำเร็จ (พ่อแม่เอาไปรีเฟรชรายการ)
  */
 export default function CheckInModal({ visit, onDone, onClose }) {
+  const sheetRef = useSheetSwipe(onClose);    // จอแคบ: ปัดลงเพื่อปิด
   const [pos, setPos] = useState(null);       // ผลขอ GPS: { ok, lat, lng, accuracy, reason }
   const [locating, setLocating] = useState(true);
   const [photo, setPhoto] = useState(null);   // data URL เซลฟี่ (ย่อแล้ว)
@@ -80,7 +82,7 @@ export default function CheckInModal({ visit, onDone, onClose }) {
 
   return (
     <div className="modal-backdrop modal-stacked" onClick={() => !busy && onClose()}>
-      <div className="modal modal-narrow" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+      <div className="modal modal-narrow" ref={sheetRef} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
         <header className="modal-head">
           <div>
             <p className="mono muted">{visit.case_id}</p>

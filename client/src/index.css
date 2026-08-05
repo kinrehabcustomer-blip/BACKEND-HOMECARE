@@ -1400,6 +1400,23 @@ select option:checked {
     max-width: 100%;
     max-height: 94vh;
     border-radius: 0.875rem 0.875rem 0 0;
+    /* ดีดกลับตอนปัดไม่ถึงระยะปิด — ระหว่างลากโค้ดจะปิด transition ไว้ให้ตามนิ้วทันที */
+    transition: transform 0.2s ease-out;
+    /* กันเบราว์เซอร์ตีความการลากลงเป็น "ดึงเพื่อรีเฟรช" หรือเลื่อนหน้าข้างหลัง */
+    overscroll-behavior: contain;
+    touch-action: pan-y;
+  }
+
+  /* ขีดจับด้านบน — บอกว่าปัดลงได้ ไม่งั้นไม่มีใครรู้ว่าทำได้
+     ใช้ ::before แทนการเพิ่ม element เพราะ popup มี 11 ที่ ไม่ต้องไปแก้ทีละไฟล์ */
+  .modal::before {
+    content: '';
+    flex-shrink: 0;
+    width: 2.25rem;
+    height: 0.25rem;
+    margin: 0.5rem auto 0.125rem;
+    border-radius: 62.4375rem;
+    background: var(--border-hover);
   }
   .modal-head, .modal-foot { padding-left: 1rem; padding-right: 1rem; }
   .modal-body { padding-left: 1rem; padding-right: 1rem; }

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import CaseModal from './CaseModal.jsx';
+import { useSheetSwipe } from '../lib/sheetSwipe.js';
 import { CASE_TYPE_LABELS, CASE_STATUS_LABELS, formatBaht, formatDate } from '../labels.js';
 
 /**
@@ -8,6 +9,7 @@ import { CASE_TYPE_LABELS, CASE_STATUS_LABELS, formatBaht, formatDate } from '..
  */
 export default function WorkHistoryModal({ employeeName, cases = [], onClose }) {
   const [openCaseId, setOpenCaseId] = useState(null);
+  const sheetRef = useSheetSwipe(onClose); // จอแคบ: ปัดลงเพื่อปิด
 
   useEffect(() => {
     // CaseModal ซ้อนอยู่ = ให้ Escape ปิดตัวนั้นก่อน ไม่ใช่ปิดพรวดทั้งสองชั้น
@@ -42,7 +44,7 @@ export default function WorkHistoryModal({ employeeName, cases = [], onClose }) 
   return (
     <>
       <div className="modal-backdrop" onClick={onClose}>
-        <div className="modal modal-wide" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+        <div className="modal modal-wide" ref={sheetRef} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
           <header className="modal-head">
             <div>
               <h2>ประวัติการทำงาน</h2>

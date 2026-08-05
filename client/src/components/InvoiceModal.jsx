@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { useAuth } from '../auth.jsx';
 import { useToast } from '../toast.jsx';
+import { useSheetSwipe } from '../lib/sheetSwipe.js';
 import { INVOICE_STATUS_LABELS, amountText, bahtText, docDate } from '../labels.js';
 
 const FOCUSABLE = 'a[href], button:not(:disabled), input, select, textarea, [tabindex]:not([tabindex="-1"])';
@@ -50,6 +51,8 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
   const { user } = useAuth();
   const toast = useToast();
   const boxRef = useRef(null);
+  // จอแคบ: ปัดลงเพื่อปิด — ใช้ ref เดียวกับ focus trap เพราะ element เดียวแปะสอง ref ไม่ได้
+  useSheetSwipe(onClose, boxRef);
   const [item, setItem] = useState(null);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);

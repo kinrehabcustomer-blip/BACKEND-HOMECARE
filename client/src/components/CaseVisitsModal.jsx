@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { useSheetSwipe } from '../lib/sheetSwipe.js';
 import CaseVisits from './CaseVisits.jsx';
 
 /**
@@ -9,6 +10,7 @@ import CaseVisits from './CaseVisits.jsx';
  */
 export default function CaseVisitsModal({ caseItem, readOnly = false, mode = 'shift', onClose }) {
   const title = mode === 'appointment' ? 'ตารางนัด' : 'ตารางกะ';
+  const sheetRef = useSheetSwipe(onClose); // จอแคบ: ปัดลงเพื่อปิด
   useEffect(() => {
     const onKeyDown = (e) => e.key === 'Escape' && onClose();
     document.addEventListener('keydown', onKeyDown);
@@ -17,7 +19,7 @@ export default function CaseVisitsModal({ caseItem, readOnly = false, mode = 'sh
 
   return (
     <div className="modal-backdrop modal-stacked" onClick={onClose}>
-      <div className="modal modal-narrow" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+      <div className="modal modal-narrow" ref={sheetRef} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
         <header className="modal-head">
           <div>
             <p className="mono muted">{caseItem.case_id}</p>

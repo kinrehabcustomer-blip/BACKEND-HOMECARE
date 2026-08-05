@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api.js';
 import { useToast } from '../toast.jsx';
+import { useSheetSwipe } from '../lib/sheetSwipe.js';
 import WorkHistory from './WorkHistory.jsx';
 import Avatar from './Avatar.jsx';
 import {
@@ -109,6 +110,8 @@ export default function EmployeeModal({ employeeId, siblings = [], onNavigate, o
   const [error, setError] = useState(null);
   const [editing, setEditing] = useState(false);
   const boxRef = useRef(null);
+  // จอแคบ: ปัดลงเพื่อปิด — ใช้ ref เดียวกับ focus trap เพราะ element เดียวแปะสอง ref ไม่ได้
+  useSheetSwipe(onClose, boxRef);
 
   // ตารางรายชื่อมีข้อมูลไม่ครบ (ไม่มีใบรับรอง) จึงดึงข้อมูลเต็มด้วย employee_id อีกรอบ
   useEffect(() => {

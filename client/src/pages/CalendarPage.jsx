@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { api } from '../api.js';
 import CaseModal from '../components/CaseModal.jsx';
 import LineIcon from '../components/LineIcon.jsx';
+import { useSheetSwipe } from '../lib/sheetSwipe.js';
 import {
   CASE_TYPE_LABELS, MONTH_LABELS, POSITION_LABELS, SERVICE_KIND_LABELS, VISIT_STATE_LABELS,
   formatDate, toBuddhistYear,
@@ -340,6 +341,8 @@ export default function CalendarPage() {
 
 /** งานทั้งวันแบบเต็ม — ช่องในปฏิทินเล็กเกินกว่าจะใส่เวลา/สถานะ/ผู้รับบริการครบในที่เดียว */
 function DayPanel({ day, list, onOpenCase, onClose }) {
+  const sheetRef = useSheetSwipe(onClose); // จอแคบ: ปัดลงเพื่อปิด
+
   useEffect(() => {
     const onKeyDown = (e) => e.key === 'Escape' && onClose();
     document.addEventListener('keydown', onKeyDown);
@@ -352,7 +355,7 @@ function DayPanel({ day, list, onOpenCase, onClose }) {
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal modal-narrow" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+      <div className="modal modal-narrow" ref={sheetRef} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
         <header className="modal-head">
           <div>
             <p className="mono muted">{day}</p>

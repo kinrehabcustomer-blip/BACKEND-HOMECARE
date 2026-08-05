@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
+import { useSheetSwipe } from '../lib/sheetSwipe.js';
 import { formatBaht } from '../labels.js';
 
 const BLANK = {
@@ -173,6 +174,7 @@ export default function PhysioPackagesPage() {
 
 /** ฟอร์มเพิ่ม/แก้ไข — ปุ่มบันทึกเดียว บันทึกทุกช่องพร้อมกัน */
 function PackageForm({ initial, onClose, onSaved }) {
+  const sheetRef = useSheetSwipe(onClose); // จอแคบ: ปัดลงเพื่อปิด
   const isNew = !initial.physio_package_id;
   const [form, setForm] = useState({
     ...BLANK,
@@ -233,7 +235,7 @@ function PackageForm({ initial, onClose, onSaved }) {
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+      <div className="modal" ref={sheetRef} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
         <header className="modal-head">
           <div>
             <h2>{isNew ? 'เพิ่มแพ็คเกจกายภาพบำบัด' : 'แก้ไขแพ็คเกจ'}</h2>

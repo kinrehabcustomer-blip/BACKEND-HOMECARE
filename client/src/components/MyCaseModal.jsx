@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
+import { useSheetSwipe } from '../lib/sheetSwipe.js';
 import {
   CASE_TYPE_LABELS,
   CASE_STATUS_LABELS,
@@ -32,6 +33,7 @@ function Field({ label, value }) {
  * ดึงจาก /api/my/cases/:id ซึ่งกรองให้เห็นเฉพาะเคสของตัวเอง และไม่มีข้อมูลการเงิน
  */
 export default function MyCaseModal({ caseId, onClose }) {
+  const sheetRef = useSheetSwipe(onClose); // จอแคบ: ปัดลงเพื่อปิด
   const [item, setItem] = useState(null);
   const [error, setError] = useState(null);
 
@@ -57,7 +59,7 @@ export default function MyCaseModal({ caseId, onClose }) {
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+      <div className="modal" ref={sheetRef} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
         {!item && !error && <p className="muted modal-loading">กำลังโหลด…</p>}
         {!item && error && <pre className="error modal-loading">{error}</pre>}
 

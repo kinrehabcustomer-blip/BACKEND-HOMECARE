@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api.js';
 import { useToast } from '../toast.jsx';
+import { useSheetSwipe } from '../lib/sheetSwipe.js';
 import PatientCases from './PatientCases.jsx';
 import {
   GENDER_LABELS, TITLE_LABELS, PATIENT_STATUS_LABELS, formatDate, ageFromBirthDate,
@@ -104,6 +105,8 @@ export default function PatientModal({ patientId, siblings = [], onNavigate, onC
   const [editing, setEditing] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const boxRef = useRef(null);
+  // จอแคบ: ปัดลงเพื่อปิด — ใช้ ref เดียวกับ focus trap เพราะ element เดียวแปะสอง ref ไม่ได้
+  useSheetSwipe(onClose, boxRef);
   const toast = useToast();
 
   useEffect(() => {

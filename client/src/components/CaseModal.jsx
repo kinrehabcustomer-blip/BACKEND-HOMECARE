@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api.js';
 import { useToast } from '../toast.jsx';
+import { useSheetSwipe } from '../lib/sheetSwipe.js';
 import CaseVisitsModal from './CaseVisitsModal.jsx';
 import InvoiceModal from './InvoiceModal.jsx';
 import {
@@ -107,6 +108,8 @@ function QuickEdit({ item, onDone, onCancel }) {
 
 export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, onChanged }) {
   const boxRef = useRef(null);
+  // จอแคบ: ปัดลงเพื่อปิด — ใช้ ref เดียวกับ focus trap เพราะ element เดียวแปะสอง ref ไม่ได้
+  useSheetSwipe(onClose, boxRef);
   const [editing, setEditing] = useState(false);
   const [item, setItem] = useState(null);
   const [staff, setStaff] = useState([]);
