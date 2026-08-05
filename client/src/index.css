@@ -1341,6 +1341,21 @@ select option:checked {
   .page-head h1 { font-size: 1.25rem; }
   .hero-value { font-size: 2.625rem; }
 
+  /* โลโก้เต็มขนาดในแถบบนแนวนอนกินที่ของเมนูไปเกือบครึ่ง — เมนูสำคัญกว่า */
+  .brand-logo { height: 1.875rem; }
+
+  /* หัวหน้า: ปุ่มหลักกินเต็มบรรทัดของตัวเอง
+     เดิมมันตกลงมาลอยชิดซ้ายใต้ข้อความสรุปยาวๆ จนกลืนไปกับข้อความ */
+  .page-head { flex-direction: column; align-items: stretch; gap: 0.75rem; }
+  .page-head > .btn { justify-content: center; }
+  .page-head .actions .btn { flex: 1; justify-content: center; }
+
+  /* แถบเลื่อนหน้า: ปุ่มก่อนหน้า/ถัดไปแบ่งบรรทัดบน ส่วนจำนวนแถวต่อหน้าลงบรรทัดใหม่
+     (บรรทัดเดียวกันทั้งหมดบนจอ 360px จะบีบจนปุ่มเล็กเกินกว่าจะกดถูก) */
+  .pager { flex-wrap: wrap; }
+  .pager .btn { flex: 1; justify-content: center; }
+  .per-page { flex: 1 0 100%; justify-content: flex-end; margin-left: 0; text-align: right; }
+
   /* บีบระยะขอบในช่องตารางแทนที่จะบีบตัวอักษร — ปัดดูคอลัมน์ที่เหลือได้อยู่แล้ว */
   .table th, .table td { padding: 0.75rem 0.625rem; }
 
@@ -1370,9 +1385,15 @@ select option:checked {
      ป้ายกำกับของแต่ละช่องมาจาก data-label บน <td> เพราะหัวตารางถูกซ่อนไปแล้ว */
   .table.table-cards { min-width: 0; width: 100%; border: none; background: none; }
   .table-cards thead { display: none; }
-  .table-cards, .table-cards tbody, .table-cards tr, .table-cards td { display: block; }
+  .table-cards, .table-cards tbody, .table-cards tfoot, .table-cards td { display: block; }
 
-  .table-cards tbody tr {
+  /* แถว = การ์ดหนึ่งใบ · เป็น flex เพื่อให้ "หัวการ์ด" (ลำดับ + รหัส + สถานะ) อยู่บรรทัดเดียวกันได้
+     ส่วนช่องที่เหลือกินเต็มความกว้าง ตกลงมาบรรทัดละช่องตามลำดับเดิม */
+  .table-cards tbody tr,
+  .table-cards tfoot tr {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
     margin-bottom: 0.625rem;
     padding: 0.75rem 0.875rem;
     background: var(--surface);
@@ -1380,46 +1401,121 @@ select option:checked {
     border-radius: var(--radius);
   }
   .table-cards tbody tr:last-child { margin-bottom: 0; }
+  /* แถวรวมเป็นการ์ดแยกใบ — ต้องมีช่องว่างคั่น ไม่งั้นขอบของสองใบมาชิดกันเป็นเส้นหนาเส้นเดียว */
+  .table-cards tfoot tr { margin: 0.625rem 0 0; }
+  /* พื้นเปลี่ยนตอน hover ไม่มีความหมายบนจอสัมผัส — มีแต่จะค้างสีไว้บนการ์ดที่นิ้วเพิ่งแตะ */
+  .table-cards tbody tr:hover { background: var(--surface); }
 
-  .table-cards tbody td,
-  .table-cards.table-2line tbody td {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 1rem;
+  /* ปริยายของทุกช่อง: หนึ่งบรรทัด ป้ายกำกับชิดซ้าย ค่าชิดขวา
+
+     รายการยาวๆ ในนี้ไม่ใช่ของเกิน — มันคือการเขียนทับกฎจัดตำแหน่งของ "โหมดตาราง" ทีละข้อ
+     (.table td:nth-child(n+3) = จัดกลาง · .table.table-indexed td:nth-child(3) = ชิดซ้าย
+      · .table tfoot th = มีพื้นและเส้นบน) ซึ่ง specificity สูงกว่าและอยู่ท้ายไฟล์กว่า
+     ถ้าเขียนสั้นกว่านี้ บางคอลัมน์จะจัดตำแหน่งไม่เหมือนคอลัมน์อื่นในการ์ดใบเดียวกัน */
+  .table.table-cards tbody td,
+  .table.table-cards tbody td:nth-child(n + 3),
+  .table.table-cards.table-indexed tbody td:first-child,
+  .table.table-cards.table-indexed tbody td:nth-child(3),
+  .table-cards.table-2line tbody td,
+  .table.table-cards tfoot th {
+    display: block;
+    flex: 1 1 100%;
     height: auto;              /* ล้างความสูงคงที่ของแถวตาราง */
-    padding: 0.3125rem 0;
+    min-width: 0;
+    padding: 0.25rem 0;
     text-align: right;         /* ล้าง text-align: center ของคอลัมน์ที่ 3 เป็นต้นไป */
-    border-bottom: none;
+    background: none;          /* แถวรวมท้ายตารางมีพื้นของตัวเอง — ในการ์ดไม่ต้อง */
+    border: none;
   }
-  .table-cards tbody td[data-label]::before {
+  /* ป้ายกำกับลอยซ้าย ไม่ใช่ flex item — ค่าในช่องมักเป็นหลายชิ้น (ข้อความ + .muted + .cell-sub)
+     ถ้าทำเป็น flex ทุกชิ้นจะกลายเป็น item แยกกันแล้วถูก space-between ดันกระจายคนละมุม
+     float ทำให้ทุกชิ้นยังเป็นข้อความไหลต่อกันชิดขวาเป็นก้อนเดียว และตกบรรทัดใหม่ได้เองถ้ายาว */
+  .table-cards tbody td[data-label]::before,
+  .table-cards tfoot th[data-label]::before {
     content: attr(data-label);
-    flex-shrink: 0;
+    float: left;
+    margin-right: 1rem;
     font-size: 0.75rem;
+    font-weight: 400;
+    line-height: 1.6;
+    text-align: left;
     color: var(--muted);
   }
-  /* ช่องสถานะว่าง/กำลังโหลด กินเต็มการ์ด ไม่ต้องมีป้ายกำกับ */
-  .table-cards tbody td:not([data-label]) { justify-content: center; text-align: center; }
-  .table-cards .name-cell { justify-content: flex-end; }
+  /* ช่องสถานะว่าง/กำลังโหลด กินเต็มการ์ด ไม่ต้องมีป้ายกำกับ
+     (เป็น td ช่องแรกของแถวด้วย จึงต้องเขียนให้ชนะกฎ .table-indexed td:first-child ข้างบน) */
+  .table.table-cards tbody td.empty,
+  .table.table-cards.table-indexed tbody td.empty { text-align: center; }
+  /* ช่องเว้นว่างในแถวรวม (คอลัมน์ที่ไม่มียอดรวม) — ในตารางต้องมีไว้ให้คอลัมน์ตรง ในการ์ดคือบรรทัดเปล่า */
+  .table-cards tfoot th:empty { display: none; }
+  /* inline-flex ไม่ใช่ flex — กล่อง flex ระดับบล็อกจะไม่หลบ float ของป้ายกำกับ แล้วทับกัน */
+  .table-cards .name-cell { display: inline-flex; vertical-align: middle; }
   .table-cards .cell-sub { display: inline; margin-top: 0; }
   .table-cards .cell-sub::before { content: ' · '; }
 
-  /* ปฏิทิน: 7 คอลัมน์บนจอมือถือคือปัดซ้ายขวาแล้วอ่านไม่ออก — เปลี่ยนเป็นรายการวันแนวตั้ง
-     วันที่ไม่มีงานยุบทิ้งไปเลย เพราะสิ่งที่คนเปิดดูคือ "วันไหนมีงานอะไร" ไม่ใช่โครงตารางเดือน */
-  .table-wrap { overflow-x: visible; }
-  .cal-grid { display: block; border: none; background: none; }
-  .cal-head { display: none; }
-  .cal-cell { display: none; }                    /* ปริยายซ่อน แล้วค่อยเปิดเฉพาะวันที่มีงาน */
-  .cal-cell:has(.cal-chip) { display: block; }
-  .cal-cell.is-today { display: block; }          /* วันนี้ต้องเห็นเสมอ แม้ไม่มีงาน */
-  .cal-cell {
-    height: auto;
-    margin-bottom: 0.5rem;
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
+  /* ---- หัวการ์ด ----
+     สามช่องนี้คือ "ตัวระบุแถว" ไม่ใช่รายละเอียด — ดึงขึ้นไปไว้บรรทัดบนสุดด้วย order ค่าติดลบ
+     (ช่องที่เหลือใช้ order ปริยาย 0 จึงตกลงไปอยู่ใต้เส้นคั่นทั้งหมด)
+     เกาะกับคลาสที่ทุกหน้ารายการใช้ร่วมกันอยู่แล้ว ไม่ใช่ตำแหน่งคอลัมน์ ซึ่งแต่ละหน้าไม่ตรงกัน */
+  /* .table-indexed อยู่ในสายด้วย — ไม่งั้นแพ้กฎ .table-indexed td:first-child ที่เพิ่งเขียนทับไปข้างบน
+     แล้วเลขลำดับจะกินเต็มบรรทัดของตัวเอง แทนที่จะอยู่หน้ารหัสในหัวการ์ด */
+  .table.table-cards.table-indexed tbody td.row-index {
+    order: -30;
+    flex: 0 0 auto;
+    margin-right: 0.5rem;
+    padding: 0;
+    text-align: left;
+    font-size: 0.75rem;
   }
-  .cal-chips { max-height: none; overflow: visible; }
-  .cal-chip { font-size: 0.8125rem; }
+  /* "ลำดับ" ยาวเกินไปสำหรับหัวการ์ด — และไม่ต้อง float เพราะอยู่ติดกับตัวเลขเลย */
+  .table.table-cards tbody td.row-index::before { content: '#'; float: none; margin-right: 0.0625rem; }
+
+  /* รหัส (CASE-0076 / EMP-0015 / …) ทำหน้าที่เป็นชื่อของการ์ด
+     ไม่ต้องมีป้ายกำกับ — รูปแบบของรหัสบอกตัวเองอยู่แล้วว่าคืออะไร */
+  .table.table-cards tbody td.mono.link {
+    order: -20;
+    flex: 1 1 auto;
+    padding: 0;
+    font-size: 0.9375rem;
+    text-align: left;
+  }
+  .table.table-cards tbody td.mono.link::before { content: none; }
+
+  /* ช่องที่มีแต่ badge = สถานะของแถว — ไปอยู่มุมขวาบนของการ์ดเสมอ ไม่ว่าเดิมเป็นคอลัมน์ที่เท่าไร */
+  .table.table-cards tbody td[data-label]:has(> .badge) {
+    order: -10;
+    flex: 0 0 auto;
+    margin-left: auto;
+    padding: 0;
+  }
+  .table.table-cards tbody td[data-label]:has(> .badge)::before { content: none; }
+  /* ในตาราง badge ถูกบังคับให้กว้างเท่ากันเพื่อให้คอลัมน์ตรงกัน — ในการ์ดไม่มีคอลัมน์ให้ตรง */
+  .table-cards tbody .badge { min-width: 0; }
+
+  /* เส้นคั่นใต้หัวการ์ด — เป็น flex item เต็มความกว้างที่แทรกก่อนช่องรายละเอียด (order 0)
+     ขึ้นเฉพาะการ์ดที่มีหัวจริงๆ แถว "กำลังโหลด…/ไม่พบข้อมูล" จึงไม่มีเส้นลอยอยู่ข้างบน */
+  .table-cards tbody tr:has(> td.mono.link)::after,
+  .table-cards tbody tr:has(> td[data-label]:has(> .badge))::after {
+    content: '';
+    order: -5;
+    flex: 0 0 100%;
+    height: 1px;
+    margin: 0.5rem 0 0.375rem;
+    background: var(--divider);
+  }
+
+  /* ปุ่มจัดการท้ายแถว (หน้าการมาทำงาน) — เต็มความกว้างการ์ด ขนาดพอให้กดด้วยนิ้ว */
+  .table.table-cards tbody td.row-actions:not(:empty) {
+    display: flex;
+    gap: 0.5rem;
+    padding-top: 0.625rem;
+  }
+  .table-cards tbody td.row-actions .btn { flex: 1; justify-content: center; padding: 0.4375rem 0.5rem; }
+
+  /* ตารางที่กลายเป็นการ์ดแล้วไม่มีอะไรให้ปัดแนวนอน
+     แต่ตารางที่ยังเป็นตารางจริงๆ (เรทแพ็คเกจ ฯลฯ) ยังต้องปัดในกล่องของตัวเอง
+     ไม่งั้นมันดันทั้งหน้าให้เลื่อนซ้ายขวาตาม ซึ่งเป็นคนละเรื่องกับการปัดดูตาราง
+     (ส่วนของปฏิทินอยู่ท้ายไฟล์ ในบล็อกที่วางไว้หลังกฎปฏิทินปกติ) */
+  .table-wrap:has(> .table-cards) { overflow-x: visible; }
 }
 
 /* ---------- toast ---------- */
@@ -1654,10 +1750,46 @@ select option:checked {
 .cal-swatch.visit-stale     { background: #fde8e8; }
 .cal-swatch.visit-missed    { background: #fbe4e4; }
 
-/* จอแคบ: ปฏิทินเดือนบีบ 7 คอลัมน์ไม่ไหว ให้เลื่อนแนวนอนแทนการบีบจนอ่านไม่ออก */
+/* ---------- ปฏิทินบนจอแคบ ----------
+   สองบล็อกนี้ต้องอยู่ "หลัง" กฎปฏิทินปกติข้างบน และเรียงจากจอกว้างไปแคบ
+   media query ไม่เพิ่ม specificity — ของที่อยู่ก่อนจะถูกกฎข้างล่างทับกลับหมด
+   (เคยเป็นแบบนั้นมาแล้ว: กฎมือถืออยู่ในบล็อก @media 600px ที่อยู่เหนือ .cal-grid
+    .cal-grid จึงยังเป็น grid ทั้งที่สั่ง block ไว้ ส่วน .cal-cell:has(.cal-chip)
+    ที่ specificity สูงกว่ากลับทับสำเร็จอยู่ข้อเดียว → ช่องที่มีงานกลายเป็น block
+    เลิกเป็น flex column แล้ว .cal-chips ก็ไม่มีอะไรคุมความสูง ชื่อจึงล้นออกนอกช่อง) */
+
+/* แท็บเล็ต/จอแคบ: บีบ 7 คอลัมน์ไม่ไหว ให้เลื่อนแนวนอนใน .table-wrap แทนการบีบจนอ่านไม่ออก */
 @media (max-width: 40rem) {
   .cal-grid { min-width: 34rem; }
   .cal-cell { height: 6.5rem; }
+}
+
+/* มือถือ: 7 คอลัมน์ต่อให้ปัดซ้ายขวาก็ยังอ่านไม่ออก — เปลี่ยนเป็นรายการวันแนวตั้ง
+   วันที่ไม่มีงานยุบทิ้งไปเลย เพราะสิ่งที่คนเปิดดูคือ "วันไหนมีงานอะไร" ไม่ใช่โครงตารางเดือน */
+@media (max-width: 600px) {
+  /* กลายเป็นรายการแล้ว ไม่มีอะไรให้ปัดแนวนอน — และ min-width ข้างบนต้องถูกล้าง
+     ไม่งั้นปฏิทินกว้าง 34rem ค้างอยู่ แล้วดันทั้งหน้าให้เลื่อนซ้ายขวา */
+  .table-wrap:has(> .cal-grid) { overflow-x: visible; }
+  .cal-grid { display: block; min-width: 0; border: none; background: none; }
+  .cal-head { display: none; }                    /* หัววันในสัปดาห์ไม่มีความหมายเมื่อไม่ใช่ตาราง */
+  .cal-cell { display: none; }                    /* ปริยายซ่อน แล้วค่อยเปิดเฉพาะวันที่มีงาน */
+
+  /* flex ไม่ใช่ block — .cal-chips เป็น flex item ที่พึ่ง column ของช่องอยู่
+     ถ้าเปลี่ยนเป็น block เมื่อไร ความสูงของช่องจะไม่คุมรายการข้างในอีกต่อไป */
+  .cal-cell:has(.cal-chip),
+  .cal-cell.is-today {                            /* วันนี้ต้องเห็นเสมอ แม้ไม่มีงาน */
+    display: flex;
+    height: auto;                                 /* สูงตามจำนวนงาน ไม่ต้องเลื่อนดูในช่อง */
+    margin-bottom: 0.5rem;
+    padding: 0.5rem 0.625rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+  }
+  /* มุมมองสัปดาห์ตั้งช่องไว้สูง 16rem เพื่อให้ 7 ช่องแถวเดียวดูไม่แบน
+     ในโหมดรายการไม่มีแถวให้เท่ากันแล้ว การ์ดของวันที่มีงานกะเดียวจึงไม่ต้องสูง 16rem */
+  .cal-grid.is-week .cal-cell { min-height: 0; }
+  .cal-chips { max-height: none; overflow: visible; }
+  .cal-chip { font-size: 0.8125rem; white-space: normal; }
 }
 
 /* แถบเตือนว่าใบไม่ตรงกับเคสแล้ว — มีปุ่มจัดการอยู่ในตัว จะได้ไม่ต้องเลื่อนไปหาที่ท้าย popup */

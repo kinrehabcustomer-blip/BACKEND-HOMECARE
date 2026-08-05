@@ -31,7 +31,9 @@ export default function MyCasesPage() {
         </section>
       ) : (
         <div className="table-wrap">
-          <table className="table">
+          {/* พนักงานภาคสนามเปิดหน้านี้จากมือถือเป็นหลัก — table-cards ทำให้แต่ละเคสเป็นการ์ดใบหนึ่ง
+              แทนที่จะเป็นตารางกว้างที่ต้องปัดซ้ายขวาถึงจะเห็นสถานะ */}
+          <table className="table table-cards table-2line">
             <colgroup>
               <col style={{ width: '16%' }} />
               <col style={{ width: '40%' }} />
@@ -60,13 +62,13 @@ export default function MyCasesPage() {
                     }
                   }}
                 >
-                  <td className="mono link">{c.case_id}</td>
-                  <td>
+                  <td className="mono link" data-label="รหัสเคส">{c.case_id}</td>
+                  <td data-label="ผู้รับการดูแล">
                     {c.client_name}
                     <span className="cell-sub">{serviceName(c)}</span>
                   </td>
-                  <td>{c.start_date ? formatDate(c.start_date) : '—'}</td>
-                  <td><span className={`badge case-${c.status}`}>{CASE_STATUS_LABELS[c.status]}</span></td>
+                  <td data-label="วันเริ่ม">{c.start_date ? formatDate(c.start_date) : '—'}</td>
+                  <td data-label="สถานะ"><span className={`badge case-${c.status}`}>{CASE_STATUS_LABELS[c.status]}</span></td>
                 </tr>
               ))}
             </tbody>

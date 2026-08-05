@@ -250,13 +250,15 @@ function Payroll({ month, patch }) {
                 </tr>
               ))}
             </tbody>
+            {/* data-label ไม่ได้มีไว้แค่สวย — จอเล็กหัวตารางถูกซ่อน แถวรวมที่เหลือแต่ตัวเลขเปล่าๆ
+                จะอ่านไม่ออกว่าเลขไหนคืออะไร */}
             <tfoot>
               <tr>
-                <th>รวม {rows.length} คน</th>
-                <th>{totalCases}</th>
-                <th>{formatBaht(totalPay)}</th>
+                <th data-label="พนักงาน">รวม {rows.length} คน</th>
+                <th data-label="เคสที่ปิด">{totalCases}</th>
+                <th data-label="ค่าจ้างรวม">{formatBaht(totalPay)}</th>
                 <th />
-                <th>{durationText(totalMinutes)}</th>
+                <th data-label="ชั่วโมงรวม">{durationText(totalMinutes)}</th>
               </tr>
             </tfoot>
           </table>

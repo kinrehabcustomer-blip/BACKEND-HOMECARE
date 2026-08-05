@@ -123,7 +123,9 @@ export default function MyAttendancePage() {
             </section>
           ) : (
             <div className="table-wrap">
-              <table className="table table-2line">
+              {/* หน้าของพนักงานภาคสนาม เปิดจากมือถือเป็นหลัก — จอเล็กแตกเป็นการ์ดต่อหนึ่งกะ
+                  แทนตารางกว้างที่ต้องปัดซ้ายขวาถึงจะเห็นเวลาเข้า–ออก */}
+              <table className="table table-cards table-2line">
                 <thead>
                   <tr>
                     <th>วันที่</th>
@@ -136,12 +138,12 @@ export default function MyAttendancePage() {
                 <tbody>
                   {rows?.map((v) => (
                     <tr key={v.visit_id}>
-                      <td>{formatDate(v.visit_date)}</td>
-                      <td>
+                      <td data-label="วันที่">{formatDate(v.visit_date)}</td>
+                      <td data-label="ผู้รับบริการ">
                         {v.client_name}
                         <span className="cell-sub">{serviceName(v)}</span>
                       </td>
-                      <td>
+                      <td data-label="เข้า–ออก">
                         {v.check_in_at ? (
                           <>
                             {timeText(v.check_in_at)} – {v.check_out_at ? timeText(v.check_out_at) : '…'}
@@ -150,8 +152,8 @@ export default function MyAttendancePage() {
                           <span className="muted">—</span>
                         )}
                       </td>
-                      <td>{durationText(v.worked_minutes)}</td>
-                      <td>
+                      <td data-label="รวม">{durationText(v.worked_minutes)}</td>
+                      <td data-label="สถานะ">
                         <span className={`badge visit-${v.state}`}>{VISIT_STATE_LABELS[v.state]}</span>
                       </td>
                     </tr>
