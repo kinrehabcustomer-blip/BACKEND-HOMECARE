@@ -1400,8 +1400,13 @@ select option:checked {
     max-width: 100%;
     max-height: 94vh;
     border-radius: 0.875rem 0.875rem 0 0;
-    /* ดีดกลับตอนปัดไม่ถึงระยะปิด — ระหว่างลากโค้ดจะปิด transition ไว้ให้ตามนิ้วทันที */
-    transition: transform 0.2s ease-out;
+    /* ดีดกลับตอนปัดไม่ถึงระยะปิด — ระหว่างลากโค้ดจะปิด transition ไว้ให้ตามนิ้วทันที
+       เส้นโค้งแบบสปริงเบาๆ (ออกตัวเร็ว เข้าที่นุ่ม) ให้ความรู้สึกว่ากล่องมีน้ำหนัก ไม่ใช่ดีดกลับแข็งๆ */
+    transition: transform 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+    /* backface + perspective — บังคับให้เบราว์เซอร์วาดกล่องเป็นเลเยอร์แยกบน GPU
+       ไม่งั้นทุกเฟรมที่ลากจะไปคำนวณ layout ของเนื้อหาข้างในใหม่ทั้งก้อน ภาพจะสะดุด */
+    backface-visibility: hidden;
+    transform: translate3d(0, 0, 0);
     /* กันเบราว์เซอร์ตีความการลากลงเป็น "ดึงเพื่อรีเฟรช" หรือเลื่อนหน้าข้างหลัง */
     overscroll-behavior: contain;
     touch-action: pan-y;

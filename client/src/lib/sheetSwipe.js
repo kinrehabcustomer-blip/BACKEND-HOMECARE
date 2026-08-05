@@ -5,6 +5,12 @@ import { useEffect, useRef } from 'react';
 const CLOSE_DISTANCE = 110;  // px
 const CLOSE_VELOCITY = 0.5;  // px ต่อ ms
 
+// ต้องเลื่อนนิ้วเกินระยะนี้ก่อนถึงเริ่มลากจริง — กันกล่องขยับตอนแค่แตะหรือนิ้วสั่น
+// และเป็นจังหวะให้เบราว์เซอร์ตัดสินใจก่อนว่าท่านี้คือ scroll หรือ drag
+const START_THRESHOLD = 8;   // px
+
+const CLOSE_MS = 200;        // เวลาที่ใช้ไถลลงไปจนสุดก่อนปิดจริง (ต้องตรงกับ transition ใน CSS)
+
 /**
  * ปัดลงเพื่อปิดกล่อง — ใช้เฉพาะจอแคบที่กล่องเป็นแผ่นเลื่อนขึ้นมาจากขอบล่าง
  * (จอกว้างกล่องลอยอยู่กลางจอ การปัดลงไม่สื่อความหมายอะไร)
@@ -34,7 +40,19 @@ export function useSheetSwipe(onClose, externalRef) {
     let startY = 0;
     let startAt = 0;
     let dy = 0;
-    let dragging = false;
+    let active = false;   // นิ้วแตะอยู่และมีสิทธิ์ลาก
+    let dragging = false; // เลื่อนเกินระยะเริ่มแล้ว กล่องกำลังขยับตามนิ้ว
+    let frame = 0;
+    let closeTimer = 0;
+
+    /**
+     * เขียน transform ทีละเฟรม ไม่ใช่ทุก touchmove
+     * touchmove ยิงถี่กว่าอัตราการวาดจอ — เขียนทุกครั้งคือสั่งงานทิ้งเปล่าและทำให้ภาพสะดุด
+     */
+    const paint = () => {
+      frame = 0;
+      el.style.transform = `translate3d(0, ${dy}px, 0)`;
+    };
 
     /** นิ้วแตะอยู่ในส่วนที่เลื่อนค้างไว้อยู่หรือเปล่า — ถ้าใช่ การปัดลงคือการเลื่อนอ่าน ไม่ใช่การปิด */
     const scrolledInside = (target) => {
@@ -44,9 +62,14 @@ export function useSheetSwipe(onClose, externalRef) {
       return false;
     };
 
-    const reset = () => {
+    const stop = () => {
+      if (frame) cancelAnimationFrame(frame);
+      frame = 0;
+      active = false;
+      dragging = false;
       el.style.transition = '';
       el.style.transform = '';
+      el.style.willChange = '';
     };
 
     const onStart = (e) => {
@@ -58,48 +81,76 @@ export function useSheetSwipe(onClose, externalRef) {
       startY = e.touches[0].clientY;
       startAt = e.timeStamp;
       dy = 0;
-      dragging = true;
-      el.style.transition = 'none'; // ระหว่างลากต้องตามนิ้วทันที ไม่หน่วง
+      active = true;
+      dragging = false;
     };
 
     const onMove = (e) => {
-      if (!dragging) return;
-      dy = e.touches[0].clientY - startY;
+      if (!active) return;
+      const raw = e.touches[0].clientY - startY;
 
-      if (dy <= 0) {
-        // ปัดขึ้น = ไม่ใช่ท่าปิด ยกเลิกการลากแล้วปล่อยให้เลื่อนเนื้อหาตามปกติ
-        dragging = false;
-        reset();
+      if (raw <= 0) {
+        // ปัดขึ้น = ไม่ใช่ท่าปิด ยกเลิกแล้วปล่อยให้เลื่อนเนื้อหาตามปกติ
+        if (dragging) stop();
+        active = false;
         return;
       }
 
+      if (!dragging) {
+        if (raw < START_THRESHOLD) return; // ยังไม่พอ ปล่อยให้เบราว์เซอร์ตัดสินใจก่อน
+        dragging = true;
+        // ปิด transition ระหว่างลากเพื่อให้ตามนิ้วทันที และบอกเบราว์เซอร์ให้ยกขึ้นเลเยอร์ของ GPU ไว้ก่อน
+        el.style.transition = 'none';
+        el.style.willChange = 'transform';
+      }
+
+      // ลบระยะเริ่มออก — ไม่งั้นกล่องจะกระโดด 8px ทันทีที่เริ่มลาก
+      dy = raw - START_THRESHOLD;
       e.preventDefault(); // กันหน้าข้างหลังเลื่อนตามนิ้วไปด้วย
-      el.style.transform = `translateY(${dy}px)`;
+      if (!frame) frame = requestAnimationFrame(paint);
     };
 
     const onEnd = (e) => {
-      if (!dragging) return;
-      dragging = false;
+      if (!active) return;
+      if (!dragging) {
+        active = false;
+        return;
+      }
 
       const velocity = dy / Math.max(1, e.timeStamp - startAt);
-      reset();
-      if (dy > CLOSE_DISTANCE || velocity > CLOSE_VELOCITY) close.current?.();
+      if (frame) cancelAnimationFrame(frame);
+      frame = 0;
+
+      if (dy > CLOSE_DISTANCE || velocity > CLOSE_VELOCITY) {
+        /* ไถลลงจนพ้นจอก่อนแล้วค่อยปิด — เดิมปิดทันทีที่ปล่อยนิ้ว กล่องจึงหายวับ
+           ทั้งที่นิ้วเพิ่งลากมาได้ครึ่งทาง ความรู้สึกเลยเหมือนภาพกระชาก */
+        el.style.transition = `transform ${CLOSE_MS}ms cubic-bezier(0.32, 0, 0.67, 0)`;
+        el.style.transform = `translate3d(0, ${el.offsetHeight}px, 0)`;
+        active = false;
+        dragging = false;
+        closeTimer = setTimeout(() => close.current?.(), CLOSE_MS);
+        return;
+      }
+
+      // ไม่ถึงเกณฑ์ = ดีดกลับที่เดิม (เส้นโค้งอยู่ใน CSS ของ .modal)
+      stop();
     };
 
-    // passive: false เฉพาะ touchmove เพราะต้อง preventDefault ได้ ส่วนอีกสองตัวไม่ต้องบล็อกอะไร
+    // passive: false เฉพาะ touchmove เพราะต้อง preventDefault ได้ ส่วนที่เหลือไม่ต้องบล็อกอะไร
     el.addEventListener('touchstart', onStart, { passive: true });
     el.addEventListener('touchmove', onMove, { passive: false });
     el.addEventListener('touchend', onEnd, { passive: true });
     el.addEventListener('touchcancel', onEnd, { passive: true });
 
     return () => {
+      clearTimeout(closeTimer);
+      if (frame) cancelAnimationFrame(frame);
       el.removeEventListener('touchstart', onStart);
       el.removeEventListener('touchmove', onMove);
       el.removeEventListener('touchend', onEnd);
       el.removeEventListener('touchcancel', onEnd);
     };
     // ref เป็นกล่องที่ตัวมันเองไม่เปลี่ยน (ทั้งของตัวเองและที่รับมา) — ใส่ใน deps ไม่ทำให้ effect รันใหม่
-    // แต่ oxlint มองไม่เห็นข้อนี้ จึงต้องบอกไว้ ไม่งั้นเตือนทุกครั้ง
   }, [ref]);
 
   return ref;
