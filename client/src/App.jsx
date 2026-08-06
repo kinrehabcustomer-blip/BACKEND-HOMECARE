@@ -95,6 +95,13 @@ function Sidebar() {
         <LineIcon name={menuOpen ? 'close' : 'menu'} className="nav-toggle-ico" />
       </button>
 
+      {/* ฉากหรี่หลังเมนูที่กางอยู่ — แตะแล้วปิด เป็นทางออกที่นิ้วหาเจอก่อนปุ่ม ✕ เสมอ
+          เป็น element จริงไม่ใช่ ::before เพราะต้องรับการแตะได้เอง
+          aria-hidden + ไม่มี label — คนใช้โปรแกรมอ่านหน้าจอปิดเมนูด้วย Esc หรือปุ่ม ✕ ที่มีชื่อกำกับอยู่แล้ว */}
+      {menuOpen && (
+        <div className="nav-scrim" onClick={() => setMenuOpen(false)} aria-hidden="true" />
+      )}
+
       {/* เมนูจัดการเห็นเฉพาะผู้ดูแลระบบ (ผู้จัดการ/HR) — พนักงานภาคสนามยังไม่มีส่วนของตัวเอง */}
       {isAdmin ? (
         <nav id="main-nav">

@@ -158,12 +158,14 @@ export default function PatientListPage() {
       <div className="table-wrap">
         <table className="table table-cards table-indexed">
           <colgroup>
+            {/* สถานะกว้างขึ้นเป็น 15% — ป้ายสถานะต้องอ่านออกทั้งก้อน ตัดครึ่งแล้วไม่มีความหมาย
+                ยืมจากผู้ว่าจ้าง ซึ่งเป็นชื่อคน/บริษัท ตัดท้ายด้วย … ยังพอรู้ว่าใคร */}
             <col style={{ width: '6%' }} />
             <col style={{ width: '13%' }} />
             <col style={{ width: '25%' }} />
             <col style={{ width: '13%' }} />
-            <col style={{ width: '21%' }} />
-            <col style={{ width: '12%' }} />
+            <col style={{ width: '18%' }} />
+            <col style={{ width: '15%' }} />
             <col style={{ width: '10%' }} />
           </colgroup>
           <thead>

@@ -1,20 +1,71 @@
 /** โยนตอนเซสชันหมดอายุ/ยังไม่ login — หน้าเว็บใช้แยกว่าควรเด้งไปหน้า login ไหม */
 export class UnauthorizedError extends Error {}
 
+/**
+ * เลิกรอเมื่อไร — fetch ไม่มีเวลาหมดอายุในตัว ถ้าไม่กำหนดเองมันรอได้ไม่จำกัด
+ *
+ * 30 วินาที: รูปที่ย่อแล้วอยู่ราว 100–300 KB (ดู lib/image.js) ต่อให้อยู่บน 3G ในอาคาร
+ * ก็ยังส่งจบทัน แต่ไม่ปล่อยให้ค้างจนคนเลิกรอไปเอง
+ */
+const TIMEOUT_MS = 30_000;
+
 async function request(path, options = {}) {
-  const res = await fetch(`/api${path}`, {
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'include', // ส่งคุกกี้ session ไปด้วยทุก request
-    ...options,
-    body: options.body ? JSON.stringify(options.body) : undefined,
-  });
+  /* พนักงานภาคสนามใช้งานจากมือถือ ซึ่งเข้าจุดอับสัญญาณ/ลิฟต์/ชั้นใต้ดินเป็นเรื่องปกติ
+     ในจุดอับ request จะออกไปแล้วเงียบหายไปเลย ไม่ตอบและไม่ error
+     ผลคือปุ่มค้างอยู่ที่ "กำลังบันทึก…" และ disabled ตลอดกาล กดซ้ำก็ไม่ได้
+     ไม่มีอะไรบอกว่าเกิดอะไรขึ้น และข้อมูลก็ไม่ได้ถูกบันทึกจริง
+     — นี่คือที่มาของอาการ "กดปุ่มไม่ติด / กดบันทึกแล้วไม่ save" ที่เจอหน้างาน */
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
-  if (res.status === 204) return null;
+  let res;
+  let text;
+  try {
+    res = await fetch(`/api${path}`, {
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include', // ส่งคุกกี้ session ไปด้วยทุก request
+      ...options,
+      body: options.body ? JSON.stringify(options.body) : undefined,
+      // อยู่หลัง spread — เวลาหมดอายุเป็นสิ่งที่ผู้เรียกเขียนทับไม่ได้
+      signal: controller.signal,
+    });
 
-  // อ่านเป็นข้อความก่อนแล้วค่อย parse — บาง response ตอบ body ว่าง (เช่น server หลุดกลางคัน
-  // หรือ proxy ตัดการเชื่อมต่อ) ถ้าเรียก res.json() ตรงๆ จะพังด้วยข้อความที่ผู้ใช้อ่านไม่รู้เรื่อง
-  const text = await res.text();
-  const data = text ? JSON.parse(text) : null;
+    if (res.status === 204) return null;
+
+    // อ่านเป็นข้อความก่อนแล้วค่อย parse — บาง response ตอบ body ว่าง (เช่น server หลุดกลางคัน
+    // หรือ proxy ตัดการเชื่อมต่อ) ถ้าเรียก res.json() ตรงๆ จะพังด้วยข้อความที่ผู้ใช้อ่านไม่รู้เรื่อง
+    // อ่าน body ให้จบในนี้ด้วย จะได้ยังอยู่ในความคุ้มครองของ timeout (ตัว body เองก็ค้างได้)
+    text = await res.text();
+  } catch (err) {
+    /* ข้อความดิบของเบราว์เซอร์เป็นภาษาอังกฤษและไม่เหมือนกันสักตัว
+       — Chrome: "Failed to fetch" · Safari บน iPhone: "Load failed" · Firefox: "NetworkError…"
+       คนใช้งานอ่านแล้วแยกไม่ออกว่าเป็นที่สัญญาณตัวเองหรือระบบพัง และไม่รู้ว่าต้องทำอะไรต่อ
+       ต้องบอกด้วยว่าข้อมูลที่กรอกไว้ยังอยู่ ไม่งั้นคนจะไม่กล้ากดซ้ำเพราะกลัวบันทึกซ้ำซ้อน */
+    throw new Error(
+      err.name === 'AbortError'
+        ? 'เชื่อมต่อนานเกินไป — สัญญาณอาจอ่อน ลองกดใหม่อีกครั้ง (ข้อมูลที่กรอกไว้ยังอยู่ครบ)'
+        : 'เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ — ตรวจสอบสัญญาณอินเทอร์เน็ตแล้วลองใหม่ (ข้อมูลที่กรอกไว้ยังอยู่ครบ)',
+    );
+  } finally {
+    // ยกเลิกตัวนับทุกทาง ไม่งั้น request ที่จบเร็วจะทิ้ง timer ค้างไว้เต็มไปหมด
+    clearTimeout(timer);
+  }
+
+  let data = null;
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      /* ตอบกลับมาแต่ไม่ใช่ JSON — มักเป็นหน้า HTML ของ proxy/gateway (502/504)
+         หรือหน้าล็อกอินของไวไฟสาธารณะที่ดักไว้กลางทาง ซึ่งเจอบ่อยเวลาออกไปทำงานนอกสถานที่
+         ปล่อยให้ JSON.parse พังเองจะได้ข้อความแบบ "Unexpected token '<'" ที่ไม่ช่วยอะไรเลย */
+      throw new Error(
+        res.ok
+          ? 'เซิร์ฟเวอร์ตอบกลับมาไม่ถูกรูปแบบ — กรุณาลองใหม่อีกครั้ง'
+          : `เชื่อมต่อไม่สำเร็จ (HTTP ${res.status}) — ถ้ากำลังใช้ไวไฟสาธารณะ ให้เข้าสู่ระบบไวไฟให้เรียบร้อยก่อนแล้วลองใหม่`,
+      );
+    }
+  }
 
   if (!res.ok) {
     if (res.status === 401) throw new UnauthorizedError(data?.error ?? 'กรุณาเข้าสู่ระบบ');

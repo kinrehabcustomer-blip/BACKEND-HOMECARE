@@ -210,13 +210,16 @@ export default function CaseListPage() {
       <div className="table-wrap">
         <table className="table table-cards table-2line table-indexed">
           <colgroup>
+            {/* สถานะกว้าง 16% เพราะป้ายที่ยาวที่สุด ("ยังไม่จับคู่พนักงาน") ต้องการ 139px
+                ที่ 13% บนจอ 1280/1440 ได้ไม่ถึง แล้วป้ายโดน … ตัดจนอ่านไม่ออกว่าเคสอยู่สถานะไหน
+                ที่ยืมมาคือคอลัมน์บริการ ซึ่งเป็นข้อความอิสระ ตัดท้ายแล้วยังเดาความได้ */}
             <col style={{ width: '6%' }} />
             <col style={{ width: '12%' }} />
-            <col style={{ width: '26%' }} />
+            <col style={{ width: '23%' }} />
             <col style={{ width: '14%' }} />
             <col style={{ width: '13%' }} />
             <col style={{ width: '16%' }} />
-            <col style={{ width: '13%' }} />
+            <col style={{ width: '16%' }} />
           </colgroup>
           <thead>
             <tr>

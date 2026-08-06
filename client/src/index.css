@@ -225,6 +225,9 @@ body {
 }
 .nav-toggle:hover { background: var(--brand-soft); color: var(--brand); }
 .nav-toggle-ico { width: 1.375rem; height: 1.375rem; }
+/* ฉากหรี่หลังเมนู — มีเฉพาะโหมดแถบบน (จอแคบ) เปิดใช้จริงในบล็อก @media ด้านล่าง
+   ปิดไว้ที่นี่กันกรณีย่อ-ขยายหน้าต่างข้ามจุดตัดตอนเมนูกางอยู่ แล้วฉากค้างทับจอกว้าง */
+.nav-scrim { display: none; }
 
 .sidebar nav { display: flex; flex-direction: column; gap: 0.1875rem; }
 .sidebar nav a {
@@ -657,6 +660,9 @@ select option:checked {
   cursor: help;
 }
 :root[data-theme='dark'] .stale-flag { background: #34291a; color: #e0b877; }
+/* ช่องที่มีธงนี้ต้องอ่านได้ทั้งเลขที่ใบและตัวธง — เลขที่ใบเป็นตัวระบุหลัก ห้ามโดน … ตัด
+   จึงยอมให้ตกบรรทัดแทน (ตารางใบแจ้งหนี้เป็น .table-2line มีที่ให้สองบรรทัดอยู่แล้ว) */
+.table td:has(> .stale-flag) { white-space: normal; }
 
 /* แถบบอกว่ากำลังกรองมาจากลิงก์ของอีกหน้า (เช่น ผู้รับการดูแลของลูกค้ารายหนึ่ง) */
 .filter-chip { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
@@ -694,6 +700,9 @@ select option:checked {
   background: rgb(18 24 28 / 55%);
   animation: fade-in 120ms ease-out;
 }
+/* ปัญหาเดียวกับฉากหรี่หลังเมนู — สีนี้สว่างพอๆ กับพื้นหลังธีมมืด ซ้อนแล้วแทบไม่หรี่
+   popup จึงไม่มีอะไรแยกมันออกจากเนื้อหาข้างหลัง สายตาไม่รู้ว่าต้องโฟกัสตรงไหน */
+:root[data-theme='dark'] .modal-backdrop { background: rgb(0 0 0 / 60%); }
 .modal {
   display: flex;
   flex-direction: column;
@@ -710,6 +719,8 @@ select option:checked {
 /* แผ่นที่เลื่อนขึ้นจากขอบล่างบนมือถือ — ขยับแต่ transform อย่างเดียว ไม่แตะ opacity
    เพราะของที่ "เลื่อนเข้ามา" ไม่ได้จางเข้ามาด้วย และ transform ล้วนวิ่งบน compositor ไม่ต้อง repaint ทุกเฟรม */
 @keyframes sheet-up { from { transform: translateY(100%); } }
+/* แผงเมนูบนจอแคบ — ไหลลงมาจากใต้แถบสั้นๆ ให้รู้ว่ามันออกมาจากปุ่ม ☰ ไม่ใช่โผล่มาเฉยๆ */
+@keyframes nav-drop { from { opacity: 0; transform: translateY(-0.5rem); } }
 
 .modal-loading { padding: 2.5rem; text-align: center; }
 
@@ -1288,6 +1299,18 @@ select option:checked {
    จอเล็กลง — แท็บเล็ตแนวนอน / แนวตั้ง / มือถือ
    ========================================================= */
 
+/* จอแล็ปท็อป (1280 / 1440 — สองความละเอียดที่คนใช้เยอะที่สุด)
+   ไซด์บาร์กิน 230px + ระยะขอบเนื้อหาอีก 72px เหลือให้ตารางไม่ถึง 1,150px
+   คอลัมน์ที่คิดเป็น % จึงแคบลงจนป้ายสถานะยาวๆ ("ยังไม่จับคู่พนักงาน" ต้องการ 158px)
+   เบอร์โทร และเลขที่ใบแจ้งหนี้ โดน … ตัด — ซึ่งขัดกับกฎของตารางเองที่ว่ารหัสต้องอ่านออกเสมอ
+
+   บีบระยะขอบในช่องแทนการตัดตัวอักษร: เสียที่ว่างข้างละ 6px ต่อคอลัมน์
+   แต่ได้ความกว้างคืนมาคอลัมน์ละ 12px ซึ่งมากพอสำหรับทุกป้ายที่ยาวที่สุดในระบบ
+   ต้องอยู่เหนือบล็อก 600px ด้านล่าง ไม่งั้นจะไปทับค่าของมือถือ */
+@media (max-width: 1400px) {
+  .table th, .table td { padding-left: 0.625rem; padding-right: 0.625rem; }
+}
+
 /* แท็บเล็ต: ฟอร์มสามคอลัมน์เหลือสองคอลัมน์ ยังพออ่านง่าย */
 @media (max-width: 1100px) {
   .grid { grid-template-columns: 1fr 1fr; }
@@ -1326,16 +1349,48 @@ select option:checked {
      เปลี่ยนเป็นพับไว้ใต้ปุ่ม ☰ แล้วกางลงมาเป็นรายการแนวตั้งอ่านครบในครั้งเดียว */
   .nav-toggle { display: inline-flex; }
   .sidebar nav { display: none; }
+  /* เมนูที่กางออกมา "ลอยทับ" เนื้อหา ไม่ใช่แทรกเป็นแถวใหม่ในแถบ
+     แบบเดิมแถบบนสูงขึ้นทั้งแถบ เนื้อหาที่กำลังอ่านอยู่เลยถูกดันหนีลงไปทั้งหน้า
+     พอปิดเมนูก็เด้งกลับ — เป็นการกระโดดของภาพที่ไม่มีใครสั่ง
+
+     absolute เกาะกับ .sidebar ซึ่งเป็น sticky (= positioned) อยู่แล้ว
+     แผงจึงห้อยใต้แถบบนพอดี และเลื่อนติดไปกับแถบเวลาเลื่อนหน้า */
   .sidebar.is-open nav {
     display: flex;
     flex-direction: column;
-    flex-basis: 100%;        /* กินเต็มบรรทัดของตัวเอง ใต้แถวโลโก้ */
-    order: 10;               /* ดันไปท้ายสุดของแถบ ไม่แทรกกลางระหว่างโลโก้กับปุ่มขวา */
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: 2;              /* เหนือฉากหรี่ที่อยู่ z-index 1 */
     gap: 0.25rem;
-    margin-top: 0.5rem;
-    padding-top: 0.625rem;
-    border-top: 1px solid var(--border);
+    padding: 0.5rem;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    border-radius: 0 0 0.875rem 0.875rem;
+    box-shadow: 0 0.75rem 1.5rem rgb(0 0 0 / 18%);
+    animation: nav-drop 160ms ease-out;
   }
+
+  /* หรี่เฉพาะส่วนที่เมนูไม่ได้ทับ — เริ่มที่ใต้แถบบนพอดี
+     แถบบนกับปุ่ม ✕ จึงยังสว่างและกดได้ตามปกติ ไม่ถูกหรี่ไปด้วย
+     absolute ไม่ใช่ fixed เพื่อให้เกาะไปกับแถบ sticky ชุดเดียวกับแผงเมนู
+     100vh คลุมส่วนที่เหลือของจอเสมอ ไม่ว่าหน้าจะยาวแค่ไหน */
+  .nav-scrim {
+    display: block;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    height: 100vh;
+    z-index: 1;
+    background: rgb(18 24 28 / 45%);
+    animation: fade-in 160ms ease-out;
+  }
+  /* ธีมมืดต้องใช้ดำล้วนและทึบกว่า — #12181c ที่ 45% มีความสว่างพอๆ กับพื้นหลังมืดอยู่แล้ว
+     ซ้อนไปก็แทบไม่เปลี่ยนอะไร (วัดได้ 26.9 → 24.9 คือแทบมองไม่ออกว่าหรี่)
+     ดำล้วน 55% กดลงเหลือ ~12 ถึงจะเห็นชัดว่าส่วนนี้ถูกพักไว้ */
+  :root[data-theme='dark'] .nav-scrim { background: rgb(0 0 0 / 55%); }
   .sidebar nav a { padding: 0.625rem 0.75rem; white-space: nowrap; }
   /* จอแคบไม่มีเมาส์ให้ hover — เอฟเฟกต์เลื่อนออกด้านข้างเลยไม่มีประโยชน์ และทำให้แถวขยับตอนแตะ */
   .sidebar nav a:hover { transform: none; }
@@ -1445,8 +1500,28 @@ select option:checked {
   .modal-head, .modal-foot { padding-left: 1rem; padding-right: 1rem; }
   .modal-body { padding-left: 1rem; padding-right: 1rem; }
   .modal-meta { margin-left: -1rem; margin-right: -1rem; padding-left: 1rem !important; padding-right: 1rem !important; }
-  .modal-foot { flex-wrap: wrap; }
-  .modal-foot .btn { flex: 1; justify-content: center; }
+  /* ปุ่มท้าย popup: 4 ปุ่มหารกันด้วย flex:1 บนจอ 390px ได้ปุ่มละ 84px
+     ซึ่งแคบกว่าคำว่า "เริ่มให้บริการ" ทุกปุ่มเลยตกเป็นสองบรรทัด อ่านเป็นก้อนตัวหนังสือมั่วๆ
+     สองคอลัมน์ตายตัวได้ปุ่มละ ~180px พอสำหรับป้ายที่ยาวที่สุด และนิ้วเล็งง่ายกว่าปุ่มผอมๆ 4 ปุ่ม */
+  .modal-foot {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem;
+  }
+  .modal-foot .btn { justify-content: center; }
+  /* ปุ่มสุดท้ายที่ไม่มีคู่ (ปุ่มรวมเป็นเลขคี่) กินเต็มบรรทัด — ดีกว่าปล่อยครึ่งบรรทัดว่างข้างเดียว
+     ครอบคลุมกรณี popup ที่มีปุ่มเดียวด้วย (เป็นทั้งลูกคนแรกและคนสุดท้าย) */
+  .modal-foot .btn:last-child:nth-child(odd) { grid-column: 1 / -1; }
+  /* ปุ่มลบเคยใช้ margin-right: auto ดันไปชิดซ้ายสุด ให้ห่างจากปุ่มที่กดกันจริง
+     ในกริดคำสั่งนั้นไม่มีผล ปุ่มลบจะไปนั่งติดปุ่มปกติแทน ซึ่งอันตรายกว่าเดิม
+     จึงย้ายลงไปเป็นแถวของตัวเองท้ายสุด — ยังคงหลักการเดิมคือ "ระยะห่างคือสิ่งที่กันการกดพลาด"
+     (order ใช้ได้กับ grid item เหมือน flex ปุ่มอื่นเป็น order 0 ปริยาย) */
+  .modal-foot .foot-danger {
+    order: 1;
+    grid-column: 1 / -1;
+    margin-right: 0;
+    margin-top: 0.25rem;
+  }
 
   /* ฟอร์มจับคู่พนักงาน/ใบรับรอง: ปุ่มตกลงมาใต้ช่องกรอก */
   .assign-form, .cert-form { flex-direction: column; }
@@ -1455,6 +1530,14 @@ select option:checked {
   .bar-label { width: 6.25rem; font-size: 0.75rem; }
   .row { flex-direction: column; gap: 2px; }
   .row-label { width: auto; }
+
+  /* ---- ขนาดปุ่มบนจอสัมผัส ----
+     บนเมาส์ ปุ่ม 24px กดแม่นเพราะเคอร์เซอร์เล็ง 1 พิกเซล แต่ปลายนิ้วกินพื้นที่ราว 40px
+     ที่อันตรายคือปุ่ม ↑ ↓ กับ "ลบ" ในหน้าแพ็คเกจอยู่ติดกัน — เล็งจะจัดลำดับแล้วโดนลบแทน
+     ไม่แตะขนาดตัวอักษร เพิ่มแต่พื้นที่กด แถวจึงไม่บวมขึ้นมากนัก */
+  .btn.tiny { min-height: 2.25rem; padding: 0.375rem 0.625rem; }
+  .seg button { padding: 0.5rem 0.875rem; }
+  /* (เป้ากดของปฏิทินอยู่ในบล็อกท้ายไฟล์ — ต้องอยู่หลังนิยาม .cal-chip ถึงจะทับได้) */
 
   /* ตารางที่ทำเป็นการ์ดได้ (.table-cards): จอเล็กเลิกเป็นตาราง กลายเป็นการ์ดต่อหนึ่งแถว
      ปัดซ้ายขวาเพื่ออ่านคอลัมน์ที่เหลือคือท่าที่ใช้ยากที่สุดบนมือถือ — ยอมให้สูงขึ้นแทน
@@ -1819,12 +1902,17 @@ select option:checked {
   color: var(--muted);
 }
 .cal-legend-item { display: inline-flex; align-items: center; gap: 0.375rem; }
-.cal-swatch { width: 0.75rem; height: 0.75rem; border-radius: 0.25rem; flex-shrink: 0; }
+/* ช่องสีในคำอธิบายเล็กแค่ 12px — เป็นจุดที่สีใกล้กันจะแยกไม่ออกก่อนที่อื่น
+   ขอบจางช่วยให้เห็นขอบเขตของช่องสีอ่อนๆ บนพื้นขาว ไม่งั้น "เสร็จแล้ว" แทบหายไปกับพื้น */
+.cal-swatch {
+  width: 0.75rem; height: 0.75rem; border-radius: 0.25rem; flex-shrink: 0;
+  border: 1px solid rgb(0 0 0 / 0.12);
+}
 .cal-swatch.visit-scheduled { background: #fff3dc; }
 .cal-swatch.visit-working   { background: #e3f5ec; }
-.cal-swatch.visit-done      { background: #eef0f2; }
-.cal-swatch.visit-stale     { background: #fde8e8; }
-.cal-swatch.visit-missed    { background: #fbe4e4; }
+.cal-swatch.visit-done      { background: #ced4da; }
+.cal-swatch.visit-stale     { background: #e6dbf7; }
+.cal-swatch.visit-missed    { background: #fbdada; }
 
 /* ---------- ปฏิทินบนจอแคบ ----------
    สองบล็อกนี้ต้องอยู่ "หลัง" กฎปฏิทินปกติข้างบน และเรียงจากจอกว้างไปแคบ
@@ -1865,7 +1953,10 @@ select option:checked {
      ในโหมดรายการไม่มีแถวให้เท่ากันแล้ว การ์ดของวันที่มีงานกะเดียวจึงไม่ต้องสูง 16rem */
   .cal-grid.is-week .cal-cell { min-height: 0; }
   .cal-chips { max-height: none; overflow: visible; }
-  .cal-chip { font-size: 0.8125rem; white-space: normal; }
+  /* งานหนึ่งชิ้น = เป้ากดหลักของทั้งหน้าสำหรับพนักงานภาคสนาม สูง 24px เตี้ยเกินกว่าจะกดแม่น */
+  .cal-chip { font-size: 0.8125rem; white-space: normal; padding: 0.5625rem 0.5rem; }
+  /* หัววันกดเพื่อดูงานทั้งวัน — เดิมสูงเท่าตัวอักษร 16px พอดี ไม่มีพื้นที่เผื่อนิ้วเลย */
+  .cal-date-btn { padding: 0.5rem 0; }
 }
 
 /* แถบเตือนว่าใบไม่ตรงกับเคสแล้ว — มีปุ่มจัดการอยู่ในตัว จะได้ไม่ต้องเลื่อนไปหาที่ท้าย popup */
@@ -2137,21 +2228,27 @@ select option:checked {
 }
 
 /* ---------- ระบบเช็คอินพนักงานภาคสนาม ---------- */
-/* สถานะกะ — โทนเดียวกับ badge.case-* */
+/* สถานะกะ — โทนเดียวกับ badge.case-*
+   ห้าสถานะต้องเป็นห้าสีที่ "คนละเฉด" จริงๆ ไม่ใช่แค่ค่าต่างกันบนกระดาษ
+   ของเดิม ค้างเช็คเอาท์ #fde8e8 กับ ขาดงาน #fbe4e4 ต่างกันแค่ 2–4 ค่าต่อช่อง
+   = ตาเปล่ามองเป็นสีเดียวกัน ทั้งที่เป็นคนละเรื่องและต้องจัดการคนละแบบ (ปิดกะ vs ยกเลิกกะ)
+   ค้างเช็คเอาท์จึงย้ายไปโทนม่วง ซึ่งไม่ชนกับสถานะไหนเลย ส่วนขาดงานเข้มขึ้นให้เป็นแดงเต็มตัว
+   (เสร็จแล้วเทาขึ้นอีกนิด ของเดิมเกือบขาวจนแทบไม่เห็นว่ามีป้ายอยู่) */
 .badge.visit-scheduled { background: #fff3dc; color: #9a6700; }
 .badge.visit-working   { background: #e3f5ec; color: #1c7a4d; }
-.badge.visit-done      { background: #eef0f2; color: #6b7280; }
-.badge.visit-stale     { background: #fde8e8; color: #b3261e; }
-.badge.visit-missed    { background: #fbe4e4; color: #a83232; }
+.badge.visit-done      { background: #ced4da; color: #495057; }
+.badge.visit-stale     { background: #e6dbf7; color: #5b3391; }
+.badge.visit-missed    { background: #fbdada; color: #a3231f; }
 .badge.visit-cancelled { background: #eef0f2; color: #6b7280; }
 .badge.flag { background: #fde8e8; color: #b3261e; margin-left: 0.4rem; }
 
-/* chip ปฏิทิน field ระบายสีตามสถานะเช็คอิน */
+/* chip ปฏิทิน field ระบายสีตามสถานะเช็คอิน — ต้องตรงกับ badge.visit-* ข้างบนเป๊ะ
+   สถานะเดียวกันต้องสีเดียวกันทุกที่ในระบบ ไม่งั้นคนจำสีจากหน้าหนึ่งไปใช้อีกหน้าไม่ได้ */
 .cal-chip.visit-scheduled { background: #fff3dc; color: #9a6700; }
 .cal-chip.visit-working   { background: #e3f5ec; color: #1c7a4d; }
-.cal-chip.visit-done      { background: #eef0f2; color: #6b7280; }
-.cal-chip.visit-stale     { background: #fde8e8; color: #b3261e; }
-.cal-chip.visit-missed    { background: #fbe4e4; color: #a83232; }
+.cal-chip.visit-done      { background: #ced4da; color: #495057; }
+.cal-chip.visit-stale     { background: #e6dbf7; color: #5b3391; }
+.cal-chip.visit-missed    { background: #fbdada; color: #a3231f; }
 .cal-chip.visit-cancelled { background: #eef0f2; color: #6b7280; }
 
 .shift-list { display: flex; flex-direction: column; gap: 0.75rem; }
@@ -2279,7 +2376,7 @@ select option:checked {
    ต้องอยู่ท้ายไฟล์: media query ไม่เพิ่ม specificity ถ้าวางก่อนบล็อกมือถือ
    กฎ animation: sheet-up ของ .modal จะทับกลับ แล้วแผ่นก็ยังเลื่อนขึ้นอยู่ดี */
 @media (prefers-reduced-motion: reduce) {
-  .modal-backdrop, .modal, .toast { animation: none; }
+  .modal-backdrop, .modal, .toast, .nav-scrim, .sidebar.is-open nav { animation: none; }
   /* ตัดจังหวะ "ดีดกลับ" ตอนปัดไม่ถึงระยะ ให้เด้งกลับที่เดิมทันที
      ส่วนการลากตามนิ้วและไถลลงตอนปิดยังอยู่ครบ — นั่นคือการตอบสนองต่อมือของผู้ใช้เอง
      ไม่ใช่การเคลื่อนไหวที่จู่ๆ ก็เกิดขึ้นเอง (transition ตอนนั้นถูกตั้งเป็น inline จาก JS อยู่แล้ว) */
