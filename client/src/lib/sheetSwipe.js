@@ -70,6 +70,8 @@ export function useSheetSwipe(onClose, externalRef) {
       el.style.transition = '';
       el.style.transform = '';
       el.style.willChange = '';
+      /* ไม่คืนค่า animation ที่ตัดไปตอนเริ่มลาก — คืนเมื่อไรเบราว์เซอร์เห็น animation-name
+         เปลี่ยนจาก none กลับเป็น sheet-up แล้วเล่นซ้ำ กล่องที่เปิดค้างอยู่จะเลื่อนขึ้นมาใหม่ทั้งใบ */
     };
 
     const onStart = (e) => {
@@ -102,6 +104,9 @@ export function useSheetSwipe(onClose, externalRef) {
         // ปิด transition ระหว่างลากเพื่อให้ตามนิ้วทันที และบอกเบราว์เซอร์ให้ยกขึ้นเลเยอร์ของ GPU ไว้ก่อน
         el.style.transition = 'none';
         el.style.willChange = 'transform';
+        /* ตัดแอนิเมชันตอนเปิดทิ้งถ้ามันยังวิ่งอยู่ — แตะกล่องภายใน 260ms แรกเจอได้จริง
+           transform ของแอนิเมชันชนะ inline style เสมอระหว่างที่ยังวิ่ง ถ้าไม่ตัด กล่องจะไม่ตามนิ้ว */
+        el.style.animation = 'none';
       }
 
       // ลบระยะเริ่มออก — ไม่งั้นกล่องจะกระโดด 8px ทันทีที่เริ่มลาก
