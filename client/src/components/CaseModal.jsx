@@ -118,6 +118,9 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
   const [busy, setBusy] = useState(false);
   const [visits, setVisits] = useState([]);      // ใช้แค่สรุปจำนวนบนปุ่ม การจัดการจริงอยู่ใน popup ย่อย
   const [visitsOpen, setVisitsOpen] = useState(false);
+  // ฟอร์มยืนยันการยกเลิกเคส — ทำเป็นฟอร์มในหน้าแทน prompt() ที่เบราว์เซอร์บล็อกได้
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [cancelReason, setCancelReason] = useState('');
   const [invoices, setInvoices] = useState([]);  // ใบแจ้งหนี้ของเคสนี้ (ปกติมีใบเดียว)
   const [openInvoiceId, setOpenInvoiceId] = useState(null);
 
@@ -185,8 +188,9 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
         // popup ย่อยเปิดอยู่ = ให้มันปิดตัวเองก่อน ไม่ใช่ปิดทั้งสองชั้นพร้อมกัน
         if (visitsOpen || openInvoiceId) return;
         e.stopPropagation();
-        // กำลังแก้อยู่ Esc ควรยกเลิกการแก้ก่อน ไม่ใช่ปิดทั้งกล่องจนสิ่งที่พิมพ์ไว้หาย
-        if (editing) setEditing(false);
+        // กำลังแก้อยู่ / ยืนยันยกเลิกอยู่ — Esc ควรพับสิ่งนั้นก่อน ไม่ใช่ปิดทั้งกล่องจนที่พิมพ์ไว้หาย
+        if (cancelOpen) setCancelOpen(false);
+        else if (editing) setEditing(false);
         else onClose();
         return;
       }
@@ -209,7 +213,7 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
 
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [onClose, visitsOpen, openInvoiceId, editing]);
+  }, [onClose, visitsOpen, openInvoiceId, editing, cancelOpen]);
 
   // ตำแหน่งของเคสนี้ในรายการหน้าปัจจุบัน — ใช้ทำปุ่มดูเคสก่อนหน้า/ถัดไป
   const index = siblings.indexOf(caseId);
@@ -256,11 +260,19 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
     });
   }
 
-  /** ยกเลิกเคส — ถามเหตุผล (เว้นว่างได้) แล้วยิง API */
+  /**
+   * ยกเลิกเคส — ยืนยันด้วยฟอร์มในหน้า ไม่ใช่ prompt()
+   *
+   * prompt() ถูกเบราว์เซอร์บล็อกได้ (คนใช้ติ๊ก "ไม่ให้หน้านี้สร้างกล่องอีก" หรือบนมือถือบางตัว)
+   * พอโดนบล็อกมันคืน null เงียบๆ ปุ่มเลยกดแล้วไม่เกิดอะไรขึ้นเลย ไม่ยิง API ไม่มีข้อความ
+   * เหมือนปุ่มเสีย — ฟอร์มรับชำระเงินใน InvoiceModal ย้ายออกจาก prompt() ไปแล้วด้วยเหตุผลเดียวกัน
+   */
   function cancelCase() {
-    const reason = prompt(`ยกเลิกเคส ${item.case_id}?\nระบุเหตุผล (ไม่บังคับ) เช่น ญาติเปลี่ยนใจ / หาพนักงานไม่ได้`, '');
-    if (reason === null) return; // กด Cancel ที่กล่อง prompt = ไม่ทำอะไร
-    run(() => api.cancelCase(item.case_id, reason.trim() || null));
+    run(async () => {
+      await api.cancelCase(item.case_id, cancelReason.trim() || null);
+      setCancelOpen(false);
+      setCancelReason('');
+    });
   }
 
   return (
@@ -521,6 +533,34 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
               </section>
             </div>
 
+            {/* ยืนยันยกเลิกเคส — อยู่เหนือแถบปุ่มเพื่อให้เห็นพร้อมกับปุ่มที่กดไป
+                เหตุผลไม่บังคับ แต่เป็นสิ่งเดียวที่บอกได้ทีหลังว่าทำไมเคสนี้ถึงไม่ได้เกิดขึ้น */}
+            {cancelOpen && (
+              <div className="notice pay-form no-print">
+                <label>
+                  เหตุผลที่ยกเลิก (ไม่บังคับ)
+                  <input
+                    autoFocus
+                    placeholder="เช่น ญาติเปลี่ยนใจ / หาพนักงานไม่ได้"
+                    value={cancelReason}
+                    onChange={(e) => setCancelReason(e.target.value)}
+                    onKeyDown={(e) => {
+                      // Enter = ยืนยัน · Esc ให้ตัวจัดการรวมด้านบนพับฟอร์มนี้
+                      if (e.key === 'Enter') { e.preventDefault(); cancelCase(); }
+                    }}
+                  />
+                </label>
+                <div className="pay-form-actions">
+                  <button className="btn" disabled={busy} onClick={() => setCancelOpen(false)}>
+                    ไม่ยกเลิกแล้ว
+                  </button>
+                  <button className="btn danger" disabled={busy} onClick={cancelCase}>
+                    ยืนยันยกเลิก {item.case_id}
+                  </button>
+                </div>
+              </div>
+            )}
+
             <footer className="modal-foot">
               <Link className="btn" to={`/cases/${item.case_id}/edit`}>แก้ไขข้อมูล</Link>
 
@@ -535,9 +575,13 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                 </button>
               )}
 
-              {/* เคสที่ยังทำงานอยู่ — ยกเลิกได้เสมอ */}
+              {/* เคสที่ยังทำงานอยู่ — ยกเลิกได้เสมอ (กดแล้วกางฟอร์มยืนยันด้านบน ไม่ยิงทันที) */}
               {!terminal && (
-                <button className="btn danger-ghost" disabled={busy} onClick={cancelCase}>
+                <button
+                  className="btn danger-ghost"
+                  disabled={busy || cancelOpen}
+                  onClick={() => setCancelOpen(true)}
+                >
                   ยกเลิกเคส
                 </button>
               )}

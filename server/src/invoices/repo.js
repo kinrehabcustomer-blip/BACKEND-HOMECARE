@@ -221,6 +221,19 @@ const OPEN_STATUSES = "('draft', 'issued')";
  */
 export async function syncOpenFromCase(caseRow, customer) {
   const price = priceParts(caseRow);
+
+  /* ::double precision ในบรรทัด total ไม่ใช่ของประดับ — node-postgres ส่งพารามิเตอร์มาโดยไม่ระบุชนิด
+     พอเขียน ":amount - :discount" ตรงๆ Postgres เจอ unknown ลบ unknown แล้วเลือกไม่ถูกว่าจะใช้
+     ตัวลบของชนิดไหน (int/numeric/date/…) จึงโยน "operator is not unique: unknown - unknown"
+     ตั้งแต่ตอน parse — คือพังทุกครั้งที่บันทึกเคส ไม่ว่าจะมีใบแจ้งหนี้ให้ซิงก์อยู่จริงหรือไม่
+     เพราะ Postgres ตรวจไวยากรณ์ก่อนดูว่า WHERE ตรงกับแถวไหนบ้าง
+
+     บรรทัด total ใน update() ด้านล่างเขียนคล้ายกันแต่ไม่เจอปัญหา เพราะห่อด้วย COALESCE คู่กับคอลัมน์
+     คอลัมน์จึงบอกชนิดให้พารามิเตอร์ไปแล้ว — ต่างกันแค่นั้น
+
+     หมายเหตุ: ห้ามเขียนคอมเมนต์ที่มีข้อความหน้าตาแบบ :ชื่อ ไว้ในสตริง SQL —
+     ตัวแปลง :name เป็น $n ใน db/index.js ข้ามแค่ string literal กับ cast ไม่ได้ข้ามคอมเมนต์ของ SQL
+     ข้อความในคอมเมนต์จึงถูกนับเป็นพารามิเตอร์ไปด้วย แล้วลำดับ $n จะเพี้ยนทั้งคำสั่ง */
   const changed = await sql.run(
     `UPDATE invoices
      SET customer_id         = :customer_id,
@@ -230,7 +243,7 @@ export async function syncOpenFromCase(caseRow, customer) {
          service_description = :service_description,
          amount              = :amount,
          discount            = :discount,
-         total               = GREATEST(0, :amount - :discount),
+         total               = GREATEST(0, :amount::double precision - :discount::double precision),
          updated_at          = ${NOW}
      WHERE case_id = :case_id AND status IN ${OPEN_STATUSES}`,
     {

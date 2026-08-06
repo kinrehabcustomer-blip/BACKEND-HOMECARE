@@ -9,7 +9,11 @@ export class UnauthorizedError extends Error {}
  */
 const TIMEOUT_MS = 30_000;
 
-async function request(path, options = {}) {
+/**
+ * empty = true บอกว่า "เรียกอันนี้แล้วไม่มีอะไรให้คืนกลับมาก็ถูกแล้ว"
+ * DELETE เป็นแบบนั้นโดยธรรมชาติอยู่แล้ว จึงไม่ต้องประกาศ (ดูเงื่อนไข 204 ด้านล่าง)
+ */
+async function request(path, { empty = false, ...options } = {}) {
   /* พนักงานภาคสนามใช้งานจากมือถือ ซึ่งเข้าจุดอับสัญญาณ/ลิฟต์/ชั้นใต้ดินเป็นเรื่องปกติ
      ในจุดอับ request จะออกไปแล้วเงียบหายไปเลย ไม่ตอบและไม่ error
      ผลคือปุ่มค้างอยู่ที่ "กำลังบันทึก…" และ disabled ตลอดกาล กดซ้ำก็ไม่ได้
@@ -30,7 +34,15 @@ async function request(path, options = {}) {
       signal: controller.signal,
     });
 
-    if (res.status === 204) return null;
+    /* 204 = ไม่มีเนื้อหาให้คืน ซึ่งถูกต้องสำหรับ DELETE และ logout
+       แต่ถ้ามาจาก POST/PATCH ที่ผู้เรียกรอ object กลับไปใช้ต่อ (เช่น เอา id ของที่เพิ่งสร้างไปเปิดหน้าถัดไป)
+       การคืน null เงียบๆ จะไปพังที่จุดใช้งานแทน ด้วยข้อความอย่าง
+       "Cannot read properties of null (reading 'customer_id')" ซึ่งคนหน้างานอ่านไม่รู้เรื่อง
+       ให้ล้มตรงนี้พร้อมข้อความไทยดีกว่า — ล้มใกล้ต้นเหตุและบอกได้ว่าเกิดอะไรขึ้น */
+    if (res.status === 204) {
+      if (empty || options.method === 'DELETE') return null;
+      throw new Error('เซิร์ฟเวอร์ตอบกลับไม่สมบูรณ์ — กรุณาลองใหม่อีกครั้ง');
+    }
 
     // อ่านเป็นข้อความก่อนแล้วค่อย parse — บาง response ตอบ body ว่าง (เช่น server หลุดกลางคัน
     // หรือ proxy ตัดการเชื่อมต่อ) ถ้าเรียก res.json() ตรงๆ จะพังด้วยข้อความที่ผู้ใช้อ่านไม่รู้เรื่อง
@@ -41,11 +53,17 @@ async function request(path, options = {}) {
        — Chrome: "Failed to fetch" · Safari บน iPhone: "Load failed" · Firefox: "NetworkError…"
        คนใช้งานอ่านแล้วแยกไม่ออกว่าเป็นที่สัญญาณตัวเองหรือระบบพัง และไม่รู้ว่าต้องทำอะไรต่อ
        ต้องบอกด้วยว่าข้อมูลที่กรอกไว้ยังอยู่ ไม่งั้นคนจะไม่กล้ากดซ้ำเพราะกลัวบันทึกซ้ำซ้อน */
-    throw new Error(
-      err.name === 'AbortError'
-        ? 'เชื่อมต่อนานเกินไป — สัญญาณอาจอ่อน ลองกดใหม่อีกครั้ง (ข้อมูลที่กรอกไว้ยังอยู่ครบ)'
-        : 'เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ — ตรวจสอบสัญญาณอินเทอร์เน็ตแล้วลองใหม่ (ข้อมูลที่กรอกไว้ยังอยู่ครบ)',
-    );
+    if (err.name === 'AbortError') {
+      throw new Error('เชื่อมต่อนานเกินไป — สัญญาณอาจอ่อน ลองกดใหม่อีกครั้ง (ข้อมูลที่กรอกไว้ยังอยู่ครบ)');
+    }
+    // fetch โยน TypeError เมื่อต่อไม่ติดจริงๆ เท่านั้น
+    if (err instanceof TypeError) {
+      throw new Error('เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ — ตรวจสอบสัญญาณอินเทอร์เน็ตแล้วลองใหม่ (ข้อมูลที่กรอกไว้ยังอยู่ครบ)');
+    }
+    /* ที่เหลือคือ error ที่เราโยนเองในบล็อกนี้ (เช่น 204 ที่ไม่ควรว่าง) — ต้องปล่อยผ่านไปตามเดิม
+       ถ้าเหมารวมว่าเป็นปัญหาเน็ตทั้งหมด ข้อความจะเพี้ยนเป็น "ตรวจสอบสัญญาณอินเทอร์เน็ต"
+       ทั้งที่ต่อติดดีอยู่ แล้วคนจะไล่ผิดทาง (ดักไว้ตรงนี้เพราะโค้ดที่เติมทีหลังก็จะเจอกับดักเดิม) */
+    throw err;
   } finally {
     // ยกเลิกตัวนับทุกทาง ไม่งั้น request ที่จบเร็วจะทิ้ง timer ค้างไว้เต็มไปหมด
     clearTimeout(timer);
@@ -72,9 +90,10 @@ async function request(path, options = {}) {
 
     // รวม error ของแต่ละ field จาก zod ให้เป็นข้อความเดียวที่อ่านรู้เรื่อง
     const fields = data?.details?.map((d) => `${d.field}: ${d.message}`).join('\n');
-    const error = new Error(
-      fields ? `${data.error}\n${fields}` : (data?.error ?? `เรียก API ไม่สำเร็จ (HTTP ${res.status})`),
-    );
+    const head = fields ? `${data.error}\n${fields}` : (data?.error ?? `เรียก API ไม่สำเร็จ (HTTP ${res.status})`);
+    /* technical = ตัวจริงของ error ฝั่ง server (ส่งมาเฉพาะกรณี 500 ที่ไม่รู้จัก)
+       ต่อท้ายให้เห็นบนหน้าจอเลย คนหน้างานจะได้ก๊อป/แคปส่งต่อได้โดยไม่ต้องไปเปิด log ของ server */
+    const error = new Error(data?.technical ? `${head}\n${data.technical}` : head);
 
     // แนบรายละเอียดรายช่องไว้ด้วย ให้ฟอร์มเอาไปแปะข้อความใต้ช่องที่ผิดได้ตรงจุด
     // (ยังคงข้อความรวมไว้เหมือนเดิม — หน้าที่ยังไม่ได้ใช้ fields จะไม่เปลี่ยนพฤติกรรม)
@@ -88,7 +107,8 @@ async function request(path, options = {}) {
 
 export const api = {
   login: (email, password) => request('/auth/login', { method: 'POST', body: { email, password } }),
-  logout: () => request('/auth/logout', { method: 'POST' }),
+  // POST เดียวในระบบที่ตอบ 204 อย่างถูกต้อง (ล้างคุกกี้แล้วจบ ไม่มีอะไรให้คืน)
+  logout: () => request('/auth/logout', { method: 'POST', empty: true }),
   me: () => request('/auth/me'),
 
   forgotPassword: (email) => request('/auth/forgot-password', { method: 'POST', body: { email } }),

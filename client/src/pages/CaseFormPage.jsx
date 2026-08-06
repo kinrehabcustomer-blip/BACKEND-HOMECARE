@@ -338,6 +338,11 @@ export default function CaseFormPage() {
   });
 
   const field = (key) => ({
+    /* name ต้องมี ไม่ใช่แค่ของประดับ — ตอน server ทักว่าช่องไหนผิด โค้ดด้านล่างเลื่อนจอไปหาช่องนั้น
+       ด้วย querySelector('[name="..."]') ฟอร์มนี้เคยไม่ใส่ให้เลยหาไม่เจอสักช่อง คนกรอกจึงเห็นแต่
+       ข้อความแดงบนสุดแต่ไม่รู้ว่าต้องแก้ตรงไหน ทั้งที่ฟอร์มยาว 2,300px กว่า
+       (ฟอร์มลูกค้า/ผู้ป่วย/พนักงานเขียน name ใส่ทีละช่องเอง จึงไม่เจอปัญหานี้) */
+    name: key,
     value: form[key],
     'aria-invalid': fieldErrors[key] ? true : undefined,
     onChange: (e) => {
@@ -346,6 +351,12 @@ export default function CaseFormPage() {
       setFieldErrors((prev) => (prev[key] ? { ...prev, [key]: undefined } : prev));
     },
   });
+
+  /** ข้อความเตือนใต้ช่อง — มาจาก details ของ zod ที่ server ส่งกลับมา
+      ต้องมีคู่กับ aria-invalid เสมอ ไม่ใช้ขอบแดงสื่อความหมายอย่างเดียว (คนตาบอดสีจะไม่เห็น
+      และขอบแดงก็ไม่ได้บอกว่าผิดตรงไหน) — ฟอร์มอื่นทำแบบนี้อยู่แล้ว ฟอร์มนี้ตกหล่นไป */
+  const fieldError = (key) =>
+    fieldErrors[key] ? <span className="field-error">{fieldErrors[key]}</span> : null;
 
   /** ออกจากหน้าโดยยังไม่บันทึก — ถามก่อน */
   const confirmLeave = (e) => {
@@ -570,6 +581,7 @@ export default function CaseFormPage() {
             <select required {...field('case_type')}>
               {Object.entries(CASE_TYPE_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
             </select>
+          {fieldError('case_type')}
           </label>
           <label>ประเภทบริการ
             <select value={form.service_kind} onChange={(e) => changeKind(e.target.value)}>
@@ -663,10 +675,11 @@ export default function CaseFormPage() {
               {' '}— เติมลงช่องด้านล่างให้แล้ว แก้ทับได้
             </p>
           )}
-          <label>วันเริ่ม<input type="date" {...field('start_date')} /></label>
-          <label>วันสิ้นสุด (ถ้ามี)<input type="date" {...field('end_date')} /></label>
+          <label>วันเริ่ม<input type="date" {...field('start_date')} />{fieldError('start_date')}</label>
+          <label>วันสิ้นสุด (ถ้ามี)<input type="date" {...field('end_date')} />{fieldError('end_date')}</label>
           <label>ค่าบริการที่ได้รับ (บาท)
             <input type="number" min="0" step="0.01" placeholder="เช่น 15000" {...field('fee')} />
+            {fieldError('fee')}
           </label>
           {/* ยอดที่พนักงานจะเห็นเป็นรายได้ของตัวเองเมื่อปิดเคส — ดึงจากแพ็คเกจให้ แก้ทับได้ */}
           <label>ค่าจ้างพนักงาน (บาท)
@@ -675,6 +688,7 @@ export default function CaseFormPage() {
               placeholder={packagePay != null ? String(packagePay) : 'ยังไม่มีในแพ็คเกจ'}
               {...field('staff_pay')}
             />
+            {fieldError('staff_pay')}
           </label>
 
           {/* เลือกบริการแล้วแต่แพ็คเกจไม่มีค่าตอบแทน = ดึงมาให้ไม่ได้ ต้องบอกว่าไปตั้งที่ไหน
@@ -715,16 +729,18 @@ export default function CaseFormPage() {
               </p>
             )}
             <div className="grid">
-              <label>ชื่อผู้ป่วย *<input required {...field('client_name')} /></label>
+              <label>ชื่อผู้ป่วย *<input required {...field('client_name')} />{fieldError('client_name')}</label>
               <label>เพศ
                 <select {...field('patient_gender')}>
                   <option value="">— ไม่ระบุ —</option>
                   {Object.entries(GENDER_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                 </select>
+              {fieldError('patient_gender')}
               </label>
-              <label>อายุ (ปี)<input type="number" min="0" max="130" {...field('patient_age')} /></label>
+              <label>อายุ (ปี)<input type="number" min="0" max="130" {...field('patient_age')} />{fieldError('patient_age')}</label>
               <label className="span-2">โรคประจำตัว
                 <textarea rows={2} placeholder="เช่น เบาหวาน ความดันโลหิตสูง" {...field('medical_history')} />
+                {fieldError('medical_history')}
               </label>
             </div>
           </>
@@ -818,28 +834,33 @@ export default function CaseFormPage() {
 
             <h3>ข้อมูลผู้ป่วยใหม่</h3>
             <div className="grid">
-              <label>ชื่อผู้ป่วย *<input required {...field('client_name')} /></label>
+              <label>ชื่อผู้ป่วย *<input required {...field('client_name')} />{fieldError('client_name')}</label>
               <label>เพศ
                 <select {...field('patient_gender')}>
                   <option value="">— ไม่ระบุ —</option>
                   {Object.entries(GENDER_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                 </select>
+              {fieldError('patient_gender')}
               </label>
-              <label>อายุ (ปี)<input type="number" min="0" max="130" {...field('patient_age')} /></label>
+              <label>อายุ (ปี)<input type="number" min="0" max="130" {...field('patient_age')} />{fieldError('patient_age')}</label>
 
               <label>ความสัมพันธ์กับผู้ว่าจ้าง
                 <input placeholder="เช่น บิดา มารดา" {...field('relation_to_customer')} />
+                {fieldError('relation_to_customer')}
               </label>
-              <label>น้ำหนัก (กก.)<input type="number" min="0" step="0.1" {...field('weight_kg')} /></label>
-              <label>ส่วนสูง (ซม.)<input type="number" min="0" step="0.1" {...field('height_cm')} /></label>
+              <label>น้ำหนัก (กก.)<input type="number" min="0" step="0.1" {...field('weight_kg')} />{fieldError('weight_kg')}</label>
+              <label>ส่วนสูง (ซม.)<input type="number" min="0" step="0.1" {...field('height_cm')} />{fieldError('height_cm')}</label>
               <label className="span-2">โรคประจำตัว
                 <textarea rows={2} placeholder="เช่น เบาหวาน ความดันโลหิตสูง" {...field('medical_history')} />
+                {fieldError('medical_history')}
               </label>
               <label className="span-2">แพ้ยา
                 <textarea rows={2} placeholder="เช่น เพนิซิลลิน แอสไพริน — ไม่มีให้เว้นว่าง" {...field('allergies')} />
+                {fieldError('allergies')}
               </label>
               <label className="span-2">แพ้อาหาร
                 <textarea rows={2} placeholder="เช่น อาหารทะเล ถั่ว นมวัว — ไม่มีให้เว้นว่าง" {...field('food_allergies')} />
+                {fieldError('food_allergies')}
               </label>
             </div>
 
@@ -850,12 +871,15 @@ export default function CaseFormPage() {
         <div className="grid">
           <label className="span-2">อาการปัจจุบัน
             <textarea rows={2} placeholder="เช่น ติดเตียง ช่วยเหลือตัวเองไม่ได้ กลืนลำบาก" {...field('current_symptoms')} />
+            {fieldError('current_symptoms')}
           </label>
           <label className="span-2">อุปกรณ์ / สายต่างๆ
             <textarea rows={2} placeholder="เช่น สายให้อาหารทางจมูก สายสวนปัสสาวะ ถังออกซิเจน" {...field('medical_devices')} />
+            {fieldError('medical_devices')}
           </label>
           <label className="span-2">จุดประสงค์ของญาติในการดูแล
             <textarea rows={2} placeholder="เช่น ต้องการให้ฟื้นฟูให้ลุกนั่งได้ / ดูแลประคับประคอง" {...field('care_goal')} />
+            {fieldError('care_goal')}
           </label>
         </div>
 
@@ -863,14 +887,17 @@ export default function CaseFormPage() {
         <div className="grid">
           <label className="span-2">วัน / เวลาที่สะดวกเริ่มใช้บริการ
             <input placeholder="เช่น เริ่มได้ 20 ก.ค. เป็นต้นไป ช่วงเช้า" {...field('service_start_preference')} />
+            {fieldError('service_start_preference')}
           </label>
-          <label>เบอร์ติดต่อคุณญาติ<input {...field('client_phone')} /></label>
+          <label>เบอร์ติดต่อคุณญาติ<input {...field('client_phone')} />{fieldError('client_phone')}</label>
 
           <label className="span-2">ที่อยู่สถานที่ดูแล
             <textarea rows={2} {...field('address')} />
+            {fieldError('address')}
           </label>
           <label>วัน / เวลาที่สะดวกให้พยาบาลโทรประเมินและรับเคส
             <input placeholder="เช่น จันทร์-ศุกร์ หลัง 18.00 น." {...field('nurse_call_preference')} />
+            {fieldError('nurse_call_preference')}
           </label>
         </div>
 
@@ -966,9 +993,10 @@ export default function CaseFormPage() {
                   </option>
                 ))}
               </select>
+            {fieldError('assigned_to')}
             </label>
           )}
-          <label className="span-2">หมายเหตุ<textarea rows={2} {...field('note')} /></label>
+          <label className="span-2">หมายเหตุ<textarea rows={2} {...field('note')} />{fieldError('note')}</label>
         </div>
 
         {/* ติดขอบล่างจอ — ฟอร์มนี้ยาวที่สุดในระบบ แก้คำเดียวก็ไม่ควรต้องเลื่อนสุดทางไปกดปุ่ม */}

@@ -294,7 +294,9 @@ body {
 .link:hover { text-decoration: underline; }
 .strike { text-decoration: line-through; }
 
-.error { background: #fdecea; border-color: #f5c6c2; border-left: 3px solid var(--danger); color: var(--danger); }
+/* pre-line — ข้อความ error หลายบรรทัดมีจริง (รายการช่องที่กรอกผิดจาก zod และรายละเอียดทางเทคนิคของ 500)
+   ถ้าไม่ตั้ง เบราว์เซอร์จะยุบ \n เป็นช่องว่าง แล้วทุกอย่างต่อกันเป็นพรืดอ่านไม่ออก */
+.error { background: #fdecea; border-color: #f5c6c2; border-left: 3px solid var(--danger); color: var(--danger); white-space: pre-line; }
 /* ในหน้าที่มีเนื้อหาต่อท้าย (ฟอร์ม/ตาราง) ต้องเว้นระยะใต้กล่อง — ในการ์ด login ใช้ gap ของ flex อยู่แล้ว */
 .content .error { margin-bottom: 1rem; }
 
@@ -337,7 +339,22 @@ body {
 .btn.primary { background: var(--brand); border-color: var(--brand); color: var(--brand-ink); }
 .btn.primary:hover:not(:disabled) { background: var(--brand-hover); }
 .btn.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
-.btn.danger-ghost { color: var(--danger); border-color: transparent; }
+/* ปุ่มทำลายแบบเบา — ตั้งใจให้ไม่เด่นเท่าปุ่มหลัก จะได้ไม่มีใครเผลอกด
+   แต่ของเดิมขอบใสสนิท ส่วนพื้นเป็น var(--surface) ซึ่งเป็นสีเดียวกับการ์ด/แถบปุ่มที่มันวางอยู่
+   = มองไม่เห็นกรอบเลย เหลือแต่ตัวหนังสือแดงลอยๆ ปนอยู่กับปุ่มจริงที่มีขอบ คนอ่านไม่รู้ว่ากดได้
+   (ชัดที่สุดตอนอยู่ในแถวปุ่มเต็มความกว้างบนมือถือ อย่าง "ยกเลิกเคส" / "ยกเลิกกะ")
+
+   ให้ขอบจางๆ สีเดียวกับตัวหนังสือแทน — อ่านเป็นปุ่มแน่นอน และยังเบากว่าปุ่มหลักชัดเจนอยู่
+   ไล่สีจาก --danger ด้วย color-mix เพื่อให้ตามธีมสว่าง/มืดเองโดยไม่ต้องเขียนสองชุด */
+.btn.danger-ghost {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 38%, transparent);
+}
+/* ชี้เมาส์ค้างแล้วขอบเข้มเต็มที่ + พื้นแดงจางๆ — ยืนยันว่ากำลังเล็งปุ่มที่ทำลายของอยู่ */
+.btn.danger-ghost:hover:not(:disabled) {
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 10%, var(--surface));
+}
 
 /* ไอคอนเส้นในปุ่ม (พิมพ์ / ดาวน์โหลด) — ขนาดเดียวกับไอคอนปุ่มเลือกไฟล์
    gap อยู่ที่นี่ไม่ใช่ที่ .btn เพราะปุ่มส่วนใหญ่มีแต่ข้อความ ไม่ต้องเว้นช่องเผื่อ */

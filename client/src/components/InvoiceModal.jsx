@@ -148,8 +148,25 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
   const canEdit = item?.status === 'draft' || item?.status === 'issued';
 
   /**
-   * ยกเลิกใบ แล้วถามต่อว่าจะออกใบใหม่ตามข้อมูลปัจจุบันเลยไหม
-   * ไม่ออกให้อัตโนมัติ เพราะบางครั้งยกเลิกเพราะไม่เก็บเงินเคสนี้แล้ว ไม่ได้จะออกใบแทน
+   * ยกเลิกใบ — ใบยังอยู่ในระบบ เปลี่ยนสถานะเป็น "ยกเลิก" เก็บไว้เป็นประวัติ
+   * ใช้กับใบที่ออกให้ลูกค้าไปแล้ว (ออกใบแล้ว/ชำระแล้ว) ซึ่งไม่ควรลบให้หายไปเฉยๆ
+   */
+  function cancelInvoice() {
+    const warning =
+      item.status === 'paid'
+        ? `ยกเลิกใบเสร็จ ${item.invoice_id} ที่รับชำระแล้ว?\nใบจะยังอยู่ในระบบเป็นประวัติ แต่ยอดนี้จะไม่ถูกนับเป็นรายได้อีก`
+        : `ยกเลิกใบแจ้งหนี้ ${item.invoice_id}?\nใบจะยังอยู่ในระบบเป็นประวัติ ไม่ถูกลบทิ้ง`;
+    if (!confirm(warning)) return;
+
+    run(async () => {
+      await api.cancelInvoice(item.invoice_id);
+      toast(`ยกเลิก ${item.invoice_id} แล้ว`);
+    });
+  }
+
+  /**
+   * ลบใบทิ้งถาวร แล้วถามต่อว่าจะออกใบใหม่ตามข้อมูลปัจจุบันเลยไหม
+   * ไม่ออกให้อัตโนมัติ เพราะบางครั้งลบเพราะไม่เก็บเงินเคสนี้แล้ว ไม่ได้จะออกใบแทน
    */
   function deleteInvoice() {
     const warning =
@@ -406,11 +423,30 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
             </div>
 
             <footer className="modal-foot no-print">
-              {/* ปุ่มลบดันไปชิดซ้ายสุด แยกออกจากกลุ่มปุ่มที่กดกันจริง — ไม่ให้มือไปโดนตอนเล็งปุ่มข้างๆ
-                  (อีกปุ่มหนึ่งอยู่ในกล่องเตือน "ไม่ตรงกับเคส" ซึ่งเป็นคนละบริบท จงใจให้อยู่ตรงนั้น) */}
-              <button className="btn danger-ghost foot-danger" disabled={busy} onClick={deleteInvoice}>
-                ลบใบนี้
-              </button>
+              {/* ปุ่มทำลายดันไปชิดซ้ายสุด แยกออกจากกลุ่มปุ่มที่กดกันจริง — ไม่ให้มือไปโดนตอนเล็งปุ่มข้างๆ
+                  (อีกปุ่มหนึ่งอยู่ในกล่องเตือน "ไม่ตรงกับเคส" ซึ่งเป็นคนละบริบท จงใจให้อยู่ตรงนั้น)
+
+                  ใบที่รับชำระแล้วให้ "ยกเลิก" ไม่ใช่ "ลบ" — ตัวเลขที่รับมาจริงพร้อมวันที่/ช่องทางที่จ่าย
+                  เป็นหลักฐานการเงิน ลบทิ้งแล้วไม่เหลืออะไรบอกว่าเคยรับเงินก้อนนี้มา
+                  (ต่างจากใบร่าง/ใบที่ออกผิดซึ่งลบทิ้งได้ ตามที่ตั้งใจไว้ในโค้ดฝั่ง server)
+                  ถ้าจำเป็นต้องลบจริงๆ ยกเลิกก่อนแล้วค่อยลบใบที่ยกเลิกได้ — สองจังหวะสำหรับของที่กู้ไม่ได้ */}
+              {item.status === 'paid' ? (
+                <button className="btn danger-ghost foot-danger" disabled={busy} onClick={cancelInvoice}>
+                  ยกเลิกใบนี้
+                </button>
+              ) : (
+                <button className="btn danger-ghost foot-danger" disabled={busy} onClick={deleteInvoice}>
+                  ลบใบนี้
+                </button>
+              )}
+
+              {/* ใบที่ออกให้ลูกค้าไปแล้วแต่ยังไม่ได้เงิน — ยกเลิกได้โดยไม่ต้องลบทิ้ง เก็บไว้เป็นประวัติ
+                  endpoint /cancel มีมาตั้งแต่แรกแต่ไม่เคยมีปุ่มเรียกใช้เลย */}
+              {item.status === 'issued' && (
+                <button className="btn" disabled={busy} onClick={cancelInvoice}>
+                  ยกเลิกใบ
+                </button>
+              )}
 
               <button className="btn" onClick={() => window.print()}>พิมพ์ / บันทึก PDF</button>
 
