@@ -490,7 +490,8 @@ export default function CaseFormPage() {
           <h1>{isEdit ? `แก้ไขเคส ${id}` : 'เปิดเคสใหม่'}</h1>
           {!isEdit && <p className="muted">ระบบจะออกรหัสเคส (CASE-xxxx) ให้อัตโนมัติหลังบันทึก</p>}
         </div>
-        <Link className="btn" to="/cases" onClick={confirmLeave}>ยกเลิก</Link>
+        {/* ไม่มีปุ่มยกเลิกตรงนี้ — แถบล่างเป็น sticky ติดขอบจอตลอด ปุ่มยกเลิกที่นั่นกดถึงได้เสมอ
+            มีสองที่ทำหน้าที่เดียวกันคือให้คนต้องเลือกโดยไม่จำเป็น และบนมือถือมันกินไปทั้งบรรทัด */}
       </header>
 
       {error && <pre className="error">{error}</pre>}

@@ -143,7 +143,7 @@ export default function EmployeeFormPage() {
           <h1>{isEdit ? `แก้ไขข้อมูล ${id}` : 'เพิ่มพนักงานใหม่'}</h1>
           {!isEdit && <p className="muted">กรอกแค่ชื่อกับตำแหน่งก็บันทึกได้ — ที่เหลือมาเติมทีหลังได้</p>}
         </div>
-        <Link className="btn" to={isEdit ? `/employees/${id}` : '/employees'} onClick={confirmLeave}>ยกเลิก</Link>
+        {/* ไม่มีปุ่มยกเลิกตรงนี้ — แถบล่างเป็น sticky ติดขอบจอตลอด ปุ่มยกเลิกที่นั่นกดถึงได้เสมอ */}
       </header>
 
       {error && <pre className="error">{error}</pre>}

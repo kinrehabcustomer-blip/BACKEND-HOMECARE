@@ -147,7 +147,7 @@ export default function CustomerFormPage() {
               : 'ระบบจะออกรหัสลูกค้า (CUS-xxxx) ให้อัตโนมัติหลังบันทึก · มีแต่ชื่อที่บังคับกรอก'}
           </p>
         </div>
-        <Link className="btn" to="/customers" onClick={confirmLeave}>ยกเลิก</Link>
+        {/* ไม่มีปุ่มยกเลิกตรงนี้ — แถบล่างเป็น sticky ติดขอบจอตลอด ปุ่มยกเลิกที่นั่นกดถึงได้เสมอ */}
       </header>
 
       {error && <pre className="error">{error}</pre>}
