@@ -148,8 +148,10 @@ casesRouter.post(
 casesRouter.post(
   '/search-place',
   asyncRoute(async (req, res) => {
-    const { query } = placeSearchSchema.parse(req.body);
-    res.json({ results: await searchPlaces(query) });
+    const { query, near_lat: lat, near_lng: lng } = placeSearchSchema.parse(req.body);
+    // ต้องมาครบคู่ถึงจะใช้เอนเอียงได้ — มีแค่ค่าเดียวไม่ใช่พิกัด
+    const near = lat != null && lng != null ? { lat, lng } : null;
+    res.json({ results: await searchPlaces(query, { near }) });
   }),
 );
 

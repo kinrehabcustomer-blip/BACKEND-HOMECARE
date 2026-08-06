@@ -174,7 +174,7 @@ export default function CustomerListPage() {
                 {/* ลำดับนับต่อเนื่องข้ามหน้า — เป็นลำดับของ "รายการที่เห็นตอนนี้" ไม่ใช่เลขประจำตัว */}
                 <td className="row-index" data-label="ลำดับ">{(page - 1) * Number(perPage) + i + 1}</td>
                 <td className="mono link" data-label="รหัส">{c.customer_id}</td>
-                <td data-label="ชื่อ">
+                <td data-label="ชื่อ" title={[c.name, c.nickname && `(${c.nickname})`].filter(Boolean).join(" ")}>
                   {c.name}
                   {c.nickname && <span className="muted"> ({c.nickname})</span>}
                 </td>

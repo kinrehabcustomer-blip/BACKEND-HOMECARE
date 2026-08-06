@@ -141,8 +141,12 @@ export const mapLinkSchema = z.object({
 });
 
 // ค้นหาสถานที่จากการพิมพ์ชื่อ/ที่อยู่
+// near_lat/near_lng = พิกัดที่หน้าเว็บมีอยู่แล้ว ส่งมาเพื่อให้ผลใกล้จุดนั้นขึ้นก่อน (ไม่บังคับ)
+// ส่งมาไม่ครบคู่ = ไม่เอนเอียง ไม่ใช่ error — เป็นแค่ตัวช่วย ไม่ควรทำให้ค้นหาไม่ได้
 export const placeSearchSchema = z.object({
   query: z.string().trim().min(1, 'กรุณาพิมพ์ชื่อสถานที่ที่ต้องการค้นหา'),
+  near_lat: z.coerce.number().min(-90).max(90).optional().nullable(),
+  near_lng: z.coerce.number().min(-180).max(180).optional().nullable(),
 });
 
 // admin แก้กะที่เช็คอินผิดพลาด — ปิดกะที่ค้าง / แก้เวลา / เคลียร์ธงนอกพื้นที่

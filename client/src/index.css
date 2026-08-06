@@ -1859,6 +1859,33 @@ select option:checked {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* มุมมองเดือน: ช่องสูงคงที่ แสดงได้ 2 กะพอดี (chip สูง 37px เพราะมีชื่อพนักงาน + ชื่อผู้รับบริการสองบรรทัด) ที่เหลือยุบไปอยู่หลังปุ่ม .cal-more
+   เดิมส่วนเกินซ่อนอยู่หลังการเลื่อนภายในช่องสูง ~70px ซึ่งแทบไม่มีใครรู้ว่าเลื่อนได้
+   วันที่มี 8 กะจึงเห็นแค่ 3 อีก 5 หายไปเงียบๆ ทั้งที่บนมือถือเห็นครบเพราะช่องยืดตามเนื้อหา
+   เลข 3 ต้องตรงกับ MONTH_VISIBLE (= 2) ใน CalendarPage.jsx */
+.cal-chips > .cal-chip:nth-child(n + 3) { display: none; }
+
+/* ปุ่ม "+N งานที่เหลือ" — เป็นข้อความเล็กๆ ไม่ใช่ปุ่มเต็มยศ จะได้ไม่แย่งสายตาไปจากตัวงานเอง */
+.cal-more {
+  flex-shrink: 0;
+  margin-top: 0.125rem;
+  padding: 0.125rem 0.25rem;
+  border: 0;
+  border-radius: 0.25rem;
+  background: none;
+  font: inherit;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-align: left;
+  color: var(--muted);
+  cursor: pointer;
+}
+.cal-more:hover { background: var(--bg); color: var(--brand); }
+
+/* มุมมองสัปดาห์: ช่องสูง 16rem มีที่พอแสดงครบ ไม่ต้องยุบและไม่ต้องมีปุ่ม */
+.cal-grid.is-week .cal-chips > .cal-chip:nth-child(n + 3) { display: block; }
+.cal-grid.is-week .cal-more { display: none; }
+
 .cal-chip:hover { filter: brightness(0.95); }
 .cal-chip-sub { display: block; opacity: 0.75; overflow: hidden; text-overflow: ellipsis; }
 /* เวลานัดนำหน้าชื่อ — ตารางงานที่ไม่บอกว่ากี่โมงใช้วางแผนวันไม่ได้ */
@@ -1952,6 +1979,9 @@ select option:checked {
   /* มุมมองสัปดาห์ตั้งช่องไว้สูง 16rem เพื่อให้ 7 ช่องแถวเดียวดูไม่แบน
      ในโหมดรายการไม่มีแถวให้เท่ากันแล้ว การ์ดของวันที่มีงานกะเดียวจึงไม่ต้องสูง 16rem */
   .cal-grid.is-week .cal-cell { min-height: 0; }
+  /* โหมดรายการ: การ์ดยืดตามจำนวนงาน จึงแสดงครบทุกกะ ไม่ต้องยุบเหลือ 3 และไม่ต้องมีปุ่ม "+N" */
+  .cal-chips > .cal-chip:nth-child(n + 3) { display: block; }
+  .cal-more { display: none; }
   .cal-chips { max-height: none; overflow: visible; }
   /* งานหนึ่งชิ้น = เป้ากดหลักของทั้งหน้าสำหรับพนักงานภาคสนาม สูง 24px เตี้ยเกินกว่าจะกดแม่น */
   .cal-chip { font-size: 0.8125rem; white-space: normal; padding: 0.5625rem 0.5rem; }

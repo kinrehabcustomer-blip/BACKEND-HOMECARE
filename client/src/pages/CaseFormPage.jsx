@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api } from '../api.js';
 import { useToast } from '../toast.jsx';
-import LocationMap from '../components/LocationMap.jsx';
+import MapPicker from '../components/MapPicker.jsx';
 import {
   CASE_TYPE_LABELS, POSITION_LABELS, GENDER_LABELS, SERVICE_KIND_LABELS, formatBaht, ageFromBirthDate,
 } from '../labels.js';
@@ -384,11 +384,36 @@ export default function CaseFormPage() {
         const r = await api.resolveMapLink(q);
         applyLocation(r.lat, r.lng, r.address);
       } else {
-        const { results } = await api.searchPlace(q);
+        // มีพิกัดอยู่แล้ว (เคสเดิม หรือเพิ่งกด "ใช้ที่อยู่ด้านบน") -> ใช้เป็นจุดอ้างอิงให้ผลใกล้ตัวขึ้นก่อน
+        const near = form.geo_lat !== '' && form.geo_lng !== ''
+          ? { lat: Number(form.geo_lat), lng: Number(form.geo_lng) }
+          : null;
+        const { results } = await api.searchPlace(q, near);
         if (results.length === 0) setLocError(`ไม่พบสถานที่ที่ตรงกับ "${q}" — ลองพิมพ์ให้เจาะจงขึ้น หรือวางลิงก์ Google Maps`);
         else if (results.length === 1) applyLocation(results[0].lat, results[0].lng, results[0].formatted);
         else setCandidates(results);
       }
+    } catch (e) {
+      setLocError(e.message);
+    } finally {
+      setFinding(false);
+    }
+  }
+
+  /**
+   * ใช้ที่อยู่ที่กรอกไว้ด้านบนเป็นจุดตั้งต้น — ไม่ต้องพิมพ์ที่อยู่เดิมซ้ำอีกรอบในช่องค้นหา
+   * ได้พิกัดคร่าวๆ ระดับถนน/ซอย แล้วค่อยลากหมุดในแผนที่ไปที่ประตูบ้านจริง
+   * (บ้านในซอยส่วนใหญ่ไม่มีอยู่ในฐานข้อมูลสถานที่ของ Google การค้นด้วยชื่อจึงไม่มีทางเจอ)
+   */
+  async function useTypedAddress() {
+    const addr = form.address?.trim();
+    if (!addr) return;
+    setFinding(true);
+    setLocError(null);
+    setCandidates([]);
+    try {
+      const r = await api.geocodeAddress(addr);
+      applyLocation(r.lat, r.lng, r.formatted ?? addr);
     } catch (e) {
       setLocError(e.message);
     } finally {
@@ -875,6 +900,12 @@ export default function CaseFormPage() {
             <button type="button" className="btn" disabled={finding || !locQuery.trim()} onClick={findLocation}>
               {finding ? 'กำลังค้นหา…' : '🔍 ค้นหา / อ่านลิงก์'}
             </button>
+            {/* ที่อยู่พิมพ์ไปแล้วด้านบน ไม่มีเหตุผลให้ต้องพิมพ์ซ้ำในช่องค้นหาอีกรอบ */}
+            {form.address?.trim() && (
+              <button type="button" className="btn" disabled={finding} onClick={useTypedAddress}>
+                ใช้ที่อยู่ด้านบน
+              </button>
+            )}
             {form.geo_lat !== '' && (
               <button type="button" className="btn danger-ghost" onClick={clearGeo}>ล้างพิกัด</button>
             )}
@@ -896,14 +927,28 @@ export default function CaseFormPage() {
             </ul>
           )}
 
-          {/* มีพิกัดแล้ว (เพิ่งค้นหา/อ่านลิงก์ หรือโหลดมาจากเคสเดิม) — โชว์ที่อยู่ + แผนที่ยืนยัน */}
+          {/* มีพิกัดแล้ว (เพิ่งค้นหา/อ่านลิงก์ หรือโหลดมาจากเคสเดิม) — โชว์ที่อยู่ + แผนที่ให้ปรับหมุด
+              เดิมเป็นแผนที่รูปนิ่ง ปักมาตรงไหนก็ต้องเอาตรงนั้น
+              แต่การค้นด้วยชื่อจะได้จุดกลางอาคาร ซึ่งห่างจากประตูจริงได้เป็นร้อยเมตรในตึกใหญ่
+              และพิกัดนี้คือตัวตัดสินว่าพนักงานจะโดนธง "นอกพื้นที่" ตอนเช็คอินหรือไม่ (รัศมีปริยาย 200 ม.)
+              ลากหมุดได้จึงเป็นวิธีเดียวที่ปักตรงบ้านในซอยซึ่ง Google ไม่รู้จักได้ */}
           {form.geo_lat !== '' && form.geo_lng !== '' && (
             <div className="geo-result">
               <p className="geo-set">
                 <span className="geo-set-pin">📍 ตั้งพิกัดแล้ว</span>
                 <span className="geo-set-addr">{resolvedAddress ?? `${form.geo_lat}, ${form.geo_lng}`}</span>
               </p>
-              <LocationMap lat={Number(form.geo_lat)} lng={Number(form.geo_lng)} />
+              <p className="form-hint muted">
+                ลากหมุดหรือแตะบนแผนที่เพื่อย้ายไปจุดที่พนักงานต้องไปถึงจริง (ประตูบ้าน/ตึก) —
+                ยิ่งตรงจุด การตรวจระยะตอนเช็คอินยิ่งแม่น
+              </p>
+              <MapPicker
+                lat={form.geo_lat}
+                lng={form.geo_lng}
+                onChange={(lat, lng) =>
+                  setForm((prev) => ({ ...prev, geo_lat: lat.toFixed(6), geo_lng: lng.toFixed(6) }))
+                }
+              />
             </div>
           )}
         </div>

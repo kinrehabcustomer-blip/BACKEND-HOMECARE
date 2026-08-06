@@ -198,7 +198,7 @@ export default function PatientListPage() {
                   {/* ลำดับนับต่อเนื่องข้ามหน้า — เป็นลำดับของ "รายการที่เห็นตอนนี้" ไม่ใช่เลขประจำตัว */}
                   <td className="row-index" data-label="ลำดับ">{(page - 1) * Number(perPage) + i + 1}</td>
                   <td className="mono link" data-label="รหัส">{p.patient_id}</td>
-                  <td data-label="ชื่อ">
+                  <td data-label="ชื่อ" title={[p.name, p.nickname && `(${p.nickname})`].filter(Boolean).join(" ")}>
                     {p.name}
                     {p.nickname && <span className="muted"> ({p.nickname})</span>}
                     {/* การแพ้เป็นข้อมูลอันตรายที่สุดในหน้านี้ — ต้องเห็นตั้งแต่ตอนกวาดตาดูรายชื่อ
@@ -216,7 +216,7 @@ export default function PatientListPage() {
                       <span className="muted">—</span>
                     )}
                   </td>
-                  <td data-label="ผู้ว่าจ้าง">
+                  <td data-label="ผู้ว่าจ้าง" title={p.customer_name || undefined}>
                     {p.customer_name ? (
                       <>
                         {/* stopPropagation กันไม่ให้การกดลิงก์เปิด popup ผู้รับการดูแลตามไปด้วย */}

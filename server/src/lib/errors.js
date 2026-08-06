@@ -35,6 +35,30 @@ export function errorHandler(err, req, res, next) {
     return res.status(409).json({ error: `เลขบัตรประชาชนนี้ถูกใช้กับ${who}แล้ว` });
   }
 
-  console.error(err);
+  /*
+   * ข้อมูลไม่ผ่านกฎของฐานข้อมูล — เดิมตกไปเป็น 500 "เกิดข้อผิดพลาดภายในระบบ" เหมือนระบบพัง
+   * ทั้งที่จริงคือข้อมูลบางช่องไม่ผ่านเงื่อนไข ซึ่งคนกรอกแก้เองได้ถ้ารู้ว่าช่องไหน
+   * ที่แย่กว่านั้นคือมันมองไม่เห็นเลยว่าติดตรงไหน ต้องไปไล่อ่าน log ของ server ทุกครั้ง
+   * จึงบอกชื่อ constraint/คอลัมน์กลับไปด้วย — เป็นระบบหลังบ้านของทีมตัวเอง ไม่ใช่หน้าเว็บสาธารณะ
+   */
+  const DB_RULES = {
+    23514: 'ค่าที่กรอกไม่ผ่านเงื่อนไขของระบบ',          // check_violation
+    23502: 'มีช่องที่จำเป็นถูกเว้นว่างไว้',                  // not_null_violation
+    23503: 'อ้างถึงข้อมูลที่ไม่มีอยู่แล้ว (อาจถูกลบไปก่อนหน้า)', // foreign_key_violation
+    23505: 'ข้อมูลนี้ซ้ำกับที่มีอยู่แล้ว',                    // unique_violation (ที่ไม่ใช่เลขบัตร)
+    22003: 'ตัวเลขเกินขนาดที่เก็บได้',                    // numeric_value_out_of_range
+    '22P02': 'รูปแบบข้อมูลไม่ถูกต้อง',                    // invalid_text_representation
+  };
+  const rule = DB_RULES[err?.code];
+  if (rule) {
+    const where = err.constraint ?? err.column ?? null;
+    console.error(`[${req.method} ${req.originalUrl}] ${err.code} ${err.constraint ?? ''}`, err.detail ?? err.message);
+    return res.status(409).json({
+      error: where ? `${rule} (${where})` : rule,
+    });
+  }
+
+  // เหลือจากนี้คือพังจริง — log ให้ครบพอตามรอยได้ว่ามาจาก request ไหน
+  console.error(`[${req.method} ${req.originalUrl}]`, err);
   return res.status(500).json({ error: 'เกิดข้อผิดพลาดภายในระบบ' });
 }

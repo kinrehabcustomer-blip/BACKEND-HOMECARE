@@ -228,8 +228,15 @@ export const api = {
   geocodeAddress: (address) => request('/cases/geocode', { method: 'POST', body: { address } }),
   /** อ่านพิกัด + ที่อยู่ จากลิงก์ Google Maps ที่วางมา */
   resolveMapLink: (url) => request('/cases/resolve-map-link', { method: 'POST', body: { url } }),
-  /** ค้นหาสถานที่จากการพิมพ์ชื่อ/ที่อยู่ — คืนรายการให้เลือก */
-  searchPlace: (query) => request('/cases/search-place', { method: 'POST', body: { query } }),
+  /**
+   * ค้นหาสถานที่จากการพิมพ์ชื่อ/ที่อยู่ — คืนรายการให้เลือก
+   * near = พิกัดที่หน้าเว็บมีอยู่แล้ว (ไม่บังคับ) ส่งไปเพื่อให้ผลใกล้จุดนั้นขึ้นก่อน
+   */
+  searchPlace: (query, near) =>
+    request('/cases/search-place', {
+      method: 'POST',
+      body: { query, near_lat: near?.lat ?? null, near_lng: near?.lng ?? null },
+    }),
   /** admin แก้กะ (ปิดกะค้าง/แก้เวลา/เคลียร์ธง) */
   adjustVisit: (caseId, visitId, body) =>
     request(`/cases/${caseId}/visits/${visitId}/adjust`, { method: 'PATCH', body }),
