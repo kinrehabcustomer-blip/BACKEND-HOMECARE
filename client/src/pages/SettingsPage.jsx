@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import ChangePasswordForm from '../components/ChangePasswordForm.jsx';
 import { getTheme, setTheme as persistTheme } from '../lib/theme.js';
+import LineIcon from '../components/LineIcon.jsx';
 
 export default function SettingsPage() {
   const [theme, setThemeState] = useState(getTheme);
@@ -33,13 +34,13 @@ export default function SettingsPage() {
               className={`btn ${theme === 'light' ? 'primary' : ''}`}
               onClick={() => changeTheme('light')}
             >
-              ☀ สว่าง
+              <LineIcon name="sun" />สว่าง
             </button>
             <button
               className={`btn ${theme === 'dark' ? 'primary' : ''}`}
               onClick={() => changeTheme('dark')}
             >
-              ☾ กลางคืน
+              <LineIcon name="moon" />กลางคืน
             </button>
           </div>
         </div>

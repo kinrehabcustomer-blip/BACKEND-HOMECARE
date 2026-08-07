@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, NavLink, Navigate, Link, useNavigate, useLocation } from 'react-router-dom';
 import { AuthProvider, RequireAuth, useAuth } from './auth.jsx';
-import LineIcon from './components/LineIcon.jsx';
 import LoginPage from './pages/LoginPage.jsx';
 import ForgotPasswordPage from './pages/ForgotPasswordPage.jsx';
 import SettingsPage from './pages/SettingsPage.jsx';
@@ -26,6 +25,7 @@ import MyTodayPage from './pages/MyTodayPage.jsx';
 import MyCasesPage from './pages/MyCasesPage.jsx';
 import MyCalendarPage from './pages/MyCalendarPage.jsx';
 import MyAttendancePage from './pages/MyAttendancePage.jsx';
+import LineIcon from './components/LineIcon.jsx';
 
 /* ไอคอนเมนูแบบเส้น (Lucide-style) — stroke=currentColor จึง tint ตามสีเมนู (จาง → ทองตอน active) เอง */
 const NAV_ICONS = {
@@ -131,7 +131,9 @@ function Sidebar() {
             <strong>{user.first_name} {user.last_name}</strong>
             <span className="mono muted">{user.employee_id}</span>
           </div>
-          <NavLink className="btn icon-btn" to="/settings" title="ตั้งค่า" aria-label="ตั้งค่า">⚙</NavLink>
+          <NavLink className="btn icon-btn" to="/settings" title="ตั้งค่า" aria-label="ตั้งค่า">
+            <LineIcon name="settings" />
+          </NavLink>
         </div>
         <button className="btn sidebar-btn" onClick={handleLogout}>ออกจากระบบ</button>
       </div>

@@ -7,6 +7,7 @@ import PatientCases from './PatientCases.jsx';
 import {
   GENDER_LABELS, TITLE_LABELS, PATIENT_STATUS_LABELS, formatDate, ageFromBirthDate,
 } from '../labels.js';
+import LineIcon from './LineIcon.jsx';
 
 const FOCUSABLE = 'a[href], button:not(:disabled), input, select, textarea, [tabindex]:not([tabindex="-1"])';
 
@@ -240,8 +241,8 @@ export default function PatientModal({ patientId, siblings = [], onNavigate, onC
                 {/* ไล่ดูทีละคนได้โดยไม่ต้องปิด-เปิดใหม่ (เฉพาะคนที่อยู่ในหน้ารายการปัจจุบัน) */}
                 {siblings.length > 1 && (
                   <span className="modal-nav">
-                    <button className="btn icon-btn" disabled={!prevId} onClick={() => onNavigate?.(prevId)} title="คนก่อนหน้า" aria-label="คนก่อนหน้า">‹</button>
-                    <button className="btn icon-btn" disabled={!nextId} onClick={() => onNavigate?.(nextId)} title="คนถัดไป" aria-label="คนถัดไป">›</button>
+                    <button className="btn icon-btn" disabled={!prevId} onClick={() => onNavigate?.(prevId)} title="คนก่อนหน้า" aria-label="คนก่อนหน้า"><LineIcon name="chevron-left" /></button>
+                    <button className="btn icon-btn" disabled={!nextId} onClick={() => onNavigate?.(nextId)} title="คนถัดไป" aria-label="คนถัดไป"><LineIcon name="chevron-right" /></button>
                   </span>
                 )}
                 <button className="modal-close" onClick={onClose} aria-label="ปิด">×</button>
@@ -257,12 +258,12 @@ export default function PatientModal({ patientId, siblings = [], onNavigate, onC
                   (คนให้ยาดูแพ้ยา คนเตรียมอาหารดูแพ้อาหาร) รวมกันแล้วต้องอ่านทั้งก้อนเพื่อหาบรรทัดของตัวเอง */}
               {patient.allergies && (
                 <p className="notice allergy-alert">
-                  <strong>⚠ แพ้ยา:</strong> {patient.allergies}
+                  <strong><LineIcon name="alert" className="text-ico" />แพ้ยา:</strong> {patient.allergies}
                 </p>
               )}
               {patient.food_allergies && (
                 <p className="notice allergy-alert">
-                  <strong>⚠ แพ้อาหาร:</strong> {patient.food_allergies}
+                  <strong><LineIcon name="alert" className="text-ico" />แพ้อาหาร:</strong> {patient.food_allergies}
                 </p>
               )}
 

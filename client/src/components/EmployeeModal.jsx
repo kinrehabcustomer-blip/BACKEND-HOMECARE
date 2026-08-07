@@ -9,6 +9,7 @@ import {
   POSITION_LABELS, EMPLOYMENT_TYPE_LABELS, STATUS_LABELS, GENDER_LABELS,
   formatBaht, formatDate,
 } from '../labels.js';
+import LineIcon from './LineIcon.jsx';
 
 // popup เป็นตัวอย่างข้อมูลย่อ — โชว์ประวัติการทำงานแค่ 3 ครั้งล่าสุด ที่เหลือดูที่หน้าเต็ม
 const PREVIEW_HISTORY = 3;
@@ -232,14 +233,14 @@ export default function EmployeeModal({ employeeId, siblings = [], onNavigate, o
                       onClick={() => onNavigate?.(prevId)}
                       title="คนก่อนหน้า"
                       aria-label="คนก่อนหน้า"
-                    >‹</button>
+                    ><LineIcon name="chevron-left" /></button>
                     <button
                       className="btn icon-btn"
                       disabled={!nextId}
                       onClick={() => onNavigate?.(nextId)}
                       title="คนถัดไป"
                       aria-label="คนถัดไป"
-                    >›</button>
+                    ><LineIcon name="chevron-right" /></button>
                   </span>
                 )}
                 <button className="modal-close" onClick={onClose} aria-label="ปิด">×</button>

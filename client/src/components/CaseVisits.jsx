@@ -3,6 +3,7 @@ import { api } from '../api.js';
 import {
   POSITION_LABELS, VISIT_STATE_LABELS, MONTH_LABELS, formatDate, timeText, toBuddhistYear,
 } from '../labels.js';
+import LineIcon from './LineIcon.jsx';
 
 const WEEKDAYS = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
 
@@ -212,7 +213,7 @@ export default function CaseVisits({ caseId, target = null, readOnly = false, mo
                   {v.assigned_name ?? 'ไม่ระบุคน'}
                   {v.check_in_at && ` · เข้า ${timeText(v.check_in_at)}`}
                   {v.check_out_at && ` · ออก ${timeText(v.check_out_at)}`}
-                  {v.location_flagged && ' · ⚠ นอกพื้นที่'}
+                  {v.location_flagged && <> · <LineIcon name="alert" className="text-ico" />นอกพื้นที่</>}
                 </span>
                 <span className={`badge visit-${v.state}`}>{VISIT_STATE_LABELS[v.state]}</span>
                 {!readOnly && (

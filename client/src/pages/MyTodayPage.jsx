@@ -4,6 +4,7 @@ import CheckInModal from '../components/CheckInModal.jsx';
 import { serviceName } from '../components/MyCaseModal.jsx';
 import { getPosition } from '../lib/geo.js';
 import { CASE_TYPE_LABELS, VISIT_STATE_LABELS, timeText, durationText } from '../labels.js';
+import LineIcon from '../components/LineIcon.jsx';
 
 /** หน้าหลักของพนักงานภาคสนาม — กะงานวันนี้ พร้อมปุ่มเช็คอิน/เช็คเอาท์ */
 export default function MyTodayPage() {
@@ -93,7 +94,7 @@ function ShiftCard({ visit, busy, onCheckIn, onCheckOut }) {
         </div>
         <h2 className="shift-title">{visit.client_name}</h2>
         <p className="muted">{serviceName(visit) || CASE_TYPE_LABELS[visit.case_type]}</p>
-        {visit.address && <p className="muted shift-addr">📍 {visit.address}</p>}
+        {visit.address && <p className="muted shift-addr"><LineIcon name="pin" className="text-ico" />{visit.address}</p>}
 
         {visit.check_in_at && (
           <p className="shift-times">
@@ -113,7 +114,7 @@ function ShiftCard({ visit, busy, onCheckIn, onCheckOut }) {
             {busy ? 'กำลังเช็คเอาท์…' : 'เช็คเอาท์'}
           </button>
         )}
-        {visit.state === 'done' && <span className="shift-done">✓ เสร็จแล้ว</span>}
+        {visit.state === 'done' && <span className="shift-done"><LineIcon name="check" className="text-ico" />เสร็จแล้ว</span>}
       </div>
     </section>
   );

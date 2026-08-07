@@ -6,6 +6,7 @@ import MapPicker from '../components/MapPicker.jsx';
 import {
   CASE_TYPE_LABELS, POSITION_LABELS, GENDER_LABELS, SERVICE_KIND_LABELS, formatBaht, ageFromBirthDate,
 } from '../labels.js';
+import LineIcon from '../components/LineIcon.jsx';
 
 const TIERS = ['CG', 'NA', 'PN', 'RN'];
 const CATEGORY_LABELS = { daily: 'รายวัน', weekly: 'รายสัปดาห์', monthly: 'รายเดือน' };
@@ -695,7 +696,7 @@ export default function CaseFormPage() {
               ไม่งั้นจะเข้าใจว่าระบบพัง แล้วปล่อยว่างจนพนักงานเห็น "ยังไม่ระบุค่าจ้าง" ตอนปิดเคส */}
           {pickedService && packagePay == null && (
             <p className="form-hint muted">
-              ⚠ {isPhysio ? 'แพ็คเกจกายภาพบำบัด' : 'เรทที่เลือก'}นี้ยังไม่ได้ตั้งค่าตอบแทนพนักงานในระบบ —
+              <LineIcon name="alert" className="text-ico" />{isPhysio ? 'แพ็คเกจกายภาพบำบัด' : 'เรทที่เลือก'}นี้ยังไม่ได้ตั้งค่าตอบแทนพนักงานในระบบ —
               กรอกเองในช่องด้านบนได้ หรือไปตั้งที่หน้า
               <Link className="link" to={isPhysio ? '/physio-packages' : '/packages'}>
                 {isPhysio ? ' แพ็คเกจกายภาพบำบัด' : ' แพ็คเกจ Homecare'}
@@ -749,12 +750,12 @@ export default function CaseFormPage() {
           <>
             {pickedPatient.allergies && (
               <p className="notice allergy-alert">
-                <strong>⚠ แพ้ยา:</strong> {pickedPatient.allergies}
+                <strong><LineIcon name="alert" className="text-ico" />แพ้ยา:</strong> {pickedPatient.allergies}
               </p>
             )}
             {pickedPatient.food_allergies && (
               <p className="notice allergy-alert">
-                <strong>⚠ แพ้อาหาร:</strong> {pickedPatient.food_allergies}
+                <strong><LineIcon name="alert" className="text-ico" />แพ้อาหาร:</strong> {pickedPatient.food_allergies}
               </p>
             )}
             <div className="picked-customer">
@@ -925,7 +926,7 @@ export default function CaseFormPage() {
 
           <div className="geo-actions">
             <button type="button" className="btn" disabled={finding || !locQuery.trim()} onClick={findLocation}>
-              {finding ? 'กำลังค้นหา…' : '🔍 ค้นหา / อ่านลิงก์'}
+              {finding ? 'กำลังค้นหา…' : <><LineIcon name="search" />ค้นหา / อ่านลิงก์</>}
             </button>
             {/* ที่อยู่พิมพ์ไปแล้วด้านบน ไม่มีเหตุผลให้ต้องพิมพ์ซ้ำในช่องค้นหาอีกรอบ */}
             {form.address?.trim() && (
@@ -962,7 +963,7 @@ export default function CaseFormPage() {
           {form.geo_lat !== '' && form.geo_lng !== '' && (
             <div className="geo-result">
               <p className="geo-set">
-                <span className="geo-set-pin">📍 ตั้งพิกัดแล้ว</span>
+                <span className="geo-set-pin"><LineIcon name="pin" className="text-ico" />ตั้งพิกัดแล้ว</span>
                 <span className="geo-set-addr">{resolvedAddress ?? `${form.geo_lat}, ${form.geo_lng}`}</span>
               </p>
               <p className="form-hint muted">

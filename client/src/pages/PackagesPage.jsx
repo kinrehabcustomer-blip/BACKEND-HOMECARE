@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { formatBaht } from '../labels.js';
+import LineIcon from '../components/LineIcon.jsx';
 
 const TIERS = ['CG', 'NA', 'PN', 'RN'];
 const CATEGORY_LABELS = { daily: 'รายวัน', weekly: 'รายสัปดาห์', monthly: 'รายเดือน' };
@@ -67,7 +68,7 @@ function RateCell({ editing, rate, draft, onPatch }) {
               type="button" className="btn tiny ghost" title="ปิดช่องนี้ (ให้บริการไม่ได้)"
               onClick={() => onPatch({ available: false })}
             >
-              ✕
+              <LineIcon name="close" />
             </button>
           </div>
           {/* ค่าจ้างพนักงาน — ตัวตั้งของสรุปค่าตอบแทนรายเดือน ไม่มีช่องนี้ระบบคำนวณค่าแรงให้ใครไม่ได้เลย */}

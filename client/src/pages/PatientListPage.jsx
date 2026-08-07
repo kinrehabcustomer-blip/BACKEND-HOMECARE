@@ -4,6 +4,7 @@ import { api } from '../api.js';
 import PatientModal from '../components/PatientModal.jsx';
 import SortHead from '../components/SortHead.jsx';
 import { GENDER_LABELS, PATIENT_STATUS_LABELS, ageFromBirthDate } from '../labels.js';
+import LineIcon from '../components/LineIcon.jsx';
 
 const PER_PAGE_OPTIONS = [20, 50, 100];
 
@@ -205,10 +206,10 @@ export default function PatientListPage() {
                         ไม่ใช่ต้องเปิด popup ก่อนถึงจะรู้ · ไอคอน + ข้อความเต็มใน title ไม่ใช้สีอย่างเดียว
                         แยกสองป้าย เพราะคนละคนที่ต้องรู้ (คนให้ยา vs คนเตรียมอาหาร) */}
                     {p.allergies && (
-                      <span className="allergy-flag" title={`แพ้ยา: ${p.allergies}`}>⚠ แพ้ยา</span>
+                      <span className="allergy-flag" title={`แพ้ยา: ${p.allergies}`}><LineIcon name="alert" className="text-ico" />แพ้ยา</span>
                     )}
                     {p.food_allergies && (
-                      <span className="allergy-flag food" title={`แพ้อาหาร: ${p.food_allergies}`}>⚠ แพ้อาหาร</span>
+                      <span className="allergy-flag food" title={`แพ้อาหาร: ${p.food_allergies}`}><LineIcon name="alert" className="text-ico" />แพ้อาหาร</span>
                     )}
                   </td>
                   <td data-label="เพศ / อายุ">

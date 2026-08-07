@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { useSheetSwipe } from '../lib/sheetSwipe.js';
 import { formatBaht } from '../labels.js';
+import LineIcon from '../components/LineIcon.jsx';
 
 const BLANK = {
   name: '',
@@ -130,6 +131,15 @@ export default function PhysioPackagesPage() {
                     </span>
                   )}
                 </td>
+                {/* ตกเฉลี่ยต่อครั้ง — server คิดให้จาก ราคาสุทธิ ÷ จำนวนครั้ง (ดู withComputed)
+                    ช่องนี้เคยหายไปทั้งที่หัวตารางมีคอลัมน์อยู่ ทำให้ทุกช่องเลื่อนซ้ายหนึ่งช่อง
+                    ค่าจ้างพนักงานไปโผล่ใต้หัว "ตกเฉลี่ย" และคอลัมน์ "จัดการ" ว่างเปล่า */}
+                <td className="physio-avg">
+                  {p.avg_per_session == null
+                    ? <span className="muted">—</span>
+                    : <>{formatBaht(p.avg_per_session)}<span className="cell-sub">ต่อครั้ง</span></>}
+                </td>
+
                 {/* ช่องที่ยังไม่ตั้งต้องเห็นชัด — ไม่มีค่าจ้าง = เคสสายกายภาพคำนวณค่าตอบแทนให้พนักงานไม่ได้เลย */}
                 <td className="physio-pay">
                   {p.staff_pay == null ? (
@@ -142,8 +152,8 @@ export default function PhysioPackagesPage() {
                   )}
                 </td>
                 <td className="physio-actions">
-                  <button className="btn tiny" title="เลื่อนขึ้น" disabled={i === 0} onClick={() => move(i, -1)}>↑</button>
-                  <button className="btn tiny" title="เลื่อนลง" disabled={i === items.length - 1} onClick={() => move(i, 1)}>↓</button>
+                  <button className="btn tiny" title="เลื่อนขึ้น" disabled={i === 0} onClick={() => move(i, -1)}><LineIcon name="arrow-up" /></button>
+                  <button className="btn tiny" title="เลื่อนลง" disabled={i === items.length - 1} onClick={() => move(i, 1)}><LineIcon name="arrow-down" /></button>
                   <button className="btn tiny" onClick={() => setEditing(p)}>แก้ไข</button>
                   <button className="btn tiny danger-ghost" onClick={() => remove(p)}>ลบ</button>
                 </td>

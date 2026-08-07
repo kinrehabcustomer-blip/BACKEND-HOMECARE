@@ -7,6 +7,7 @@ import { compressImage } from '../lib/image.js';
 import { serviceName } from './MyCaseModal.jsx';
 import LocationMap from './LocationMap.jsx';
 import { CASE_TYPE_LABELS } from '../labels.js';
+import LineIcon from './LineIcon.jsx';
 
 /**
  * popup ยืนยันเช็คอินกะ — ขอ GPS ตอนเปิด แล้วให้แนบเซลฟี่ได้ (ไม่บังคับ)
@@ -96,14 +97,14 @@ export default function CheckInModal({ visit, onDone, onClose }) {
           {/* สถานะ GPS */}
           <div className={`gps-status ${pos?.ok ? 'is-ok' : locating ? '' : 'is-warn'}`}>
             {locating ? (
-              <>📍 กำลังหาตำแหน่ง…</>
+              <><LineIcon name="pin" className="text-ico" />กำลังหาตำแหน่ง…</>
             ) : pos?.ok ? (
               <>
-                📍 ได้ตำแหน่งแล้ว <span className="muted">(ความแม่นยำ ±{pos.accuracy} ม.)</span>
+                <LineIcon name="pin" className="text-ico" />ได้ตำแหน่งแล้ว <span className="muted">(ความแม่นยำ ±{pos.accuracy} ม.)</span>
               </>
             ) : (
               <>
-                ⚠ {pos?.reason}
+                <LineIcon name="alert" className="text-ico" />{pos?.reason}
                 <button type="button" className="btn tiny" onClick={retryLocation}>ลองใหม่</button>
               </>
             )}

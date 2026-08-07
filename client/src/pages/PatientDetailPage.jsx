@@ -5,6 +5,7 @@ import PatientCases from '../components/PatientCases.jsx';
 import {
   GENDER_LABELS, TITLE_LABELS, PATIENT_STATUS_LABELS, formatDate, ageFromBirthDate,
 } from '../labels.js';
+import LineIcon from '../components/LineIcon.jsx';
 
 function Row({ label, children }) {
   return (
@@ -70,12 +71,12 @@ export default function PatientDetailPage() {
           แยกสองแถบ เพราะคนละคนที่ต้องรู้ (คนให้ยา vs คนเตรียมอาหาร) */}
       {patient.allergies && (
         <p className="notice allergy-alert">
-          <strong>⚠ แพ้ยา:</strong> {patient.allergies}
+          <strong><LineIcon name="alert" className="text-ico" />แพ้ยา:</strong> {patient.allergies}
         </p>
       )}
       {patient.food_allergies && (
         <p className="notice allergy-alert">
-          <strong>⚠ แพ้อาหาร:</strong> {patient.food_allergies}
+          <strong><LineIcon name="alert" className="text-ico" />แพ้อาหาร:</strong> {patient.food_allergies}
         </p>
       )}
 

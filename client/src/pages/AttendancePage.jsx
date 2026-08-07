@@ -2,8 +2,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../api.js';
 import { useToast } from '../toast.jsx';
-import LineIcon from '../components/LineIcon.jsx';
 import { VISIT_STATE_LABELS, formatBaht, formatDate, timeText, durationText } from '../labels.js';
+import LineIcon from '../components/LineIcon.jsx';
 
 const TABS = {
   exceptions: 'รายการต้องตรวจ',
@@ -51,7 +51,7 @@ function MonthPicker({ month, onChange, children }) {
   return (
     <div className="att-filter">
       <span className="month-step">
-        <button className="btn icon-btn" onClick={() => onChange(shiftMonth(month, -1))} title="เดือนก่อนหน้า" aria-label="เดือนก่อนหน้า">‹</button>
+        <button className="btn icon-btn" onClick={() => onChange(shiftMonth(month, -1))} title="เดือนก่อนหน้า" aria-label="เดือนก่อนหน้า"><LineIcon name="chevron-left" /></button>
         <input type="month" value={month} onChange={(e) => e.target.value && onChange(e.target.value)} aria-label="เดือน" />
         <button
           className="btn icon-btn"
@@ -59,7 +59,7 @@ function MonthPicker({ month, onChange, children }) {
           disabled={month >= thisMonth()}
           title="เดือนถัดไป"
           aria-label="เดือนถัดไป"
-        >›</button>
+        ><LineIcon name="chevron-right" /></button>
       </span>
       {children}
     </div>
@@ -351,7 +351,7 @@ function Exceptions({ rows, error, onReload, filters }) {
         !error && <p className="muted">กำลังโหลด…</p>
       ) : rows.length === 0 ? (
         <section className="card empty-state">
-          <p>ไม่มีรายการต้องตรวจ 🎉</p>
+          <p><LineIcon name="check" className="text-ico" />ไม่มีรายการต้องตรวจ</p>
           <p className="muted">ทุกกะเช็คอิน/เช็คเอาท์เรียบร้อย</p>
         </section>
       ) : (

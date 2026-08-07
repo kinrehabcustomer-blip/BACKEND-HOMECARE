@@ -4,6 +4,7 @@ import { useAuth } from '../auth.jsx';
 import { useToast } from '../toast.jsx';
 import { useSheetSwipe } from '../lib/sheetSwipe.js';
 import { INVOICE_STATUS_LABELS, amountText, bahtText, docDate } from '../labels.js';
+import LineIcon from './LineIcon.jsx';
 
 const FOCUSABLE = 'a[href], button:not(:disabled), input, select, textarea, [tabindex]:not([tabindex="-1"])';
 
@@ -227,8 +228,8 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                 {/* ไล่ดูทีละใบได้โดยไม่ต้องปิด-เปิดใหม่ (เฉพาะใบที่อยู่ในหน้ารายการปัจจุบัน) */}
                 {siblings.length > 1 && (
                   <span className="modal-nav">
-                    <button className="btn icon-btn" disabled={!prevId} onClick={() => onNavigate?.(prevId)} title="ใบก่อนหน้า" aria-label="ใบก่อนหน้า">‹</button>
-                    <button className="btn icon-btn" disabled={!nextId} onClick={() => onNavigate?.(nextId)} title="ใบถัดไป" aria-label="ใบถัดไป">›</button>
+                    <button className="btn icon-btn" disabled={!prevId} onClick={() => onNavigate?.(prevId)} title="ใบก่อนหน้า" aria-label="ใบก่อนหน้า"><LineIcon name="chevron-left" /></button>
+                    <button className="btn icon-btn" disabled={!nextId} onClick={() => onNavigate?.(nextId)} title="ใบถัดไป" aria-label="ใบถัดไป"><LineIcon name="chevron-right" /></button>
                   </span>
                 )}
                 <button className="modal-close" onClick={onClose} aria-label="ปิด">×</button>
@@ -280,13 +281,13 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                   {/* แยกบรรทัดตามสิ่งที่ไม่ตรง — อาจไม่ตรงทั้งค่าจ้างและผู้จ่ายพร้อมกันได้ */}
                   {item.payer_stale && (
                     <p>
-                      ⚠ ผู้จ่ายของเคสตอนนี้คือ <strong>{item.case_payer_name}</strong>
+                      <LineIcon name="alert" className="text-ico" />ผู้จ่ายของเคสตอนนี้คือ <strong>{item.case_payer_name}</strong>
                       {' '}แต่ใบนี้ออกในชื่อ <strong>{item.bill_to_name}</strong> — ยังไม่ตรงกัน
                     </p>
                   )}
                   {item.fee_stale && (
                     <p>
-                      ⚠ ค่าจ้างในเคสตอนนี้คือ <strong>{amountText(item.case_fee)}</strong>
+                      <LineIcon name="alert" className="text-ico" />ค่าจ้างในเคสตอนนี้คือ <strong>{amountText(item.case_fee)}</strong>
                       {' '}แต่ยอดสุทธิของใบนี้เป็น <strong>{amountText(item.total)}</strong> — ยังไม่ตรงกัน
                     </p>
                   )}

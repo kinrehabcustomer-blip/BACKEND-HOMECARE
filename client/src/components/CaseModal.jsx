@@ -9,6 +9,7 @@ import {
   CASE_TYPE_LABELS, CASE_STATUS_LABELS, POSITION_LABELS, GENDER_LABELS, SERVICE_KIND_LABELS,
   INVOICE_STATUS_LABELS, formatBaht, formatDate,
 } from '../labels.js';
+import LineIcon from './LineIcon.jsx';
 
 /**
  * ชื่อบริการของเคส — สองสายเก็บคนละที่ (Homecare = รูปแบบ+เกรด, กายภาพ = ชื่อแพ็คเกจ)
@@ -305,8 +306,8 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                 {/* ไล่ดูทีละเคสได้โดยไม่ต้องปิด-เปิดใหม่ (เฉพาะเคสที่อยู่ในหน้ารายการปัจจุบัน) */}
                 {siblings.length > 1 && (
                   <span className="modal-nav">
-                    <button className="btn icon-btn" disabled={!prevId} onClick={() => onNavigate?.(prevId)} title="เคสก่อนหน้า" aria-label="เคสก่อนหน้า">‹</button>
-                    <button className="btn icon-btn" disabled={!nextId} onClick={() => onNavigate?.(nextId)} title="เคสถัดไป" aria-label="เคสถัดไป">›</button>
+                    <button className="btn icon-btn" disabled={!prevId} onClick={() => onNavigate?.(prevId)} title="เคสก่อนหน้า" aria-label="เคสก่อนหน้า"><LineIcon name="chevron-left" /></button>
+                    <button className="btn icon-btn" disabled={!nextId} onClick={() => onNavigate?.(nextId)} title="เคสถัดไป" aria-label="เคสถัดไป"><LineIcon name="chevron-right" /></button>
                   </span>
                 )}
                 <button className="modal-close" onClick={onClose} aria-label="ปิด">×</button>
@@ -457,7 +458,7 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                         {/* ข้อมูลในใบไม่ตรงกับเคสแล้ว (ค่าจ้าง และ/หรือ ชื่อผู้จ่าย) — เปิดใบเพื่อรีเฟรช/ออกใหม่ */}
                         {v.is_stale && v.status !== 'cancelled' && (
                           <p className="stale-tag">
-                            {v.payer_stale ? '⚠ ผู้จ่ายในใบไม่ตรงกับเคส' : `⚠ ไม่ตรงกับค่าจ้างเคส (${formatBaht(v.case_fee)})`}
+                            <><LineIcon name="alert" className="text-ico" />{v.payer_stale ? 'ผู้จ่ายในใบไม่ตรงกับเคส' : `ไม่ตรงกับค่าจ้างเคส (${formatBaht(v.case_fee)})`}</>
                           </p>
                         )}
                       </div>
@@ -606,7 +607,7 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                     // ปิดเคส = ยืนยันค่าจ้าง ยอดจะไปโผล่ในหน้าค่าตอบแทนของพนักงานทันที — บอกให้รู้ตัวก่อนกด
                     const pay = item.staff_pay != null
                       ? `\nพนักงานจะเห็นค่าจ้าง ${formatBaht(item.staff_pay)} ในสรุปค่าตอบแทนของเดือนนี้`
-                      : '\n⚠ เคสนี้ยังไม่ได้ระบุค่าจ้างพนักงาน — ปิดแล้วพนักงานจะเห็นว่า "ยังไม่ระบุค่าจ้าง"';
+                      : '\nเคสนี้ยังไม่ได้ระบุค่าจ้างพนักงาน — ปิดแล้วพนักงานจะเห็นว่า "ยังไม่ระบุค่าจ้าง"';
                     if (!confirm(`ปิดเคส ${item.case_id}?${pay}\nเคสจะยังอยู่ในระบบเป็นประวัติ และเปิดใหม่ได้ภายหลัง`)) return;
                     run(() => api.closeCase(item.case_id, new Date().toISOString().slice(0, 10)));
                   }}

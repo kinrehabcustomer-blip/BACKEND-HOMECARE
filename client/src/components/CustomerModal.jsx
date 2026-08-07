@@ -8,6 +8,7 @@ import {
   GENDER_LABELS, TITLE_LABELS, MARITAL_STATUS_LABELS, PATIENT_STATUS_LABELS,
   formatDate, ageFromBirthDate,
 } from '../labels.js';
+import LineIcon from './LineIcon.jsx';
 
 const FOCUSABLE = 'a[href], button:not(:disabled), input, select, textarea, [tabindex]:not([tabindex="-1"])';
 
@@ -228,8 +229,8 @@ export default function CustomerModal({ customerId, siblings = [], onNavigate, o
                 {/* ไล่ดูทีละคนได้โดยไม่ต้องปิด-เปิดใหม่ (เฉพาะคนที่อยู่ในหน้ารายการปัจจุบัน) */}
                 {siblings.length > 1 && (
                   <span className="modal-nav">
-                    <button className="btn icon-btn" disabled={!prevId} onClick={() => onNavigate?.(prevId)} title="คนก่อนหน้า" aria-label="คนก่อนหน้า">‹</button>
-                    <button className="btn icon-btn" disabled={!nextId} onClick={() => onNavigate?.(nextId)} title="คนถัดไป" aria-label="คนถัดไป">›</button>
+                    <button className="btn icon-btn" disabled={!prevId} onClick={() => onNavigate?.(prevId)} title="คนก่อนหน้า" aria-label="คนก่อนหน้า"><LineIcon name="chevron-left" /></button>
+                    <button className="btn icon-btn" disabled={!nextId} onClick={() => onNavigate?.(nextId)} title="คนถัดไป" aria-label="คนถัดไป"><LineIcon name="chevron-right" /></button>
                   </span>
                 )}
                 <button className="modal-close" onClick={onClose} aria-label="ปิด">×</button>
