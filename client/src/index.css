@@ -35,7 +35,17 @@ html {
   --radius-card: 1rem;       /* การ์ดมนกว่าปุ่ม/ช่องกรอก (แนว dashboard) */
   --font-mono: ui-monospace, 'Cascadia Mono', 'Segoe UI', monospace;
 
-  font-family: 'Sarabun', 'Segoe UI', system-ui, sans-serif;
+  /* Anuphan — ตัวแปรผัน โหลดจาก <link> ใน index.html · มีทั้งไทยและอังกฤษอยู่ในตัวเดียว
+     (ตรวจแล้วมีชุด thai, latin, latin-ext, vietnamese) จึงไม่ต้องจับคู่กับฟอนต์ละตินอีกตัว
+     ที่เหลือในรายการเป็นตาข่ายรองรับกรณีโหลดฟอนต์ไม่สำเร็จเท่านั้น
+
+     ไม่ตั้ง font-variation-settings ตามตัวอย่างของ Google เพราะไม่จำเป็น —
+     แกน wght คุมผ่าน font-weight ปกติได้อยู่แล้ว
+     และถ้าเผลอเขียน "wght" ลงไป มันจะทับ font-weight ทั้งไฟล์
+     ทำให้ตัวหนาทุกที่ในระบบตายพร้อมกันโดยไม่มีอะไรเตือน */
+  font-family: 'Anuphan', 'Segoe UI', system-ui, sans-serif;
+  /* Anuphan มีแกน opsz — ปรับรูปทรงตัวอักษรตามขนาดที่แสดงจริง */
+  font-optical-sizing: auto;
   color: var(--text);
 }
 
@@ -224,7 +234,9 @@ body {
 .sidebar-btn:last-child { margin-bottom: 0; }
 /* โลโก้แนวนอน ชิดซ้ายบนไซด์บาร์สีขาว (ไม่มีพื้นรอง) */
 .brand { display: flex; align-items: flex-start; margin-bottom: 1.75rem; }
-.brand-mark { font-size: 1.5rem; font-weight: 800; letter-spacing: 2px; color: var(--brand); }
+/* 700 ไม่ใช่ 800 — Anuphan มีน้ำหนักสูงสุดแค่ 700 เขียน 800 ไว้เบราว์เซอร์ก็ปัดลงมาเป็น 700 อยู่ดี
+   เขียนให้ตรงกับสิ่งที่ฟอนต์ทำได้จริง จะได้ไม่เข้าใจผิดว่าตรงนี้หนากว่าที่อื่นทั้งที่เท่ากัน */
+.brand-mark { font-size: 1.5rem; font-weight: 700; letter-spacing: 2px; color: var(--brand); }
 .brand-logo { height: 2.5rem; width: auto; max-width: 100%; display: block; object-fit: contain; }
 .login-logo { height: 2.75rem; margin: 0 auto; }
 .brand-sub { font-size: 0.75rem; color: var(--muted); }

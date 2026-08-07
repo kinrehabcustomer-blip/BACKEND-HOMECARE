@@ -4,9 +4,17 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- บอกเบราว์เซอร์ให้เปิดการเชื่อมต่อไปหา Google Fonts ล่วงหน้า ตั้งแต่ยังอ่าน HTML ไม่จบ
+         (จับมือ DNS + TLS ใช้เวลาหลักร้อยมิลลิวินาที ทำคู่ขนานไปเลยดีกว่ารอให้ถึงคิว)
+         gstatic เป็นโดเมนที่เก็บไฟล์ฟอนต์จริง ต้องมี crossorigin เพราะฟอนต์โหลดแบบ CORS เสมอ -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <!-- Anuphan — ฟอนต์แปรผัน (variable font) ไฟล์เดียวครอบน้ำหนัก 100–700 ทั้งช่วง
+         ต่างจากของเดิมที่โหลดแยกเป็น 3 น้ำหนัก แล้วน้ำหนัก 500/700 ที่ CSS เรียกใช้ไม่มีของจริง
+         เบราว์เซอร์ต้องปัดไปใช้ตัวใกล้เคียงหรือปลอมความหนาขึ้นมาเอง -->
     <link
       rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;800&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Anuphan:wght@100..700&display=swap"
     />
     <title>KIN Homecare · ระบบหลังบ้าน</title>
   </head>
