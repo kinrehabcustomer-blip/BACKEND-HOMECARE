@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { api } from '../api.js';
 import CustomerCases from '../components/CustomerCases.jsx';
+import ErrorBar from '../components/ErrorBar.jsx';
+import ConfirmButton from '../components/ConfirmButton.jsx';
 import {
   GENDER_LABELS, TITLE_LABELS, MARITAL_STATUS_LABELS, PATIENT_STATUS_LABELS,
   formatDate, ageFromBirthDate,
@@ -22,24 +24,25 @@ export default function CustomerDetailPage() {
 
   const [customer, setCustomer] = useState(null);
   const [error, setError] = useState(null);
+  const [reloadKey, setReloadKey] = useState(0); // เด้งค่าเพื่อสั่งโหลดใหม่จากปุ่ม "ลองใหม่"
 
   useEffect(() => {
-    api.getCustomer(id).then(setCustomer).catch((err) => setError(err.message));
-  }, [id]);
+    api
+      .getCustomer(id)
+      .then((v) => {
+        setCustomer(v);
+        setError(null); // โหลดผ่านแล้ว error ของรอบก่อนต้องหายไปด้วย
+      })
+      .catch((err) => setError(err.message));
+  }, [id, reloadKey]);
 
   async function handleDelete() {
-    if (
-      !confirm(
-        `ลบลูกค้า ${id} ออกจากฐานข้อมูลถาวร?\nเคสที่เคยให้บริการจะยังอยู่ (ข้อมูลผู้ป่วยถูกบันทึกไว้ในเคสแล้ว) แต่จะไม่เชื่อมกับลูกค้ารายนี้อีก`,
-      )
-    ) {
-      return;
-    }
     await api.deleteCustomer(id);
     navigate('/customers');
   }
 
-  if (error) return <pre className="error">{error}</pre>;
+  // โหลดไม่สำเร็จ ยังไม่มีข้อมูลให้แสดง — แต่ต้องมีทางกดใหม่ ไม่ใช่ต้องรีเฟรชเบราว์เซอร์เอง
+  if (error) return <ErrorBar message={error} onRetry={() => setReloadKey((k) => k + 1)} />;
   if (!customer) return <p className="muted">กำลังโหลด…</p>;
 
   // อายุจากวันเกิดแม่นกว่าเลขที่กรอกไว้เมื่อหลายปีก่อน — ใช้ช่อง age เป็นตัวสำรอง
@@ -168,7 +171,15 @@ export default function CustomerDetailPage() {
             ลบข้อมูลลูกค้าออกจากฐานข้อมูล กู้คืนไม่ได้ — เคสที่เคยให้บริการยังอยู่ครบ แต่จะไม่เชื่อมกับลูกค้ารายนี้อีก
           </p>
         </div>
-        <button className="btn danger" onClick={handleDelete}>ลบถาวร</button>
+        <ConfirmButton
+          className="btn danger"
+          title={`ลบลูกค้า ${id} ออกจากฐานข้อมูลถาวร?`}
+          detail="เคสที่เคยให้บริการจะยังอยู่ (ข้อมูลผู้ป่วยถูกบันทึกไว้ในเคสแล้ว) แต่จะไม่เชื่อมกับลูกค้ารายนี้อีก"
+          confirmLabel="ลบถาวร"
+          onConfirm={handleDelete}
+        >
+          ลบถาวร
+        </ConfirmButton>
       </section>
     </>
   );

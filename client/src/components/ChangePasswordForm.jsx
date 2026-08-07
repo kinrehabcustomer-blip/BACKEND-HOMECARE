@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { api } from '../api.js';
 import { useAuth } from '../auth.jsx';
+import PasswordInput from './PasswordInput.jsx';
 
 /** ฟอร์มเปลี่ยนรหัสผ่าน — ใช้ในหน้าตั้งค่า */
 export default function ChangePasswordForm() {
@@ -40,8 +41,7 @@ export default function ChangePasswordForm() {
 
       <label>
         รหัสผ่านปัจจุบัน
-        <input
-          type="password"
+        <PasswordInput
           autoComplete="current-password"
           required
           value={current}
@@ -54,8 +54,7 @@ export default function ChangePasswordForm() {
 
       <label>
         รหัสผ่านใหม่
-        <input
-          type="password"
+        <PasswordInput
           autoComplete="new-password"
           required
           minLength={8}
@@ -67,8 +66,7 @@ export default function ChangePasswordForm() {
 
       <label>
         ยืนยันรหัสผ่านใหม่
-        <input
-          type="password"
+        <PasswordInput
           autoComplete="new-password"
           required
           value={confirm}

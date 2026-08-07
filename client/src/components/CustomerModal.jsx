@@ -9,6 +9,7 @@ import {
   formatDate, ageFromBirthDate,
 } from '../labels.js';
 import LineIcon from './LineIcon.jsx';
+import ConfirmButton from './ConfirmButton.jsx';
 
 const FOCUSABLE = 'a[href], button:not(:disabled), input, select, textarea, [tabindex]:not([tabindex="-1"])';
 
@@ -175,14 +176,6 @@ export default function CustomerModal({ customerId, siblings = [], onNavigate, o
   };
 
   async function handleDelete() {
-    if (
-      !confirm(
-        `ลบลูกค้า ${customerId}?\nเคสที่เคยให้บริการจะยังอยู่ในระบบ (ข้อมูลผู้ป่วยถูกบันทึกไว้ในเคสแล้ว) แต่จะไม่เชื่อมกับลูกค้ารายนี้อีก`,
-      )
-    ) {
-      return;
-    }
-
     setDeleting(true);
     try {
       await api.deleteCustomer(customerId);
@@ -356,9 +349,16 @@ export default function CustomerModal({ customerId, siblings = [], onNavigate, o
 
             <footer className="modal-foot">
               {/* ปุ่มลบดันไปชิดซ้ายสุด แยกออกจากกลุ่มปุ่มที่กดกันจริง — ไม่ให้มือไปโดนตอนเล็งปุ่มข้างๆ */}
-              <button className="btn danger-ghost foot-danger" onClick={handleDelete} disabled={deleting}>
+              <ConfirmButton
+                className="btn danger-ghost foot-danger"
+                disabled={deleting}
+                title={`ลบลูกค้า ${customerId} ออกจากฐานข้อมูลถาวร?`}
+                detail="เคสที่เคยให้บริการจะยังอยู่ในระบบ (ข้อมูลผู้ป่วยถูกบันทึกไว้ในเคสแล้ว) แต่จะไม่เชื่อมกับลูกค้ารายนี้อีก"
+                confirmLabel="ลบลูกค้า"
+                onConfirm={handleDelete}
+              >
                 {deleting ? 'กำลังลบ…' : 'ลบลูกค้า'}
-              </button>
+              </ConfirmButton>
               <Link className="btn" to={`/cases/new?customer_id=${customer.customer_id}`}>
                 + เปิดเคส
               </Link>

@@ -10,6 +10,7 @@ import {
   INVOICE_STATUS_LABELS, formatBaht, formatDate,
 } from '../labels.js';
 import LineIcon from './LineIcon.jsx';
+import ConfirmButton from './ConfirmButton.jsx';
 
 /**
  * ชื่อบริการของเคส — สองสายเก็บคนละที่ (Homecare = รูปแบบ+เกรด, กายภาพ = ชื่อแพ็คเกจ)
@@ -250,9 +251,7 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
 
   /** ลบใบแจ้งหนี้ทิ้งถาวร แล้วถามต่อว่าจะออกใบใหม่ตามข้อมูลปัจจุบันเลยไหม */
   function deleteInvoice(v) {
-    if (!confirm(`ลบใบแจ้งหนี้ ${v.invoice_id} ทิ้งถาวร?\nลบแล้วกู้คืนไม่ได้ และเลขที่ใบจะข้าม`)) return;
-
-    run(async () => {
+    return run(async () => {
       await api.deleteInvoice(v.invoice_id);
       if (confirm('ลบแล้ว — ออกใบใหม่ตามข้อมูลปัจจุบันของเคสเลยไหม?')) {
         const created = await api.createInvoice({ case_id: item.case_id });
@@ -466,13 +465,16 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                         <button className="btn tiny" onClick={() => setOpenInvoiceId(v.invoice_id)}>
                           เปิดดู
                         </button>
-                        <button
+                        <ConfirmButton
                           className="btn tiny danger-ghost"
                           disabled={busy}
-                          onClick={() => deleteInvoice(v)}
+                          title={`ลบใบแจ้งหนี้ ${v.invoice_id} ทิ้งถาวร?`}
+                          detail="ลบแล้วกู้คืนไม่ได้ และเลขที่ใบจะข้าม — ระบบจะถามต่อว่าจะออกใบใหม่ตามข้อมูลปัจจุบันเลยไหม"
+                          confirmLabel="ลบถาวร"
+                          onConfirm={() => deleteInvoice(v)}
                         >
                           ลบ
-                        </button>
+                        </ConfirmButton>
                       </div>
                     </div>
                   ))

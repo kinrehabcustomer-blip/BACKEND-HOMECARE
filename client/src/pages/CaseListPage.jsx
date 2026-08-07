@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api.js';
 import CaseModal from '../components/CaseModal.jsx';
 import SortHead from '../components/SortHead.jsx';
+import ErrorBar from '../components/ErrorBar.jsx';
 import {
   CASE_TYPE_LABELS, CASE_STATUS_LABELS, MONTH_LABELS,
   formatBaht, formatDate, formatPeriod, toBuddhistYear,
@@ -204,7 +205,7 @@ export default function CaseListPage() {
       </div>
 
       {/* error เป็นแถบเหนือตาราง ไม่ทับทั้งหน้า — ตัวกรองที่ตั้งไว้ต้องไม่หายไปเพราะเน็ตสะดุด */}
-      {error && <p className="error">{error}</p>}
+      <ErrorBar message={error} onRetry={() => setReloadKey((k) => k + 1)} busy={loading} />
 
       {/* จอแคบ: ให้ตารางเลื่อนแนวนอนในกล่องของตัวเอง ไม่ดันทั้งหน้าให้เลื่อนตาม */}
       <div className="table-wrap">

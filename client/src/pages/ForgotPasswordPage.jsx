@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../api.js';
+import PasswordInput from '../components/PasswordInput.jsx';
 
 export default function ForgotPasswordPage() {
   const navigate = useNavigate();
@@ -103,8 +104,7 @@ export default function ForgotPasswordPage() {
 
             <label>
               รหัสผ่านใหม่
-              <input
-                type="password"
+              <PasswordInput
                 autoComplete="new-password"
                 required
                 minLength={8}
@@ -116,8 +116,7 @@ export default function ForgotPasswordPage() {
 
             <label>
               ยืนยันรหัสผ่านใหม่
-              <input
-                type="password"
+              <PasswordInput
                 autoComplete="new-password"
                 required
                 value={confirm}

@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { formatBaht } from '../labels.js';
 import LineIcon from '../components/LineIcon.jsx';
+import ErrorBar from '../components/ErrorBar.jsx';
+import ConfirmButton from '../components/ConfirmButton.jsx';
 
 const TIERS = ['CG', 'NA', 'PN', 'RN'];
 const CATEGORY_LABELS = { daily: 'รายวัน', weekly: 'รายสัปดาห์', monthly: 'รายเดือน' };
@@ -17,6 +19,17 @@ const cellKey = (formatId, gradeId, tier) => `${formatId}:${gradeId ?? 'x'}:${ti
 
 /** ช่องกรอกว่าง = ไม่ได้ตั้งค่า (null) ไม่ใช่ศูนย์ */
 const num = (v) => (v === '' || v == null ? null : Number(v));
+
+const NUM_FIELDS = ['customer_price', 'staff_pay', 'discount_percent', 'discount_amount'];
+
+/**
+ * ช่องนี้ยังเหมือนตอนเปิดโหมดแก้อยู่ไหม
+ *
+ * เทียบผ่าน num() ไม่ใช่ === ตรงๆ เพราะค่าที่โหลดมาจากฐานข้อมูลเป็นตัวเลข (15000)
+ * แต่พอผู้ใช้พิมพ์ทับจะกลายเป็นข้อความ ("15000") — พิมพ์เลขเดิมกลับเข้าไปจึงต้องนับว่า "ไม่เปลี่ยน"
+ */
+const sameCell = (a, b) =>
+  Boolean(a) && Boolean(b) && a.available === b.available && NUM_FIELDS.every((k) => num(a[k]) === num(b[k]));
 
 /**
  * ส่วนลดเป็นบาท — สูตรเดียวกับฝั่ง server (packages/repo.js)
@@ -34,14 +47,17 @@ function discountOf(price, percent, amount) {
  * ประกาศไว้นอก PackagesPage โดยตั้งใจ — ถ้าประกาศข้างในจะกลายเป็น component "ชนิดใหม่" ทุกครั้งที่ state เปลี่ยน
  * React จะถอด input ทิ้งแล้วสร้างใหม่ทุกตัวอักษรที่พิมพ์ ทำให้โฟกัสหลุดจนพิมพ์ตัวเลขต่อกันไม่ได้
  */
-function RateCell({ editing, rate, draft, onPatch }) {
+function RateCell({ editing, rate, draft, changed, onPatch }) {
   if (editing) {
     const dv = draft ?? {
       customer_price: '', staff_pay: '', discount_percent: '', discount_amount: '', available: true,
     };
+    // ทำเครื่องหมายช่องที่แก้ไปแล้ว — ตารางมีเป็นร้อยช่อง ไล่หาเองว่าแตะอะไรไปบ้างไม่ไหว
+    // และเป็นตัวเดียวกับที่ตัดสินว่าช่องไหนจะถูกส่งขึ้น server ตอนกดบันทึก
+    const mark = changed ? ' is-changed' : '';
     if (!dv.available) {
       return (
-        <td className="rate-off">
+        <td className={`rate-off${mark}`}>
           <button type="button" className="btn tiny" onClick={() => onPatch({ available: true })}>
             เปิดช่องนี้
           </button>
@@ -57,7 +73,7 @@ function RateCell({ editing, rate, draft, onPatch }) {
     const profit = net != null && pay != null ? net - pay : null;
 
     return (
-      <td className="rate-input">
+      <td className={`rate-input${mark}`}>
         <div className="rate-edit">
           <div className="rate-edit-row">
             <input
@@ -130,7 +146,7 @@ function RateCell({ editing, rate, draft, onPatch }) {
 }
 
 /** ตารางเรทหนึ่งกลุ่ม (รายวัน/สัปดาห์ = ไม่อิงเกรด · รายเดือน = แยกตามเกรด) */
-function RateTable({ label, formats, gradeId, editing, rateMap, draft, onPatchCell }) {
+function RateTable({ label, formats, gradeId, editing, rateMap, draft, dirty, onPatchCell }) {
   if (formats.length === 0) return <p className="muted">ยังไม่มีรูปแบบบริการในกลุ่มนี้</p>;
 
   return (
@@ -162,6 +178,7 @@ function RateTable({ label, formats, gradeId, editing, rateMap, draft, onPatchCe
                     editing={editing}
                     rate={rateMap[key]}
                     draft={draft[key]}
+                    changed={dirty.has(key)}
                     onPatch={(patch) => onPatchCell(key, patch)}
                   />
                 );
@@ -182,15 +199,49 @@ export default function PackagesPage() {
   const [managing, setManaging] = useState(false);
   const [busy, setBusy] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
+  // กางกล่องยืนยันตอนกดยกเลิกทั้งที่แก้ไปแล้ว — ไม่ใช้ confirm() ของเบราว์เซอร์ ซึ่งถูกบล็อกได้แล้วคืน false เงียบๆ
+  const [discardOpen, setDiscardOpen] = useState(false);
+  // ค่าตอนกดเข้าโหมดแก้ ไว้เทียบว่าช่องไหนถูกแก้จริง — เป็น ref เพราะไม่ได้ใช้วาดหน้าจอ ไม่ต้อง re-render
+  const baseline = useRef({});
 
   useEffect(() => {
-    api.packageMatrix().then(setMatrix).catch((err) => setError(err.message));
+    api
+      .packageMatrix()
+      .then((m) => {
+        setMatrix(m);
+        setError(null); // โหลดผ่านแล้ว error ของรอบก่อนต้องหายไปด้วย
+      })
+      .catch((err) => setError(err.message));
   }, [reloadKey]);
 
   const reload = () => setReloadKey((k) => k + 1);
 
-  if (error) return <p className="error">{error}</p>;
-  if (!matrix) return <p className="muted">กำลังโหลด…</p>;
+  // ช่องที่ต่างจากตอนเปิดโหมดแก้ — ใช้ทั้งตัดสินว่าจะส่งอะไรขึ้น server, ทำเครื่องหมายบนตาราง และเตือนก่อนออก
+  const dirtyKeys = Object.keys(draft).filter((k) => !sameCell(draft[k], baseline.current[k]));
+
+  /* ปิดแท็บ/กดรีเฟรชทั้งที่แก้ราคาค้างอยู่ — ให้เบราว์เซอร์ถามก่อน
+     ตารางนี้แก้ทีเดียวได้หลายสิบช่อง เสียไปทั้งชุดเพราะเผลอกดปุ่มเดียวคือกรอกใหม่ทั้งหมด
+     ฟอร์มเคส/ลูกค้า/ผู้ป่วย/พนักงานเตือนไว้หมดแล้ว ตารางที่ใหญ่ที่สุดกลับไม่มีอะไรกัน
+     (เบราว์เซอร์บังคับใช้ข้อความมาตรฐานของตัวเอง กำหนดเองไม่ได้)
+     ไม่ใส่ deps โดยตั้งใจ — ต้องผูกใหม่ทุก render เพื่อให้เห็น dirtyKeys ล่าสุดเสมอ */
+  useEffect(() => {
+    const onBeforeUnload = (e) => {
+      if (!editing || dirtyKeys.length === 0) return;
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  });
+
+  /* ยังไม่มีตารางให้แสดงเลย (โหลดครั้งแรกไม่สำเร็จ) — ไม่มีอะไรให้เก็บไว้จริงๆ
+     แต่ต้องมีปุ่มลองใหม่ ไม่ใช่ปล่อยให้ค้างเป็นข้อความแดงจนต้องรีเฟรชเบราว์เซอร์เอง
+     ส่วน error ที่เกิดตอนบันทึก/จัดการเกรด จะขึ้นเป็นแถบเหนือตารางโดยไม่ล้างงานที่แก้ค้างไว้ */
+  if (!matrix) {
+    return error
+      ? <ErrorBar message={error} onRetry={reload} />
+      : <p className="muted">กำลังโหลด…</p>;
+  }
 
   const sharedFormats = matrix.formats.filter((f) => !f.graded);
   const gradedFormats = matrix.formats.filter((f) => f.graded);
@@ -216,36 +267,50 @@ export default function PackagesPage() {
       }
     }
     setDraft(d);
+    baseline.current = d; // ก้อนเดียวกัน — patchCell สร้างออบเจ็กต์ช่องใหม่เสมอ ของเดิมจึงไม่ถูกแก้ตาม
+    setDiscardOpen(false);
     setEditing(true);
   }
 
+  /** ออกจากโหมดแก้ ทิ้ง draft — ใช้ทั้งตอนบันทึกเสร็จและตอนกดยกเลิก */
+  function stopEdit() {
+    setEditing(false);
+    setDiscardOpen(false);
+    setDraft({});
+    baseline.current = {};
+  }
+
   async function saveRates() {
+    /* ส่งเฉพาะช่องที่แก้จริง ไม่ใช่ยกตารางทั้งใบขึ้นไปทุกครั้ง — สองเรื่องพร้อมกัน:
+       1. สองคนเปิดแก้คนละช่องพร้อมกัน คนที่กดบันทึกทีหลังเคยทับงานของคนแรกทั้งตารางแบบเงียบๆ
+          ส่งเฉพาะช่องของตัวเองแล้ว งานของทั้งคู่รอด (เหลือแต่กรณีแก้ช่องเดียวกันจริงๆ ซึ่งเลี่ยงไม่ได้)
+       2. เดิมกดแก้ไขราคาแล้วกดบันทึกโดยไม่แตะอะไรเลย จะสร้างแถวราคาให้ทุกช่องในตาราง
+          ช่องที่เคยขึ้นว่า "ให้บริการไม่ได้" (ไม่มีแถว) จะกลายเป็น "—" (มีแถว เปิดขาย ราคาว่าง) ยกแผง
+          ทั้งที่ไม่มีใครสั่งให้เปลี่ยน */
+    const rates = dirtyKeys.map((key) => {
+      const [formatId, gradeId, tier] = key.split(':');
+      const dv = draft[key];
+      return {
+        format_id: Number(formatId),
+        grade_id: gradeId === 'x' ? null : Number(gradeId),
+        staff_tier: tier,
+        customer_price: num(dv.customer_price),
+        staff_pay: num(dv.staff_pay),
+        discount_percent: num(dv.discount_percent),
+        discount_amount: num(dv.discount_amount),
+        available: dv.available,
+      };
+    });
+
+    // ไม่ได้แก้อะไรเลย — ปิดโหมดแก้เฉยๆ (ฝั่ง server ปฏิเสธรายการเปล่าอยู่แล้ว ยิงไปก็ได้ error กลับมางงๆ)
+    if (rates.length === 0) return stopEdit();
+
     setBusy(true);
     setError(null);
     try {
-      const rates = [];
-      for (const f of matrix.formats) {
-        const gradeIds = f.graded ? matrix.grades.map((g) => g.grade_id) : [null];
-        for (const gid of gradeIds) {
-          for (const tier of TIERS) {
-            const key = cellKey(f.format_id, gid, tier);
-            const dv = draft[key];
-            rates.push({
-              format_id: f.format_id,
-              grade_id: gid,
-              staff_tier: tier,
-              customer_price: num(dv.customer_price),
-              staff_pay: num(dv.staff_pay),
-              discount_percent: num(dv.discount_percent),
-              discount_amount: num(dv.discount_amount),
-              available: dv.available,
-            });
-          }
-        }
-      }
       const updated = await api.saveRates(rates);
       setMatrix(updated);
-      setEditing(false);
+      stopEdit();
     } catch (err) {
       setError(err.message);
     } finally {
@@ -256,19 +321,34 @@ export default function PackagesPage() {
   const patchCell = (key, patch) =>
     setDraft((prev) => ({ ...prev, [key]: { ...prev[key], ...patch } }));
 
+  const dirty = new Set(dirtyKeys);
+
   return (
     <>
       <header className="page-head">
         <div>
           <h1>แพ็คเกจบริการ (พนักงานพาร์ทไทม์)</h1>
-          <p className="muted">ตารางเรทตามเกรด × รูปแบบบริการ × ระดับพนักงาน (CG / NA / PN / RN)</p>
+          <p className="muted">
+            ตารางเรทตามเกรด × รูปแบบบริการ × ระดับพนักงาน (CG / NA / PN / RN)
+            {/* บอกจำนวนที่ค้างไว้ตลอดเวลาที่แก้อยู่ — ตารางยาวกว่าหนึ่งหน้าจอ เลื่อนลงไปแก้ล่างสุด
+                แล้วลืมว่ายังไม่ได้บันทึกเป็นเรื่องที่เกิดง่ายมาก */}
+            {editing && dirtyKeys.length > 0 && (
+              <> · <strong className="flag-text">แก้ไปแล้ว {dirtyKeys.length} ช่อง ยังไม่บันทึก</strong></>
+            )}
+          </p>
         </div>
         <div className="actions">
           {editing ? (
             <>
-              <button className="btn" disabled={busy} onClick={() => setEditing(false)}>ยกเลิก</button>
+              <button
+                className="btn"
+                disabled={busy}
+                onClick={() => (dirtyKeys.length > 0 ? setDiscardOpen(true) : stopEdit())}
+              >
+                ยกเลิก
+              </button>
               <button className="btn primary" disabled={busy} onClick={saveRates}>
-                {busy ? 'กำลังบันทึก…' : 'บันทึกราคา'}
+                {busy ? 'กำลังบันทึก…' : dirtyKeys.length > 0 ? `บันทึก ${dirtyKeys.length} ช่อง` : 'บันทึกราคา'}
               </button>
             </>
           ) : (
@@ -282,6 +362,25 @@ export default function PackagesPage() {
         </div>
       </header>
 
+      {/* error ตอนบันทึก/เพิ่ม-ลบเกรด — เป็นแถบเหนือตาราง ห้ามทับทั้งหน้า
+          ไม่งั้นราคาที่แก้ค้างไว้หลายสิบช่องจะหายไปพร้อมกับหน้าจอ ทั้งที่ยังอยู่ใน state ครบ
+
+          ไม่มีปุ่มลองใหม่ตรงนี้โดยตั้งใจ — error ที่ถึงจุดนี้มาจากการกดปุ่ม (บันทึก/เพิ่ม/ลบ)
+          ซึ่งกดซ้ำได้เองอยู่แล้ว ส่วน "ลองใหม่" ในหน้านี้แปลว่าดึงตารางใหม่จาก server
+          ซึ่งเป็นคนละเรื่องกับสิ่งที่เพิ่งล้มเหลว และถ้ากำลังแก้ราคาค้างอยู่จะยิ่งชวนสับสน */}
+      <ErrorBar message={error} />
+
+      {/* ยืนยันทิ้งการแก้ — อยู่ใต้แถบปุ่มที่เพิ่งกด ให้เห็นพร้อมกับปุ่มที่ทำให้มันโผล่มา */}
+      {discardOpen && (
+        <div className="notice pay-form">
+          <p>ทิ้งการแก้ราคา <strong>{dirtyKeys.length} ช่อง</strong> ที่ยังไม่ได้บันทึก? กู้คืนไม่ได้</p>
+          <div className="pay-form-actions">
+            <button className="btn" onClick={() => setDiscardOpen(false)}>กลับไปแก้ต่อ</button>
+            <button className="btn danger" onClick={stopEdit}>ทิ้งทั้งหมด</button>
+          </div>
+        </div>
+      )}
+
       {managing && !editing && (
         <ManagePanel matrix={matrix} onChanged={reload} setError={setError} />
       )}
@@ -290,7 +389,7 @@ export default function PackagesPage() {
         <h2>รายวัน / รายสัปดาห์ <span className="muted">(เรทเดียว ใช้ร่วมทุกเกรด)</span></h2>
         <RateTable
           label="รูปแบบบริการ" formats={sharedFormats} gradeId={null}
-          editing={editing} rateMap={rateMap} draft={draft} onPatchCell={patchCell}
+          editing={editing} rateMap={rateMap} draft={draft} dirty={dirty} onPatchCell={patchCell}
         />
       </section>
 
@@ -304,7 +403,7 @@ export default function PackagesPage() {
           {g.description && <p className="grade-desc">{g.description}</p>}
           <RateTable
             label="รูปแบบบริการ" formats={gradedFormats} gradeId={g.grade_id}
-            editing={editing} rateMap={rateMap} draft={draft} onPatchCell={patchCell}
+            editing={editing} rateMap={rateMap} draft={draft} dirty={dirty} onPatchCell={patchCell}
           />
         </section>
       ))}
@@ -350,12 +449,16 @@ function ManagePanel({ matrix, onChanged, setError }) {
                   </strong>
                   {g.description && <p className="muted">{g.description}</p>}
                 </div>
-                <button
-                  className="btn tiny danger-ghost" disabled={busy}
-                  onClick={() => confirm(`ลบ ${g.name}? ราคาของเกรดนี้จะถูกลบทั้งหมด`) && run(() => api.deleteGrade(g.grade_id))}
+                <ConfirmButton
+                  className="btn tiny danger-ghost"
+                  disabled={busy}
+                  title={`ลบเกรด "${g.name}"?`}
+                  detail="ราคาทุกช่องของเกรดนี้จะถูกลบไปด้วย และกู้คืนไม่ได้"
+                  confirmLabel="ลบเกรด"
+                  onConfirm={() => run(() => api.deleteGrade(g.grade_id))}
                 >
                   ลบ
-                </button>
+                </ConfirmButton>
               </li>
             ))}
           </ul>
@@ -401,12 +504,16 @@ function ManagePanel({ matrix, onChanged, setError }) {
                     {f.graded ? 'แยกราคาตามเกรด' : 'เรทเดียวทุกเกรด'}
                   </p>
                 </div>
-                <button
-                  className="btn tiny danger-ghost" disabled={busy}
-                  onClick={() => confirm(`ลบ ${f.name}? ราคาของรูปแบบนี้จะถูกลบทั้งหมด`) && run(() => api.deleteFormat(f.format_id))}
+                <ConfirmButton
+                  className="btn tiny danger-ghost"
+                  disabled={busy}
+                  title={`ลบรูปแบบบริการ "${f.name}"?`}
+                  detail="ราคาทุกช่องของรูปแบบนี้จะถูกลบไปด้วย และกู้คืนไม่ได้"
+                  confirmLabel="ลบรูปแบบ"
+                  onConfirm={() => run(() => api.deleteFormat(f.format_id))}
                 >
                   ลบ
-                </button>
+                </ConfirmButton>
               </li>
             ))}
           </ul>

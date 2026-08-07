@@ -3,6 +3,9 @@ import { useParams, Link, useNavigate } from 'react-router-dom';
 import { api } from '../api.js';
 import WorkHistory from '../components/WorkHistory.jsx';
 import Avatar from '../components/Avatar.jsx';
+import ErrorBar from '../components/ErrorBar.jsx';
+import LineIcon from '../components/LineIcon.jsx';
+import ConfirmButton from '../components/ConfirmButton.jsx';
 import {
   POSITION_LABELS, EMPLOYMENT_TYPE_LABELS, STATUS_LABELS, GENDER_LABELS,
   formatBaht, formatDate,
@@ -25,25 +28,32 @@ export default function EmployeeDetailPage() {
   const [employee, setEmployee] = useState(null);
   const [error, setError] = useState(null);
 
-  const reload = () => api.getEmployee(id).then(setEmployee).catch((err) => setError(err.message));
+  // มี reload() อยู่แล้ว (ปุ่มบันทึกลาออกก็เรียกตัวนี้) — ปุ่ม "ลองใหม่" ใช้ตัวเดียวกัน ไม่ต้องมีตัวนับซ้อน
+  const reload = () =>
+    api
+      .getEmployee(id)
+      .then((v) => {
+        setEmployee(v);
+        setError(null); // โหลดผ่านแล้ว error ของรอบก่อนต้องหายไปด้วย
+      })
+      .catch((err) => setError(err.message));
 
   useEffect(() => {
     reload();
   }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleResign() {
-    if (!confirm(`บันทึกการลาออกของ ${id}?\nข้อมูลจะยังอยู่ในระบบ แต่สถานะจะเปลี่ยนเป็น "ลาออกแล้ว"`)) return;
     await api.resignEmployee(id, new Date().toISOString().slice(0, 10));
     reload();
   }
 
   async function handleDelete() {
-    if (!confirm(`ลบ ${id} ออกจากฐานข้อมูลถาวร?\nใบรับรองทั้งหมดของพนักงานคนนี้จะถูกลบไปด้วย และกู้คืนไม่ได้`)) return;
     await api.deleteEmployee(id);
     navigate('/employees');
   }
 
-  if (error) return <pre className="error">{error}</pre>;
+  // โหลดไม่สำเร็จ ยังไม่มีข้อมูลให้แสดง — แต่ต้องมีทางกดใหม่ ไม่ใช่ต้องรีเฟรชเบราว์เซอร์เอง
+  if (error) return <ErrorBar message={error} onRetry={reload} />;
   if (!employee) return <p className="muted">กำลังโหลด…</p>;
 
   return (
@@ -65,6 +75,18 @@ export default function EmployeeDetailPage() {
           <Link className="btn primary" to={`/employees/${id}/edit`}>แก้ไข</Link>
         </div>
       </header>
+
+      {/* คนนี้ยังไม่เคยตั้งรหัสผ่านของตัวเอง = ยังใช้รหัสตั้งต้นซึ่งคือรหัสพนักงาน
+          ที่เดียวในระบบที่บอกเรื่องนี้ ต้องอยู่ตรงนี้ ไม่ใช่บนหน้า login ซึ่งใครก็เปิดได้
+          เดิมหน้า login เขียนไว้ให้ทุกคนอ่าน ส่วนฝ่ายบุคคลที่ต้องแจ้งพนักงานใหม่กลับไม่มีอะไรบอกเลย
+          ป้ายนี้หายไปเองเมื่อเจ้าตัวเปลี่ยนรหัสแล้ว (must_change_password) จึงใช้เช็คได้ด้วยว่าใครยังค้าง */}
+      {employee.must_change_password && (
+        <p className="notice">
+          <LineIcon name="alert" className="text-ico" />
+          ยังใช้รหัสผ่านตั้งต้นอยู่ — รหัสคือ <strong className="mono">{employee.employee_id}</strong>{' '}
+          แจ้งให้เจ้าตัวเข้าระบบแล้วเปลี่ยนรหัสทันที เพราะรหัสพนักงานเป็นเลขที่คนอื่นเห็นได้
+        </p>
+      )}
 
       <div className="columns">
         <section className="card">
@@ -191,15 +213,32 @@ export default function EmployeeDetailPage() {
           <strong>บันทึกการลาออก</strong>
           <p className="muted">เก็บประวัติไว้ในระบบ เปลี่ยนสถานะเป็น "ลาออกแล้ว" — แนะนำให้ใช้วิธีนี้</p>
         </div>
-        <button className="btn" onClick={handleResign} disabled={employee.status === 'resigned'}>
+        <ConfirmButton
+          className="btn"
+          disabled={employee.status === 'resigned'}
+          title={`บันทึกการลาออกของ ${id}?`}
+          detail='ข้อมูลจะยังอยู่ในระบบ แต่สถานะจะเปลี่ยนเป็น "ลาออกแล้ว"'
+          confirmLabel="บันทึกลาออก"
+          cancelLabel="ยังไม่บันทึก"
+          danger={false}
+          onConfirm={handleResign}
+        >
           บันทึกลาออก
-        </button>
+        </ConfirmButton>
 
         <div>
           <strong>ลบถาวร</strong>
           <p className="muted">ลบข้อมูลพนักงานและใบรับรองทั้งหมดออกจากฐานข้อมูล กู้คืนไม่ได้</p>
         </div>
-        <button className="btn danger" onClick={handleDelete}>ลบถาวร</button>
+        <ConfirmButton
+          className="btn danger"
+          title={`ลบ ${id} ออกจากฐานข้อมูลถาวร?`}
+          detail="ใบรับรองทั้งหมดของพนักงานคนนี้จะถูกลบไปด้วย และกู้คืนไม่ได้"
+          confirmLabel="ลบถาวร"
+          onConfirm={handleDelete}
+        >
+          ลบถาวร
+        </ConfirmButton>
       </section>
     </>
   );

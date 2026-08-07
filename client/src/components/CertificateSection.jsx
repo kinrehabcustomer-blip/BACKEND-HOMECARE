@@ -1,4 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import ConfirmButton from './ConfirmButton.jsx';
 import { api } from '../api.js';
 import FileButton from './FileButton.jsx';
 import { ACCEPTED, compressImage, formatFileSize } from '../lib/image.js';
@@ -133,13 +134,11 @@ const CertificateSection = forwardRef(function CertificateSection({ employeeId }
   }
 
   async function removeImage(certificateId) {
-    if (!confirm('ลบรูปของใบรับรองนี้? (ตัวใบรับรองยังอยู่)')) return;
     await api.setCertificateImage(employeeId, certificateId, null);
     reload();
   }
 
   async function removeCertificate(c) {
-    if (!confirm(`ลบใบรับรอง "${c.name}"?${c.has_image ? '\nรูปที่แนบไว้จะถูกลบไปด้วย' : ''}`)) return;
     await api.deleteCertificate(employeeId, c.certificate_id);
     reload();
   }
@@ -198,25 +197,29 @@ const CertificateSection = forwardRef(function CertificateSection({ employeeId }
                   />
                 </label>
                 {' · '}
-                <button
-                  type="button"
+                <ConfirmButton
                   className="inline-link danger"
-                  onClick={() => removeImage(c.certificate_id)}
+                  title="ลบรูปของใบรับรองนี้?"
+                  detail="ตัวใบรับรองยังอยู่ แนบรูปใหม่ทีหลังได้"
+                  confirmLabel="ลบรูป"
+                  onConfirm={() => removeImage(c.certificate_id)}
                 >
                   ลบรูป
-                </button>
+                </ConfirmButton>
               </p>
             )}
           </div>
 
-          <button
-            type="button"
+          <ConfirmButton
             className="btn danger-ghost"
-            onClick={() => removeCertificate(c)}
             disabled={busy}
+            title={`ลบใบรับรอง "${c.name}"?`}
+            detail={c.has_image ? 'รูปที่แนบไว้จะถูกลบไปด้วย และกู้คืนไม่ได้' : 'ลบแล้วกู้คืนไม่ได้'}
+            confirmLabel="ลบใบรับรอง"
+            onConfirm={() => removeCertificate(c)}
           >
             ลบ
-          </button>
+          </ConfirmButton>
         </div>
       ))}
 

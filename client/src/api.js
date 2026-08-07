@@ -2,6 +2,20 @@
 export class UnauthorizedError extends Error {}
 
 /**
+ * ตัวรับแจ้งว่าเซสชันใช้ไม่ได้แล้ว — AuthProvider ลงทะเบียนไว้ตอนแอปเริ่มทำงาน
+ *
+ * ต้องแจ้งจากจุดนี้จุดเดียว เพราะไม่มีทางรู้ล่วงหน้าว่าคนใช้จะค้างอยู่หน้าไหนตอนเซสชันหมดอายุ
+ * ปล่อยให้แต่ละหน้าดักเอง = ต้องไปแก้ทุกหน้า แล้วหน้าที่เขียนเพิ่มทีหลังจะตกหล่นเสมอ
+ * ซึ่งเป็นสิ่งที่เกิดขึ้นมาแล้ว: เคยมีตัวช่วยให้หน้าเรียกใช้ แต่ไม่มีหน้าไหนเรียกเลยสักหน้า
+ * ทิ้งแท็บไว้ข้ามคืนแล้วกลับมากด จึงได้แถบแดง "เซสชันหมดอายุ" ค้างอยู่ ทุกปุ่มพัง
+ * และไม่มีอะไรพาไปหน้า login — ต้องพิมพ์ URL เอง
+ */
+let onUnauthorized = null;
+export const setUnauthorizedHandler = (fn) => {
+  onUnauthorized = fn;
+};
+
+/**
  * เลิกรอเมื่อไร — fetch ไม่มีเวลาหมดอายุในตัว ถ้าไม่กำหนดเองมันรอได้ไม่จำกัด
  *
  * 30 วินาที: รูปที่ย่อแล้วอยู่ราว 100–300 KB (ดู lib/image.js) ต่อให้อยู่บน 3G ในอาคาร
@@ -13,7 +27,7 @@ const TIMEOUT_MS = 30_000;
  * empty = true บอกว่า "เรียกอันนี้แล้วไม่มีอะไรให้คืนกลับมาก็ถูกแล้ว"
  * DELETE เป็นแบบนั้นโดยธรรมชาติอยู่แล้ว จึงไม่ต้องประกาศ (ดูเงื่อนไข 204 ด้านล่าง)
  */
-async function request(path, { empty = false, ...options } = {}) {
+async function request(path, { empty = false, credentialCheck = false, ...options } = {}) {
   /* พนักงานภาคสนามใช้งานจากมือถือ ซึ่งเข้าจุดอับสัญญาณ/ลิฟต์/ชั้นใต้ดินเป็นเรื่องปกติ
      ในจุดอับ request จะออกไปแล้วเงียบหายไปเลย ไม่ตอบและไม่ error
      ผลคือปุ่มค้างอยู่ที่ "กำลังบันทึก…" และ disabled ตลอดกาล กดซ้ำก็ไม่ได้
@@ -86,7 +100,15 @@ async function request(path, { empty = false, ...options } = {}) {
   }
 
   if (!res.ok) {
-    if (res.status === 401) throw new UnauthorizedError(data?.error ?? 'กรุณาเข้าสู่ระบบ');
+    if (res.status === 401) {
+      const err = new UnauthorizedError(data?.error ?? 'กรุณาเข้าสู่ระบบ');
+      /* ส่งข้อความของ server ต่อไปให้หน้า login แสดง — มันบอกได้ตรงกว่าที่เราจะเขียนเอง
+         ("เซสชันหมดอายุ" / "บัญชีนี้ใช้งานไม่ได้แล้ว" เป็นคนละเรื่องที่ต้องทำคนละอย่าง)
+         credentialCheck = การตรวจรหัสผ่านตอน login ซึ่ง 401 แปลว่า "กรอกผิด" ไม่ใช่ "เซสชันหลุด"
+         เหมารวมจะกลายเป็นกรอกรหัสผิดแล้วโดนล้างเซสชันทิ้ง แล้วข้อความบอกผิดเรื่อง */
+      if (!credentialCheck) onUnauthorized?.(err.message);
+      throw err;
+    }
 
     // รวม error ของแต่ละ field จาก zod ให้เป็นข้อความเดียวที่อ่านรู้เรื่อง
     const fields = data?.details?.map((d) => `${d.field}: ${d.message}`).join('\n');
@@ -106,7 +128,8 @@ async function request(path, { empty = false, ...options } = {}) {
 }
 
 export const api = {
-  login: (email, password) => request('/auth/login', { method: 'POST', body: { email, password } }),
+  login: (email, password) =>
+    request('/auth/login', { method: 'POST', credentialCheck: true, body: { email, password } }),
   // POST เดียวในระบบที่ตอบ 204 อย่างถูกต้อง (ล้างคุกกี้แล้วจบ ไม่มีอะไรให้คืน)
   logout: () => request('/auth/logout', { method: 'POST', empty: true }),
   me: () => request('/auth/me'),

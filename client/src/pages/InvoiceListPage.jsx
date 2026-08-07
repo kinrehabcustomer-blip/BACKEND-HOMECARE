@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import InvoiceModal from '../components/InvoiceModal.jsx';
 import SortHead from '../components/SortHead.jsx';
+import ErrorBar from '../components/ErrorBar.jsx';
 import { api } from '../api.js';
 import { INVOICE_STATUS_LABELS, formatBaht, formatDate } from '../labels.js';
 
@@ -170,7 +171,7 @@ export default function InvoiceListPage() {
       </div>
 
       {/* error เป็นแถบเหนือตาราง ไม่ทับทั้งหน้า — คำค้นที่พิมพ์ไว้ต้องไม่หายไปเพราะเน็ตสะดุด */}
-      {error && <p className="error">{error}</p>}
+      <ErrorBar message={error} onRetry={() => setReloadKey((k) => k + 1)} busy={loading} />
 
       <div className="table-wrap">
         <table className="table table-cards table-2line table-indexed">

@@ -1,4 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import ConfirmButton from './ConfirmButton.jsx';
 import { api } from '../api.js';
 import FileButton from './FileButton.jsx';
 import { compressImage, formatFileSize } from '../lib/image.js';
@@ -116,7 +117,6 @@ const PortfolioSection = forwardRef(function PortfolioSection({ employeeId }, re
   }
 
   async function remove(item) {
-    if (!confirm(`ลบผลงาน "${item.title}"? กู้คืนไม่ได้`)) return;
     await api.deletePortfolio(employeeId, item.portfolio_id);
     reload();
   }
@@ -214,9 +214,16 @@ const PortfolioSection = forwardRef(function PortfolioSection({ employeeId }, re
                     >
                       แก้ไข
                     </button>
-                    <button type="button" className="btn danger-ghost" onClick={() => remove(item)} disabled={busy}>
+                    <ConfirmButton
+                      className="btn danger-ghost"
+                      disabled={busy}
+                      title={`ลบผลงาน "${item.title}"?`}
+                      detail="รูปที่แนบไว้จะถูกลบไปด้วย และกู้คืนไม่ได้"
+                      confirmLabel="ลบผลงาน"
+                      onConfirm={() => remove(item)}
+                    >
                       ลบ
-                    </button>
+                    </ConfirmButton>
                   </div>
                 </>
               )}

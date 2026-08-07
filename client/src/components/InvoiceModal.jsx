@@ -5,6 +5,7 @@ import { useToast } from '../toast.jsx';
 import { useSheetSwipe } from '../lib/sheetSwipe.js';
 import { INVOICE_STATUS_LABELS, amountText, bahtText, docDate } from '../labels.js';
 import LineIcon from './LineIcon.jsx';
+import ConfirmButton from './ConfirmButton.jsx';
 
 const FOCUSABLE = 'a[href], button:not(:disabled), input, select, textarea, [tabindex]:not([tabindex="-1"])';
 
@@ -153,13 +154,7 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
    * ใช้กับใบที่ออกให้ลูกค้าไปแล้ว (ออกใบแล้ว/ชำระแล้ว) ซึ่งไม่ควรลบให้หายไปเฉยๆ
    */
   function cancelInvoice() {
-    const warning =
-      item.status === 'paid'
-        ? `ยกเลิกใบเสร็จ ${item.invoice_id} ที่รับชำระแล้ว?\nใบจะยังอยู่ในระบบเป็นประวัติ แต่ยอดนี้จะไม่ถูกนับเป็นรายได้อีก`
-        : `ยกเลิกใบแจ้งหนี้ ${item.invoice_id}?\nใบจะยังอยู่ในระบบเป็นประวัติ ไม่ถูกลบทิ้ง`;
-    if (!confirm(warning)) return;
-
-    run(async () => {
+    return run(async () => {
       await api.cancelInvoice(item.invoice_id);
       toast(`ยกเลิก ${item.invoice_id} แล้ว`);
     });
@@ -170,13 +165,7 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
    * ไม่ออกให้อัตโนมัติ เพราะบางครั้งลบเพราะไม่เก็บเงินเคสนี้แล้ว ไม่ได้จะออกใบแทน
    */
   function deleteInvoice() {
-    const warning =
-      item.status === 'paid'
-        ? `ลบใบเสร็จ ${item.invoice_id} ที่รับชำระแล้วทิ้งถาวร?\nลบแล้วกู้คืนไม่ได้ และเลขที่ใบจะข้าม`
-        : `ลบใบแจ้งหนี้ ${item.invoice_id} ทิ้งถาวร?\nลบแล้วกู้คืนไม่ได้ และเลขที่ใบจะข้าม`;
-    if (!confirm(warning)) return;
-
-    run(async () => {
+    return run(async () => {
       await api.deleteInvoice(item.invoice_id);
       toast(`ลบ ${item.invoice_id} แล้ว`);
       if (!item.case_id) return onClose();
@@ -306,9 +295,16 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                         รีเฟรชจากเคส
                       </button>
                     ) : (
-                      <button className="btn danger-ghost" disabled={busy} onClick={deleteInvoice}>
+                      <ConfirmButton
+                        className="btn danger-ghost"
+                        disabled={busy}
+                        title={`ลบใบเสร็จ ${item.invoice_id} ที่รับชำระแล้วทิ้งถาวร?`}
+                        detail="ลบแล้วกู้คืนไม่ได้ และเลขที่ใบจะข้าม — ระบบจะถามต่อว่าจะออกใบใหม่ตามข้อมูลปัจจุบันเลยไหม"
+                        confirmLabel="ลบถาวร"
+                        onConfirm={deleteInvoice}
+                      >
                         ลบแล้วออกใบใหม่
-                      </button>
+                      </ConfirmButton>
                     )}
                   </div>
                 </div>
@@ -432,21 +428,44 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                   (ต่างจากใบร่าง/ใบที่ออกผิดซึ่งลบทิ้งได้ ตามที่ตั้งใจไว้ในโค้ดฝั่ง server)
                   ถ้าจำเป็นต้องลบจริงๆ ยกเลิกก่อนแล้วค่อยลบใบที่ยกเลิกได้ — สองจังหวะสำหรับของที่กู้ไม่ได้ */}
               {item.status === 'paid' ? (
-                <button className="btn danger-ghost foot-danger" disabled={busy} onClick={cancelInvoice}>
+                <ConfirmButton
+                  className="btn danger-ghost foot-danger"
+                  disabled={busy}
+                  title={`ยกเลิกใบเสร็จ ${item.invoice_id} ที่รับชำระแล้ว?`}
+                  detail="ใบจะยังอยู่ในระบบเป็นประวัติ แต่ยอดนี้จะไม่ถูกนับเป็นรายได้อีก"
+                  confirmLabel="ยกเลิกใบนี้"
+                  cancelLabel="ไม่ยกเลิกแล้ว"
+                  onConfirm={cancelInvoice}
+                >
                   ยกเลิกใบนี้
-                </button>
+                </ConfirmButton>
               ) : (
-                <button className="btn danger-ghost foot-danger" disabled={busy} onClick={deleteInvoice}>
+                <ConfirmButton
+                  className="btn danger-ghost foot-danger"
+                  disabled={busy}
+                  title={`ลบใบแจ้งหนี้ ${item.invoice_id} ทิ้งถาวร?`}
+                  detail="ลบแล้วกู้คืนไม่ได้ และเลขที่ใบจะข้าม"
+                  confirmLabel="ลบถาวร"
+                  onConfirm={deleteInvoice}
+                >
                   ลบใบนี้
-                </button>
+                </ConfirmButton>
               )}
 
               {/* ใบที่ออกให้ลูกค้าไปแล้วแต่ยังไม่ได้เงิน — ยกเลิกได้โดยไม่ต้องลบทิ้ง เก็บไว้เป็นประวัติ
                   endpoint /cancel มีมาตั้งแต่แรกแต่ไม่เคยมีปุ่มเรียกใช้เลย */}
               {item.status === 'issued' && (
-                <button className="btn" disabled={busy} onClick={cancelInvoice}>
+                <ConfirmButton
+                  className="btn"
+                  disabled={busy}
+                  title={`ยกเลิกใบแจ้งหนี้ ${item.invoice_id}?`}
+                  detail="ใบจะยังอยู่ในระบบเป็นประวัติ ไม่ถูกลบทิ้ง"
+                  confirmLabel="ยกเลิกใบ"
+                  cancelLabel="ไม่ยกเลิกแล้ว"
+                  onConfirm={cancelInvoice}
+                >
                   ยกเลิกใบ
-                </button>
+                </ConfirmButton>
               )}
 
               <button className="btn" onClick={() => window.print()}>พิมพ์ / บันทึก PDF</button>

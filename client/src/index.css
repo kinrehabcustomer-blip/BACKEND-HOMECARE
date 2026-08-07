@@ -108,6 +108,27 @@ body {
   color: var(--muted);
 }
 .login-error { margin: 0; }
+
+/* ช่องรหัสผ่าน + ปุ่มดู/ซ่อน — ปุ่มลอยทับขอบขวาในช่อง ไม่ใช่วางต่อท้ายเป็นคนละก้อน
+   ไม่งั้นบนจอแคบมันจะบีบช่องกรอกให้สั้นลงจนพิมพ์แล้วเห็นตัวอักษรไม่กี่ตัว */
+.pw-field { position: relative; display: block; }
+/* เว้นที่ขวาไว้ให้ปุ่ม ไม่ให้ตัวอักษรที่พิมพ์ไหลไปอยู่ใต้ปุ่มจนอ่านไม่ออกตอนกดแสดงรหัส */
+.pw-field input { width: 100%; padding-right: 2.75rem; }
+.pw-toggle {
+  position: absolute;
+  top: 50%;
+  right: 0.25rem;
+  transform: translateY(-50%);
+  display: flex;
+  padding: 0.5rem;
+  border: none;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+.pw-toggle:hover { color: var(--text); }
+/* กรอบโฟกัสต้องเห็นชัด — ปุ่มนี้เข้าถึงด้วย Tab ได้และไม่มีข้อความกำกับให้เดาตำแหน่ง */
+.pw-toggle:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; border-radius: var(--radius); }
 .login-submit { justify-content: center; margin-top: 0.375rem; padding: 0.6875rem; }
 .login-note { margin-top: 0.25rem; text-align: center; line-height: 1.6; }
 .login-note a { color: var(--brand); font-weight: 600; text-decoration: none; }
@@ -299,6 +320,13 @@ body {
 .error { background: #fdecea; border-color: #f5c6c2; border-left: 3px solid var(--danger); color: var(--danger); white-space: pre-line; }
 /* ในหน้าที่มีเนื้อหาต่อท้าย (ฟอร์ม/ตาราง) ต้องเว้นระยะใต้กล่อง — ในการ์ด login ใช้ gap ของ flex อยู่แล้ว */
 .content .error { margin-bottom: 1rem; }
+
+/* แถบ error ที่มีปุ่มลองใหม่ — ปุ่มชิดขวาสุด ห่างจากข้อความเสมอไม่ว่าข้อความจะสั้นหรือยาว
+   align-items: flex-start เพราะ error จาก zod ยาวได้หลายบรรทัด ปุ่มต้องอยู่แถวบนคู่กับบรรทัดแรก
+   ไม่ลอยไปกลางก้อนข้อความจนหาไม่เจอ */
+.error-bar { display: flex; align-items: flex-start; gap: 0.75rem; }
+.error-bar-text { flex: 1; min-width: 0; }
+.error-bar .btn { flex-shrink: 0; }
 
 /* ---------- controls ---------- */
 .btn {
@@ -1786,6 +1814,14 @@ select option:checked {
 .rate-price { font-weight: 700; }
 .rate-off { color: var(--text-faint); background: var(--divider); font-style: italic; }
 
+/* ช่องที่แก้ไปแล้วแต่ยังไม่บันทึก — ตารางมีเป็นร้อยช่อง ไล่หาเองว่าแตะอะไรไปบ้างไม่ไหว
+   ใช้ทั้งสีพื้นและเส้นขอบซ้าย ไม่พึ่งสีอย่างเดียว (พื้นจางๆ บนจอสว่างจ้ากลางแดดแทบไม่เห็น
+   ซึ่งเป็นสภาพที่ผู้จัดการเปิดโน้ตบุ๊กทำงานจริง) */
+.rate-table td.is-changed {
+  background: color-mix(in srgb, var(--brand) 12%, transparent);
+  box-shadow: inset 3px 0 0 var(--brand);
+}
+
 /* ราคาเต็มที่ถูกลด — ขีดฆ่าไว้บนราคาสุทธิ ให้เห็นว่าลดมาจากเท่าไหร่ */
 .rate-was {
   display: block;
@@ -2140,6 +2176,15 @@ select option:checked {
 /* หน้าต่างที่มีตารางอยู่ข้างใน — กว้างกว่า popup ปกติ ไม่งั้นคอลัมน์เบียดจนอ่านไม่ออก */
 .modal.modal-wide { max-width: 60rem; }
 
+/* กล่องยืนยันก่อนลบ — แคบกว่า popup ปกติ เพราะมีแค่คำถามกับปุ่มสองปุ่ม
+   ไม่มี header แยก คำถามคือหัวข้อในตัวมันเอง จะได้ไม่มีอะไรให้อ่านเกินจำเป็นก่อนตัดสินใจ */
+.modal.confirm-box { max-width: 26rem; }
+.confirm-body { padding: 1.5rem 1.5rem 1.25rem; }
+.confirm-body h2 { margin: 0; font-size: 1.0625rem; line-height: 1.5; }
+.confirm-body p { margin: 0.5rem 0 0; font-size: 0.875rem; }
+/* ปุ่มยืนยันอยู่ขวาสุดตามตำแหน่งปุ่มหลักของ popup อื่นทั้งระบบ — นิ้วไปถูกที่โดยไม่ต้องอ่านซ้ำ */
+.confirm-box .modal-foot { justify-content: flex-end; }
+
 /* สรุปวันนัด + ปุ่มเปิด popup ในหน้าเคส */
 .visit-summary {
   display: flex;
@@ -2338,6 +2383,13 @@ select option:checked {
 .shift-times { margin: 0.5rem 0 0; font-size: 0.8125rem; }
 .shift-actions { flex-shrink: 0; }
 .shift-done { color: #1c7a4d; font-weight: 600; font-size: 0.875rem; }
+
+/* กล่องยืนยันเช็คเอาท์ — เข้ามาแทนที่ปุ่มในช่องเดิม ไม่ใช่แทรกเพิ่มเป็นแถวใหม่
+   การ์ดจะได้ไม่กระตุกยืดออกตอนกด และสายตายังอยู่ตรงจุดที่นิ้วเพิ่งแตะ */
+.shift-confirm { flex-shrink: 0; display: flex; flex-direction: column; gap: 0.5rem; }
+.shift-confirm-when { margin: 0; font-size: 0.8125rem; }
+.shift-confirm-warn { margin: 0; font-size: 0.75rem; color: var(--danger); max-width: 22rem; }
+.shift-confirm-actions { display: flex; gap: 0.5rem; }
 /* แถบสีซ้ายบอกสถานะกะแบบเร็ว */
 .shift-card.visit-working { border-left: 3px solid var(--brand); }
 .shift-card.visit-done { opacity: 0.8; }
@@ -2393,6 +2445,8 @@ select option:checked {
   .shift-card { flex-direction: column; align-items: stretch; }
   .shift-actions { display: flex; }
   .shift-actions .btn { flex: 1; }
+  /* ปุ่มยืนยันต้องกว้างเท่าปุ่มเช็คเอาท์เดิม — นิ้วเล็งที่เดิมได้ ไม่ต้องหาปุ่มใหม่ */
+  .shift-confirm-actions .btn { flex: 1; }
 }
 
 /* ฟอร์มนัดกะ (admin) */

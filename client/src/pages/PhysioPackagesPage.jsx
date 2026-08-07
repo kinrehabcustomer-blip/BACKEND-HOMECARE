@@ -3,6 +3,7 @@ import { api } from '../api.js';
 import { useSheetSwipe } from '../lib/sheetSwipe.js';
 import { formatBaht } from '../labels.js';
 import LineIcon from '../components/LineIcon.jsx';
+import ConfirmButton from '../components/ConfirmButton.jsx';
 
 const BLANK = {
   name: '',
@@ -73,7 +74,6 @@ export default function PhysioPackagesPage() {
   }
 
   async function remove(p) {
-    if (!confirm(`ลบแพ็คเกจ "${p.name}"?\nการลบนี้ย้อนกลับไม่ได้ — ถ้าแค่หยุดขายชั่วคราว ให้ติ๊ก "เปิดขาย" ออกแทน`)) return;
     try {
       await api.deletePhysioPackage(p.physio_package_id);
       load();
@@ -155,7 +155,15 @@ export default function PhysioPackagesPage() {
                   <button className="btn tiny" title="เลื่อนขึ้น" disabled={i === 0} onClick={() => move(i, -1)}><LineIcon name="arrow-up" /></button>
                   <button className="btn tiny" title="เลื่อนลง" disabled={i === items.length - 1} onClick={() => move(i, 1)}><LineIcon name="arrow-down" /></button>
                   <button className="btn tiny" onClick={() => setEditing(p)}>แก้ไข</button>
-                  <button className="btn tiny danger-ghost" onClick={() => remove(p)}>ลบ</button>
+                  <ConfirmButton
+                    className="btn tiny danger-ghost"
+                    title={`ลบแพ็คเกจ "${p.name}"?`}
+                    detail={'การลบนี้ย้อนกลับไม่ได้ — ถ้าแค่หยุดขายชั่วคราว ให้ติ๊ก "เปิดขาย" ออกแทน'}
+                    confirmLabel="ลบแพ็คเกจ"
+                    onConfirm={() => remove(p)}
+                  >
+                    ลบ
+                  </ConfirmButton>
                 </td>
               </tr>
             ))}

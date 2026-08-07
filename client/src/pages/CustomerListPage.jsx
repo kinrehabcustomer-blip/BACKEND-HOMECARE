@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api.js';
 import CustomerModal from '../components/CustomerModal.jsx';
 import SortHead from '../components/SortHead.jsx';
+import ErrorBar from '../components/ErrorBar.jsx';
 import { GENDER_LABELS } from '../labels.js';
 
 const PER_PAGE_OPTIONS = [20, 50, 100];
@@ -135,7 +136,7 @@ export default function CustomerListPage() {
       </div>
 
       {/* error เป็นแถบเหนือตาราง ไม่ทับทั้งหน้า — คำค้นที่พิมพ์ไว้ต้องไม่หายไปเพราะเน็ตสะดุด */}
-      {error && <p className="error">{error}</p>}
+      <ErrorBar message={error} onRetry={() => setReloadKey((k) => k + 1)} busy={loading} />
 
       <div className="table-wrap">
         <table className="table table-cards table-indexed">

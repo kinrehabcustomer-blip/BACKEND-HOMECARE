@@ -1,30 +1,49 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
 import MyCaseModal, { serviceName } from '../components/MyCaseModal.jsx';
+import ErrorBar from '../components/ErrorBar.jsx';
 import { CASE_STATUS_LABELS, formatDate } from '../labels.js';
 
 export default function MyCasesPage() {
   const [list, setList] = useState(null);
   const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [openId, setOpenId] = useState(null);
 
-  useEffect(() => {
-    api.myCases().then(setList).catch((e) => setError(e.message));
+  const load = useCallback(() => {
+    setLoading(true);
+    return api
+      .myCases()
+      .then((data) => {
+        setList(data);
+        setError(null); // โหลดผ่านแล้ว error ของรอบก่อนต้องหายไปด้วย
+      })
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
   }, []);
 
-  if (error) return <p className="error">{error}</p>;
-  if (!list) return <p className="muted">กำลังโหลด…</p>;
+  useEffect(() => { load(); }, [load]);
 
   return (
     <>
       <header className="page-head">
         <div>
           <h1>เคสของฉัน</h1>
-          <p className="muted">เคสที่คุณรับผิดชอบทั้งหมด {list.length} เคส — กดที่เคสเพื่อดูรายละเอียด</p>
+          <p className="muted">
+            {list
+              ? `เคสที่คุณรับผิดชอบทั้งหมด ${list.length} เคส — กดที่เคสเพื่อดูรายละเอียด`
+              : 'เคสที่คุณรับผิดชอบ'}
+          </p>
         </div>
       </header>
 
-      {list.length === 0 ? (
+      {/* error เป็นแถบเหนือรายการ ไม่ทับทั้งหน้า — พนักงานอยู่หน้างาน สัญญาณหายเป็นเรื่องปกติ
+          เคสที่โหลดมาได้แล้วต้องยังเปิดดูได้ และต้องมีปุ่มลองใหม่ ไม่ใช่ต้องรีเฟรชเบราว์เซอร์เอง */}
+      <ErrorBar message={error} onRetry={load} busy={loading} />
+
+      {!list ? (
+        !error && <p className="muted">กำลังโหลด…</p>
+      ) : list.length === 0 ? (
         <section className="card empty-state">
           <p>ยังไม่มีเคสที่คุณรับผิดชอบ</p>
           <p className="muted">เมื่อผู้จัดการจับคู่เคสให้คุณ เคสจะปรากฏที่นี่</p>

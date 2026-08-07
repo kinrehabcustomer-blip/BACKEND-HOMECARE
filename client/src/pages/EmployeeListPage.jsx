@@ -4,6 +4,7 @@ import { api } from '../api.js';
 import EmployeeModal from '../components/EmployeeModal.jsx';
 import SortHead from '../components/SortHead.jsx';
 import Avatar from '../components/Avatar.jsx';
+import ErrorBar from '../components/ErrorBar.jsx';
 import { POSITION_LABELS, STATUS_LABELS, EMPLOYMENT_TYPE_LABELS } from '../labels.js';
 
 const PER_PAGE_OPTIONS = [20, 50, 100];
@@ -160,7 +161,7 @@ export default function EmployeeListPage() {
       </div>
 
       {/* error เป็นแถบเหนือตาราง ไม่ทับทั้งหน้า — คำค้นและตัวกรองที่ตั้งไว้ต้องไม่หายไปเพราะเน็ตสะดุด */}
-      {error && <p className="error">{error}</p>}
+      <ErrorBar message={error} onRetry={() => setReloadKey((k) => k + 1)} busy={loading} />
 
       {/* จอแคบ: ให้ตารางเลื่อนแนวนอนในกล่องของตัวเอง ไม่ดันทั้งหน้าให้เลื่อนตาม */}
       <div className="table-wrap">

@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { api } from '../api.js';
 import RevenueChart from '../components/RevenueChart.jsx';
 import CaseTypeChart from '../components/CaseTypeChart.jsx';
+import ErrorBar from '../components/ErrorBar.jsx';
 import {
   CASE_TYPE_LABELS, CASE_STATUS_LABELS, MONTH_LABELS,
   formatDate, formatPeriod, toBuddhistYear,
@@ -29,6 +30,8 @@ export default function DashboardPage() {
   const [summary, setSummary] = useState(null);
   const [unassigned, setUnassigned] = useState([]);
   const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [reloadKey, setReloadKey] = useState(0); // เด้งค่าเพื่อสั่งโหลดใหม่จากปุ่ม "ลองใหม่"
 
   // ปี/เดือนที่มีข้อมูลจริง โหลดครั้งเดียว — ไม่ต้องดึงใหม่ทุกครั้งที่เปลี่ยนช่วงเวลา
   useEffect(() => {
@@ -36,20 +39,30 @@ export default function DashboardPage() {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+
     const params = { status: 'unassigned', per_page: 5, sort: 'created_at', order: 'desc' };
     if (year) params.year = year;
     if (year && month) params.month = month;
 
     Promise.all([api.caseSummary({ year, month }), api.listCases(params)])
       .then(([s, list]) => {
+        if (cancelled) return; // ผลของช่วงเวลาเก่าที่มาถึงช้ากว่า ต้องไม่ทับของที่เลือกอยู่
         setSummary(s);
         setUnassigned(list.data);
+        setError(null); // สำเร็จแล้วต้องล้าง error ของรอบก่อน ไม่งั้นเน็ตสะดุดครั้งเดียวแถบจะค้างตลอด
       })
-      .catch((err) => setError(err.message));
-  }, [year, month]);
+      .catch((err) => !cancelled && setError(err.message))
+      .finally(() => !cancelled && setLoading(false));
+
+    return () => { cancelled = true; };
+  }, [year, month, reloadKey]);
 
   // เดือนที่เลือกได้ = เฉพาะเดือนที่มีเคสจริงในปีที่เลือกอยู่
   const monthsOfYear = periods.find((p) => p.year === year)?.months ?? [];
+
+  const reload = () => setReloadKey((k) => k + 1);
 
   /** เปลี่ยนปีแล้วต้องล้างเดือนทิ้ง — เดือนเดิมอาจไม่มีข้อมูลในปีใหม่ */
   const changeYear = (value) => {
@@ -65,15 +78,12 @@ export default function DashboardPage() {
     return `/cases?${params}`;
   };
 
-  if (error) return <p className="error">{error}</p>;
-  if (!summary) return <p className="muted">กำลังโหลด…</p>;
-
-  const count = (status) => summary.by_status.find((s) => s.status === status)?.count ?? 0;
-  const total = summary.total;
+  const count = (status) => summary?.by_status.find((s) => s.status === status)?.count ?? 0;
+  const total = summary?.total ?? 0;
   const pct = (n) => (total === 0 ? '—' : `${Math.round((n / total) * 100)}% ของทั้งหมด`);
 
   // เรียงมากไปน้อย ประเภทที่ยังไม่มีเคสเลยไม่ต้องแสดง (กราฟเรียงซ้ำอีกชั้นเผื่อถูกเรียกจากที่อื่น)
-  const byType = [...summary.by_type].sort((a, b) => b.count - a.count);
+  const byType = summary ? [...summary.by_type].sort((a, b) => b.count - a.count) : [];
 
   return (
     <>
@@ -114,7 +124,13 @@ export default function DashboardPage() {
         </div>
       </header>
 
-      {total === 0 ? (
+      {/* error เป็นแถบเหนือเนื้อหา ไม่ทับทั้งหน้า — ตัวเลือกปี/เดือนกับตัวเลขที่โหลดมาได้แล้ว
+          ต้องไม่หายไปเพราะเน็ตสะดุดครั้งเดียว และต้องมีทางกดกลับมาเองโดยไม่ต้องรีเฟรชเบราว์เซอร์ */}
+      <ErrorBar message={error} onRetry={reload} busy={loading} />
+
+      {!summary ? (
+        !error && <p className="muted">กำลังโหลด…</p>
+      ) : total === 0 ? (
         <section className="card empty-state">
           <p>{year ? `ไม่มีเคสที่เปิดใน${formatPeriod(year, month)}` : 'ยังไม่มีเคสในระบบ'}</p>
           {year ? (

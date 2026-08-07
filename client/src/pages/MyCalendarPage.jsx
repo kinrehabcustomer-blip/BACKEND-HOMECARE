@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import MyCaseModal from '../components/MyCaseModal.jsx';
+import ErrorBar from '../components/ErrorBar.jsx';
 import { CASE_TYPE_LABELS, VISIT_STATE_LABELS, MONTH_LABELS, toBuddhistYear } from '../labels.js';
 
 const WEEKDAYS = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
@@ -18,19 +19,27 @@ export default function MyCalendarPage() {
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
-  const [cases, setCases] = useState([]);
+  const [cases, setCases] = useState(null);
   const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [openId, setOpenId] = useState(null);
 
   const mm = String(month).padStart(2, '0');
   const today = todayISO();
 
-  useEffect(() => {
-    api
+  const load = useCallback(() => {
+    setLoading(true);
+    return api
       .myCalendar({ year: String(year), month: mm })
-      .then(setCases)
-      .catch((e) => setError(e.message));
+      .then((data) => {
+        setCases(data);
+        setError(null); // เปลี่ยนเดือนแล้วโหลดผ่าน error ของเดือนก่อนต้องหายไปด้วย
+      })
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
   }, [year, mm]);
+
+  useEffect(() => { load(); }, [load]);
 
   function shiftMonth(delta) {
     const d = new Date(year, month - 1 + delta, 1);
@@ -49,21 +58,23 @@ export default function MyCalendarPage() {
 
   const byDay = useMemo(() => {
     const map = new Map();
-    for (const c of cases) {
+    for (const c of cases ?? []) {
       if (!map.has(c.visit_date)) map.set(c.visit_date, []);
       map.get(c.visit_date).push(c);
     }
     return map;
   }, [cases]);
 
-  if (error) return <p className="error">{error}</p>;
-
   return (
     <>
       <header className="page-head">
         <div>
           <h1>ตารางงานของฉัน</h1>
-          <p className="muted">เดือนนี้คุณมี {cases.length} วันนัด — กดที่งานเพื่อดูรายละเอียดเคส</p>
+          <p className="muted">
+            {cases
+              ? `เดือนนี้คุณมี ${cases.length} วันนัด — กดที่งานเพื่อดูรายละเอียดเคส`
+              : 'กดที่งานเพื่อดูรายละเอียดเคส'}
+          </p>
         </div>
         <div className="actions">
           <button className="btn" onClick={() => shiftMonth(-1)} aria-label="เดือนก่อนหน้า">←</button>
@@ -72,9 +83,16 @@ export default function MyCalendarPage() {
         </div>
       </header>
 
-      <h2 className="cal-title">{MONTH_LABELS[mm]} {toBuddhistYear(year)}</h2>
+      {/* error เป็นแถบเหนือปฏิทิน ไม่ทับทั้งหน้า — ปุ่มเลื่อนเดือนต้องยังกดได้
+          และเดือนที่โหลดมาได้แล้วต้องยังอ่านต่อได้ ถึงเดือนถัดไปจะโหลดไม่สำเร็จ */}
+      <ErrorBar message={error} onRetry={load} busy={loading} />
 
-      {cases.length === 0 && <p className="notice">คุณไม่มีงานในเดือนนี้</p>}
+      <h2 className="cal-title">
+        {MONTH_LABELS[mm]} {toBuddhistYear(year)}
+        {loading && <span className="muted"> · กำลังโหลด…</span>}
+      </h2>
+
+      {cases?.length === 0 && <p className="notice">คุณไม่มีงานในเดือนนี้</p>}
 
       <div className="table-wrap">
         <div className="cal-grid">

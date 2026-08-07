@@ -8,6 +8,7 @@ import {
   GENDER_LABELS, TITLE_LABELS, PATIENT_STATUS_LABELS, formatDate, ageFromBirthDate,
 } from '../labels.js';
 import LineIcon from './LineIcon.jsx';
+import ConfirmButton from './ConfirmButton.jsx';
 
 const FOCUSABLE = 'a[href], button:not(:disabled), input, select, textarea, [tabindex]:not([tabindex="-1"])';
 
@@ -186,14 +187,6 @@ export default function PatientModal({ patientId, siblings = [], onNavigate, onC
   };
 
   async function handleDelete() {
-    if (
-      !confirm(
-        `ลบแฟ้มผู้รับการดูแล ${patientId}?\nเคสที่เคยผูกไว้จะยังอยู่ในระบบ (ข้อมูลผู้ป่วยถูกบันทึกในเคสแล้ว) แต่จะไม่เชื่อมกับแฟ้มนี้อีก`,
-      )
-    ) {
-      return;
-    }
-
     setDeleting(true);
     try {
       await api.deletePatient(patientId);
@@ -357,9 +350,16 @@ export default function PatientModal({ patientId, siblings = [], onNavigate, onC
 
             <footer className="modal-foot">
               {/* ปุ่มลบดันไปชิดซ้ายสุด แยกออกจากกลุ่มปุ่มที่กดกันจริง — ไม่ให้มือไปโดนตอนเล็งปุ่มข้างๆ */}
-              <button className="btn danger-ghost foot-danger" onClick={handleDelete} disabled={deleting}>
+              <ConfirmButton
+                className="btn danger-ghost foot-danger"
+                disabled={deleting}
+                title={`ลบแฟ้มผู้รับการดูแล ${patientId} ออกจากฐานข้อมูลถาวร?`}
+                detail="เคสที่เคยผูกไว้จะยังอยู่ในระบบ (ข้อมูลผู้ป่วยถูกบันทึกในเคสแล้ว) แต่จะไม่เชื่อมกับแฟ้มนี้อีก"
+                confirmLabel="ลบแฟ้ม"
+                onConfirm={handleDelete}
+              >
                 {deleting ? 'กำลังลบ…' : 'ลบแฟ้ม'}
-              </button>
+              </ConfirmButton>
               <Link className="btn" to={`/cases/new?patient_id=${patient.patient_id}`}>+ เปิดเคส</Link>
               <Link className="btn" to={`/patients/${patient.patient_id}`}>เปิดหน้าเต็ม</Link>
               <Link className="btn primary" to={`/patients/${patient.patient_id}/edit`}>แก้ไขทั้งหมด</Link>

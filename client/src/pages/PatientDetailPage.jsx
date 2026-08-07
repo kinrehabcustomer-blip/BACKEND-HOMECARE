@@ -6,6 +6,8 @@ import {
   GENDER_LABELS, TITLE_LABELS, PATIENT_STATUS_LABELS, formatDate, ageFromBirthDate,
 } from '../labels.js';
 import LineIcon from '../components/LineIcon.jsx';
+import ErrorBar from '../components/ErrorBar.jsx';
+import ConfirmButton from '../components/ConfirmButton.jsx';
 
 function Row({ label, children }) {
   return (
@@ -22,24 +24,25 @@ export default function PatientDetailPage() {
 
   const [patient, setPatient] = useState(null);
   const [error, setError] = useState(null);
+  const [reloadKey, setReloadKey] = useState(0); // เด้งค่าเพื่อสั่งโหลดใหม่จากปุ่ม "ลองใหม่"
 
   useEffect(() => {
-    api.getPatient(id).then(setPatient).catch((err) => setError(err.message));
-  }, [id]);
+    api
+      .getPatient(id)
+      .then((v) => {
+        setPatient(v);
+        setError(null); // โหลดผ่านแล้ว error ของรอบก่อนต้องหายไปด้วย
+      })
+      .catch((err) => setError(err.message));
+  }, [id, reloadKey]);
 
   async function handleDelete() {
-    if (
-      !confirm(
-        `ลบแฟ้มผู้รับการดูแล ${id} ออกจากฐานข้อมูลถาวร?\nเคสที่เคยผูกไว้จะยังอยู่ (ข้อมูลผู้ป่วยถูกบันทึกในเคสแล้ว) แต่จะไม่เชื่อมกับแฟ้มนี้อีก`,
-      )
-    ) {
-      return;
-    }
     await api.deletePatient(id);
     navigate('/patients');
   }
 
-  if (error) return <pre className="error">{error}</pre>;
+  // โหลดไม่สำเร็จ ยังไม่มีข้อมูลให้แสดง — แต่ต้องมีทางกดใหม่ ไม่ใช่ต้องรีเฟรชเบราว์เซอร์เอง
+  if (error) return <ErrorBar message={error} onRetry={() => setReloadKey((k) => k + 1)} />;
   if (!patient) return <p className="muted">กำลังโหลด…</p>;
 
   const age = ageFromBirthDate(patient.birth_date) ?? patient.age;
@@ -158,7 +161,15 @@ export default function PatientDetailPage() {
             ลบแฟ้มผู้รับการดูแลออกจากฐานข้อมูล กู้คืนไม่ได้ — เคสที่เคยผูกไว้ยังอยู่ครบ แต่จะไม่เชื่อมกับแฟ้มนี้อีก
           </p>
         </div>
-        <button className="btn danger" onClick={handleDelete}>ลบถาวร</button>
+        <ConfirmButton
+          className="btn danger"
+          title={`ลบแฟ้มผู้รับการดูแล ${id} ออกจากฐานข้อมูลถาวร?`}
+          detail="เคสที่เคยผูกไว้จะยังอยู่ (ข้อมูลผู้ป่วยถูกบันทึกในเคสแล้ว) แต่จะไม่เชื่อมกับแฟ้มนี้อีก"
+          confirmLabel="ลบถาวร"
+          onConfirm={handleDelete}
+        >
+          ลบถาวร
+        </ConfirmButton>
       </section>
     </>
   );
