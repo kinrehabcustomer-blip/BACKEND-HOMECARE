@@ -48,10 +48,6 @@ const PAYMENT_METHODS = ['เงินสด', 'โอน', 'บัตรเค�
 
 const today = () => new Date().toISOString().slice(0, 10);
 
-/* ความกว้างกระดาษ A4 คิดเป็นพิกเซลที่ 96dpi (หน่วยอ้างอิงที่ CSS ใช้แปลง mm) — ต้องตรงกับ
-   width: 210mm ใน .invoice-doc · เป็นค่าคงที่ ไม่ได้มาจากขนาดจอ อัตราย่อจึงคำนวณจบในรอบเดียว */
-const A4_WIDTH = (210 * 96) / 25.4;
-
 export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onClose, onChanged, onReissued }) {
   const { user } = useAuth();
   const toast = useToast();
@@ -65,59 +61,6 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
   const [payOpen, setPayOpen] = useState(false);
   const [payDate, setPayDate] = useState(today);
   const [payMethod, setPayMethod] = useState(PAYMENT_METHODS[0]);
-
-  /* ใบแจ้งหนี้เป็นเอกสารกระดาษ A4 ที่สูงกว่าจอมือถือเสมอ — เดิมต้องเลื่อนอ่านทีละส่วน
-     จึงย่อทั้งใบให้พอดีกรอบตั้งแต่เปิดมา แล้วแตะเพื่อกางเป็นขนาดเต็มถ้าอยากอ่านละเอียด
-     ใช้ transform: scale ไม่ใช่ zoom — zoom จะจัดบรรทัดใหม่ (กลายเป็น "ตัวหนังสือเล็กลง")
-     ส่วน scale ย่อทั้งแผ่นตามสัดส่วนจริง เหมือนมองกระดาษไกลๆ ซึ่งเป็นสิ่งที่ต้องการ */
-  const bodyRef = useRef(null);
-  const fitRef = useRef(null);
-  const docRef = useRef(null);
-  /* null = แสดงขนาดเต็ม · มีค่า = กำลังย่อ — เก็บความสูงจริงกับอัตราย่อไว้ด้วยกันเป็นก้อนเดียว
-     เพราะความสูงกรอบ (= natural × scale) ต้องมาจากการวัดครั้งเดียวกันเสมอ
-     ถ้าไปอ่านความสูงจาก ref ตอน render กรอบจะได้เลขของเฟรมก่อน ไม่ตรงกับใบที่เพิ่งย่อ */
-  const [fitBox, setFitBox] = useState(null);
-  const [zoomed, setZoomed] = useState(false);
-
-  useEffect(() => {
-    if (!item || zoomed) { setFitBox(null); return undefined; }
-
-    const measure = () => {
-      const doc = docRef.current;
-      const box = fitRef.current;
-      const body = bodyRef.current;
-      if (!doc || !box || !body) return;
-      // scrollHeight เป็นค่าจาก layout จึงไม่ถูก transform ที่ครอบอยู่กวน — วัดซ้ำได้ไม่เพี้ยน
-      const natural = doc.scrollHeight;
-
-      /* ที่ว่างจริง = ความสูงกรอบเนื้อหา − ของที่อยู่เหนือใบ − ระยะขอบล่าง
-         "ของที่อยู่เหนือใบ" คือ padding บนของ .modal-body บวกกล่องเตือน/ฟอร์มรับชำระที่อาจโผล่มา
-         ซึ่งสูงไม่เท่ากันในแต่ละใบ จะหักด้วยตัวเลขตายตัวไม่ได้ · บวก scrollTop กลับเข้าไป
-         เพราะ rect เป็นตำแหน่งบนจอ ถ้าผู้ใช้เลื่อนอยู่แล้ววัดใหม่ตอนหมุนจอ ระยะจะเพี้ยนไปเท่าที่เลื่อน */
-      const bodyTop = body.getBoundingClientRect().top;
-      const above = box.getBoundingClientRect().top - bodyTop + body.scrollTop;
-      const padBottom = parseFloat(getComputedStyle(body).paddingBottom) || 0;
-      const avail = body.clientHeight - above - padBottom;
-      if (avail <= 0 || box.clientWidth <= 0) return;
-
-      /* ย่อตามด้านที่คับกว่า — กระดาษกว้างตายตัว 210mm บนมือถือจึงมักติดความกว้างก่อนความสูง
-         คิดแต่ความสูงอย่างเดียวแผ่นจะยังล้นออกข้างจนโดนตัดซ้าย-ขวา */
-      const scale = Math.min(box.clientWidth / A4_WIDTH, avail / natural);
-      // พอดีอยู่แล้ว (จอใหญ่) ไม่ต้องย่อ — ปล่อยเป็นแผ่นขนาดจริงไปเลย
-      if (scale >= 1) { setFitBox(null); return; }
-      // วัดได้เท่าเดิมให้คืนก้อนเดิมไป — ออบเจ็กต์ใหม่ทุกรอบจะทำให้ render กับ ResizeObserver ปลุกกันไม่จบ
-      setFitBox((prev) =>
-        prev && prev.natural === natural && prev.scale === scale ? prev : { natural, scale });
-    };
-
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(bodyRef.current);
-    observer.observe(docRef.current);
-    return () => observer.disconnect();
-    // payOpen อยู่ในรายการด้วยเพราะฟอร์มรับชำระกางอยู่เหนือใบ — กางแล้วที่ว่างหายไปหนึ่งฟอร์ม
-    // แต่ตัว .modal-body กับตัวใบไม่ได้เปลี่ยนขนาด ResizeObserver จึงไม่รู้เรื่อง ต้องสั่งวัดใหม่เอง
-  }, [item, zoomed, payOpen]);
 
   const load = () => api.getInvoice(invoiceId).then(setItem);
 
@@ -259,10 +202,8 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      {/* modal-preview = กล่องสูงคงที่เท่าเพดาน ไม่หดตามเนื้อหา — เป็นเงื่อนไขที่ทำให้การวัดพื้นที่ว่าง
-          ข้างบนได้เลขคงที่ ไม่ใช่เลขที่ขยับตามขนาดที่เราเพิ่งย่อไปเอง */}
       <div
-        className="modal modal-wide modal-preview"
+        className="modal modal-wide"
         role="dialog"
         aria-modal="true"
         aria-label="ใบแจ้งหนี้"
@@ -295,7 +236,7 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
               </div>
             </header>
 
-            <div className="modal-body" ref={bodyRef}>
+            <div className="modal-body">
               {error && <p className="error no-print">{error}</p>}
 
               {/* ใบร่างระบบอัปเดตตามเคสให้เอง จึงเตือนเฉพาะใบที่ออกไปแล้วและตัวเลขไม่ตรงกับเคส */}
@@ -373,135 +314,110 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                 </div>
               )}
 
-              {/* กรอบย่อ — สูงเท่าใบหลังย่อแล้ว (transform ไม่ลดพื้นที่ที่ layout จองไว้เอง
-                  ถ้าไม่บีบความสูงตรงนี้จะเหลือช่องว่างใต้ใบเท่ากับส่วนที่ย่อหายไป)
-                  ปุ่มมุมบนขวาสลับเป็นขนาดเต็ม — ตอนเต็มปล่อยให้ modal เลื่อนอ่านตามปกติ */}
-              <div
-                className={`invoice-fit ${fitBox ? 'is-fitted' : ''} ${zoomed ? 'is-zoomed' : ''}`}
-                ref={fitRef}
-                style={fitBox ? { height: fitBox.natural * fitBox.scale } : undefined}
-              >
-                {/* ใบที่พอดีกรอบอยู่แล้วไม่ต้องมีปุ่ม — "แตะเพื่อดูขนาดเต็ม" ทั้งที่เต็มอยู่แล้วคือปุ่มที่กดไปก็ไม่มีอะไรเกิด */}
-                {(fitBox || zoomed) && (
-                  <button
-                    type="button"
-                    className="invoice-zoom no-print"
-                    onClick={() => setZoomed((v) => !v)}
-                    aria-expanded={zoomed}
-                  >
-                    {zoomed ? 'ย่อให้พอดีจอ' : 'แตะเพื่อดูขนาดเต็ม'}
-                  </button>
-                )}
+              {/* เอกสารจริงที่จะถูกพิมพ์ — ตอนสั่งพิมพ์ CSS จะซ่อนทุกอย่างนอกกล่องนี้ */}
+              <div className="invoice-doc">
+                <p className="inv-printed">วันที่พิมพ์: {printStamp()}</p>
 
-                {/* เอกสารจริงที่จะถูกพิมพ์ — ตอนสั่งพิมพ์ CSS จะซ่อนทุกอย่างนอกกล่องนี้ */}
-                <div
-                  className="invoice-doc"
-                  ref={docRef}
-                  style={fitBox ? { transform: `scale(${fitBox.scale}) translateX(-50%)` } : undefined}
-                >
-                  <p className="inv-printed">วันที่พิมพ์: {printStamp()}</p>
-
-                  <div className="inv-header">
-                    <div className="inv-logo">
-                      <img src={ISSUER.logo} alt={ISSUER.name} />
-                    </div>
-
-                    <h3 className="inv-title">
-                      {isReceipt ? 'ใบเสร็จรับเงิน /Receipt' : 'ใบแจ้งหนี้ /Invoice'}
-                    </h3>
-                    <p className="inv-copy">สำเนา</p>
-
-                    <p className="inv-org">{ISSUER.name}</p>
-                    <p className="inv-org-line">{ISSUER.address}</p>
-                    <p className="inv-org-line">Tel. {ISSUER.tel}</p>
-                    <hr className="inv-rule" />
+                <div className="inv-header">
+                  <div className="inv-logo">
+                    <img src={ISSUER.logo} alt={ISSUER.name} />
                   </div>
 
-                  <div className="inv-parties">
-                    <div>
-                      <p>รหัสลูกค้า : <span className="mono">{item.customer_id ?? '—'}</span></p>
-                      <p>คุณ {item.bill_to_name}</p>
-                      {item.bill_to_tax_id && (
-                        <p>เลขผู้เสียภาษี : <span className="mono">{item.bill_to_tax_id}</span></p>
-                      )}
-                    </div>
-                    <div className="inv-parties-right">
-                      <p>Bill No: <strong className="mono">{item.invoice_id}</strong></p>
-                      <p>วันที่ /Date : {docDate(item.issue_date)}</p>
-                      {item.due_date && <p>ครบกำหนด /Due : {docDate(item.due_date)}</p>}
-                    </div>
+                  <h3 className="inv-title">
+                    {isReceipt ? 'ใบเสร็จรับเงิน /Receipt' : 'ใบแจ้งหนี้ /Invoice'}
+                  </h3>
+                  <p className="inv-copy">สำเนา</p>
+
+                  <p className="inv-org">{ISSUER.name}</p>
+                  <p className="inv-org-line">{ISSUER.address}</p>
+                  <p className="inv-org-line">Tel. {ISSUER.tel}</p>
+                  <hr className="inv-rule" />
+                </div>
+
+                <div className="inv-parties">
+                  <div>
+                    <p>รหัสลูกค้า : <span className="mono">{item.customer_id ?? '—'}</span></p>
+                    <p>คุณ {item.bill_to_name}</p>
+                    {item.bill_to_tax_id && (
+                      <p>เลขผู้เสียภาษี : <span className="mono">{item.bill_to_tax_id}</span></p>
+                    )}
                   </div>
+                  <div className="inv-parties-right">
+                    <p>Bill No: <strong className="mono">{item.invoice_id}</strong></p>
+                    <p>วันที่ /Date : {docDate(item.issue_date)}</p>
+                    {item.due_date && <p>ครบกำหนด /Due : {docDate(item.due_date)}</p>}
+                  </div>
+                </div>
 
-                  <table className="inv-table">
-                    <colgroup>
-                      <col style={{ width: '8%' }} />
-                      <col />
-                      <col style={{ width: '14%' }} />
-                      <col style={{ width: '20%' }} />
-                    </colgroup>
-                    <thead>
-                      <tr>
-                        <th>No.</th>
-                        <th>รายการ (Description)</th>
-                        <th>จำนวน (Qty)</th>
-                        <th>จำนวนเงิน (Amount)</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr>
-                        <td className="inv-c">1</td>
-                        <td>{item.service_description}</td>
-                        <td className="inv-c">1</td>
-                        <td className="inv-r">{amountText(item.amount)}</td>
-                      </tr>
-                    </tbody>
-                    <tfoot>
-                      <tr>
-                        <td colSpan={3} className="inv-r">ยอดรวมทั้งสิ้น/Total</td>
-                        <td className="inv-r">{amountText(item.amount)}</td>
-                      </tr>
-                      <tr>
-                        <td colSpan={3} className="inv-r">ส่วนลดที่ได้รับ/Discount</td>
-                        <td className="inv-r">{amountText(item.discount)}</td>
-                      </tr>
-                      <tr>
-                        <td colSpan={3} className="inv-r">รวมเงิน(หลังหักส่วนลด)/Sub Total</td>
-                        <td className="inv-r">{amountText(item.total)}</td>
-                      </tr>
-                      <tr>
-                        <td colSpan={3} className="inv-r">
-                          {isReceipt ? 'จ่ายชำระทั้งสิ้น/Paid' : 'ยอดที่ต้องชำระ/Amount Due'}
-                        </td>
-                        <td className="inv-r"><strong>{amountText(item.total)}</strong></td>
-                      </tr>
-                      <tr>
-                        <td colSpan={4} className="inv-r inv-words">( {bahtText(item.total)} )</td>
-                      </tr>
-                    </tfoot>
-                  </table>
+                <table className="inv-table">
+                  <colgroup>
+                    <col style={{ width: '8%' }} />
+                    <col />
+                    <col style={{ width: '14%' }} />
+                    <col style={{ width: '20%' }} />
+                  </colgroup>
+                  <thead>
+                    <tr>
+                      <th>No.</th>
+                      <th>รายการ (Description)</th>
+                      <th>จำนวน (Qty)</th>
+                      <th>จำนวนเงิน (Amount)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td className="inv-c">1</td>
+                      <td>{item.service_description}</td>
+                      <td className="inv-c">1</td>
+                      <td className="inv-r">{amountText(item.amount)}</td>
+                    </tr>
+                  </tbody>
+                  <tfoot>
+                    <tr>
+                      <td colSpan={3} className="inv-r">ยอดรวมทั้งสิ้น/Total</td>
+                      <td className="inv-r">{amountText(item.amount)}</td>
+                    </tr>
+                    <tr>
+                      <td colSpan={3} className="inv-r">ส่วนลดที่ได้รับ/Discount</td>
+                      <td className="inv-r">{amountText(item.discount)}</td>
+                    </tr>
+                    <tr>
+                      <td colSpan={3} className="inv-r">รวมเงิน(หลังหักส่วนลด)/Sub Total</td>
+                      <td className="inv-r">{amountText(item.total)}</td>
+                    </tr>
+                    <tr>
+                      <td colSpan={3} className="inv-r">
+                        {isReceipt ? 'จ่ายชำระทั้งสิ้น/Paid' : 'ยอดที่ต้องชำระ/Amount Due'}
+                      </td>
+                      <td className="inv-r"><strong>{amountText(item.total)}</strong></td>
+                    </tr>
+                    <tr>
+                      <td colSpan={4} className="inv-r inv-words">( {bahtText(item.total)} )</td>
+                    </tr>
+                  </tfoot>
+                </table>
 
-                  <p className="inv-methods">
-                    <span>เงินสด Cash={pay.cash}</span>
-                    <span>บัตรเครดิต/Credit Card={pay.credit}</span>
-                    <span>โอน/Transfer={pay.transfer}</span>
-                  </p>
+                <p className="inv-methods">
+                  <span>เงินสด Cash={pay.cash}</span>
+                  <span>บัตรเครดิต/Credit Card={pay.credit}</span>
+                  <span>โอน/Transfer={pay.transfer}</span>
+                </p>
 
-                  {isReceipt && <p className="inv-line">ได้รับเงินจาก (Received from) คุณ {item.bill_to_name}</p>}
-                  <p className="inv-line">หมายเหตุ : {item.note ?? ''}</p>
+                {isReceipt && <p className="inv-line">ได้รับเงินจาก (Received from) คุณ {item.bill_to_name}</p>}
+                <p className="inv-line">หมายเหตุ : {item.note ?? ''}</p>
 
-                  <div className="inv-signs">
-                    <div className="inv-sign">
-                      <span className="inv-sign-role">ผู้จ่ายเงิน</span>
-                      <span className="inv-sign-dots">(...................................................)</span>
-                      <span className="inv-sign-name">( คุณ {item.bill_to_name} )</span>
-                    </div>
-                    {/* ผู้ลงนาม = คนที่กำลังสั่งพิมพ์ (บัญชีที่ล็อกอินอยู่) เพราะเป็นคนยื่นเอกสารให้ลูกค้าจริง
-                        ส่วนคนที่ออกใบ/รับเงินยังถูกบันทึกไว้ใน DB (issued_by/paid_by) สำหรับทำรายงาน */}
-                    <div className="inv-sign">
-                      <span className="inv-sign-role">ผู้ออกเอกสาร / ผู้รับชำระเงิน</span>
-                      <span className="inv-sign-dots">(...................................................)</span>
-                      <span className="inv-sign-name">( {printerName} )</span>
-                    </div>
+                <div className="inv-signs">
+                  <div className="inv-sign">
+                    <span className="inv-sign-role">ผู้จ่ายเงิน</span>
+                    <span className="inv-sign-dots">(...................................................)</span>
+                    <span className="inv-sign-name">( คุณ {item.bill_to_name} )</span>
+                  </div>
+                  {/* ผู้ลงนาม = คนที่กำลังสั่งพิมพ์ (บัญชีที่ล็อกอินอยู่) เพราะเป็นคนยื่นเอกสารให้ลูกค้าจริง
+                      ส่วนคนที่ออกใบ/รับเงินยังถูกบันทึกไว้ใน DB (issued_by/paid_by) สำหรับทำรายงาน */}
+                  <div className="inv-sign">
+                    <span className="inv-sign-role">ผู้ออกเอกสาร / ผู้รับชำระเงิน</span>
+                    <span className="inv-sign-dots">(...................................................)</span>
+                    <span className="inv-sign-name">( {printerName} )</span>
                   </div>
                 </div>
               </div>
