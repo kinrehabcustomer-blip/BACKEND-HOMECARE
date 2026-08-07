@@ -8,6 +8,7 @@ import {
   formatDate, toBuddhistYear,
 } from '../labels.js';
 import LineIcon from '../components/LineIcon.jsx';
+import PageRefresh from '../components/PageRefresh.jsx';
 
 const WEEKDAYS = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
 
@@ -163,7 +164,7 @@ export default function CalendarPage() {
       : `${MONTH_LABELS[mm]} ${toBuddhistYear(year)}`;
 
   return (
-    <>
+    <PageRefresh onRefresh={() => setReloadKey((k) => k + 1)} busy={loading}>
       <header className="page-head no-print">
         <div>
           <h1>ตารางงาน</h1>
@@ -354,7 +355,7 @@ export default function CalendarPage() {
           onChanged={() => setReloadKey((k) => k + 1)}
         />
       )}
-    </>
+    </PageRefresh>
   );
 }
 

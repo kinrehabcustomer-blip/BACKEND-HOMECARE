@@ -51,11 +51,34 @@ function NavIcon({ name }) {
   );
 }
 
+/* เมนูเก็บเป็นข้อมูล ไม่ใช่ JSX ตายตัว — ใช้สองที่: วาดรายการเมนู และหาชื่อหน้าปัจจุบันมาโชว์บนแถบบน
+   ถ้าแยกกันเขียนสองชุด วันหนึ่งจะมีเมนูที่เปลี่ยนชื่อแล้วแถบบนยังเรียกชื่อเก่า */
+const ADMIN_NAV = [
+  { to: '/dashboard', icon: 'dashboard', label: 'ภาพรวม' },
+  { to: '/cases', icon: 'cases', label: 'เคส' },
+  { to: '/calendar', icon: 'calendar', label: 'ตารางงาน' },
+  { to: '/attendance', icon: 'clock', label: 'การมาทำงาน' },
+  { to: '/invoices', icon: 'invoice', label: 'ใบแจ้งหนี้' },
+  { to: '/customers', icon: 'users', label: 'ลูกค้า' },
+  { to: '/patients', icon: 'heart', label: 'ผู้รับการดูแล' },
+  { to: '/packages', icon: 'home', label: 'แพ็คเกจ Homecare' },
+  { to: '/physio-packages', icon: 'activity', label: 'แพ็คเกจกายภาพบำบัด' },
+  { to: '/employees', icon: 'user', label: 'พนักงาน' },
+];
+
+const FIELD_NAV = [
+  { to: '/my-today', icon: 'today', label: 'งานวันนี้' },
+  { to: '/my-cases', icon: 'cases', label: 'เคสของฉัน' },
+  { to: '/my-calendar', icon: 'calendar', label: 'ตารางงานของฉัน' },
+  { to: '/my-attendance', icon: 'clock', label: 'ค่าตอบแทนของฉัน' },
+];
+
 function Sidebar() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const isAdmin = user.role === 'admin';
+  const items = isAdmin ? ADMIN_NAV : FIELD_NAV;
 
   // เมนูพับได้เฉพาะจอแคบ (CSS ซ่อนปุ่มบนจอกว้าง) — บนจอกว้างค่านี้ไม่มีผลกับอะไรเลย
   const [menuOpen, setMenuOpen] = useState(false);
@@ -102,40 +125,30 @@ function Sidebar() {
         <div className="nav-scrim" onClick={() => setMenuOpen(false)} aria-hidden="true" />
       )}
 
-      {/* เมนูจัดการเห็นเฉพาะผู้ดูแลระบบ (ผู้จัดการ/HR) — พนักงานภาคสนามยังไม่มีส่วนของตัวเอง */}
-      {isAdmin ? (
-        <nav id="main-nav">
-          <NavLink to="/dashboard"><NavIcon name="dashboard" />ภาพรวม</NavLink>
-          <NavLink to="/cases"><NavIcon name="cases" />เคส</NavLink>
-          <NavLink to="/calendar"><NavIcon name="calendar" />ตารางงาน</NavLink>
-          <NavLink to="/attendance"><NavIcon name="clock" />การมาทำงาน</NavLink>
-          <NavLink to="/invoices"><NavIcon name="invoice" />ใบแจ้งหนี้</NavLink>
-          <NavLink to="/customers"><NavIcon name="users" />ลูกค้า</NavLink>
-          <NavLink to="/patients"><NavIcon name="heart" />ผู้รับการดูแล</NavLink>
-          <NavLink to="/packages"><NavIcon name="home" />แพ็คเกจ Homecare</NavLink>
-          <NavLink to="/physio-packages"><NavIcon name="activity" />แพ็คเกจกายภาพบำบัด</NavLink>
-          <NavLink to="/employees"><NavIcon name="user" />พนักงาน</NavLink>
-        </nav>
-      ) : (
-        <nav id="main-nav">
-          <NavLink to="/my-today"><NavIcon name="today" />งานวันนี้</NavLink>
-          <NavLink to="/my-cases"><NavIcon name="cases" />เคสของฉัน</NavLink>
-          <NavLink to="/my-calendar"><NavIcon name="calendar" />ตารางงานของฉัน</NavLink>
-          <NavLink to="/my-attendance"><NavIcon name="clock" />ค่าตอบแทนของฉัน</NavLink>
-        </nav>
-      )}
+      {/* เมนูจัดการเห็นเฉพาะผู้ดูแลระบบ (ผู้จัดการ/HR) — พนักงานภาคสนามเห็นเฉพาะงานของตัวเอง
 
-      <div className="sidebar-foot">
-        <div className="who-row">
-          <div className="who">
-            <strong>{user.first_name} {user.last_name}</strong>
-            <span className="mono muted">{user.employee_id}</span>
+          กรอบนี้เป็น display: contents บนจอกว้าง = ไม่มีตัวตนในการจัดวาง เมนูกับส่วนท้าย
+          ยังเป็นลูกโดยตรงของ sidebar เหมือนเดิมเป๊ะ · บนจอแคบมันกลายเป็นแผงเดียวที่กางลงมา
+          ทำให้ปุ่มตั้งค่า/ออกจากระบบย้ายเข้าไปอยู่ในเมนู แทนที่จะแย่งที่บนแถบบน */}
+      <div className="sidebar-panel">
+        <nav id="main-nav">
+          {items.map((i) => (
+            <NavLink key={i.to} to={i.to}><NavIcon name={i.icon} />{i.label}</NavLink>
+          ))}
+        </nav>
+
+        <div className="sidebar-foot">
+          <div className="who-row">
+            <div className="who">
+              <strong>{user.first_name} {user.last_name}</strong>
+              <span className="mono muted">{user.employee_id}</span>
+            </div>
+            <NavLink className="btn icon-btn" to="/settings" title="ตั้งค่า" aria-label="ตั้งค่า">
+              <LineIcon name="settings" />
+            </NavLink>
           </div>
-          <NavLink className="btn icon-btn" to="/settings" title="ตั้งค่า" aria-label="ตั้งค่า">
-            <LineIcon name="settings" />
-          </NavLink>
+          <button className="btn sidebar-btn" onClick={handleLogout}>ออกจากระบบ</button>
         </div>
-        <button className="btn sidebar-btn" onClick={handleLogout}>ออกจากระบบ</button>
       </div>
     </aside>
   );

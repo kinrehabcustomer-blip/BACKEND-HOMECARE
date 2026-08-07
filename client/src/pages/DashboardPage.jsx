@@ -4,6 +4,7 @@ import { api } from '../api.js';
 import RevenueChart from '../components/RevenueChart.jsx';
 import CaseTypeChart from '../components/CaseTypeChart.jsx';
 import ErrorBar from '../components/ErrorBar.jsx';
+import PageRefresh from '../components/PageRefresh.jsx';
 import {
   CASE_TYPE_LABELS, CASE_STATUS_LABELS, MONTH_LABELS,
   formatDate, formatPeriod, toBuddhistYear,
@@ -86,7 +87,7 @@ export default function DashboardPage() {
   const byType = summary ? [...summary.by_type].sort((a, b) => b.count - a.count) : [];
 
   return (
-    <>
+    <PageRefresh onRefresh={reload} busy={loading}>
       <header className="page-head">
         <div>
           <h1>ภาพรวม</h1>
@@ -225,6 +226,6 @@ export default function DashboardPage() {
           <RevenueChart />
         </>
       )}
-    </>
+    </PageRefresh>
   );
 }

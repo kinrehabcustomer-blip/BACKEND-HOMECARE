@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
 import MyCaseModal, { serviceName } from '../components/MyCaseModal.jsx';
 import ErrorBar from '../components/ErrorBar.jsx';
+import PageRefresh from '../components/PageRefresh.jsx';
 import { CASE_STATUS_LABELS, formatDate } from '../labels.js';
 
 export default function MyCasesPage() {
@@ -25,7 +26,7 @@ export default function MyCasesPage() {
   useEffect(() => { load(); }, [load]);
 
   return (
-    <>
+    <PageRefresh onRefresh={load} busy={loading}>
       <header className="page-head">
         <div>
           <h1>เคสของฉัน</h1>
@@ -96,6 +97,6 @@ export default function MyCasesPage() {
       )}
 
       {openId && <MyCaseModal caseId={openId} onClose={() => setOpenId(null)} />}
-    </>
+    </PageRefresh>
   );
 }

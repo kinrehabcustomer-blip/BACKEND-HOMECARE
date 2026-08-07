@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import InvoiceModal from '../components/InvoiceModal.jsx';
 import SortHead from '../components/SortHead.jsx';
 import ErrorBar from '../components/ErrorBar.jsx';
+import PageRefresh from '../components/PageRefresh.jsx';
 import { api } from '../api.js';
 import { INVOICE_STATUS_LABELS, formatBaht, formatDate } from '../labels.js';
 
@@ -139,7 +140,7 @@ export default function InvoiceListPage() {
   const visibleIds = rows.map((v) => v.invoice_id);
 
   return (
-    <>
+    <PageRefresh onRefresh={() => setReloadKey((k) => k + 1)} busy={loading}>
       <header className="page-head">
         <div>
           <h1>ใบแจ้งหนี้</h1>
@@ -336,6 +337,6 @@ export default function InvoiceListPage() {
           onClose={closeInvoice}
         />
       )}
-    </>
+    </PageRefresh>
   );
 }

@@ -3,6 +3,7 @@ import { api } from '../api.js';
 import { useSheetSwipe } from '../lib/sheetSwipe.js';
 import { formatBaht } from '../labels.js';
 import LineIcon from '../components/LineIcon.jsx';
+import PageRefresh from '../components/PageRefresh.jsx';
 import ConfirmButton from '../components/ConfirmButton.jsx';
 
 const BLANK = {
@@ -51,10 +52,19 @@ const detailLine = (p) =>
 
 export default function PhysioPackagesPage() {
   const [items, setItems] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [editing, setEditing] = useState(null); // null = ปิดฟอร์ม | {} = เพิ่มใหม่ | {...} = แก้ไข
 
-  const load = () => api.listPhysioPackages().then(setItems).catch((e) => setError(e.message));
+  // คืน promise ออกไปด้วย เพื่อให้ตัวดึงหน้าลงรู้ว่าโหลดเสร็จเมื่อไร (คาวงกลมหมุนไว้จนกว่าจะได้ของจริง)
+  const load = () => {
+    setLoading(true);
+    return api
+      .listPhysioPackages()
+      .then((v) => { setItems(v); setError(null); })
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
+  };
   useEffect(() => {
     load();
   }, []);
@@ -86,7 +96,7 @@ export default function PhysioPackagesPage() {
   if (!items) return <p className="muted">กำลังโหลด…</p>;
 
   return (
-    <>
+    <PageRefresh onRefresh={load} busy={loading}>
       <header className="page-head">
         <div>
           <h1>แพ็คเกจกายภาพบำบัด</h1>
@@ -186,7 +196,7 @@ export default function PhysioPackagesPage() {
           }}
         />
       )}
-    </>
+    </PageRefresh>
   );
 }
 

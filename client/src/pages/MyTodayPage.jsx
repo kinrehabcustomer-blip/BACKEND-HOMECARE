@@ -3,14 +3,9 @@ import { api } from '../api.js';
 import CheckInModal from '../components/CheckInModal.jsx';
 import { serviceName } from '../components/MyCaseModal.jsx';
 import { getPosition } from '../lib/geo.js';
-import { usePullToRefresh } from '../lib/pullRefresh.js';
+import PageRefresh, { RefreshButton } from '../components/PageRefresh.jsx';
 import { CASE_TYPE_LABELS, VISIT_STATE_LABELS, timeText, durationText } from '../labels.js';
 import LineIcon from '../components/LineIcon.jsx';
-
-/* เว้นระยะขั้นต่ำระหว่างการโหลดอัตโนมัติ — สลับแอปกลับมาทีเดียวบางเบราว์เซอร์ยิงทั้ง
-   visibilitychange และ focus ติดกัน ถ้าไม่กันไว้จะยิง API สองรอบทุกครั้งที่เปิดแอปขึ้นมา
-   ไม่คุมปุ่มรีเฟรชที่ผู้ใช้กดเอง — กดแล้วต้องโหลดจริงเสมอ ไม่งั้นเหมือนปุ่มเสีย */
-const AUTO_RELOAD_GAP_MS = 15_000;
 
 /** หน้าหลักของพนักงานภาคสนาม — กะงานวันนี้ พร้อมปุ่มเช็คอิน/เช็คเอาท์ */
 export default function MyTodayPage() {
@@ -26,12 +21,10 @@ export default function MyTodayPage() {
      และไม่มีอะไรบอกว่าสิ่งที่เห็นอยู่เก่าแค่ไหน */
   const loadId = useRef(0);      // เลขรอบการโหลด — รอบที่ออกทีหลังชนะเสมอ
   const mutationId = useRef(0);  // เด้งขึ้นทุกครั้งที่เช็คอิน/เช็คเอาท์สำเร็จ
-  const lastLoadAt = useRef(0);
 
   const load = useCallback(async () => {
     const id = ++loadId.current;
     const mutationAtStart = mutationId.current;
-    lastLoadAt.current = Date.now();
     setLoading(true);
     try {
       const data = await api.myToday();
@@ -52,28 +45,8 @@ export default function MyTodayPage() {
     }
   }, []);
 
-  /* ดึงหน้าลงเพื่อรีเฟรช — ท่ามาตรฐานของแอปมือถือ และเป็นท่าที่นิ้วทำอยู่แล้วตอนอยากดูของใหม่
-     ปุ่มยังอยู่ แต่ CSS ซ่อนบนเครื่องที่ใช้นิ้ว (ดู .pull-only-btn) — บนคอมไม่มีนิ้วให้ดึง ต้องมีปุ่ม */
-  const { zoneRef, contentRef } = usePullToRefresh(load);
-
-  useEffect(() => {
-    load();
-
-    /* กลับมาที่แอปแล้วดึงใหม่ให้เอง — จังหวะที่คนเปิดหน้านี้ขึ้นมาดูคือจังหวะที่ต้องการข้อมูลล่าสุดพอดี
-       ดักสองเหตุการณ์เพราะบนมือถือแต่ละเบราว์เซอร์ยิงไม่เหมือนกัน (บางตัวสลับแอปแล้วไม่ยิง
-       visibilitychange เลย) มี AUTO_RELOAD_GAP_MS กันการยิงซ้ำอยู่แล้ว */
-    const onWake = () => {
-      if (document.visibilityState !== 'visible') return;
-      if (Date.now() - lastLoadAt.current < AUTO_RELOAD_GAP_MS) return;
-      load();
-    };
-    document.addEventListener('visibilitychange', onWake);
-    window.addEventListener('focus', onWake);
-    return () => {
-      document.removeEventListener('visibilitychange', onWake);
-      window.removeEventListener('focus', onWake);
-    };
-  }, [load]);
+  // โหลดรอบแรก — ส่วนการดึงหน้าลงและการโหลดใหม่ตอนกลับเข้าแอป <PageRefresh> จัดการให้
+  useEffect(() => { load(); }, [load]);
 
   /** ทับกะที่อัปเดตแล้วในรายการ (หลังเช็คอิน/เอาท์) */
   const apply = (updated) => {
@@ -97,57 +70,41 @@ export default function MyTodayPage() {
   const dateLabel = new Date().toLocaleDateString('th-TH', { weekday: 'long', day: 'numeric', month: 'long' });
 
   return (
-    <div className="pull-zone" ref={zoneRef}>
-      {/* วงกลมหมุนที่โผล่มาในช่องว่างซึ่งเนื้อหาเลื่อนลงไปเปิดให้ — จางอยู่นอกสายตาตอนไม่ได้ดึง
-          aria-hidden เพราะเป็นภาพประกอบท่านิ้วล้วนๆ คนใช้โปรแกรมอ่านหน้าจอใช้ปุ่มรีเฟรชแทน */}
-      <div className="pull-hint" data-pull-hint aria-hidden="true">
-        <LineIcon name="refresh" className="pull-hint-ico" />
-      </div>
+    <PageRefresh onRefresh={load} busy={loading}>
+      <header className="page-head">
+        <div>
+          <h1>งานวันนี้</h1>
+          <p className="muted">{dateLabel}{visits && ` · ${visits.length} กะ`}</p>
+        </div>
+        <RefreshButton onRefresh={load} busy={loading} updatedAt={loadedAt} />
+      </header>
 
-      <div className="pull-content" ref={contentRef}>
-        <header className="page-head">
-          <div>
-            <h1>งานวันนี้</h1>
-            <p className="muted">
-              {dateLabel}
-              {visits && ` · ${visits.length} กะ`}
-              {/* บอกด้วยว่าที่เห็นอยู่ดึงมาตอนไหน — หน้านี้เปิดค้างทั้งวัน ไม่มีเวลากำกับก็ไม่มีทางรู้ว่าเก่าแค่ไหน */}
-              {loadedAt && <span className="muted"> · อัปเดต {timeText(loadedAt)}</span>}
-            </p>
-          </div>
-          {/* บนเครื่องที่ใช้นิ้วจะถูกซ่อน (ดึงหน้าลงแทน) เหลือไว้ให้เครื่องที่ใช้เมาส์ซึ่งดึงไม่ได้ */}
-          <button className="btn pull-only-btn" disabled={loading} onClick={load}>
-            <LineIcon name="refresh" />{loading ? 'กำลังโหลด…' : 'รีเฟรช'}
-          </button>
-        </header>
+      {/* error เป็นแถบเหนือรายการ ไม่ทับทั้งหน้า — กะที่โหลดมาได้แล้วต้องยังกดเช็คอิน/เช็คเอาท์ได้
+          ถึงการดึงข้อมูลรอบล่าสุดจะล้มเหลว (พนักงานอยู่หน้างาน สัญญาณหายเป็นเรื่องปกติ) */}
+      {error && <p className="error">{error}</p>}
 
-        {/* error เป็นแถบเหนือรายการ ไม่ทับทั้งหน้า — กะที่โหลดมาได้แล้วต้องยังกดเช็คอิน/เช็คเอาท์ได้
-            ถึงการดึงข้อมูลรอบล่าสุดจะล้มเหลว (พนักงานอยู่หน้างาน สัญญาณหายเป็นเรื่องปกติ) */}
-        {error && <p className="error">{error}</p>}
-
-        {!visits ? (
-          !error && <p className="muted">กำลังโหลด…</p>
-        ) : visits.length === 0 ? (
-          <section className="card empty-state">
-            <p>วันนี้คุณไม่มีกะงาน</p>
-            <p className="muted">
-              เมื่อผู้จัดการนัดกะให้คุณ งานจะปรากฏที่นี่ — หน้านี้ดึงข้อมูลใหม่ให้เองทุกครั้งที่กลับเข้าแอป
-            </p>
-          </section>
-        ) : (
-          <div className="shift-list">
-            {visits.map((v) => (
-              <ShiftCard
-                key={v.visit_id}
-                visit={v}
-                busy={busyId === v.visit_id}
-                onCheckIn={() => setCheckinFor(v)}
-                onCheckOut={() => checkOut(v)}
-              />
-            ))}
-          </div>
-        )}
-      </div>
+      {!visits ? (
+        !error && <p className="muted">กำลังโหลด…</p>
+      ) : visits.length === 0 ? (
+        <section className="card empty-state">
+          <p>วันนี้คุณไม่มีกะงาน</p>
+          <p className="muted">
+            เมื่อผู้จัดการนัดกะให้คุณ งานจะปรากฏที่นี่ — หน้านี้ดึงข้อมูลใหม่ให้เองทุกครั้งที่กลับเข้าแอป
+          </p>
+        </section>
+      ) : (
+        <div className="shift-list">
+          {visits.map((v) => (
+            <ShiftCard
+              key={v.visit_id}
+              visit={v}
+              busy={busyId === v.visit_id}
+              onCheckIn={() => setCheckinFor(v)}
+              onCheckOut={() => checkOut(v)}
+            />
+          ))}
+        </div>
+      )}
 
       {checkinFor && (
         <CheckInModal
@@ -159,7 +116,7 @@ export default function MyTodayPage() {
           }}
         />
       )}
-    </div>
+    </PageRefresh>
   );
 }
 

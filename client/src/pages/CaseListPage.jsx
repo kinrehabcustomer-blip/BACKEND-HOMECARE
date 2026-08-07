@@ -4,6 +4,7 @@ import { api } from '../api.js';
 import CaseModal from '../components/CaseModal.jsx';
 import SortHead from '../components/SortHead.jsx';
 import ErrorBar from '../components/ErrorBar.jsx';
+import PageRefresh from '../components/PageRefresh.jsx';
 import {
   CASE_TYPE_LABELS, CASE_STATUS_LABELS, MONTH_LABELS,
   formatBaht, formatDate, formatPeriod, toBuddhistYear,
@@ -140,7 +141,7 @@ export default function CaseListPage() {
   const visibleIds = rows.map((c) => c.case_id);
 
   return (
-    <>
+    <PageRefresh onRefresh={() => setReloadKey((k) => k + 1)} busy={loading}>
       <header className="page-head">
         <div>
           <h1>เคส</h1>
@@ -354,6 +355,6 @@ export default function CaseListPage() {
           onClose={closeCase}
         />
       )}
-    </>
+    </PageRefresh>
   );
 }

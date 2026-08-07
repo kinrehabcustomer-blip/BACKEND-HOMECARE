@@ -4,6 +4,7 @@ import { api } from '../api.js';
 import CustomerModal from '../components/CustomerModal.jsx';
 import SortHead from '../components/SortHead.jsx';
 import ErrorBar from '../components/ErrorBar.jsx';
+import PageRefresh from '../components/PageRefresh.jsx';
 import { GENDER_LABELS } from '../labels.js';
 
 const PER_PAGE_OPTIONS = [20, 50, 100];
@@ -110,7 +111,7 @@ export default function CustomerListPage() {
   const visibleIds = rows.map((c) => c.customer_id);
 
   return (
-    <>
+    <PageRefresh onRefresh={() => setReloadKey((k) => k + 1)} busy={loading}>
       <header className="page-head">
         <div>
           <h1>ลูกค้า</h1>
@@ -268,6 +269,6 @@ export default function CustomerListPage() {
           onClose={closeCustomer}
         />
       )}
-    </>
+    </PageRefresh>
   );
 }

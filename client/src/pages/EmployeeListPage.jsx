@@ -5,6 +5,7 @@ import EmployeeModal from '../components/EmployeeModal.jsx';
 import SortHead from '../components/SortHead.jsx';
 import Avatar from '../components/Avatar.jsx';
 import ErrorBar from '../components/ErrorBar.jsx';
+import PageRefresh from '../components/PageRefresh.jsx';
 import { POSITION_LABELS, STATUS_LABELS, EMPLOYMENT_TYPE_LABELS } from '../labels.js';
 
 const PER_PAGE_OPTIONS = [20, 50, 100];
@@ -120,7 +121,7 @@ export default function EmployeeListPage() {
   const activeCount = summary?.by_status.find((s) => s.status === 'active')?.count ?? 0;
 
   return (
-    <>
+    <PageRefresh onRefresh={() => setReloadKey((k) => k + 1)} busy={loading}>
       <header className="page-head">
         <div>
           <h1>พนักงาน</h1>
@@ -302,6 +303,6 @@ export default function EmployeeListPage() {
           onClose={closeEmployee}
         />
       )}
-    </>
+    </PageRefresh>
   );
 }

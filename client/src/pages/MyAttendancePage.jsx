@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { serviceName } from '../components/MyCaseModal.jsx';
+import PageRefresh, { RefreshButton, useUpdatedAt } from '../components/PageRefresh.jsx';
 import { VISIT_STATE_LABELS, formatBaht, formatDate, timeText, durationText } from '../labels.js';
 
 /**
@@ -14,33 +15,36 @@ export default function MyAttendancePage() {
   const [report, setReport] = useState(null);
   const [rows, setRows] = useState(null);
   const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    let cancelled = false;
-    setReport(null);
-    setRows(null);
-    setError(null);
-
-    Promise.all([api.myAttendanceReport(month), api.myAttendance(month)])
+  /* แยกเป็นฟังก์ชันเพื่อให้ทั้ง effect ตอนเปลี่ยนเดือน และการดึงหน้าลงรีเฟรช เรียกตัวเดียวกัน
+     ไม่ล้าง report/rows ทิ้งก่อนโหลดเหมือนเดิม — รีเฟรชแล้วตัวเลขวูบหายไปทั้งหน้า
+     แล้วค่อยกลับมาเป็นภาพกระพริบที่ไม่มีใครสั่ง ของเดิมที่อ่านอยู่ควรค้างไว้จนกว่าของใหม่จะมา */
+  const load = useCallback(() => {
+    setLoading(true);
+    return Promise.all([api.myAttendanceReport(month), api.myAttendance(month)])
       .then(([r, list]) => {
-        if (cancelled) return;
         setReport(r);
         setRows(list);
+        setError(null); // เปลี่ยนเดือนแล้วโหลดผ่าน error ของเดือนก่อนต้องหายไปด้วย
       })
-      .catch((e) => !cancelled && setError(e.message));
-
-    return () => {
-      cancelled = true;
-    };
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
   }, [month]);
 
+  useEffect(() => { load(); }, [load]);
+
+  // เวลาที่ข้อมูลชุดที่เห็นอยู่ถูกดึงมา — จับจากจังหวะที่ loading ลงจาก true เป็น false
+  const updatedAt = useUpdatedAt(loading);
+
   return (
-    <>
+    <PageRefresh onRefresh={load} busy={loading}>
       <header className="page-head">
         <div>
           <h1>ค่าตอบแทนของฉัน</h1>
           <p className="muted">ค่าจ้างและชั่วโมงทำงานของคุณ — เห็นเฉพาะของตัวเอง</p>
         </div>
+        <RefreshButton onRefresh={load} busy={loading} updatedAt={updatedAt} />
       </header>
 
       <div className="att-filter">
@@ -164,6 +168,6 @@ export default function MyAttendancePage() {
           )}
         </>
       )}
-    </>
+    </PageRefresh>
   );
 }

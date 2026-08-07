@@ -2,8 +2,9 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../api.js';
 import { useToast } from '../toast.jsx';
-import { VISIT_STATE_LABELS, formatBaht, formatDate, timeText, durationText } from '../labels.js';
+import { VISIT_STATE_LABELS, formatBaht, formatDate, timeText, durationText, distanceText } from '../labels.js';
 import LineIcon from '../components/LineIcon.jsx';
+import PageRefresh from '../components/PageRefresh.jsx';
 
 const TABS = {
   exceptions: 'รายการต้องตรวจ',
@@ -74,6 +75,9 @@ export default function AttendancePage() {
   const [exceptions, setExceptions] = useState(null);
   const [exError, setExError] = useState(null);
   const [staff, setStaff] = useState([]);
+  /* ตัวนับสั่งโหลดใหม่ระดับหน้า — ส่งลงไปเป็น dep ของแท็บ "ประวัติ" กับ "สรุปค่าตอบแทน"
+     เพราะสองแท็บนั้นโหลดข้อมูลเอง หน้าแม่สั่งตรงไม่ได้ */
+  const [reloadKey, setReloadKey] = useState(0);
 
   const get = (key) => params.get(key) ?? '';
   const tab = TABS[get('tab')] ? get('tab') : 'exceptions';
@@ -108,6 +112,13 @@ export default function AttendancePage() {
     api.assignableEmployees().then(setStaff).catch(() => {});
   }, [loadExceptions]);
 
+  /* ดึงใหม่ทั้งหน้า — เด้งตัวนับให้แท็บที่เปิดอยู่โหลดเอง และโหลดรายการต้องตรวจ (ตัวเลขบนแท็บ) ไปพร้อมกัน
+     คืน promise ของรายการต้องตรวจออกไป ให้ตัวดึงหน้าลงรู้ว่าคาวงกลมหมุนไว้ถึงเมื่อไร */
+  const refreshAll = useCallback(() => {
+    setReloadKey((k) => k + 1);
+    return loadExceptions();
+  }, [loadExceptions]);
+
   // กรองพนักงานฝั่งหน้าเว็บ — endpoint รายการต้องตรวจไม่รับพารามิเตอร์ (ตั้งใจให้เห็นทุกคนเสมอ)
   const shownExceptions = exceptions?.filter((v) => !employeeId || v.employee_id === employeeId) ?? null;
   const pending = exceptions?.length ?? 0;
@@ -122,7 +133,7 @@ export default function AttendancePage() {
   );
 
   return (
-    <>
+    <PageRefresh onRefresh={refreshAll}>
       <header className="page-head">
         <div>
           <h1>การมาทำงาน</h1>
@@ -163,14 +174,15 @@ export default function AttendancePage() {
           page={Math.max(1, Number(get('page')) || 1)}
           patch={patch}
           employeePicker={employeePicker}
+          reloadKey={reloadKey}
         />
       )}
-      {tab === 'payroll' && <Payroll month={month} patch={patch} />}
-    </>
+      {tab === 'payroll' && <Payroll month={month} patch={patch} reloadKey={reloadKey} />}
+    </PageRefresh>
   );
 }
 
-function Payroll({ month, patch }) {
+function Payroll({ month, patch, reloadKey }) {
   const [rows, setRows] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -189,7 +201,7 @@ function Payroll({ month, patch }) {
       .finally(() => !cancelled && setLoading(false));
 
     return () => { cancelled = true; };
-  }, [month]);
+  }, [month, reloadKey]);
 
   function exportCsv() {
     downloadCsv(
@@ -277,23 +289,51 @@ function staticMapUrl(v) {
   return `https://maps.googleapis.com/maps/api/staticmap?size=130x90&scale=2&${markers.join('&')}&key=${MAPS_KEY}`;
 }
 
-/** หลักฐานตำแหน่ง: thumbnail (มี key) หรือลิงก์ Google Maps ธรรมดา (ไม่มี key) + รูปเซลฟี่ */
+/**
+ * หลักฐานตำแหน่ง: แผนที่ + รูปเซลฟี่ + ระยะห่างจากจุดเคส
+ *
+ * วางเป็นสองชั้น — รูปหลักฐานเรียงข้างกันชั้นบน ระยะห่างเป็นบรรทัดล่าง
+ * เดิมยัดสามอย่างไว้แถวเดียวในคอลัมน์ที่แคบที่สุดของตาราง พอไม่พอที่ลิงก์ "รูป"
+ * จะตกไปบรรทัดใหม่แล้วโดนความสูงแถวตัดจนอ่านไม่ออก — ซึ่งคือหลักฐานชิ้นที่หนักที่สุด
+ * (เซลฟี่หน้างาน) กลายเป็นชิ้นที่เห็นยากที่สุด
+ */
 function Evidence({ v }) {
   const hasLoc = v.check_in_lat != null;
   const fullMap = hasLoc ? `https://www.google.com/maps?q=${v.check_in_lat},${v.check_in_lng}` : null;
+
   return (
     <span className="att-evidence">
+      <span className="att-evidence-media">
+        {hasLoc && MAPS_KEY && (
+          <a href={fullMap} target="_blank" rel="noreferrer" title="เปิดแผนที่เต็ม">
+            <img className="att-thumb" src={staticMapUrl(v)} alt="ตำแหน่งเช็คอิน" loading="lazy" />
+          </a>
+        )}
+        {/* เซลฟี่แสดงเป็นรูปย่อเหมือนแผนที่ ไม่ใช่ลิงก์ตัวหนังสือ — ตรวจว่า "ใช่คนนี้จริงไหม"
+            ต้องเห็นรูปถึงจะตอบได้ ลิงก์ที่ต้องกดเปิดแท็บใหม่ทีละแถวไม่มีใครไล่ดูจริง */}
+        {v.has_photo && (
+          <a
+            href={api.visitCheckinPhotoUrl(v.case_id, v.visit_id)}
+            target="_blank"
+            rel="noreferrer"
+            title="เปิดรูปเต็ม"
+          >
+            <img
+              className="att-thumb"
+              src={api.visitCheckinPhotoUrl(v.case_id, v.visit_id)}
+              alt="เซลฟี่ตอนเช็คอิน"
+              loading="lazy"
+            />
+          </a>
+        )}
+        {/* ไม่ได้ตั้ง key แผนที่ไว้ — ยังต้องมีทางเปิดดูตำแหน่ง แค่ไม่มีรูปย่อให้ */}
+        {hasLoc && !MAPS_KEY && <a href={fullMap} target="_blank" rel="noreferrer">เปิดแผนที่</a>}
+      </span>
+
       {v.check_in_distance_m != null && (
-        <span className={v.location_flagged ? 'flag-text' : ''}>ห่าง {v.check_in_distance_m} ม.</span>
-      )}
-      {hasLoc && MAPS_KEY && (
-        <a href={fullMap} target="_blank" rel="noreferrer" title="เปิดแผนที่เต็ม">
-          <img className="att-thumb" src={staticMapUrl(v)} alt="ตำแหน่งเช็คอิน" loading="lazy" />
-        </a>
-      )}
-      {hasLoc && !MAPS_KEY && <a href={fullMap} target="_blank" rel="noreferrer">แผนที่</a>}
-      {v.has_photo && (
-        <a href={api.visitCheckinPhotoUrl(v.case_id, v.visit_id)} target="_blank" rel="noreferrer">รูป</a>
+        <span className={`att-distance ${v.location_flagged ? 'flag-text' : 'muted'}`}>
+          ห่าง {distanceText(v.check_in_distance_m)}
+        </span>
       )}
     </span>
   );
@@ -405,7 +445,7 @@ function Exceptions({ rows, error, onReload, filters }) {
   );
 }
 
-function Log({ month, employeeId, state, q, page, patch, employeePicker }) {
+function Log({ month, employeeId, state, q, page, patch, employeePicker, reloadKey }) {
   const [rows, setRows] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -424,7 +464,7 @@ function Log({ month, employeeId, state, q, page, patch, employeePicker }) {
       .finally(() => !cancelled && setLoading(false));
 
     return () => { cancelled = true; };
-  }, [month, employeeId]);
+  }, [month, employeeId, reloadKey]);
 
   /* กรองสถานะกับคำค้นฝั่งหน้าเว็บ — endpoint คืนทั้งเดือนมาแล้ว (เดือนหนึ่งไม่กี่ร้อยแถว)
      ยิงซ้ำเพื่อกรองจึงช้ากว่าและไม่ได้อะไรเพิ่ม */

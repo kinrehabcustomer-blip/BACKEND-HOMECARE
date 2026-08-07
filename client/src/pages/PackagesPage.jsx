@@ -4,6 +4,7 @@ import { formatBaht } from '../labels.js';
 import LineIcon from '../components/LineIcon.jsx';
 import ErrorBar from '../components/ErrorBar.jsx';
 import ConfirmButton from '../components/ConfirmButton.jsx';
+import PageRefresh from '../components/PageRefresh.jsx';
 
 const TIERS = ['CG', 'NA', 'PN', 'RN'];
 const CATEGORY_LABELS = { daily: 'รายวัน', weekly: 'รายสัปดาห์', monthly: 'รายเดือน' };
@@ -193,6 +194,7 @@ function RateTable({ label, formats, gradeId, editing, rateMap, draft, dirty, on
 
 export default function PackagesPage() {
   const [matrix, setMatrix] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState({});
@@ -205,13 +207,15 @@ export default function PackagesPage() {
   const baseline = useRef({});
 
   useEffect(() => {
+    setLoading(true);
     api
       .packageMatrix()
       .then((m) => {
         setMatrix(m);
         setError(null); // โหลดผ่านแล้ว error ของรอบก่อนต้องหายไปด้วย
       })
-      .catch((err) => setError(err.message));
+      .catch((err) => setError(err.message))
+      .finally(() => setLoading(false));
   }, [reloadKey]);
 
   const reload = () => setReloadKey((k) => k + 1);
@@ -324,7 +328,7 @@ export default function PackagesPage() {
   const dirty = new Set(dirtyKeys);
 
   return (
-    <>
+    <PageRefresh onRefresh={reload} busy={loading}>
       <header className="page-head">
         <div>
           <h1>แพ็คเกจบริการ (พนักงานพาร์ทไทม์)</h1>
@@ -411,7 +415,7 @@ export default function PackagesPage() {
       {matrix.grades.length === 0 && (
         <p className="muted">ยังไม่มีเกรด — กด "จัดการเกรด/รูปแบบ" เพื่อเพิ่ม</p>
       )}
-    </>
+    </PageRefresh>
   );
 }
 

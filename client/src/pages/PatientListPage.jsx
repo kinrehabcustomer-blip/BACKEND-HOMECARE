@@ -6,6 +6,7 @@ import SortHead from '../components/SortHead.jsx';
 import { GENDER_LABELS, PATIENT_STATUS_LABELS, ageFromBirthDate } from '../labels.js';
 import LineIcon from '../components/LineIcon.jsx';
 import ErrorBar from '../components/ErrorBar.jsx';
+import PageRefresh from '../components/PageRefresh.jsx';
 
 const PER_PAGE_OPTIONS = [20, 50, 100];
 
@@ -115,7 +116,7 @@ export default function PatientListPage() {
   const visibleIds = rows.map((p) => p.patient_id);
 
   return (
-    <>
+    <PageRefresh onRefresh={() => setReloadKey((k) => k + 1)} busy={loading}>
       <header className="page-head">
         <div>
           <h1>ผู้รับการดูแล</h1>
@@ -319,6 +320,6 @@ export default function PatientListPage() {
           onClose={closePatient}
         />
       )}
-    </>
+    </PageRefresh>
   );
 }

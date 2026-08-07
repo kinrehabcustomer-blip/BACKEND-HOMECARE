@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import MyCaseModal from '../components/MyCaseModal.jsx';
 import ErrorBar from '../components/ErrorBar.jsx';
+import PageRefresh from '../components/PageRefresh.jsx';
 import { CASE_TYPE_LABELS, VISIT_STATE_LABELS, MONTH_LABELS, toBuddhistYear } from '../labels.js';
 
 const WEEKDAYS = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
@@ -66,7 +67,7 @@ export default function MyCalendarPage() {
   }, [cases]);
 
   return (
-    <>
+    <PageRefresh onRefresh={load} busy={loading}>
       <header className="page-head">
         <div>
           <h1>ตารางงานของฉัน</h1>
@@ -143,6 +144,6 @@ export default function MyCalendarPage() {
       </p>
 
       {openId && <MyCaseModal caseId={openId} onClose={() => setOpenId(null)} />}
-    </>
+    </PageRefresh>
   );
 }
