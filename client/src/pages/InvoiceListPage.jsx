@@ -16,6 +16,14 @@ const SORTABLE = {
 
 const DEFAULTS = { sort: 'invoice_id', order: 'desc', per_page: '20', page: '1' };
 
+/**
+ * ชื่อรายการที่เก็บในใบเป็น "<บริการ> — ผู้รับบริการ: <ชื่อ>" ซึ่งยาวเกินคอลัมน์เสมอ
+ * แล้วโดน … ตัดกลางคำจนอ่านไม่ออกทั้งสองส่วน — ในตารางเอาแค่ชื่อบริการพอ
+ * ชื่อผู้รับบริการยังดูได้จากเคสที่ลิงก์ไว้ใต้บรรทัด และข้อความเต็มอยู่ใน title (ชี้เมาส์ค้าง)
+ * ส่วนบนใบที่พิมพ์ออกไปจริงยังใช้ข้อความเต็มเหมือนเดิม ไม่ได้ตัดอะไรทิ้ง
+ */
+const serviceHead = (s) => (s ?? '').replace(/\s+—\s+ผู้รับบริการ:.*$/, '');
+
 export default function InvoiceListPage() {
   const [params, setParams] = useSearchParams();
   const navigate = useNavigate();
@@ -182,7 +190,7 @@ export default function InvoiceListPage() {
               <th>#</th>
               <th><SortHead column="invoice_id" {...SORTABLE.invoice_id} sort={sort} order={order} onSort={sortBy} /></th>
               <th>ผู้จ่าย / เบอร์</th>
-              <th>รายการ / เคส</th>
+              <th className="cell-text">รายการ / เคส</th>
               <th><SortHead column="issue_date" {...SORTABLE.issue_date} sort={sort} order={order} onSort={sortBy} /></th>
               <th><SortHead column="total" {...SORTABLE.total} sort={sort} order={order} onSort={sortBy} /></th>
               <th>สถานะ</th>
@@ -206,10 +214,18 @@ export default function InvoiceListPage() {
                 <td className="row-index" data-label="ลำดับ">{(page - 1) * Number(perPage) + i + 1}</td>
                 <td className="mono link" data-label="เลขที่ใบ">
                   {v.invoice_id}
-                  {/* ใบไม่ตรงกับข้อมูลเคสแล้ว — เดิมรู้ได้ต่อเมื่อเปิดใบขึ้นมาดู ต้องเห็นตั้งแต่ในรายการ */}
-                  {v.is_stale && (
-                    <span className="stale-flag" title="ยอดหรือชื่อผู้จ่ายในใบไม่ตรงกับเคสแล้ว — เปิดใบเพื่อรีเฟรช">
-                      ไม่ตรงกับเคส
+                  {/* ใบไม่ตรงกับข้อมูลเคสแล้ว — เดิมรู้ได้ต่อเมื่อเปิดใบขึ้นมาดู ต้องเห็นตั้งแต่ในรายการ
+
+                      บอกให้ตรงว่าไม่ตรงเรื่องอะไร — server แยก fee_stale / payer_stale มาให้อยู่แล้ว
+                      และ popup เคสก็ใช้ความต่างนี้อยู่ ("ผู้จ่ายในใบไม่ตรง" vs "ไม่ตรงกับค่าจ้างเคส")
+                      หน้ารายการเคยทิ้งไปเหลือ "ไม่ตรงกับเคส" กลางๆ ซึ่งต้องเปิดใบดูอยู่ดีว่าเรื่องอะไร
+
+                      ใบที่ยกเลิกแล้วไม่ต้องเตือน ไม่มีใครต้องไปรีเฟรชมัน (เกณฑ์เดียวกับอีกสองที่) */}
+                  {v.is_stale && v.status !== 'cancelled' && (
+                    <span className="stale-flag" title="ข้อมูลในใบไม่ตรงกับเคสแล้ว — เปิดใบแล้วกด “รีเฟรชจากเคส”">
+                      {v.fee_stale && v.payer_stale
+                        ? 'ยอด/ผู้จ่ายไม่ตรง'
+                        : v.payer_stale ? 'ผู้จ่ายไม่ตรง' : 'ยอดไม่ตรง'}
                     </span>
                   )}
                 </td>
@@ -227,8 +243,8 @@ export default function InvoiceListPage() {
                 {/* รายละเอียดบริการเป็นข้อความอิสระ ยาวเกินคอลัมน์เสมอและถูก … ตัดท้าย
                     บนมือถือมันตัดบรรทัดจึงอ่านได้ครบ แต่บน PC ที่บังคับบรรทัดเดียวจะอ่านต่อไม่ได้เลย
                     title ให้ชี้เมาส์ค้างแล้วเห็นข้อความเต็ม — เป็นทางอ่านที่มีเฉพาะบน PC อยู่แล้ว */}
-                <td data-label="รายการ" title={v.service_description || undefined}>
-                  {v.service_description}
+                <td className="cell-text" data-label="รายการ" title={v.service_description || undefined}>
+                  {serviceHead(v.service_description)}
                   {v.case_id && (
                     <span className="cell-sub">
                       <Link className="link mono" to={`/cases?open=${v.case_id}`} onClick={(e) => e.stopPropagation()}>

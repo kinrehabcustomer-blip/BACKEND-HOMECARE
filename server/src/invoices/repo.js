@@ -263,9 +263,17 @@ export async function syncOpenFromCase(caseRow, customer) {
 
 /** ข้อความรายการบริการบนใบ — ประกอบจากสิ่งที่เคสเลือกไว้ */
 function describeService(c) {
+  /* แพ็คเกจกายภาพที่นี่ตั้งชื่อตามจำนวนครั้งอยู่แล้ว ("แพ็ค 20 ครั้ง", "10 ครั้ง 3 เดือน")
+     เติม "· 20 ครั้ง" ต่อท้ายอีกจึงได้ "แพ็ค 20 ครั้ง · 20 ครั้ง" ซึ่งซ้ำคำเปล่าๆ
+     และกินที่จนรายการโดน … ตัดกลางคำในตาราง — เติมเฉพาะตอนชื่อยังไม่ได้บอกจำนวนครั้งไว้ */
+  const sessions =
+    c.physio_sessions && !String(c.physio_package_name ?? '').includes(`${c.physio_sessions} ครั้ง`)
+      ? `${c.physio_sessions} ครั้ง`
+      : null;
+
   const parts =
     c.service_kind === 'physio'
-      ? [c.physio_package_name, c.physio_sessions && `${c.physio_sessions} ครั้ง`]
+      ? [c.physio_package_name, sessions]
       : [c.format_name, c.grade_name, c.pkg_staff_tier];
 
   const service = parts.filter(Boolean).join(' · ');

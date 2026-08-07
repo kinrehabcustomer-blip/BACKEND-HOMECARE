@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api.js';
 import RevenueChart from '../components/RevenueChart.jsx';
+import CaseTypeChart from '../components/CaseTypeChart.jsx';
 import {
   CASE_TYPE_LABELS, CASE_STATUS_LABELS, MONTH_LABELS,
   formatDate, formatPeriod, toBuddhistYear,
@@ -71,9 +72,8 @@ export default function DashboardPage() {
   const total = summary.total;
   const pct = (n) => (total === 0 ? '—' : `${Math.round((n / total) * 100)}% ของทั้งหมด`);
 
-  // เรียงมากไปน้อย ประเภทที่ยังไม่มีเคสเลยไม่ต้องแสดง
+  // เรียงมากไปน้อย ประเภทที่ยังไม่มีเคสเลยไม่ต้องแสดง (กราฟเรียงซ้ำอีกชั้นเผื่อถูกเรียกจากที่อื่น)
   const byType = [...summary.by_type].sort((a, b) => b.count - a.count);
-  const maxType = Math.max(...byType.map((t) => t.count), 1);
 
   return (
     <>
@@ -171,18 +171,7 @@ export default function DashboardPage() {
           <div className="columns">
             <section className="card">
               <h2>เคสตามประเภท</h2>
-              {/* แท่งสีเดียวทุกแถว — ประเภทเคสไม่มีลำดับสูงต่ำ การไล่สีตามจำนวนจะซ้ำกับความยาวแท่งเปล่าๆ */}
-              <ul className="bars">
-                {byType.map((t) => (
-                  <li key={t.case_type} title={`${CASE_TYPE_LABELS[t.case_type]}: ${t.count} เคส (${Math.round((t.count / total) * 100)}%)`}>
-                    <span className="bar-label">{CASE_TYPE_LABELS[t.case_type]}</span>
-                    <span className="bar-track">
-                      <span className="bar-fill" style={{ width: `${(t.count / maxType) * 100}%` }} />
-                    </span>
-                    <span className="bar-value">{t.count}</span>
-                  </li>
-                ))}
-              </ul>
+              <CaseTypeChart byType={byType} total={total} />
             </section>
 
             <section className="card">
