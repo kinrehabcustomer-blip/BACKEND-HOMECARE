@@ -740,7 +740,10 @@ select option:checked {
   flex-direction: column;
   width: 100%;
   max-width: 45rem;
-  max-height: 88vh;
+  /* เก็บเพดานความสูงไว้ในตัวแปร เพราะแต่ละขนาดจอใช้คนละค่า (88/92/94vh)
+     แล้วมีกล่องที่ต้องการ "ความสูงคงที่เท่าเพดาน" ไม่ใช่ "ไม่เกินเพดาน" — ดู .modal-preview */
+  --modal-h: 88vh;
+  max-height: var(--modal-h);
   background: var(--surface);
   border-radius: 0.875rem;
   box-shadow: 0 1.5rem 3.75rem rgb(0 0 0 / 22%);
@@ -1457,7 +1460,7 @@ select option:checked {
   .table { min-width: 48.75rem; }
 
   .danger-zone { grid-template-columns: 1fr; }
-  .modal { max-height: 92vh; }
+  .modal { --modal-h: 92vh; }
 }
 
 /* มือถือ */
@@ -1488,7 +1491,7 @@ select option:checked {
   .modal-backdrop { padding: 0; align-items: flex-end; }
   .modal {
     max-width: 100%;
-    max-height: 94vh;
+    --modal-h: 94vh;
     border-radius: 0.875rem 0.875rem 0 0;
 
     /* ตอนเปิด: เลื่อนขึ้นมาจากขอบล่างเต็มระยะ ไม่ใช่ pop-in ของกล่องกลางจอ
@@ -2041,6 +2044,58 @@ select option:checked {
 }
 .pay-form-actions { display: flex; gap: 0.5rem; margin-left: auto; }
 
+/* ---------- กรอบดูก่อนพิมพ์ — ย่อทั้งแผ่นให้พอดีที่ ----------
+   กรอบนี้เล่นบท "โต๊ะ" ที่วางกระดาษ ส่วน .invoice-doc คือแผ่นที่ถูกย่อลงไปวางอยู่บนโต๊ะ
+   ความสูงกรอบมาจาก JS (= ความสูงจริงของใบ × อัตราย่อ) เพราะ transform ไม่คืนพื้นที่ที่ layout จองไว้
+   ถ้าไม่บีบตรงนี้จะเหลือช่องว่างใต้ใบเท่ากับความสูงส่วนที่ย่อหายไปพอดี */
+.invoice-fit {
+  position: relative;
+  overflow: hidden;
+  background: var(--bg);
+  border-radius: var(--radius);
+}
+/* ตอนย่อ: ถอดแผ่นออกจากสายการวางปกติ เพราะกระดาษกว้าง 210mm ซึ่งกว้างกว่ากรอบบนมือถือหลายเท่า
+   ถ้ายังอยู่ในสายการวาง มันจะดันกรอบให้กว้างตาม แล้วความสูงที่ JS คำนวณไว้ก็ใช้ไม่ได้
+
+   จุดตรึงเป็นมุมบนซ้าย ไม่ใช่ค่าปริยาย (ใจกลางแผ่น) — ใจกลางของแผ่น 210mm อยู่นอกกรอบไปแล้ว
+   ย่อเข้าหาจุดนั้นกระดาษจะเลื่อนไปโผล่ทางขวาแล้วโดนตัด
+
+   left: 50% ย้ายมุมบนซ้ายไปกลางกรอบ แล้ว translateX(-50%) ถอยกลับมาครึ่งแผ่น
+   ลำดับใน transform สำคัญ: เขียน scale ไว้หน้า translate เพื่อให้ระยะถอยถูกย่อไปด้วย
+   (ครึ่งหนึ่งของแผ่น "หลังย่อ") ถ้าสลับลำดับจะถอยเต็มครึ่งแผ่นจริง แล้วเบ้ไปทางซ้าย */
+.invoice-fit.is-fitted > .invoice-doc {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform-origin: top left;
+}
+
+/* ปุ่มสลับย่อ/เต็ม — ลอยทับมุมบน ไม่อยู่ในสายการวางปกติ
+   เพราะความสูงกรอบคำนวณจากตัวเอกสารล้วนๆ ปุ่มที่กินที่จะดันใบให้เกินกรอบทันทีเท่าความสูงปุ่ม */
+.invoice-zoom {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  z-index: 1;
+  padding: 0.25rem 0.625rem;
+  font: inherit;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 62.4375rem;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 12%);
+  cursor: pointer;
+}
+.invoice-zoom:hover { border-color: var(--border-hover); }
+
+/* กางเต็ม = กระดาษ A4 ขนาดจริง — คืนทุกอย่างให้ layout ปกติ แล้วให้ .modal-body เลื่อนอ่านเอง
+   บนจอแคบแผ่นจะกว้างเกินกรอบ จึงต้องเลื่อนแนวนอนได้ด้วย ซึ่งทำที่ .modal-body ไม่ใช่ตรงนี้
+   (ตั้ง overflow-x ตรงนี้ไม่ได้ผล เพราะ CSS บังคับว่าถ้าแกนหนึ่งไม่ visible อีกแกนจะกลายเป็น auto ตาม
+   กรอบจะกลายเป็นกล่องเลื่อนของตัวเอง ได้แถบเลื่อนซ้อนแถบเลื่อนแทนที่จะสูงตามแผ่น) */
+.invoice-fit.is-zoomed { height: auto !important; overflow: visible; background: none; }
+
 /* ---------- เอกสารใบแจ้งหนี้/ใบเสร็จ (ฟอร์มราชการไทย — หน้าจอ + พิมพ์) ----------
    ใช้สีดำ/ขาวตายตัว ไม่อิงตัวแปรธีม เพราะเอกสารต้องหน้าตาเหมือนกันทั้งโหมดสว่าง/มืด และตอนพิมพ์ */
 .invoice-doc {
@@ -2048,6 +2103,19 @@ select option:checked {
   color: #000;
   font-size: 0.8125rem;
   line-height: 1.55;
+
+  /* กระดาษ A4 ขนาดจริง — เดิมไม่ได้กำหนดขนาดไว้เลย แผ่นจึงกางตามความกว้างจอที่เปิดดู
+     บนมือถือได้แถบสูงผอมตามจอ ไม่ใช่สัดส่วน 210×297 และที่แย่กว่านั้นคือสิ่งที่เห็นบนจอ
+     ไม่ตรงกับสิ่งที่ออกจากเครื่องพิมพ์ (ตอนพิมพ์กระดาษเป็น A4 อยู่แล้ว บรรทัดจึงตัดคนละที่กัน)
+     ตรึงเป็น mm ไปเลย สิ่งที่เห็นบนจอกับที่พิมพ์ออกมาจึงเป็นแผ่นเดียวกัน แค่ถูกย่อ
+
+     min-height ทำให้ใบที่มีรายการเดียวยังเป็นกระดาษเต็มแผ่น ไม่ใช่แถบเตี้ยๆ ลอยอยู่
+     padding เท่ากับ margin ของ @page ตอนพิมพ์ — ขอบกระดาษบนจอจึงกว้างเท่าที่พิมพ์จริง */
+  width: 210mm;
+  min-height: 297mm;
+  padding: 15mm;
+  margin: 0 auto;
+  box-shadow: 0 2px 12px rgb(0 0 0 / 18%);
 }
 .invoice-doc p { margin: 0; }
 
@@ -2062,7 +2130,11 @@ select option:checked {
 .inv-org-line { font-size: 0.75rem; }
 .inv-rule { width: 60%; margin: 0.5rem auto 0; border: 0; border-top: 1px dashed #000; }
 
-.inv-parties { display: flex; justify-content: space-between; gap: 1rem; margin: 0.75rem 0 0.375rem; }
+/* สองฝั่งของหัวใบ (ผู้ซื้อ / เลขที่ใบ) — flex-wrap เพื่อให้ฝั่งขวาตกลงมาข้างล่างแทนที่จะดันจนล้น
+   เวลาชื่อลูกค้าหรือเลขผู้เสียภาษียาว บนจอแคบ · min-width: 0 ให้แต่ละฝั่งหดและตัดบรรทัดได้จริง
+   (ค่าปริยายของ flex item คือห้ามหดต่ำกว่าความกว้างเนื้อหา ซึ่งเป็นต้นเหตุที่ทำให้ล้นออกนอกกระดาษ) */
+.inv-parties { display: flex; justify-content: space-between; gap: 0.5rem 1rem; flex-wrap: wrap; margin: 0.75rem 0 0.375rem; }
+.inv-parties > div { min-width: 0; }
 .inv-parties-right { text-align: right; }
 
 /* ตารางรายการ — เส้นขอบครบทุกช่องแบบฟอร์มกระดาษ */
@@ -2096,12 +2168,35 @@ select option:checked {
   .cal-legend, .cal-legend * { visibility: visible; }
   .no-print { display: none !important; }
 
-  .invoice-doc {
+  /* เขียนตัวเลือกซ้ำอีกชั้นด้วย — กฎตอนย่อ (.invoice-fit.is-fitted > .invoice-doc) เจาะจงกว่า
+     ถ้าเขียนแค่ .invoice-doc ค่า left: 50% จะรอดมาถึงตอนพิมพ์ แล้วเอกสารไปโผล่ครึ่งขวาของกระดาษ
+
+     ขนาด A4 กับขอบกระดาษต้องคลายทิ้งทั้งหมด เพราะตอนพิมพ์ @page จัดการให้แล้ว
+     ถ้าปล่อย min-height: 297mm ไว้ มันจะไปบวกกับขอบ 15mm ของ @page จนเกินหน้า
+     แล้วได้กระดาษเปล่าแถมมาอีกหนึ่งแผ่นทุกครั้งที่พิมพ์ */
+  .invoice-doc,
+  .invoice-fit.is-fitted > .invoice-doc {
     position: absolute;
     top: 0;
     left: 0;
     width: 100%;
+    min-height: 0;
+    margin: 0;
     padding: 0;
+    box-shadow: none;
+    /* ตัวคูณย่อมาจาก inline style ของ JS จึงต้อง !important ถึงจะทับได้
+       ไม่คลายออกจะได้กระดาษ A4 ที่มีใบเล็กจิ๋วอยู่มุมบน */
+    transform: none !important;
+  }
+
+  /* กรอบย่อเป็นเรื่องของหน้าจอล้วนๆ — ตอนพิมพ์ต้องคลายทิ้งทั้งหมด
+     position: static สำคัญที่สุด: .invoice-doc ข้างบนเป็น absolute ถ้ากรอบยัง relative อยู่
+     เอกสารจะไปยึดกรอบเป็นหลัก แทนที่จะยึดหน้ากระดาษ แล้วไปโผล่ตรงตำแหน่งเดิมบนจอ */
+  .invoice-fit {
+    position: static;
+    height: auto !important;
+    overflow: visible;
+    background: none;
   }
 
   /* ตารางงานลงกระดาษ — ตัดแถบเลื่อนในช่องออก ไม่งั้นกะที่เลื่อนซ่อนอยู่จะหายไปจากที่พิมพ์ */
@@ -2111,7 +2206,7 @@ select option:checked {
 
   /* ฉากหลังทึบ/เงา/ขอบมนของ popup ไม่ต้องพิมพ์ลงกระดาษ */
   .modal-backdrop { position: static; padding: 0; background: none; }
-  .modal { max-width: none; max-height: none; box-shadow: none; border-radius: 0; }
+  .modal { max-width: none; max-height: none; height: auto; box-shadow: none; border-radius: 0; }
   .modal-body { padding: 0; overflow: visible; }
 
   /* กันตารางถูกตัดครึ่งคาบหน้ากระดาษ */
@@ -2125,6 +2220,14 @@ select option:checked {
 .modal.modal-narrow { max-width: 30rem; }
 /* หน้าต่างที่มีตารางอยู่ข้างใน — กว้างกว่า popup ปกติ ไม่งั้นคอลัมน์เบียดจนอ่านไม่ออก */
 .modal.modal-wide { max-width: 60rem; }
+
+/* หน้าต่างดูเอกสาร — สูงคงที่เท่าเพดาน ไม่ใช่สูงตามเนื้อหา
+   เพราะโค้ดฝั่ง JS วัด "ที่ว่างที่เหลือ" จาก .modal-body แล้วย่อใบให้พอดีค่านั้น
+   ถ้ากล่องยังหดตามเนื้อหาอยู่ ที่ว่างที่วัดได้จะเป็นผลลัพธ์ของรอบก่อนหน้าตัวเอง
+   วัด-ย่อ-วัดใหม่จึงไล่กันเล็กลงทีละรอบไม่มีวันหยุด · ตรึงความสูงไว้แล้วเลขที่วัดได้คงที่ วัดรอบเดียวจบ */
+.modal.modal-preview { height: var(--modal-h); }
+/* overflow-x ไว้รองรับตอนกางเป็น A4 ขนาดจริงบนจอแคบ — ตอนย่อพอดีไม่มีอะไรล้น แถบเลื่อนจึงไม่โผล่ */
+.modal.modal-preview .modal-body { flex: 1; min-height: 0; overflow-x: auto; }
 
 /* สรุปวันนัด + ปุ่มเปิด popup ในหน้าเคส */
 .visit-summary {
