@@ -2381,6 +2381,48 @@ select option:checked {
 .shift-time { font-weight: 700; font-size: 0.9375rem; }
 .shift-addr { margin-top: 0.25rem; }
 .shift-times { margin: 0.5rem 0 0; font-size: 0.8125rem; }
+/* ---------- ดึงหน้าลงเพื่อรีเฟรช (หน้างานวันนี้ของพนักงานภาคสนาม) ----------
+   ท่ามาตรฐานของแอปมือถือ และเป็นท่าที่นิ้วทำอยู่แล้วตอนอยากดูของใหม่
+   ปุ่มรีเฟรชยังอยู่สำหรับเครื่องที่ใช้เมาส์ ซึ่งดึงหน้าลงไม่ได้ */
+.pull-zone { position: relative; }
+
+/* วงกลมบอกสถานะ — ลอยอยู่เหนือเนื้อหา จางสนิทตอนไม่ได้ดึง
+   ใช้ absolute ไม่ให้กินที่ในสายการวาง เนื้อหาจึงอยู่ตำแหน่งเดิมเป๊ะเมื่อไม่มีใครแตะ
+   เยื้องขึ้นไปเล็กน้อยเพื่อให้พอดีกับช่องว่างที่เปิดออกตอนดึง (โค้ดเลื่อนมันลงครึ่งหนึ่งของระยะดึง) */
+.pull-hint {
+  position: absolute;
+  top: -1.25rem;
+  left: 0;
+  right: 0;
+  z-index: 1;
+  display: flex;
+  justify-content: center;
+  opacity: 0;
+  pointer-events: none;
+}
+.pull-hint-ico {
+  width: 2.25rem;
+  height: 2.25rem;
+  padding: 0.5rem;
+  color: var(--muted);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 62.4375rem;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 10%);
+}
+/* ดึงถึงระยะแล้ว — เปลี่ยนสีบอกว่าปล่อยได้ ไม่ต้องเดาว่าดึงพอหรือยัง */
+.pull-hint.is-ready .pull-hint-ico { color: var(--brand); border-color: var(--brand); }
+/* กำลังโหลด — หมุนที่ตัวไอคอน ไม่ใช่ที่กรอบ เพราะกรอบมี transform ของระยะดึงเขียนทับอยู่จาก JS
+   (แอนิเมชันของ CSS ชนะ inline style เสมอ ถ้าใส่ที่กรอบ ตำแหน่งที่ค้างไว้จะกระโดดหาย) */
+.pull-hint.is-busy .pull-hint-ico { color: var(--brand); animation: pull-spin 900ms linear infinite; }
+@keyframes pull-spin { to { transform: rotate(360deg); } }
+
+/* เครื่องที่ใช้นิ้ว (ไม่มีเมาส์) — ซ่อนปุ่ม ดึงหน้าลงแทน
+   เช็คทั้ง hover และ pointer เพื่อไม่ให้โน้ตบุ๊กจอสัมผัสซึ่งมีทั้งสองอย่างโดนซ่อนปุ่มไปด้วย */
+@media (hover: none) and (pointer: coarse) {
+  .pull-only-btn { display: none; }
+}
+
 .shift-actions { flex-shrink: 0; }
 .shift-done { color: #1c7a4d; font-weight: 600; font-size: 0.875rem; }
 

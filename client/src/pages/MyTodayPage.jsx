@@ -3,6 +3,7 @@ import { api } from '../api.js';
 import CheckInModal from '../components/CheckInModal.jsx';
 import { serviceName } from '../components/MyCaseModal.jsx';
 import { getPosition } from '../lib/geo.js';
+import { usePullToRefresh } from '../lib/pullRefresh.js';
 import { CASE_TYPE_LABELS, VISIT_STATE_LABELS, timeText, durationText } from '../labels.js';
 import LineIcon from '../components/LineIcon.jsx';
 
@@ -51,6 +52,10 @@ export default function MyTodayPage() {
     }
   }, []);
 
+  /* ดึงหน้าลงเพื่อรีเฟรช — ท่ามาตรฐานของแอปมือถือ และเป็นท่าที่นิ้วทำอยู่แล้วตอนอยากดูของใหม่
+     ปุ่มยังอยู่ แต่ CSS ซ่อนบนเครื่องที่ใช้นิ้ว (ดู .pull-only-btn) — บนคอมไม่มีนิ้วให้ดึง ต้องมีปุ่ม */
+  const { zoneRef, contentRef } = usePullToRefresh(load);
+
   useEffect(() => {
     load();
 
@@ -92,48 +97,57 @@ export default function MyTodayPage() {
   const dateLabel = new Date().toLocaleDateString('th-TH', { weekday: 'long', day: 'numeric', month: 'long' });
 
   return (
-    <>
-      <header className="page-head">
-        <div>
-          <h1>งานวันนี้</h1>
-          <p className="muted">
-            {dateLabel}
-            {visits && ` · ${visits.length} กะ`}
-            {/* บอกด้วยว่าที่เห็นอยู่ดึงมาตอนไหน — หน้านี้เปิดค้างทั้งวัน ไม่มีเวลากำกับก็ไม่มีทางรู้ว่าเก่าแค่ไหน */}
-            {loadedAt && <span className="muted"> · อัปเดต {timeText(loadedAt)}</span>}
-          </p>
-        </div>
-        <button className="btn" disabled={loading} onClick={load}>
-          <LineIcon name="refresh" />{loading ? 'กำลังโหลด…' : 'รีเฟรช'}
-        </button>
-      </header>
+    <div className="pull-zone" ref={zoneRef}>
+      {/* วงกลมหมุนที่โผล่มาในช่องว่างซึ่งเนื้อหาเลื่อนลงไปเปิดให้ — จางอยู่นอกสายตาตอนไม่ได้ดึง
+          aria-hidden เพราะเป็นภาพประกอบท่านิ้วล้วนๆ คนใช้โปรแกรมอ่านหน้าจอใช้ปุ่มรีเฟรชแทน */}
+      <div className="pull-hint" data-pull-hint aria-hidden="true">
+        <LineIcon name="refresh" className="pull-hint-ico" />
+      </div>
 
-      {/* error เป็นแถบเหนือรายการ ไม่ทับทั้งหน้า — กะที่โหลดมาได้แล้วต้องยังกดเช็คอิน/เช็คเอาท์ได้
-          ถึงการดึงข้อมูลรอบล่าสุดจะล้มเหลว (พนักงานอยู่หน้างาน สัญญาณหายเป็นเรื่องปกติ) */}
-      {error && <p className="error">{error}</p>}
+      <div className="pull-content" ref={contentRef}>
+        <header className="page-head">
+          <div>
+            <h1>งานวันนี้</h1>
+            <p className="muted">
+              {dateLabel}
+              {visits && ` · ${visits.length} กะ`}
+              {/* บอกด้วยว่าที่เห็นอยู่ดึงมาตอนไหน — หน้านี้เปิดค้างทั้งวัน ไม่มีเวลากำกับก็ไม่มีทางรู้ว่าเก่าแค่ไหน */}
+              {loadedAt && <span className="muted"> · อัปเดต {timeText(loadedAt)}</span>}
+            </p>
+          </div>
+          {/* บนเครื่องที่ใช้นิ้วจะถูกซ่อน (ดึงหน้าลงแทน) เหลือไว้ให้เครื่องที่ใช้เมาส์ซึ่งดึงไม่ได้ */}
+          <button className="btn pull-only-btn" disabled={loading} onClick={load}>
+            <LineIcon name="refresh" />{loading ? 'กำลังโหลด…' : 'รีเฟรช'}
+          </button>
+        </header>
 
-      {!visits ? (
-        !error && <p className="muted">กำลังโหลด…</p>
-      ) : visits.length === 0 ? (
-        <section className="card empty-state">
-          <p>วันนี้คุณไม่มีกะงาน</p>
-          <p className="muted">
-            เมื่อผู้จัดการนัดกะให้คุณ งานจะปรากฏที่นี่ — หน้านี้ดึงข้อมูลใหม่ให้เองทุกครั้งที่กลับเข้าแอป
-          </p>
-        </section>
-      ) : (
-        <div className="shift-list">
-          {visits.map((v) => (
-            <ShiftCard
-              key={v.visit_id}
-              visit={v}
-              busy={busyId === v.visit_id}
-              onCheckIn={() => setCheckinFor(v)}
-              onCheckOut={() => checkOut(v)}
-            />
-          ))}
-        </div>
-      )}
+        {/* error เป็นแถบเหนือรายการ ไม่ทับทั้งหน้า — กะที่โหลดมาได้แล้วต้องยังกดเช็คอิน/เช็คเอาท์ได้
+            ถึงการดึงข้อมูลรอบล่าสุดจะล้มเหลว (พนักงานอยู่หน้างาน สัญญาณหายเป็นเรื่องปกติ) */}
+        {error && <p className="error">{error}</p>}
+
+        {!visits ? (
+          !error && <p className="muted">กำลังโหลด…</p>
+        ) : visits.length === 0 ? (
+          <section className="card empty-state">
+            <p>วันนี้คุณไม่มีกะงาน</p>
+            <p className="muted">
+              เมื่อผู้จัดการนัดกะให้คุณ งานจะปรากฏที่นี่ — หน้านี้ดึงข้อมูลใหม่ให้เองทุกครั้งที่กลับเข้าแอป
+            </p>
+          </section>
+        ) : (
+          <div className="shift-list">
+            {visits.map((v) => (
+              <ShiftCard
+                key={v.visit_id}
+                visit={v}
+                busy={busyId === v.visit_id}
+                onCheckIn={() => setCheckinFor(v)}
+                onCheckOut={() => checkOut(v)}
+              />
+            ))}
+          </div>
+        )}
+      </div>
 
       {checkinFor && (
         <CheckInModal
@@ -145,7 +159,7 @@ export default function MyTodayPage() {
           }}
         />
       )}
-    </>
+    </div>
   );
 }
 
