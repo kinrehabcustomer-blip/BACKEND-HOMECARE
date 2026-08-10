@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { useSheetSwipe } from '../lib/sheetSwipe.js';
+import { useScrollLock } from '../lib/scrollLock.js';
 import {
   CASE_TYPE_LABELS,
   CASE_STATUS_LABELS,
@@ -43,14 +44,11 @@ export default function MyCaseModal({ caseId, onClose }) {
     return () => { cancelled = true; };
   }, [caseId]);
 
+  useScrollLock();
   useEffect(() => {
     const onKeyDown = (e) => e.key === 'Escape' && onClose();
     document.addEventListener('keydown', onKeyDown);
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.removeEventListener('keydown', onKeyDown);
-      document.body.style.overflow = '';
-    };
+    return () => document.removeEventListener('keydown', onKeyDown);
   }, [onClose]);
 
   const genderAge = item

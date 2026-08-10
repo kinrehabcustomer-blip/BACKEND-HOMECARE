@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { api } from '../api.js';
 import { useToast } from '../toast.jsx';
 import { useSheetSwipe } from '../lib/sheetSwipe.js';
+import { useScrollLock } from '../lib/scrollLock.js';
 import WorkHistory from './WorkHistory.jsx';
 import Avatar from './Avatar.jsx';
 import {
@@ -136,15 +137,11 @@ export default function EmployeeModal({ employeeId, siblings = [], onNavigate, o
    * ต้องแยกออกมาเป็น effect ที่ทำงานครั้งเดียวตลอดอายุกล่อง — ถ้าไปรวมกับ effect ที่มี deps
    * โฟกัสจะถูกคืนออกไปข้างนอกทุกครั้งที่ deps เปลี่ยน (เช่น ตอนกดเข้าโหมดแก้ด่วน)
    */
+  useScrollLock();
   useEffect(() => {
     const previous = document.activeElement;
     boxRef.current?.focus();
-    document.body.style.overflow = 'hidden';
-
-    return () => {
-      document.body.style.overflow = '';
-      previous?.focus?.();
-    };
+    return () => previous?.focus?.();
   }, []);
 
   /*

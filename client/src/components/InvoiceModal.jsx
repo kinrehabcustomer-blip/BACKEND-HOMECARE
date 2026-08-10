@@ -3,6 +3,7 @@ import { api } from '../api.js';
 import { useAuth } from '../auth.jsx';
 import { useToast } from '../toast.jsx';
 import { useSheetSwipe } from '../lib/sheetSwipe.js';
+import { useScrollLock } from '../lib/scrollLock.js';
 import { INVOICE_STATUS_LABELS, amountText, bahtText, docDate } from '../labels.js';
 import LineIcon from './LineIcon.jsx';
 import ConfirmButton from './ConfirmButton.jsx';
@@ -83,15 +84,11 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
    * แยกเป็น effect ที่ทำงานครั้งเดียวตลอดอายุกล่อง — ถ้าไปรวมกับ effect ที่มี deps
    * โฟกัสจะถูกคืนออกไปข้างนอกทุกครั้งที่ deps เปลี่ยน
    */
+  useScrollLock();
   useEffect(() => {
     const previous = document.activeElement;
     boxRef.current?.focus();
-    document.body.style.overflow = 'hidden';
-
-    return () => {
-      document.body.style.overflow = '';
-      previous?.focus?.();
-    };
+    return () => previous?.focus?.();
   }, []);
 
   /* ปิดด้วย Esc + ขังโฟกัสไว้ในกล่อง — ถ้าไม่ขัง Tab จะวิ่งไปโดนลิงก์ที่อยู่หลังฉาก */

@@ -8,6 +8,27 @@ export const POSITION_LABELS = {
   hr: 'HR',
 };
 
+/**
+ * ระดับพนักงานในตารางราคา -> ตำแหน่งของพนักงานที่ตรงกับระดับนั้น
+ * (สายกายภาพบำบัดไม่มีระดับ ใช้ตำแหน่งนักกายภาพบำบัดเป็นเกณฑ์แทน — ดู positionsForCase)
+ */
+export const TIER_POSITIONS = {
+  CG: ['caregiver'],
+  NA: ['assistant_nurse'],
+  PN: ['practical_nurse'],
+  RN: ['nurse'],
+};
+
+/**
+ * ตำแหน่งที่ "ควรจะ" รับเคสนี้ — คืน null ถ้ายังบอกไม่ได้ (ยังไม่เลือกบริการ) = ไม่ต้องกรองใคร
+ * ใช้เป็นตัวกรองรายชื่อตอนจับคู่ ไม่ใช่กฎบังคับ: พยาบาลลงไปทำงานระดับต่ำกว่าได้จริง
+ * หน้าเว็บจึงต้องเปิดทางให้ดูทุกตำแหน่งได้เสมอ
+ */
+export function positionsForCase({ service_kind, physio_package_id, pkg_staff_tier }) {
+  if (service_kind === 'physio' || physio_package_id) return ['therapist'];
+  return TIER_POSITIONS[pkg_staff_tier] ?? null;
+}
+
 export const EMPLOYMENT_TYPE_LABELS = {
   fulltime: 'ประจำ',
   parttime: 'พาร์ทไทม์',

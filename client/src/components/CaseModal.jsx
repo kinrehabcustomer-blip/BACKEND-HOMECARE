@@ -3,11 +3,12 @@ import { Link } from 'react-router-dom';
 import { api } from '../api.js';
 import { useToast } from '../toast.jsx';
 import { useSheetSwipe } from '../lib/sheetSwipe.js';
+import { useScrollLock } from '../lib/scrollLock.js';
 import CaseVisitsModal from './CaseVisitsModal.jsx';
 import InvoiceModal from './InvoiceModal.jsx';
 import {
   CASE_TYPE_LABELS, CASE_STATUS_LABELS, POSITION_LABELS, GENDER_LABELS, SERVICE_KIND_LABELS,
-  INVOICE_STATUS_LABELS, CASE_EVENT_LABELS, formatBaht, formatDate, stampText,
+  INVOICE_STATUS_LABELS, CASE_EVENT_LABELS, formatBaht, formatDate, stampText, positionsForCase,
 } from '../labels.js';
 import LineIcon from './LineIcon.jsx';
 import ConfirmButton from './ConfirmButton.jsx';
@@ -127,6 +128,7 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
   const [openInvoiceId, setOpenInvoiceId] = useState(null);
   const [events, setEvents] = useState([]);      // ประวัติการทำรายการ (audit log) — ใหม่สุดอยู่บน
   const [eventsOpen, setEventsOpen] = useState(false);
+  const [allStaff, setAllStaff] = useState(false); // เลิกกรองรายชื่อตามระดับที่เคสเลือกไว้
 
   // ดึงเคส รายชื่อพนักงาน และวันนัดพร้อมกัน — จำนวนเคสที่แต่ละคนถืออยู่เปลี่ยนทุกครั้งที่จับคู่/ยกเลิก
   const load = () =>
@@ -174,19 +176,15 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
   }, [caseId]);
 
   /*
-   * ล็อกไม่ให้หน้าหลังเลื่อนตาม + คืนโฟกัสกลับไปที่แถวเดิมตอนปิด (ไม่ใช่ดีดกลับไปต้นหน้า)
+   * คืนโฟกัสกลับไปที่แถวเดิมตอนปิด (ไม่ใช่ดีดกลับไปต้นหน้า)
    * ต้องแยกเป็น effect ที่ทำงานครั้งเดียวตลอดอายุกล่อง — ถ้าไปรวมกับ effect ที่มี deps
    * โฟกัสจะถูกคืนออกไปข้างนอกทุกครั้งที่ deps เปลี่ยน (เช่น ตอนเปิด popup วันนัด)
    */
+  useScrollLock();
   useEffect(() => {
     const previous = document.activeElement;
     boxRef.current?.focus();
-    document.body.style.overflow = 'hidden';
-
-    return () => {
-      document.body.style.overflow = '';
-      previous?.focus?.();
-    };
+    return () => previous?.focus?.();
   }, []);
 
   /* ปิดด้วย Esc + ขังโฟกัสไว้ในกล่อง — ถ้าไม่ขัง Tab จะวิ่งไปโดนลิงก์ที่อยู่หลังฉาก */
@@ -254,6 +252,17 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
   // วันที่ยกเลิกไม่นับเป็นนัดที่จองไว้ แต่ยังเก็บไว้เป็นประวัติใน popup
   const bookedVisits = visits.filter((v) => v.status !== 'cancelled').length;
   const doneVisits = visits.filter((v) => v.status === 'done').length;
+
+  /* รายชื่อพนักงานที่ตรงกับระดับ/สายบริการของเคสนี้ — กติกาเดียวกับหน้าเปิดเคส (ดู positionsForCase)
+     คนที่ถือเคสอยู่ตอนนี้ต้องอยู่ในรายการเสมอ ไม่งั้นช่องจะว่างทั้งที่มีคนรับอยู่ */
+  const wantedPositions = item ? positionsForCase(item) : null;
+  const matchingStaff = wantedPositions ? staff.filter((e) => wantedPositions.includes(e.position)) : staff;
+  const filtering = Boolean(wantedPositions) && !allStaff && matchingStaff.length > 0;
+  const baseStaff = filtering ? matchingStaff : staff;
+  const shownStaff =
+    item?.assigned_to && !baseStaff.some((e) => e.employee_id === item.assigned_to)
+      ? [...baseStaff, ...staff.filter((e) => e.employee_id === item.assigned_to)]
+      : baseStaff;
 
   /** ลบใบแจ้งหนี้ทิ้งถาวร แล้วถามต่อว่าจะออกใบใหม่ตามข้อมูลปัจจุบันเลยไหม */
   function deleteInvoice(v) {
@@ -588,11 +597,15 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
 
                 {!terminal && (
                   <div className="assign-form">
+                    {/* กรองตามระดับที่เคสเลือกไว้ (กติกาเดียวกับหน้าเปิดเคส — ดู positionsForCase)
+                        กดดูทุกตำแหน่งได้ และถ้าไม่มีใครตรงเลยก็แสดงทั้งหมดแทนช่องว่างเปล่า */}
                     <select value={pick} onChange={(e) => setPick(e.target.value)}>
                       <option value="">— เลือกพนักงาน —</option>
-                      {staff.map((e) => (
+                      {shownStaff.map((e) => (
                         <option key={e.employee_id} value={e.employee_id}>
-                          {e.employee_id} · {e.first_name} {e.last_name} ({POSITION_LABELS[e.position]}) · ถืออยู่ {e.active_cases} เคส
+                          {e.employee_id} · {e.first_name} {e.last_name} ({POSITION_LABELS[e.position]})
+                          {wantedPositions && !wantedPositions.includes(e.position) ? ' · ไม่ตรงระดับ' : ''}
+                          {' · '}ถืออยู่ {e.active_cases} เคส
                         </option>
                       ))}
                     </select>
@@ -604,6 +617,23 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                       {item.assigned_to ? 'เปลี่ยนพนักงาน' : 'จับคู่พนักงาน'}
                     </button>
                   </div>
+                )}
+                {!terminal && wantedPositions && (
+                  <p className="muted assign-hint">
+                    {filtering ? (
+                      <>
+                        แสดงเฉพาะ{wantedPositions.map((p) => POSITION_LABELS[p]).join('/')} ({matchingStaff.length} คน){' · '}
+                        <button type="button" className="btn link-btn" onClick={() => setAllStaff(true)}>ดูทุกตำแหน่ง</button>
+                      </>
+                    ) : matchingStaff.length === 0 ? (
+                      <>ยังไม่มีพนักงานตำแหน่ง{wantedPositions.map((p) => POSITION_LABELS[p]).join('/')} — แสดงทุกคนแทน</>
+                    ) : (
+                      <>
+                        แสดงทุกตำแหน่ง ·{' '}
+                        <button type="button" className="btn link-btn" onClick={() => setAllStaff(false)}>กรองตามระดับ</button>
+                      </>
+                    )}
+                  </p>
                 )}
               </section>
 

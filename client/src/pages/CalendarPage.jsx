@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { api } from '../api.js';
 import CaseModal from '../components/CaseModal.jsx';
 import { useSheetSwipe } from '../lib/sheetSwipe.js';
+import { useScrollLock } from '../lib/scrollLock.js';
 import {
   CASE_TYPE_LABELS, MONTH_LABELS, POSITION_LABELS, SERVICE_KIND_LABELS, VISIT_STATE_LABELS,
   formatDate, toBuddhistYear,
@@ -363,14 +364,11 @@ export default function CalendarPage() {
 function DayPanel({ day, list, onOpenCase, onClose }) {
   const sheetRef = useSheetSwipe(onClose); // จอแคบ: ปัดลงเพื่อปิด
 
+  useScrollLock();
   useEffect(() => {
     const onKeyDown = (e) => e.key === 'Escape' && onClose();
     document.addEventListener('keydown', onKeyDown);
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.removeEventListener('keydown', onKeyDown);
-      document.body.style.overflow = '';
-    };
+    return () => document.removeEventListener('keydown', onKeyDown);
   }, [onClose]);
 
   return (

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import CaseModal from './CaseModal.jsx';
 import { useSheetSwipe } from '../lib/sheetSwipe.js';
+import { useScrollLock } from '../lib/scrollLock.js';
 import { CASE_TYPE_LABELS, CASE_STATUS_LABELS, formatBaht, formatDate } from '../labels.js';
 
 /**
@@ -11,18 +12,13 @@ export default function WorkHistoryModal({ employeeName, cases = [], onClose }) 
   const [openCaseId, setOpenCaseId] = useState(null);
   const sheetRef = useSheetSwipe(onClose); // จอแคบ: ปัดลงเพื่อปิด
 
+  // การล็อกนับชั้นเอง (ดู lib/scrollLock.js) — CaseModal ที่ซ้อนอยู่ปิดตัวเองแล้วไม่ปลดล็อกของตัวนี้อีก
+  useScrollLock();
   useEffect(() => {
     // CaseModal ซ้อนอยู่ = ให้ Escape ปิดตัวนั้นก่อน ไม่ใช่ปิดพรวดทั้งสองชั้น
     const onKeyDown = (e) => e.key === 'Escape' && !openCaseId && onClose();
     document.addEventListener('keydown', onKeyDown);
-
-    // ผูกกับ openCaseId ด้วย เพราะ CaseModal ปลดล็อกการเลื่อนตอนมันปิด — ต้องล็อกกลับทันที
-    document.body.style.overflow = 'hidden';
-
-    return () => {
-      document.removeEventListener('keydown', onKeyDown);
-      document.body.style.overflow = '';
-    };
+    return () => document.removeEventListener('keydown', onKeyDown);
   }, [onClose, openCaseId]);
 
   const active = cases.filter((c) => c.status === 'assigned' || c.status === 'in_progress');

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { useSheetSwipe } from '../lib/sheetSwipe.js';
+import { useScrollLock } from '../lib/scrollLock.js';
 import FileButton from './FileButton.jsx';
 import { getPosition } from '../lib/geo.js';
 import { compressImage } from '../lib/image.js';
@@ -33,14 +34,11 @@ export default function CheckInModal({ visit, onDone, onClose }) {
     return () => { cancelled = true; };
   }, []);
 
+  useScrollLock();
   useEffect(() => {
     const onKeyDown = (e) => e.key === 'Escape' && !busy && onClose();
     document.addEventListener('keydown', onKeyDown);
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.removeEventListener('keydown', onKeyDown);
-      document.body.style.overflow = '';
-    };
+    return () => document.removeEventListener('keydown', onKeyDown);
   }, [onClose, busy]);
 
   async function retryLocation() {

@@ -1,16 +1,16 @@
 import { useEffect } from 'react';
 import { useSheetSwipe } from '../lib/sheetSwipe.js';
+import { useScrollLock } from '../lib/scrollLock.js';
 import CaseVisits from './CaseVisits.jsx';
 
 /**
  * popup เฉพาะสำหรับลงวันนัดให้บริการ — เปิดซ้อนบน CaseModal อีกที
- *
- * ไม่แตะ document.body.style.overflow เพราะ popup แม่ (CaseModal) ล็อกการเลื่อนไว้อยู่แล้ว
- * ถ้าแตะด้วย พอปิดตัวนี้จะไปปลดล็อกทั้งที่ popup แม่ยังเปิดอยู่
+ * การล็อกหน้าหลังนับชั้นเอง (ดู lib/scrollLock.js) จึงเรียกได้ตามปกติ ไม่ไปปลดล็อกของ popup แม่
  */
 export default function CaseVisitsModal({ caseItem, readOnly = false, mode = 'shift', onClose }) {
   const title = mode === 'appointment' ? 'ตารางนัด' : 'ตารางกะ';
   const sheetRef = useSheetSwipe(onClose); // จอแคบ: ปัดลงเพื่อปิด
+  useScrollLock();
   useEffect(() => {
     const onKeyDown = (e) => e.key === 'Escape' && onClose();
     document.addEventListener('keydown', onKeyDown);

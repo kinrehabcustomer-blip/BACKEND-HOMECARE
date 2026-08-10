@@ -4,7 +4,8 @@ import { api } from '../api.js';
 import { useToast } from '../toast.jsx';
 import MapPicker from '../components/MapPicker.jsx';
 import {
-  CASE_TYPE_LABELS, POSITION_LABELS, GENDER_LABELS, SERVICE_KIND_LABELS, formatBaht, ageFromBirthDate,
+  CASE_TYPE_LABELS, POSITION_LABELS, GENDER_LABELS, SERVICE_KIND_LABELS,
+  formatBaht, ageFromBirthDate, positionsForCase,
 } from '../labels.js';
 import LineIcon from '../components/LineIcon.jsx';
 
@@ -71,6 +72,8 @@ export default function CaseFormPage() {
   const [error, setError] = useState(null);
   const [fieldErrors, setFieldErrors] = useState({});
   const [saving, setSaving] = useState(false);
+  // เปิดดูพนักงานทุกตำแหน่ง แทนที่จะเห็นเฉพาะระดับที่เคสนี้ต้องการ
+  const [allStaff, setAllStaff] = useState(false);
   const formEl = useRef(null);
 
   // ค่าตั้งต้นไว้เทียบว่าผู้ใช้แก้อะไรไปแล้วบ้าง (ใช้เตือนก่อนออกจากหน้า)
@@ -118,6 +121,23 @@ export default function CaseFormPage() {
     selectedFormat && form.pkg_staff_tier && (!needGrade || selGradeId)
       ? lookupRate(selectedFormat.format_id, effectiveGrade, form.pkg_staff_tier)
       : null;
+
+  /* ---------- รายชื่อพนักงานที่เข้ากับบริการที่เลือกไว้ ----------
+     เลือกระดับ "RN" ไว้แล้วยังต้องไล่หาพยาบาลเองในรายชื่อทั้งบริษัทไม่มีเหตุผล
+     — กรองให้เหลือเฉพาะตำแหน่งที่ตรงกับระดับ (สายกายภาพ = นักกายภาพบำบัด)
+
+     ไม่ทำเป็นกฎบังคับ เพราะของจริงคนระดับสูงกว่าลงไปทำงานระดับต่ำกว่าได้:
+       · กดดู "ทุกตำแหน่ง" ได้ตลอด
+       · ไม่มีใครตรงระดับเลย = แสดงทั้งหมดแทน ไม่ปล่อยให้เจอ dropdown ว่าง
+       · คนที่เลือกไว้แล้วยังอยู่ในรายการเสมอ แม้จะเปลี่ยนระดับทีหลังจนไม่ตรง (ติดป้ายบอกว่าไม่ตรงระดับ) */
+  const wantedPositions = positionsForCase(form);
+  const matchingStaff = wantedPositions ? staff.filter((e) => wantedPositions.includes(e.position)) : staff;
+  const filtering = Boolean(wantedPositions) && !allStaff && matchingStaff.length > 0;
+  const baseStaff = filtering ? matchingStaff : staff;
+  const shownStaff =
+    form.assigned_to && !baseStaff.some((e) => e.employee_id === form.assigned_to)
+      ? [...baseStaff, ...staff.filter((e) => e.employee_id === form.assigned_to)]
+      : baseStaff;
 
   /**
    * ผู้ใช้เปลี่ยนการเลือกเรท -> ถ้าได้ช่องที่ให้บริการได้ คัดลอกค่าบริการมาเป็นค่าจ้าง (fee)
@@ -988,14 +1008,43 @@ export default function CaseFormPage() {
               พนักงานที่รับเคส
               <select {...field('assigned_to')}>
                 <option value="">— ยังไม่จับคู่ (จับคู่ทีหลังได้) —</option>
-                {staff.map((e) => (
+                {shownStaff.map((e) => (
                   <option key={e.employee_id} value={e.employee_id}>
-                    {e.employee_id} · {e.first_name} {e.last_name} ({POSITION_LABELS[e.position]}) · ถืออยู่ {e.active_cases} เคส
+                    {e.employee_id} · {e.first_name} {e.last_name} ({POSITION_LABELS[e.position]})
+                    {wantedPositions && !wantedPositions.includes(e.position) ? ' · ไม่ตรงระดับ' : ''}
+                    {' · '}ถืออยู่ {e.active_cases} เคส
                   </option>
                 ))}
               </select>
             {fieldError('assigned_to')}
             </label>
+          )}
+
+          {/* บอกให้รู้ว่ารายชื่อถูกกรองอยู่ ไม่ใช่ปล่อยให้สงสัยว่าทำไมคนที่หาไม่โผล่ */}
+          {!isEdit && wantedPositions && (
+            <p className="form-hint muted">
+              {filtering ? (
+                <>
+                  แสดงเฉพาะ<strong>{wantedPositions.map((p) => POSITION_LABELS[p]).join('/')}</strong>
+                  {' '}ที่ตรงกับบริการที่เลือก ({matchingStaff.length} คน){' · '}
+                  <button type="button" className="btn link-btn" onClick={() => setAllStaff(true)}>
+                    ดูทุกตำแหน่ง
+                  </button>
+                </>
+              ) : matchingStaff.length === 0 ? (
+                <>
+                  ยังไม่มีพนักงานตำแหน่ง<strong>{wantedPositions.map((p) => POSITION_LABELS[p]).join('/')}</strong>
+                  {' '}ในระบบ — แสดงทุกคนแทน
+                </>
+              ) : (
+                <>
+                  แสดงทุกตำแหน่ง ·{' '}
+                  <button type="button" className="btn link-btn" onClick={() => setAllStaff(false)}>
+                    กรองตามระดับที่เลือก
+                  </button>
+                </>
+              )}
+            </p>
           )}
           <label className="span-2">หมายเหตุ<textarea rows={2} {...field('note')} />{fieldError('note')}</label>
         </div>

@@ -22,6 +22,7 @@ const CLOSE_MS = 200;        // เวลาที่ใช้ไถลลงไ
  * กติกาที่ทำให้ไม่ไปทับการใช้งานอื่น:
  *   - เริ่มลากได้เฉพาะตอนเนื้อหาข้างในเลื่อนอยู่บนสุด ไม่งั้นการปัดลงคือการเลื่อนอ่านเนื้อหา
  *   - ไม่เริ่มลากถ้านิ้วแตะช่องกรอก (จะได้เลือกข้อความ/วางเคอร์เซอร์ได้ตามปกติ)
+ *   - ไม่เริ่มลากถ้านิ้วอยู่บนแผ่นที่ซ้อนอยู่ข้างบน (popup ในระบบนี้ซ้อนกันได้)
  *   - ปัดขึ้นปล่อยผ่านทันที เป็นการเลื่อนเนื้อหาปกติ
  */
 export function useSheetSwipe(onClose, externalRef) {
@@ -78,6 +79,10 @@ export function useSheetSwipe(onClose, externalRef) {
       if (!sheet.matches || e.touches.length !== 1) return;
       const t = e.target;
       if (t.closest?.('input, textarea, select, [contenteditable]')) return;
+      /* popup ที่ซ้อนอยู่ข้างบนเป็นลูกของ popup แม่ในโครง DOM — touch บนแผ่นลูกจึงลอยมาถึงแม่ด้วย
+         ถ้าไม่กันไว้ ปัดลงบนแผ่นลูกจะลากทั้งสองใบพร้อมกัน (transform ซ้อนกัน เลื่อนเร็วเป็นสองเท่า)
+         แล้วพอถึงระยะปิด ก็ปิดพรวดทั้งกอง ทั้งที่ตั้งใจปิดแค่แผ่นบนสุด */
+      if (t.closest?.('.modal') !== el) return;
       if (scrolledInside(t)) return;
 
       startY = e.touches[0].clientY;

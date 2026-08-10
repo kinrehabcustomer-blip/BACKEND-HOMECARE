@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useScrollLock } from '../lib/scrollLock.js';
 
 /**
  * ปุ่มที่ต้องยืนยันก่อนทำงาน — ใช้แทน confirm() ของเบราว์เซอร์
@@ -29,6 +30,9 @@ export default function ConfirmButton({
   const [running, setRunning] = useState(false);
   const cancelRef = useRef(null);
 
+  // ล็อกเฉพาะตอนกล่องยืนยันกางอยู่ · ตัวนับชั้นดูแลกรณีเปิดซ้อนบน popup แม่ให้แล้ว
+  useScrollLock(open);
+
   useEffect(() => {
     if (!open) return undefined;
 
@@ -45,15 +49,7 @@ export default function ConfirmButton({
     };
     document.addEventListener('keydown', onKeyDown, true);
 
-    /* ล็อกการเลื่อนหน้าหลังเฉพาะตอนที่ยังไม่มีใครล็อกไว้ — เปิดจากใน popup แม่จะโดนล็อกอยู่แล้ว
-       ถ้าล็อกซ้ำแล้วปลดตอนปิด จะไปปลดของแม่ทั้งที่แม่ยังเปิดอยู่ แล้วหน้าหลังเลื่อนได้ทั้งที่ไม่ควร */
-    const alreadyLocked = document.body.style.overflow === 'hidden';
-    if (!alreadyLocked) document.body.style.overflow = 'hidden';
-
-    return () => {
-      document.removeEventListener('keydown', onKeyDown, true);
-      if (!alreadyLocked) document.body.style.overflow = '';
-    };
+    return () => document.removeEventListener('keydown', onKeyDown, true);
   }, [open, running]);
 
   async function run() {

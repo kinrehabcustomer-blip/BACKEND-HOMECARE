@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { useSheetSwipe } from '../lib/sheetSwipe.js';
+import { useScrollLock } from '../lib/scrollLock.js';
 import { formatBaht } from '../labels.js';
 import LineIcon from '../components/LineIcon.jsx';
 import PageRefresh from '../components/PageRefresh.jsx';
@@ -224,14 +225,11 @@ function PackageForm({ initial, onClose, onSaved }) {
   const { avg, discount, net, profit } = preview(form);
   const canSave = form.name.trim() && toNum(form.sessions) > 0 && toNum(form.original_price) != null;
 
+  useScrollLock();
   useEffect(() => {
     const onKey = (e) => e.key === 'Escape' && onClose();
     document.addEventListener('keydown', onKey);
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.removeEventListener('keydown', onKey);
-      document.body.style.overflow = '';
-    };
+    return () => document.removeEventListener('keydown', onKey);
   }, [onClose]);
 
   async function save() {
