@@ -2496,9 +2496,26 @@ select option:checked {
   border-radius: var(--radius);
   box-shadow: 0 -0.5rem 1rem rgb(0 0 0 / 8%);
 }
-/* ช่องติ๊กเลือกกะ — แคบที่สุดเท่าที่กดได้ ที่เหลือยกให้คอลัมน์ที่ต้องอ่าน */
+/* ช่องติ๊กเลือกกะ — แคบที่สุดเท่าที่อ่านออก ที่เหลือยกให้คอลัมน์ที่ต้องอ่าน */
 .col-check { width: 2.5rem; text-align: center; }
-.table tbody tr.is-picked { background: var(--brand-soft); }
+
+/* ทั้งแถวเป็นปุ่มเลือก (ทั้งเมาส์และนิ้ว) — ช่องติ๊กเป็นแค่ตัวบอกสถานะ ไม่รับคลิกเอง
+   ถ้าปล่อยให้มันรับด้วย การแตะโดนช่องติ๊กพอดีจะสลับสองครั้งแล้วเหมือนกดไม่ติด */
+.table tbody tr.is-tappable { cursor: pointer; }
+.table tbody tr.is-tappable td { user-select: none; }
+.table tbody tr.is-tappable .col-check input { pointer-events: none; }
+/* ลิงก์ในแถวยังกดได้ตามปกติ (ไปเปิดเคส) — ตัวมันหยุดการส่งต่อคลิกเองใน JSX */
+.table tbody tr.is-tappable a { cursor: pointer; user-select: text; }
+/* เฉพาะเครื่องที่มีเมาส์จริง — จอสัมผัสไม่มี hover พื้นจะค้างสีไว้บนแถวที่นิ้วเพิ่งแตะ
+   (กฎเดียวกับที่โหมดการ์ดตั้งใจปิด hover ไว้อยู่แล้ว) */
+@media (hover: hover) {
+  .table tbody tr.is-tappable:hover { background: var(--surface-2); }
+}
+.table tbody tr.is-tappable:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }
+/* แถว/การ์ดที่เลือกไว้ — ต้องชนะทั้งกฎ hover ด้านบนและกฎที่โหมดการ์ดล็อกพื้นไว้เป็น surface
+   ใช้เส้นขอบสีแบรนด์ด้วย ไม่พึ่งพื้นสีอย่างเดียว (จอกลางแดดพื้นจางๆ แทบไม่ต่างจากขาว) */
+.table tbody tr.is-picked,
+.table tbody tr.is-picked:hover { background: var(--brand-soft); border-color: var(--brand); }
 .pay-cell { text-align: right; }
 
 /* บรรทัดบอกว่ารายชื่อพนักงานถูกกรองตามระดับของเคสอยู่ — ใต้ช่องเลือกในโมดัลเคส */

@@ -281,7 +281,8 @@ function Approvals({ month, employeeId, patch, employeePicker, reloadKey }) {
 
       <p className="muted form-hint">
         กะที่เช็คเอาท์แล้วจะยัง<strong>ไม่เข้าสรุปค่าตอบแทน</strong>ของพนักงาน จนกว่าจะอนุมัติที่นี่ ·
-        ยอดที่เห็นคือค่าจ้างของกะนั้น (เกลี่ยจากค่าจ้างเคสถ้าไม่ได้ตั้งรายกะ)
+        ยอดที่เห็นคือค่าจ้างของกะนั้น (เกลี่ยจากค่าจ้างเคสถ้าไม่ได้ตั้งรายกะ) ·
+        <strong>แตะที่แถวเพื่อเลือก</strong>
       </p>
 
       {error && <p className="error">{error}</p>}
@@ -295,18 +296,24 @@ function Approvals({ month, employeeId, patch, employeePicker, reloadKey }) {
         </section>
       ) : rows?.length > 0 ? (
         <>
+          {/* ปุ่มเลือกทั้งหมดต้องอยู่นอกหัวตาราง — จอแคบหัวตารางถูกซ่อน (แถวกลายเป็นการ์ด)
+              ถ้าฝากไว้ในหัวตารางอย่างเดียว บนมือถือจะไม่มีทางเลือกทั้งหมดได้เลย */}
+          <div className="pick-presets">
+            <button
+              className="btn tiny"
+              disabled={busy}
+              onClick={() => setPicked(allPicked ? new Set() : new Set(rows.map((v) => v.visit_id)))}
+            >
+              {allPicked ? 'ล้างที่เลือก' : `เลือกทั้งหมด (${rows.length})`}
+            </button>
+            {picked.size > 0 && !allPicked && <span className="muted">เลือกไว้ {picked.size} กะ</span>}
+          </div>
+
           <div className="table-wrap">
             <table className="table table-cards table-2line">
               <thead>
                 <tr>
-                  <th className="col-check">
-                    <input
-                      type="checkbox"
-                      checked={allPicked}
-                      aria-label="เลือกทั้งหมด"
-                      onChange={() => setPicked(allPicked ? new Set() : new Set(rows.map((v) => v.visit_id)))}
-                    />
-                  </th>
+                  <th className="col-check" aria-label="เลือก" />
                   <th>วันที่</th>
                   <th>พนักงาน / เคส</th>
                   <th>เข้า–ออก</th>
@@ -316,13 +323,30 @@ function Approvals({ month, employeeId, patch, employeePicker, reloadKey }) {
               </thead>
               <tbody>
                 {rows.map((v) => (
-                  <tr key={v.visit_id} className={picked.has(v.visit_id) ? 'is-picked' : ''}>
+                  /* ทั้งแถวคือปุ่มเลือก — เล็งช่องติ๊กเล็กๆ บนมือถือยากและพลาดง่าย
+                     ช่องติ๊กเหลือไว้เป็นตัวบอกสถานะอย่างเดียว (pointer-events ปิดใน CSS)
+                     จึงไม่เกิดการสลับสองครั้งเมื่อแตะโดนช่องติ๊กพอดี */
+                  <tr
+                    key={v.visit_id}
+                    className={`is-tappable ${picked.has(v.visit_id) ? 'is-picked' : ''}`}
+                    role="button"
+                    tabIndex={0}
+                    aria-pressed={picked.has(v.visit_id)}
+                    aria-label={`กะวันที่ ${v.visit_date} ของ ${v.employee_name}`}
+                    onClick={() => toggle(v.visit_id)}
+                    onKeyDown={(e) => {
+                      if (e.key !== 'Enter' && e.key !== ' ') return;
+                      e.preventDefault(); // เว้นวรรคบนแถวที่โฟกัสอยู่ = เลือก ไม่ใช่เลื่อนหน้า
+                      toggle(v.visit_id);
+                    }}
+                  >
                     <td data-label="เลือก" className="col-check">
                       <input
                         type="checkbox"
                         checked={picked.has(v.visit_id)}
-                        aria-label={`เลือกกะวันที่ ${v.visit_date}`}
-                        onChange={() => toggle(v.visit_id)}
+                        readOnly
+                        tabIndex={-1}
+                        aria-hidden="true"
                       />
                     </td>
                     <td data-label="วันที่">{formatDate(v.visit_date)}</td>
@@ -330,7 +354,14 @@ function Approvals({ month, employeeId, patch, employeePicker, reloadKey }) {
                       {v.employee_name}
                       <span className="cell-sub">
                         {v.client_name} ·{' '}
-                        <Link className="link mono" to={`/cases?open=${v.case_id}`}>{v.case_id}</Link>
+                        {/* ลิงก์ไปเปิดเคส — ต้องไม่ถูกนับเป็นการเลือกแถวไปด้วย */}
+                        <Link
+                          className="link mono"
+                          to={`/cases?open=${v.case_id}`}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {v.case_id}
+                        </Link>
                       </span>
                     </td>
                     <td data-label="เข้า–ออก">
