@@ -5,6 +5,7 @@ import {
   POSITION_LABELS, VISIT_STATE_LABELS, MONTH_LABELS, formatBaht, formatDate, timeText, toBuddhistYear,
 } from '../labels.js';
 import LineIcon from './LineIcon.jsx';
+import TimeSelect from './TimeSelect.jsx';
 
 const WEEKDAYS = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
 
@@ -25,6 +26,17 @@ const TIME_PRESETS = [
   { key: 'day', label: '08:00–17:00', start: '08:00', end: '17:00' },
   { key: 'late', label: '09:00–18:00', start: '09:00', end: '18:00' },
   { key: 'full', label: '24 ชม.', start: '00:00', end: '23:59' },
+];
+
+/**
+ * นัดกายภาพบำบัดเป็นการเข้าเซสชันครั้งละราวหนึ่งชั่วโมง ไม่ใช่กะทั้งวันแบบ Homecare
+ * ชิปจึงคนละชุดกัน — เอาชุดกะมาใช้จะได้ตัวเลือกที่ไม่มีใครกดเลย (นัดกายภาพ 24 ชม.)
+ */
+const APPOINTMENT_TIME_PRESETS = [
+  { key: 'none', label: 'ไม่ระบุเวลา', start: '', end: '' },
+  { key: 'morning', label: '09:00–10:00', start: '09:00', end: '10:00' },
+  { key: 'noon', label: '13:00–14:00', start: '13:00', end: '14:00' },
+  { key: 'afternoon', label: '15:00–16:00', start: '15:00', end: '16:00' },
 ];
 
 /** สีของช่องวันบนปฏิทินจากกะทั้งหมดในวันนั้น: มีกะรอ/กำลังทำ = เขียวแบรนด์, เสร็จหมด = เขียวเข้ม, ยกเลิกหมด = แดง */
@@ -70,9 +82,11 @@ export default function CaseVisits({ caseId, target = null, readOnly = false, mo
   const mm = String(month).padStart(2, '0');
   const today = todayISO();
 
-  const time = timeKey === 'custom' ? custom : TIME_PRESETS.find((p) => p.key === timeKey) ?? TIME_PRESETS[0];
-  const plannedStart = isAppt ? '' : time.start;
-  const plannedEnd = isAppt ? '' : time.end;
+  const unit = isAppt ? 'นัด' : 'กะ'; // คำเรียกของหนึ่งรายการ ใช้ในข้อความทุกที่ของโหมดนั้น
+  const presets = isAppt ? APPOINTMENT_TIME_PRESETS : TIME_PRESETS;
+  const time = timeKey === 'custom' ? custom : presets.find((p) => p.key === timeKey) ?? presets[0];
+  const plannedStart = time.start;
+  const plannedEnd = time.end;
 
   useEffect(() => {
     let cancelled = false;
@@ -155,9 +169,9 @@ export default function CaseVisits({ caseId, target = null, readOnly = false, mo
       } else {
         setVisits(res.visits);
         if (res.deleted != null) {
-          toast(`ลบ ${res.deleted} กะ${res.kept ? ` · เก็บ ${res.kept} กะที่เช็คอินไปแล้วไว้` : ''}`);
+          toast(`ลบ ${res.deleted} ${unit}${res.kept ? ` · เก็บ ${res.kept} ${unit}ที่เช็คอินไปแล้วไว้` : ''}`);
         } else if (res.added != null) {
-          toast(`บันทึก ${res.added} กะ${res.skipped ? ` · ข้าม ${res.skipped} วันที่มีกะเหมือนกันอยู่แล้ว` : ''}`);
+          toast(`บันทึก ${res.added} ${unit}${res.skipped ? ` · ข้าม ${res.skipped} วันที่มี${unit}เหมือนกันอยู่แล้ว` : ''}`);
         }
       }
       if (clearPicked) setPicked(new Set());
@@ -316,7 +330,9 @@ export default function CaseVisits({ caseId, target = null, readOnly = false, mo
 
       {!readOnly && picked.size === 0 && (
         <p className="muted visit-hint">
-          {isAppt ? 'แตะวันบนปฏิทินเพื่อเลือกวันนัด แล้วกดบันทึก' : 'แตะวันบนปฏิทินเพื่อเลือก (แตะซ้ำเพื่อยกเลิก) แล้วตั้งคน/เวลาแล้วกดบันทึก'}
+          {isAppt
+            ? 'แตะวันบนปฏิทินเพื่อเลือกวันนัด (แตะซ้ำเพื่อยกเลิก) แล้วเลือกเวลานัดแล้วกดบันทึก'
+            : 'แตะวันบนปฏิทินเพื่อเลือก (แตะซ้ำเพื่อยกเลิก) แล้วตั้งคน/เวลาแล้วกดบันทึก'}
         </p>
       )}
 
@@ -326,53 +342,65 @@ export default function CaseVisits({ caseId, target = null, readOnly = false, mo
           <p className="pick-count">
             เลือกไว้ <strong>{picked.size}</strong> วัน
             {duplicateDates.size > 0 && (
-              <span className="cell-sub">{duplicateDates.size} วันมีกะเหมือนกันอยู่แล้ว — จะถูกข้าม</span>
+              <span className="cell-sub">
+                {duplicateDates.size} วันมี{unit}เหมือนกันอยู่แล้ว — จะถูกข้าม
+              </span>
             )}
           </p>
 
+          {/* คนที่ไป: เฉพาะกะ Homecare — นัดกายภาพใช้ผู้รับผิดชอบหลักของเคส (นักกายภาพบำบัดของคอร์สนั้น) */}
           {!isAppt && (
-            <>
-              <select value={who} disabled={busy} onChange={(e) => setWho(e.target.value)}>
-                <option value="">— พนักงาน (ไม่ระบุ = ผู้รับผิดชอบหลัก) —</option>
-                {staff.map((s) => (
-                  <option key={s.employee_id} value={s.employee_id}>
-                    {s.first_name} {s.last_name} ({POSITION_LABELS[s.position]})
-                  </option>
-                ))}
-              </select>
+            <select value={who} disabled={busy} onChange={(e) => setWho(e.target.value)}>
+              <option value="">— พนักงาน (ไม่ระบุ = ผู้รับผิดชอบหลัก) —</option>
+              {staff.map((s) => (
+                <option key={s.employee_id} value={s.employee_id}>
+                  {s.first_name} {s.last_name} ({POSITION_LABELS[s.position]})
+                </option>
+              ))}
+            </select>
+          )}
 
-              <div className="time-chips">
-                {TIME_PRESETS.map((p) => (
-                  <button
-                    key={p.key}
-                    type="button"
-                    className={`btn tiny ${timeKey === p.key ? 'primary' : ''}`}
-                    disabled={busy}
-                    onClick={() => setTimeKey(p.key)}
-                  >
-                    {p.label}
-                  </button>
-                ))}
-                <button
-                  type="button"
-                  className={`btn tiny ${timeKey === 'custom' ? 'primary' : ''}`}
-                  disabled={busy}
-                  onClick={() => setTimeKey('custom')}
-                >
-                  กำหนดเอง
-                </button>
-              </div>
+          {/* ช่วงเวลา: ใช้ทั้งสองโหมด — นัดกายภาพก็ต้องบอกคนไข้ได้ว่ามากี่โมง
+              และเวลาที่ระบุไว้ทำให้ตรวจกะชนกันได้แม่นขึ้น (ไม่งั้นนับเป็นชนทั้งวัน) */}
+          <div className="time-chips">
+            <span className="muted time-chips-label">{isAppt ? 'เวลานัด' : 'เวลากะ'}</span>
+            {presets.map((p) => (
+              <button
+                key={p.key}
+                type="button"
+                className={`btn tiny ${timeKey === p.key ? 'primary' : ''}`}
+                disabled={busy}
+                onClick={() => setTimeKey(p.key)}
+              >
+                {p.label}
+              </button>
+            ))}
+            <button
+              type="button"
+              className={`btn tiny ${timeKey === 'custom' ? 'primary' : ''}`}
+              disabled={busy}
+              onClick={() => setTimeKey('custom')}
+            >
+              กำหนดเอง
+            </button>
+          </div>
 
-              {timeKey === 'custom' && (
-                <div className="time-custom">
-                  <input type="time" value={custom.start} disabled={busy} title="เวลาเริ่ม"
-                    onChange={(e) => setCustom((p) => ({ ...p, start: e.target.value }))} />
-                  <span className="muted">–</span>
-                  <input type="time" value={custom.end} disabled={busy} title="เวลาเลิก"
-                    onChange={(e) => setCustom((p) => ({ ...p, end: e.target.value }))} />
-                </div>
-              )}
-            </>
+          {timeKey === 'custom' && (
+            <div className="time-custom">
+              <TimeSelect
+                label={isAppt ? 'เวลานัด' : 'เวลาเริ่ม'}
+                value={custom.start}
+                disabled={busy}
+                onChange={(v) => setCustom((p) => ({ ...p, start: v }))}
+              />
+              <span className="muted">–</span>
+              <TimeSelect
+                label="เวลาเลิก"
+                value={custom.end}
+                disabled={busy}
+                onChange={(v) => setCustom((p) => ({ ...p, end: v }))}
+              />
+            </div>
           )}
 
           {/* เตือนก่อนบันทึก ไม่ใช่หลังบันทึก — ยังกดบันทึกได้ บางครั้งจงใจซ้อน (แวะสองบ้านติดกัน) */}
@@ -396,7 +424,7 @@ export default function CaseVisits({ caseId, target = null, readOnly = false, mo
 
           <div className="pick-actions">
             <button type="button" className="btn primary" disabled={busy} onClick={save}>
-              บันทึก {picked.size} {isAppt ? 'นัด' : 'กะ'}
+              บันทึก {picked.size} {unit}
             </button>
             {pickedWithVisits.length > 0 && (
               <button
@@ -414,7 +442,9 @@ export default function CaseVisits({ caseId, target = null, readOnly = false, mo
       )}
 
       {visits.length === 0 ? (
-        <p className="muted visit-empty">ยังไม่ได้นัดกะ{readOnly ? '' : ' — แตะวันบนปฏิทินเพื่อเลือก'}</p>
+        <p className="muted visit-empty">
+          {isAppt ? 'ยังไม่ได้ลงนัด' : 'ยังไม่ได้นัดกะ'}{readOnly ? '' : ' — แตะวันบนปฏิทินเพื่อเลือก'}
+        </p>
       ) : (
         <ol className="visit-list">
           {visits.map((v, idx) => {

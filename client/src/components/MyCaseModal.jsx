@@ -133,7 +133,12 @@ export default function MyCaseModal({ caseId, onClose }) {
                     {item.visits.map((v, i) => (
                       <li key={v.visit_id} className={`visit-${v.state}`}>
                         <span className="visit-seq">ครั้งที่ {i + 1}</span>
-                        <span className="visit-date">{formatDate(v.visit_date)}</span>
+                        {/* เวลานัดต้องอยู่คู่กับวันเสมอ — ระบุเวลาไว้แล้วคนที่ต้องไปไม่เห็น ก็เท่ากับไม่ได้ระบุ */}
+                        <span className="visit-date">
+                          {formatDate(v.visit_date)}
+                          {[v.planned_start, v.planned_end].filter(Boolean).length > 0 &&
+                            ` · ${[v.planned_start, v.planned_end].filter(Boolean).join('-')}`}
+                        </span>
                         <span className="muted">
                           {VISIT_STATE_LABELS[v.state]}
                           {v.check_in_at && ` · เข้า ${timeText(v.check_in_at)}`}

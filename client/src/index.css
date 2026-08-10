@@ -2383,8 +2383,70 @@ select option:checked {
   gap: 0.5rem;
 }
 .pick-count { margin: 0; font-size: 0.875rem; }
-.time-chips { display: flex; flex-wrap: wrap; gap: 0.25rem; }
-.time-custom { display: flex; align-items: center; gap: 0.375rem; }
+.time-chips { display: flex; flex-wrap: wrap; gap: 0.25rem; align-items: center; }
+.time-chips-label { font-size: 0.75rem; margin-right: 0.125rem; }
+.time-custom { display: flex; align-items: center; gap: 0.375rem; flex-wrap: wrap; }
+
+/* ช่องเลือกเวลา 24 ชม. (ชั่วโมง : นาที) — สองช่องแคบๆ ที่อ่านเป็นเวลาเดียวกัน จึงชิดกันกว่าปกติ */
+.time-select { display: inline-flex; align-items: center; gap: 0.25rem; }
+
+/* ---------- dropdown ที่ทำเอง (ใช้แทน <select> เมื่อรายการยาวจนกางเต็มจอ) ---------- */
+.picker { position: relative; display: inline-flex; }
+.picker-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-width: 3.5rem;
+  padding: 0.375rem 0.5rem;
+  font: inherit;
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.picker-btn:hover:not(:disabled) { border-color: var(--border-hover); }
+.picker-btn:disabled { opacity: 0.6; cursor: default; }
+.picker-caret { width: 0.875rem; height: 0.875rem; color: var(--muted); }
+
+/* หัวใจของเรื่องนี้: สูงเท่าที่เรากำหนด (~6 บรรทัด) แล้วเลื่อนดูที่เหลือในตัวเอง
+   ไม่ใช่กางยาวเท่าจำนวนรายการเหมือน <select> ของเบราว์เซอร์ */
+.picker-list {
+  position: absolute;
+  top: calc(100% + 0.25rem);
+  left: 0;
+  z-index: 30;
+  min-width: 100%;
+  max-height: 11rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0.1875rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 0.5rem 1.25rem rgb(0 0 0 / 18%);
+}
+/* ที่ว่างข้างล่างไม่พอ (แถบเลือกเวลาอยู่ติดขอบล่างจอบนมือถือ) — พลิกไปกางขึ้นบนแทน */
+.picker.is-up .picker-list { top: auto; bottom: calc(100% + 0.25rem); }
+
+.picker-list button {
+  display: block;
+  width: 100%;
+  padding: 0.375rem 0.625rem;
+  font: inherit;
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  color: var(--text);
+  background: none;
+  border: 0;
+  border-radius: 0.375rem;
+  cursor: pointer;
+}
+.picker-list button:hover { background: var(--brand-soft); }
+.picker-list button.is-on { background: var(--brand); color: var(--brand-ink); font-weight: 700; }
 .pick-actions { display: flex; flex-wrap: wrap; gap: 0.375rem; }
 .conflict-list { margin: 0.375rem 0 0; padding-left: 1.125rem; font-size: 0.8125rem; }
 
