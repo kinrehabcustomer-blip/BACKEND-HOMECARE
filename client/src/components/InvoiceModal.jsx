@@ -360,13 +360,26 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                       <th>จำนวนเงิน (Amount)</th>
                     </tr>
                   </thead>
+                  {/* ใบที่แตกเป็นรายครั้ง (ออกตามกะที่ไปจริง) พิมพ์ทีละบรรทัด
+                      ใบแพ็คเกจปกติไม่มี items จึงยังเป็นบรรทัดเดียวเหมือนเดิม */}
                   <tbody>
-                    <tr>
-                      <td className="inv-c">1</td>
-                      <td>{item.service_description}</td>
-                      <td className="inv-c">1</td>
-                      <td className="inv-r">{amountText(item.amount)}</td>
-                    </tr>
+                    {item.items?.length > 0 ? (
+                      item.items.map((line) => (
+                        <tr key={line.seq}>
+                          <td className="inv-c">{line.seq}</td>
+                          <td>{line.description}</td>
+                          <td className="inv-c">{line.quantity}</td>
+                          <td className="inv-r">{amountText(line.amount)}</td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td className="inv-c">1</td>
+                        <td>{item.service_description}</td>
+                        <td className="inv-c">1</td>
+                        <td className="inv-r">{amountText(item.amount)}</td>
+                      </tr>
+                    )}
                   </tbody>
                   <tfoot>
                     <tr>

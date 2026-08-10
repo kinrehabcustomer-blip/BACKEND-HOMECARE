@@ -58,20 +58,20 @@ export default function MyAttendancePage() {
         <>
           <section className="hero-card">
             {/* ยอดเงินเป็นตัวเลขนำของหน้า — เป็นสิ่งที่พนักงานเปิดหน้านี้มาดู
-                นับเฉพาะเคสที่ผู้จัดการปิดแล้ว = ยืนยันยอดแล้ว จึงพูดได้เต็มปากว่า "ได้รับ" */}
+                นับจากกะที่เช็คอิน–เอาท์ครบแล้วในเดือนนี้ = งานที่ลงแรงไปจริง */}
             <div className="hero">
-              <span className="hero-label">ค่าจ้างจากเคสที่ปิดแล้ว</span>
+              <span className="hero-label">ค่าจ้างจากกะที่ทำในเดือนนี้</span>
               <span className="hero-value">{formatBaht(report.pay)}</span>
             </div>
 
             <div className="tiles">
               <div className="tile is-static">
-                <span className="tile-label">เคสที่ปิดในเดือนนี้</span>
-                <span className="tile-value">{report.closed_cases}</span>
+                <span className="tile-label">กะที่ทำจบแล้ว</span>
+                <span className="tile-value">{report.shifts}</span>
                 <span className="tile-share">
-                  {report.unpriced_cases > 0
-                    ? `${report.unpriced_cases} เคสยังไม่ระบุค่าจ้าง`
-                    : 'ยืนยันยอดครบแล้ว'}
+                  {report.unpriced_shifts > 0
+                    ? `${report.unpriced_shifts} กะยังไม่ระบุค่าจ้าง`
+                    : `${report.cases_worked} เคส`}
                 </span>
               </div>
               <div className="tile is-static">
@@ -83,23 +83,23 @@ export default function MyAttendancePage() {
                 <span className="tile-label">เคสที่ยังทำอยู่</span>
                 <span className="tile-value">{report.open_cases}</span>
                 <span className="tile-share">
-                  {report.open_cases > 0 ? 'ยอดจะขึ้นเมื่อผู้จัดการปิดเคส' : 'ไม่มีเคสค้าง'}
+                  {report.open_cases > 0 ? 'กะที่เหลือจะทยอยเพิ่มยอด' : 'ไม่มีเคสค้าง'}
                 </span>
               </div>
             </div>
           </section>
 
-          {/* บอกกติกาให้ชัด ไม่งั้นพนักงานที่ทำงานทั้งเดือนแต่เคสยังไม่ปิดจะเห็น ฿0 แล้วเข้าใจผิด */}
+          {/* บอกกติกาให้ชัด ไม่งั้นพนักงานจะไม่รู้ว่าทำไมกะที่ยังไม่เช็คเอาท์ถึงไม่มียอด */}
           <p className="notice">
-            ยอดค่าจ้างจะขึ้นก็ต่อเมื่อ <strong>ผู้จัดการปิดเคสแล้ว</strong> เท่านั้น —
-            เคสที่ยังให้บริการอยู่จะยังไม่ถูกนับ และยอดจะไปอยู่ในเดือนที่ปิดเคส
-            {report.unpriced_cases > 0 && ' · มีเคสที่ปิดแล้วแต่ยังไม่ได้ระบุค่าจ้างในระบบ กรุณาสอบถามฝ่ายบุคคล'}
+            ยอดขึ้นทันทีที่ <strong>เช็คอินและเช็คเอาท์ครบ</strong> โดยนับเข้าเดือนที่ไปทำงาน —
+            กะที่ยังไม่เช็คเอาท์ยังไม่ถูกนับ · ตัวเลขอาจปรับได้จนกว่าผู้จัดการจะปิดเคส (ปิดแล้ว = ตรึงยอด)
+            {report.unpriced_shifts > 0 && ' · มีกะที่ระบบยังไม่รู้ค่าจ้าง กรุณาสอบถามฝ่ายบุคคล'}
           </p>
 
           {/* ที่มาของยอด — ให้กางดูได้ว่าเงินมาจากเคสไหนบ้าง ไม่ใช่เห็นแค่ก้อนเดียว */}
           {report.cases.length > 0 && (
             <section className="card">
-              <h2>เคสที่ปิดในเดือนนี้ ({report.cases.length})</h2>
+              <h2>เคสที่ทำในเดือนนี้ ({report.cases.length})</h2>
               {report.cases.map((c) => (
                 <div className="history-item" key={c.case_id}>
                   <div>
@@ -107,11 +107,12 @@ export default function MyAttendancePage() {
                     <p className="muted">
                       <span className="mono">{c.case_id}</span>
                       {' · '}{serviceName(c)}
-                      {' · '}ปิดเมื่อ {formatDate(c.closed_at)}
+                      {' · '}{c.shifts} กะ
+                      {c.closed_at && ` · ปิดเมื่อ ${formatDate(c.closed_at)}`}
                     </p>
                   </div>
-                  <strong className={c.staff_pay == null ? 'muted' : ''}>
-                    {c.staff_pay == null ? 'ยังไม่ระบุค่าจ้าง' : formatBaht(c.staff_pay)}
+                  <strong className={c.unpriced_shifts > 0 && c.pay === 0 ? 'muted' : ''}>
+                    {c.unpriced_shifts > 0 && c.pay === 0 ? 'ยังไม่ระบุค่าจ้าง' : formatBaht(c.pay)}
                   </strong>
                 </div>
               ))}

@@ -93,8 +93,7 @@ myRouter.get(
  * สรุปค่าตอบแทนของฉัน (รายเดือน) — ต้องมาก่อน '/attendance' ไม่ให้ path ชนกัน
  * ใช้ตัวคำนวณเดียวกับหน้า payroll ของ admin แต่บังคับกรองด้วย employee_id จาก session
  *
- * ยอดเงินมาจากเคสที่ admin ปิดแล้วเท่านั้น — ส่งรายการเคสไปด้วยเพื่อให้กางดูที่มาของยอดได้
- * เคสที่ยังทำอยู่ส่งไปแค่ "จำนวน" ไม่ส่งยอด เพราะยังไม่ยืนยันว่าจะได้เท่าไหร่
+ * ยอดเงินมาจากกะที่เช็คอิน/เอาท์ครบในเดือนนั้น — ส่งรายการเคสไปด้วยเพื่อให้กางดูที่มาของยอดได้
  * ยังไม่มีข้อมูลในเดือนนั้น = ไม่มีแถวกลับมา ตอบเป็นศูนย์แทน null ให้หน้าเว็บแสดงได้เลย
  */
 myRouter.get(
@@ -115,10 +114,10 @@ myRouter.get(
         employee_id: me,
         employee_name: req.user.name,
         shifts: 0,
+        cases_worked: 0,
         minutes: 0,
-        closed_cases: 0,
         pay: 0,
-        unpriced_cases: 0,
+        unpriced_shifts: 0,
       }),
       cases: paidCases,
       open_cases: openCases,
@@ -137,9 +136,17 @@ myRouter.get(
 
 // ---------- เช็คอิน / เช็คเอาท์ ----------
 
+/** นาทีระหว่างเวลานัดกับเวลาที่เช็คอินจริง ('HH:MM' ทั้งคู่) — ติดลบ = มาก่อนเวลา */
+const minutesBetween = (from, to) => {
+  const [fh, fm] = from.split(':').map(Number);
+  const [th, tm] = to.split(':').map(Number);
+  return th * 60 + tm - (fh * 60 + fm);
+};
+
 /**
  * เช็คอินกะ — เวลาใช้ now() ของ server (กันปลอมเวลา)
  * geofence: เกินรัศมี/ไม่มีพิกัด = flag ให้ admin ตรวจ ไม่บล็อกการเช็คอิน (GPS คลาดได้)
+ * วันนัด: กะในอนาคตกดไม่ได้ · กะของวันที่ผ่านมาแล้วกดได้แต่ติดธง "นอกวันนัด" ให้ admin ตรวจ
  */
 myRouter.post(
   '/visits/:id/check-in',
@@ -148,6 +155,20 @@ myRouter.post(
     if (!visit) return next(notFound('ไม่พบกะนี้ หรือไม่ใช่กะที่คุณรับผิดชอบ'));
     if (CLOSED_CASE.includes(visit.case_status)) throw new ApiError(409, 'เคสนี้จบไปแล้ว เช็คอินไม่ได้');
     if (visit.check_in_at) throw new ApiError(409, 'คุณเช็คอินกะนี้ไปแล้ว');
+
+    // เทียบกับนาฬิกาของฐานข้อมูล = ตัวเดียวกับที่จะถูกบันทึกเป็น check_in_at
+    const now = await cases.serverNowTH();
+    if (visit.visit_date > now.date) {
+      throw new ApiError(409, 'ยังไม่ถึงวันนัดของกะนี้ — เช็คอินได้ตั้งแต่วันที่นัดไว้');
+    }
+
+    const offSchedule = visit.visit_date !== now.date;
+    // สายเทียบได้เฉพาะกะที่ระบุเวลานัดและเช็คอินในวันนัดจริง
+    // กะที่กดย้อนวันจะได้ตัวเลข "สาย" เป็นพันนาทีซึ่งไม่มีความหมาย ใช้ธงนอกวันนัดแทน
+    const lateMinutes =
+      visit.planned_start && !offSchedule
+        ? Math.max(0, minutesBetween(visit.planned_start, now.time))
+        : null;
 
     const input = checkInSchema.parse(req.body ?? {});
     const photo = toImage(input.photo);
@@ -170,6 +191,8 @@ myRouter.post(
       distance,
       flagged,
       photo,
+      late_minutes: lateMinutes,
+      off_schedule: offSchedule,
     });
     if (!result) throw new ApiError(409, 'คุณเช็คอินกะนี้ไปแล้ว'); // แข่งกดพร้อมกัน
     res.json(result);

@@ -107,22 +107,82 @@ export const VISIT_STATUSES = ['scheduled', 'done', 'cancelled'];
 // เวลานัด 'HH:MM' แบบ 24 ชม. — ว่างได้ (บางเคสไม่กำหนดเวลาตายตัว)
 const time = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'เวลาต้องอยู่ในรูปแบบ HH:MM (24 ชม.)');
 
+// ค่าจ้างเฉพาะกะ — เว้นว่าง = เกลี่ยจากยอดเคสหารจำนวนกะที่นัดไว้ (ดู VISIT_PAY ใน repo)
+const visitPay = z.number().nonnegative('ค่าจ้างต้องไม่ติดลบ');
+
 export const createVisitSchema = z.object({
   visit_date: date,
   // พนักงานที่นัดให้ไปกะนี้ — เว้นว่าง = ใช้ผู้รับผิดชอบหลักของเคส (repo เติมให้)
   assigned_to: z.string().trim().min(1).optional().nullable(),
   planned_start: time.optional().nullable(),
   planned_end: time.optional().nullable(),
+  staff_pay: visitPay.optional().nullable(),
   note: optionalText,
 });
 
-// แก้ได้ทั้งเลื่อนวัน เปลี่ยนคนที่ไป เวลานัด สถานะ (ไปมาแล้ว/ไม่ได้ไป) และหมายเหตุ
+// จำนวนกะสูงสุดต่อการสร้างหนึ่งครั้ง — ตารางจริงของเคสหนึ่งเดือนอยู่ราว 30 กะ
+// เผื่อไว้ถึง 200 สำหรับเคสยาวข้ามไตรมาส แต่ไม่ปล่อยไม่จำกัด กันกรอกปีผิดแล้วได้กะเป็นพัน
+const MAX_BULK_VISITS = 200;
+
+/** ทุกวันในช่วง (รวมวันเริ่ม–วันจบ) ที่ตรงกับวันในสัปดาห์ที่เลือก — คิดบน UTC ให้วันไม่เลื่อนตามโซนเครื่อง */
+function datesInRange(from, to, weekdays) {
+  const out = [];
+  const end = Date.parse(`${to}T00:00:00Z`);
+  for (let t = Date.parse(`${from}T00:00:00Z`); t <= end; t += 86_400_000) {
+    const d = new Date(t);
+    if (weekdays?.length && !weekdays.includes(d.getUTCDay())) continue;
+    out.push(d.toISOString().slice(0, 10));
+  }
+  return out;
+}
+
+/**
+ * ลงกะทีเดียวทั้งช่วง — เคส Homecare รายเดือนคือ 26 กะ ที่เดิมต้องกดปฏิทินทีละวัน
+ * weekdays = วันในสัปดาห์ที่ให้ลง (0=อาทิตย์ … 6=เสาร์) · เว้นว่าง = ทุกวันในช่วง
+ */
+export const bulkVisitSchema = z
+  .object({
+    from: date,
+    to: date,
+    weekdays: z.array(z.number().int().min(0).max(6)).max(7).optional(),
+    assigned_to: z.string().trim().min(1).optional().nullable(),
+    planned_start: time.optional().nullable(),
+    planned_end: time.optional().nullable(),
+    staff_pay: visitPay.optional().nullable(),
+    note: optionalText,
+  })
+  .superRefine((v, ctx) => {
+    if (v.to < v.from) {
+      ctx.addIssue({ code: 'custom', path: ['to'], message: 'วันสิ้นสุดต้องไม่มาก่อนวันเริ่ม' });
+      return;
+    }
+    const n = datesInRange(v.from, v.to, v.weekdays).length;
+    if (n === 0) {
+      ctx.addIssue({ code: 'custom', path: ['weekdays'], message: 'ช่วงที่เลือกไม่มีวันไหนตรงกับวันในสัปดาห์ที่ระบุ' });
+    }
+    if (n > MAX_BULK_VISITS) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['to'],
+        message: `ช่วงนี้จะได้ ${n} กะ ซึ่งเกิน ${MAX_BULK_VISITS} กะต่อครั้ง — แบ่งเป็นช่วงย่อยก่อน`,
+      });
+    }
+  })
+  .transform((v) => ({ ...v, dates: datesInRange(v.from, v.to, v.weekdays) }));
+
+/** ลบกะทั้งช่วง — กะที่เช็คอินไปแล้วระบบจะข้ามให้เอง (ดู removeVisitRange) */
+export const visitRangeSchema = z
+  .object({ from: date, to: date })
+  .refine((v) => v.to >= v.from, { path: ['to'], message: 'วันสิ้นสุดต้องไม่มาก่อนวันเริ่ม' });
+
+// แก้ได้ทั้งเลื่อนวัน เปลี่ยนคนที่ไป เวลานัด ค่าจ้าง สถานะ (ไปมาแล้ว/ไม่ได้ไป) และหมายเหตุ
 export const updateVisitSchema = z
   .object({
     visit_date: date,
     assigned_to: z.string().trim().min(1).nullable(),
     planned_start: time.nullable(),
     planned_end: time.nullable(),
+    staff_pay: visitPay.nullable(),
     status: z.enum(VISIT_STATUSES, { errorMap: () => ({ message: 'สถานะวันนัดไม่ถูกต้อง' }) }),
     note: optionalText,
   })

@@ -10,6 +10,7 @@ import { packagesRouter } from './packages/routes.js';
 import { physioRouter } from './physio/routes.js';
 import { invoicesRouter } from './invoices/routes.js';
 import { myRouter } from './my/routes.js';
+import { notifyRouter } from './notify/routes.js';
 import { errorHandler } from './lib/errors.js';
 import { requireAuth, requireAdmin } from './lib/auth.js';
 
@@ -37,6 +38,9 @@ export function createApp() {
 
   // ส่วนของพนักงานภาคสนาม — เห็นเฉพาะเคสของตัวเอง (กรองด้วย employee_id ในเส้น) จึงไม่ต้อง requireAdmin
   app.use('/api/my', requireAuth, myRouter);
+
+  // แจ้งเตือนอัตโนมัติ — ตรวจสิทธิ์เองในเส้น เพราะ Vercel Cron ยิงเข้ามาโดยไม่มีคุกกี้ session
+  app.use('/api/notify', notifyRouter);
 
   app.use((req, res) => res.status(404).json({ error: `ไม่พบ endpoint: ${req.method} ${req.path}` }));
   app.use(errorHandler);

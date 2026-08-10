@@ -45,6 +45,24 @@ const COLUMNS = [
 
 const NOW = `to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD HH24:MI:SS')`;
 
+/**
+ * ข้อมูลความปลอดภัยของผู้ป่วยที่ต้อง "อ่านสดจากแฟ้ม" ไม่ใช่ snapshot ของเคส
+ *
+ * เคสคัดลอกข้อมูลไว้ตอนเปิด ซึ่งถูกสำหรับราคา/ผู้จ่าย (ใบที่ปิดไปแล้วต้องไม่ขยับ)
+ * แต่ผิดสำหรับ "แพ้ยา / โรคประจำตัว" — แก้แฟ้มผู้ป่วยแล้วคนที่ไปหน้างานยังเห็นของเก่า
+ * แพ้ยาไม่เคยถูกคัดลอกลงเคสด้วยซ้ำ พนักงานภาคสนามจึงไม่เคยเห็นเลย
+ *
+ * medical_history_stale = แฟ้มผู้ป่วยกับ snapshot ในเคสไม่ตรงกันแล้ว → ขึ้นป้ายเตือนให้ไปดูของจริง
+ * ต้องมี alias c (cases) และ pt (patients) ใน query ที่เอาไปใช้
+ */
+const PATIENT_LIVE = `
+  pt.allergies       AS patient_allergies,
+  pt.food_allergies  AS patient_food_allergies,
+  pt.blood_type      AS patient_blood_type,
+  pt.medical_history AS patient_medical_history,
+  (c.patient_id IS NOT NULL AND pt.medical_history IS DISTINCT FROM c.medical_history) AS medical_history_stale
+`;
+
 // ดึงชื่อพนักงานที่รับเคสและชื่อลูกค้ามาด้วยเลย หน้าเว็บจะได้ไม่ต้องยิง API ซ้ำทีละแถว
 //
 // ราคาเต็มก่อนลดของทั้งสองสาย (physio_original_price / rate_customer_price) ดึงมาด้วย
@@ -65,10 +83,12 @@ const SELECT_CASE = `
          pp.original_price                  AS physio_original_price,
          pp.staff_pay                       AS physio_staff_pay,
          r.customer_price                   AS rate_customer_price,
-         r.staff_pay                        AS rate_staff_pay
+         r.staff_pay                        AS rate_staff_pay,
+         ${PATIENT_LIVE}
   FROM cases c
   LEFT JOIN employees e           ON e.employee_id  = c.assigned_to
   LEFT JOIN customers cu          ON cu.customer_id = c.customer_id
+  LEFT JOIN patients pt           ON pt.patient_id  = c.patient_id
   LEFT JOIN pkg_grades g          ON g.grade_id     = c.pkg_grade_id
   LEFT JOIN pkg_service_formats f ON f.format_id    = c.pkg_format_id
   LEFT JOIN physio_packages pp    ON pp.physio_package_id = c.physio_package_id
@@ -225,7 +245,57 @@ async function payFromService(input) {
   return null;
 }
 
-export function create(rawInput) {
+// ---------- ประวัติการทำรายการ (case_events) ----------
+
+/**
+ * บันทึกหนึ่งบรรทัดลงประวัติของเคส — เรียกใน transaction เดียวกับการเปลี่ยนแปลงเสมอ
+ * ไม่งั้นจะเกิดเคสที่เปลี่ยนสถานะสำเร็จแต่ประวัติหาย (หรือกลับกัน) แล้วไล่ย้อนไม่ได้
+ *
+ * actor = req.user จาก session — ไม่รับชื่อผู้ทำรายการจาก body เด็ดขาด
+ * ไม่มี actor (เช่นงานที่ระบบทำเอง) ก็บันทึกได้ ช่องผู้ทำรายการจะว่าง
+ */
+function logEvent(tx, caseId, event, detail, actor) {
+  return tx.run(
+    `INSERT INTO case_events (case_id, event, detail, actor_id, actor_name)
+     VALUES (:case_id, :event, :detail, :actor_id, :actor_name)`,
+    {
+      case_id: caseId,
+      event,
+      detail: detail ?? null,
+      actor_id: actor?.employee_id ?? null,
+      actor_name: actor?.name ?? null,
+    },
+  );
+}
+
+/** ประวัติของเคสหนึ่งใบ — ใหม่สุดอยู่บน (คนเปิดดูอยากรู้ว่าเพิ่งเกิดอะไร) */
+export function listEvents(caseId) {
+  return sql.all(
+    `SELECT event_id, event, detail, actor_id, actor_name, created_at
+     FROM case_events WHERE case_id = :id
+     ORDER BY event_id DESC`,
+    { id: caseId },
+  );
+}
+
+/** ชื่อเต็มของพนักงาน (null ถ้าหาไม่เจอ/ถูกลบไปแล้ว) */
+async function staffName(tx, employeeId) {
+  if (!employeeId) return null;
+  const e = await tx.one(
+    'SELECT first_name, last_name FROM employees WHERE employee_id = :id',
+    { id: employeeId },
+  );
+  return e ? `${e.first_name} ${e.last_name}` : null;
+}
+
+/** ชื่อเต็ม + รหัส ไว้เขียนลงข้อความประวัติให้อ่านรู้เรื่องโดยไม่ต้อง join ตอนอ่าน */
+async function staffLabel(tx, employeeId) {
+  if (!employeeId) return null;
+  const name = await staffName(tx, employeeId);
+  return name ? `${name} (${employeeId})` : employeeId;
+}
+
+export function create(rawInput, actor) {
   const input = clearUnusedKind(rawInput);
   return transaction(async (tx) => {
     const caseId = await nextCaseId(tx);
@@ -254,11 +324,45 @@ export function create(rawInput) {
       values,
     );
 
+    await logEvent(tx, caseId, 'created', `เปิดเคสให้ ${values.client_name}`, actor);
+    if (values.assigned_to) {
+      await logEvent(tx, caseId, 'assigned', `มอบหมายให้ ${await staffLabel(tx, values.assigned_to)}`, actor);
+    }
+
     return caseId;
   }).then(findById);
 }
 
-export async function update(caseId, rawInput) {
+/** ชื่อช่องที่เอาไปเขียนลงประวัติ — ช่องที่ไม่มีในนี้ใช้ชื่อคอลัมน์ไปตรงๆ (ดีกว่าไม่บอกเลย) */
+const FIELD_LABELS = {
+  title: 'ชื่อเคส', case_type: 'ประเภทเคส', customer_id: 'ผู้ว่าจ้าง', patient_id: 'ผู้รับการดูแล',
+  service_kind: 'สายบริการ', pkg_grade_id: 'เกรด', pkg_format_id: 'รูปแบบบริการ',
+  pkg_staff_tier: 'ระดับพนักงาน', physio_package_id: 'แพ็คเกจกายภาพบำบัด',
+  client_name: 'ชื่อผู้ป่วย', patient_gender: 'เพศ', patient_age: 'อายุ',
+  weight_kg: 'น้ำหนัก', height_cm: 'ส่วนสูง', medical_history: 'โรคประจำตัว',
+  current_symptoms: 'อาการปัจจุบัน', medical_devices: 'อุปกรณ์การแพทย์', care_goal: 'เป้าหมายการดูแล',
+  service_start_preference: 'ความสะดวกเริ่มบริการ', address: 'ที่อยู่', client_phone: 'เบอร์ติดต่อ',
+  nurse_call_preference: 'ความต้องการผู้ดูแล', start_date: 'วันเริ่ม', end_date: 'วันสิ้นสุด',
+  fee: 'ค่าบริการ', staff_pay: 'ค่าจ้างพนักงาน',
+  geo_lat: 'พิกัด', geo_lng: 'พิกัด', geofence_radius_m: 'รัศมีเช็คอิน', note: 'หมายเหตุ',
+};
+
+/**
+ * ช่องที่ค่าเปลี่ยนจริงเทียบกับของเดิม — PATCH จากหน้าเว็บส่งมาทั้งฟอร์ม
+ * ถ้าไม่กรอง ประวัติจะบอกว่า "แก้ทุกช่อง" ทุกครั้งที่กดบันทึก จนอ่านไม่ได้ความ
+ * เทียบเป็นข้อความเพราะ Postgres คืนตัวเลข/วันที่มาคนละชนิดกับที่หน้าเว็บส่งมา
+ */
+function changedLabels(current, values, fields) {
+  const labels = [];
+  for (const f of fields) {
+    if (String(current?.[f] ?? '') === String(values[f] ?? '')) continue;
+    const label = FIELD_LABELS[f] ?? f;
+    if (!labels.includes(label)) labels.push(label);
+  }
+  return labels;
+}
+
+export async function update(caseId, rawInput, actor) {
   // สลับสายบริการตอนแก้เคส ต้องล้างของสายเดิมด้วย ไม่งั้นค้างเป็นเคสที่มีทั้งเรท Homecare และแพ็คเกจกายภาพบำบัด
   const input = clearUnusedKind(rawInput);
   const fields = COLUMNS.filter((col) => col in input);
@@ -267,19 +371,31 @@ export async function update(caseId, rawInput) {
   const values = { case_id: caseId };
   for (const col of fields) values[col] = input[col] ?? null;
 
+  const current = await findById(caseId);
+
   // ส่งช่องค่าจ้างมาเป็นค่าว่างทั้งที่เลือกบริการไว้ = ให้ใช้ของแพ็คเกจ (เหมือนตอนสร้างเคส)
   // ดูจากสิ่งที่เลือกไว้ "หลังแก้" เพราะ PATCH ส่งมาบางฟิลด์ได้ (เช่น แก้แค่หมายเหตุ)
   if (fields.includes('staff_pay') && values.staff_pay == null) {
-    const current = await findById(caseId);
     values.staff_pay = await payFromService({ ...current, ...input });
   }
 
-  await sql.run(
-    `UPDATE cases
-     SET ${fields.map((c) => `${c} = :${c}`).join(', ')}, updated_at = ${NOW}
-     WHERE case_id = :case_id`,
-    values,
-  );
+  const changed = changedLabels(current, values, fields);
+
+  await transaction(async (tx) => {
+    await tx.run(
+      `UPDATE cases
+       SET ${fields.map((c) => `${c} = :${c}`).join(', ')}, updated_at = ${NOW}
+       WHERE case_id = :case_id`,
+      values,
+    );
+
+    // ไม่มีอะไรเปลี่ยน = ไม่บันทึก (กดบันทึกโดยไม่แก้อะไรไม่ควรมีบรรทัดขึ้นในประวัติ)
+    if (changed.length > 0) {
+      const shown = changed.slice(0, 8).join(', ');
+      const more = changed.length > 8 ? ` และอีก ${changed.length - 8} ช่อง` : '';
+      await logEvent(tx, caseId, 'edited', `แก้ ${shown}${more}`, actor);
+    }
+  });
 
   return findById(caseId);
 }
@@ -288,15 +404,25 @@ export async function update(caseId, rawInput) {
  * จับคู่พนักงาน — เคสที่ปิด/ยกเลิกแล้วต้องเปิดใหม่ก่อนถึงจะจับคู่ได้ (เช็คที่ชั้น route)
  * ถ้าเคสกำลังให้บริการอยู่แล้ว (in_progress) การเปลี่ยนพนักงานไม่ควรดึงสถานะถอยกลับไป 'assigned'
  */
-export async function assign(caseId, employeeId) {
-  await sql.run(
-    `UPDATE cases
-     SET assigned_to = :employee_id,
-         status = CASE WHEN status = 'in_progress' THEN 'in_progress' ELSE 'assigned' END,
-         assigned_at = ${NOW}, updated_at = ${NOW}
-     WHERE case_id = :case_id`,
-    { case_id: caseId, employee_id: employeeId },
-  );
+export async function assign(caseId, employeeId, actor) {
+  await transaction(async (tx) => {
+    const previous = await tx.one('SELECT assigned_to FROM cases WHERE case_id = :id', { id: caseId });
+
+    await tx.run(
+      `UPDATE cases
+       SET assigned_to = :employee_id,
+           status = CASE WHEN status = 'in_progress' THEN 'in_progress' ELSE 'assigned' END,
+           assigned_at = ${NOW}, updated_at = ${NOW}
+       WHERE case_id = :case_id`,
+      { case_id: caseId, employee_id: employeeId },
+    );
+
+    // สลับคนกลางคันคือจังหวะที่ต้องไล่ย้อนได้มากที่สุด — บันทึกทั้งคนเก่าและคนใหม่ในบรรทัดเดียว
+    const to = await staffLabel(tx, employeeId);
+    const from = previous?.assigned_to ? await staffLabel(tx, previous.assigned_to) : null;
+    const detail = from && from !== to ? `เปลี่ยนผู้รับผิดชอบจาก ${from} เป็น ${to}` : `มอบหมายให้ ${to}`;
+    await logEvent(tx, caseId, 'assigned', detail, actor);
+  });
 
   return findById(caseId);
 }
@@ -305,57 +431,120 @@ export async function assign(caseId, employeeId) {
  * เริ่มให้บริการ — เคสต้องอยู่สถานะ 'assigned' (มีพนักงานแล้ว) เท่านั้น (เช็คที่ชั้น route)
  * บันทึกเวลาเริ่มจริง และเติม start_date เป็นวันนี้ถ้ายังไม่เคยกรอกไว้
  */
-export async function start(caseId) {
-  await sql.run(
-    `UPDATE cases
-     SET status = 'in_progress',
-         started_at = ${NOW},
-         start_date = COALESCE(start_date, to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD')),
-         updated_at = ${NOW}
-     WHERE case_id = :case_id`,
-    { case_id: caseId },
-  );
+export async function start(caseId, actor) {
+  await transaction(async (tx) => {
+    await tx.run(
+      `UPDATE cases
+       SET status = 'in_progress',
+           started_at = ${NOW},
+           start_date = COALESCE(start_date, to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD')),
+           updated_at = ${NOW}
+       WHERE case_id = :case_id`,
+      { case_id: caseId },
+    );
+    await logEvent(tx, caseId, 'started', 'เริ่มให้บริการ', actor);
+  });
 
   return findById(caseId);
 }
 
 /** ยกเลิกเคส — เก็บพนักงานที่เคยรับและเหตุผลไว้เป็นประวัติ ไม่ล้างทิ้ง */
-export async function cancel(caseId, reason) {
-  await sql.run(
-    `UPDATE cases
-     SET status = 'cancelled',
-         cancelled_at = ${NOW},
-         cancel_reason = :reason,
-         updated_at = ${NOW}
-     WHERE case_id = :case_id`,
-    { case_id: caseId, reason: reason ?? null },
-  );
+export async function cancel(caseId, reason, actor) {
+  await transaction(async (tx) => {
+    await tx.run(
+      `UPDATE cases
+       SET status = 'cancelled',
+           cancelled_at = ${NOW},
+           cancel_reason = :reason,
+           updated_at = ${NOW}
+       WHERE case_id = :case_id`,
+      { case_id: caseId, reason: reason ?? null },
+    );
+    await logEvent(tx, caseId, 'cancelled', reason ? `ยกเลิกเคส — ${reason}` : 'ยกเลิกเคส', actor);
+  });
 
   return findById(caseId);
 }
 
-export async function unassign(caseId) {
-  await sql.run(
-    `UPDATE cases
-     SET assigned_to = NULL, status = 'unassigned', assigned_at = NULL, updated_at = ${NOW}
-     WHERE case_id = :case_id`,
-    { case_id: caseId },
-  );
+export async function unassign(caseId, actor) {
+  await transaction(async (tx) => {
+    const previous = await tx.one('SELECT assigned_to FROM cases WHERE case_id = :id', { id: caseId });
+
+    await tx.run(
+      `UPDATE cases
+       SET assigned_to = NULL, status = 'unassigned', assigned_at = NULL, updated_at = ${NOW}
+       WHERE case_id = :case_id`,
+      { case_id: caseId },
+    );
+
+    const from = previous?.assigned_to ? await staffLabel(tx, previous.assigned_to) : null;
+    await logEvent(tx, caseId, 'unassigned', from ? `ถอด ${from} ออกจากเคส` : 'ยกเลิกการจับคู่', actor);
+  });
 
   return findById(caseId);
 }
 
-/** ปิดเคส — เก็บพนักงานที่เคยรับไว้เป็นประวัติ ไม่ล้างทิ้ง */
-export async function close(caseId, endDate) {
-  await sql.run(
-    `UPDATE cases
-     SET status = 'closed',
-         closed_at = ${NOW},
-         end_date = COALESCE(:end_date, end_date),
-         updated_at = ${NOW}
-     WHERE case_id = :case_id`,
-    { case_id: caseId, end_date: endDate ?? null },
+/**
+ * ปิดเคส — เก็บพนักงานที่เคยรับไว้เป็นประวัติ ไม่ล้างทิ้ง
+ *
+ * ตรึงค่าจ้างของกะที่ทำไปแล้วลงในแถวกะด้วย: ตอนเคสยังเปิด ยอดต่อกะเป็นการเกลี่ยสดจากยอดเคส
+ * (เพิ่ม/ลบกะแล้วตัวหารขยับ ยอดเดือนที่ปิดงบไปแล้วก็ขยับตาม) ปิดเคส = ยืนยันยอด จึงเขียนตัวเลขค้างไว้
+ * แตะเฉพาะกะที่เช็คอินแล้วและยังไม่เคยตั้งค่าจ้างเอง — กะที่ admin ระบุยอดไว้เองไม่ถูกทับ
+ */
+/**
+ * ของค้างที่ต้องเตือนก่อนปิดเคส
+ * upcoming = กะที่นัดไว้ตั้งแต่วันนี้เป็นต้นไปแต่ยังไม่มีใครไป (ปิดเคสแล้วกะพวกนี้จะถูกยกเลิก)
+ * open_shifts = กะที่เช็คอินแล้วแต่ยังไม่เช็คเอาท์ (ชั่วโมงและค่าจ้างของกะนั้นจะหายไปจากรายงาน)
+ */
+export async function pendingShifts(caseId) {
+  const row = await sql.one(
+    `SELECT COUNT(*) FILTER (WHERE check_in_at IS NULL AND visit_date >= :today) AS upcoming,
+            COUNT(*) FILTER (WHERE check_in_at IS NOT NULL AND check_out_at IS NULL) AS open_shifts
+     FROM case_visits
+     WHERE case_id = :id AND status = 'scheduled'`,
+    { id: caseId, today: isoDateTH(new Date()) },
   );
+  return { upcoming: Number(row.upcoming), open_shifts: Number(row.open_shifts) };
+}
+
+export async function close(caseId, endDate, actor) {
+  await transaction(async (tx) => {
+    // กะที่ยังไม่ถึงวันและไม่มีใครไป = งานที่จะไม่เกิดขึ้นแล้ว ยกเลิกทิ้งไปพร้อมกับการปิดเคส
+    // ไม่งั้นปฏิทินเดือนหน้ายังขึ้นกะของเคสที่ปิดไปแล้ว และพนักงานยังเห็นในตารางงานของตัวเอง
+    // กะของวันที่ผ่านมาแล้วไม่แตะ — ปล่อยให้ยังเป็น "ขาดงาน" ตามความจริง
+    const dropped = await tx.run(
+      `UPDATE case_visits
+       SET status = 'cancelled', updated_at = ${NOW}
+       WHERE case_id = :case_id AND status = 'scheduled'
+         AND check_in_at IS NULL AND visit_date >= :today`,
+      { case_id: caseId, today: isoDateTH(new Date()) },
+    );
+
+    const frozen = await tx.run(
+      `UPDATE case_visits v
+       SET staff_pay = c.staff_pay / NULLIF(b.n, 0), updated_at = ${NOW}
+       FROM cases c, ${BOOKED_VISITS} b
+       WHERE v.case_id = :case_id AND c.case_id = :case_id AND b.case_id = :case_id
+         AND v.staff_pay IS NULL AND v.check_in_at IS NOT NULL AND c.staff_pay IS NOT NULL`,
+      { case_id: caseId },
+    );
+
+    await tx.run(
+      `UPDATE cases
+       SET status = 'closed',
+           closed_at = ${NOW},
+           end_date = COALESCE(:end_date, end_date),
+           updated_at = ${NOW}
+       WHERE case_id = :case_id`,
+      { case_id: caseId, end_date: endDate ?? null },
+    );
+
+    const notes = [
+      frozen > 0 && `ตรึงค่าจ้าง ${frozen} กะ`,
+      dropped > 0 && `ยกเลิกกะที่ยังไม่ถึงวัน ${dropped} กะ`,
+    ].filter(Boolean);
+    await logEvent(tx, caseId, 'closed', notes.length ? `ปิดเคส · ${notes.join(' · ')}` : 'ปิดเคส', actor);
+  });
 
   return findById(caseId);
 }
@@ -364,17 +553,20 @@ export async function close(caseId, endDate) {
  * เปิดเคสที่ปิด/ยกเลิกไปแล้วกลับมา — สถานะกลับไปตามว่ามีพนักงานอยู่หรือไม่
  * กลับไปได้แค่ 'assigned'/'unassigned' เท่านั้น (ต้องกดเริ่มให้บริการใหม่) และล้างร่องรอยการปิด/ยกเลิกทิ้ง
  */
-export async function reopen(caseId) {
-  await sql.run(
-    `UPDATE cases
-     SET status = CASE WHEN assigned_to IS NULL THEN 'unassigned' ELSE 'assigned' END,
-         closed_at = NULL,
-         cancelled_at = NULL,
-         cancel_reason = NULL,
-         updated_at = ${NOW}
-     WHERE case_id = :case_id`,
-    { case_id: caseId },
-  );
+export async function reopen(caseId, actor) {
+  await transaction(async (tx) => {
+    await tx.run(
+      `UPDATE cases
+       SET status = CASE WHEN assigned_to IS NULL THEN 'unassigned' ELSE 'assigned' END,
+           closed_at = NULL,
+           cancelled_at = NULL,
+           cancel_reason = NULL,
+           updated_at = ${NOW}
+       WHERE case_id = :case_id`,
+      { case_id: caseId },
+    );
+    await logEvent(tx, caseId, 'reopened', 'เปิดเคสใหม่', actor);
+  });
 
   return findById(caseId);
 }
@@ -386,6 +578,20 @@ export async function remove(caseId) {
 
 // ---------- วันนัดให้บริการ (case_visits) ----------
 
+/**
+ * ค่าจ้างของกะหนึ่งกะ — ตั้งไว้ที่กะเองก่อน ไม่ได้ตั้งก็เกลี่ยยอดของเคสตามจำนวนกะที่นัดไว้
+ * ต้องมี alias v (case_visits), c (cases) และ b (จำนวนกะที่นัดไว้ต่อเคส) อยู่ใน query ที่เอาไปใช้
+ *
+ * เกลี่ยแทนที่จะบังคับให้กรอกทีละกะ เพราะราคาที่ตกลงกับลูกค้าเป็นราคาต่อ "แพ็คเกจ" ไม่ใช่ต่อครั้ง
+ * กะที่ทำไปแล้วจะถูกตรึงยอดตอนปิดเคส (ดู close) ยอดย้อนหลังจึงไม่ขยับตามการเพิ่ม/ลดกะทีหลัง
+ */
+const VISIT_PAY = 'COALESCE(v.staff_pay, c.staff_pay / NULLIF(b.n, 0))';
+
+/** จำนวนกะที่นัดไว้ต่อเคส (ไม่นับกะที่ยกเลิก) = ตัวหารของการเกลี่ยค่าจ้าง */
+const BOOKED_VISITS = `
+  (SELECT case_id, COUNT(*) AS n FROM case_visits WHERE status <> 'cancelled' GROUP BY case_id)
+`;
+
 /** กะทั้งหมดของเคสหนึ่งใบ พร้อมชื่อพนักงานที่นัดไว้ + สถานะเช็คอิน (state คำนวณตอนอ่าน) — เรียงตามวัน/เวลานัด */
 export function listVisits(caseId) {
   return sql
@@ -393,9 +599,13 @@ export function listVisits(caseId) {
       `SELECT v.visit_id, v.case_id, v.visit_date, v.status, v.note,
               v.assigned_to, v.planned_start, v.planned_end,
               v.check_in_at, v.check_out_at, v.check_in_distance_m, v.location_flagged,
+              v.check_in_late_minutes, v.off_schedule, v.staff_pay,
+              ${VISIT_PAY} AS effective_pay,
               e.first_name || ' ' || e.last_name AS assigned_name,
               e.nickname                          AS assigned_nickname
        FROM case_visits v
+       JOIN cases c ON c.case_id = v.case_id
+       LEFT JOIN ${BOOKED_VISITS} b ON b.case_id = v.case_id
        LEFT JOIN employees e ON e.employee_id = v.assigned_to
        WHERE v.case_id = :id
        ORDER BY v.visit_date, v.planned_start NULLS FIRST, v.visit_id`,
@@ -408,28 +618,130 @@ export function listVisits(caseId) {
  * จองกะ — วันเดียวมีได้หลายกะ/หลายคน จึงไม่กันวันซ้ำแล้ว (unique index (case_id, visit_date) ถูกปลดในเฟส 2)
  * ไม่ระบุคนไป = ใช้ผู้รับผิดชอบหลักของเคส (COALESCE กับ cases.assigned_to) — ให้หน้าเดิมที่ส่งแค่ visit_date ยังทำงาน
  */
-export async function addVisit(caseId, { visit_date, assigned_to, planned_start, planned_end, note }) {
-  await sql.run(
-    `INSERT INTO case_visits (case_id, visit_date, assigned_to, planned_start, planned_end, note)
-     VALUES (:case_id, :visit_date,
-             COALESCE(:assigned_to, (SELECT assigned_to FROM cases WHERE case_id = :case_id)),
-             :planned_start, :planned_end, :note)`,
-    {
-      case_id: caseId,
-      visit_date,
-      assigned_to: assigned_to ?? null,
-      planned_start: planned_start ?? null,
-      planned_end: planned_end ?? null,
-      note: note ?? null,
-    },
+export async function addVisit(caseId, input) {
+  return addVisits(caseId, [input.visit_date], input);
+}
+
+/**
+ * ช่วงเวลาของกะสำหรับเทียบว่าชนกันไหม — ไม่ระบุเวลา = ถือว่ากินทั้งวัน
+ * ตั้งใจให้เตือนเกินไว้ดีกว่าเตือนขาด: กะที่ไม่ระบุเวลาสองกะในวันเดียวกันของคนเดียวกัน
+ * คือสิ่งที่ต้องให้คนดูอีกที ไม่ใช่สิ่งที่ระบบควรเงียบไว้
+ */
+const SPAN = (t) => `COALESCE(${t}.planned_start, '00:00')`;
+const SPAN_END = (t) => `COALESCE(${t}.planned_end, '23:59')`;
+
+/**
+ * กะที่เพิ่งลงไป ชนกับกะอื่นของพนักงานคนเดียวกันหรือเปล่า (รวมข้ามเคส)
+ * คืนรายการคู่ที่ชน ไม่ได้บล็อกการบันทึก — บางครั้งจงใจซ้อน (เช่นแวะสองบ้านติดกัน คนละครึ่งชั่วโมง)
+ * แต่คนลงตารางต้องรู้ตัว ไม่ใช่มารู้ตอนพนักงานโทรมาบอกว่าไปสองที่พร้อมกันไม่ได้
+ */
+export function visitConflicts(visitIds) {
+  if (visitIds.length === 0) return Promise.resolve([]);
+
+  const slots = visitIds.map((_, i) => `:v${i}`).join(', ');
+  const params = Object.fromEntries(visitIds.map((id, i) => [`v${i}`, id]));
+
+  return sql.all(
+    `SELECT v.visit_id, v.visit_date, v.planned_start, v.planned_end,
+            o.case_id       AS other_case_id,
+            o.planned_start AS other_start,
+            o.planned_end   AS other_end,
+            oc.client_name  AS other_client_name,
+            e.first_name || ' ' || e.last_name AS employee_name
+     FROM case_visits v
+     JOIN case_visits o ON o.assigned_to = v.assigned_to
+                       AND o.visit_date  = v.visit_date
+                       AND o.visit_id   <> v.visit_id
+                       AND o.status <> 'cancelled'
+     JOIN cases oc     ON oc.case_id = o.case_id
+     LEFT JOIN employees e ON e.employee_id = v.assigned_to
+     WHERE v.visit_id IN (${slots})
+       AND v.status <> 'cancelled'
+       AND ${SPAN('v')} < ${SPAN_END('o')}
+       AND ${SPAN('o')} < ${SPAN_END('v')}
+     ORDER BY v.visit_date, v.visit_id`,
+    params,
   );
-  return listVisits(caseId);
+}
+
+/**
+ * ลงกะหลายวันในครั้งเดียว — ตัวหลักของทั้งการกดวันเดียวบนปฏิทินและการสร้างเป็นช่วง
+ *
+ * ข้ามวันที่มีกะ "เหมือนกันเป๊ะ" อยู่แล้ว (คนเดียวกัน เวลาเดียวกัน) เพราะการกดสร้างช่วงซ้ำ
+ * เป็นเรื่องปกติเวลาต่อตารางเดือนถัดไป ไม่ควรได้กะซ้อนสองใบโดยไม่รู้ตัว
+ * ส่วนกะคนละเวลา/คนละคนในวันเดียวกันยังลงได้ตามปกติ (ตั้งใจให้ทำได้ตั้งแต่ระบบกะเฟส 2)
+ */
+export async function addVisits(caseId, dates, { assigned_to, planned_start, planned_end, staff_pay, note } = {}) {
+  const existing = await sql.all(
+    `SELECT visit_date, assigned_to, planned_start FROM case_visits WHERE case_id = :id AND status <> 'cancelled'`,
+    { id: caseId },
+  );
+  // ไม่ระบุคน = ผู้รับผิดชอบหลักของเคส ต้องเทียบด้วยคนคนนั้น ไม่งั้นกดซ้ำแล้วได้กะซ้อน
+  const fallback = assigned_to
+    ? null
+    : (await sql.one('SELECT assigned_to FROM cases WHERE case_id = :id', { id: caseId }))?.assigned_to ?? null;
+  const who = assigned_to ?? fallback;
+  const seen = new Set(existing.map((v) => `${v.visit_date}|${v.assigned_to ?? ''}|${v.planned_start ?? ''}`));
+
+  const fresh = dates.filter((d) => !seen.has(`${d}|${who ?? ''}|${planned_start ?? ''}`));
+  if (fresh.length === 0) {
+    return { visits: await listVisits(caseId), added: 0, skipped: dates.length, conflicts: [] };
+  }
+
+  const params = {
+    case_id: caseId,
+    assigned_to: assigned_to ?? null,
+    planned_start: planned_start ?? null,
+    planned_end: planned_end ?? null,
+    staff_pay: staff_pay ?? null,
+    note: note ?? null,
+  };
+  const values = fresh.map((d, i) => {
+    params[`d${i}`] = d;
+    return `(:case_id, :d${i},
+             COALESCE(:assigned_to, (SELECT assigned_to FROM cases WHERE case_id = :case_id)),
+             :planned_start, :planned_end, :staff_pay, :note)`;
+  });
+
+  const inserted = await sql.all(
+    `INSERT INTO case_visits (case_id, visit_date, assigned_to, planned_start, planned_end, staff_pay, note)
+     VALUES ${values.join(', ')}
+     RETURNING visit_id`,
+    params,
+  );
+
+  return {
+    visits: await listVisits(caseId),
+    added: inserted.length,
+    skipped: dates.length - fresh.length,
+    conflicts: await visitConflicts(inserted.map((r) => r.visit_id)),
+  };
+}
+
+/**
+ * ลบกะทั้งช่วง — ใช้ตอนลงตารางผิดทั้งเดือน หรือลูกค้าเลื่อนบริการ
+ * กะที่เช็คอินไปแล้วไม่ลบให้ (เป็นบันทึกการทำงานจริงและเป็นฐานค่าจ้าง) — คืนจำนวนที่ข้ามไปให้บอกผู้ใช้
+ */
+export async function removeVisitRange(caseId, { from, to }) {
+  const deleted = await sql.run(
+    `DELETE FROM case_visits
+     WHERE case_id = :id AND visit_date BETWEEN :from AND :to AND check_in_at IS NULL`,
+    { id: caseId, from, to },
+  );
+  const kept = await sql.one(
+    `SELECT COUNT(*) AS n FROM case_visits
+     WHERE case_id = :id AND visit_date BETWEEN :from AND :to AND check_in_at IS NOT NULL`,
+    { id: caseId, from, to },
+  );
+
+  return { visits: await listVisits(caseId), deleted, kept: Number(kept.n) };
 }
 
 export async function updateVisit(caseId, visitId, input) {
-  const fields = ['visit_date', 'assigned_to', 'planned_start', 'planned_end', 'status', 'note'].filter(
-    (c) => c in input,
-  );
+  const fields = [
+    'visit_date', 'assigned_to', 'planned_start', 'planned_end', 'status', 'note',
+    'staff_pay', // ตั้งค่าจ้างเฉพาะกะนี้ — ส่ง null = กลับไปเกลี่ยจากยอดเคสตามปกติ
+  ].filter((c) => c in input);
   if (fields.length === 0) return listVisits(caseId);
 
   const values = { case_id: caseId, visit_id: visitId };
@@ -459,6 +771,7 @@ const MY_VISIT = `
          v.assigned_to, v.planned_start, v.planned_end,
          v.check_in_at, v.check_out_at, v.check_in_lat, v.check_in_lng,
          v.check_in_distance_m, v.location_flagged,
+         v.check_in_late_minutes, v.off_schedule,
          (v.check_in_photo_data IS NOT NULL) AS has_photo,
          c.status AS case_status, c.case_type, c.client_name, c.address, c.client_phone,
          c.service_kind, c.start_date, c.end_date,
@@ -466,9 +779,11 @@ const MY_VISIT = `
          c.medical_history, c.current_symptoms, c.medical_devices, c.care_goal,
          c.patient_gender, c.patient_age,
          f.name  AS format_name, g.name AS grade_name,
-         pp.name AS physio_package_name, pp.sessions AS physio_sessions
+         pp.name AS physio_package_name, pp.sessions AS physio_sessions,
+         ${PATIENT_LIVE}
   FROM case_visits v
   JOIN cases c ON c.case_id = v.case_id
+  LEFT JOIN patients pt           ON pt.patient_id = c.patient_id
   LEFT JOIN pkg_service_formats f ON f.format_id = c.pkg_format_id
   LEFT JOIN pkg_grades g          ON g.grade_id  = c.pkg_grade_id
   LEFT JOIN physio_packages pp    ON pp.physio_package_id = c.physio_package_id
@@ -476,6 +791,17 @@ const MY_VISIT = `
 
 // วันปัจจุบันโซนไทย 'YYYY-MM-DD' — พนักงานอยู่ไทย ปฏิทิน/ขาดงานต้องอิงวันไทย ไม่ใช่ UTC
 const isoDateTH = (d) => new Date(d.getTime() + 7 * 3.6e6).toISOString().slice(0, 10);
+
+/**
+ * วัน–เวลาปัจจุบันโซนไทยจากนาฬิกาของฐานข้อมูล
+ * ใช้ตัวนี้ตัดสินเรื่องเช็คอิน (ถึงวันนัดหรือยัง / สายกี่นาที) เพราะ check_in_at ก็มาจาก now() ของ DB
+ * ถ้าไปใช้นาฬิกาของ Node แล้วสองเครื่องเหลื่อมกัน จะได้กะที่ "สายติดลบ" หรือกันเช็คอินผิดวัน
+ */
+export const serverNowTH = () =>
+  sql.one(
+    `SELECT to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD') AS date,
+            to_char(now() AT TIME ZONE 'Asia/Bangkok', 'HH24:MI')    AS time`,
+  );
 
 /**
  * สถานะกะที่คำนวณตอนอ่าน (ไม่เก็บใน DB) — จาก timestamps เทียบกับตอนนี้
@@ -535,19 +861,24 @@ export const findVisitPhoto = (visitId) =>
  * เช็คอินกะ + ดันเคสเป็น in_progress ถ้าเป็นการเริ่มกะแรก — คืน null ถ้าเช็คอินไปแล้ว (กันซ้ำ/แข่งกด)
  * เวลาใช้ now() ของ DB เท่านั้น ไม่รับจาก client (กันปลอมเวลา)
  */
-export function checkInVisit(visitId, { employee_id, lat, lng, accuracy, distance, flagged, photo }) {
+export function checkInVisit(
+  visitId,
+  { employee_id, lat, lng, accuracy, distance, flagged, photo, late_minutes, off_schedule },
+) {
   return transaction(async (tx) => {
     const updated = await tx.run(
       `UPDATE case_visits
        SET check_in_at = now(), checked_in_by = :emp,
            check_in_lat = :lat, check_in_lng = :lng, check_in_accuracy_m = :acc,
            check_in_distance_m = :dist, location_flagged = :flag,
+           check_in_late_minutes = :late, off_schedule = :off,
            check_in_photo_data = :pdata, check_in_photo_mime = :pmime, check_in_photo_size = :psize,
            updated_at = ${NOW}
        WHERE visit_id = :id AND check_in_at IS NULL`,
       {
         id: visitId, emp: employee_id, lat, lng, acc: accuracy,
         dist: distance, flag: flagged,
+        late: late_minutes ?? null, off: off_schedule ?? false,
         pdata: photo?.data ?? null, pmime: photo?.mime ?? null, psize: photo?.size ?? null,
       },
     );
@@ -555,7 +886,7 @@ export function checkInVisit(visitId, { employee_id, lat, lng, accuracy, distanc
 
     // เช็คอินขณะเคสยัง 'assigned' = เริ่มให้บริการ (mirror start(): เติม start_date ถ้ายังว่าง)
     // เงื่อนไข status='assigned' รับประกันว่า cases.assigned_to ไม่เป็น null อยู่แล้ว (ตาม CHECK) จึงเข้า in_progress ได้ไม่ชน constraint
-    await tx.run(
+    const started = await tx.run(
       `UPDATE cases
        SET status = 'in_progress',
            start_date = COALESCE(start_date, to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD')),
@@ -563,6 +894,16 @@ export function checkInVisit(visitId, { employee_id, lat, lng, accuracy, distanc
        WHERE case_id = (SELECT case_id FROM case_visits WHERE visit_id = :id) AND status = 'assigned'`,
       { id: visitId },
     );
+
+    // เคสเข้าสถานะ "กำลังให้บริการ" โดยไม่มีใครกดปุ่ม — ต้องมีบรรทัดในประวัติเหมือนกัน
+    // ไม่งั้นสถานะเปลี่ยนเองแล้วไล่ไม่ได้ว่าเปลี่ยนตอนไหน เพราะอะไร
+    if (started > 0) {
+      const row = await tx.one('SELECT case_id FROM case_visits WHERE visit_id = :id', { id: visitId });
+      await logEvent(tx, row.case_id, 'started', 'เริ่มให้บริการ (จากการเช็คอินกะแรก)', {
+        employee_id,
+        name: await staffName(tx, employee_id),
+      });
+    }
     return true;
   }).then((ok) => (ok ? findVisit(visitId) : null));
 }
@@ -586,6 +927,7 @@ const ADMIN_VISIT = `
          v.assigned_to, v.checked_in_by, v.planned_start, v.planned_end,
          v.check_in_at, v.check_out_at, v.check_in_lat, v.check_in_lng,
          v.check_in_distance_m, v.check_in_accuracy_m, v.location_flagged, v.adjusted_by,
+         v.check_in_late_minutes, v.off_schedule,
          (v.check_in_photo_data IS NOT NULL) AS has_photo,
          -- รหัสของคนที่ employee_name อ้างถึง — ลำดับ COALESCE ต้องตรงกับบรรทัดล่างเป๊ะ
          -- ไม่งั้นหน้าเว็บจะกรองด้วยรหัสของคนหนึ่งแต่เห็นชื่ออีกคน
@@ -627,6 +969,7 @@ export function attendanceExceptions() {
        WHERE v.status <> 'cancelled'
          AND (
            v.location_flagged = TRUE
+           OR v.off_schedule = TRUE
            OR (v.check_in_at IS NOT NULL AND v.check_out_at IS NULL)
            OR (v.check_in_at IS NULL AND v.visit_date < :today)
          )
@@ -636,47 +979,88 @@ export function attendanceExceptions() {
     .then((rows) =>
       rows
         .map((v) => withVisitState(v))
-        .filter((v) => v.state === 'missed' || v.state === 'stale' || v.location_flagged),
+        .filter(
+          (v) => v.state === 'missed' || v.state === 'stale' || v.location_flagged || v.off_schedule,
+        ),
     );
 }
 
+/** สิ่งที่ admin แก้ในกะ เขียนเป็นข้อความสั้นๆ ลงประวัติ — ไล่ย้อนได้ว่าตัวเลขถูกแตะตรงไหน */
+const ADJUST_LABELS = {
+  check_in_at: 'เวลาเข้า',
+  check_out_at: 'เวลาออก',
+  status: 'สถานะกะ',
+  location_flagged: 'ธงนอกพื้นที่',
+};
+
 /**
  * admin แก้กะที่เช็คอินผิดพลาด — ปิดกะค้าง / แก้เวลา / เคลียร์ธง / เปลี่ยนสถานะ
- * เก็บ adjusted_by ไว้เสมอ ให้รู้ว่าใครแก้ (ตรวจสอบย้อนหลังได้)
+ * เก็บ adjusted_by ไว้เสมอ ให้รู้ว่าใครแก้ และลงประวัติของเคสด้วย (การแก้เวลาเข้า–ออกกระทบค่าจ้าง)
  */
-export async function adjustVisit(caseId, visitId, input, adminId) {
+export async function adjustVisit(caseId, visitId, input, admin) {
+  const adminId = typeof admin === 'string' ? admin : admin?.employee_id ?? null;
   const sets = ['adjusted_by = :admin', `updated_at = ${NOW}`];
   const values = { case_id: caseId, visit_id: visitId, admin: adminId };
+  const touched = [];
 
   for (const col of ['check_in_at', 'check_out_at', 'status', 'location_flagged']) {
     if (col in input) {
       sets.push(`${col} = :${col}`);
       values[col] = input[col] ?? null;
+      touched.push(ADJUST_LABELS[col]);
     }
   }
 
-  await sql.run(
-    `UPDATE case_visits SET ${sets.join(', ')} WHERE visit_id = :visit_id AND case_id = :case_id`,
-    values,
-  );
+  await transaction(async (tx) => {
+    await tx.run(
+      `UPDATE case_visits SET ${sets.join(', ')} WHERE visit_id = :visit_id AND case_id = :case_id`,
+      values,
+    );
+
+    const visit = await tx.one(
+      'SELECT visit_date FROM case_visits WHERE visit_id = :id AND case_id = :case_id',
+      { id: visitId, case_id: caseId },
+    );
+    if (visit) {
+      await logEvent(
+        tx,
+        caseId,
+        'visit_adjusted',
+        `แก้กะวันที่ ${visit.visit_date}${touched.length ? ` — ${touched.join(', ')}` : ''}`,
+        typeof admin === 'string' ? { employee_id: adminId, name: await staffName(tx, adminId) } : admin,
+      );
+    }
+  });
+
   return findVisit(visitId);
 }
 
 /**
- * เดือน (โซนไทย) ที่เคสถูกปิด — closed_at เก็บเป็น TEXT เวลา UTC จึงต้องบอกโซนให้ Postgres ก่อนแปลง
- * เคสที่ปิดตอนเช้ามืดของไทยจะได้ไม่ตกไปนับเป็นเดือนก่อนหน้า
+ * กะที่ทำจบแล้ว (เช็คอินและเช็คเอาท์ครบ) ในเดือนที่ขอ — ฐานของทั้งชั่วโมงและค่าจ้าง
+ * รวม join ชื่อบริการ (f/g/pp) ไว้ด้วย เพราะ WHERE อยู่ในก้อนนี้แล้ว ผู้เรียกจึงต่อ JOIN เพิ่มทีหลังไม่ได้
  */
-const CLOSED_MONTH_TH = `to_char((c.closed_at::timestamp AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM')`;
+const WORKED_SHIFT = `
+  FROM case_visits v
+  JOIN cases c     ON c.case_id     = v.case_id
+  JOIN employees e ON e.employee_id = v.checked_in_by
+  LEFT JOIN ${BOOKED_VISITS} b    ON b.case_id   = v.case_id
+  LEFT JOIN pkg_service_formats f ON f.format_id = c.pkg_format_id
+  LEFT JOIN pkg_grades g          ON g.grade_id  = c.pkg_grade_id
+  LEFT JOIN physio_packages pp    ON pp.physio_package_id = c.physio_package_id
+  WHERE v.check_in_at IS NOT NULL
+    AND to_char(v.check_in_at AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM') = :month
+`;
 
 /**
  * สรุปค่าตอบแทนรายเดือนต่อพนักงาน (payroll)
  *
- * ค่าจ้างนับจาก "เคสที่ admin ปิดแล้ว" ไม่ใช่ต่อกะ — ปิดเคส = ยืนยันว่างานจบและยอดนี้ถูกต้อง
- * ก่อนปิดยังไม่นับเป็นรายได้ เพราะยอดอาจเปลี่ยนได้ (เปลี่ยนแพ็คเกจ/ยกเลิกกลางคัน)
- * ใช้ cases.staff_pay ที่คัดลอกไว้ตอนเปิดเคส ไม่ใช่อ่านสดจากตารางเรท ยอดเดือนที่ผ่านไปแล้วจึงไม่ขยับตามการปรับราคา
+ * ค่าจ้างและชั่วโมงนับจากฐานเดียวกัน = "กะที่เช็คอินจริง" ของ "คนที่เช็คอินจริง" (checked_in_by)
+ * ในเดือนที่เช็คอิน — ไม่ใช่ยอดของเคสที่ปิดในเดือนนั้นเหมือนเดิม
+ * ของเดิมจ่ายให้ผู้รับผิดชอบเคส ณ ตอนปิด: เปลี่ยนคนกลางคันแล้วคนที่ไปทำจริงได้ศูนย์
+ * และเคสที่ลากข้ามเดือนจะเทเงินทั้งก้อนลงเดือนที่ปิด
  *
- * ชั่วโมง/จำนวนกะ ยังนับจากการเช็คอินจริงเหมือนเดิม — เป็นคนละมิติกับค่าจ้าง
- * (พนักงานอาจเช็คอินหลายกะในเคสเดียว หรือทำกะในเดือนหนึ่งแล้วเคสไปปิดอีกเดือน)
+ * ยอดต่อกะดู VISIT_PAY (ค่าจ้างของกะเอง ไม่มีก็เกลี่ยจากยอดเคส) — ตรึงเป็นตัวเลขถาวรตอนปิดเคส
+ * ค่าจ้างที่ใช้เป็น snapshot ที่คัดลอกไว้ในเคส ไม่ได้อ่านสดจากตารางเรท ยอดย้อนหลังจึงไม่ขยับตามการปรับราคา
  *
  * employeeId = ดูของคนเดียว (ฝั่งพนักงานภาคสนามที่เห็นได้เฉพาะของตัวเอง) — ไม่ส่ง = ทุกคน (admin)
  */
@@ -685,93 +1069,68 @@ export async function attendanceReport(month, employeeId = null) {
   const params = { month };
   if (employeeId) params.emp = employeeId;
 
-  const [hours, payouts] = await Promise.all([
-    sql.all(
-      `SELECT v.checked_in_by AS employee_id,
-              e.first_name || ' ' || e.last_name AS employee_name,
-              COUNT(*) FILTER (WHERE v.check_out_at IS NOT NULL) AS shifts,
-              COALESCE(ROUND(SUM(EXTRACT(EPOCH FROM (v.check_out_at - v.check_in_at)) / 60)
-                       FILTER (WHERE v.check_out_at IS NOT NULL)), 0) AS minutes
-       FROM case_visits v
-       JOIN employees e ON e.employee_id = v.checked_in_by
-       WHERE v.check_in_at IS NOT NULL
-         AND to_char(v.check_in_at AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM') = :month
-         ${employeeId ? 'AND v.checked_in_by = :emp' : ''}
-       GROUP BY v.checked_in_by, e.first_name, e.last_name`,
-      params,
-    ),
-    sql.all(
-      `SELECT c.assigned_to AS employee_id,
-              e.first_name || ' ' || e.last_name AS employee_name,
-              COUNT(*) AS closed_cases,
-              COALESCE(SUM(c.staff_pay), 0) AS pay,
-              COUNT(*) FILTER (WHERE c.staff_pay IS NULL) AS unpriced_cases
-       FROM cases c
-       JOIN employees e ON e.employee_id = c.assigned_to
-       WHERE c.status = 'closed' AND c.closed_at IS NOT NULL
-         AND ${CLOSED_MONTH_TH} = :month
-         ${employeeId ? 'AND c.assigned_to = :emp' : ''}
-       GROUP BY c.assigned_to, e.first_name, e.last_name`,
-      params,
-    ),
-  ]);
+  const rows = await sql.all(
+    `SELECT v.checked_in_by AS employee_id,
+            e.first_name || ' ' || e.last_name AS employee_name,
+            COUNT(*) FILTER (WHERE v.check_out_at IS NOT NULL)                    AS shifts,
+            COUNT(DISTINCT v.case_id) FILTER (WHERE v.check_out_at IS NOT NULL)   AS cases_worked,
+            COALESCE(ROUND(SUM(EXTRACT(EPOCH FROM (v.check_out_at - v.check_in_at)) / 60)
+                     FILTER (WHERE v.check_out_at IS NOT NULL)), 0)               AS minutes,
+            COALESCE(SUM(${VISIT_PAY}) FILTER (WHERE v.check_out_at IS NOT NULL), 0) AS pay,
+            COUNT(*) FILTER (WHERE v.check_out_at IS NOT NULL AND ${VISIT_PAY} IS NULL) AS unpriced_shifts
+     ${WORKED_SHIFT}
+       ${employeeId ? 'AND v.checked_in_by = :emp' : ''}
+     GROUP BY v.checked_in_by, e.first_name, e.last_name`,
+    params,
+  );
 
-  // คนที่มีกะแต่ยังไม่มีเคสปิด (และกลับกัน) ต้องขึ้นทั้งคู่ — รวมสองฝั่งด้วย employee_id
-  const merged = new Map();
-  const slot = (id, name) => {
-    if (!merged.has(id)) {
-      merged.set(id, {
-        employee_id: id,
-        employee_name: name,
-        shifts: 0,
-        minutes: 0,
-        closed_cases: 0,
-        pay: 0,
-        unpriced_cases: 0,
-      });
-    }
-    return merged.get(id);
-  };
-
-  for (const r of hours) {
-    const row = slot(r.employee_id, r.employee_name);
-    row.shifts = Number(r.shifts);
-    row.minutes = Number(r.minutes);
-  }
-  for (const r of payouts) {
-    const row = slot(r.employee_id, r.employee_name);
-    row.closed_cases = Number(r.closed_cases);
-    row.pay = Number(r.pay);
-    row.unpriced_cases = Number(r.unpriced_cases);
-  }
-
-  return [...merged.values()].sort((a, b) => a.employee_name.localeCompare(b.employee_name, 'th'));
+  return rows
+    .map((r) => ({
+      employee_id: r.employee_id,
+      employee_name: r.employee_name,
+      shifts: Number(r.shifts),
+      cases_worked: Number(r.cases_worked),
+      minutes: Number(r.minutes),
+      pay: Number(r.pay),
+      unpriced_shifts: Number(r.unpriced_shifts),
+    }))
+    .sort((a, b) => a.employee_name.localeCompare(b.employee_name, 'th'));
 }
 
 /**
- * เคสที่ปิดในเดือนนั้นของพนักงานคนหนึ่ง พร้อมค่าจ้างของแต่ละเคส — ที่มาของยอดรวมในสรุปค่าตอบแทน
- * ให้พนักงานกางดูได้ว่ายอดมาจากเคสไหนบ้าง ไม่ใช่เห็นแค่ตัวเลขก้อนเดียว
+ * เคสที่พนักงานคนหนึ่งลงแรงในเดือนนั้น พร้อมยอดรวมของกะที่ทำในเคสนั้น — ที่มาของยอดในสรุปค่าตอบแทน
+ * ให้กางดูได้ว่าเงินมาจากเคสไหน กี่กะ ไม่ใช่เห็นแค่ตัวเลขก้อนเดียว
  */
 export function payoutCases(month, employeeId) {
   return sql
     .all(
-      `SELECT c.case_id, c.title, c.client_name, c.case_type, c.service_kind,
-              c.closed_at, c.start_date, c.end_date, c.staff_pay,
+      `SELECT c.case_id, c.title, c.client_name, c.case_type, c.service_kind, c.status,
+              c.closed_at, c.start_date, c.end_date,
+              COUNT(*) FILTER (WHERE v.check_out_at IS NOT NULL) AS shifts,
+              COALESCE(SUM(${VISIT_PAY}) FILTER (WHERE v.check_out_at IS NOT NULL), 0) AS pay,
+              COUNT(*) FILTER (WHERE v.check_out_at IS NOT NULL AND ${VISIT_PAY} IS NULL) AS unpriced_shifts,
+              MAX(v.visit_date) AS last_visit_date,
               f.name  AS format_name, g.name AS grade_name,
               pp.name AS physio_package_name, pp.sessions AS physio_sessions
-       FROM cases c
-       LEFT JOIN pkg_service_formats f ON f.format_id = c.pkg_format_id
-       LEFT JOIN pkg_grades g          ON g.grade_id  = c.pkg_grade_id
-       LEFT JOIN physio_packages pp    ON pp.physio_package_id = c.physio_package_id
-       WHERE c.assigned_to = :emp AND c.status = 'closed' AND c.closed_at IS NOT NULL
-         AND ${CLOSED_MONTH_TH} = :month
-       ORDER BY c.closed_at DESC`,
+       ${WORKED_SHIFT}
+         AND v.checked_in_by = :emp
+       GROUP BY c.case_id, c.title, c.client_name, c.case_type, c.service_kind, c.status,
+                c.closed_at, c.start_date, c.end_date,
+                f.name, g.name, pp.name, pp.sessions
+       ORDER BY last_visit_date DESC`,
       { emp: employeeId, month },
     )
-    .then((rows) => rows.map((r) => ({ ...r, staff_pay: r.staff_pay == null ? null : Number(r.staff_pay) })));
+    .then((rows) =>
+      rows.map((r) => ({
+        ...r,
+        shifts: Number(r.shifts),
+        pay: Number(r.pay),
+        unpriced_shifts: Number(r.unpriced_shifts),
+      })),
+    );
 }
 
-/** เคสที่ยังทำอยู่ของพนักงานคนหนึ่ง — ยังไม่ปิด จึงยังไม่นับเป็นรายได้ (โชว์แค่จำนวน ไม่โชว์ยอด) */
+/** เคสที่ยังทำอยู่ของพนักงานคนหนึ่ง (ยังไม่ปิด/ยกเลิก) — โชว์เป็นจำนวนงานที่ถืออยู่ ไม่ใช่ยอดเงิน */
 export function openCaseCount(employeeId) {
   return sql
     .one(

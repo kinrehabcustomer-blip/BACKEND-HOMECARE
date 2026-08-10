@@ -94,6 +94,37 @@ export const VISIT_STATE_LABELS = {
 export const timeText = (value) =>
   value ? new Date(value).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) : '—';
 
+/** ประวัติการทำรายการของเคส (case_events.event) */
+export const CASE_EVENT_LABELS = {
+  created: 'เปิดเคส',
+  edited: 'แก้ข้อมูล',
+  assigned: 'จับคู่พนักงาน',
+  unassigned: 'ถอดพนักงาน',
+  started: 'เริ่มให้บริการ',
+  closed: 'ปิดเคส',
+  cancelled: 'ยกเลิกเคส',
+  reopened: 'เปิดเคสใหม่',
+  visit_adjusted: 'แก้กะ',
+};
+
+/**
+ * วัน + เวลา จากช่องเวลาที่ฐานข้อมูลเก็บเป็นข้อความ 'YYYY-MM-DD HH:MM:SS' (เวลา UTC)
+ *
+ * ต้องเติม 'Z' ให้เอง — สตริงที่ไม่มีโซนเวลา เบราว์เซอร์อ่านเป็น "เวลาเครื่อง"
+ * ประวัติที่บันทึกตอนบ่ายสองจะกลายเป็นเจ็ดโมงเช้า ซึ่งอ่านแล้วสรุปเหตุการณ์ผิดลำดับได้
+ * ค่าที่มีโซนมาแล้ว (TIMESTAMPTZ ที่ผ่าน JSON) ปล่อยผ่านตามเดิม
+ */
+export const stampText = (value) => {
+  if (!value) return '—';
+  const iso = typeof value === 'string' && !/[Z+]|\d[+-]\d\d:\d\d$/.test(value)
+    ? `${value.replace(' ', 'T')}Z`
+    : value;
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime())
+    ? '—'
+    : d.toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' });
+};
+
 /** ชั่วโมง:นาที จากจำนวนนาที (เช่น 90 -> '1 ชม. 30 น.') */
 export function durationText(minutes) {
   if (minutes == null) return '—';

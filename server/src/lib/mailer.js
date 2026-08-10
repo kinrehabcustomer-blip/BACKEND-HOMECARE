@@ -18,6 +18,53 @@ if (!configured) {
   );
 }
 
+/** true = ส่งอีเมลได้จริง (ตั้งค่า SMTP ครบ) — ให้ผู้เรียกบอกผู้ใช้ได้ว่าทำไมไม่มีเมลเข้า */
+export const mailerReady = configured;
+
+const SHELL = (title, body) => `
+  <div style="font-family:'Segoe UI',sans-serif;max-width:640px;color:#1c2024">
+    <p style="font-size:20px;font-weight:800;letter-spacing:2px;color:#0f7b6c;margin:0">KIN</p>
+    <p style="font-size:12px;color:#6b7280;margin:2px 0 20px">Homecare · ระบบหลังบ้าน</p>
+    <h2 style="font-size:17px;margin:0 0 16px">${title}</h2>
+    ${body}
+    <p style="color:#6b7280;font-size:12px;border-top:1px solid #e3e6ea;padding-top:14px;margin-top:24px">
+      อีเมลอัตโนมัติจากระบบ — จัดการรายการเหล่านี้ได้ที่หน้า "การมาทำงาน" และ "ใบแจ้งหนี้"
+    </p>
+  </div>`;
+
+/**
+ * สรุปของค้างประจำวันถึงผู้จัดการ
+ *
+ * sections = [{ title, lines: string[] }] — ส่วนที่ไม่มีรายการถูกตัดทิ้งตั้งแต่ผู้เรียก
+ * ไม่ส่งอีเมลตอนไม่มีอะไรค้าง เพราะเมลที่เขียนว่า "ไม่มีอะไร" ทุกวันคือเมลที่คนเลิกอ่าน
+ */
+export async function sendDigestEmail({ to, date, sections }) {
+  const body = sections
+    .map(
+      (s) => `
+        <p style="font-weight:700;margin:18px 0 6px">${s.title} (${s.lines.length})</p>
+        <ul style="margin:0;padding-left:18px;line-height:1.7;font-size:14px">
+          ${s.lines.map((l) => `<li>${l}</li>`).join('')}
+        </ul>`,
+    )
+    .join('');
+
+  const subject = `[KIN] สรุปของค้าง ${date} — ${sections.map((s) => `${s.title} ${s.lines.length}`).join(' · ')}`;
+
+  if (!transporter) {
+    console.log(`\n📧 [DEV] ${subject}\nถึง: ${to.join(', ')}\n`);
+    return false;
+  }
+
+  await transporter.sendMail({
+    from: SMTP_FROM ?? `KIN Homecare <${SMTP_USER}>`,
+    to: to.join(', '),
+    subject,
+    html: SHELL(`สรุปของค้าง ประจำวันที่ ${date}`, body),
+  });
+  return true;
+}
+
 export async function sendOtpEmail({ to, name, code, minutes }) {
   const subject = `รหัสยืนยันสำหรับตั้งรหัสผ่านใหม่: ${code}`;
   const html = `

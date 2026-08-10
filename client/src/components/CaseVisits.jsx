@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import {
-  POSITION_LABELS, VISIT_STATE_LABELS, MONTH_LABELS, formatDate, timeText, toBuddhistYear,
+  POSITION_LABELS, VISIT_STATE_LABELS, MONTH_LABELS, formatBaht, formatDate, timeText, toBuddhistYear,
 } from '../labels.js';
 import LineIcon from './LineIcon.jsx';
 
@@ -39,6 +39,11 @@ export default function CaseVisits({ caseId, target = null, readOnly = false, mo
   const [pick, setPick] = useState({ assigned_to: '', planned_start: '', planned_end: '' });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  // ลงกะเป็นช่วง — เปิดเมื่อผู้ใช้กด ไม่กางค้างไว้ เพราะการกดวันทีละวันยังเป็นทางหลักของเคสสั้นๆ
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [range, setRange] = useState({ from: '', to: '', weekdays: [] });
+  const [notice, setNotice] = useState(null);   // ผลของครั้งล่าสุด (เพิ่มกี่กะ ข้ามกี่กะ)
+  const [conflicts, setConflicts] = useState([]); // กะที่ชนกับงานอื่นของคนเดียวกัน (เตือน ไม่บล็อก)
 
   const mm = String(month).padStart(2, '0');
   const today = todayISO();
@@ -75,17 +80,42 @@ export default function CaseVisits({ caseId, target = null, readOnly = false, mo
     setMonth(d.getMonth() + 1);
   }
 
+  /**
+   * ทุกคำสั่งคืน "รายการกะล่าสุด" มาให้เสมอ จึงไม่ต้องดึงซ้ำเอง
+   * คำสั่งที่เพิ่ม/ลบทีละหลายกะคืนเป็นอ็อบเจ็กต์พร้อมสรุปผล — เอามาบอกผู้ใช้ว่าเกิดอะไรขึ้นจริง
+   * (กด "สร้างช่วง" แล้วหน้าจอนิ่งเพราะซ้ำทั้งหมด จะดูเหมือนปุ่มเสีย)
+   */
   async function run(action) {
     setBusy(true);
     setError(null);
+    setNotice(null);
     try {
-      setVisits(await action());
+      const res = await action();
+      if (Array.isArray(res)) {
+        setVisits(res);
+        setConflicts([]);
+        return;
+      }
+
+      setVisits(res.visits);
+      setConflicts(res.conflicts ?? []);
+      if (res.deleted != null) {
+        setNotice(`ลบ ${res.deleted} กะ${res.kept ? ` · เก็บ ${res.kept} กะที่เช็คอินไปแล้วไว้` : ''}`);
+      } else if (res.added != null) {
+        setNotice(`เพิ่ม ${res.added} กะ${res.skipped ? ` · ข้าม ${res.skipped} กะที่มีอยู่แล้ว` : ''}`);
+      }
     } catch (e) {
       setError(e.message);
     } finally {
       setBusy(false);
     }
   }
+
+  const toggleWeekday = (d) =>
+    setRange((p) => ({
+      ...p,
+      weekdays: p.weekdays.includes(d) ? p.weekdays.filter((x) => x !== d) : [...p.weekdays, d],
+    }));
 
   /**
    * กดวันบนปฏิทิน:
@@ -107,6 +137,18 @@ export default function CaseVisits({ caseId, target = null, readOnly = false, mo
         planned_end: pick.planned_end || null,
       }),
     );
+  }
+
+  /**
+   * ตั้งค่าจ้างเฉพาะกะนี้ (ว่าง = กลับไปเกลี่ยจากยอดเคส) — บันทึกตอนออกจากช่อง
+   * ค่าไม่เปลี่ยนก็ไม่ยิง ไม่งั้นแค่คลิกผ่านช่องก็เขียน DB ทุกครั้ง
+   */
+  function savePay(v, raw) {
+    const text = raw.trim();
+    const value = text === '' ? null : Number(text);
+    if (value != null && !Number.isFinite(value)) return;
+    if ((v.staff_pay ?? null) === value) return;
+    return run(() => api.updateVisit(caseId, v.visit_id, { staff_pay: value }));
   }
 
   const leading = new Date(year, month - 1, 1).getDay();
@@ -161,7 +203,98 @@ export default function CaseVisits({ caseId, target = null, readOnly = false, mo
           {isAppt
             ? 'กดวันบนปฏิทินเพื่อจองนัด · กดวันที่จองแล้วอีกครั้งเพื่อยกเลิก'
             : 'กดวันบนปฏิทินเพื่อเพิ่มกะ · กดซ้ำวันเดิมได้ถ้ามีหลายกะ/หลายคน'}
+          {!isAppt && (
+            <>
+              {' · '}
+              <button type="button" className="btn link-btn" onClick={() => setBulkOpen((v) => !v)}>
+                {bulkOpen ? 'ปิดการลงเป็นช่วง' : 'ลงกะเป็นช่วง'}
+              </button>
+            </>
+          )}
         </p>
+      )}
+
+      {/* ลงกะทั้งเดือนในครั้งเดียว — ใช้พนักงาน/เวลาที่ตั้งไว้ด้านบนชุดเดียวกับการกดทีละวัน
+          วันในสัปดาห์ไม่เลือกเลย = ทุกวันในช่วง (ตรงกับที่ server ตีความ) */}
+      {!readOnly && !isAppt && bulkOpen && (
+        <div className="bulk-visit">
+          <div className="bulk-row">
+            <label>ตั้งแต่
+              <input type="date" value={range.from} disabled={busy}
+                onChange={(e) => setRange((p) => ({ ...p, from: e.target.value }))} />
+            </label>
+            <label>ถึง
+              <input type="date" value={range.to} disabled={busy}
+                onChange={(e) => setRange((p) => ({ ...p, to: e.target.value }))} />
+            </label>
+          </div>
+
+          <div className="bulk-days">
+            {WEEKDAYS.map((w, d) => (
+              <button
+                key={w}
+                type="button"
+                className={`btn tiny ${range.weekdays.includes(d) ? 'primary' : ''}`}
+                disabled={busy}
+                onClick={() => toggleWeekday(d)}
+              >
+                {w}
+              </button>
+            ))}
+            <span className="muted">{range.weekdays.length === 0 && 'ไม่เลือก = ทุกวันในช่วง'}</span>
+          </div>
+
+          <div className="bulk-row">
+            <button
+              type="button"
+              className="btn primary"
+              disabled={busy || !range.from || !range.to}
+              onClick={() =>
+                run(() =>
+                  api.addVisits(caseId, {
+                    from: range.from,
+                    to: range.to,
+                    weekdays: range.weekdays,
+                    assigned_to: pick.assigned_to || null,
+                    planned_start: pick.planned_start || null,
+                    planned_end: pick.planned_end || null,
+                  }),
+                )
+              }
+            >
+              สร้างกะในช่วงนี้
+            </button>
+            <button
+              type="button"
+              className="btn danger-ghost"
+              disabled={busy || !range.from || !range.to}
+              onClick={() => run(() => api.deleteVisitRange(caseId, { from: range.from, to: range.to }))}
+            >
+              ลบกะในช่วงนี้
+            </button>
+          </div>
+        </div>
+      )}
+
+      {notice && <p className="notice">{notice}</p>}
+
+      {/* กะที่ชนกับงานอื่นของคนเดียวกัน — เตือนอย่างเดียว บางครั้งจงใจซ้อน (แวะสองบ้านติดกัน) */}
+      {conflicts.length > 0 && (
+        <div className="banner">
+          <strong>กะซ้อนกัน {conflicts.length} รายการ</strong>
+          <ul className="conflict-list">
+            {conflicts.slice(0, 5).map((c) => (
+              <li key={`${c.visit_id}-${c.other_case_id}`}>
+                {formatDate(c.visit_date)}
+                {c.planned_start && ` ${c.planned_start}-${c.planned_end ?? ''}`}
+                {' · '}{c.employee_name ?? 'ไม่ระบุคน'} มีงานที่ {c.other_client_name}
+                {' ('}<span className="mono">{c.other_case_id}</span>
+                {c.other_start ? ` ${c.other_start}-${c.other_end ?? ''}` : ' ไม่ระบุเวลา'})
+              </li>
+            ))}
+            {conflicts.length > 5 && <li className="muted">และอีก {conflicts.length - 5} รายการ</li>}
+          </ul>
+        </div>
       )}
 
       <div className="mini-cal">
@@ -216,6 +349,23 @@ export default function CaseVisits({ caseId, target = null, readOnly = false, mo
                   {v.location_flagged && <> · <LineIcon name="alert" className="text-ico" />นอกพื้นที่</>}
                 </span>
                 <span className={`badge visit-${v.state}`}>{VISIT_STATE_LABELS[v.state]}</span>
+                {/* ค่าจ้างของกะนี้ — ว่างไว้ = เกลี่ยจากยอดเคส (ตัวเลขที่เกลี่ยได้โชว์เป็น placeholder)
+                    กรอกทับได้เมื่อกะนั้นตกลงกันเป็นพิเศษ เช่น ไปครึ่งวัน หรือค่าเดินทางเพิ่ม */}
+                {readOnly ? (
+                  v.effective_pay != null && <span className="visit-pay muted">{formatBaht(v.effective_pay)}</span>
+                ) : (
+                  <input
+                    type="number"
+                    min="0"
+                    step="10"
+                    className="visit-pay-input"
+                    title="ค่าจ้างของกะนี้ — เว้นว่าง = เกลี่ยจากค่าจ้างของเคส"
+                    disabled={busy}
+                    defaultValue={v.staff_pay ?? ''}
+                    placeholder={v.effective_pay == null ? '฿ ค่าจ้าง' : `฿${Math.round(v.effective_pay)}`}
+                    onBlur={(e) => savePay(v, e.target.value)}
+                  />
+                )}
                 {!readOnly && (
                   <button
                     type="button"

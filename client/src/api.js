@@ -286,6 +286,12 @@ export const api = {
   /** URL รูปเซลฟี่เช็คอินของกะ (ฝั่ง admin) — ใส่ใน <img src> ได้ */
   visitCheckinPhotoUrl: (caseId, visitId) => `/api/cases/${caseId}/visits/${visitId}/photo`,
 
+  // ---------- แจ้งเตือนอัตโนมัติ ----------
+  /** ดูว่าตอนนี้มีของค้างอะไรบ้าง (ไม่ส่งอีเมล) */
+  digestPreview: () => request('/notify/digest-preview'),
+  /** ส่งสรุปของค้างทางอีเมลเดี๋ยวนี้ — ปกติ cron ส่งให้เองวันละครั้ง ปุ่มนี้ไว้ทดสอบ/ส่งซ้ำ */
+  sendDailyDigest: () => request('/notify/daily-digest'),
+
   // ---------- ใบแจ้งหนี้ ----------
   listInvoices: (params = {}) => request(`/invoices?${new URLSearchParams(params)}`),
   /** ยอดสรุปใบแจ้งหนี้ — ส่งตัวกรองชุดเดียวกับ listInvoices เพื่อให้ตัวเลขตรงกับรายการที่แสดงอยู่ */
@@ -310,13 +316,23 @@ export const api = {
 
   // วันนัดให้บริการของเคส — ทุกตัวคืน "รายการวันนัดล่าสุดทั้งหมด" กลับมา ไม่ต้องดึงซ้ำเอง
   listVisits: (id) => request(`/cases/${id}/visits`),
+  /** เพิ่มกะทีละวัน — คืน { visits, added, skipped, conflicts } */
   addVisit: (id, body) => request(`/cases/${id}/visits`, { method: 'POST', body }),
+  /** ลงกะทั้งช่วง (from/to + weekdays) — คืนรูปแบบเดียวกับ addVisit */
+  addVisits: (id, body) => request(`/cases/${id}/visits/bulk`, { method: 'POST', body }),
+  /** ลบกะทั้งช่วง — คืน { visits, deleted, kept } (kept = กะที่เช็คอินแล้ว จึงไม่ลบให้) */
+  deleteVisitRange: (id, { from, to }) =>
+    request(`/cases/${id}/visits?${new URLSearchParams({ from, to })}`, { method: 'DELETE' }),
   updateVisit: (id, visitId, body) => request(`/cases/${id}/visits/${visitId}`, { method: 'PATCH', body }),
   deleteVisit: (id, visitId) => request(`/cases/${id}/visits/${visitId}`, { method: 'DELETE' }),
+  /** ประวัติการทำรายการของเคส (ใครจับคู่/ปิด/ยกเลิก เมื่อไหร่) — ใหม่สุดอยู่บน */
+  listCaseEvents: (id) => request(`/cases/${id}/events`),
   assignCase: (id, employee_id) => request(`/cases/${id}/assign`, { method: 'POST', body: { employee_id } }),
   unassignCase: (id) => request(`/cases/${id}/unassign`, { method: 'POST' }),
   startCase: (id) => request(`/cases/${id}/start`, { method: 'POST' }),
-  closeCase: (id, end_date) => request(`/cases/${id}/close`, { method: 'POST', body: { end_date } }),
+  /** ปิดเคส — force = ยืนยันแล้วว่ารู้ว่ายังมีกะค้าง (ไม่ส่ง = server จะตอบ 409 พร้อมบอกว่าค้างอะไร) */
+  closeCase: (id, end_date, force = false) =>
+    request(`/cases/${id}/close`, { method: 'POST', body: { end_date, force } }),
   cancelCase: (id, reason) => request(`/cases/${id}/cancel`, { method: 'POST', body: { reason } }),
   reopenCase: (id) => request(`/cases/${id}/reopen`, { method: 'POST' }),
 };

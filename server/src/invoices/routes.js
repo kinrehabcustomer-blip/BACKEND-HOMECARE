@@ -82,8 +82,17 @@ invoicesRouter.post(
     // เคสไม่มีผู้ว่าจ้างแต่ผูกลูกค้าไว้ที่แฟ้มผู้ป่วย → ใช้ลูกค้าของผู้ป่วย ชื่อจะได้ขึ้นในใบ
     const customer = await resolvePayer(caseRow);
 
+    // ออกใบตามกะที่ไปจริง — แตกเป็นรายการรายครั้ง ยอดรวมคิดจากกะที่ทำเสร็จแล้วเท่านั้น
+    let items = [];
+    if (input.basis === 'visits') {
+      ({ lines: items } = await repo.visitLines(caseRow, input));
+      if (items.length === 0) {
+        throw new ApiError(409, 'เคสนี้ยังไม่มีกะที่เช็คอิน–เอาท์ครบในช่วงที่เลือก จึงออกใบตามกะไม่ได้');
+      }
+    }
+
     // req.user มาจาก requireAuth = พนักงานที่กำลังทำรายการนี้ → บันทึกเป็นผู้ออกเอกสาร
-    res.status(201).json(await repo.createFromCase({ ...caseRow, customer }, input, req.user));
+    res.status(201).json(await repo.createFromCase({ ...caseRow, customer }, input, req.user, items));
   }),
 );
 
@@ -111,6 +120,12 @@ invoicesRouter.post(
       throw new ApiError(409, 'ใบที่ชำระ/ยกเลิกแล้วรีเฟรชไม่ได้ — ต้องยกเลิกแล้วออกใบใหม่');
     }
     if (!req.invoice.case_id) throw new ApiError(409, 'ใบนี้ไม่ได้ผูกกับเคส จึงไม่มีต้นทางให้ดึงข้อมูล');
+    if (req.invoice.has_items) {
+      throw new ApiError(
+        409,
+        'ใบนี้แตกเป็นรายครั้งไว้แล้ว จึงรีเฟรชจากค่าบริการของเคสไม่ได้ — ถ้าจำนวนครั้งเปลี่ยน ให้ลบใบนี้แล้วออกใหม่',
+      );
+    }
 
     const caseRow = await cases.findById(req.invoice.case_id);
     if (!caseRow) throw new ApiError(409, 'เคสต้นทางถูกลบไปแล้ว');

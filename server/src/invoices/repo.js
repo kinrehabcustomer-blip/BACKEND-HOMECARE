@@ -14,6 +14,7 @@ const EDITABLE = [
 // ใช้เทียบกับ bill_to_name ในใบ เพื่อรู้ว่าใบยังตรงกับผู้จ่ายปัจจุบันไหม (ดู withComputed.payer_stale)
 const SELECT_INVOICE = `
   SELECT i.*,
+         EXISTS (SELECT 1 FROM invoice_items ii WHERE ii.invoice_id = i.invoice_id) AS has_items,
          c.title       AS case_title,
          c.status      AS case_status,
          c.fee         AS case_fee,
@@ -69,7 +70,10 @@ const withComputed = (row) => {
    */
   // เทียบกับยอดสุทธิ ไม่ใช่ยอดก่อนลด — amount เป็นราคาเต็มแล้ว ส่วน total คือเงินที่ลูกค้าต้องจ่ายจริง
   // ซึ่งเป็นตัวที่ต้องตรงกับค่าจ้างของเคส (ดู priceParts)
+  // ใบที่แตกเป็นรายครั้ง (มี items) ตั้งใจให้ยอดเป็นสัดส่วนของกะที่ไปจริง ไม่ใช่ยอดเต็มของเคส
+  // เทียบกับ fee ของเคสแล้วจะขึ้นป้าย "ไม่ตรงกับเคส" ตลอดทั้งที่ถูกต้องอยู่แล้ว
   const feeStale =
+    !row.has_items &&
     row.case_id != null && row.case_fee != null && Number(row.case_fee) !== Number(row.total);
   const payerStale =
     row.case_id != null && row.case_payer_name != null && row.case_payer_name !== row.bill_to_name;
@@ -135,8 +139,15 @@ export async function list({ q, status, customer_id, case_id, overdue, page, per
   };
 }
 
-export const findById = (id) =>
-  sql.one(`${SELECT_INVOICE} WHERE i.invoice_id = :id`, { id }).then((r) => (r ? withComputed(r) : null));
+/**
+ * ใบเดี่ยว + รายการย่อย — หน้ารายการไม่ต้องใช้ items จึงดึงเฉพาะตอนเปิดดูใบจริง
+ * items ว่าง = ใบแบบแพ็คเกจบรรทัดเดียว (ส่วนใหญ่เป็นแบบนี้)
+ */
+export const findById = async (id) => {
+  const row = await sql.one(`${SELECT_INVOICE} WHERE i.invoice_id = :id`, { id });
+  if (!row) return null;
+  return withComputed({ ...row, items: await listItems(id) });
+};
 
 /** ใบแจ้งหนี้ทั้งหมดของลูกค้ารายหนึ่ง — ให้หน้าลูกค้าเอาไปแสดง */
 export const listForCustomer = (customerId) =>
@@ -150,16 +161,89 @@ export const listForCase = (caseId) =>
     .all(`${SELECT_INVOICE} WHERE i.case_id = :id ORDER BY i.invoice_id DESC`, { id: caseId })
     .then((rows) => rows.map(withComputed));
 
+/** รายการย่อยของใบ (ว่าง = ใบแบบแพ็คเกจบรรทัดเดียวตามปกติ) */
+export const listItems = (invoiceId) =>
+  sql.all(
+    `SELECT seq, description, quantity, unit_price, amount
+     FROM invoice_items WHERE invoice_id = :id ORDER BY seq`,
+    { id: invoiceId },
+  );
+
+/**
+ * แตกใบเป็นรายการรายครั้งจาก "กะที่ไปมาแล้วจริง" ของเคส
+ *
+ * ราคาต่อครั้ง = ค่าบริการของเคส ÷ จำนวนกะที่นัดไว้ทั้งหมด (นิยามเดียวกับการเกลี่ยค่าจ้างพนักงาน)
+ * บรรทัดสุดท้ายรับเศษที่ปัดทิ้งไป ผลรวมจึงเท่ากับยอดที่ตั้งใจเก็บเป๊ะ ไม่ขาดไม่เกินสตางค์
+ * ไม่มีกะที่ทำเสร็จเลย = ออกใบแบบนี้ไม่ได้ (ให้ผู้เรียกตัดสินใจต่อ)
+ */
+export async function visitLines(caseRow, { from, to } = {}) {
+  const where = ['v.case_id = :id', 'v.check_out_at IS NOT NULL'];
+  const params = { id: caseRow.case_id };
+  if (from) {
+    where.push('v.visit_date >= :from');
+    params.from = from;
+  }
+  if (to) {
+    where.push('v.visit_date <= :to');
+    params.to = to;
+  }
+
+  const [visits, booked] = await Promise.all([
+    sql.all(
+      `SELECT v.visit_date, v.planned_start, v.planned_end,
+              e.first_name || ' ' || e.last_name AS employee_name
+       FROM case_visits v
+       LEFT JOIN employees e ON e.employee_id = v.checked_in_by
+       WHERE ${where.join(' AND ')}
+       ORDER BY v.visit_date, v.planned_start NULLS FIRST, v.visit_id`,
+      params,
+    ),
+    sql.one(
+      `SELECT COUNT(*) AS n FROM case_visits WHERE case_id = :id AND status <> 'cancelled'`,
+      { id: caseRow.case_id },
+    ),
+  ]);
+
+  if (visits.length === 0) return { lines: [], amount: 0 };
+
+  const perVisit = Number(booked.n) > 0 ? (caseRow.fee ?? 0) / Number(booked.n) : 0;
+  const rounded = Math.round(perVisit * 100) / 100;
+  // เก็บเฉพาะครั้งที่ไปจริง — ยอดรวมจึงเป็นสัดส่วนของกะที่ทำ ไม่ใช่ทั้งแพ็คเกจ
+  const total = Math.round(rounded * visits.length * 100) / 100;
+
+  const lines = visits.map((v, i) => ({
+    seq: i + 1,
+    description: [
+      `${v.visit_date}`,
+      [v.planned_start, v.planned_end].filter(Boolean).join('-'),
+      v.employee_name,
+    ]
+      .filter(Boolean)
+      .join(' · '),
+    quantity: 1,
+    unit_price: rounded,
+    // บรรทัดสุดท้ายกลืนเศษการปัดของทุกบรรทัดก่อนหน้า
+    amount: i === visits.length - 1 ? Math.round((total - rounded * i) * 100) / 100 : rounded,
+  }));
+
+  return { lines, amount: total };
+}
+
 /**
  * สร้างใบแจ้งหนี้จากเคส — คัดลอกข้อมูลผู้จ่ายและค่าบริการ ณ ตอนนี้มาเก็บไว้ในใบ
  * ไม่ผูกอ่านสด เพราะใบที่ออกไปแล้วต้องคงเดิมแม้ลูกค้าจะย้ายบ้านหรือเคสจะถูกแก้ราคา
+ *
+ * items = รายการรายครั้งที่ route เตรียมมาให้ (ออกใบตามกะที่ไปจริง) — ไม่ส่งมา = ใบแบบแพ็คเกจตามเดิม
  */
-export function createFromCase(caseRow, input, actor) {
+export function createFromCase(caseRow, input, actor, items = []) {
   const customer = caseRow.customer ?? null;
 
   // ยอดก่อนลด + ส่วนลด แจกแจงมาจากราคาเต็มที่เคสอ้างอิงอยู่ (ดู priceParts)
   // ส่งยอดมาเองก็ให้ส่วนลดเป็นของผู้เรียกล้วนๆ ไม่เดาจากราคาตั้งของเคส จะได้ไม่ขัดกับยอดที่ตั้งใจ
-  const auto = priceParts(caseRow);
+  // ใบที่แตกเป็นรายครั้งใช้ผลรวมของรายการเป็นยอดก่อนลด — ราคาตั้งของแพ็คเกจไม่เกี่ยวแล้ว
+  const auto = items.length > 0
+    ? { amount: items.reduce((s, i) => s + i.amount, 0), discount: 0 }
+    : priceParts(caseRow);
   const amount = input.amount ?? auto.amount;
   const discount = input.discount ?? (input.amount != null ? 0 : auto.discount);
 
@@ -205,6 +289,15 @@ export function createFromCase(caseRow, input, actor) {
        RETURNING invoice_id`,
       { ...values, invoice_id: invoiceId },
     );
+
+    for (const line of items) {
+      await tx.run(
+        `INSERT INTO invoice_items (invoice_id, seq, description, quantity, unit_price, amount)
+         VALUES (:invoice_id, :seq, :description, :quantity, :unit_price, :amount)`,
+        { ...line, invoice_id: invoiceId },
+      );
+    }
+
     return invoiceId;
   }).then(findById);
 }
@@ -245,7 +338,8 @@ export async function syncOpenFromCase(caseRow, customer) {
          discount            = :discount,
          total               = GREATEST(0, :amount::double precision - :discount::double precision),
          updated_at          = ${NOW}
-     WHERE case_id = :case_id AND status IN ${OPEN_STATUSES}`,
+     WHERE case_id = :case_id AND status IN ${OPEN_STATUSES}
+       AND NOT EXISTS (SELECT 1 FROM invoice_items ii WHERE ii.invoice_id = invoices.invoice_id)`,
     {
       case_id: caseRow.case_id,
       customer_id: customer?.customer_id ?? caseRow.customer_id ?? null,

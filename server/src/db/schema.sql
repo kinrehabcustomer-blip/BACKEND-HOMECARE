@@ -650,3 +650,80 @@ CREATE INDEX IF NOT EXISTS idx_case_visits_assignee ON case_visits (assigned_to,
 -- ปลด unique เดิม (case_id, visit_date) — วันเดียวมีได้หลายกะ/หลายคน (addVisit เลิกใช้ ON CONFLICT แล้ว)
 -- index ค้นตามวัน (idx_case_visits_date) ยังอยู่ ปฏิทินจึงยังเร็วเหมือนเดิม
 DROP INDEX IF EXISTS idx_case_visits_unique;
+
+-- ============================================================================
+-- ค่าตอบแทนย้ายมาคิดที่ "กะที่ทำจริง" แทน "เคสที่ปิด"
+--
+-- ของเดิมรวมยอดจาก cases.staff_pay ของเคสที่ปิดในเดือนนั้น โดยจ่ายให้ cases.assigned_to
+-- ซึ่งผิดสองทาง: (1) เปลี่ยนผู้รับผิดชอบกลางคัน คนเดิมที่ไปทำจริงได้ศูนย์ ยอดทั้งก้อนตกกับคนที่ถืออยู่ตอนปิด
+-- (2) เคสที่ลากข้ามเดือน เงินไปกองในเดือนที่ปิด ไม่ใช่เดือนที่ลงแรง
+--
+-- ของใหม่: ยอดของกะ = staff_pay ของกะเอง ถ้าไม่ได้ตั้งไว้ก็เกลี่ยจากยอดเคสหารจำนวนกะที่นัดไว้
+-- (ไม่รวมกะที่ยกเลิก) แล้วนับให้ "คนที่เช็คอินจริง" ใน "เดือนที่เช็คอิน"
+-- เคส 1 ใบ = แพ็คเกจ 1 ชุด ยอดรวมทุกกะจึงเท่ากับ cases.staff_pay เท่าเดิม แค่กระจายถูกคน/ถูกเดือน
+-- ============================================================================
+ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS staff_pay DOUBLE PRECISION CHECK (staff_pay >= 0);
+
+-- ดึงกะของคนที่เช็คอินตามเดือน (สรุปค่าตอบแทน) — ของเดิมมีแต่ index ตาม assigned_to
+CREATE INDEX IF NOT EXISTS idx_case_visits_checkin ON case_visits (checked_in_by, check_in_at);
+
+-- ============================================================================
+-- ประวัติการทำรายการของเคส (audit log)
+--
+-- คอลัมน์เวลาบนตาราง cases (assigned_at/closed_at/...) เก็บได้แค่ "ครั้งล่าสุด" และไม่บอกว่าใครกด
+-- สลับพนักงาน 3 รอบแล้วปิดเคส เหลือร่องรอยแค่รอบสุดท้าย — ธุรกิจดูแลผู้ป่วยมีข้อพิพาทได้
+-- (ญาติแจ้งว่าไม่มีคนมา / ใครสั่งเปลี่ยนคนดูแล / ใครยกเลิกเคส) จึงต้องมีบันทึกทีละครั้ง
+--
+-- actor_name เก็บชื่อ ณ ตอนนั้นคู่กับรหัส แบบเดียวกับ issued_by_name ของใบแจ้งหนี้:
+-- คนทำรายการอาจเปลี่ยนชื่อหรือถูกลบทีหลัง ประวัติต้องยังอ่านได้ว่าตอนนั้นใครทำ
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS case_events (
+  event_id   INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  case_id    TEXT NOT NULL REFERENCES cases (case_id) ON DELETE CASCADE ON UPDATE CASCADE,
+
+  -- created · edited · assigned · unassigned · started · closed · cancelled · reopened
+  event      TEXT NOT NULL,
+  detail     TEXT,   -- ข้อความอ่านออก เช่น 'มอบหมายให้ สมชาย ใจดี (EMP-0003)'
+
+  actor_id   TEXT REFERENCES employees (employee_id) ON DELETE SET NULL ON UPDATE CASCADE,
+  actor_name TEXT,
+
+  created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD HH24:MI:SS')
+);
+
+CREATE INDEX IF NOT EXISTS idx_case_events_case ON case_events (case_id, event_id);
+
+-- ============================================================================
+-- เช็คอินให้ตรงกับ "แผน" ไม่ใช่แค่ตรงกับ "สถานที่"
+--
+-- ของเดิมเช็คแค่ว่าเป็นกะของตัวเองและยังไม่เคยเช็คอิน — กะของอาทิตย์หน้าจึงกดได้ตั้งแต่วันนี้
+-- และไม่มีอะไรบอกว่ามาช้ากว่าเวลานัดแค่ไหน ทั้งที่ planned_start ถูกกรอกไว้อยู่แล้ว
+--
+-- ของใหม่: กะในอนาคตกดไม่ได้เลย (กันที่ route) · กะของวันที่ผ่านมาแล้วยังกดได้แต่ติดธง off_schedule
+-- (พนักงานลืมกดตอนอยู่หน้างานเป็นเรื่องที่เกิดจริง ปิดทางเลยจะได้ข้อมูลที่ขาดไปเฉยๆ)
+-- ============================================================================
+ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS check_in_late_minutes INTEGER;
+ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS off_schedule BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- ============================================================================
+-- รายการย่อยบนใบแจ้งหนี้ (ไม่บังคับต้องมี)
+--
+-- ใบส่วนใหญ่เป็น "แพ็คเกจ 1 ชุด = 1 บรรทัด" ซึ่งไม่ต้องใช้ตารางนี้เลย (items ว่าง = พิมพ์บรรทัดเดียวเหมือนเดิม)
+-- แต่เคสที่ตกลงกันเป็นรายครั้ง ลูกค้าอยากเห็นว่าไปวันไหนบ้าง กี่ครั้ง ครั้งละเท่าไหร่
+-- ของเดิมต้องพิมพ์ลงช่อง service_description เอาเองทุกใบ
+--
+-- เป็นสำเนา ณ วันออกใบเหมือนช่อง bill_to_* — ไม่ผูกกับ case_visits ด้วย FK
+-- ลบกะทิ้งทีหลังแล้วใบที่ส่งลูกค้าไปแล้วต้องไม่เปลี่ยนตาม
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS invoice_items (
+  item_id     INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  invoice_id  TEXT NOT NULL REFERENCES invoices (invoice_id) ON DELETE CASCADE ON UPDATE CASCADE,
+  seq         INTEGER NOT NULL,           -- ลำดับบนใบ (1, 2, 3, …)
+  description TEXT NOT NULL,
+  quantity    DOUBLE PRECISION NOT NULL DEFAULT 1 CHECK (quantity >= 0),
+  unit_price  DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK (unit_price >= 0),
+  amount      DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK (amount >= 0),
+  created_at  TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD HH24:MI:SS')
+);
+
+CREATE INDEX IF NOT EXISTS idx_invoice_items_invoice ON invoice_items (invoice_id, seq);

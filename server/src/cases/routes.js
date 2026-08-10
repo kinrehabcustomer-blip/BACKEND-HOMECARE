@@ -13,6 +13,8 @@ import {
   calendarQuerySchema,
   createVisitSchema,
   updateVisitSchema,
+  bulkVisitSchema,
+  visitRangeSchema,
   geocodeSchema,
   mapLinkSchema,
   placeSearchSchema,
@@ -169,17 +171,23 @@ casesRouter.post(
     const input = createCaseSchema.parse(req.body);
     if (input.assigned_to) await ensureAssignable(input.assigned_to);
 
-    res.status(201).json(await repo.create(input));
+    res.status(201).json(await repo.create(input, req.user));
   }),
 );
 
 casesRouter.get('/:id', (req, res) => res.json(req.case));
 
+/** ประวัติการทำรายการของเคส — ใครจับคู่/ปิด/ยกเลิก เมื่อไหร่ (ดู case_events) */
+casesRouter.get(
+  '/:id/events',
+  asyncRoute(async (req, res) => res.json(await repo.listEvents(req.params.id))),
+);
+
 casesRouter.patch(
   '/:id',
   asyncRoute(async (req, res) => {
     const input = updateCaseSchema.parse(req.body);
-    const updated = await repo.update(req.params.id, input);
+    const updated = await repo.update(req.params.id, input, req.user);
 
     // แก้เคสแล้วใบแจ้งหนี้ที่ยังแก้ได้ (ร่าง/ออกใบแล้ว) ต้องตามให้ทัน — ดู syncOpenFromCase
     const customer = updated.customer_id ? await customers.findById(updated.customer_id) : null;
@@ -200,7 +208,7 @@ casesRouter.post(
     }
     await ensureAssignable(employee_id);
 
-    res.json(await repo.assign(req.params.id, employee_id));
+    res.json(await repo.assign(req.params.id, employee_id, req.user));
   }),
 );
 
@@ -209,7 +217,7 @@ casesRouter.post(
   '/:id/unassign',
   asyncRoute(async (req, res) => {
     if (isTerminal(req.case)) throw new ApiError(409, 'เคสนี้จบไปแล้ว');
-    res.json(await repo.unassign(req.params.id));
+    res.json(await repo.unassign(req.params.id, req.user));
   }),
 );
 
@@ -221,15 +229,29 @@ casesRouter.post(
     if (req.case.status !== 'assigned') {
       throw new ApiError(409, 'ต้องจับคู่พนักงานให้เรียบร้อยก่อนจึงจะเริ่มให้บริการได้');
     }
-    res.json(await repo.start(req.params.id));
+    res.json(await repo.start(req.params.id, req.user));
   }),
 );
 
+/**
+ * ปิดเคส — ถ้ายังมีกะค้างจะไม่ปิดให้ทันที ต้องยืนยันด้วย force
+ * (ปิดแล้วกะที่ยังไม่ถึงวันจะถูกยกเลิก และกะที่ค้างเช็คเอาท์จะไม่มีชั่วโมง/ค่าจ้าง — ต้องรู้ก่อนกด)
+ */
 casesRouter.post(
   '/:id/close',
   asyncRoute(async (req, res) => {
     if (isTerminal(req.case)) throw new ApiError(409, 'เคสนี้จบไปแล้ว');
-    res.json(await repo.close(req.params.id, req.body?.end_date));
+
+    const pending = await repo.pendingShifts(req.params.id);
+    if (!req.body?.force && (pending.upcoming > 0 || pending.open_shifts > 0)) {
+      const parts = [
+        pending.upcoming > 0 && `${pending.upcoming} กะที่ยังไม่ถึงวันนัด (จะถูกยกเลิก)`,
+        pending.open_shifts > 0 && `${pending.open_shifts} กะที่เช็คอินแล้วแต่ยังไม่เช็คเอาท์`,
+      ].filter(Boolean);
+      throw new ApiError(409, `เคสนี้ยังมีกะค้าง: ${parts.join(' · ')} — ยืนยันอีกครั้งถ้าต้องการปิด`, { pending });
+    }
+
+    res.json(await repo.close(req.params.id, req.body?.end_date, req.user));
   }),
 );
 
@@ -239,7 +261,7 @@ casesRouter.post(
   asyncRoute(async (req, res) => {
     if (isTerminal(req.case)) throw new ApiError(409, 'เคสนี้จบไปแล้ว');
     const { reason } = cancelSchema.parse(req.body ?? {});
-    res.json(await repo.cancel(req.params.id, reason));
+    res.json(await repo.cancel(req.params.id, reason, req.user));
   }),
 );
 
@@ -247,7 +269,7 @@ casesRouter.post(
   '/:id/reopen',
   asyncRoute(async (req, res) => {
     if (!isTerminal(req.case)) throw new ApiError(409, 'เคสนี้ยังไม่ได้ปิดหรือยกเลิก');
-    res.json(await repo.reopen(req.params.id));
+    res.json(await repo.reopen(req.params.id, req.user));
   }),
 );
 
@@ -274,6 +296,24 @@ casesRouter.post(
   }),
 );
 
+/** ลงกะทีเดียวทั้งช่วง (เช่น จันทร์–ศุกร์ ทั้งเดือน) — คืนกะทั้งหมด + จำนวนที่เพิ่ม/ข้าม + กะที่ชนกัน */
+casesRouter.post(
+  '/:id/visits/bulk',
+  asyncRoute(async (req, res) => {
+    const input = bulkVisitSchema.parse(req.body);
+    res.status(201).json(await repo.addVisits(req.params.id, input.dates, input));
+  }),
+);
+
+/** ลบกะทั้งช่วง — ข้ามกะที่เช็คอินไปแล้วเสมอ (เป็นบันทึกการทำงานจริง) */
+casesRouter.delete(
+  '/:id/visits',
+  asyncRoute(async (req, res) => {
+    const range = visitRangeSchema.parse({ from: req.query.from, to: req.query.to });
+    res.json(await repo.removeVisitRange(req.params.id, range));
+  }),
+);
+
 casesRouter.patch(
   '/:id/visits/:visitId',
   asyncRoute(async (req, res) => {
@@ -295,7 +335,7 @@ casesRouter.patch(
   asyncRoute(async (req, res) => {
     const input = adjustVisitSchema.parse(req.body);
     res.json(
-      await repo.adjustVisit(req.params.id, Number(req.params.visitId), input, req.user.employee_id),
+      await repo.adjustVisit(req.params.id, Number(req.params.visitId), input, req.user),
     );
   }),
 );

@@ -206,14 +206,15 @@ function Payroll({ month, patch, reloadKey }) {
   function exportCsv() {
     downloadCsv(
       `payroll-${month}.csv`,
-      ['รหัสพนักงาน', 'ชื่อ', 'เคสที่ปิด', 'ค่าจ้างรวม (บาท)', 'เคสที่ยังไม่ระบุค่าจ้าง', 'จำนวนกะ', 'ชั่วโมงรวม'],
+      ['รหัสพนักงาน', 'ชื่อ', 'จำนวนกะ', 'ชั่วโมงรวม', 'เคสที่ทำ', 'ค่าจ้างรวม (บาท)', 'กะที่ยังไม่ระบุค่าจ้าง'],
       rows.map((r) => [
-        r.employee_id, r.employee_name, r.closed_cases, r.pay, r.unpriced_cases, r.shifts, (r.minutes / 60).toFixed(1),
+        r.employee_id, r.employee_name, r.shifts, (r.minutes / 60).toFixed(1), r.cases_worked, r.pay, r.unpriced_shifts,
       ]),
     );
   }
 
-  const totalCases = rows?.reduce((s, r) => s + r.closed_cases, 0) ?? 0;
+  const totalCases = rows?.reduce((s, r) => s + r.cases_worked, 0) ?? 0;
+  const totalShifts = rows?.reduce((s, r) => s + r.shifts, 0) ?? 0;
   const totalMinutes = rows?.reduce((s, r) => s + r.minutes, 0) ?? 0;
   const totalPay = rows?.reduce((s, r) => s + r.pay, 0) ?? 0;
 
@@ -224,9 +225,10 @@ function Payroll({ month, patch, reloadKey }) {
       </MonthPicker>
 
       <p className="muted form-hint">
-        ค่าจ้างนับจาก<strong>เคสที่ปิดแล้ว</strong>ในเดือนนั้น (ค่าจ้างที่คัดลอกไว้ในเคสตอนเลือกแพ็คเกจ) —
-        ปิดเคส = ยืนยันยอด แล้วพนักงานจะเห็นตัวเลขนี้ในหน้าของตัวเอง ·
-        <strong>ชั่วโมงรวม</strong>คือเวลาจริงจากการเช็คอิน/เอาท์ ซึ่งเป็นคนละมิติกับค่าจ้าง
+        ค่าจ้างนับจาก<strong>กะที่เช็คอิน–เอาท์ครบ</strong>ในเดือนนั้น จ่ายให้คนที่ไปทำจริง —
+        ยอดต่อกะใช้ค่าจ้างที่ตั้งไว้ที่กะ ถ้าไม่ได้ตั้งก็เกลี่ยจากค่าจ้างของเคสหารจำนวนกะที่นัดไว้
+        และจะถูก<strong>ตรึงเป็นตัวเลขถาวรเมื่อปิดเคส</strong> ·
+        <strong>ชั่วโมงรวม</strong>คือเวลาจริงจากการเช็คอิน/เอาท์
       </p>
 
       {error && <p className="error">{error}</p>}
@@ -234,31 +236,31 @@ function Payroll({ month, patch, reloadKey }) {
       {loading && !rows ? (
         <p className="muted">กำลังโหลด…</p>
       ) : !error && rows?.length === 0 ? (
-        <section className="card empty-state"><p>เดือนนี้ยังไม่มีเคสที่ปิดและไม่มีการเช็คอิน</p></section>
+        <section className="card empty-state"><p>เดือนนี้ยังไม่มีการเช็คอิน</p></section>
       ) : rows?.length > 0 ? (
         <div className="table-wrap">
           <table className="table table-cards">
             <thead>
-              <tr><th>พนักงาน</th><th>เคสที่ปิด</th><th>ค่าจ้างรวม</th><th>จำนวนกะ</th><th>ชั่วโมงรวม</th></tr>
+              <tr><th>พนักงาน</th><th>จำนวนกะ</th><th>ชั่วโมงรวม</th><th>เคสที่ทำ</th><th>ค่าจ้างรวม</th></tr>
             </thead>
             <tbody>
               {rows.map((r) => (
                 <tr key={r.employee_id}>
                   <td data-label="พนักงาน">{r.employee_name}<span className="cell-sub mono">{r.employee_id}</span></td>
-                  <td data-label="เคสที่ปิด">{r.closed_cases}</td>
+                  <td data-label="จำนวนกะ">{r.shifts}</td>
+                  <td data-label="ชั่วโมงรวม">{durationText(r.minutes)}</td>
+                  <td data-label="เคสที่ทำ">{r.cases_worked}</td>
                   <td data-label="ค่าจ้างรวม">
                     {formatBaht(r.pay)}
-                    {/* กดไปหาเคสที่ปิดของคนนี้ได้เลย — เดิมรู้ว่ามีปัญหาแต่ไม่รู้ว่าเคสไหน */}
-                    {r.unpriced_cases > 0 && (
+                    {/* กดไปหาเคสของคนนี้ได้เลย — เดิมรู้ว่ามีปัญหาแต่ไม่รู้ว่าเคสไหน */}
+                    {r.unpriced_shifts > 0 && (
                       <span className="cell-sub">
-                        <Link className="link flag-text" to={`/cases?assigned_to=${r.employee_id}&status=closed`}>
-                          {r.unpriced_cases} เคสยังไม่ระบุค่าจ้าง →
+                        <Link className="link flag-text" to={`/cases?assigned_to=${r.employee_id}`}>
+                          {r.unpriced_shifts} กะยังไม่ระบุค่าจ้าง →
                         </Link>
                       </span>
                     )}
                   </td>
-                  <td data-label="จำนวนกะ">{r.shifts}</td>
-                  <td data-label="ชั่วโมงรวม">{durationText(r.minutes)}</td>
                 </tr>
               ))}
             </tbody>
@@ -267,10 +269,10 @@ function Payroll({ month, patch, reloadKey }) {
             <tfoot>
               <tr>
                 <th data-label="พนักงาน">รวม {rows.length} คน</th>
-                <th data-label="เคสที่ปิด">{totalCases}</th>
-                <th data-label="ค่าจ้างรวม">{formatBaht(totalPay)}</th>
-                <th />
+                <th data-label="จำนวนกะ">{totalShifts}</th>
                 <th data-label="ชั่วโมงรวม">{durationText(totalMinutes)}</th>
+                <th data-label="เคสที่ทำ">{totalCases}</th>
+                <th data-label="ค่าจ้างรวม">{formatBaht(totalPay)}</th>
               </tr>
             </tfoot>
           </table>
@@ -356,7 +358,18 @@ function reason(v) {
   if (v.state === 'missed') return 'ขาดงาน';
   if (v.state === 'stale') return 'ค้างเช็คเอาท์';
   if (v.location_flagged) return 'นอกพื้นที่';
+  if (v.off_schedule) return 'เช็คอินนอกวันนัด';
   return VISIT_STATE_LABELS[v.state];
+}
+
+/**
+ * มาสายกี่นาที / เช็คอินคนละวันกับที่นัด — สองอย่างนี้ต้องเห็นคู่กับเวลาเข้าเสมอ
+ * ตัวเลขสายมีเฉพาะกะที่ระบุเวลานัดไว้และเช็คอินในวันนัดจริง (ดู my/routes.js)
+ */
+function LateTag({ v }) {
+  if (v.off_schedule) return <span className="cell-sub flag-text">เช็คอินนอกวันนัด</span>;
+  if (!v.check_in_late_minutes) return null;
+  return <span className="cell-sub flag-text">สาย {durationText(v.check_in_late_minutes)}</span>;
 }
 
 function Exceptions({ rows, error, onReload, filters }) {
@@ -379,9 +392,28 @@ function Exceptions({ rows, error, onReload, filters }) {
     }
   }
 
+  /* ปกติ cron ส่งสรุปให้เองทุกเช้า — ปุ่มนี้ไว้ส่งซ้ำตอนอยากให้ทีมเห็นเดี๋ยวนี้ หรือทดสอบว่าอีเมลออกจริง */
+  async function sendDigest() {
+    setBusy(true);
+    setActionError(null);
+    try {
+      const r = await api.sendDailyDigest();
+      toast(r.sent ? `ส่งสรุปให้ผู้จัดการ ${r.recipients} คนแล้ว` : `ไม่ได้ส่ง — ${r.reason}`);
+    } catch (e) {
+      setActionError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <>
-      <div className="att-filter">{filters}</div>
+      <div className="att-filter">
+        {filters}
+        <button className="btn" disabled={busy} onClick={sendDigest}>
+          <LineIcon name="mail" />ส่งสรุปทางอีเมลตอนนี้
+        </button>
+      </div>
 
       {/* error เป็นแถบเหนือตาราง ไม่ทับทั้งหน้า — แท็บกับตัวกรองต้องไม่หายเพราะเน็ตสะดุด */}
       {error && <p className="error">{error}</p>}
@@ -409,6 +441,7 @@ function Exceptions({ rows, error, onReload, filters }) {
                     {v.state === 'stale' && daysAgo(v.visit_date) > 0 && (
                       <span className="cell-sub flag-text">ค้างมา {daysAgo(v.visit_date)} วัน</span>
                     )}
+                    <LateTag v={v} />
                   </td>
                   <td data-label="พนักงาน / เคส"><WhoCell v={v} /></td>
                   <td data-label="ปัญหา"><span className={`badge visit-${v.state}`}>{reason(v)}</span></td>
@@ -434,6 +467,8 @@ function Exceptions({ rows, error, onReload, filters }) {
                         เคลียร์ธง
                       </button>
                     )}
+                    {/* เช็คอินนอกวันนัด: ปกติแก้ด้วยการเลื่อนวันกะให้ตรงกับวันที่ไปจริง
+                        ทำที่หน้าเคส จึงลิงก์ไปแทนที่จะมีปุ่มลัดที่นี่ */}
                   </td>
                 </tr>
               ))}
@@ -483,7 +518,8 @@ function Log({ month, employeeId, state, q, page, patch, employeePicker, reloadK
   function exportCsv() {
     downloadCsv(
       `attendance-${month}.csv`,
-      ['วันที่', 'พนักงาน', 'ผู้รับบริการ', 'รหัสเคส', 'เข้า', 'ออก', 'ชั่วโมง', 'สถานะ', 'ห่างจากจุดเคส (ม.)'],
+      ['วันที่', 'พนักงาน', 'ผู้รับบริการ', 'รหัสเคส', 'เข้า', 'ออก', 'ชั่วโมง', 'สถานะ',
+        'ห่างจากจุดเคส (ม.)', 'สาย (นาที)', 'นอกวันนัด'],
       // ส่งออก "ทุกแถวที่กรองอยู่" ไม่ใช่แค่หน้าปัจจุบัน — คนกด export ต้องการทั้งชุดไปตรวจ
       filteredRows.map((v) => [
         v.visit_date, v.employee_name, v.client_name, v.case_id,
@@ -492,6 +528,8 @@ function Log({ month, employeeId, state, q, page, patch, employeePicker, reloadK
         v.worked_minutes != null ? (v.worked_minutes / 60).toFixed(1) : '',
         VISIT_STATE_LABELS[v.state] ?? v.state,
         v.check_in_distance_m ?? '',
+        v.check_in_late_minutes ?? '',
+        v.off_schedule ? 'ใช่' : '',
       ]),
     );
   }
@@ -543,7 +581,10 @@ function Log({ month, employeeId, state, q, page, patch, employeePicker, reloadK
                   <tr key={v.visit_id}>
                     <td data-label="วันที่">{formatDate(v.visit_date)}</td>
                     <td data-label="พนักงาน / เคส"><WhoCell v={v} /></td>
-                    <td data-label="เข้า–ออก">{timeText(v.check_in_at)} – {v.check_out_at ? timeText(v.check_out_at) : '…'}</td>
+                    <td data-label="เข้า–ออก">
+                      {timeText(v.check_in_at)} – {v.check_out_at ? timeText(v.check_out_at) : '…'}
+                      <LateTag v={v} />
+                    </td>
                     <td data-label="รวม">{durationText(v.worked_minutes)}</td>
                     <td data-label="สถานะ"><span className={`badge visit-${v.state}`}>{VISIT_STATE_LABELS[v.state]}</span></td>
                     <td data-label="หลักฐาน"><Evidence v={v} /></td>

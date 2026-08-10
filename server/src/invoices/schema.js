@@ -13,6 +13,16 @@ const money = z.number().nonnegative('จำนวนเงินต้องไ
 export const createInvoiceSchema = z.object({
   case_id: z.string().trim().min(1, 'กรุณาเลือกเคสที่จะออกใบแจ้งหนี้'),
 
+  /**
+   * ฐานการคิดเงินของใบนี้
+   * 'package' (ปริยาย) = ทั้งแพ็คเกจเป็นบรรทัดเดียวตามค่าบริการของเคส
+   * 'visits'            = แตกเป็นรายครั้งจากกะที่ไปมาแล้วจริง (ใช้กับเคสที่ตกลงกันเป็นรายครั้ง
+   *                       หรือเก็บเงินระหว่างทางก่อนเคสจบ) · from/to = จำกัดช่วงวันของกะที่เอามาคิด
+   */
+  basis: z.enum(['package', 'visits']).optional(),
+  from: date.optional(),
+  to: date.optional(),
+
   issue_date: date.optional(),   // ไม่ส่ง = วันนี้
   due_date: date.optional().nullable(),
 

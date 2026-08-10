@@ -7,7 +7,7 @@ import CaseVisitsModal from './CaseVisitsModal.jsx';
 import InvoiceModal from './InvoiceModal.jsx';
 import {
   CASE_TYPE_LABELS, CASE_STATUS_LABELS, POSITION_LABELS, GENDER_LABELS, SERVICE_KIND_LABELS,
-  INVOICE_STATUS_LABELS, formatBaht, formatDate,
+  INVOICE_STATUS_LABELS, CASE_EVENT_LABELS, formatBaht, formatDate, stampText,
 } from '../labels.js';
 import LineIcon from './LineIcon.jsx';
 import ConfirmButton from './ConfirmButton.jsx';
@@ -125,6 +125,8 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
   const [cancelReason, setCancelReason] = useState('');
   const [invoices, setInvoices] = useState([]);  // ใบแจ้งหนี้ของเคสนี้ (ปกติมีใบเดียว)
   const [openInvoiceId, setOpenInvoiceId] = useState(null);
+  const [events, setEvents] = useState([]);      // ประวัติการทำรายการ (audit log) — ใหม่สุดอยู่บน
+  const [eventsOpen, setEventsOpen] = useState(false);
 
   // ดึงเคส รายชื่อพนักงาน และวันนัดพร้อมกัน — จำนวนเคสที่แต่ละคนถืออยู่เปลี่ยนทุกครั้งที่จับคู่/ยกเลิก
   const load = () =>
@@ -133,11 +135,13 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
       api.assignableEmployees(),
       api.listVisits(caseId),
       api.listInvoices({ case_id: caseId }),
-    ]).then(([c, list, v, inv]) => {
+      api.listCaseEvents(caseId),
+    ]).then(([c, list, v, inv, ev]) => {
       setItem(c);
       setStaff(list);
       setVisits(v);
       setInvoices(inv.data);
+      setEvents(ev);
     });
 
   useEffect(() => {
@@ -151,13 +155,15 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
       api.assignableEmployees(),
       api.listVisits(caseId),
       api.listInvoices({ case_id: caseId }),
+      api.listCaseEvents(caseId),
     ])
-      .then(([c, list, v, inv]) => {
+      .then(([c, list, v, inv, ev]) => {
         if (cancelled) return;
         setItem(c);
         setStaff(list);
         setVisits(v);
         setInvoices(inv.data);
+        setEvents(ev);
         setPick(c.assigned_to ?? '');
       })
       .catch((err) => !cancelled && setError(err.message));
@@ -323,7 +329,23 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                   <Field label="เพศ / อายุ" value={genderAge(item)} />
                   <Field label="น้ำหนัก / ส่วนสูง" value={weightHeight(item)} />
                 </div>
+                {/* แพ้ยา/แพ้อาหาร มีที่แฟ้มผู้ป่วยที่เดียว (ไม่ได้คัดลอกลงเคส) — อ่านสดมาแสดงคู่กัน */}
+                {(item.patient_allergies || item.patient_food_allergies) && (
+                  <p className="allergy-alert">
+                    {item.patient_allergies && <>แพ้ยา: {item.patient_allergies}</>}
+                    {item.patient_allergies && item.patient_food_allergies && ' · '}
+                    {item.patient_food_allergies && <>แพ้อาหาร: {item.patient_food_allergies}</>}
+                  </p>
+                )}
                 <Field label="โรคประจำตัว" value={item.medical_history} />
+                {/* snapshot ในเคสไม่ตรงกับแฟ้มผู้ป่วยแล้ว — พนักงานภาคสนามเห็นของล่าสุดอยู่
+                    แต่ที่นี่ยังโชว์ snapshot เพราะเป็นข้อมูล ณ วันเปิดเคส จึงต้องบอกให้รู้ว่าต่างกัน */}
+                {item.medical_history_stale && (
+                  <p className="notice">
+                    แฟ้มผู้ป่วยถูกแก้หลังเปิดเคส — ปัจจุบันคือ “{item.patient_medical_history || 'ไม่ได้ระบุ'}”
+                    {' '}(พนักงานภาคสนามเห็นข้อมูลล่าสุดนี้แล้ว)
+                  </p>
+                )}
                 <Field label="อาการปัจจุบัน" value={item.current_symptoms} />
                 <Field label="อุปกรณ์ / สายต่างๆ" value={item.medical_devices} />
                 <Field label="จุดประสงค์ของญาติในการดูแล" value={item.care_goal} />
@@ -429,20 +451,44 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                 <h3>ใบแจ้งหนี้</h3>
                 {invoices.length === 0 ? (
                   <div className="visit-summary">
-                    <p className="muted">ยังไม่ได้ออกใบแจ้งหนี้</p>
-                    <button
-                      className="btn"
-                      disabled={busy || item.status === 'cancelled'}
-                      title={item.status === 'cancelled' ? 'เคสที่ยกเลิกแล้วออกใบแจ้งหนี้ไม่ได้' : undefined}
-                      onClick={() =>
-                        run(async () => {
-                          const created = await api.createInvoice({ case_id: item.case_id });
-                          setOpenInvoiceId(created.invoice_id);
-                        })
-                      }
-                    >
-                      ออกใบแจ้งหนี้
-                    </button>
+                    <p className="muted">
+                      ยังไม่ได้ออกใบแจ้งหนี้
+                      {doneVisits > 0 && <span className="cell-sub">ทำไปแล้ว {doneVisits} กะ — เลือกออกตามกะได้</span>}
+                    </p>
+                    <div className="row-actions">
+                      <button
+                        className="btn"
+                        disabled={busy || item.status === 'cancelled'}
+                        title={item.status === 'cancelled' ? 'เคสที่ยกเลิกแล้วออกใบแจ้งหนี้ไม่ได้' : undefined}
+                        onClick={() =>
+                          run(async () => {
+                            const created = await api.createInvoice({ case_id: item.case_id });
+                            setOpenInvoiceId(created.invoice_id);
+                          })
+                        }
+                      >
+                        ออกใบตามแพ็คเกจ
+                      </button>
+                      {/* เก็บเงินตามครั้งที่ไปจริง — ใบจะแตกเป็นรายการรายวัน ยอดเป็นสัดส่วนของกะที่ทำ
+                          ใช้กับเคสที่เก็บเงินระหว่างทาง หรือเคสที่ตกลงกันเป็นรายครั้ง */}
+                      {doneVisits > 0 && (
+                        <button
+                          className="btn"
+                          disabled={busy || item.status === 'cancelled'}
+                          onClick={() =>
+                            run(async () => {
+                              const created = await api.createInvoice({
+                                case_id: item.case_id,
+                                basis: 'visits',
+                              });
+                              setOpenInvoiceId(created.invoice_id);
+                            })
+                          }
+                        >
+                          ออกใบตามกะที่ไปจริง ({doneVisits})
+                        </button>
+                      )}
+                    </div>
                   </div>
                 ) : (
                   invoices.map((v) => (
@@ -478,6 +524,37 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                       </div>
                     </div>
                   ))
+                )}
+              </section>
+
+              {/* ประวัติการทำรายการ — ใครทำอะไรกับเคสนี้บ้าง เก็บทีละครั้ง ไม่ใช่แค่เวลาล่าสุด
+                  ย่อไว้เพราะเป็นข้อมูลที่เปิดดูเฉพาะตอนต้องไล่ย้อน ไม่ใช่ของที่ต้องเห็นทุกครั้ง */}
+              <section>
+                <h3>ประวัติการทำรายการ</h3>
+                {events.length === 0 ? (
+                  <p className="muted">ยังไม่มีประวัติ (เคสนี้เปิดก่อนระบบเริ่มบันทึก)</p>
+                ) : (
+                  <>
+                    <ol className="event-log">
+                      {(eventsOpen ? events : events.slice(0, 3)).map((ev) => (
+                        <li key={ev.event_id}>
+                          <span className="badge">{CASE_EVENT_LABELS[ev.event] ?? ev.event}</span>
+                          <span className="event-detail">
+                            {ev.detail}
+                            <span className="cell-sub">
+                              {stampText(ev.created_at)}
+                              {' · '}{ev.actor_name ?? 'ไม่ทราบผู้ทำรายการ'}
+                            </span>
+                          </span>
+                        </li>
+                      ))}
+                    </ol>
+                    {events.length > 3 && (
+                      <button className="btn tiny" onClick={() => setEventsOpen((v) => !v)}>
+                        {eventsOpen ? 'ย่อ' : `ดูทั้งหมด (${events.length})`}
+                      </button>
+                    )}
+                  </>
                 )}
               </section>
 
@@ -606,12 +683,26 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                   className={`btn ${status === 'in_progress' ? 'primary' : ''}`}
                   disabled={busy}
                   onClick={() => {
-                    // ปิดเคส = ยืนยันค่าจ้าง ยอดจะไปโผล่ในหน้าค่าตอบแทนของพนักงานทันที — บอกให้รู้ตัวก่อนกด
+                    // ปิดเคส = ตรึงค่าจ้างของกะที่ทำไปแล้ว — บอกให้รู้ตัวก่อนกด
                     const pay = item.staff_pay != null
-                      ? `\nพนักงานจะเห็นค่าจ้าง ${formatBaht(item.staff_pay)} ในสรุปค่าตอบแทนของเดือนนี้`
-                      : '\nเคสนี้ยังไม่ได้ระบุค่าจ้างพนักงาน — ปิดแล้วพนักงานจะเห็นว่า "ยังไม่ระบุค่าจ้าง"';
-                    if (!confirm(`ปิดเคส ${item.case_id}?${pay}\nเคสจะยังอยู่ในระบบเป็นประวัติ และเปิดใหม่ได้ภายหลัง`)) return;
-                    run(() => api.closeCase(item.case_id, new Date().toISOString().slice(0, 10)));
+                      ? `\nค่าจ้างของกะที่ทำไปแล้วจะถูกตรึงตามยอดเคส ${formatBaht(item.staff_pay)}`
+                      : '\nเคสนี้ยังไม่ได้ระบุค่าจ้างพนักงาน — กะที่ทำไปแล้วจะยังไม่มียอด';
+
+                    /* ของค้างที่ต้องบอกก่อนปิด (server กันซ้ำอีกชั้นด้วย force)
+                       กะที่ยังไม่ถึงวันจะถูกยกเลิก ส่วนกะที่ค้างเช็คเอาท์จะไม่มีชั่วโมง/ค่าจ้างเลย */
+                    const today = new Date().toISOString().slice(0, 10);
+                    const upcoming = visits.filter(
+                      (v) => v.status === 'scheduled' && !v.check_in_at && v.visit_date >= today,
+                    ).length;
+                    const openShifts = visits.filter((v) => v.check_in_at && !v.check_out_at).length;
+                    const warn = [
+                      upcoming > 0 && `• ${upcoming} กะที่ยังไม่ถึงวันนัด จะถูกยกเลิก`,
+                      openShifts > 0 && `• ${openShifts} กะที่เช็คอินแล้วแต่ยังไม่เช็คเอาท์ จะไม่ถูกนับชั่วโมง/ค่าจ้าง`,
+                    ].filter(Boolean);
+                    const pending = warn.length ? `\n\nยังมีของค้าง:\n${warn.join('\n')}` : '';
+
+                    if (!confirm(`ปิดเคส ${item.case_id}?${pay}${pending}\nเคสจะยังอยู่ในระบบเป็นประวัติ และเปิดใหม่ได้ภายหลัง`)) return;
+                    run(() => api.closeCase(item.case_id, today, warn.length > 0));
                   }}
                 >
                   ปิดเคส
