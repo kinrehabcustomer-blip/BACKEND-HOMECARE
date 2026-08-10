@@ -1848,6 +1848,20 @@ select option:checked {
 }
 .rate-cut { display: block; font-size: 0.6875rem; font-weight: 600; color: var(--danger); }
 
+/* บรรทัดประกอบในเซลล์เรทต้องตัดบรรทัดได้ แม้เซลล์จะตั้ง nowrap ไว้
+   คอลัมน์ระดับพนักงานกว้างคงที่ราว 100px (table-layout: fixed) แต่ "จ้าง ฿1,000 · กำไร 50%"
+   ยาวกว่านั้นเกือบเท่าตัว — พอห้ามตัดบรรทัดและเซลล์ปล่อย overflow ไว้ ข้อความจึงไหลไปทับ
+   ข้อความของคอลัมน์ถัดไป (เห็นชัดที่สุดบนมือถือที่ตารางถูกบีบจนแคบสุด) */
+.rate-was,
+.rate-cut,
+.rate-staff,
+.rate-net,
+.rate-off {
+  white-space: normal;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
 /* โหมดแก้ไข: ราคาเต็ม 1 ช่อง + ส่วนลด %/บาท อีก 2 ช่อง + บรรทัดสรุปราคาสุทธิ */
 .rate-edit { display: flex; flex-direction: column; gap: 0.1875rem; align-items: stretch; }
 .rate-edit-row { display: flex; gap: 0.1875rem; align-items: center; }
@@ -1857,6 +1871,15 @@ select option:checked {
 /* ค่าจ้างพนักงานใต้ราคาขาย — เบากว่าราคาเพราะเป็นข้อมูลประกอบ ไม่ใช่ตัวเลขที่ลูกค้าเห็น */
 .rate-staff { display: block; font-size: 0.6875rem; font-weight: 400; color: var(--muted); }
 .rate-staff.is-missing { color: var(--danger); }
+.rate-margin::before { content: ' · '; }
+
+/* จอแคบ: คอลัมน์ระดับพนักงานเหลือราว 100px — ให้ค่าจ้างกับกำไรอยู่คนละบรรทัดไปเลย
+   ตัดบรรทัดเองกลางประโยคจะได้ตัวคั่น " · " ห้อยท้ายบรรทัดบนซึ่งอ่านแล้วสะดุด */
+@media (max-width: 600px) {
+  .rate-margin { display: block; }
+  .rate-margin::before { content: none; }
+  .rate-table { font-size: 0.75rem; }
+}
 
 /* ---------- ปฏิทินตารางงาน ---------- */
 /* เส้นตารางทำด้วย gap 1px บนพื้นสีเส้น — ได้เส้นบางสม่ำเสมอโดยไม่ต้องคุม border ของทุกช่อง */

@@ -137,7 +137,9 @@ function RateCell({ editing, rate, draft, changed, onPatch }) {
       {rate.staff_pay != null ? (
         <span className="rate-staff">
           จ้าง {formatBaht(rate.staff_pay)}
-          {rate.margin != null && ` · กำไร ${rate.margin}%`}
+          {/* แยก span ให้กำไรลงบรรทัดของตัวเองได้บนจอแคบ — ตัวคั่น " · " มาจาก CSS
+              เขียนติดกันเป็นข้อความเดียวแล้วมันจะตัดบรรทัดกลางประโยค อ่านเป็น "จ้าง ฿1,000 · กำไร / 50%" */}
+          {rate.margin != null && <span className="rate-margin">กำไร {rate.margin}%</span>}
         </span>
       ) : (
         <span className="rate-staff is-missing">ยังไม่ตั้งค่าจ้าง</span>
