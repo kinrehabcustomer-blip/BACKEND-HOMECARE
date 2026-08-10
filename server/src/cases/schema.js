@@ -137,13 +137,16 @@ function datesInRange(from, to, weekdays) {
 }
 
 /**
- * ลงกะทีเดียวทั้งช่วง — เคส Homecare รายเดือนคือ 26 กะ ที่เดิมต้องกดปฏิทินทีละวัน
+ * ลงกะหลายวันในครั้งเดียว — รับได้สองแบบ:
+ *   dates: ['2026-08-10', ...]           = วันที่เลือกไว้บนปฏิทิน (หน้าเว็บใช้แบบนี้)
+ *   from/to (+weekdays)                  = ทั้งช่วง เช่น จันทร์–ศุกร์ ทั้งเดือน
  * weekdays = วันในสัปดาห์ที่ให้ลง (0=อาทิตย์ … 6=เสาร์) · เว้นว่าง = ทุกวันในช่วง
  */
 export const bulkVisitSchema = z
   .object({
-    from: date,
-    to: date,
+    dates: z.array(date).optional(),
+    from: date.optional(),
+    to: date.optional(),
     weekdays: z.array(z.number().int().min(0).max(6)).max(7).optional(),
     assigned_to: z.string().trim().min(1).optional().nullable(),
     planned_start: time.optional().nullable(),
@@ -152,28 +155,72 @@ export const bulkVisitSchema = z
     note: optionalText,
   })
   .superRefine((v, ctx) => {
-    if (v.to < v.from) {
-      ctx.addIssue({ code: 'custom', path: ['to'], message: 'วันสิ้นสุดต้องไม่มาก่อนวันเริ่ม' });
+    const listed = v.dates?.length ?? 0;
+    if (listed === 0 && !(v.from && v.to)) {
+      ctx.addIssue({ code: 'custom', path: ['dates'], message: 'กรุณาเลือกวันที่จะลงกะ' });
       return;
     }
-    const n = datesInRange(v.from, v.to, v.weekdays).length;
-    if (n === 0) {
-      ctx.addIssue({ code: 'custom', path: ['weekdays'], message: 'ช่วงที่เลือกไม่มีวันไหนตรงกับวันในสัปดาห์ที่ระบุ' });
+
+    if (listed === 0) {
+      if (v.to < v.from) {
+        ctx.addIssue({ code: 'custom', path: ['to'], message: 'วันสิ้นสุดต้องไม่มาก่อนวันเริ่ม' });
+        return;
+      }
+      if (datesInRange(v.from, v.to, v.weekdays).length === 0) {
+        ctx.addIssue({ code: 'custom', path: ['weekdays'], message: 'ช่วงที่เลือกไม่มีวันไหนตรงกับวันในสัปดาห์ที่ระบุ' });
+      }
     }
+
+    const n = listed || datesInRange(v.from, v.to, v.weekdays).length;
     if (n > MAX_BULK_VISITS) {
       ctx.addIssue({
         code: 'custom',
-        path: ['to'],
-        message: `ช่วงนี้จะได้ ${n} กะ ซึ่งเกิน ${MAX_BULK_VISITS} กะต่อครั้ง — แบ่งเป็นช่วงย่อยก่อน`,
+        path: listed ? ['dates'] : ['to'],
+        message: `ครั้งนี้จะได้ ${n} กะ ซึ่งเกิน ${MAX_BULK_VISITS} กะต่อครั้ง — แบ่งเป็นช่วงย่อยก่อน`,
       });
     }
   })
-  .transform((v) => ({ ...v, dates: datesInRange(v.from, v.to, v.weekdays) }));
+  // ส่งวันซ้ำมาก็ลงครั้งเดียว และเรียงให้เสมอ ผลลัพธ์จะได้ไม่ขึ้นกับลำดับที่ผู้ใช้แตะปฏิทิน
+  .transform((v) => ({
+    ...v,
+    dates: v.dates?.length ? [...new Set(v.dates)].sort() : datesInRange(v.from, v.to, v.weekdays),
+  }));
 
-/** ลบกะทั้งช่วง — กะที่เช็คอินไปแล้วระบบจะข้ามให้เอง (ดู removeVisitRange) */
+/**
+ * ตรวจก่อนบันทึกว่าวันที่เลือกไว้จะชนกับงานอื่นของคนคนนั้นไหม
+ * แยกจาก bulk เพราะหน้าเว็บเรียกทุกครั้งที่ผู้ใช้เปลี่ยนวัน/คน/เวลา ซึ่งยังไม่ใช่การบันทึก
+ */
+export const previewVisitsSchema = z.object({
+  dates: z.array(date).min(1, 'กรุณาเลือกวันที่จะลงกะ').max(MAX_BULK_VISITS),
+  assigned_to: z.string().trim().min(1).optional().nullable(),
+  planned_start: time.optional().nullable(),
+  planned_end: time.optional().nullable(),
+});
+
+/**
+ * ลบกะหลายวัน — ระบุเป็นช่วง (from/to) หรือรายวัน (dates) ก็ได้
+ * กะที่เช็คอินไปแล้วระบบจะข้ามให้เองทั้งสองแบบ (ดู removeVisitsOn)
+ */
 export const visitRangeSchema = z
-  .object({ from: date, to: date })
-  .refine((v) => v.to >= v.from, { path: ['to'], message: 'วันสิ้นสุดต้องไม่มาก่อนวันเริ่ม' });
+  .object({
+    dates: z.array(date).optional(),
+    from: date.optional(),
+    to: date.optional(),
+  })
+  .superRefine((v, ctx) => {
+    if (v.dates?.length) return;
+    if (!v.from || !v.to) {
+      ctx.addIssue({ code: 'custom', path: ['dates'], message: 'ต้องระบุวันที่จะลบ (dates หรือ from/to)' });
+      return;
+    }
+    if (v.to < v.from) {
+      ctx.addIssue({ code: 'custom', path: ['to'], message: 'วันสิ้นสุดต้องไม่มาก่อนวันเริ่ม' });
+    }
+  })
+  .transform((v) => ({
+    ...v,
+    dates: v.dates?.length ? [...new Set(v.dates)].sort() : datesInRange(v.from, v.to),
+  }));
 
 // แก้ได้ทั้งเลื่อนวัน เปลี่ยนคนที่ไป เวลานัด ค่าจ้าง สถานะ (ไปมาแล้ว/ไม่ได้ไป) และหมายเหตุ
 export const updateVisitSchema = z

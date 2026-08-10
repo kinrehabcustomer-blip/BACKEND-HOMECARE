@@ -318,11 +318,13 @@ export const api = {
   listVisits: (id) => request(`/cases/${id}/visits`),
   /** เพิ่มกะทีละวัน — คืน { visits, added, skipped, conflicts } */
   addVisit: (id, body) => request(`/cases/${id}/visits`, { method: 'POST', body }),
-  /** ลงกะทั้งช่วง (from/to + weekdays) — คืนรูปแบบเดียวกับ addVisit */
+  /** ลงกะหลายวันในครั้งเดียว — ส่ง { dates: [...] } หรือ { from, to, weekdays } · คืนรูปแบบเดียวกับ addVisit */
   addVisits: (id, body) => request(`/cases/${id}/visits/bulk`, { method: 'POST', body }),
-  /** ลบกะทั้งช่วง — คืน { visits, deleted, kept } (kept = กะที่เช็คอินแล้ว จึงไม่ลบให้) */
-  deleteVisitRange: (id, { from, to }) =>
-    request(`/cases/${id}/visits?${new URLSearchParams({ from, to })}`, { method: 'DELETE' }),
+  /** ตรวจก่อนบันทึกว่าวันที่เลือกไว้ชนกับงานอื่นไหม — คืน { conflicts, duplicates } (ไม่บันทึกอะไร) */
+  previewVisits: (id, body) => request(`/cases/${id}/visits/preview`, { method: 'POST', body }),
+  /** ลบกะของวันที่ระบุ — คืน { visits, deleted, kept } (kept = กะที่เช็คอินแล้ว จึงไม่ลบให้) */
+  deleteVisitsOn: (id, dates) =>
+    request(`/cases/${id}/visits?${new URLSearchParams({ dates: dates.join(',') })}`, { method: 'DELETE' }),
   updateVisit: (id, visitId, body) => request(`/cases/${id}/visits/${visitId}`, { method: 'PATCH', body }),
   deleteVisit: (id, visitId) => request(`/cases/${id}/visits/${visitId}`, { method: 'DELETE' }),
   /** ประวัติการทำรายการของเคส (ใครจับคู่/ปิด/ยกเลิก เมื่อไหร่) — ใหม่สุดอยู่บน */

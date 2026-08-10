@@ -14,6 +14,7 @@ import {
   createVisitSchema,
   updateVisitSchema,
   bulkVisitSchema,
+  previewVisitsSchema,
   visitRangeSchema,
   geocodeSchema,
   mapLinkSchema,
@@ -296,7 +297,7 @@ casesRouter.post(
   }),
 );
 
-/** ลงกะทีเดียวทั้งช่วง (เช่น จันทร์–ศุกร์ ทั้งเดือน) — คืนกะทั้งหมด + จำนวนที่เพิ่ม/ข้าม + กะที่ชนกัน */
+/** ลงกะหลายวันในครั้งเดียว (วันที่เลือกไว้ หรือทั้งช่วง) — คืนกะทั้งหมด + จำนวนที่เพิ่ม/ข้าม + กะที่ชนกัน */
 casesRouter.post(
   '/:id/visits/bulk',
   asyncRoute(async (req, res) => {
@@ -305,12 +306,28 @@ casesRouter.post(
   }),
 );
 
-/** ลบกะทั้งช่วง — ข้ามกะที่เช็คอินไปแล้วเสมอ (เป็นบันทึกการทำงานจริง) */
+/** ตรวจก่อนบันทึกว่าวันที่เลือกไว้ชนกับงานอื่นของคนนั้นไหม — ไม่เขียนอะไรลงฐานข้อมูล */
+casesRouter.post(
+  '/:id/visits/preview',
+  asyncRoute(async (req, res) => {
+    const input = previewVisitsSchema.parse(req.body);
+    res.json(await repo.previewVisits(req.params.id, input));
+  }),
+);
+
+/**
+ * ลบกะหลายวัน — ?dates=YYYY-MM-DD,YYYY-MM-DD หรือ ?from=&to=
+ * ข้ามกะที่เช็คอินไปแล้วเสมอ (เป็นบันทึกการทำงานจริง)
+ */
 casesRouter.delete(
   '/:id/visits',
   asyncRoute(async (req, res) => {
-    const range = visitRangeSchema.parse({ from: req.query.from, to: req.query.to });
-    res.json(await repo.removeVisitRange(req.params.id, range));
+    const { dates } = visitRangeSchema.parse({
+      dates: req.query.dates ? String(req.query.dates).split(',') : undefined,
+      from: req.query.from,
+      to: req.query.to,
+    });
+    res.json(await repo.removeVisitsOn(req.params.id, dates));
   }),
 );
 

@@ -455,7 +455,7 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                       ยังไม่ได้ออกใบแจ้งหนี้
                       {doneVisits > 0 && <span className="cell-sub">ทำไปแล้ว {doneVisits} กะ — เลือกออกตามกะได้</span>}
                     </p>
-                    <div className="row-actions">
+                    <div className="stack-actions">
                       <button
                         className="btn"
                         disabled={busy || item.status === 'cancelled'}

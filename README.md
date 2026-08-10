@@ -141,8 +141,9 @@ npm run dev              # รัน API (:4000) + หน้าเว็บ (:51
 | POST | `/:id/assign` `/:id/unassign` | จับคู่ / ยกเลิกจับคู่พนักงาน |
 | POST | `/:id/start` `/:id/close` `/:id/cancel` `/:id/reopen` | เริ่มบริการ / ปิด / ยกเลิก / เปิดใหม่ — `close` ต้องส่ง `force: true` ถ้ายังมีกะค้าง |
 | GET/POST/PATCH/DELETE | `/:id/visits` `/:id/visits/:visitId` | กะของเคส (เพิ่ม/แก้/ลบทีละกะ) |
-| POST | `/:id/visits/bulk` | ลงกะทั้งช่วง (`from`/`to`/`weekdays`) — คืนจำนวนที่เพิ่ม/ข้าม + **กะที่ชนกับงานอื่นของคนเดียวกัน** |
-| DELETE | `/:id/visits?from=&to=` | ลบกะทั้งช่วง (ข้ามกะที่เช็คอินไปแล้ว) |
+| POST | `/:id/visits/bulk` | ลงกะหลายวันครั้งเดียว — `dates: [...]` หรือ `from`/`to`(+`weekdays`) · คืนจำนวนที่เพิ่ม/ข้าม + กะที่ชนกัน |
+| POST | `/:id/visits/preview` | **ตรวจก่อนบันทึก** ว่าวันที่เลือกชนกับงานอื่นของคนนั้นไหม (ไม่เขียนอะไร) |
+| DELETE | `/:id/visits?dates=` / `?from=&to=` | ลบกะหลายวัน (ข้ามกะที่เช็คอินไปแล้ว) |
 
 ### Packages (Homecare) — `/api/packages` · Physio — `/api/physio`
 | Method | Endpoint | คำอธิบาย |

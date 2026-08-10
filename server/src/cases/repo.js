@@ -718,23 +718,101 @@ export async function addVisits(caseId, dates, { assigned_to, planned_start, pla
   };
 }
 
+/** แปลงรายการวันเป็นพารามิเตอร์ :d0..:dn (ตัวแปลง :name ไม่รองรับ array) */
+function dateSlots(dates, params = {}) {
+  const slots = dates.map((d, i) => {
+    params[`d${i}`] = d;
+    return `:d${i}`;
+  });
+  return { slots: slots.join(', '), params };
+}
+
 /**
- * ลบกะทั้งช่วง — ใช้ตอนลงตารางผิดทั้งเดือน หรือลูกค้าเลื่อนบริการ
+ * ลบกะของวันที่ระบุ — ใช้ตอนลงตารางผิด หรือลูกค้าเลื่อนบริการ
  * กะที่เช็คอินไปแล้วไม่ลบให้ (เป็นบันทึกการทำงานจริงและเป็นฐานค่าจ้าง) — คืนจำนวนที่ข้ามไปให้บอกผู้ใช้
  */
-export async function removeVisitRange(caseId, { from, to }) {
+export async function removeVisitsOn(caseId, dates) {
+  if (dates.length === 0) return { visits: await listVisits(caseId), deleted: 0, kept: 0 };
+
+  const { slots, params } = dateSlots(dates, { id: caseId });
   const deleted = await sql.run(
     `DELETE FROM case_visits
-     WHERE case_id = :id AND visit_date BETWEEN :from AND :to AND check_in_at IS NULL`,
-    { id: caseId, from, to },
+     WHERE case_id = :id AND visit_date IN (${slots}) AND check_in_at IS NULL`,
+    params,
   );
   const kept = await sql.one(
     `SELECT COUNT(*) AS n FROM case_visits
-     WHERE case_id = :id AND visit_date BETWEEN :from AND :to AND check_in_at IS NOT NULL`,
-    { id: caseId, from, to },
+     WHERE case_id = :id AND visit_date IN (${slots}) AND check_in_at IS NOT NULL`,
+    params,
   );
 
   return { visits: await listVisits(caseId), deleted, kept: Number(kept.n) };
+}
+
+/**
+ * ตรวจล่วงหน้าว่าวันที่เลือกไว้จะชนกับงานอื่นของพนักงานคนนั้นไหม — เรียกก่อนบันทึก
+ *
+ * ของเดิมรู้ว่าชนก็ต่อเมื่อกดบันทึกไปแล้ว ซึ่งเป็นจังหวะที่แก้ยากที่สุด
+ * ไม่ระบุคน = เทียบกับผู้รับผิดชอบหลักของเคส (ตรงกับที่ addVisits จะเติมให้ตอนบันทึกจริง)
+ *
+ * duplicates = วันที่มีกะ "เหมือนกันเป๊ะ" อยู่แล้ว (คนเดียวกัน เวลาเดียวกัน) — บันทึกไปก็ถูกข้าม
+ */
+export async function previewVisits(caseId, { dates, assigned_to, planned_start, planned_end }) {
+  const who =
+    assigned_to ??
+    (await sql.one('SELECT assigned_to FROM cases WHERE case_id = :id', { id: caseId }))?.assigned_to ??
+    null;
+  if (!who || dates.length === 0) return { conflicts: [], duplicates: [] };
+
+  const { slots, params } = dateSlots(dates, {
+    emp: who,
+    start: planned_start ?? '00:00',
+    end: planned_end ?? '23:59',
+    self: caseId,
+  });
+
+  const [conflicts, duplicates] = await Promise.all([
+    sql.all(
+      `SELECT o.visit_date, o.case_id AS other_case_id,
+              o.planned_start AS other_start, o.planned_end AS other_end,
+              oc.client_name  AS other_client_name,
+              e.first_name || ' ' || e.last_name AS employee_name
+       FROM case_visits o
+       JOIN cases oc ON oc.case_id = o.case_id
+       LEFT JOIN employees e ON e.employee_id = o.assigned_to
+       WHERE o.assigned_to = :emp
+         AND o.status <> 'cancelled'
+         AND o.visit_date IN (${slots})
+         AND ${SPAN('o')} < :end
+         AND :start < ${SPAN_END('o')}
+       ORDER BY o.visit_date`,
+      params,
+    ),
+    sql.all(
+      `SELECT visit_date FROM case_visits
+       WHERE case_id = :self AND status <> 'cancelled'
+         AND assigned_to = :emp
+         AND planned_start IS NOT DISTINCT FROM :nullable_start
+         AND visit_date IN (${slots})`,
+      { ...params, nullable_start: planned_start ?? null },
+    ),
+  ]);
+
+  const dupDates = new Set(duplicates.map((r) => r.visit_date));
+
+  /* กะที่ "เหมือนกันเป๊ะ" ในเคสเดียวกัน ถูกรายงานเป็น duplicate ไปแล้วและตอนบันทึกจะถูกข้าม
+     ถ้าปล่อยให้ขึ้นในรายการชนด้วย จะกลายเป็นเตือนว่า "ชนกับเคสตัวเอง" ซึ่งอ่านแล้วงงและไม่ต้องทำอะไรต่อ
+     กะคนละเวลาในเคสเดียวกันยังเตือนตามปกติ (คนเดียวไปสองรอบทับเวลากันไม่ได้จริง) */
+  const meaningful = conflicts.filter(
+    (c) =>
+      !(
+        c.other_case_id === caseId &&
+        dupDates.has(c.visit_date) &&
+        (c.other_start ?? null) === (planned_start ?? null)
+      ),
+  );
+
+  return { conflicts: meaningful, duplicates: [...dupDates] };
 }
 
 export async function updateVisit(caseId, visitId, input) {
