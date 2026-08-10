@@ -265,6 +265,18 @@ export const api = {
     return request(`/cases/attendance${params.size ? `?${params}` : ''}`);
   },
   attendanceExceptions: () => request('/cases/attendance/exceptions'),
+  /** คิวกะที่ทำงานจบแล้วแต่ยังไม่ได้อนุมัติค่าจ้าง */
+  pendingApprovals: ({ month, employee_id } = {}) => {
+    const params = new URLSearchParams();
+    if (month) params.set('month', month);
+    if (employee_id) params.set('employee_id', employee_id);
+    return request(`/cases/attendance/pending${params.size ? `?${params}` : ''}`);
+  },
+  /** อนุมัติ/ไม่อนุมัติค่าจ้างของกะที่เลือก — approve=false ต้องมีเหตุผล */
+  decidePay: (visit_ids, approve, reason = null) =>
+    request('/cases/attendance/decide', { method: 'POST', body: { visit_ids, approve, reason } }),
+  /** อนุมัติค่าจ้างของกะที่ทำจบแล้วทั้งเคสในครั้งเดียว */
+  approveCasePay: (caseId) => request(`/cases/${caseId}/approve-pay`, { method: 'POST' }),
   /** สรุปค่าตอบแทนรายเดือนต่อพนักงาน (payroll) */
   attendanceReport: (month) => request(`/cases/attendance/report${month ? `?month=${month}` : ''}`),
   /** แปลงที่อยู่เป็นพิกัด (ผ่าน server) — คืน { lat, lng, formatted } */

@@ -1,4 +1,5 @@
 import { sql } from '../db/index.js';
+import { LATE_THRESHOLD_MINUTES } from '../cases/repo.js';
 
 /**
  * ข้อมูลของ "สรุปประจำวัน" ที่ส่งให้ผู้จัดการทางอีเมล
@@ -44,13 +45,17 @@ export const staleShifts = () =>
      ORDER BY v.check_in_at`,
   );
 
-/** เช็คอินที่ผิดปกติในรอบวัน — นอกพื้นที่ หรือกดคนละวันกับที่นัด */
+/**
+ * เช็คอินที่ผิดปกติในรอบวัน — นอกพื้นที่ · กดคนละวันกับที่นัด · มาสายเกินเกณฑ์
+ * ใช้เกณฑ์สายตัวเดียวกับหน้า "รายการต้องตรวจ" เพื่อไม่ให้อีเมลกับหน้าเว็บบอกไม่ตรงกัน
+ */
 export const flaggedCheckIns = () =>
   sql.all(
     `${VISIT_ROW}
      WHERE v.check_in_at >= now() - interval '24 hours'
-       AND (v.location_flagged = TRUE OR v.off_schedule = TRUE)
+       AND (v.location_flagged = TRUE OR v.off_schedule = TRUE OR v.check_in_late_minutes > :late)
      ORDER BY v.check_in_at DESC`,
+    { late: LATE_THRESHOLD_MINUTES },
   );
 
 /** กะของวันนี้ที่ยังไม่มีคนไป — เตือนตั้งแต่เช้าให้ยังหาคนแทนทัน */

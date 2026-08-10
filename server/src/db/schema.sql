@@ -727,3 +727,28 @@ CREATE TABLE IF NOT EXISTS invoice_items (
 );
 
 CREATE INDEX IF NOT EXISTS idx_invoice_items_invoice ON invoice_items (invoice_id, seq);
+
+-- ============================================================================
+-- อนุมัติค่าจ้างรายกะ — เช็คเอาท์แล้วยังไม่เป็นเงิน จนกว่าผู้จัดการจะกดอนุมัติ
+--
+-- ของเดิม "เช็คเอาท์ = ได้เงิน" ทันที ซึ่งไม่มีจังหวะให้ใครทักท้วงเลย
+-- ทั้งที่มีกะที่ต้องดูก่อนจ่ายจริง: เช็คอินนอกพื้นที่ · มาสายหลายชั่วโมง ·
+-- กดเข้า-ออกห่างกันไม่กี่วินาที (เจอมาแล้ว: เข้า 17:13 ออก 17:13 = 0 นาที แต่ได้ค่าจ้างเต็มกะ)
+--
+-- pending  = ทำงานจบแล้ว รอผู้จัดการตรวจ (ค่าปริยายของทุกกะ)
+-- approved = ยืนยันแล้ว นับเข้าสรุปค่าตอบแทนของพนักงาน
+-- rejected = ไม่จ่ายกะนี้ (เก็บเหตุผลไว้ ไม่ลบทิ้ง — พนักงานต้องเห็นได้ว่าทำไมถึงไม่ได้)
+--
+-- เก็บชื่อผู้อนุมัติ ณ ตอนนั้นคู่กับรหัส แบบเดียวกับใบแจ้งหนี้ — คนอนุมัติอาจลาออกทีหลัง
+-- ============================================================================
+ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS pay_status TEXT NOT NULL DEFAULT 'pending'
+  CHECK (pay_status IN ('pending', 'approved', 'rejected'));
+ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS approved_at      TEXT;
+ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS approved_by      TEXT
+  REFERENCES employees (employee_id) ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS approved_by_name TEXT;
+ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS pay_note         TEXT;  -- เหตุผลตอนไม่อนุมัติ
+
+-- คิวรออนุมัติถูกเปิดดูบ่อย (ทุกวัน) และโตขึ้นเรื่อยๆ ตามจำนวนกะ — index เฉพาะแถวที่ยังค้าง
+CREATE INDEX IF NOT EXISTS idx_case_visits_pending
+  ON case_visits (checked_in_by, visit_date) WHERE pay_status = 'pending';

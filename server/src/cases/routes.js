@@ -20,6 +20,7 @@ import {
   mapLinkSchema,
   placeSearchSchema,
   adjustVisitSchema,
+  decidePaySchema,
   attendanceQuerySchema,
   CASE_TYPES,
   CASE_STATUSES,
@@ -109,6 +110,30 @@ casesRouter.get(
   asyncRoute(async (req, res) => res.json(await repo.attendanceExceptions())),
 );
 
+/** คิวกะที่ทำงานจบแล้วแต่ยังไม่ได้อนุมัติค่าจ้าง — ต้องมาก่อน '/:id' */
+casesRouter.get(
+  '/attendance/pending',
+  asyncRoute(async (req, res) => {
+    const query = attendanceQuerySchema.parse({
+      month: req.query.month || undefined,
+      employee_id: req.query.employee_id || undefined,
+    });
+    res.json(await repo.pendingApprovals(query));
+  }),
+);
+
+/**
+ * อนุมัติ/ไม่อนุมัติค่าจ้างของกะที่เลือก — เงินจะเข้าสรุปค่าตอบแทนของพนักงานก็ต่อเมื่อผ่านเส้นนี้
+ * แตะเฉพาะกะที่ยังรออยู่ กดซ้ำหรือกดจากหน้าที่ข้อมูลเก่าจึงไม่ทับผลที่ตัดสินไปแล้ว
+ */
+casesRouter.post(
+  '/attendance/decide',
+  asyncRoute(async (req, res) => {
+    const input = decidePaySchema.parse(req.body);
+    res.json(await repo.decideVisitPay(input.visit_ids, input, req.user));
+  }),
+);
+
 /** สรุปค่าตอบแทนรายเดือนต่อพนักงาน (payroll) — ไม่ส่งเดือน = เดือนปัจจุบัน (โซนไทย) */
 casesRouter.get(
   '/attendance/report',
@@ -182,6 +207,18 @@ casesRouter.get('/:id', (req, res) => res.json(req.case));
 casesRouter.get(
   '/:id/events',
   asyncRoute(async (req, res) => res.json(await repo.listEvents(req.params.id))),
+);
+
+/**
+ * อนุมัติค่าจ้างของกะที่ทำจบแล้วทั้งเคสในครั้งเดียว — จังหวะที่ใช้บ่อยที่สุดคือตอนปิดเคส
+ * (ไล่กดทีละกะจากคิวรวมก็ได้ แต่ตอนปิดเคสคือตอนที่ผู้จัดการกำลังดูงานทั้งก้อนนี้อยู่พอดี)
+ */
+casesRouter.post(
+  '/:id/approve-pay',
+  asyncRoute(async (req, res) => {
+    const ids = await repo.pendingVisitIds(req.params.id);
+    res.json(await repo.decideVisitPay(ids, { approve: true }, req.user));
+  }),
 );
 
 casesRouter.patch(

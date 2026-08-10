@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { serviceName } from '../components/MyCaseModal.jsx';
 import PageRefresh, { RefreshButton, useUpdatedAt } from '../components/PageRefresh.jsx';
-import { VISIT_STATE_LABELS, formatBaht, formatDate, timeText, durationText } from '../labels.js';
+import { VISIT_STATE_LABELS, PAY_STATUS_LABELS, formatBaht, formatDate, timeText, durationText } from '../labels.js';
 
 /**
  * การมาทำงาน + ค่าตอบแทนของพนักงานภาคสนามเอง
@@ -60,18 +60,18 @@ export default function MyAttendancePage() {
             {/* ยอดเงินเป็นตัวเลขนำของหน้า — เป็นสิ่งที่พนักงานเปิดหน้านี้มาดู
                 นับจากกะที่เช็คอิน–เอาท์ครบแล้วในเดือนนี้ = งานที่ลงแรงไปจริง */}
             <div className="hero">
-              <span className="hero-label">ค่าจ้างจากกะที่ทำในเดือนนี้</span>
+              <span className="hero-label">ค่าจ้างที่อนุมัติแล้ว</span>
               <span className="hero-value">{formatBaht(report.pay)}</span>
             </div>
 
             <div className="tiles">
+              {/* เงินที่ทำไปแล้วแต่ยังไม่ได้ — ต้องเห็นชัดพอๆ กับยอดที่ได้แล้ว
+                  ไม่งั้นพนักงานที่ทำงานทั้งเดือนจะเปิดมาเห็น ฿0 แล้วคิดว่าระบบไม่นับให้ */}
               <div className="tile is-static">
-                <span className="tile-label">กะที่ทำจบแล้ว</span>
-                <span className="tile-value">{report.shifts}</span>
+                <span className="tile-label">รออนุมัติ</span>
+                <span className="tile-value">{formatBaht(report.pending_pay)}</span>
                 <span className="tile-share">
-                  {report.unpriced_shifts > 0
-                    ? `${report.unpriced_shifts} กะยังไม่ระบุค่าจ้าง`
-                    : `${report.cases_worked} เคส`}
+                  {report.pending_shifts > 0 ? `${report.pending_shifts} กะ` : 'ยืนยันครบแล้ว'}
                 </span>
               </div>
               <div className="tile is-static">
@@ -89,11 +89,12 @@ export default function MyAttendancePage() {
             </div>
           </section>
 
-          {/* บอกกติกาให้ชัด ไม่งั้นพนักงานจะไม่รู้ว่าทำไมกะที่ยังไม่เช็คเอาท์ถึงไม่มียอด */}
+          {/* บอกกติกาให้ชัด ไม่งั้นพนักงานจะไม่รู้ว่าทำไมกะที่ทำไปแล้วยังไม่มียอด */}
           <p className="notice">
-            ยอดขึ้นทันทีที่ <strong>เช็คอินและเช็คเอาท์ครบ</strong> โดยนับเข้าเดือนที่ไปทำงาน —
-            กะที่ยังไม่เช็คเอาท์ยังไม่ถูกนับ · ตัวเลขอาจปรับได้จนกว่าผู้จัดการจะปิดเคส (ปิดแล้ว = ตรึงยอด)
+            กะที่ <strong>เช็คอินและเช็คเอาท์ครบ</strong> จะขึ้นเป็น "รออนุมัติ" ก่อน
+            แล้วย้ายมาเป็นค่าจ้างเมื่อ<strong>ผู้จัดการอนุมัติ</strong> — นับเข้าเดือนที่ไปทำงานเสมอ
             {report.unpriced_shifts > 0 && ' · มีกะที่ระบบยังไม่รู้ค่าจ้าง กรุณาสอบถามฝ่ายบุคคล'}
+            {report.rejected_shifts > 0 && ` · มี ${report.rejected_shifts} กะที่ไม่ได้รับอนุมัติ ดูเหตุผลได้ที่รายการกะด้านล่าง`}
           </p>
 
           {/* ที่มาของยอด — ให้กางดูได้ว่าเงินมาจากเคสไหนบ้าง ไม่ใช่เห็นแค่ก้อนเดียว */}
@@ -111,9 +112,14 @@ export default function MyAttendancePage() {
                       {c.closed_at && ` · ปิดเมื่อ ${formatDate(c.closed_at)}`}
                     </p>
                   </div>
-                  <strong className={c.unpriced_shifts > 0 && c.pay === 0 ? 'muted' : ''}>
-                    {c.unpriced_shifts > 0 && c.pay === 0 ? 'ยังไม่ระบุค่าจ้าง' : formatBaht(c.pay)}
-                  </strong>
+                  <div className="pay-cell">
+                    <strong className={c.unpriced_shifts > 0 && c.pay === 0 ? 'muted' : ''}>
+                      {c.unpriced_shifts > 0 && c.pay === 0 ? 'ยังไม่ระบุค่าจ้าง' : formatBaht(c.pay)}
+                    </strong>
+                    {c.pending_shifts > 0 && (
+                      <span className="cell-sub">รออนุมัติ {formatBaht(c.pending_pay)} ({c.pending_shifts} กะ)</span>
+                    )}
+                  </div>
                 </div>
               ))}
             </section>
@@ -160,6 +166,14 @@ export default function MyAttendancePage() {
                       <td data-label="รวม">{durationText(v.worked_minutes)}</td>
                       <td data-label="สถานะ">
                         <span className={`badge visit-${v.state}`}>{VISIT_STATE_LABELS[v.state]}</span>
+                        {/* กะที่ทำจบแล้วต้องบอกด้วยว่าเงินถึงไหนแล้ว — รออนุมัติ / อนุมัติ / ไม่อนุมัติ(พร้อมเหตุผล)
+                            ไม่งั้นพนักงานเห็นแค่ "เสร็จแล้ว" แต่ยอดไม่ขึ้น ก็ไม่รู้จะไปถามใครเรื่องอะไร */}
+                        {v.state === 'done' && (
+                          <span className={`cell-sub ${v.pay_status === 'rejected' ? 'flag-text' : ''}`}>
+                            {PAY_STATUS_LABELS[v.pay_status]}
+                            {v.pay_status === 'rejected' && v.pay_note && ` — ${v.pay_note}`}
+                          </span>
+                        )}
                       </td>
                     </tr>
                   ))}

@@ -22,6 +22,17 @@ const esc = (s) =>
 
 const who = (v) => `${esc(v.employee_name ?? 'ไม่ระบุคน')} · ${esc(v.client_name)} (${esc(v.case_id)})`;
 
+/** กะหนึ่งอาจผิดปกติหลายอย่างพร้อมกัน — บอกให้ครบ ไม่ใช่เลือกมาอันเดียวแล้วปิดที่เหลือไว้ */
+function flagReason(v) {
+  return [
+    v.location_flagged && 'นอกพื้นที่',
+    v.off_schedule && 'นอกวันนัด',
+    v.check_in_late_minutes > 0 && `มาสาย ${v.check_in_late_minutes} นาที`,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+}
+
 /** รวบรวมของค้างทั้งหมด ณ ตอนนี้ — ใช้ทั้งตอนส่งอีเมลและตอนแสดงผลบนหน้าเว็บ */
 async function collect() {
   const period = await repo.todayTH();
@@ -52,9 +63,7 @@ async function collect() {
     {
       key: 'flagged',
       title: 'เช็คอินที่ต้องตรวจ (24 ชม.)',
-      lines: flagged.map(
-        (v) => `${esc(v.visit_date)} · ${who(v)} — ${v.off_schedule ? 'นอกวันนัด' : 'นอกพื้นที่'}`,
-      ),
+      lines: flagged.map((v) => `${esc(v.visit_date)} · ${who(v)} — ${flagReason(v)}`),
     },
     {
       key: 'overdue',

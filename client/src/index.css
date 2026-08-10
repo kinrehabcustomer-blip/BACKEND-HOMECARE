@@ -2476,6 +2476,31 @@ select option:checked {
   text-align: center;
 }
 
+/* แถวอนุมัติค่าจ้างในโมดัลเคส — คั่นจากสรุปตารางกะด้านบนด้วยเส้นบางๆ */
+.approve-row { margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px dashed var(--divider); }
+
+/* แถบยืนยันการอนุมัติในคิว — ติดขอบล่างจอ ติ๊กมา 40 กะแล้วไม่ต้องเลื่อนกลับขึ้นไปหาปุ่ม */
+.approve-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.625rem;
+  margin-top: 0.75rem;
+  padding: 0.75rem 1rem;
+  background: var(--brand-soft);
+  border: 1px solid var(--brand);
+  border-radius: var(--radius);
+  box-shadow: 0 -0.5rem 1rem rgb(0 0 0 / 8%);
+}
+/* ช่องติ๊กเลือกกะ — แคบที่สุดเท่าที่กดได้ ที่เหลือยกให้คอลัมน์ที่ต้องอ่าน */
+.col-check { width: 2.5rem; text-align: center; }
+.table tbody tr.is-picked { background: var(--brand-soft); }
+.pay-cell { text-align: right; }
+
 /* บรรทัดบอกว่ารายชื่อพนักงานถูกกรองตามระดับของเคสอยู่ — ใต้ช่องเลือกในโมดัลเคส */
 .assign-hint { margin: 0.375rem 0 0; font-size: 0.75rem; }
 

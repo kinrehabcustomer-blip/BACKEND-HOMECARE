@@ -8,6 +8,7 @@ import PageRefresh from '../components/PageRefresh.jsx';
 
 const TABS = {
   exceptions: 'รายการต้องตรวจ',
+  approvals: 'รออนุมัติค่าจ้าง',
   log: 'ประวัติเช็คอิน',
   payroll: 'สรุปค่าตอบแทน',
 };
@@ -177,8 +178,205 @@ export default function AttendancePage() {
           reloadKey={reloadKey}
         />
       )}
+      {tab === 'approvals' && (
+        <Approvals
+          month={month}
+          employeeId={employeeId}
+          patch={patch}
+          employeePicker={employeePicker}
+          reloadKey={reloadKey}
+        />
+      )}
       {tab === 'payroll' && <Payroll month={month} patch={patch} reloadKey={reloadKey} />}
     </PageRefresh>
+  );
+}
+
+/**
+ * คิวอนุมัติค่าจ้าง — กะที่ทำงานจบแล้วแต่เงินยังไม่เข้าพนักงานจนกว่าจะกดอนุมัติที่นี่
+ *
+ * ต้องเลือกทีละหลายกะได้ เพราะเดือนหนึ่งมีหลักร้อยกะ ถ้าให้กดทีละใบจะไม่มีใครทำ
+ * แต่ต้องเห็น "ธงที่ต้องดู" ของแต่ละกะก่อนกดด้วย (นอกพื้นที่/สาย/ทำงาน 0 นาที)
+ * ไม่งั้นปุ่มอนุมัติทั้งหมดจะกลายเป็นตรายางที่ไม่มีใครอ่านอะไรเลย
+ */
+function Approvals({ month, employeeId, patch, employeePicker, reloadKey }) {
+  const toast = useToast();
+  const [rows, setRows] = useState(null);
+  const [picked, setPicked] = useState(() => new Set());
+  const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    api
+      .pendingApprovals({ month, employee_id: employeeId || undefined })
+      .then((r) => {
+        if (cancelled) return;
+        setRows(r);
+        setPicked(new Set());  // เปลี่ยนตัวกรองแล้วสิ่งที่ติ๊กไว้ไม่เกี่ยวข้องอีกต่อไป
+        setError(null);
+      })
+      .catch((e) => !cancelled && setError(e.message))
+      .finally(() => !cancelled && setLoading(false));
+
+    return () => { cancelled = true; };
+  }, [month, employeeId, reloadKey]);
+
+  const toggle = (id) =>
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  const allPicked = rows?.length > 0 && picked.size === rows.length;
+  const pickedRows = rows?.filter((v) => picked.has(v.visit_id)) ?? [];
+  const pickedTotal = pickedRows.reduce((s, v) => s + (v.pay ?? 0), 0);
+
+  async function decide(approve) {
+    const ids = [...picked];
+    if (ids.length === 0) return;
+
+    let reason = null;
+    if (!approve) {
+      // ไม่อนุมัติต้องมีเหตุผลเสมอ — เป็นสิ่งเดียวที่พนักงานจะได้รู้ว่าทำไมกะนั้นไม่ได้เงิน
+      reason = prompt(`ไม่อนุมัติ ${ids.length} กะ — เหตุผล (พนักงานจะเห็นข้อความนี้)`);
+      if (!reason?.trim()) return;
+    } else if (!confirm(`อนุมัติค่าจ้าง ${ids.length} กะ รวม ${formatBaht(pickedTotal)}?`)) {
+      return;
+    }
+
+    setBusy(true);
+    setError(null);
+    try {
+      const { changed } = await api.decidePay(ids, approve, reason?.trim() ?? null);
+      toast(`${approve ? 'อนุมัติ' : 'ไม่อนุมัติ'} ${changed} กะแล้ว`);
+      setRows((prev) => prev.filter((v) => !picked.has(v.visit_id)));
+      setPicked(new Set());
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** ธงที่ทำให้กะนี้ควรถูกดูก่อนอนุมัติ — ไม่มีเลย = กะปกติ */
+  const flags = (v) =>
+    [
+      v.location_flagged && 'นอกพื้นที่',
+      v.off_schedule && 'นอกวันนัด',
+      v.check_in_late_minutes > LATE_MINUTES && `สาย ${durationText(v.check_in_late_minutes)}`,
+      v.worked_minutes === 0 && 'ทำงาน 0 นาที',
+      v.pay == null && 'ยังไม่ระบุค่าจ้าง',
+    ].filter(Boolean);
+
+  const total = rows?.reduce((s, v) => s + (v.pay ?? 0), 0) ?? 0;
+
+  return (
+    <>
+      <MonthPicker month={month} onChange={(m) => patch({ month: m })}>{employeePicker}</MonthPicker>
+
+      <p className="muted form-hint">
+        กะที่เช็คเอาท์แล้วจะยัง<strong>ไม่เข้าสรุปค่าตอบแทน</strong>ของพนักงาน จนกว่าจะอนุมัติที่นี่ ·
+        ยอดที่เห็นคือค่าจ้างของกะนั้น (เกลี่ยจากค่าจ้างเคสถ้าไม่ได้ตั้งรายกะ)
+      </p>
+
+      {error && <p className="error">{error}</p>}
+
+      {loading && !rows ? (
+        <p className="muted">กำลังโหลด…</p>
+      ) : rows?.length === 0 ? (
+        <section className="card empty-state">
+          <p><LineIcon name="check" className="text-ico" />ไม่มีกะรออนุมัติ</p>
+          <p className="muted">ค่าจ้างของเดือนนี้ยืนยันครบแล้ว</p>
+        </section>
+      ) : rows?.length > 0 ? (
+        <>
+          <div className="table-wrap">
+            <table className="table table-cards table-2line">
+              <thead>
+                <tr>
+                  <th className="col-check">
+                    <input
+                      type="checkbox"
+                      checked={allPicked}
+                      aria-label="เลือกทั้งหมด"
+                      onChange={() => setPicked(allPicked ? new Set() : new Set(rows.map((v) => v.visit_id)))}
+                    />
+                  </th>
+                  <th>วันที่</th>
+                  <th>พนักงาน / เคส</th>
+                  <th>เข้า–ออก</th>
+                  <th>รวม</th>
+                  <th>ค่าจ้าง</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((v) => (
+                  <tr key={v.visit_id} className={picked.has(v.visit_id) ? 'is-picked' : ''}>
+                    <td data-label="เลือก" className="col-check">
+                      <input
+                        type="checkbox"
+                        checked={picked.has(v.visit_id)}
+                        aria-label={`เลือกกะวันที่ ${v.visit_date}`}
+                        onChange={() => toggle(v.visit_id)}
+                      />
+                    </td>
+                    <td data-label="วันที่">{formatDate(v.visit_date)}</td>
+                    <td data-label="พนักงาน / เคส">
+                      {v.employee_name}
+                      <span className="cell-sub">
+                        {v.client_name} ·{' '}
+                        <Link className="link mono" to={`/cases?open=${v.case_id}`}>{v.case_id}</Link>
+                      </span>
+                    </td>
+                    <td data-label="เข้า–ออก">
+                      {timeText(v.check_in_at)} – {timeText(v.check_out_at)}
+                      {flags(v).length > 0 && <span className="cell-sub flag-text">{flags(v).join(' · ')}</span>}
+                    </td>
+                    <td data-label="รวม">{durationText(v.worked_minutes)}</td>
+                    <td data-label="ค่าจ้าง">
+                      {v.pay == null ? <span className="muted">—</span> : formatBaht(v.pay)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr>
+                  <th />
+                  <th data-label="รวม">{rows.length} กะ</th>
+                  <th />
+                  <th />
+                  <th />
+                  <th data-label="ค่าจ้างรวม">{formatBaht(total)}</th>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+
+          {/* แถบยืนยันติดขอบล่าง — ติ๊กมา 40 กะแล้วต้องเลื่อนกลับขึ้นไปหาปุ่มคือคนละเรื่องกัน */}
+          {picked.size > 0 && (
+            <div className="approve-bar">
+              <p className="pick-count">
+                เลือกไว้ <strong>{picked.size}</strong> กะ · รวม <strong>{formatBaht(pickedTotal)}</strong>
+              </p>
+              <div className="pick-actions">
+                <button className="btn primary" disabled={busy} onClick={() => decide(true)}>
+                  อนุมัติ {picked.size} กะ
+                </button>
+                <button className="btn danger-ghost" disabled={busy} onClick={() => decide(false)}>
+                  ไม่อนุมัติ
+                </button>
+                <button className="btn" disabled={busy} onClick={() => setPicked(new Set())}>ล้าง</button>
+              </div>
+            </div>
+          )}
+        </>
+      ) : null}
+    </>
   );
 }
 
@@ -206,17 +404,19 @@ function Payroll({ month, patch, reloadKey }) {
   function exportCsv() {
     downloadCsv(
       `payroll-${month}.csv`,
-      ['รหัสพนักงาน', 'ชื่อ', 'จำนวนกะ', 'ชั่วโมงรวม', 'เคสที่ทำ', 'ค่าจ้างรวม (บาท)', 'กะที่ยังไม่ระบุค่าจ้าง'],
+      ['รหัสพนักงาน', 'ชื่อ', 'จำนวนกะ', 'ชั่วโมงรวม', 'เคสที่ทำ', 'ค่าจ้างที่อนุมัติแล้ว (บาท)',
+        'กะที่อนุมัติแล้ว', 'รออนุมัติ (บาท)', 'กะที่รออนุมัติ', 'กะที่ไม่อนุมัติ', 'กะที่ยังไม่ระบุค่าจ้าง'],
       rows.map((r) => [
-        r.employee_id, r.employee_name, r.shifts, (r.minutes / 60).toFixed(1), r.cases_worked, r.pay, r.unpriced_shifts,
+        r.employee_id, r.employee_name, r.shifts, (r.minutes / 60).toFixed(1), r.cases_worked, r.pay,
+        r.approved_shifts, r.pending_pay, r.pending_shifts, r.rejected_shifts, r.unpriced_shifts,
       ]),
     );
   }
 
-  const totalCases = rows?.reduce((s, r) => s + r.cases_worked, 0) ?? 0;
   const totalShifts = rows?.reduce((s, r) => s + r.shifts, 0) ?? 0;
   const totalMinutes = rows?.reduce((s, r) => s + r.minutes, 0) ?? 0;
   const totalPay = rows?.reduce((s, r) => s + r.pay, 0) ?? 0;
+  const totalPending = rows?.reduce((s, r) => s + r.pending_pay, 0) ?? 0;
 
   return (
     <>
@@ -225,10 +425,9 @@ function Payroll({ month, patch, reloadKey }) {
       </MonthPicker>
 
       <p className="muted form-hint">
-        ค่าจ้างนับจาก<strong>กะที่เช็คอิน–เอาท์ครบ</strong>ในเดือนนั้น จ่ายให้คนที่ไปทำจริง —
-        ยอดต่อกะใช้ค่าจ้างที่ตั้งไว้ที่กะ ถ้าไม่ได้ตั้งก็เกลี่ยจากค่าจ้างของเคสหารจำนวนกะที่นัดไว้
-        และจะถูก<strong>ตรึงเป็นตัวเลขถาวรเมื่อปิดเคส</strong> ·
-        <strong>ชั่วโมงรวม</strong>คือเวลาจริงจากการเช็คอิน/เอาท์
+        ค่าจ้างนับจาก<strong>กะที่เช็คอิน–เอาท์ครบและผ่านการอนุมัติแล้ว</strong> จ่ายให้คนที่ไปทำจริง —
+        ยอดต่อกะใช้ค่าจ้างที่ตั้งไว้ที่กะ ถ้าไม่ได้ตั้งก็เกลี่ยจากค่าจ้างของเคสหารจำนวนกะที่นัดไว้ ·
+        <strong>ชั่วโมงรวม</strong>คือเวลาจริงจากการเช็คอิน/เอาท์ (นับทุกกะ ไม่ว่าจะอนุมัติแล้วหรือยัง)
       </p>
 
       {error && <p className="error">{error}</p>}
@@ -241,15 +440,28 @@ function Payroll({ month, patch, reloadKey }) {
         <div className="table-wrap">
           <table className="table table-cards">
             <thead>
-              <tr><th>พนักงาน</th><th>จำนวนกะ</th><th>ชั่วโมงรวม</th><th>เคสที่ทำ</th><th>ค่าจ้างรวม</th></tr>
+              <tr><th>พนักงาน</th><th>จำนวนกะ</th><th>ชั่วโมงรวม</th><th>รออนุมัติ</th><th>ค่าจ้างรวม</th></tr>
             </thead>
             <tbody>
               {rows.map((r) => (
                 <tr key={r.employee_id}>
                   <td data-label="พนักงาน">{r.employee_name}<span className="cell-sub mono">{r.employee_id}</span></td>
-                  <td data-label="จำนวนกะ">{r.shifts}</td>
+                  <td data-label="จำนวนกะ">
+                    {r.shifts}
+                    <span className="cell-sub">{r.cases_worked} เคส</span>
+                  </td>
                   <td data-label="ชั่วโมงรวม">{durationText(r.minutes)}</td>
-                  <td data-label="เคสที่ทำ">{r.cases_worked}</td>
+                  {/* เงินที่ค้างอยู่ที่โต๊ะผู้จัดการเอง ไม่ใช่ปัญหาของพนักงาน — กดไปที่คิวอนุมัติได้เลย */}
+                  <td data-label="รออนุมัติ">
+                    {r.pending_shifts > 0 ? (
+                      <Link className="link" to={`/attendance?tab=approvals&month=${month}&employee_id=${r.employee_id}`}>
+                        {formatBaht(r.pending_pay)}
+                        <span className="cell-sub">{r.pending_shifts} กะ →</span>
+                      </Link>
+                    ) : (
+                      <span className="muted">—</span>
+                    )}
+                  </td>
                   <td data-label="ค่าจ้างรวม">
                     {formatBaht(r.pay)}
                     {/* กดไปหาเคสของคนนี้ได้เลย — เดิมรู้ว่ามีปัญหาแต่ไม่รู้ว่าเคสไหน */}
@@ -259,6 +471,9 @@ function Payroll({ month, patch, reloadKey }) {
                           {r.unpriced_shifts} กะยังไม่ระบุค่าจ้าง →
                         </Link>
                       </span>
+                    )}
+                    {r.rejected_shifts > 0 && (
+                      <span className="cell-sub flag-text">ไม่อนุมัติ {r.rejected_shifts} กะ</span>
                     )}
                   </td>
                 </tr>
@@ -271,7 +486,7 @@ function Payroll({ month, patch, reloadKey }) {
                 <th data-label="พนักงาน">รวม {rows.length} คน</th>
                 <th data-label="จำนวนกะ">{totalShifts}</th>
                 <th data-label="ชั่วโมงรวม">{durationText(totalMinutes)}</th>
-                <th data-label="เคสที่ทำ">{totalCases}</th>
+                <th data-label="รออนุมัติ">{totalPending > 0 ? formatBaht(totalPending) : '—'}</th>
                 <th data-label="ค่าจ้างรวม">{formatBaht(totalPay)}</th>
               </tr>
             </tfoot>
@@ -354,12 +569,27 @@ function WhoCell({ v }) {
   );
 }
 
+/* เกณฑ์เดียวกับฝั่ง server (LATE_THRESHOLD_MINUTES) — ต่ำกว่านี้ถือเป็นเรื่องปกติของการเดินทาง
+   ไม่ได้ดึงมาจาก API เพราะเป็นแค่การเลือก "คำ" ที่จะแสดงในคอลัมน์ปัญหา
+   ตัวตัดสินว่าแถวไหนขึ้นหน้านี้เป็นของ server ล้วนๆ */
+const LATE_MINUTES = 30;
+
+/** ปัญหาที่ทำให้กะนี้ต้องถูกตรวจ — เรียงตามความรีบ อันที่ต้องรีบสุดขึ้นก่อน */
 function reason(v) {
   if (v.state === 'missed') return 'ขาดงาน';
   if (v.state === 'stale') return 'ค้างเช็คเอาท์';
   if (v.location_flagged) return 'นอกพื้นที่';
   if (v.off_schedule) return 'เช็คอินนอกวันนัด';
+  if (v.check_in_late_minutes > LATE_MINUTES) return `มาสาย ${durationText(v.check_in_late_minutes)}`;
   return VISIT_STATE_LABELS[v.state];
+}
+
+/** สีป้ายในคอลัมน์ปัญหา — กะที่ "เสร็จแล้ว" แต่มาสาย ต้องไม่ใช้สีเทาของกะที่จบปกติ
+    ไม่งั้นแถวที่มีปัญหาจะกลืนไปกับพื้นหลังของหน้าที่ตั้งใจให้ไล่ดูปัญหา */
+function reasonTone(v) {
+  if (v.state === 'missed' || v.state === 'stale') return `visit-${v.state}`;
+  if (v.location_flagged || v.off_schedule || v.check_in_late_minutes > LATE_MINUTES) return 'visit-missed';
+  return `visit-${v.state}`;
 }
 
 /**
@@ -444,7 +674,7 @@ function Exceptions({ rows, error, onReload, filters }) {
                     <LateTag v={v} />
                   </td>
                   <td data-label="พนักงาน / เคส"><WhoCell v={v} /></td>
-                  <td data-label="ปัญหา"><span className={`badge visit-${v.state}`}>{reason(v)}</span></td>
+                  <td data-label="ปัญหา"><span className={`badge ${reasonTone(v)}`}>{reason(v)}</span></td>
                   <td data-label="หลักฐาน"><Evidence v={v} /></td>
                   <td className="row-actions">
                     {v.state === 'stale' && (

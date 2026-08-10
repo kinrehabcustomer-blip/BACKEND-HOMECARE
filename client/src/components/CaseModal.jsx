@@ -253,6 +253,11 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
   const bookedVisits = visits.filter((v) => v.status !== 'cancelled').length;
   const doneVisits = visits.filter((v) => v.status === 'done').length;
 
+  /* กะที่ทำจบแล้วแต่ค่าจ้างยังไม่ได้อนุมัติ — ตอนปิดเคสคือจังหวะที่ผู้จัดการกำลังดูงานก้อนนี้อยู่พอดี
+     จึงควรอนุมัติได้จากตรงนี้เลย ไม่ต้องไปตามหาในคิวรวมของทั้งบริษัททีหลัง */
+  const pendingPay = visits.filter((v) => v.check_out_at && v.pay_status === 'pending');
+  const pendingPayTotal = pendingPay.reduce((s, v) => s + (v.effective_pay ?? 0), 0);
+
   /* รายชื่อพนักงานที่ตรงกับระดับ/สายบริการของเคสนี้ — กติกาเดียวกับหน้าเปิดเคส (ดู positionsForCase)
      คนที่ถือเคสอยู่ตอนนี้ต้องอยู่ในรายการเสมอ ไม่งั้นช่องจะว่างทั้งที่มีคนรับอยู่ */
   const wantedPositions = item ? positionsForCase(item) : null;
@@ -453,6 +458,32 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                       : (isPhysio ? 'ลงนัด' : 'นัดกะ')}
                   </button>
                 </div>
+
+                {/* ค่าจ้างของกะที่ทำไปแล้วยังไม่เข้าพนักงานจนกว่าจะอนุมัติ — อนุมัติทั้งเคสได้จากที่นี่
+                    (ไล่ทีละกะได้ที่หน้า "การมาทำงาน → รออนุมัติค่าจ้าง") */}
+                {pendingPay.length > 0 && (
+                  <div className="visit-summary approve-row">
+                    <p className="muted">
+                      <strong>รออนุมัติค่าจ้าง {pendingPay.length} กะ</strong>
+                      <span className="cell-sub">
+                        รวม {formatBaht(pendingPayTotal)} — พนักงานจะยังไม่เห็นยอดนี้จนกว่าจะอนุมัติ
+                      </span>
+                    </p>
+                    <button
+                      className="btn primary"
+                      disabled={busy}
+                      onClick={() => {
+                        if (!confirm(`อนุมัติค่าจ้าง ${pendingPay.length} กะ รวม ${formatBaht(pendingPayTotal)}?`)) return;
+                        run(async () => {
+                          const { changed } = await api.approveCasePay(item.case_id);
+                          toast(`อนุมัติค่าจ้าง ${changed} กะแล้ว`);
+                        });
+                      }}
+                    >
+                      อนุมัติทั้งหมด
+                    </button>
+                  </div>
+                )}
               </section>
 
               {/* ออกใบแจ้งหนี้จากเคสนี้ — ระบบคัดลอกผู้จ่าย/ที่อยู่/ค่าจ้างไปให้เอง */}

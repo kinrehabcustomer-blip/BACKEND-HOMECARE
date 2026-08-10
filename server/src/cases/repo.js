@@ -600,6 +600,7 @@ export function listVisits(caseId) {
               v.assigned_to, v.planned_start, v.planned_end,
               v.check_in_at, v.check_out_at, v.check_in_distance_m, v.location_flagged,
               v.check_in_late_minutes, v.off_schedule, v.staff_pay,
+              v.pay_status, v.pay_note, v.approved_by_name,
               ${VISIT_PAY} AS effective_pay,
               e.first_name || ' ' || e.last_name AS assigned_name,
               e.nickname                          AS assigned_nickname
@@ -718,10 +719,10 @@ export async function addVisits(caseId, dates, { assigned_to, planned_start, pla
   };
 }
 
-/** แปลงรายการวันเป็นพารามิเตอร์ :d0..:dn (ตัวแปลง :name ไม่รองรับ array) */
-function dateSlots(dates, params = {}) {
-  const slots = dates.map((d, i) => {
-    params[`d${i}`] = d;
+/** แปลงรายการค่า (วัน/รหัสกะ) เป็นพารามิเตอร์ :d0..:dn สำหรับ IN (...) — ตัวแปลง :name ไม่รองรับ array */
+function listSlots(values, params = {}) {
+  const slots = values.map((v, i) => {
+    params[`d${i}`] = v;
     return `:d${i}`;
   });
   return { slots: slots.join(', '), params };
@@ -734,7 +735,7 @@ function dateSlots(dates, params = {}) {
 export async function removeVisitsOn(caseId, dates) {
   if (dates.length === 0) return { visits: await listVisits(caseId), deleted: 0, kept: 0 };
 
-  const { slots, params } = dateSlots(dates, { id: caseId });
+  const { slots, params } = listSlots(dates, { id: caseId });
   const deleted = await sql.run(
     `DELETE FROM case_visits
      WHERE case_id = :id AND visit_date IN (${slots}) AND check_in_at IS NULL`,
@@ -764,7 +765,7 @@ export async function previewVisits(caseId, { dates, assigned_to, planned_start,
     null;
   if (!who || dates.length === 0) return { conflicts: [], duplicates: [] };
 
-  const { slots, params } = dateSlots(dates, {
+  const { slots, params } = listSlots(dates, {
     emp: who,
     start: planned_start ?? '00:00',
     end: planned_end ?? '23:59',
@@ -850,6 +851,7 @@ const MY_VISIT = `
          v.check_in_at, v.check_out_at, v.check_in_lat, v.check_in_lng,
          v.check_in_distance_m, v.location_flagged,
          v.check_in_late_minutes, v.off_schedule,
+         v.pay_status, v.pay_note,
          (v.check_in_photo_data IS NOT NULL) AS has_photo,
          c.status AS case_status, c.case_type, c.client_name, c.address, c.client_phone,
          c.service_kind, c.start_date, c.end_date,
@@ -1039,6 +1041,13 @@ export function attendanceList({ month, employee_id }) {
  * รายการที่ต้องตรวจ (admin) — ขาดงาน (เลยวันไม่เช็คอิน) · ค้างเช็คเอาท์ (stale) · นอกพื้นที่ (flagged)
  * ไม่รวมกะที่กำลังทำงานปกติ (working) เว้นแต่ถูก flag
  */
+/**
+ * สายเกินกี่นาทีถึงเรียกว่าต้องให้ผู้จัดการดู
+ * 30 นาที — ต่ำกว่านี้มักเป็นรถติด/หาบ้านไม่เจอ ซึ่งเกิดเป็นปกติและไม่ต้องทำอะไรต่อ
+ * เกินครึ่งชั่วโมงคือเริ่มกระทบงานจริง (ญาติรอ, กะถัดไปเลื่อน)
+ */
+export const LATE_THRESHOLD_MINUTES = 30;
+
 export function attendanceExceptions() {
   const today = isoDateTH(new Date());
   return sql
@@ -1048,19 +1057,137 @@ export function attendanceExceptions() {
          AND (
            v.location_flagged = TRUE
            OR v.off_schedule = TRUE
+           OR v.check_in_late_minutes > :late
            OR (v.check_in_at IS NOT NULL AND v.check_out_at IS NULL)
            OR (v.check_in_at IS NULL AND v.visit_date < :today)
          )
        ORDER BY v.visit_date DESC, v.check_in_at DESC`,
-      { today },
+      { today, late: LATE_THRESHOLD_MINUTES },
     )
     .then((rows) =>
       rows
         .map((v) => withVisitState(v))
         .filter(
-          (v) => v.state === 'missed' || v.state === 'stale' || v.location_flagged || v.off_schedule,
+          (v) =>
+            v.state === 'missed' ||
+            v.state === 'stale' ||
+            v.location_flagged ||
+            v.off_schedule ||
+            v.check_in_late_minutes > LATE_THRESHOLD_MINUTES,
         ),
     );
+}
+
+// ---------- อนุมัติค่าจ้างรายกะ ----------
+
+/**
+ * กะที่ทำงานจบแล้วแต่ยังไม่ได้อนุมัติ — คิวที่ผู้จัดการต้องไล่ดูก่อนเงินเข้าพนักงาน
+ *
+ * ส่งยอดของแต่ละกะไปด้วย (เกลี่ยจากเคสถ้าไม่ได้ตั้งรายกะ) เพราะคนอนุมัติต้องเห็นว่ากำลังอนุมัติเงินเท่าไหร่
+ * พร้อมธงที่ทำให้กะนั้นน่าสงสัย (นอกพื้นที่ / นอกวันนัด / สาย / ทำงาน 0 นาที) — เรียงของที่ต้องดูก่อนขึ้นบน
+ */
+export function pendingApprovals({ month, employee_id } = {}) {
+  const where = [`${DONE}`, `v.pay_status = 'pending'`];
+  const params = {};
+  if (month) {
+    where.push(`to_char(v.check_in_at AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM') = :month`);
+    params.month = month;
+  }
+  if (employee_id) {
+    where.push('v.checked_in_by = :emp');
+    params.emp = employee_id;
+  }
+
+  return sql
+    .all(
+      `SELECT v.visit_id, v.case_id, v.visit_date, v.planned_start, v.planned_end,
+              v.check_in_at, v.check_out_at, v.check_in_distance_m,
+              v.location_flagged, v.off_schedule, v.check_in_late_minutes,
+              v.status AS visit_status,
+              ${VISIT_PAY} AS pay,
+              ROUND(EXTRACT(EPOCH FROM (v.check_out_at - v.check_in_at)) / 60) AS worked_minutes,
+              c.client_name, c.status AS case_status,
+              v.checked_in_by AS employee_id,
+              e.first_name || ' ' || e.last_name AS employee_name
+       FROM case_visits v
+       JOIN cases c     ON c.case_id     = v.case_id
+       JOIN employees e ON e.employee_id = v.checked_in_by
+       LEFT JOIN ${BOOKED_VISITS} b ON b.case_id = v.case_id
+       WHERE ${where.join(' AND ')}
+       ORDER BY v.visit_date DESC, v.check_in_at DESC`,
+      params,
+    )
+    .then((rows) =>
+      rows.map((r) => ({
+        ...r,
+        pay: r.pay == null ? null : Number(r.pay),
+        worked_minutes: r.worked_minutes == null ? null : Number(r.worked_minutes),
+      })),
+    );
+}
+
+/**
+ * อนุมัติ/ไม่อนุมัติค่าจ้างของกะ (ทีละหลายกะได้) — คืนจำนวนที่เปลี่ยนจริง
+ *
+ * แตะเฉพาะกะที่ "ทำจบแล้วและยังรออยู่" เท่านั้น — กะที่ตัดสินไปแล้วต้องไม่ถูกทับด้วยการกดซ้ำ
+ * หรือด้วยการกด "อนุมัติทั้งหมด" จากอีกหน้าที่เห็นข้อมูลเก่า
+ * ลงประวัติของเคสด้วย เพราะเป็นการตัดสินใจเรื่องเงินที่ต้องไล่ย้อนได้ว่าใครเป็นคนกด
+ */
+export async function decideVisitPay(visitIds, { approve, reason }, actor) {
+  if (visitIds.length === 0) return { changed: 0 };
+
+  const { slots, params } = listSlots(visitIds, {
+    status: approve ? 'approved' : 'rejected',
+    note: approve ? null : reason ?? null,
+    by: actor?.employee_id ?? null,
+    by_name: actor?.name ?? null,
+  });
+
+  return transaction(async (tx) => {
+    const rows = await tx.all(
+      `UPDATE case_visits v
+       SET pay_status = :status,
+           pay_note = :note,
+           approved_at = ${NOW},
+           approved_by = :by,
+           approved_by_name = :by_name,
+           updated_at = ${NOW}
+       WHERE v.visit_id IN (${slots})
+         AND v.check_out_at IS NOT NULL
+         AND v.pay_status = 'pending'
+       RETURNING v.case_id, v.visit_date`,
+      params,
+    );
+
+    // รวมเป็นบรรทัดเดียวต่อเคส — อนุมัติทีละ 30 กะแล้วได้ประวัติ 30 บรรทัดคือไล่อ่านไม่ไหว
+    const byCase = new Map();
+    for (const r of rows) byCase.set(r.case_id, (byCase.get(r.case_id) ?? 0) + 1);
+
+    for (const [caseId, n] of byCase) {
+      await logEvent(
+        tx,
+        caseId,
+        approve ? 'pay_approved' : 'pay_rejected',
+        approve
+          ? `อนุมัติค่าจ้าง ${n} กะ`
+          : `ไม่อนุมัติค่าจ้าง ${n} กะ${reason ? ` — ${reason}` : ''}`,
+        actor,
+      );
+    }
+
+    return { changed: rows.length };
+  });
+}
+
+/** กะของเคสหนึ่งที่ยังรออนุมัติ — ใช้ตอนกด "อนุมัติทั้งเคส" จากหน้าจัดการเคส */
+export function pendingVisitIds(caseId) {
+  return sql
+    .all(
+      `SELECT visit_id FROM case_visits
+       WHERE case_id = :id AND check_out_at IS NOT NULL AND pay_status = 'pending'`,
+      { id: caseId },
+    )
+    .then((rows) => rows.map((r) => r.visit_id));
 }
 
 /** สิ่งที่ admin แก้ในกะ เขียนเป็นข้อความสั้นๆ ลงประวัติ — ไล่ย้อนได้ว่าตัวเลขถูกแตะตรงไหน */
@@ -1142,6 +1269,11 @@ const WORKED_SHIFT = `
  *
  * employeeId = ดูของคนเดียว (ฝั่งพนักงานภาคสนามที่เห็นได้เฉพาะของตัวเอง) — ไม่ส่ง = ทุกคน (admin)
  */
+/** กะที่ทำจบแล้ว = ฐานของชั่วโมง · กะที่อนุมัติแล้วเท่านั้น = ฐานของเงิน */
+const DONE = `v.check_out_at IS NOT NULL`;
+const PAYABLE = `${DONE} AND v.pay_status = 'approved'`;
+const AWAITING = `${DONE} AND v.pay_status = 'pending'`;
+
 export async function attendanceReport(month, employeeId = null) {
   // ใส่เงื่อนไข (และพารามิเตอร์) เฉพาะตอนใช้จริง — ตัวแปลง :name ไล่หาชื่อจาก SQL ที่มีอยู่จริงเท่านั้น
   const params = { month };
@@ -1150,12 +1282,16 @@ export async function attendanceReport(month, employeeId = null) {
   const rows = await sql.all(
     `SELECT v.checked_in_by AS employee_id,
             e.first_name || ' ' || e.last_name AS employee_name,
-            COUNT(*) FILTER (WHERE v.check_out_at IS NOT NULL)                    AS shifts,
-            COUNT(DISTINCT v.case_id) FILTER (WHERE v.check_out_at IS NOT NULL)   AS cases_worked,
+            COUNT(*) FILTER (WHERE ${DONE})                    AS shifts,
+            COUNT(DISTINCT v.case_id) FILTER (WHERE ${DONE})   AS cases_worked,
             COALESCE(ROUND(SUM(EXTRACT(EPOCH FROM (v.check_out_at - v.check_in_at)) / 60)
-                     FILTER (WHERE v.check_out_at IS NOT NULL)), 0)               AS minutes,
-            COALESCE(SUM(${VISIT_PAY}) FILTER (WHERE v.check_out_at IS NOT NULL), 0) AS pay,
-            COUNT(*) FILTER (WHERE v.check_out_at IS NOT NULL AND ${VISIT_PAY} IS NULL) AS unpriced_shifts
+                     FILTER (WHERE ${DONE})), 0)               AS minutes,
+            COALESCE(SUM(${VISIT_PAY}) FILTER (WHERE ${PAYABLE}), 0)  AS pay,
+            COUNT(*) FILTER (WHERE ${PAYABLE})                        AS approved_shifts,
+            COALESCE(SUM(${VISIT_PAY}) FILTER (WHERE ${AWAITING}), 0) AS pending_pay,
+            COUNT(*) FILTER (WHERE ${AWAITING})                       AS pending_shifts,
+            COUNT(*) FILTER (WHERE ${DONE} AND v.pay_status = 'rejected') AS rejected_shifts,
+            COUNT(*) FILTER (WHERE ${DONE} AND ${VISIT_PAY} IS NULL)  AS unpriced_shifts
      ${WORKED_SHIFT}
        ${employeeId ? 'AND v.checked_in_by = :emp' : ''}
      GROUP BY v.checked_in_by, e.first_name, e.last_name`,
@@ -1170,6 +1306,10 @@ export async function attendanceReport(month, employeeId = null) {
       cases_worked: Number(r.cases_worked),
       minutes: Number(r.minutes),
       pay: Number(r.pay),
+      approved_shifts: Number(r.approved_shifts),
+      pending_pay: Number(r.pending_pay),
+      pending_shifts: Number(r.pending_shifts),
+      rejected_shifts: Number(r.rejected_shifts),
       unpriced_shifts: Number(r.unpriced_shifts),
     }))
     .sort((a, b) => a.employee_name.localeCompare(b.employee_name, 'th'));
@@ -1184,9 +1324,11 @@ export function payoutCases(month, employeeId) {
     .all(
       `SELECT c.case_id, c.title, c.client_name, c.case_type, c.service_kind, c.status,
               c.closed_at, c.start_date, c.end_date,
-              COUNT(*) FILTER (WHERE v.check_out_at IS NOT NULL) AS shifts,
-              COALESCE(SUM(${VISIT_PAY}) FILTER (WHERE v.check_out_at IS NOT NULL), 0) AS pay,
-              COUNT(*) FILTER (WHERE v.check_out_at IS NOT NULL AND ${VISIT_PAY} IS NULL) AS unpriced_shifts,
+              COUNT(*) FILTER (WHERE ${DONE}) AS shifts,
+              COALESCE(SUM(${VISIT_PAY}) FILTER (WHERE ${PAYABLE}), 0) AS pay,
+              COUNT(*) FILTER (WHERE ${AWAITING}) AS pending_shifts,
+              COALESCE(SUM(${VISIT_PAY}) FILTER (WHERE ${AWAITING}), 0) AS pending_pay,
+              COUNT(*) FILTER (WHERE ${DONE} AND ${VISIT_PAY} IS NULL) AS unpriced_shifts,
               MAX(v.visit_date) AS last_visit_date,
               f.name  AS format_name, g.name AS grade_name,
               pp.name AS physio_package_name, pp.sessions AS physio_sessions

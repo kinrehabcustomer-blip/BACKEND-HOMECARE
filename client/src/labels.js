@@ -115,6 +115,13 @@ export const VISIT_STATE_LABELS = {
 export const timeText = (value) =>
   value ? new Date(value).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) : '—';
 
+/** สถานะการอนุมัติค่าจ้างของกะ (case_visits.pay_status) */
+export const PAY_STATUS_LABELS = {
+  pending: 'รออนุมัติ',
+  approved: 'อนุมัติแล้ว',
+  rejected: 'ไม่อนุมัติ',
+};
+
 /** ประวัติการทำรายการของเคส (case_events.event) */
 export const CASE_EVENT_LABELS = {
   created: 'เปิดเคส',
@@ -126,6 +133,8 @@ export const CASE_EVENT_LABELS = {
   cancelled: 'ยกเลิกเคส',
   reopened: 'เปิดเคสใหม่',
   visit_adjusted: 'แก้กะ',
+  pay_approved: 'อนุมัติค่าจ้าง',
+  pay_rejected: 'ไม่อนุมัติค่าจ้าง',
 };
 
 /**

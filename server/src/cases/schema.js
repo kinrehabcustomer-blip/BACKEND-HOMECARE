@@ -268,6 +268,22 @@ export const adjustVisitSchema = z
   })
   .partial();
 
+/**
+ * อนุมัติ/ไม่อนุมัติค่าจ้างของกะ (ทีละหลายกะได้)
+ * เหตุผลบังคับเฉพาะตอน "ไม่อนุมัติ" — เป็นสิ่งเดียวที่พนักงานจะได้รู้ว่าทำไมกะนั้นไม่ได้เงิน
+ */
+export const decidePaySchema = z
+  .object({
+    visit_ids: z.array(z.number().int().positive()).min(1, 'กรุณาเลือกกะที่จะอนุมัติ').max(500),
+    approve: z.boolean(),
+    reason: z.string().trim().max(500).optional().nullable(),
+  })
+  .superRefine((v, ctx) => {
+    if (!v.approve && !v.reason) {
+      ctx.addIssue({ code: 'custom', path: ['reason'], message: 'กรุณาระบุเหตุผลที่ไม่อนุมัติ' });
+    }
+  });
+
 // รายการมาทำงาน (admin) — เดือน + กรองพนักงาน (เว้นได้ทั้งคู่)
 export const attendanceQuerySchema = z.object({
   month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'เดือนต้องอยู่ในรูปแบบ YYYY-MM').optional(),
