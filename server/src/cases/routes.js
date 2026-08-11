@@ -134,13 +134,16 @@ casesRouter.post(
   }),
 );
 
-/** สรุปค่าตอบแทนรายเดือนต่อพนักงาน (payroll) — ไม่ส่งเดือน = เดือนปัจจุบัน (โซนไทย) */
+/** สรุปค่าตอบแทนรายเดือนต่อพนักงาน (payroll) — ไม่ส่งเดือน = เดือนปัจจุบัน (โซนไทย), ไม่ส่งพนักงาน = ทุกคน */
 casesRouter.get(
   '/attendance/report',
   asyncRoute(async (req, res) => {
-    const { month } = attendanceQuerySchema.parse({ month: req.query.month || undefined });
+    const { month, employee_id } = attendanceQuerySchema.parse({
+      month: req.query.month || undefined,
+      employee_id: req.query.employee_id || undefined,
+    });
     const ym = month ?? new Date(Date.now() + 7 * 3.6e6).toISOString().slice(0, 7);
-    res.json(await repo.attendanceReport(ym));
+    res.json(await repo.attendanceReport(ym, employee_id ?? null));
   }),
 );
 

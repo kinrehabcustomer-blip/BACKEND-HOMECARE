@@ -277,8 +277,13 @@ export const api = {
     request('/cases/attendance/decide', { method: 'POST', body: { visit_ids, approve, reason } }),
   /** อนุมัติค่าจ้างของกะที่ทำจบแล้วทั้งเคสในครั้งเดียว */
   approveCasePay: (caseId) => request(`/cases/${caseId}/approve-pay`, { method: 'POST' }),
-  /** สรุปค่าตอบแทนรายเดือนต่อพนักงาน (payroll) */
-  attendanceReport: (month) => request(`/cases/attendance/report${month ? `?month=${month}` : ''}`),
+  /** สรุปค่าตอบแทนรายเดือนต่อพนักงาน (payroll) — ไม่ส่ง employee_id = ทุกคน */
+  attendanceReport: (month, employee_id) => {
+    const params = new URLSearchParams();
+    if (month) params.set('month', month);
+    if (employee_id) params.set('employee_id', employee_id);
+    return request(`/cases/attendance/report${params.size ? `?${params}` : ''}`);
+  },
   /** แปลงที่อยู่เป็นพิกัด (ผ่าน server) — คืน { lat, lng, formatted } */
   geocodeAddress: (address) => request('/cases/geocode', { method: 'POST', body: { address } }),
   /** อ่านพิกัด + ที่อยู่ จากลิงก์ Google Maps ที่วางมา */

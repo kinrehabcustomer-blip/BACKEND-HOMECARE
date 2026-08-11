@@ -187,7 +187,15 @@ export default function AttendancePage() {
           reloadKey={reloadKey}
         />
       )}
-      {tab === 'payroll' && <Payroll month={month} patch={patch} reloadKey={reloadKey} />}
+      {tab === 'payroll' && (
+        <Payroll
+          month={month}
+          employeeId={employeeId}
+          patch={patch}
+          employeePicker={employeePicker}
+          reloadKey={reloadKey}
+        />
+      )}
     </PageRefresh>
   );
 }
@@ -411,7 +419,7 @@ function Approvals({ month, employeeId, patch, employeePicker, reloadKey }) {
   );
 }
 
-function Payroll({ month, patch, reloadKey }) {
+function Payroll({ month, employeeId, patch, employeePicker, reloadKey }) {
   const [rows, setRows] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -420,7 +428,7 @@ function Payroll({ month, patch, reloadKey }) {
     let cancelled = false;
     setLoading(true);
     api
-      .attendanceReport(month)
+      .attendanceReport(month, employeeId || undefined)
       .then((r) => {
         if (cancelled) return;
         setRows(r);
@@ -430,11 +438,12 @@ function Payroll({ month, patch, reloadKey }) {
       .finally(() => !cancelled && setLoading(false));
 
     return () => { cancelled = true; };
-  }, [month, reloadKey]);
+  }, [month, employeeId, reloadKey]);
 
   function exportCsv() {
     downloadCsv(
-      `payroll-${month}.csv`,
+      // ใส่รหัสพนักงานในชื่อไฟล์ตอนกรองคนเดียว — ไม่งั้นไฟล์ของคนละคนทับกันในโฟลเดอร์ดาวน์โหลด
+      `payroll-${month}${employeeId ? `-${employeeId}` : ''}.csv`,
       ['รหัสพนักงาน', 'ชื่อ', 'จำนวนกะ', 'ชั่วโมงรวม', 'เคสที่ทำ', 'ค่าจ้างที่อนุมัติแล้ว (บาท)',
         'กะที่อนุมัติแล้ว', 'รออนุมัติ (บาท)', 'กะที่รออนุมัติ', 'กะที่ไม่อนุมัติ', 'กะที่ยังไม่ระบุค่าจ้าง'],
       rows.map((r) => [
@@ -452,6 +461,7 @@ function Payroll({ month, patch, reloadKey }) {
   return (
     <>
       <MonthPicker month={month} onChange={(m) => patch({ month: m })}>
+        {employeePicker}
         {rows?.length > 0 && <button className="btn" onClick={exportCsv}><LineIcon name="download" />ดาวน์โหลด CSV</button>}
       </MonthPicker>
 
@@ -466,7 +476,10 @@ function Payroll({ month, patch, reloadKey }) {
       {loading && !rows ? (
         <p className="muted">กำลังโหลด…</p>
       ) : !error && rows?.length === 0 ? (
-        <section className="card empty-state"><p>เดือนนี้ยังไม่มีการเช็คอิน</p></section>
+        // บอกให้ชัดว่าว่างเพราะ "ไม่มีใครเช็คอิน" หรือเพราะ "คนที่กรองไว้ไม่ได้เช็คอิน" — ไม่งั้นเข้าใจว่าข้อมูลหาย
+        <section className="card empty-state">
+          <p>{employeeId ? 'เดือนนี้พนักงานคนนี้ยังไม่มีการเช็คอิน' : 'เดือนนี้ยังไม่มีการเช็คอิน'}</p>
+        </section>
       ) : rows?.length > 0 ? (
         <div className="table-wrap">
           <table className="table table-cards">
