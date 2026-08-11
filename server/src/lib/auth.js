@@ -13,6 +13,25 @@ export const COOKIE_NAME = 'kin_session';
 export const ADMIN_POSITIONS = ['manager', 'hr'];
 export const roleForPosition = (position) => (ADMIN_POSITIONS.includes(position) ? 'admin' : 'field');
 
+/**
+ * ต้นทุน/กำไรของแพ็คเกจ = เฉพาะผู้จัดการ — แคบกว่า admin หนึ่งขั้น (HR เข้าหน้าแพ็คเกจได้ แต่ไม่เห็นตัวเลขนี้)
+ *
+ * แยกจาก roleForPosition โดยตั้งใจ ไม่ใช่เพิ่มค่า role ใหม่ — ถ้าเอาไปรวมเป็น role
+ * ทุกจุดที่เช็ค admin อยู่ต้องมานั่งไล่ว่าหมายถึงอันไหน สิทธิ์ย่อยแบบนี้จึงถามเป็นคำถามของตัวเอง
+ */
+export const canSeeStaffPay = (position) => position === 'manager';
+
+/**
+ * ลบตัวเลขต้นทุน/กำไรออกจากแถวก่อนส่งให้คนที่ไม่ใช่ผู้จัดการ
+ *
+ * ตัดที่ payload จริง ไม่ใช่ซ่อนด้วย CSS — ไม่งั้นเปิด DevTools แท็บ Network ก็เห็นครบ
+ * ใช้ได้ทั้งเรท Homecare และแพ็คเกจกายภาพ เพราะสองที่ตั้งชื่อฟิลด์เหมือนกัน
+ */
+export function stripPayFields(row) {
+  const { staff_pay, margin, staff_share, ...rest } = row;
+  return rest;
+}
+
 if (!SECRET || SECRET.length < 32) {
   throw new Error('ไม่พบ JWT_SECRET ที่ยาวพอใน .env — สร้างด้วย `node -e "console.log(crypto.randomUUID()+crypto.randomUUID())"`');
 }
@@ -67,6 +86,9 @@ export function requireAdmin(req, res, next) {
       if (roleForPosition(emp.position) !== 'admin') {
         return next(new ApiError(403, 'เฉพาะผู้จัดการหรือ HR เท่านั้นที่เข้าถึงส่วนนี้ได้'));
       }
+      // เก็บตำแหน่งสดที่เพิ่งอ่านมาไว้ให้เส้นที่ต้องแยกสิทธิ์ย่อย (เช่น เห็นค่าจ้าง/กำไรไหม)
+      // ใช้ต่อได้เลยโดยไม่ต้อง query ซ้ำ และเป็นค่าสดเสมอเหมือนกับที่ใช้ตัดสิน admin
+      req.user.position = emp.position;
       next();
     })
     .catch(next);

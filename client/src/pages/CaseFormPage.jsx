@@ -8,6 +8,7 @@ import {
   formatBaht, ageFromBirthDate, positionsForCase,
 } from '../labels.js';
 import LineIcon from '../components/LineIcon.jsx';
+import { useCanSeeStaffPay } from '../auth.jsx';
 
 const TIERS = ['CG', 'NA', 'PN', 'RN'];
 const CATEGORY_LABELS = { daily: 'รายวัน', weekly: 'รายสัปดาห์', monthly: 'รายเดือน' };
@@ -84,6 +85,9 @@ export default function CaseFormPage() {
   const [locError, setLocError] = useState(null);
   const [candidates, setCandidates] = useState([]);   // ผลค้นหาให้เลือก (กรณีพิมพ์ชื่อ)
   const [resolvedAddress, setResolvedAddress] = useState(null);
+
+  // ค่าจ้าง/ส่วนต่าง = เฉพาะผู้จัดการ — คนอื่นเปิดเคสได้ครบ แค่ไม่เห็นและไม่ตั้งตัวเลขฝั่งต้นทุน
+  const seePay = useCanSeeStaffPay();
 
   // ค้นหา/เลือกผู้รับการดูแล (patient) เป็นหลัก
   const [query, setQuery] = useState('');
@@ -681,8 +685,8 @@ export default function CaseFormPage() {
               ค่าบริการ <strong>{formatBaht(currentRate.net_price ?? currentRate.customer_price)}</strong>
               {currentRate.discount_value > 0 &&
                 ` (จากราคาเต็ม ${formatBaht(currentRate.customer_price)} − ส่วนลด ${formatBaht(currentRate.discount_value)})`}
-              {currentRate.staff_pay != null && ` · ค่าตอบแทนพนักงาน ${formatBaht(currentRate.staff_pay)}`}
-              {currentRate.margin != null && ` · ส่วนต่าง ${currentRate.margin}%`}
+              {seePay && currentRate.staff_pay != null && ` · ค่าตอบแทนพนักงาน ${formatBaht(currentRate.staff_pay)}`}
+              {seePay && currentRate.margin != null && ` · ส่วนต่าง ${currentRate.margin}%`}
               {' '}— เติมลงช่องด้านล่างให้แล้ว แก้ทับได้
             </p>
           )}
@@ -691,8 +695,8 @@ export default function CaseFormPage() {
               ราคาพิเศษ <strong>{formatBaht(selectedPhysio.special_price)}</strong>
               {selectedPhysio.original_price != null && ` · จากราคาเดิม ${formatBaht(selectedPhysio.original_price)}`}
               {selectedPhysio.avg_per_session != null && ` · ตกเฉลี่ย ${formatBaht(selectedPhysio.avg_per_session)}/ครั้ง`}
-              {selectedPhysio.staff_pay != null && ` · ค่าตอบแทนพนักงาน ${formatBaht(selectedPhysio.staff_pay)}`}
-              {selectedPhysio.margin != null && ` · ส่วนต่าง ${selectedPhysio.margin}%`}
+              {seePay && selectedPhysio.staff_pay != null && ` · ค่าตอบแทนพนักงาน ${formatBaht(selectedPhysio.staff_pay)}`}
+              {seePay && selectedPhysio.margin != null && ` · ส่วนต่าง ${selectedPhysio.margin}%`}
               {' '}— เติมลงช่องด้านล่างให้แล้ว แก้ทับได้
             </p>
           )}
@@ -702,19 +706,23 @@ export default function CaseFormPage() {
             <input type="number" min="0" step="0.01" placeholder="เช่น 15000" {...field('fee')} />
             {fieldError('fee')}
           </label>
-          {/* ยอดที่พนักงานจะเห็นเป็นรายได้ของตัวเองเมื่อปิดเคส — ดึงจากแพ็คเกจให้ แก้ทับได้ */}
-          <label>ค่าจ้างพนักงาน (บาท)
-            <input
-              type="number" min="0" step="0.01"
-              placeholder={packagePay != null ? String(packagePay) : 'ยังไม่มีในแพ็คเกจ'}
-              {...field('staff_pay')}
-            />
-            {fieldError('staff_pay')}
-          </label>
+          {/* ยอดที่พนักงานจะเห็นเป็นรายได้ของตัวเองเมื่อปิดเคส — ดึงจากแพ็คเกจให้ แก้ทับได้
+              เห็นเฉพาะผู้จัดการ · คนอื่นเปิดเคสได้ตามปกติแล้ว server เติมค่าจ้างจากเรท/แพ็คเกจให้เอง
+              (payFromService ใน cases/repo.js) — ไม่ใช่ปล่อยว่างจนพนักงานเห็น "ยังไม่ระบุค่าจ้าง" */}
+          {seePay && (
+            <label>ค่าจ้างพนักงาน (บาท)
+              <input
+                type="number" min="0" step="0.01"
+                placeholder={packagePay != null ? String(packagePay) : 'ยังไม่มีในแพ็คเกจ'}
+                {...field('staff_pay')}
+              />
+              {fieldError('staff_pay')}
+            </label>
+          )}
 
           {/* เลือกบริการแล้วแต่แพ็คเกจไม่มีค่าตอบแทน = ดึงมาให้ไม่ได้ ต้องบอกว่าไปตั้งที่ไหน
               ไม่งั้นจะเข้าใจว่าระบบพัง แล้วปล่อยว่างจนพนักงานเห็น "ยังไม่ระบุค่าจ้าง" ตอนปิดเคส */}
-          {pickedService && packagePay == null && (
+          {seePay && pickedService && packagePay == null && (
             <p className="form-hint muted">
               <LineIcon name="alert" className="text-ico" />{isPhysio ? 'แพ็คเกจกายภาพบำบัด' : 'เรทที่เลือก'}นี้ยังไม่ได้ตั้งค่าตอบแทนพนักงานในระบบ —
               กรอกเองในช่องด้านบนได้ หรือไปตั้งที่หน้า
@@ -724,7 +732,7 @@ export default function CaseFormPage() {
               {' '}เพื่อให้เคสอื่นที่ใช้แพ็คเกจเดียวกันได้ด้วย
             </p>
           )}
-          {pickedService && packagePay != null && Number(form.staff_pay) !== packagePay && (
+          {seePay && pickedService && packagePay != null && Number(form.staff_pay) !== packagePay && (
             <p className="form-hint muted">
               ค่าตอบแทนตามแพ็คเกจคือ <strong>{formatBaht(packagePay)}</strong> — ตอนนี้ใช้ตัวเลขที่กรอกเองแทน{' '}
               <button

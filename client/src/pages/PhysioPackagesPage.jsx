@@ -6,6 +6,7 @@ import { formatBaht } from '../labels.js';
 import LineIcon from '../components/LineIcon.jsx';
 import PageRefresh from '../components/PageRefresh.jsx';
 import ConfirmButton from '../components/ConfirmButton.jsx';
+import { useCanSeeStaffPay } from '../auth.jsx';
 
 const BLANK = {
   name: '',
@@ -52,6 +53,8 @@ const detailLine = (p) =>
   [`${p.sessions} ครั้ง`, p.duration_months && `${p.duration_months} เดือน`].filter(Boolean).join(' · ');
 
 export default function PhysioPackagesPage() {
+  // ค่าจ้างพนักงาน/กำไร = เฉพาะผู้จัดการ (server ตัดฟิลด์ออกจาก payload ให้แล้ว ตรงนี้แค่ไม่วาด)
+  const seePay = useCanSeeStaffPay();
   const [items, setItems] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -118,7 +121,8 @@ export default function PhysioPackagesPage() {
               <th>ราคาเต็ม (บาท)</th>
               <th>ราคาสุทธิ (บาท)</th>
               <th>ตกเฉลี่ย (บาท/ครั้ง)</th>
-              <th>ค่าจ้างพนักงาน (บาท)</th>
+              {/* ค่าจ้าง/กำไร = เฉพาะผู้จัดการ — ตัดทั้งคอลัมน์ ไม่ใช่ปล่อยหัวตารางค้างไว้ให้ว่าง */}
+              {seePay && <th>ค่าจ้างพนักงาน (บาท)</th>}
               <th>จัดการ</th>
             </tr>
           </thead>
@@ -152,16 +156,18 @@ export default function PhysioPackagesPage() {
                 </td>
 
                 {/* ช่องที่ยังไม่ตั้งต้องเห็นชัด — ไม่มีค่าจ้าง = เคสสายกายภาพคำนวณค่าตอบแทนให้พนักงานไม่ได้เลย */}
-                <td className="physio-pay">
-                  {p.staff_pay == null ? (
-                    <span className="pay-missing">ยังไม่ตั้ง</span>
-                  ) : (
-                    <>
-                      {formatBaht(p.staff_pay)}
-                      {p.margin != null && <span className="cell-sub">กำไร {p.margin}%</span>}
-                    </>
-                  )}
-                </td>
+                {seePay && (
+                  <td className="physio-pay">
+                    {p.staff_pay == null ? (
+                      <span className="pay-missing">ยังไม่ตั้ง</span>
+                    ) : (
+                      <>
+                        {formatBaht(p.staff_pay)}
+                        {p.margin != null && <span className="cell-sub">กำไร {p.margin}%</span>}
+                      </>
+                    )}
+                  </td>
+                )}
                 <td className="physio-actions">
                   <button className="btn tiny" title="เลื่อนขึ้น" disabled={i === 0} onClick={() => move(i, -1)}><LineIcon name="arrow-up" /></button>
                   <button className="btn tiny" title="เลื่อนลง" disabled={i === items.length - 1} onClick={() => move(i, 1)}><LineIcon name="arrow-down" /></button>
@@ -180,7 +186,7 @@ export default function PhysioPackagesPage() {
             ))}
             {items.length === 0 && (
               <tr>
-                <td colSpan={6} className="empty">ยังไม่มีแพ็คเกจ — กด "+ เพิ่มแพ็คเกจ" เพื่อเริ่ม</td>
+                <td colSpan={seePay ? 6 : 5} className="empty">ยังไม่มีแพ็คเกจ — กด "+ เพิ่มแพ็คเกจ" เพื่อเริ่ม</td>
               </tr>
             )}
           </tbody>
@@ -203,6 +209,7 @@ export default function PhysioPackagesPage() {
 
 /** ฟอร์มเพิ่ม/แก้ไข — ปุ่มบันทึกเดียว บันทึกทุกช่องพร้อมกัน */
 function PackageForm({ initial, onClose, onSaved }) {
+  const seePay = useCanSeeStaffPay();
   const sheetRef = useSheetSwipe(onClose); // จอแคบ: ปัดลงเพื่อปิด
   const isNew = !initial.physio_package_id;
   const [form, setForm] = useState({
@@ -245,7 +252,8 @@ function PackageForm({ initial, onClose, onSaved }) {
         discount_amount: toNum(form.discount_amount),
         // server คิดราคาสุทธิเองจาก (ราคาเต็ม − ส่วนลด) — ส่งไปด้วยเพื่อให้ schema เดิมผ่าน
         special_price: net,
-        staff_pay: toNum(form.staff_pay),
+        // ไม่ใช่ผู้จัดการ = ไม่ส่งคีย์นี้ (ไม่ใช่ส่ง null) — updatePackage แตะเฉพาะคอลัมน์ที่ส่งมา ค่าจ้างเดิมจึงอยู่ครบ
+        ...(seePay ? { staff_pay: toNum(form.staff_pay) } : null),
         active: form.active,
         note: form.note.trim() || null,
       };
@@ -320,14 +328,17 @@ function PackageForm({ initial, onClose, onSaved }) {
             </label>
 
             {/* ค่าจ้างพนักงานต่อแพ็คเกจ — เคสคัดลอกไปใช้เป็นยอดที่พนักงานได้รับเมื่อปิดเคส
-                ไม่กรอก = เคสสายกายภาพจะคำนวณค่าตอบแทนให้พนักงานไม่ได้ */}
-            <label className="span-2">ค่าจ้างพนักงาน (บาท)
-              <input
-                type="number" min="0" step="100" value={form.staff_pay}
-                placeholder="ยอดที่พนักงานได้รับต่อแพ็คเกจนี้"
-                onChange={(e) => set('staff_pay', e.target.value)}
-              />
-            </label>
+                ไม่กรอก = เคสสายกายภาพจะคำนวณค่าตอบแทนให้พนักงานไม่ได้
+                เห็น/แก้ได้เฉพาะผู้จัดการ · คนอื่นแก้ชื่อ-ราคา-ส่วนลดได้ตามปกติ ค่าจ้างเดิมไม่ถูกแตะ */}
+            {seePay && (
+              <label className="span-2">ค่าจ้างพนักงาน (บาท)
+                <input
+                  type="number" min="0" step="100" value={form.staff_pay}
+                  placeholder="ยอดที่พนักงานได้รับต่อแพ็คเกจนี้"
+                  onChange={(e) => set('staff_pay', e.target.value)}
+                />
+              </label>
+            )}
 
             {/* ยืนยันตัวเลขให้เห็นก่อนกดบันทึก — ตกเฉลี่ยคือคอลัมน์ที่ลูกค้าใช้เทียบความคุ้ม */}
             <div className="physio-preview span-2">
@@ -343,10 +354,12 @@ function PackageForm({ initial, onClose, onSaved }) {
                 <span className="field-label">ตกเฉลี่ย</span>
                 <strong>{avg != null ? `${formatBaht(avg)} / ครั้ง` : '—'}</strong>
               </div>
-              <div>
-                <span className="field-label">กำไรที่บริษัทได้</span>
-                <strong>{profit != null ? formatBaht(profit) : '—'}</strong>
-              </div>
+              {seePay && (
+                <div>
+                  <span className="field-label">กำไรที่บริษัทได้</span>
+                  <strong>{profit != null ? formatBaht(profit) : '—'}</strong>
+                </div>
+              )}
             </div>
 
             <label className="span-2">หมายเหตุ

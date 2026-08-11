@@ -123,9 +123,14 @@ async function upsertOne(tx, r) {
     available: r.available ?? true,
   };
 
+  /* "ไม่มีคีย์ staff_pay" ต่างจาก "ส่ง staff_pay มาเป็น null" — อย่างแรกคือไม่มีสิทธิ์แตะ (คงของเดิมไว้)
+     อย่างหลังคือผู้จัดการตั้งใจล้างค่าจ้างช่องนั้น ต้องล้างจริง จึงแยกด้วยการมี/ไม่มีท่อน SET ไม่ใช่ COALESCE */
+  const writePay = 'staff_pay' in r;
+  const paySet = writePay ? 'staff_pay = :staff_pay, ' : '';
+
   const updated = await tx.run(
     `UPDATE pkg_rates
-     SET customer_price = :customer_price, staff_pay = :staff_pay,
+     SET customer_price = :customer_price, ${paySet}
          discount_percent = :discount_percent, discount_amount = :discount_amount,
          available = :available, updated_at = ${NOW}
      WHERE format_id = :format_id

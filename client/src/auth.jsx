@@ -69,6 +69,14 @@ export function AuthProvider({ children }) {
 
 export const useAuth = () => useContext(AuthContext);
 
+/**
+ * เห็นค่าจ้างพนักงาน/กำไรได้ไหม — เฉพาะตำแหน่งผู้จัดการ (แคบกว่า admin ที่รวม HR ด้วย)
+ *
+ * ตัวนี้ใช้ตัดสินแค่ว่าจะ "วาด" อะไรบนหน้าจอ — ตัวจริงที่กันคือ server ที่ตัดฟิลด์ออกจาก payload
+ * (ดู canSeeStaffPay ใน server/src/lib/auth.js) แก้ค่านี้ในเบราว์เซอร์แล้วก็ยังไม่มีตัวเลขให้ดูอยู่ดี
+ */
+export const useCanSeeStaffPay = () => useAuth()?.user?.position === 'manager';
+
 /** ครอบหน้าที่ต้อง login — ยังไม่ login ให้เด้งไปหน้า login */
 export function RequireAuth({ children }) {
   const { user, loading, intentionalLogout, kickedOut } = useAuth();

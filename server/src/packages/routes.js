@@ -10,6 +10,7 @@ import {
   FORMAT_CATEGORIES,
 } from './schema.js';
 import { asyncRoute, notFound } from '../lib/errors.js';
+import { canSeeStaffPay, stripPayFields } from '../lib/auth.js';
 
 export const packagesRouter = Router();
 
@@ -17,10 +18,20 @@ packagesRouter.get('/meta', (req, res) => {
   res.json({ staff_tiers: STAFF_TIERS, categories: FORMAT_CATEGORIES });
 });
 
-/** ตารางเรททั้งหมด (เกรด + รูปแบบ + ราคา) — หน้าเว็บดึงชุดเดียวไปประกอบตาราง */
+/**
+ * ตารางเรททั้งหมด (เกรด + รูปแบบ + ราคา) — หน้าเว็บดึงชุดเดียวไปประกอบตาราง
+ *
+ * ไม่ใช่ผู้จัดการ = ได้ราคาลูกค้าครบ แต่ไม่มีค่าจ้าง/กำไรติดไปด้วย
+ * การเปิดเคสไม่พังเพราะไม่มีค่าจ้างในชุดนี้ — repo ของเคสเติม staff_pay เองจาก pkg_rates ฝั่ง server
+ * เมื่อหน้าเว็บไม่ได้ส่งมา (ดู payFromService ใน cases/repo.js)
+ */
 packagesRouter.get(
   '/matrix',
-  asyncRoute(async (req, res) => res.json(await repo.getMatrix())),
+  asyncRoute(async (req, res) => {
+    const matrix = await repo.getMatrix();
+    if (canSeeStaffPay(req.user?.position)) return res.json(matrix);
+    res.json({ ...matrix, rates: matrix.rates.map(stripPayFields) });
+  }),
 );
 
 // ---------- เกรด ----------
@@ -74,6 +85,13 @@ packagesRouter.patch(
   '/rates',
   asyncRoute(async (req, res) => {
     const { rates } = ratesSchema.parse(req.body);
-    res.json(await repo.upsertRates(rates));
+    const seePay = canSeeStaffPay(req.user?.position);
+
+    /* คนที่ไม่เห็นค่าจ้างต้องแก้ค่าจ้างไม่ได้ด้วย — ถอดคีย์ทิ้งก่อนส่งเข้า repo
+       ไม่ใช่แค่กันเจตนาไม่ดี แต่กันอุบัติเหตุตรงๆ: หน้าเว็บของคนกลุ่มนี้ไม่มีช่องค่าจ้าง
+       ถ้าปล่อยผ่าน ค่าที่ส่งมาจะเป็นว่างเปล่าแล้วไปล้างค่าจ้างเดิมที่ผู้จัดการตั้งไว้ทิ้งทั้งแถว */
+    const safe = seePay ? rates : rates.map(({ staff_pay, ...r }) => r);
+    const updated = await repo.upsertRates(safe);
+    res.json(seePay ? updated : { ...updated, rates: updated.rates.map(stripPayFields) });
   }),
 );

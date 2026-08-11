@@ -5,6 +5,7 @@ import LineIcon from '../components/LineIcon.jsx';
 import ErrorBar from '../components/ErrorBar.jsx';
 import ConfirmButton from '../components/ConfirmButton.jsx';
 import PageRefresh from '../components/PageRefresh.jsx';
+import { useCanSeeStaffPay } from '../auth.jsx';
 
 const TIERS = ['CG', 'NA', 'PN', 'RN'];
 const CATEGORY_LABELS = { daily: 'รายวัน', weekly: 'รายสัปดาห์', monthly: 'รายเดือน' };
@@ -48,7 +49,7 @@ function discountOf(price, percent, amount) {
  * ประกาศไว้นอก PackagesPage โดยตั้งใจ — ถ้าประกาศข้างในจะกลายเป็น component "ชนิดใหม่" ทุกครั้งที่ state เปลี่ยน
  * React จะถอด input ทิ้งแล้วสร้างใหม่ทุกตัวอักษรที่พิมพ์ ทำให้โฟกัสหลุดจนพิมพ์ตัวเลขต่อกันไม่ได้
  */
-function RateCell({ editing, rate, draft, changed, onPatch }) {
+function RateCell({ editing, rate, draft, changed, onPatch, seePay }) {
   if (editing) {
     const dv = draft ?? {
       customer_price: '', staff_pay: '', discount_percent: '', discount_amount: '', available: true,
@@ -88,14 +89,17 @@ function RateCell({ editing, rate, draft, changed, onPatch }) {
               <LineIcon name="close" />
             </button>
           </div>
-          {/* ค่าจ้างพนักงาน — ตัวตั้งของสรุปค่าตอบแทนรายเดือน ไม่มีช่องนี้ระบบคำนวณค่าแรงให้ใครไม่ได้เลย */}
-          <div className="rate-edit-row">
-            <input
-              type="number" min="0" step="100" placeholder="ค่าจ้าง" title="ค่าจ้างพนักงานต่อรอบบริการ"
-              value={dv.staff_pay}
-              onChange={(e) => onPatch({ staff_pay: e.target.value })}
-            />
-          </div>
+          {/* ค่าจ้างพนักงาน — ตัวตั้งของสรุปค่าตอบแทนรายเดือน ไม่มีช่องนี้ระบบคำนวณค่าแรงให้ใครไม่ได้เลย
+              เห็นเฉพาะผู้จัดการ · คนอื่นแก้ราคาลูกค้า/ส่วนลดได้ตามปกติ ค่าจ้างเดิมไม่ถูกแตะ */}
+          {seePay && (
+            <div className="rate-edit-row">
+              <input
+                type="number" min="0" step="100" placeholder="ค่าจ้าง" title="ค่าจ้างพนักงานต่อรอบบริการ"
+                value={dv.staff_pay}
+                onChange={(e) => onPatch({ staff_pay: e.target.value })}
+              />
+            </div>
+          )}
           <div className="rate-edit-row">
             <input
               type="number" min="0" max="100" step="1" placeholder="ลด %" title="ส่วนลดเป็นเปอร์เซ็นต์"
@@ -112,7 +116,7 @@ function RateCell({ editing, rate, draft, changed, onPatch }) {
           {price != null && (
             <span className="rate-net">
               {cut > 0 ? `สุทธิ ${formatBaht(net)}` : 'ไม่มีส่วนลด'}
-              {profit != null && ` · กำไร ${formatBaht(profit)}`}
+              {seePay && profit != null && ` · กำไร ${formatBaht(profit)}`}
             </span>
           )}
         </div>
@@ -133,23 +137,26 @@ function RateCell({ editing, rate, draft, changed, onPatch }) {
           −{rate.discount_percent > 0 ? `${rate.discount_percent}%` : formatBaht(rate.discount_value)}
         </span>
       )}
-      {/* ค่าจ้างพนักงาน + กำไรที่เหลือ — ช่องที่ยังไม่ได้ตั้งต้องเห็นชัด เพราะสรุปค่าตอบแทนจะคิดไม่ได้ */}
-      {rate.staff_pay != null ? (
-        <span className="rate-staff">
-          จ้าง {formatBaht(rate.staff_pay)}
-          {/* แยก span ให้กำไรลงบรรทัดของตัวเองได้บนจอแคบ — ตัวคั่น " · " มาจาก CSS
-              เขียนติดกันเป็นข้อความเดียวแล้วมันจะตัดบรรทัดกลางประโยค อ่านเป็น "จ้าง ฿1,000 · กำไร / 50%" */}
-          {rate.margin != null && <span className="rate-margin">กำไร {rate.margin}%</span>}
-        </span>
-      ) : (
-        <span className="rate-staff is-missing">ยังไม่ตั้งค่าจ้าง</span>
-      )}
+      {/* ค่าจ้างพนักงาน + กำไรที่เหลือ — ช่องที่ยังไม่ได้ตั้งต้องเห็นชัด เพราะสรุปค่าตอบแทนจะคิดไม่ได้
+          ทั้งก้อนเห็นเฉพาะผู้จัดการ รวมถึงป้าย "ยังไม่ตั้งค่าจ้าง" ด้วย — ป้ายนั้นก็บอกต้นทุนกลายๆ
+          (รู้ว่าช่องไหนตั้งแล้ว/ยังไม่ตั้ง) และไม่ใช่งานที่คนอื่นทำอะไรกับมันได้อยู่ดี */}
+      {seePay &&
+        (rate.staff_pay != null ? (
+          <span className="rate-staff">
+            จ้าง {formatBaht(rate.staff_pay)}
+            {/* แยก span ให้กำไรลงบรรทัดของตัวเองได้บนจอแคบ — ตัวคั่น " · " มาจาก CSS
+                เขียนติดกันเป็นข้อความเดียวแล้วมันจะตัดบรรทัดกลางประโยค อ่านเป็น "จ้าง ฿1,000 · กำไร / 50%" */}
+            {rate.margin != null && <span className="rate-margin">กำไร {rate.margin}%</span>}
+          </span>
+        ) : (
+          <span className="rate-staff is-missing">ยังไม่ตั้งค่าจ้าง</span>
+        ))}
     </td>
   );
 }
 
 /** ตารางเรทหนึ่งกลุ่ม (รายวัน/สัปดาห์ = ไม่อิงเกรด · รายเดือน = แยกตามเกรด) */
-function RateTable({ label, formats, gradeId, editing, rateMap, draft, dirty, onPatchCell }) {
+function RateTable({ label, formats, gradeId, editing, rateMap, draft, dirty, onPatchCell, seePay }) {
   if (formats.length === 0) return <p className="muted">ยังไม่มีรูปแบบบริการในกลุ่มนี้</p>;
 
   return (
@@ -183,6 +190,7 @@ function RateTable({ label, formats, gradeId, editing, rateMap, draft, dirty, on
                     draft={draft[key]}
                     changed={dirty.has(key)}
                     onPatch={(patch) => onPatchCell(key, patch)}
+                    seePay={seePay}
                   />
                 );
               })}
@@ -195,6 +203,8 @@ function RateTable({ label, formats, gradeId, editing, rateMap, draft, dirty, on
 }
 
 export default function PackagesPage() {
+  // ค่าจ้างพนักงาน/กำไร = เฉพาะผู้จัดการ · คนอื่นเห็นแต่ราคาที่ขายลูกค้า (server ตัดฟิลด์ออกให้แล้ว)
+  const seePay = useCanSeeStaffPay();
   const [matrix, setMatrix] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -301,7 +311,8 @@ export default function PackagesPage() {
         grade_id: gradeId === 'x' ? null : Number(gradeId),
         staff_tier: tier,
         customer_price: num(dv.customer_price),
-        staff_pay: num(dv.staff_pay),
+        // ไม่ใช่ผู้จัดการ = ไม่ส่งคีย์นี้เลย (ไม่ใช่ส่งค่าว่าง) — server อ่านว่า "ไม่แตะ" แล้วคงค่าจ้างเดิมไว้
+        ...(seePay ? { staff_pay: num(dv.staff_pay) } : null),
         discount_percent: num(dv.discount_percent),
         discount_amount: num(dv.discount_amount),
         available: dv.available,
@@ -396,6 +407,7 @@ export default function PackagesPage() {
         <RateTable
           label="รูปแบบบริการ" formats={sharedFormats} gradeId={null}
           editing={editing} rateMap={rateMap} draft={draft} dirty={dirty} onPatchCell={patchCell}
+          seePay={seePay}
         />
       </section>
 
@@ -410,6 +422,7 @@ export default function PackagesPage() {
           <RateTable
             label="รูปแบบบริการ" formats={gradedFormats} gradeId={g.grade_id}
             editing={editing} rateMap={rateMap} draft={draft} dirty={dirty} onPatchCell={patchCell}
+            seePay={seePay}
           />
         </section>
       ))}
