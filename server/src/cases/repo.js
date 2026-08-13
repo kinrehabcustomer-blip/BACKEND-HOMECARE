@@ -1216,6 +1216,21 @@ export async function adjustVisit(caseId, visitId, input, admin) {
     }
   }
 
+  /* ลงเวลาเข้าให้กะที่ไม่เคยเช็คอิน (พนักงานไปทำงานจริงแต่ลืมกดเช็คอิน) ต้องลง "คนที่ทำ" ให้ด้วย
+     สรุปค่าตอบแทนทั้งระบบนับจาก checked_in_by (ดู WORKED_SHIFT ที่ JOIN employees ด้วยคอลัมน์นี้)
+     ถ้าลงแต่เวลา กะจะขึ้นว่าเสร็จแล้วบนหน้าจอ แต่หายไปจากค่าจ้างเงียบๆ — พนักงานทำงานฟรี
+
+     COALESCE จึงไม่ทับของเดิม: กะที่พนักงานเช็คอินเองแล้วผู้จัดการมาแก้เวลาทีหลัง
+     ต้องยังเป็นชื่อคนที่ไปจริง ไม่ใช่ถูกเปลี่ยนเป็นคนที่ถูกจัดให้ในภายหลัง
+     ส่วนล้างเวลาเข้าทิ้ง = กะนั้นไม่มีใครไป ชื่อคนเช็คอินต้องหายตามไปด้วย ไม่งั้นค้างเป็นข้อมูลผี */
+  if ('check_in_at' in input) {
+    sets.push(
+      input.check_in_at == null
+        ? 'checked_in_by = NULL'
+        : 'checked_in_by = COALESCE(checked_in_by, assigned_to)',
+    );
+  }
+
   await transaction(async (tx) => {
     await tx.run(
       `UPDATE case_visits SET ${sets.join(', ')} WHERE visit_id = :visit_id AND case_id = :case_id`,

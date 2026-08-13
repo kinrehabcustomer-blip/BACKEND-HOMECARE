@@ -38,6 +38,15 @@ const iso = (y, m, d) => `${y}-${String(m).padStart(2, '0')}-${String(d).padStar
 const isoOf = (date) => iso(date.getFullYear(), date.getMonth() + 1, date.getDate());
 const todayISO = () => isoOf(new Date());
 
+/**
+ * ป้ายวันแบบอ่านออกได้ด้วยตัวเอง — 'พฤ. 13 ส.ค.'
+ *
+ * ใช้ในโหมดรายการบนมือถือ ซึ่งไม่มีหัวคอลัมน์วันในสัปดาห์และไม่มีวันข้างๆ ให้เทียบแล้ว
+ * เห็นเลข "13" ลอยอยู่ในกล่องจึงบอกอะไรไม่ได้เลยว่าเป็นวันอะไร
+ */
+const dayLabel = (key) =>
+  new Date(`${key}T00:00:00`).toLocaleDateString('th-TH', { weekday: 'short', day: 'numeric', month: 'short' });
+
 /** ช่วงเวลานัดของกะ — เก็บเป็น 'HH:MM' อยู่แล้ว ไม่ต้องแปลงโซนเวลา */
 const timeRange = (v) =>
   v.planned_start ? `${v.planned_start}${v.planned_end ? `–${v.planned_end}` : ''}` : null;
@@ -179,7 +188,10 @@ export default function CalendarPage() {
             )}
           </p>
         </div>
-        <div className="actions">
+        {/* cal-nav — ปุ่มเลื่อนช่วงเวลา ไม่ใช่ปุ่มสั่งงานหลักของหน้า
+            บนมือถือปุ่มใน .actions ปกติจะยืดหารความกว้างกันจนเต็มบรรทัด ซึ่งใหญ่เกินหน้าที่ของมัน
+            (ลูกศรตัวเดียวกินพื้นที่เท่าปุ่มบันทึก) และไม่เข้ากับแถบตัวกรองที่อยู่ใต้ลงมา */}
+        <div className="actions cal-nav">
           <button className="btn" onClick={() => shift(-1)} aria-label={view === 'week' ? 'สัปดาห์ก่อนหน้า' : 'เดือนก่อนหน้า'}>←</button>
           <button className="btn" onClick={() => patch({ date: '' })}>วันนี้</button>
           <button className="btn" onClick={() => shift(1)} aria-label={view === 'week' ? 'สัปดาห์ถัดไป' : 'เดือนถัดไป'}>→</button>
@@ -270,6 +282,10 @@ export default function CalendarPage() {
                   title={`ดูงานของ ${formatDate(key)}`}
                 >
                   <span className="cal-date">{Number(key.slice(8))}</span>
+                  {/* สองอันนี้ใช้เฉพาะโหมดรายการบนมือถือ (CSS ซ่อนไว้ในโหมดตาราง)
+                      ที่นั่นการ์ดหนึ่งใบต้องบอกตัวเองได้ครบว่าเป็นวันอะไร ไม่มีตารางรอบข้างให้เทียบ */}
+                  <span className="cal-date-full">{dayLabel(key)}</span>
+                  {key === today && <span className="cal-today-tag">วันนี้</span>}
                   {list.length > 0 && <span className="cal-count">{list.length}</span>}
                 </button>
 
@@ -300,6 +316,11 @@ export default function CalendarPage() {
                     </button>
                   ))}
                 </div>
+
+                {/* วันที่ไม่มีงานสักกะ — โหมดรายการบนมือถือยุบวันแบบนี้ทิ้งหมด ยกเว้น "วันนี้" ที่ต้องเห็นเสมอ
+                    การ์ดที่มีแต่ตัวเลขวันกับที่ว่างอ่านเหมือนหน้าจอค้างหรือโหลดไม่เสร็จ
+                    (CSS ซ่อนบรรทัดนี้ในโหมดตาราง — ที่นั่นช่องว่างทั้งเดือนจะกลายเป็นคำว่า "ไม่มีงาน" เต็มปฏิทิน) */}
+                {list.length === 0 && <p className="cal-empty-day">ไม่มีงาน</p>}
 
                 {/* บอกให้เห็นกับตาว่ายังมีงานอีกกี่กะที่ไม่ได้แสดง แล้วกดเปิดดูทั้งวันได้จากตรงนี้เลย
                     CSS ซ่อนปุ่มนี้ในมุมมองสัปดาห์และบนมือถือ ซึ่งช่องสูงพอจะแสดงครบอยู่แล้ว */}

@@ -5,6 +5,10 @@ import { useToast } from '../toast.jsx';
 import { VISIT_STATE_LABELS, formatBaht, formatDate, timeText, durationText, distanceText } from '../labels.js';
 import LineIcon from '../components/LineIcon.jsx';
 import PageRefresh from '../components/PageRefresh.jsx';
+import ConfirmButton from '../components/ConfirmButton.jsx';
+import TimeSelect from '../components/TimeSelect.jsx';
+import { useSheetSwipe } from '../lib/sheetSwipe.js';
+import { useScrollLock } from '../lib/scrollLock.js';
 
 const TABS = {
   exceptions: 'รายการต้องตรวจ',
@@ -306,7 +310,9 @@ function Approvals({ month, employeeId, patch, employeePicker, reloadKey }) {
         <>
           {/* ปุ่มเลือกทั้งหมดต้องอยู่นอกหัวตาราง — จอแคบหัวตารางถูกซ่อน (แถวกลายเป็นการ์ด)
               ถ้าฝากไว้ในหัวตารางอย่างเดียว บนมือถือจะไม่มีทางเลือกทั้งหมดได้เลย */}
-          <div className="pick-presets">
+          {/* att-presets — ระยะห่างของแถวนี้เมื่อยืนเดี่ยวๆ ในหน้า ไม่ใช่ตอนอยู่ติดใต้ปฏิทินในโมดัลลงกะ
+              ที่นั่นมันเกาะกับปฏิทินโดยตั้งใจ ที่นี่มันถูกขนาบด้วยข้อความอธิบายกับการ์ดกะจนดูอัดกัน */}
+          <div className="pick-presets att-presets">
             <button
               className="btn tiny"
               disabled={busy}
@@ -646,21 +652,141 @@ function LateTag({ v }) {
   return <span className="cell-sub flag-text">สาย {durationText(v.check_in_late_minutes)}</span>;
 }
 
+/** เวลาที่เลือกครบและใช้ได้จริงหรือยัง — 24 ชม. เท่านั้น (00:00–23:59) */
+const isTime = (t) => /^([01]\d|2[0-3]):[0-5]\d$/.test(t);
+
+/** 'HH:MM' ของเวลาที่บันทึกไว้ — รูปแบบเดียวกับที่ TimeSelect และ planned_start ใช้ */
+const clockValue = (ts) => {
+  if (!ts) return '';
+  const d = new Date(ts);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+};
+
+/** 'YYYY-MM-DD' + 'HH:MM' (+ ข้ามวัน) → ISO เต็มรูปแบบตามที่ adjustVisitSchema ต้องการ */
+const stamp = (date, time, nextDay = false) => {
+  const d = new Date(`${date}T${time}:00`);
+  if (nextDay) d.setDate(d.getDate() + 1);
+  return d.toISOString();
+};
+
+/**
+ * ลงเวลาเข้า–ออกย้อนหลัง — สำหรับกะที่พนักงาน "ไปทำงานจริงแต่ลืมเช็คอิน"
+ *
+ * เดิมกะแบบนี้มีทางออกเดียวคือยกเลิกทิ้ง ซึ่งแปลว่ากะหลุดจากสรุปค่าตอบแทน = พนักงานทำงานฟรี
+ * หรือไม่ก็ปล่อยค้างอยู่ในคิว "รายการต้องตรวจ" ตลอดไป
+ *
+ * บันทึกแล้วกะจะออกจากคิวนี้ไปเข้าคิว "รออนุมัติค่าจ้าง" ตามทางปกติ — ไม่ได้ข้ามขั้นอนุมัติ
+ */
+function TimeFix({ visit, busy, onClose, onSave }) {
+  const sheetRef = useSheetSwipe(onClose);
+  const [start, setStart] = useState(clockValue(visit.check_in_at) || visit.planned_start || '');
+  const [end, setEnd] = useState(clockValue(visit.check_out_at) || visit.planned_end || '');
+
+  useScrollLock();
+  useEffect(() => {
+    const onKey = (e) => e.key === 'Escape' && onClose();
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  /* กะ 24 ชม. มีจริงในแพ็คเกจ (รายวัน/รายเดือน 24 ชม.) เวลาออกจึงเป็นวันถัดไปได้
+     ไม่ถามเป็นช่องติ๊ก — เดาให้จากเวลาที่กรอก แล้วบอกไว้ในบรรทัดสรุปว่าจะบันทึกเป็นวันไหน */
+  const ready = isTime(start) && isTime(end); // กรอกครบทั้งสองช่องและอยู่ในช่วงที่เป็นเวลาจริง
+  const nextDay = ready && end <= start;
+  const minutes = ready
+    ? (Number(end.slice(0, 2)) * 60 + Number(end.slice(3)) + (nextDay ? 1440 : 0))
+      - (Number(start.slice(0, 2)) * 60 + Number(start.slice(3)))
+    : null;
+
+  /* ไม่มีพนักงานผูกกับกะนี้ = บันทึกไปก็ไม่รู้ว่าใครทำ และค่าตอบแทนจะไม่เข้าใคร
+     (สรุปค่าตอบแทนนับจากคนที่เช็คอิน ซึ่ง server จะเติมจากพนักงานที่ถูกจัดให้กะนี้) */
+  const noStaff = !visit.employee_id;
+  const canSave = ready && !noStaff && !busy;
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal modal-narrow" ref={sheetRef} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+        <header className="modal-head">
+          <div>
+            <h2>บันทึกเวลาจริง</h2>
+            <p className="muted">
+              {formatDate(visit.visit_date)} · {visit.employee_name ?? 'ยังไม่มีพนักงาน'} · {visit.client_name}
+            </p>
+          </div>
+          <button className="modal-close" onClick={onClose} aria-label="ปิด">×</button>
+        </header>
+
+        <div className="modal-body">
+          {noStaff ? (
+            <p className="error timefix-hint">
+              กะนี้ยังไม่มีพนักงานรับผิดชอบ — จับคู่พนักงานที่หน้าเคสก่อน ไม่งั้นค่าตอบแทนจะไม่เข้าใคร
+            </p>
+          ) : (
+            <p className="muted timefix-hint">
+              ใช้เมื่อพนักงานไปทำงานจริงแต่ลืมกดเช็คอิน · กะจะเข้าคิว
+              <strong> รออนุมัติค่าจ้าง</strong> ต่อตามปกติ
+            </p>
+          )}
+
+          {/* ใช้ตัวเลือกเวลาตัวเดียวกับหน้าลงกะ — dropdown ที่ทำเอง สูงราว 6 บรรทัดแล้วเลื่อนดูที่เหลือ
+              (<select> ของเบราว์เซอร์กางยาวเท่าจำนวนรายการ 24 บรรทัดจนทับทั้งกล่อง สั่งความสูงไม่ได้)
+              และเป็นตัวเดียวกับที่ผู้จัดการใช้ตอนลงเวลานัด จึงกรอกด้วยท่าเดิมไม่ต้องเรียนรู้ใหม่ */}
+          <div className="grid cols-2 timefix-times">
+            <label>เวลาเข้า *
+              <TimeSelect label="เวลาเข้า" value={start} disabled={noStaff} onChange={setStart} />
+            </label>
+            <label>เวลาออก *
+              <TimeSelect label="เวลาออก" value={end} disabled={noStaff} onChange={setEnd} />
+            </label>
+          </div>
+
+          {/* ยืนยันสิ่งที่จะถูกบันทึกก่อนกด — โดยเฉพาะกรณีข้ามวัน ซึ่งระบบเดาให้เอง */}
+          {minutes != null && (
+            <p className="notice timefix-sum">
+              {formatDate(visit.visit_date)} {start} → {nextDay && 'วันถัดไป '}{end}
+              {' · รวม '}{durationText(minutes)}
+            </p>
+          )}
+        </div>
+
+        <footer className="modal-foot">
+          <button className="btn" disabled={busy} onClick={onClose}>ยกเลิก</button>
+          <button
+            className="btn primary"
+            disabled={!canSave}
+            onClick={() =>
+              onSave({
+                check_in_at: stamp(visit.visit_date, start),
+                check_out_at: stamp(visit.visit_date, end, nextDay),
+                status: 'done',
+              })
+            }
+          >
+            {busy ? 'กำลังบันทึก…' : 'บันทึกเวลา'}
+          </button>
+        </footer>
+      </div>
+    </div>
+  );
+}
+
 function Exceptions({ rows, error, onReload, filters }) {
   const toast = useToast();
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState(null);
+  const [fixing, setFixing] = useState(null); // กะที่กำลังลงเวลาย้อนหลัง (null = ปิดฟอร์ม)
 
-  async function adjust(v, body, confirmMsg, done) {
-    if (confirmMsg && !confirm(confirmMsg)) return;
+  async function adjust(v, body, done) {
     setBusy(true);
     setActionError(null);
     try {
       await api.adjustVisit(v.case_id, v.visit_id, body);
       toast(done);
       await onReload();
+      return true;
     } catch (e) {
       setActionError(e.message);
+      return false; // ฟอร์มลงเวลาต้องค้างไว้ให้แก้ต่อ ไม่ใช่ปิดทิ้งพร้อมเวลาที่เพิ่งกรอก
     } finally {
       setBusy(false);
     }
@@ -721,25 +847,48 @@ function Exceptions({ rows, error, onReload, filters }) {
                   <td data-label="ปัญหา"><span className={`badge ${reasonTone(v)}`}>{reason(v)}</span></td>
                   <td data-label="หลักฐาน"><Evidence v={v} /></td>
                   <td className="row-actions">
-                    {v.state === 'stale' && (
-                      <button className="btn tiny" disabled={busy}
-                        onClick={() => adjust(v, { check_out_at: new Date().toISOString(), status: 'done' },
-                          `ปิดกะนี้ด้วยเวลาปัจจุบัน?\n(${v.employee_name} · ${formatDate(v.visit_date)})`,
-                          'ปิดกะแล้ว')}>
-                        ปิดกะ
+                    {/* ลงเวลาจริงย้อนหลัง — ทางออกของกะที่ "ไปทำงานจริงแต่ลืมเช็คอิน"
+                        ทั้งกะที่ขาดงาน (ไม่มีเวลาเลย) และกะที่ค้างเช็คเอาท์ (มีแต่เวลาเข้า)
+                        ต่างจากปุ่ม "ปิดกะ" ที่ยัดเวลาปัจจุบันให้ ซึ่งใช้ได้เฉพาะตอนที่เพิ่งเลิกงานจริงๆ */}
+                    {(v.state === 'missed' || v.state === 'stale') && (
+                      <button className="btn tiny" disabled={busy} onClick={() => setFixing(v)}>
+                        บันทึกเวลาจริง
                       </button>
                     )}
-                    {v.state === 'missed' && (
-                      <button className="btn tiny danger-ghost" disabled={busy}
-                        onClick={() => adjust(v, { status: 'cancelled' }, 'ทำเครื่องหมายว่ากะนี้ยกเลิก?', 'ยกเลิกกะแล้ว')}>
-                        ยกเลิกกะ
-                      </button>
+                    {v.state === 'stale' && (
+                      <ConfirmButton
+                        className="btn tiny"
+                        disabled={busy}
+                        danger={false}
+                        title="ปิดกะนี้ด้วยเวลาปัจจุบัน?"
+                        detail={`${v.employee_name} · ${formatDate(v.visit_date)} — ถ้าเลิกงานไปนานแล้ว ให้ใช้ "บันทึกเวลาจริง" แทน`}
+                        confirmLabel="ปิดกะ"
+                        cancelLabel="ไม่ปิด"
+                        onConfirm={() => adjust(v, { check_out_at: new Date().toISOString(), status: 'done' }, 'ปิดกะแล้ว')}
+                      >
+                        ปิดกะ
+                      </ConfirmButton>
                     )}
                     {v.location_flagged && (
                       <button className="btn tiny" disabled={busy}
-                        onClick={() => adjust(v, { location_flagged: false }, null, 'เคลียร์ธงแล้ว')}>
+                        onClick={() => adjust(v, { location_flagged: false }, 'เคลียร์ธงแล้ว')}>
                         เคลียร์ธง
                       </button>
+                    )}
+                    {/* ยกเลิกกะ = กะนี้ไม่ได้เกิดขึ้นจริง (ลูกค้าเลื่อน/ยกเลิก) อยู่ท้ายสุดเสมอ
+                        เป็นทางเลือกสุดท้ายหลังจากดูแล้วว่าไม่ใช่กรณีลืมเช็คอิน */}
+                    {v.state === 'missed' && (
+                      <ConfirmButton
+                        className="btn tiny danger-ghost"
+                        disabled={busy}
+                        title="ทำเครื่องหมายว่ากะนี้ยกเลิก?"
+                        detail={`${v.employee_name ?? 'ยังไม่มีพนักงาน'} · ${formatDate(v.visit_date)} — กะที่ยกเลิกจะไม่เข้าสรุปค่าตอบแทน`}
+                        confirmLabel="ยกเลิกกะ"
+                        cancelLabel="ไม่ยกเลิก"
+                        onConfirm={() => adjust(v, { status: 'cancelled' }, 'ยกเลิกกะแล้ว')}
+                      >
+                        ยกเลิกกะ
+                      </ConfirmButton>
                     )}
                     {/* เช็คอินนอกวันนัด: ปกติแก้ด้วยการเลื่อนวันกะให้ตรงกับวันที่ไปจริง
                         ทำที่หน้าเคส จึงลิงก์ไปแทนที่จะมีปุ่มลัดที่นี่ */}
@@ -749,6 +898,17 @@ function Exceptions({ rows, error, onReload, filters }) {
             </tbody>
           </table>
         </div>
+      )}
+
+      {fixing && (
+        <TimeFix
+          visit={fixing}
+          busy={busy}
+          onClose={() => setFixing(null)}
+          onSave={async (body) => {
+            if (await adjust(fixing, body, 'บันทึกเวลาแล้ว — กะนี้เข้าคิวรออนุมัติค่าจ้าง')) setFixing(null);
+          }}
+        />
       )}
     </>
   );

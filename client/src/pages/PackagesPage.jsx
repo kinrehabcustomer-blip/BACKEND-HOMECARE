@@ -49,7 +49,9 @@ function discountOf(price, percent, amount) {
  * ประกาศไว้นอก PackagesPage โดยตั้งใจ — ถ้าประกาศข้างในจะกลายเป็น component "ชนิดใหม่" ทุกครั้งที่ state เปลี่ยน
  * React จะถอด input ทิ้งแล้วสร้างใหม่ทุกตัวอักษรที่พิมพ์ ทำให้โฟกัสหลุดจนพิมพ์ตัวเลขต่อกันไม่ได้
  */
-function RateCell({ editing, rate, draft, changed, onPatch, seePay }) {
+function RateCell({ tier, editing, rate, draft, changed, onPatch, seePay }) {
+  /* data-tier ติดไว้ทุกทาง — บนจอมือถือหัวตารางถูกซ่อน แล้วแถวกลายเป็นการ์ด
+     ป้าย CG/NA/PN/RN (พร้อมสีประจำระดับ) จึงมาจากแอตทริบิวต์นี้แทนหัวคอลัมน์ */
   if (editing) {
     const dv = draft ?? {
       customer_price: '', staff_pay: '', discount_percent: '', discount_amount: '', available: true,
@@ -59,7 +61,7 @@ function RateCell({ editing, rate, draft, changed, onPatch, seePay }) {
     const mark = changed ? ' is-changed' : '';
     if (!dv.available) {
       return (
-        <td className={`rate-off${mark}`}>
+        <td className={`rate-off${mark}`} data-tier={tier}>
           <button type="button" className="btn tiny" onClick={() => onPatch({ available: true })}>
             เปิดช่องนี้
           </button>
@@ -75,7 +77,7 @@ function RateCell({ editing, rate, draft, changed, onPatch, seePay }) {
     const profit = net != null && pay != null ? net - pay : null;
 
     return (
-      <td className={`rate-input${mark}`}>
+      <td className={`rate-input${mark}`} data-tier={tier}>
         <div className="rate-edit">
           <div className="rate-edit-row">
             <input
@@ -124,12 +126,12 @@ function RateCell({ editing, rate, draft, changed, onPatch, seePay }) {
     );
   }
 
-  if (!rate || !rate.available) return <td className="rate-off">ให้บริการไม่ได้</td>;
-  if (rate.customer_price == null) return <td className="rate-price">—</td>;
+  if (!rate || !rate.available) return <td className="rate-off" data-tier={tier}>ให้บริการไม่ได้</td>;
+  if (rate.customer_price == null) return <td className="rate-price" data-tier={tier}>—</td>;
 
   const discounted = rate.discount_value > 0;
   return (
-    <td className="rate-price">
+    <td className="rate-price" data-tier={tier}>
       {discounted && <span className="rate-was">{formatBaht(rate.customer_price)}</span>}
       {formatBaht(discounted ? rate.net_price : rate.customer_price)}
       {discounted && (
@@ -152,6 +154,65 @@ function RateCell({ editing, rate, draft, changed, onPatch, seePay }) {
           <span className="rate-staff is-missing">ยังไม่ตั้งค่าจ้าง</span>
         ))}
     </td>
+  );
+}
+
+/** จุดตัด "จอแคบ" ชุดเดียวกับ @media (max-width: 600px) ใน index.css */
+const NARROW = '(max-width: 600px)';
+
+/** ตอนนี้อยู่บนจอแคบไหม — ต้องรู้ตอนวาด ไม่ใช่แค่ตอนจัดหน้า เพราะโครงหัวข้อสองแบบไม่เหมือนกัน */
+function useIsNarrow() {
+  const [narrow, setNarrow] = useState(() => window.matchMedia(NARROW).matches);
+  useEffect(() => {
+    const mq = window.matchMedia(NARROW);
+    const onChange = (e) => setNarrow(e.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+  return narrow;
+}
+
+/**
+ * หัวข้อกลุ่มเรทหนึ่งกลุ่ม
+ *
+ * จอกว้าง = หัวข้อธรรมดา กางอยู่ตลอดเหมือนเดิมทุกอย่าง — ที่นั่นตารางทั้งสี่ระดับอยู่ในจอเดียว
+ * เลื่อนผ่านทั้งหน้าก็ยังเร็วกว่าต้องกดกางทีละกลุ่ม
+ *
+ * จอแคบ = กางเก็บได้ เพราะแต่ละแถวกลายเป็นการ์ด หน้าเลยยาวหลายหน้าจอ
+ * (รายวัน/สัปดาห์ + เกรดละหนึ่งตาราง) กว่าจะเลื่อนถึงเกรด 3 ก็ลืมแล้วว่าเกรด 1 ราคาเท่าไร
+ *
+ * ใช้ <details> ของเบราว์เซอร์ ไม่ใช่ state เอง — ได้คีย์บอร์ด, โปรแกรมอ่านหน้าจอ
+ * และการค้นหาในหน้า (Ctrl+F กางกลุ่มที่ซ่อนอยู่ให้เอง) มาครบโดยไม่ต้องเขียนอะไรเพิ่ม
+ *
+ * open เป็นค่าเริ่มต้นเฉยๆ ไม่ใช่ค่าที่คุมตลอด — React แตะแอตทริบิวต์นี้เฉพาะตอนค่า prop เปลี่ยน
+ * กลุ่มที่ผู้ใช้กางเองจึงไม่ถูกพับกลับตอนหน้าวาดใหม่ (ซึ่งเกิดทุกตัวอักษรที่พิมพ์ในโหมดแก้ราคา)
+ */
+function RateSection({ title, note, desc, dirtyCount, collapsible, defaultOpen, children }) {
+  const heading = (
+    <h2>
+      {title}
+      {note && <> <span className="muted">{note}</span></>}
+    </h2>
+  );
+  const body = (
+    <>
+      {desc && <p className="grade-desc">{desc}</p>}
+      {children}
+    </>
+  );
+
+  if (!collapsible) return <section className="rate-section">{heading}{body}</section>;
+
+  return (
+    <details className="rate-section" open={defaultOpen}>
+      <summary className="rate-head">
+        {heading}
+        {/* กลุ่มที่พับอยู่ต้องบอกได้ว่ามีของค้างข้างใน — ไม่งั้นกดบันทึกแล้วงงว่าเลขมาจากไหน */}
+        {dirtyCount > 0 && <span className="flag-text rate-head-flag">{dirtyCount} ช่อง</span>}
+        <LineIcon name="chevron" className="rate-head-ico" />
+      </summary>
+      {body}
+    </details>
   );
 }
 
@@ -185,6 +246,7 @@ function RateTable({ label, formats, gradeId, editing, rateMap, draft, dirty, on
                 return (
                   <RateCell
                     key={t}
+                    tier={t}
                     editing={editing}
                     rate={rateMap[key]}
                     draft={draft[key]}
@@ -205,6 +267,7 @@ function RateTable({ label, formats, gradeId, editing, rateMap, draft, dirty, on
 export default function PackagesPage() {
   // ค่าจ้างพนักงาน/กำไร = เฉพาะผู้จัดการ · คนอื่นเห็นแต่ราคาที่ขายลูกค้า (server ตัดฟิลด์ออกให้แล้ว)
   const seePay = useCanSeeStaffPay();
+  const narrow = useIsNarrow(); // จอแคบเท่านั้นที่พับกลุ่มเรทได้ — จอกว้างเหมือนเดิมทุกอย่าง
   const [matrix, setMatrix] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -340,6 +403,10 @@ export default function PackagesPage() {
 
   const dirty = new Set(dirtyKeys);
 
+  /** ช่องที่แก้ค้างไว้ในกลุ่มเดียว — คีย์คือ "รูปแบบ:เกรด:ระดับ" (เกรด 'x' = เรทร่วมทุกเกรด) */
+  const dirtyIn = (gradeId) =>
+    dirtyKeys.filter((k) => k.split(':')[1] === String(gradeId ?? 'x')).length;
+
   return (
     <PageRefresh onRefresh={reload} busy={loading}>
       <header className="page-head">
@@ -402,29 +469,37 @@ export default function PackagesPage() {
         <ManagePanel matrix={matrix} onChanged={reload} setError={setError} />
       )}
 
-      <section className="rate-section">
-        <h2>รายวัน / รายสัปดาห์ <span className="muted">(เรทเดียว ใช้ร่วมทุกเกรด)</span></h2>
+      {/* บนมือถือกลุ่มแรกกางไว้ให้เห็นว่าหน้านี้มีอะไร ที่เหลือพับ — เปิดหน้ามาแล้วเห็นรายชื่อเกรดครบ
+          ในจอเดียว เลือกได้เลยว่าจะดูเกรดไหน แทนที่จะต้องเลื่อนผ่านตารางที่ไม่ได้จะดู */}
+      <RateSection
+        title="รายวัน / รายสัปดาห์"
+        note="(เรทเดียว ใช้ร่วมทุกเกรด)"
+        dirtyCount={dirtyIn(null)}
+        collapsible={narrow}
+        defaultOpen
+      >
         <RateTable
           label="รูปแบบบริการ" formats={sharedFormats} gradeId={null}
           editing={editing} rateMap={rateMap} draft={draft} dirty={dirty} onPatchCell={patchCell}
           seePay={seePay}
         />
-      </section>
+      </RateSection>
 
       {matrix.grades.map((g, i) => (
-        <section className="rate-section" key={g.grade_id}>
-          <h2>
-            {g.name}
-            {careLevelOf(i) && ` (${careLevelOf(i)})`}
-            {' '}<span className="muted">· รายเดือน</span>
-          </h2>
-          {g.description && <p className="grade-desc">{g.description}</p>}
+        <RateSection
+          key={g.grade_id}
+          title={`${g.name}${careLevelOf(i) ? ` (${careLevelOf(i)})` : ''}`}
+          note="· รายเดือน"
+          desc={g.description}
+          dirtyCount={dirtyIn(g.grade_id)}
+          collapsible={narrow}
+        >
           <RateTable
             label="รูปแบบบริการ" formats={gradedFormats} gradeId={g.grade_id}
             editing={editing} rateMap={rateMap} draft={draft} dirty={dirty} onPatchCell={patchCell}
             seePay={seePay}
           />
-        </section>
+        </RateSection>
       ))}
 
       {matrix.grades.length === 0 && (

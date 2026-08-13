@@ -143,11 +143,25 @@ function Sidebar() {
               <strong>{user.first_name} {user.last_name}</strong>
               <span className="mono muted">{user.employee_id}</span>
             </div>
-            <NavLink className="btn icon-btn" to="/settings" title="ตั้งค่า" aria-label="ตั้งค่า">
-              <LineIcon name="settings" />
-            </NavLink>
+            {/* ตั้งค่า + ออกจากระบบ เป็นปุ่มไอคอนคู่กันท้ายแถวชื่อผู้ใช้ — ทั้งคู่คือ "เรื่องของบัญชีนี้"
+                ไม่ใช่เมนูของระบบ · ออกจากระบบเดิมเป็นปุ่มข้อความเต็มความกว้างอยู่บรรทัดล่าง
+                ซึ่งเด่นกว่าเมนูงานทุกอันในหน้า ทั้งที่เป็นสิ่งที่กดกันวันละครั้ง */}
+            <div className="who-actions">
+              <NavLink className="btn icon-btn" to="/settings" title="ตั้งค่า" aria-label="ตั้งค่า">
+                <LineIcon name="settings" />
+              </NavLink>
+              {/* aria-label/title ทำหน้าที่แทนข้อความในปุ่ม — ไอคอนล้วนไม่มีชื่อกำกับจะไม่มีใครรู้ว่าปุ่มอะไร
+                  ทั้งคนที่ใช้โปรแกรมอ่านหน้าจอ และคนที่จิ้มค้างดูคำอธิบายบนเดสก์ท็อป */}
+              <button
+                className="btn icon-btn"
+                onClick={handleLogout}
+                title="ออกจากระบบ"
+                aria-label="ออกจากระบบ"
+              >
+                <LineIcon name="logout" />
+              </button>
+            </div>
           </div>
-          <button className="btn sidebar-btn" onClick={handleLogout}>ออกจากระบบ</button>
         </div>
       </div>
     </aside>

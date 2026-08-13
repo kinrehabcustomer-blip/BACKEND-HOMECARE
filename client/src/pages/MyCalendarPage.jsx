@@ -77,7 +77,8 @@ export default function MyCalendarPage() {
               : 'กดที่งานเพื่อดูรายละเอียดเคส'}
           </p>
         </div>
-        <div className="actions">
+        {/* cal-nav — ดูคำอธิบายที่ CalendarPage: ปุ่มเลื่อนเดือนไม่ต้องยืดเต็มบรรทัดบนมือถือ */}
+        <div className="actions cal-nav">
           <button className="btn" onClick={() => shiftMonth(-1)} aria-label="เดือนก่อนหน้า">←</button>
           <button className="btn" onClick={goToday}>วันนี้</button>
           <button className="btn" onClick={() => shiftMonth(1)} aria-label="เดือนถัดไป">→</button>

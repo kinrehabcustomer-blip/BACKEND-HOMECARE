@@ -215,7 +215,7 @@ body {
   border-top: 1px solid var(--border);
 }
 
-/* แถวข้อมูลผู้ใช้ + ปุ่มตั้งค่า (ไอคอน) อยู่ระดับเดียวกัน ปุ่มชิดขวา */
+/* แถวข้อมูลผู้ใช้ + ปุ่มตั้งค่า/ออกจากระบบ (ไอคอน) อยู่ระดับเดียวกัน ปุ่มชิดขวา */
 .who-row {
   display: flex;
   align-items: center;
@@ -223,9 +223,13 @@ body {
   gap: 0.5rem;
   margin-bottom: 0.625rem;
 }
+/* แถวสุดท้ายของส่วนท้าย — ไม่มีอะไรต่อท้ายแล้ว ระยะใต้จึงเป็นที่ว่างเปล่าๆ ก่อนขอบไซด์บาร์ */
+.who-row:last-child { margin-bottom: 0; }
 .who { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: 0.875rem; }
 .who strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .who .mono { font-size: 0.75rem; }
+/* ระยะห่างระหว่างสองปุ่มไม่ใช่แค่ความสวย — ปุ่มขวาคือออกจากระบบ กดพลาดแล้วต้องล็อกอินใหม่ทั้งรอบ */
+.who-actions { display: flex; flex-shrink: 0; gap: 0.5rem; }
 
 /* ปุ่มไอคอนล้วน (สี่เหลี่ยมจัตุรัส) — ใช้กับปุ่มตั้งค่า */
 .icon-btn {
@@ -236,8 +240,6 @@ body {
   height: 2.25rem;
   font-size: 1rem;
 }
-.sidebar-btn { width: 100%; justify-content: center; margin-bottom: 0.5rem; }
-.sidebar-btn:last-child { margin-bottom: 0; }
 /* โลโก้แนวนอน ชิดซ้ายบนไซด์บาร์สีขาว (ไม่มีพื้นรอง) */
 .brand { display: flex; align-items: flex-start; margin-bottom: 1.75rem; }
 /* 700 ไม่ใช่ 800 — Anuphan มีน้ำหนักสูงสุดแค่ 700 เขียน 800 ไว้เบราว์เซอร์ก็ปัดลงมาเป็น 700 อยู่ดี
@@ -966,13 +968,34 @@ select option:checked {
 .tile-value { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 1.75rem; font-weight: 700; line-height: 1.2; }
 .tile-share { font-size: 0.75rem; color: var(--muted); }
 
-/* จุดสีประจำสถานะ — อยู่คู่กับข้อความเสมอ สีไม่ใช่ตัวสื่อความหมายเพียงอย่างเดียว */
+/* จุดสีประจำสถานะ — อยู่คู่กับข้อความเสมอ สีไม่ใช่ตัวสื่อความหมายเพียงอย่างเดียว
+   ประกาศเป็นตัวแปรเพราะแถบสัดส่วนด้านล่างใช้ชุดเดียวกัน — จุดกับแถบต้องเป็นสีเดียวกันเสมอ
+   ไม่งั้นแถบจะกลายเป็นภาพที่จับคู่กับช่องตัวเลขไม่ได้ */
+:root {
+  --case-unassigned: #d99400;
+  --case-assigned: #2c74c9;
+  --case-in_progress: var(--brand);
+  --case-closed: #9aa1a9;
+  --case-cancelled: #c0504d;
+}
 .dot { width: 0.5rem; height: 0.5rem; border-radius: 50%; flex-shrink: 0; }
-.dot.case-unassigned  { background: #d99400; }
-.dot.case-assigned    { background: #2c74c9; }
-.dot.case-in_progress { background: var(--brand); }
-.dot.case-closed      { background: #9aa1a9; }
-.dot.case-cancelled   { background: #c0504d; }
+.dot.case-unassigned  { background: var(--case-unassigned); }
+.dot.case-assigned    { background: var(--case-assigned); }
+.dot.case-in_progress { background: var(--case-in_progress); }
+.dot.case-closed      { background: var(--case-closed); }
+.dot.case-cancelled   { background: var(--case-cancelled); }
+
+/* แถบสัดส่วนสถานะใต้ตัวเลขนำ — ขึ้นเฉพาะจอแคบ (เปิดใช้ในบล็อก @media ด้านล่าง)
+   บนจอกว้างช่องตัวเลขทั้งสี่เรียงเป็นแถวเดียวเทียบกันได้อยู่แล้ว และคอลัมน์ตัวเลขนำก็แคบเกินกว่าจะอ่านแถบออก */
+.share-bar { display: none; }
+.share-seg { display: block; height: 100%; }
+/* เส้นคั่นบางๆ ระหว่างช่วง — วาดด้วยเงาด้านใน ไม่ใช่ border/gap ซึ่งจะไปบวกกับความกว้าง %
+   แล้วช่วงสุดท้ายจะโดนตัดหาย (ผลรวมเกิน 100%) */
+.share-seg + .share-seg { box-shadow: inset 1px 0 0 var(--surface); }
+.share-seg.case-unassigned  { background: var(--case-unassigned); }
+.share-seg.case-assigned    { background: var(--case-assigned); }
+.share-seg.case-in_progress { background: var(--case-in_progress); }
+.share-seg.case-closed      { background: var(--case-closed); }
 
 /* แท่งแนวนอน: สีเดียวทุกแท่ง (ประเภทเคสไม่มีลำดับ) ปลายมน 0.25rem ฐานตรง ตัวเลขอยู่ปลายแท่ง */
 .bars { list-style: none; margin: 0; padding: 0; }
@@ -1007,7 +1030,35 @@ select option:checked {
 @media (max-width: 900px) {
   .hero-card { flex-direction: column; gap: 1.125rem; }
   .hero { padding: 0 0 1.125rem; border-right: none; border-bottom: 1px solid var(--border); }
-  .tiles { grid-template-columns: 1fr; }
+
+  /* สองคอลัมน์ ไม่ใช่หนึ่ง — เรียงเดี่ยวได้การ์ดสี่ใบสูงใบละ 90px กินพื้นที่ราวหนึ่งหน้าจอเต็ม
+     ทั้งที่แต่ละใบมีแค่ป้าย + ตัวเลข · 2×2 เห็นครบทั้งสี่สถานะพร้อมกันโดยไม่ต้องเลื่อน
+     (จอกว้างยังเป็น auto-fit เรียงแถวเดียวเหมือนเดิม) */
+  .tiles { grid-template-columns: 1fr 1fr; }
+
+  /* ตัวเลขนำอยู่เต็มความกว้างการ์ดแล้ว — แถบสัดส่วนจึงยาวพอจะอ่านออก */
+  .share-bar {
+    display: flex;
+    height: 0.4375rem;
+    margin-top: 0.875rem;
+    overflow: hidden;
+    background: var(--divider);
+    border-radius: 62.4375rem;
+  }
+}
+
+@media (max-width: 600px) {
+  /* บีบขอบการ์ดเข้ามา — ช่องตัวเลขสองคอลัมน์บนจอ 390px ต้องการทุกพิกเซลที่หาได้
+     ป้ายอย่าง "ยังไม่จับคู่พนักงาน" จะได้ไม่ตกบรรทัดโดยไม่จำเป็น */
+  .hero-card { padding: 1.25rem 1.125rem; }
+  .tiles { gap: 0.5rem; }
+  .tile { padding: 0.75rem 0.75rem 0.6875rem; }
+  .tile-value { font-size: 1.5rem; }
+  /* ป้ายยาวตกสองบรรทัดได้ — จุดสีต้องอยู่แนวเดียวกับบรรทัดแรก ไม่ใช่กลางก้อนข้อความ */
+  .tile-label { align-items: flex-start; line-height: 1.35; }
+  .tile-label .dot { margin-top: 0.3125rem; }
+  /* เหลือแค่ "20%" — แถบสัดส่วนเหนือช่องพวกนี้บอกแล้วว่าเทียบกับอะไร */
+  .tile-of { display: none; }
 }
 
 /* ---------- cards & detail ---------- */
@@ -1422,7 +1473,9 @@ select option:checked {
     /* flex-wrap — เมนูที่กางออกมาตกไปอยู่บรรทัดใหม่เต็มความกว้าง ไม่เบียดกับโลโก้/ปุ่มออกจากระบบ */
     flex-wrap: wrap;
     overflow: visible;
-    padding: 0.625rem 1rem;
+    /* แถบบนสูงราว 4.5rem — เดิม 0.625rem ได้แถบสูง 3.75rem ซึ่งเตี้ยกว่าแถบบนของแอปทั่วไป
+       และทำให้โลโก้กับปุ่ม ☰ ดูลอยติดขอบ ไม่มีที่หายใจรอบตัว */
+    padding: 0.875rem 1rem;
     border-right: none;
     border-bottom: 1px solid var(--border);
   }
@@ -1433,7 +1486,10 @@ select option:checked {
      โลโก้ริมซ้ายสุดตามตำแหน่งที่สายตาเริ่มอ่าน · ☰ ริมขวาซึ่งนิ้วโป้งเอื้อมถึงง่ายกว่า
      margin-left: auto ดัน ☰ ไปสุดขอบขวาเอง — ไม่มีอะไรคั่นกลางให้ถ่างระยะแทนแล้ว */
   .brand { order: 1; }
-  .nav-toggle { order: 2; display: inline-flex; margin-left: auto; }
+  /* ปุ่มเดียวของแถบบน และเป็นทางเดียวที่จะไปหน้าอื่นบนมือถือ — ให้ใหญ่กว่าปุ่มไอคอนทั่วไป
+     2.75rem (44px) คือขนาดเป้ากดขั้นต่ำที่แนะนำกันบนจอสัมผัส พอดีกับที่ตั้งใจให้แถบสูงขึ้นด้วย */
+  .nav-toggle { order: 2; display: inline-flex; margin-left: auto; width: 2.75rem; height: 2.75rem; }
+  .nav-toggle-ico { width: 1.5rem; height: 1.5rem; }
 
   /* เมนู 10 รายการเรียงแนวนอนบนจอมือถือต้องปัดซ้ายขวาหาเมนูที่ต้องการ ซึ่งมองไม่เห็นว่ามีอะไรบ้าง
      เปลี่ยนเป็นพับไว้ใต้ปุ่ม ☰ แล้วกางลงมาเป็นรายการแนวตั้งอ่านครบในครั้งเดียว */
@@ -1501,7 +1557,6 @@ select option:checked {
      ไม่ได้แย่งที่บนแถบบนอีกต่อไป — คั่นด้วยเส้นบางๆ ให้แยกจากรายการเมนูด้านบน
      พอมีที่แล้วจึงเอาชื่อผู้ใช้กลับมาแสดงได้ ซึ่งเดิมบนมือถือถูกซ่อนทิ้งเพราะไม่มีที่ */
   .sidebar-foot { margin-top: 0.5rem; padding: 0.75rem 0.25rem 0.25rem; }
-  .sidebar-btn { width: 100%; margin-bottom: 0; }
 
   .content { padding: 1.25rem 1rem; }
 
@@ -1542,14 +1597,21 @@ select option:checked {
   .page-head h1 { font-size: 1.25rem; }
   .hero-value { font-size: 2.625rem; }
 
-  /* โลโก้เต็มขนาดในแถบบนแนวนอนกินที่ของเมนูไปเกือบครึ่ง — เมนูสำคัญกว่า */
-  .brand-logo { height: 1.875rem; }
+  /* โลโก้เต็มขนาด (2.5rem) ในแถบบนแนวนอนกินที่ของเมนูไปเกือบครึ่ง — เมนูสำคัญกว่า
+     แต่ 1.875rem เตี้ยจนคำว่า HOME CARE แทบอ่านไม่ออก · 2.25rem อ่านออกและยังเหลือที่ให้ ☰ */
+  .brand-logo { height: 2.25rem; }
 
   /* หัวหน้า: ปุ่มหลักกินเต็มบรรทัดของตัวเอง
      เดิมมันตกลงมาลอยชิดซ้ายใต้ข้อความสรุปยาวๆ จนกลืนไปกับข้อความ */
   .page-head { flex-direction: column; align-items: stretch; gap: 0.75rem; }
   .page-head > .btn { justify-content: center; }
   .page-head .actions .btn { flex: 1; justify-content: center; }
+
+  /* ยกเว้นปุ่มเลื่อนช่วงเวลาของปฏิทิน — เป็นปุ่มนำทาง ไม่ใช่ปุ่มสั่งงาน จึงไม่ควรเด่นเท่า
+     ยืดเต็มบรรทัดแล้วได้ปุ่มลูกศรกว้าง 120px นั่งอยู่เหนือแถบตัวกรองที่ปุ่มขนาดปกติ ดูไม่เป็นชุดเดียวกัน
+     min-width กันไม่ให้ปุ่มลูกศร (อักษรตัวเดียว) หดจนเล็กกว่าที่นิ้วกดถูก */
+  .page-head .actions.cal-nav { justify-content: flex-start; }
+  .page-head .actions.cal-nav .btn { flex: 0 0 auto; min-width: 2.75rem; }
 
   /* แถบเลื่อนหน้า: ปุ่มก่อนหน้า/ถัดไปแบ่งบรรทัดบน ส่วนจำนวนแถวต่อหน้าลงบรรทัดใหม่
      (บรรทัดเดียวกันทั้งหมดบนจอ 360px จะบีบจนปุ่มเล็กเกินกว่าจะกดถูก) */
@@ -1828,7 +1890,54 @@ select option:checked {
 
 /* ---------- แพ็คเกจ: ตารางเรท (เกรด × รูปแบบ × CG/NA/PN) ---------- */
 .rate-section { margin-top: 1.5rem; }
+/* จอกว้าง: หัวข้อเป็นแค่หัวข้อ กลุ่มกางอยู่เสมอ (หน้าเว็บฝั่ง PC ไม่มีอะไรเปลี่ยน) */
 .rate-section > h2 { margin-bottom: 0.25rem; }
+
+/* ---- จอแคบ: กลุ่มเรทหนึ่งกลุ่ม = การ์ดหนึ่งใบ กางเก็บได้ ----
+   โครงนี้มีเฉพาะตอนจอแคบ (PackagesPage วาด <section>/<h2> ธรรมดาให้จอกว้าง)
+   จึงเขียนไว้นอก @media ได้ — ไม่มี .rate-head บนจอกว้างให้กฎพวกนี้ไปโดน
+
+   เป็นการ์ดเต็มใบ ไม่ใช่หัวข้อลอยๆ บนพื้นหลัง — ของที่กดได้ในระบบนี้อยู่ในกรอบสีขาวเสมอ
+   (การ์ดเคส แถวตาราง ปุ่ม) หัวข้อเปล่าที่กดได้จึงดูไม่ออกว่าเป็นของกดได้ และไม่เข้าชุดกับหน้าอื่น */
+.rate-section:has(> .rate-head) {
+  margin-top: 0.625rem;      /* กลุ่มเรียงต่อกันเป็นรายการ ไม่ใช่หัวข้อที่คั่นด้วยที่ว่างกว้างๆ */
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;          /* มุมมนคุมถึงหัวข้อและเนื้อในด้วย */
+}
+
+.rate-head {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0.875rem 1rem;    /* ทั้งแถบคือเป้ากด ไม่ใช่แค่ตัวอักษร */
+  cursor: pointer;
+  /* ซ่อนสามเหลี่ยมปริยายของเบราว์เซอร์ — ใช้ chevron ชุดเดียวกับที่อื่นในระบบแทน
+     ต้องสั่งทั้งสองแบบ: มาตรฐานคือ list-style ส่วน Safari ยังฟังเฉพาะ ::-webkit-details-marker */
+  list-style: none;
+}
+.rate-head::-webkit-details-marker { display: none; }
+/* เล็กกว่าหัวข้อบนจอกว้าง — พอพับแล้วหัวข้อทุกกลุ่มเรียงต่อกันเป็นสารบัญ
+   ขนาดเต็มทำให้ชื่อยาวอย่าง "รายวัน / รายสัปดาห์ (เรทเดียว ใช้ร่วมทุกเกรด)" ตกสองบรรทัด
+   แล้วลูกศรไปลอยอยู่กลางก้อน อ่านไม่ออกว่าคู่กับบรรทัดไหน */
+.rate-head > h2 { flex: 1; min-width: 0; margin: 0; font-size: 1.0625rem; }
+/* ไม่ใช้ :hover — จอสัมผัสจะค้างสีไว้บนหัวข้อที่นิ้วเพิ่งแตะ เหมือนกลุ่มนั้นถูกเลือกอยู่
+   :active คือแตะค้างจริงๆ ปล่อยนิ้วแล้วหายทันที (หลักเดียวกับเมนูข้างและแถวตารางบนมือถือ) */
+.rate-head:active { background: var(--surface-2); }
+/* outline วาดเข้าด้านใน — ขอบการ์ดตัดส่วนที่ล้นออกนอกทิ้ง (overflow: hidden) */
+.rate-head:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }
+/* จำนวนช่องที่แก้ค้างไว้ในกลุ่มที่พับอยู่ — ของที่มองไม่เห็นต้องมีร่องรอยบอกว่ายังอยู่ */
+.rate-head-flag { flex-shrink: 0; font-size: 0.75rem; }
+.rate-head-ico { flex-shrink: 0; width: 1.25rem; height: 1.25rem; color: var(--muted); transition: transform 160ms ease; }
+.rate-section[open] > .rate-head .rate-head-ico { transform: rotate(180deg); }
+/* กางอยู่ = หัวข้อกลายเป็นหัวการ์ด มีเส้นคั่นก่อนถึงราคา (ตอนพับไม่มีเส้นลอยอยู่ท้ายใบ) */
+.rate-section[open] > .rate-head { border-bottom: 1px solid var(--divider); }
+
+/* เนื้อในของการ์ด — ระยะขอบมาจากตรงนี้ที่เดียว ตัวตารางจึงไม่ต้องรู้ว่าตัวเองอยู่ในกรอบอะไร */
+.rate-section:has(> .rate-head) > .grade-desc { margin: 0; padding: 0.75rem 1rem 0; }
+.rate-section:has(> .rate-head) > .table-wrap { padding: 0.875rem 1rem; }
+
 .grade-desc { color: var(--danger); font-size: 0.85rem; margin: 0 0 0.625rem; }
 
 /* ขนาดเล็กสุดของปุ่ม — ใช้สเกล rem ชุดเดียวกับที่เหลือของระบบ (0.75rem) ไม่ใช่ค่าเฉพาะกิจ */
@@ -1854,11 +1963,14 @@ select option:checked {
   padding-right: 1.25rem; /* เว้นช่องหายใจก่อนถึงคอลัมน์ราคา */
   white-space: normal;    /* ชื่อรูปแบบยาวตัดบรรทัดได้ในคอลัมน์กว้างคงที่ ไม่ดันตารางเบี้ยว */
 }
+/* สีประจำระดับพนักงาน — ประกาศเป็นตัวแปรเพราะใช้สองที่: หัวคอลัมน์ (จอกว้าง)
+   และป้ายบนช่องราคาในโหมดการ์ด (จอมือถือ ซึ่งไม่มีหัวคอลัมน์ให้ดูแล้ว) ต้องเป็นสีเดียวกันเสมอ */
+.rate-table { --tier-CG: #c026d3; --tier-NA: #7c3aed; --tier-PN: #0891b2; --tier-RN: #059669; }
 .rate-table thead .tier-head { color: #fff; }
-.tier-head.tier-CG { background: #c026d3; }   /* magenta ตามตัวอย่าง */
-.tier-head.tier-NA { background: #7c3aed; }
-.tier-head.tier-PN { background: #0891b2; }
-.tier-head.tier-RN { background: #059669; }   /* เขียว — ระดับพยาบาลวิชาชีพ (RN) */
+.tier-head.tier-CG { background: var(--tier-CG); }   /* magenta ตามตัวอย่าง */
+.tier-head.tier-NA { background: var(--tier-NA); }
+.tier-head.tier-PN { background: var(--tier-PN); }
+.tier-head.tier-RN { background: var(--tier-RN); }   /* เขียว — ระดับพยาบาลวิชาชีพ (RN) */
 
 .rate-price { font-weight: 700; }
 .rate-off { color: var(--text-faint); background: var(--divider); font-style: italic; }
@@ -1911,7 +2023,91 @@ select option:checked {
 @media (max-width: 600px) {
   .rate-margin { display: block; }
   .rate-margin::before { content: none; }
-  .rate-table { font-size: 0.75rem; }
+
+  /* ---- มือถือ: ตารางเรทกลายเป็นการ์ดใบละรูปแบบบริการ ----
+     ตารางนี้กว้างขั้นต่ำ 38rem (แก้ราคา 58rem) บนจอ 390px จึงต้องปัดแนวนอนตลอดเวลา
+     ซึ่งแปลว่าเห็นทีละ 2 ระดับพนักงาน และพอปัดไปดู PN/RN ก็ไม่เห็นแล้วว่าแถวนี้คือรูปแบบไหน
+     ทำเป็นการ์ด: ชื่อรูปแบบเป็นหัวการ์ด ระดับพนักงานเรียงเป็นไทล์ 2×2 อยู่ในจอเดียวครบทั้งสี่
+
+     ป้าย CG/NA/PN/RN มาจาก data-tier ของแต่ละช่อง (หัวตารางถูกซ่อนไปแล้ว)
+     พร้อมสีประจำระดับชุดเดียวกับหัวคอลัมน์บนจอกว้าง — คนที่ชินกับแถบสีบนคอมจะอ่านการ์ดออกทันที */
+  .table-wrap:has(> .rate-table) { overflow-x: visible; }
+  .rate-table,
+  .rate-table.is-editing {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    font-size: 0.8125rem;
+    background: none;
+    border: none;
+  }
+  /* colgroup/หัวตารางเป็นของ "โหมดตาราง" ล้วนๆ — ความกว้างคอลัมน์ไม่มีความหมายในการ์ด */
+  .rate-table colgroup, .rate-table thead { display: none; }
+  .rate-table tbody { display: block; }
+
+  /* แถว = กลุ่มไทล์หนึ่งชุด ไม่มีกรอบของตัวเอง — กรอบสีขาวมาจากการ์ดของกลุ่มเรทที่ครอบอยู่แล้ว
+     ใส่กรอบซ้อนกรอบจะได้กล่องขาวในกล่องขาว ซึ่งอ่านเป็นชั้นข้อมูลที่ไม่มีอยู่จริง */
+  .rate-table tbody tr {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.375rem;
+    margin-bottom: 1.125rem;   /* ระยะห่างคือสิ่งเดียวที่แยกรูปแบบบริการออกจากกัน */
+  }
+  .rate-table tbody tr:last-child { margin-bottom: 0; }
+  /* พื้นเปลี่ยนตอน hover ไม่มีความหมายบนจอสัมผัส — ค้างสีไว้บนแถวที่นิ้วเพิ่งแตะเฉยๆ */
+  .rate-table tbody tr:hover { background: none; }
+
+  /* ชื่อรูปแบบบริการ = หัวของแถว กินเต็มความกว้าง มีเส้นคั่นก่อนถึงราคา */
+  .rate-table tbody td.rate-format {
+    grid-column: 1 / -1;
+    height: auto;
+    padding: 0 0 0.4375rem;
+    font-size: 0.9375rem;
+    border-bottom: 1px solid var(--divider);
+  }
+
+  /* ราคาของหนึ่งระดับพนักงาน = ไทล์หนึ่งใบ */
+  .rate-table tbody td[data-tier] {
+    height: auto;
+    padding: 0.4375rem 0.375rem 0.5rem;
+    text-align: center;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+  }
+  .rate-table tbody td[data-tier]::before {
+    content: attr(data-tier);
+    display: block;
+    width: fit-content;
+    margin: 0 auto 0.3125rem;
+    padding: 0 0.5rem;
+    font-size: 0.6875rem;
+    font-weight: 700;
+    line-height: 1.5;
+    color: #fff;
+    background: var(--tier-color);
+    border-radius: 62.4375rem;
+  }
+  .rate-table tbody td[data-tier='CG'] { --tier-color: var(--tier-CG); }
+  .rate-table tbody td[data-tier='NA'] { --tier-color: var(--tier-NA); }
+  .rate-table tbody td[data-tier='PN'] { --tier-color: var(--tier-PN); }
+  .rate-table tbody td[data-tier='RN'] { --tier-color: var(--tier-RN); }
+  /* ช่องที่ให้บริการไม่ได้ต้องยังดูจมกว่าช่องที่มีราคา — ไทล์สีเดียวกันหมดจะแยกไม่ออก */
+  .rate-table tbody td.rate-off { background: var(--divider); }
+
+  /* โหมดแก้ราคา: ไทล์ครึ่งจอใส่ช่องกรอกสามช่องไม่ไหว (เหลือช่องละ ~70px)
+     ให้แต่ละระดับกินเต็มบรรทัด ป้ายชื่อระดับย้ายไปอยู่ซ้าย ช่องกรอกได้ความกว้างที่เหลือทั้งหมด */
+  .rate-table.is-editing tbody td[data-tier] {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: 2.5rem 1fr;
+    gap: 0.5rem;
+    align-items: center;
+    text-align: left;
+  }
+  .rate-table.is-editing tbody td[data-tier]::before { margin: 0; }
+  /* นิ้วกดช่องกรอกสูง 20px ไม่ไหว — สเกลเดียวกับ .btn.tiny ของจอสัมผัสด้านบน */
+  .rate-table.is-editing .rate-edit-row input { padding: 0.4375rem 0.5rem; }
 }
 
 /* ---------- ปฏิทินตารางงาน ---------- */
@@ -1972,6 +2168,9 @@ select option:checked {
    เพราะพื้นสีอ่อนจะชนกับสีสถานะของ chip (เขียวอ่อน = กำลังให้บริการ) จน chip กลืนหายไป */
 .cal-cell.is-today { box-shadow: inset 0 0 0 2px var(--brand); }
 .cal-date { font-size: 0.75rem; font-weight: 700; color: var(--muted); }
+/* ของโหมดรายการ (มือถือ) ล้วนๆ — ในตารางเดือนมีหัวคอลัมน์วันและวันข้างๆ ให้เทียบอยู่แล้ว
+   เอามาแสดงด้วยจะกลายเป็นคำว่า "ไม่มีงาน" เต็มปฏิทินและวันที่ยาวจนช่องแตก */
+.cal-date-full, .cal-today-tag, .cal-empty-day { display: none; }
 .cal-cell.is-today .cal-date {
   align-self: flex-start;
   min-width: 1.25rem;
@@ -2126,7 +2325,31 @@ select option:checked {
   /* งานหนึ่งชิ้น = เป้ากดหลักของทั้งหน้าสำหรับพนักงานภาคสนาม สูง 24px เตี้ยเกินกว่าจะกดแม่น */
   .cal-chip { font-size: 0.8125rem; white-space: normal; padding: 0.5625rem 0.5rem; }
   /* หัววันกดเพื่อดูงานทั้งวัน — เดิมสูงเท่าตัวอักษร 16px พอดี ไม่มีพื้นที่เผื่อนิ้วเลย */
-  .cal-date-btn { padding: 0.5rem 0; }
+  .cal-date-btn { padding: 0.25rem 0 0.375rem; }
+
+  /* ---- หัวการ์ดของหนึ่งวันในโหมดรายการ: [พฤ. 13 ส.ค.] [วันนี้] ......... [จำนวนกะ] ----
+     เลขวันเดี่ยวๆ ใช้ไม่ได้ที่นี่ ไม่มีหัวคอลัมน์วันในสัปดาห์และไม่มีวันข้างๆ ให้เทียบแล้ว */
+  .cal-date { display: none; }
+  .cal-date-full { display: inline; font-size: 0.875rem; font-weight: 700; }
+  .cal-cell.is-today .cal-date-full { color: var(--brand); }
+  /* ป้าย "วันนี้" แทนวงกลมรอบตัวเลข — margin-right: auto ดันจำนวนกะไปชิดขวาสุด */
+  .cal-today-tag {
+    display: inline-block;
+    margin-right: auto;
+    padding: 0.0625rem 0.4375rem;
+    font-size: 0.6875rem;
+    font-weight: 700;
+    color: var(--brand-ink);
+    background: var(--brand);
+    border-radius: 62.4375rem;
+  }
+  /* วันว่าง (มีได้แค่ "วันนี้") — บอกตรงๆ ว่าไม่มีงาน ดีกว่าปล่อยเป็นกล่องเปล่าที่ดูเหมือนโหลดไม่เสร็จ
+     กรอบทองของ .is-today เตะตาอยู่แล้ว เนื้อในจึงไม่ต้องแย่งความสนใจ */
+  .cal-empty-day { display: block; margin: 0; font-size: 0.8125rem; color: var(--text-faint); }
+
+  /* แถบ "ไม่มีกะในช่วงนี้" กับการ์ดของวันนี้ที่ตามมาเป็นเรื่องเดียวกัน — ต้องมีระยะคั่นให้เห็นว่าคนละกล่อง
+     แต่ไม่ห่างจนอ่านเป็นสองเรื่อง (.notice ตั้ง margin: 0 ไว้ ปริยายจึงติดกันสนิท) */
+  .notice + .table-wrap:has(> .cal-grid) { display: block; margin-top: 0.625rem; }
 }
 
 /* แถบเตือนว่าใบไม่ตรงกับเคสแล้ว — มีปุ่มจัดการอยู่ในตัว จะได้ไม่ต้องเลื่อนไปหาที่ท้าย popup */
@@ -2371,6 +2594,22 @@ select option:checked {
   font-size: 0.75rem;
 }
 
+/* แถวเดียวกันแต่ยืนเดี่ยวในหน้าการมาทำงาน — ข้างบนเป็นข้อความอธิบาย ข้างล่างเป็นการ์ดกะใบแรก
+   ทั้งสองอย่างไม่มีระยะของตัวเอง ปุ่มจึงถูกบีบอยู่ตรงกลางเหมือนเป็นส่วนหนึ่งของข้อความ
+   ต้องมีที่หายใจทั้งบนและล่างถึงจะอ่านออกว่าเป็นเครื่องมือของรายการที่อยู่ใต้มัน */
+.att-presets { margin: 1rem 0 0.75rem; gap: 0.625rem; }
+
+/* ฟอร์มลงเวลาย้อนหลัง — ข้อความนำกับบรรทัดสรุปต้องแยกตัวออกจากช่องกรอก
+   (ทั้งสองเป็น p ที่ .muted/.notice ตั้ง margin: 0 ไว้ ปริยายจึงชนกับช่องกรอกพอดี) */
+.timefix-hint { margin-bottom: 0.875rem; }
+.timefix-sum { margin-top: 0.875rem; }
+
+/* ปุ่มเลือกชั่วโมง/นาทีในฟอร์มนี้กว้างกว่าที่หน้าลงกะ — ที่นั่นมันต่อท้ายชิปเวลาในแถวเดียว
+   ที่นี่มันเป็นช่องกรอกของฟอร์ม จึงควรมีขนาดใกล้เคียงช่องกรอกอื่นที่อยู่ในกล่องเดียวกัน */
+.timefix-times .time-select { margin-top: 0.3125rem; }
+.timefix-times .picker { flex: 1; }
+.timefix-times .picker-btn { width: 100%; justify-content: space-between; padding: 0.5rem 0.625rem; font-size: 0.9375rem; }
+
 /* แถบร่าง — โผล่เมื่อเลือกวันแล้ว ทำให้ตอนยังไม่เลือกอะไร ปฏิทินได้พื้นที่เต็ม */
 .pick-bar {
   margin-top: 0.625rem;
@@ -2412,14 +2651,16 @@ select option:checked {
 .picker-caret { width: 0.875rem; height: 0.875rem; color: var(--muted); }
 
 /* หัวใจของเรื่องนี้: สูงเท่าที่เรากำหนด (~6 บรรทัด) แล้วเลื่อนดูที่เหลือในตัวเอง
-   ไม่ใช่กางยาวเท่าจำนวนรายการเหมือน <select> ของเบราว์เซอร์ */
+   ไม่ใช่กางยาวเท่าจำนวนรายการเหมือน <select> ของเบราว์เซอร์
+
+   fixed + วาดที่ <body> (ดู TimeSelect.jsx) — ตำแหน่ง/ความสูงมาจาก inline style ที่คำนวณจากปุ่ม
+   ถ้าเป็น absolute ในตัวเอง กล่อง popup ที่เนื้อในเลื่อนได้จะตัดรายการเหลือสองบรรทัด
+
+   z-index ต้องสูงกว่า popup (60) เพราะไม่ได้อยู่ในชั้นซ้อนของ popup อีกแล้ว
+   แต่ต่ำกว่า toast (100) ซึ่งเป็นตัวยืนยันผลของสิ่งที่เพิ่งทำ ต้องอยู่บนสุดเสมอ */
 .picker-list {
-  position: absolute;
-  top: calc(100% + 0.25rem);
-  left: 0;
-  z-index: 30;
-  min-width: 100%;
-  max-height: 11rem;
+  position: fixed;
+  z-index: 80;
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: 0.1875rem;
@@ -2428,8 +2669,6 @@ select option:checked {
   border-radius: var(--radius);
   box-shadow: 0 0.5rem 1.25rem rgb(0 0 0 / 18%);
 }
-/* ที่ว่างข้างล่างไม่พอ (แถบเลือกเวลาอยู่ติดขอบล่างจอบนมือถือ) — พลิกไปกางขึ้นบนแทน */
-.picker.is-up .picker-list { top: auto; bottom: calc(100% + 0.25rem); }
 
 .picker-list button {
   display: block;
@@ -2636,6 +2875,37 @@ select option:checked {
 /* แพ็คเกจที่ปิดขาย ยังอยู่ในตารางเพื่อเก็บราคาไว้ แต่ต้องดูออกทันทีว่าไม่ได้ขายแล้ว */
 .physio-table .is-inactive { opacity: 0.55; }
 .muted-badge { background: var(--divider); color: var(--muted); margin-left: 0.4rem; }
+
+/* ---- มือถือ: ตารางแพ็คเกจกลายเป็นการ์ด (โครง .table-cards ร่วมกับหน้ารายการอื่น) ----
+   ต้องอยู่หลังกฎ .physio-* ข้างบน และหลังบล็อก .table-cards กลาง — ทั้งสองชุดมี specificity เท่ากันหรือสูงกว่า */
+@media (max-width: 600px) {
+  /* ชื่อแพ็คเกจ = ชื่อของการ์ด (บทบาทเดียวกับรหัส CASE-xxxx ในหน้ารายการอื่น)
+     ไม่ต้องมีป้ายกำกับ "แพ็กเกจ" — บรรทัดบนสุดของการ์ดบอกตัวเองอยู่แล้วว่าคืออะไร */
+  .table.table-cards tbody td.physio-name {
+    order: -20;
+    flex: 1 1 100%;
+    padding: 0;
+    font-size: 0.9375rem;
+    text-align: left;
+  }
+  .table-cards tbody td.physio-name::before { content: none; }
+  /* เส้นคั่นใต้ชื่อ — ก่อนบล็อกตัวเลข (order ปริยาย 0) */
+  .table-cards tbody tr:has(> td.physio-name)::after {
+    content: '';
+    order: -5;
+    flex: 0 0 100%;
+    height: 1px;
+    margin: 0.5rem 0 0.375rem;
+    background: var(--divider);
+  }
+  /* ไม่มีส่วนลด = ไม่มีราคาเต็มให้เทียบ บรรทัด "ราคาเต็ม —" จึงเป็นที่ว่างเปล่าๆ ในการ์ด */
+  .table.table-cards tbody td.physio-was.is-blank { display: none; }
+
+  /* ปุ่มจัดการ: ↑ ↓ เท่าที่จำเป็น ส่วน "แก้ไข/ลบ" หารความกว้างที่เหลือ
+     ให้ทุกปุ่ม flex: 1 เท่ากันจะได้ปุ่มลูกศรกว้างเท่าปุ่มลบ ทั้งที่ไอคอนเดียว */
+  .table-cards tbody td.physio-actions .btn { margin-left: 0; }
+  .table-cards tbody td.physio-actions .btn:nth-child(-n + 2) { flex: 0 0 auto; }
+}
 
 /* กล่องสรุปตัวเลขที่คำนวณให้ในฟอร์ม */
 .physio-preview {

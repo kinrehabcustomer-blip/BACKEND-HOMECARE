@@ -1,4 +1,5 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import LineIcon from './LineIcon.jsx';
 
 /**
@@ -19,30 +20,73 @@ const HOURS = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'));
 // ทีละ 5 นาที — ละเอียดพอสำหรับเวลานัด/เข้างาน แต่รายการสั้นพอกวาดตาหาได้
 const MINUTES = Array.from({ length: 12 }, (_, i) => String(i * 5).padStart(2, '0'));
 
+const GAP = 4;         // ระยะระหว่างปุ่มกับรายการ
+const WANT = 176;      // ความสูงที่อยากได้ (11rem ≈ 6 บรรทัด) — ย่อลงได้ถ้าที่ไม่พอ
+const LEAST = 96;      // เตี้ยกว่านี้เลือกไม่ไหว ยอมให้ล้นออกนอกที่ว่างดีกว่า
+
 /**
  * dropdown ขนาดเล็กที่คุมความสูงเองได้
- * เปิดขึ้นบนแทนถ้าที่ว่างข้างล่างไม่พอ — แถบเลือกเวลาอยู่ใกล้ขอบล่างจอบนมือถือ
- * ถ้าไม่พลิกด้าน รายการจะโผล่นอกกรอบที่เลื่อนได้แล้วโดนตัดหายไปครึ่งหนึ่ง
+ *
+ * รายการวาดที่ <body> ด้วย position: fixed ไม่ใช่วางซ้อนในตัวมันเอง
+ * เพราะช่องเลือกเวลาถูกใช้ในกล่อง popup ที่เนื้อในเลื่อนได้ (overflow-y: auto)
+ * กล่องแบบนั้น "ตัด" ทุกอย่างที่ล้นออกนอกตัวเอง รายการจึงเหลือโผล่มาแค่สองบรรทัด
+ * พร้อมแถบเลื่อนของกล่องแม่ — และบนมือถือมันไปโผล่ทับหัว popup จนไม่เห็นว่าตั้งเวลาให้วันไหน
+ *
+ * เปิดขึ้นบนแทนถ้าที่ว่างข้างล่างไม่พอ — ช่องเลือกเวลามักอยู่ใกล้ขอบล่างจอบนมือถือ
  */
 function Picker({ value, options, onPick, disabled, label }) {
   const [open, setOpen] = useState(false);
-  const [dropUp, setDropUp] = useState(false);
+  const [pos, setPos] = useState(null);
   const boxRef = useRef(null);
   const listRef = useRef(null);
 
+  /* ตำแหน่งของรายการคิดจากตำแหน่งจริงของปุ่มบนหน้าจอ ณ ตอนนั้น
+     ต้องคิดใหม่ทุกครั้งที่มีอะไรเลื่อน (เนื้อใน popup เลื่อนได้) ไม่งั้นรายการค้างอยู่ที่เดิมขณะปุ่มเลื่อนหนีไป */
+  const place = useCallback(() => {
+    const r = boxRef.current?.getBoundingClientRect();
+    if (!r) return;
+    const below = window.innerHeight - r.bottom - GAP;
+    const above = r.top - GAP;
+    const up = below < WANT && above > below;
+    setPos({
+      left: r.left,
+      width: r.width,
+      maxHeight: Math.max(LEAST, Math.min(WANT, up ? above : below)),
+      ...(up ? { bottom: window.innerHeight - r.top + GAP } : { top: r.bottom + GAP }),
+    });
+  }, []);
+
   useLayoutEffect(() => {
-    if (!open) return;
-    const rect = boxRef.current?.getBoundingClientRect();
-    if (rect) setDropUp(window.innerHeight - rect.bottom < 200 && rect.top > 200);
-    // เลื่อนให้ค่าที่เลือกอยู่มาอยู่กลางรายการ ไม่ใช่ให้ผู้ใช้ไล่หาเองทุกครั้งที่เปิด
-    listRef.current?.querySelector('.is-on')?.scrollIntoView({ block: 'center' });
-  }, [open]);
+    if (open) place();
+  }, [open, place]);
+
+  /* เลื่อนให้ค่าที่เลือกอยู่เห็นได้ ไม่ใช่ให้ไล่หาเองทุกครั้งที่เปิด (เลือก 20:00 ไว้ ต้องไม่เปิดมาเจอ 00)
+     ต้องรอให้รายการถูกวาดจริงก่อน — จังหวะที่กดเปิด ตำแหน่งยังคำนวณไม่เสร็จ รายการจึงยังไม่มีตัวตน
+     ทำครั้งเดียวต่อการเปิดหนึ่งครั้ง: pos เปลี่ยนทุกครั้งที่มีอะไรเลื่อน ถ้าไม่กันไว้
+     รายการจะดีดกลับไปที่ค่าที่เลือกทุกครั้งที่ผู้ใช้กำลังเลื่อนหาเลขอื่นอยู่
+     block: 'nearest' — 'center' จะสั่งให้กล่องแม่ทุกชั้นเลื่อนตามด้วย หน้าจอข้างหลังเลยกระโดด */
+  const scrolledRef = useRef(false);
+  useLayoutEffect(() => {
+    if (!open) {
+      scrolledRef.current = false;
+      return;
+    }
+    if (!pos || scrolledRef.current) return;
+    scrolledRef.current = true;
+    listRef.current?.querySelector('.is-on')?.scrollIntoView({ block: 'nearest' });
+  }, [open, pos]);
 
   useEffect(() => {
     if (!open) return undefined;
 
+    // capture — ต้องรู้ทุกการเลื่อน รวมถึงในกล่องที่เลื่อนได้ข้างใน ซึ่ง scroll ไม่ลอยขึ้นมาถึง document
+    window.addEventListener('scroll', place, true);
+    window.addEventListener('resize', place);
+
     const onDown = (e) => {
-      if (!boxRef.current?.contains(e.target)) setOpen(false);
+      // รายการอยู่นอก .picker แล้ว (วาดที่ body) ต้องยกเว้นให้ด้วย
+      // ไม่งั้นแตะตัวเลือกจะถูกนับเป็น "แตะข้างนอก" แล้วรายการปิดไปก่อนที่ click จะทำงาน = เลือกไม่ได้เลย
+      if (!boxRef.current?.contains(e.target) && !listRef.current?.contains(e.target)) setOpen(false);
     };
     /* Esc ต้องปิดแค่รายการนี้ ไม่ใช่ปิด popup ที่ครอบอยู่ไปด้วย
        ดักช่วง capture แล้วหยุดส่งต่อ — ตัวจัดการของ popup แม่ผูกไว้ที่ document ช่วง bubble */
@@ -55,13 +99,15 @@ function Picker({ value, options, onPick, disabled, label }) {
     document.addEventListener('pointerdown', onDown);
     document.addEventListener('keydown', onKey, true);
     return () => {
+      window.removeEventListener('scroll', place, true);
+      window.removeEventListener('resize', place);
       document.removeEventListener('pointerdown', onDown);
       document.removeEventListener('keydown', onKey, true);
     };
-  }, [open]);
+  }, [open, place]);
 
   return (
-    <span className={`picker ${dropUp ? 'is-up' : ''}`} ref={boxRef}>
+    <span className="picker" ref={boxRef}>
       <button
         type="button"
         className="picker-btn"
@@ -75,26 +121,28 @@ function Picker({ value, options, onPick, disabled, label }) {
         <LineIcon name="chevron" className="picker-caret" />
       </button>
 
-      {open && (
-        // ตัวเลือกต้องเป็นลูกโดยตรงของ listbox — ห่อด้วย <li> อีกชั้นแล้วโปรแกรมอ่านหน้าจอจะจับคู่ไม่ติด
-        <div className="picker-list" role="listbox" aria-label={label} ref={listRef}>
-          {options.map((o) => (
-            <button
-              key={o}
-              type="button"
-              role="option"
-              aria-selected={o === value}
-              className={o === value ? 'is-on' : ''}
-              onClick={() => {
-                onPick(o);
-                setOpen(false);
-              }}
-            >
-              {o}
-            </button>
-          ))}
-        </div>
-      )}
+      {open && pos &&
+        createPortal(
+          // ตัวเลือกต้องเป็นลูกโดยตรงของ listbox — ห่อด้วย <li> อีกชั้นแล้วโปรแกรมอ่านหน้าจอจะจับคู่ไม่ติด
+          <div className="picker-list" role="listbox" aria-label={label} ref={listRef} style={pos}>
+            {options.map((o) => (
+              <button
+                key={o}
+                type="button"
+                role="option"
+                aria-selected={o === value}
+                className={o === value ? 'is-on' : ''}
+                onClick={() => {
+                  onPick(o);
+                  setOpen(false);
+                }}
+              >
+                {o}
+              </button>
+            ))}
+          </div>,
+          document.body,
+        )}
     </span>
   );
 }

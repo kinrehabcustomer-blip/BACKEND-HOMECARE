@@ -10,6 +10,9 @@ import {
   formatDate, formatPeriod, toBuddhistYear,
 } from '../labels.js';
 
+/** สถานะเคสตามลำดับการทำงานจริง: รอจับคู่ → จับคู่แล้ว → กำลังให้บริการ → ปิดเคส */
+const STATUSES = ['unassigned', 'assigned', 'in_progress', 'closed'];
+
 /** ตัวเลขสรุปหนึ่งช่อง — จุดสีคู่กับป้ายข้อความเสมอ ไม่ใช้สีสื่อความหมายเพียงอย่างเดียว */
 function StatTile({ label, value, share, status, to }) {
   return (
@@ -19,7 +22,12 @@ function StatTile({ label, value, share, status, to }) {
         {label}
       </span>
       <span className="tile-value">{value}</span>
-      <span className="tile-share">{share}</span>
+      {/* "ของทั้งหมด" ถูกซ่อนบนจอแคบ (ดู index.css) — ที่นั่นมีแถบสัดส่วนอยู่เหนือช่องพวกนี้แล้ว
+          บอกว่าเทียบกับอะไร ส่วนบนจอกว้างไม่มีแถบ ข้อความเต็มจึงยังต้องมี */}
+      <span className="tile-share">
+        {share}
+        {share !== '—' && <span className="tile-of"> ของทั้งหมด</span>}
+      </span>
     </Link>
   );
 }
@@ -81,7 +89,7 @@ export default function DashboardPage() {
 
   const count = (status) => summary?.by_status.find((s) => s.status === status)?.count ?? 0;
   const total = summary?.total ?? 0;
-  const pct = (n) => (total === 0 ? '—' : `${Math.round((n / total) * 100)}% ของทั้งหมด`);
+  const pct = (n) => (total === 0 ? '—' : `${Math.round((n / total) * 100)}%`);
 
   // เรียงมากไปน้อย ประเภทที่ยังไม่มีเคสเลยไม่ต้องแสดง (กราฟเรียงซ้ำอีกชั้นเผื่อถูกเรียกจากที่อื่น)
   const byType = summary ? [...summary.by_type].sort((a, b) => b.count - a.count) : [];
@@ -151,37 +159,37 @@ export default function DashboardPage() {
                 {!year ? 'เคสทั้งหมด' : month ? 'เคสในเดือนนี้' : 'เคสในปีนี้'}
               </span>
               <span className="hero-value">{total.toLocaleString('th-TH')}</span>
+
+              {/* แถบสัดส่วนสถานะ — บอก "งานกองอยู่ตรงไหน" ในบรรทัดเดียว โดยไม่ต้องไล่อ่าน % ทีละช่อง
+                  ขึ้นเฉพาะจอแคบ (ดู index.css): ที่นั่นช่องตัวเลขเรียงเป็น 2×2 ซึ่งเทียบขนาดกันด้วยตาไม่ได้
+                  ส่วนจอกว้างช่องทั้งสี่เรียงเป็นแถวเดียวเทียบกันได้อยู่แล้ว และคอลัมน์นี้แคบเกินกว่าจะอ่านแถบออก
+
+                  aria-hidden — เป็นภาพแทนตัวเลขชุดเดียวกับที่อยู่ในช่องด้านล่าง ไม่ใช่ข้อมูลใหม่
+                  ปล่อยไว้โปรแกรมอ่านหน้าจอจะอ่านสัดส่วนซ้ำอีกรอบโดยไม่ได้ความหมายเพิ่ม */}
+              <div className="share-bar" aria-hidden="true">
+                {STATUSES.map((s) =>
+                  count(s) > 0 ? (
+                    <span
+                      key={s}
+                      className={`share-seg case-${s}`}
+                      style={{ width: `${(count(s) / total) * 100}%` }}
+                    />
+                  ) : null,
+                )}
+              </div>
             </div>
 
             <div className="tiles">
-              <StatTile
-                label={CASE_STATUS_LABELS.unassigned}
-                value={count('unassigned').toLocaleString('th-TH')}
-                share={pct(count('unassigned'))}
-                status="unassigned"
-                to={linkTo('unassigned')}
-              />
-              <StatTile
-                label={CASE_STATUS_LABELS.assigned}
-                value={count('assigned').toLocaleString('th-TH')}
-                share={pct(count('assigned'))}
-                status="assigned"
-                to={linkTo('assigned')}
-              />
-              <StatTile
-                label={CASE_STATUS_LABELS.in_progress}
-                value={count('in_progress').toLocaleString('th-TH')}
-                share={pct(count('in_progress'))}
-                status="in_progress"
-                to={linkTo('in_progress')}
-              />
-              <StatTile
-                label={CASE_STATUS_LABELS.closed}
-                value={count('closed').toLocaleString('th-TH')}
-                share={pct(count('closed'))}
-                status="closed"
-                to={linkTo('closed')}
-              />
+              {STATUSES.map((s) => (
+                <StatTile
+                  key={s}
+                  label={CASE_STATUS_LABELS[s]}
+                  value={count(s).toLocaleString('th-TH')}
+                  share={pct(count(s))}
+                  status={s}
+                  to={linkTo(s)}
+                />
+              ))}
             </div>
           </section>
 

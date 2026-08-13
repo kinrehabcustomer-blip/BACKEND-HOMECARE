@@ -113,8 +113,11 @@ export default function PhysioPackagesPage() {
 
       {error && <p className="error">{error}</p>}
 
+      {/* table-cards: จอมือถือเลิกเป็นตาราง กลายเป็นการ์ดใบละแพ็คเกจ
+          ตารางนี้มี 6 คอลัมน์ที่เป็นตัวเลขเกือบทั้งหมด บนจอ 390px ต้องปัดแนวนอนไปอ่านทีละคอลัมน์
+          ซึ่งทำให้เทียบ "ราคาสุทธิ vs ตกเฉลี่ย" ของแพ็คเกจเดียวกันไม่ได้เลย ทั้งที่เป็นสองเลขที่ใช้ตัดสินใจ */}
       <div className="table-wrap">
-        <table className="table physio-table">
+        <table className="table physio-table table-cards">
           <thead>
             <tr>
               <th>แพ็กเกจ</th>
@@ -134,11 +137,13 @@ export default function PhysioPackagesPage() {
                   {!p.active && <span className="badge muted-badge">ปิดขาย</span>}
                   <span className="cell-sub">{detailLine(p)}</span>
                 </td>
-                {/* ขีดฆ่าราคาเต็มเฉพาะตอนมีส่วนลดจริง — ไม่งั้นจะขีดฆ่าเลขเดียวกับราคาสุทธิ ดูสับสน */}
-                <td className="physio-was">
+                {/* ขีดฆ่าราคาเต็มเฉพาะตอนมีส่วนลดจริง — ไม่งั้นจะขีดฆ่าเลขเดียวกับราคาสุทธิ ดูสับสน
+                    is-blank บอก CSS ว่าช่องนี้ไม่มีเนื้อหาจริง — ในโหมดการ์ดจะถูกซ่อนไปเลย
+                    บรรทัด "ราคาเต็ม —" กินที่หนึ่งบรรทัดในการ์ดโดยไม่ได้บอกอะไร */}
+                <td className={`physio-was${p.discount > 0 ? '' : ' is-blank'}`} data-label="ราคาเต็ม">
                   {p.discount > 0 ? <s>{formatBaht(p.original_price)}</s> : <span className="muted">—</span>}
                 </td>
-                <td className="physio-special">
+                <td className="physio-special" data-label="ราคาสุทธิ">
                   {formatBaht(p.special_price)}
                   {p.discount > 0 && (
                     <span className="cell-sub">
@@ -149,7 +154,7 @@ export default function PhysioPackagesPage() {
                 {/* ตกเฉลี่ยต่อครั้ง — server คิดให้จาก ราคาสุทธิ ÷ จำนวนครั้ง (ดู withComputed)
                     ช่องนี้เคยหายไปทั้งที่หัวตารางมีคอลัมน์อยู่ ทำให้ทุกช่องเลื่อนซ้ายหนึ่งช่อง
                     ค่าจ้างพนักงานไปโผล่ใต้หัว "ตกเฉลี่ย" และคอลัมน์ "จัดการ" ว่างเปล่า */}
-                <td className="physio-avg">
+                <td className="physio-avg" data-label="ตกเฉลี่ย">
                   {p.avg_per_session == null
                     ? <span className="muted">—</span>
                     : <>{formatBaht(p.avg_per_session)}<span className="cell-sub">ต่อครั้ง</span></>}
@@ -157,7 +162,7 @@ export default function PhysioPackagesPage() {
 
                 {/* ช่องที่ยังไม่ตั้งต้องเห็นชัด — ไม่มีค่าจ้าง = เคสสายกายภาพคำนวณค่าตอบแทนให้พนักงานไม่ได้เลย */}
                 {seePay && (
-                  <td className="physio-pay">
+                  <td className="physio-pay" data-label="ค่าจ้างพนักงาน">
                     {p.staff_pay == null ? (
                       <span className="pay-missing">ยังไม่ตั้ง</span>
                     ) : (
@@ -168,7 +173,8 @@ export default function PhysioPackagesPage() {
                     )}
                   </td>
                 )}
-                <td className="physio-actions">
+                {/* row-actions = คลาสร่วมของโหมดการ์ด — ปุ่มกินเต็มความกว้างการ์ด กดด้วยนิ้วได้ */}
+                <td className="physio-actions row-actions">
                   <button className="btn tiny" title="เลื่อนขึ้น" disabled={i === 0} onClick={() => move(i, -1)}><LineIcon name="arrow-up" /></button>
                   <button className="btn tiny" title="เลื่อนลง" disabled={i === items.length - 1} onClick={() => move(i, 1)}><LineIcon name="arrow-down" /></button>
                   <button className="btn tiny" onClick={() => setEditing(p)}>แก้ไข</button>
