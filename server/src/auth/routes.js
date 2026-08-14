@@ -4,7 +4,9 @@ import { z } from 'zod';
 import { sql } from '../db/index.js';
 import { ApiError, asyncRoute } from '../lib/errors.js';
 import {
+  BLOCKED_STATUSES,
   COOKIE_NAME,
+  clearCookieOptions,
   cookieOptions,
   hashPassword,
   requireAuth,
@@ -45,7 +47,7 @@ const changeSchema = z.object({
 });
 
 // พนักงานที่ลาออกหรือถูกพักงานเข้าระบบไม่ได้ แม้รหัสผ่านจะถูก
-const BLOCKED_STATUSES = { resigned: 'บัญชีนี้ลาออกแล้ว', suspended: 'บัญชีนี้ถูกพักงานอยู่' };
+// นิยามอยู่ที่ lib/auth.js เพราะ requireAuth ใช้ตัวเดียวกันตรวจทุก request หลัง login ด้วย
 
 authRouter.post(
   '/login',
@@ -65,7 +67,7 @@ authRouter.post(
     if (blocked) throw new ApiError(403, `${blocked} — ติดต่อผู้ดูแลระบบ`);
 
     await sql.run(
-      `UPDATE employees SET last_login_at = to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD HH24:MI:SS')
+      `UPDATE employees SET last_login_at = to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')
        WHERE employee_id = :id`,
       { id: employee.employee_id },
     );
@@ -76,7 +78,7 @@ authRouter.post(
 );
 
 authRouter.post('/logout', (req, res) => {
-  res.clearCookie(COOKIE_NAME, cookieOptions);
+  res.clearCookie(COOKIE_NAME, clearCookieOptions);
   res.status(204).end();
 });
 
@@ -91,7 +93,7 @@ authRouter.get(
 
     // บัญชีอาจถูกลบหรือให้ลาออกไปหลังจากออก token — เช็คซ้ำทุกครั้ง ไม่เชื่อ token อย่างเดียว
     if (!employee || BLOCKED_STATUSES[employee.status]) {
-      res.clearCookie(COOKIE_NAME, cookieOptions);
+      res.clearCookie(COOKIE_NAME, clearCookieOptions);
       throw new ApiError(401, 'บัญชีนี้ใช้งานไม่ได้แล้ว');
     }
 
@@ -192,7 +194,7 @@ authRouter.post(
     await sql.run('UPDATE password_reset_otps SET used_at = now() WHERE otp_id = :otp', { otp: otp.otp_id });
 
     // ตั้งรหัสใหม่แล้วให้ login ใหม่เอง — เซสชันเก่าที่ค้างอยู่ (ถ้ามี) จะไม่ถูกใช้ต่อ
-    res.clearCookie(COOKIE_NAME, cookieOptions);
+    res.clearCookie(COOKIE_NAME, clearCookieOptions);
     res.json({ message: 'ตั้งรหัสผ่านใหม่เรียบร้อย กรุณาเข้าสู่ระบบด้วยรหัสผ่านใหม่' });
   }),
 );

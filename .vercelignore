@@ -1,0 +1,3 @@
+# ชุดทดสอบไม่ถูก import จากที่ไหนใน production (จุดเข้าคือ api/index.js -> server/src/app.js)
+# ตัดออกตั้งแต่ตอนอัปโหลด จะได้ไม่มีไฟล์ที่ไม่ได้ใช้ปนอยู่ใน deployment
+server/test

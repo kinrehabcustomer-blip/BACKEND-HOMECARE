@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
+import { useCanSeeStaffPay } from '../auth.jsx';
 import { useToast } from '../toast.jsx';
 import {
   POSITION_LABELS, VISIT_STATE_LABELS, MONTH_LABELS, formatBaht, formatDate, timeText, toBuddhistYear,
@@ -62,6 +63,8 @@ function dayClass(list) {
  */
 export default function CaseVisits({ caseId, target = null, readOnly = false, mode = 'shift' }) {
   const toast = useToast();
+  // ค่าจ้างรายกะเห็น/แก้ได้เฉพาะผู้จัดการ เหมือนค่าจ้างของเคส (server ตัดฟิลด์ให้อยู่แล้ว)
+  const seePay = useCanSeeStaffPay();
   const isAppt = mode === 'appointment';
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
@@ -465,7 +468,7 @@ export default function CaseVisits({ caseId, target = null, readOnly = false, mo
                 <span className={`badge visit-${v.state}`}>{VISIT_STATE_LABELS[v.state]}</span>
                 {/* ค่าจ้างของกะนี้ — ว่างไว้ = เกลี่ยจากยอดเคส (ตัวเลขที่เกลี่ยได้โชว์เป็น placeholder)
                     กรอกทับได้เมื่อกะนั้นตกลงกันเป็นพิเศษ เช่น ไปครึ่งวัน หรือค่าเดินทางเพิ่ม */}
-                {readOnly ? (
+                {!seePay ? null : readOnly ? (
                   v.effective_pay != null && <span className="visit-pay muted">{formatBaht(v.effective_pay)}</span>
                 ) : (
                   <input

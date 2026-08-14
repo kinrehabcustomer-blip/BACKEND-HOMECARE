@@ -24,9 +24,10 @@ CREATE TABLE IF NOT EXISTS employees (
   emergency_contact_phone TEXT,
   note                    TEXT,
 
-  -- เก็บเป็น TEXT รูปแบบ 'YYYY-MM-DD HH:MM:SS' (UTC) ให้ JSON ที่ส่งออกหน้าตาเหมือนเดิมกับตอนใช้ SQLite
-  created_at              TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD HH24:MI:SS'),
-  updated_at              TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD HH24:MI:SS')
+  -- เก็บเป็น TEXT รูปแบบ 'YYYY-MM-DD HH:MM:SS' (เวลาไทย) ให้ JSON ที่ส่งออกหน้าตาเหมือนเดิมกับตอนใช้ SQLite
+  -- เดิมเก็บเป็น UTC ซึ่งเหลื่อมกับระบบเช็คอินที่ใช้เวลาไทย — ดูบล็อกท้ายไฟล์
+  created_at              TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS'),
+  updated_at              TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')
 );
 
 CREATE INDEX IF NOT EXISTS idx_employees_status   ON employees (status);
@@ -47,7 +48,7 @@ CREATE TABLE IF NOT EXISTS employee_certificates (
   issuer         TEXT,
   issued_date    TEXT,
   expiry_date    TEXT,
-  created_at     TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD HH24:MI:SS')
+  created_at     TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')
 );
 
 CREATE INDEX IF NOT EXISTS idx_certificates_employee ON employee_certificates (employee_id);
@@ -74,7 +75,7 @@ CREATE TABLE IF NOT EXISTS employee_portfolio (
   image_data   BYTEA NOT NULL,   -- ผลงานต้องมีรูปเสมอ ไม่งั้นไม่มีอะไรให้ดู
   image_mime   TEXT NOT NULL,
   image_size   INTEGER NOT NULL,
-  created_at   TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD HH24:MI:SS')
+  created_at   TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')
 );
 
 CREATE INDEX IF NOT EXISTS idx_portfolio_employee ON employee_portfolio (employee_id);
@@ -103,8 +104,8 @@ CREATE TABLE IF NOT EXISTS customers (
   address          TEXT,
   note             TEXT,
 
-  created_at       TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD HH24:MI:SS'),
-  updated_at       TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD HH24:MI:SS')
+  created_at       TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS'),
+  updated_at       TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')
 );
 
 CREATE INDEX IF NOT EXISTS idx_customers_name ON customers (name);
@@ -203,8 +204,8 @@ CREATE TABLE IF NOT EXISTS patients (
   status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
   note   TEXT,
 
-  created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD HH24:MI:SS'),
-  updated_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD HH24:MI:SS')
+  created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS'),
+  updated_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')
 );
 
 CREATE INDEX IF NOT EXISTS idx_patients_customer ON patients (customer_id);
@@ -261,8 +262,8 @@ CREATE TABLE IF NOT EXISTS cases (
   end_date      TEXT,
   note          TEXT,
 
-  created_at    TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD HH24:MI:SS'),
-  updated_at    TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD HH24:MI:SS'),
+  created_at    TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS'),
+  updated_at    TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS'),
 
   -- กันข้อมูลขัดแย้งกันเองในระดับฐานข้อมูล: สถานะที่ยัง "ทำงานอยู่" ต้องสอดคล้องกับการมีพนักงาน
   -- 'จับคู่แล้ว'/'กำลังให้บริการ' ต้องมีพนักงาน, 'ยังไม่จับคู่' ต้องไม่มี
@@ -342,8 +343,8 @@ CREATE TABLE IF NOT EXISTS case_visits (
   status     TEXT NOT NULL DEFAULT 'scheduled' CHECK (status IN ('scheduled', 'done', 'cancelled')),
   note       TEXT,
 
-  created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD HH24:MI:SS'),
-  updated_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD HH24:MI:SS')
+  created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS'),
+  updated_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')
 );
 
 CREATE INDEX IF NOT EXISTS idx_case_visits_case ON case_visits (case_id);
@@ -392,8 +393,8 @@ CREATE TABLE IF NOT EXISTS invoices (
   payment_method  TEXT,
   note            TEXT,
 
-  created_at      TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD HH24:MI:SS'),
-  updated_at      TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD HH24:MI:SS')
+  created_at      TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS'),
+  updated_at      TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')
 );
 
 -- พนักงานที่ทำธุรกรรม — เก็บทั้งรหัส (ไว้ทำรายงาน) และชื่อ ณ ตอนนั้น (ไว้พิมพ์ลงเอกสาร)
@@ -437,8 +438,8 @@ CREATE TABLE IF NOT EXISTS pkg_grades (
   name        TEXT NOT NULL,
   description TEXT,
   sort_order  INTEGER NOT NULL DEFAULT 0,
-  created_at  TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD HH24:MI:SS'),
-  updated_at  TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD HH24:MI:SS')
+  created_at  TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS'),
+  updated_at  TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')
 );
 
 -- รูปแบบบริการ — เช่น 'รายวัน 12 ชม.', 'รายเดือน 24 ชม. ไม่มีวันหยุด'
@@ -449,8 +450,8 @@ CREATE TABLE IF NOT EXISTS pkg_service_formats (
   category    TEXT NOT NULL DEFAULT 'monthly' CHECK (category IN ('daily', 'weekly', 'monthly')),
   graded      BOOLEAN NOT NULL DEFAULT TRUE,
   sort_order  INTEGER NOT NULL DEFAULT 0,
-  created_at  TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD HH24:MI:SS'),
-  updated_at  TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD HH24:MI:SS')
+  created_at  TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS'),
+  updated_at  TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')
 );
 
 -- ราคาแต่ละช่องของตาราง: (รูปแบบ, เกรด, ระดับพนักงาน) -> ค่าบริการ + ค่าตอบแทน
@@ -465,8 +466,8 @@ CREATE TABLE IF NOT EXISTS pkg_rates (
   customer_price DOUBLE PRECISION CHECK (customer_price >= 0),
   staff_pay      DOUBLE PRECISION CHECK (staff_pay >= 0),
   available      BOOLEAN NOT NULL DEFAULT TRUE,
-  created_at     TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD HH24:MI:SS'),
-  updated_at     TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD HH24:MI:SS')
+  created_at     TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS'),
+  updated_at     TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')
 );
 
 -- หนึ่งช่องต่อหนึ่ง (รูปแบบ, เกรด, ระดับ) — แยก 2 index เพราะ NULL ใน UNIQUE ปกติไม่ชนกัน
@@ -510,8 +511,8 @@ CREATE TABLE IF NOT EXISTS physio_packages (
   active            BOOLEAN NOT NULL DEFAULT TRUE,
   note              TEXT,
   sort_order        INTEGER NOT NULL DEFAULT 0,
-  created_at        TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD HH24:MI:SS'),
-  updated_at        TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD HH24:MI:SS')
+  created_at        TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS'),
+  updated_at        TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')
 );
 
 -- ---------- ส่วนลดของแพ็คเกจ (ทั้งสองสายใช้กติกาเดียวกัน) ----------
@@ -688,7 +689,7 @@ CREATE TABLE IF NOT EXISTS case_events (
   actor_id   TEXT REFERENCES employees (employee_id) ON DELETE SET NULL ON UPDATE CASCADE,
   actor_name TEXT,
 
-  created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD HH24:MI:SS')
+  created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')
 );
 
 CREATE INDEX IF NOT EXISTS idx_case_events_case ON case_events (case_id, event_id);
@@ -723,7 +724,7 @@ CREATE TABLE IF NOT EXISTS invoice_items (
   quantity    DOUBLE PRECISION NOT NULL DEFAULT 1 CHECK (quantity >= 0),
   unit_price  DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK (unit_price >= 0),
   amount      DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK (amount >= 0),
-  created_at  TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD HH24:MI:SS')
+  created_at  TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')
 );
 
 CREATE INDEX IF NOT EXISTS idx_invoice_items_invoice ON invoice_items (invoice_id, seq);
@@ -752,3 +753,44 @@ ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS pay_note         TEXT;  -- เ�
 -- คิวรออนุมัติถูกเปิดดูบ่อย (ทุกวัน) และโตขึ้นเรื่อยๆ ตามจำนวนกะ — index เฉพาะแถวที่ยังค้าง
 CREATE INDEX IF NOT EXISTS idx_case_visits_pending
   ON case_visits (checked_in_by, visit_date) WHERE pay_status = 'pending';
+
+-- ============================================================================
+-- เวลาที่บันทึกเปลี่ยนจาก UTC เป็นเวลาไทย
+--
+-- created_at/updated_at ทั้งระบบเคยเก็บเป็น UTC ขณะที่ระบบเช็คอิน/สรุปค่าตอบแทน
+-- ใช้ Asia/Bangkok มาตั้งแต่ต้น สองเส้นแบ่งวันจึงเหลื่อมกันอยู่ 7 ชั่วโมง
+-- ผลคือทุกอย่างที่เกิดระหว่างเที่ยงคืนถึงตีเจ็ดตามเวลาไทย ถูกลงวันที่/เดือนเป็นของก่อนหน้า
+--   · เปิดเคสตีสองของวันที่ 1 ส.ค. -> created_at เป็น 31 ก.ค. -> หายจากรายงานเดือน ส.ค.
+--     (ตัวกรองช่วงเวลาเทียบ prefix ของ created_at ตรงๆ ดู periodFilter ใน cases/repo.js)
+--   · ออกใบแจ้งหนี้/รับชำระตอนกลางดึก -> ลงวันที่เป็นเมื่อวาน
+--
+-- CREATE TABLE ด้านบนถูกแก้ไปแล้ว แต่มีผลเฉพาะฐานข้อมูลที่สร้างใหม่
+-- ฐานเดิมยังถือ DEFAULT เก่าอยู่ จึงต้อง SET DEFAULT ทับตรงนี้ (รันซ้ำได้ ไม่มีผลข้างเคียง)
+--
+-- แถวเดิมไม่ถูกแก้ย้อนหลังโดยตั้งใจ — เป็นการเขียนทับประวัติที่ตรวจสอบไม่ได้ว่าถูกจริงไหม
+-- ข้อมูลก่อนวันรันคำสั่งนี้จึงยังเป็น UTC อยู่ (เหลื่อมได้ 1 วันเฉพาะรายการที่ทำตอนกลางดึก)
+-- ============================================================================
+DO $$
+DECLARE
+  t text;
+  c text;
+BEGIN
+  FOREACH t IN ARRAY ARRAY[
+    'employees', 'employee_certificates', 'employee_portfolio',
+    'customers', 'patients', 'cases', 'case_visits', 'case_events',
+    'invoices', 'invoice_items',
+    'pkg_grades', 'pkg_service_formats', 'pkg_rates', 'physio_packages'
+  ] LOOP
+    FOREACH c IN ARRAY ARRAY['created_at', 'updated_at'] LOOP
+      IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = t AND column_name = c AND data_type = 'text'
+      ) THEN
+        EXECUTE format(
+          'ALTER TABLE %I ALTER COLUMN %I SET DEFAULT to_char(now() AT TIME ZONE ''Asia/Bangkok'', ''YYYY-MM-DD HH24:MI:SS'')',
+          t, c
+        );
+      END IF;
+    END LOOP;
+  END LOOP;
+END $$;

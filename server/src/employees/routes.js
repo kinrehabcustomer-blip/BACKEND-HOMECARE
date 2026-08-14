@@ -15,6 +15,7 @@ import {
   STATUSES,
 } from './schema.js';
 import { ApiError, asyncRoute, notFound } from '../lib/errors.js';
+import { canSeeStaffPay } from '../lib/auth.js';
 
 export const employeesRouter = Router();
 
@@ -64,6 +65,7 @@ employeesRouter.post(
   '/',
   asyncRoute(async (req, res) => {
     const input = createEmployeeSchema.parse(req.body);
+    ensureCanGrantManager(req, input.position);
     const employee = await repo.create(input);
     res.status(201).json(employee);
   }),
@@ -76,10 +78,54 @@ employeesRouter.get(
   }),
 );
 
+/**
+ * สิทธิ์ในระบบคิดจาก "ตำแหน่ง" (ดู roleForPosition/canSeeStaffPay) — ช่อง position จึงไม่ใช่ข้อมูลธรรมดา
+ * มันคือปุ่มเลื่อนสิทธิ์ และหน้าพนักงานเปิดให้ทั้งผู้จัดการและ HR เข้าถึงเท่ากัน
+ *
+ * ไม่มีตัวกันไว้เลย HR มีทางขึ้นเป็นผู้จัดการสองทางซึ่งง่ายพอกัน:
+ *   1. PATCH ใส่รหัสตัวเองเป็น 'manager' แล้วได้สิทธิ์ทันทีในคำขอถัดไป (requireAuth อ่านตำแหน่งสด)
+ *   2. POST สร้างพนักงานใหม่ตำแหน่ง 'manager' — รหัสผ่านเริ่มต้นคือรหัสพนักงานซึ่งโชว์อยู่ในตาราง
+ *      แล้ว login เป็นบัญชีนั้นได้เลย (ทางนี้ไม่ต้องแตะบัญชีตัวเองด้วยซ้ำ)
+ * ปิดทางเดียวไม่พอ ต้องปิดที่ "ใครมีสิทธิ์แต่งตั้งผู้จัดการ" ซึ่งคือผู้จัดการเท่านั้น
+ */
+export function ensureCanGrantManager(req, nextPosition) {
+  if (nextPosition === 'manager' && !canSeeStaffPay(req.user.position)) {
+    throw new ApiError(403, 'เฉพาะผู้จัดการเท่านั้นที่ตั้งตำแหน่งผู้จัดการให้คนอื่นได้');
+  }
+}
+
+/** กันเลื่อนตำแหน่งตัวเอง และกันลดผู้จัดการคนสุดท้ายจนไม่เหลือใครดูแลระบบ */
+export async function ensurePositionChangeAllowed(req, target, nextPosition) {
+  if (nextPosition == null || nextPosition === target.position) return;
+
+  if (target.employee_id === req.user.employee_id) {
+    throw new ApiError(403, 'เปลี่ยนตำแหน่งของตัวเองไม่ได้ — ต้องให้ผู้จัดการคนอื่นเป็นคนแก้ให้');
+  }
+  ensureCanGrantManager(req, nextPosition);
+
+  if (target.position === 'manager' && (await repo.activeManagerCount(target.employee_id)) === 0) {
+    throw new ApiError(409, 'นี่คือผู้จัดการคนสุดท้ายที่ใช้งานได้ — ตั้งผู้จัดการคนใหม่ก่อนจึงจะลดตำแหน่งคนนี้ได้');
+  }
+}
+
+/** ลาออก/ลบผู้จัดการคนสุดท้ายก็ทำให้ไม่เหลือใครดูแลระบบเหมือนกัน — ใช้เกณฑ์เดียวกัน */
+export async function ensureRemovable(target) {
+  if (target.position === 'manager' && (await repo.activeManagerCount(target.employee_id)) === 0) {
+    throw new ApiError(409, 'นี่คือผู้จัดการคนสุดท้ายที่ใช้งานได้ — ตั้งผู้จัดการคนใหม่ก่อนจึงจะนำคนนี้ออกได้');
+  }
+}
+
 employeesRouter.patch(
   '/:id',
   asyncRoute(async (req, res) => {
     const input = updateEmployeeSchema.parse(req.body);
+    await ensurePositionChangeAllowed(req, req.employee, input.position);
+
+    // ปิดบัญชีตัวเอง (ลาออก/พักงาน) แล้วเด้งตัวเองออกทันทีเป็นอุบัติเหตุที่กู้เองไม่ได้
+    if (req.employee.employee_id === req.user.employee_id && input.status && input.status !== req.employee.status) {
+      throw new ApiError(403, 'เปลี่ยนสถานะของตัวเองไม่ได้ — ต้องให้ผู้จัดการคนอื่นเป็นคนแก้ให้');
+    }
+
     res.json(await repo.update(req.params.id, input));
   }),
 );
@@ -88,6 +134,11 @@ employeesRouter.patch(
 employeesRouter.delete(
   '/:id',
   asyncRoute(async (req, res) => {
+    if (req.employee.employee_id === req.user.employee_id) {
+      throw new ApiError(403, 'นำบัญชีของตัวเองออกจากระบบไม่ได้');
+    }
+    await ensureRemovable(req.employee);
+
     if (req.query.hard === 'true') {
       await repo.remove(req.params.id);
       return res.status(204).end();

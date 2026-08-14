@@ -25,7 +25,7 @@ const COLUMNS = [
   'note',
 ];
 
-const NOW = `to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD HH24:MI:SS')`;
+const NOW = `to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')`;
 
 // คอลัมน์ที่ส่งออก API ได้ — เขียนชื่อทีละตัวแทน SELECT * เพื่อไม่ให้ password_hash หลุดออกไปหน้าเว็บ
 // photo_data ก็ไม่อยู่ในนี้ด้วยเหตุผลเดียวกับรูปใบรับรอง: ไบนารีรูปจะทำให้ทุก response อ้วนขึ้นหลายร้อย KB
@@ -174,6 +174,24 @@ export async function remove(employeeId) {
     const changes = await tx.run('DELETE FROM employees WHERE employee_id = :id', { id: employeeId });
     return changes > 0;
   });
+}
+
+/**
+ * จำนวนผู้จัดการที่ยังใช้งานระบบได้ — ใช้กันไม่ให้เหลือศูนย์
+ *
+ * ผู้จัดการเป็นตำแหน่งเดียวที่เห็นต้นทุน/กำไรและตั้งค่าจ้างได้ (ดู canSeeStaffPay)
+ * ถ้าลดตำแหน่ง/ลาออก/ลบจนหมด จะไม่มีใครกู้กลับมาได้เลยนอกจากแก้ที่ฐานข้อมูลตรงๆ
+ * นับเกณฑ์เดียวกับที่ใช้กันไม่ให้ login (BLOCKED_STATUSES) — คนที่พักงานอยู่ไม่นับว่าใช้ได้
+ */
+export async function activeManagerCount(excludeId = null) {
+  const row = await sql.one(
+    `SELECT COUNT(*) AS n FROM employees
+     WHERE position = 'manager'
+       AND status NOT IN ('resigned', 'suspended')
+       AND (:exclude::text IS NULL OR employee_id <> :exclude)`,
+    { exclude: excludeId },
+  );
+  return Number(row.n);
 }
 
 export async function summary() {

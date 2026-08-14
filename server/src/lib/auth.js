@@ -56,40 +56,70 @@ export const cookieOptions = {
   path: '/',
 };
 
-/** ทุก request ที่ผ่าน middleware นี้ต้องมี session ที่ยังไม่หมดอายุ */
+/**
+ * ตัวเลือกสำหรับ "ลบ" คุกกี้ — ต้องไม่มี maxAge
+ * express เตือน deprecated ถ้าส่ง maxAge เข้า clearCookie (v5 จะเมินค่านี้ทิ้ง)
+ * ที่เหลือต้องตรงกับตอนตั้งคุกกี้เป๊ะ ไม่งั้นเบราว์เซอร์จะไม่ถือว่าเป็นคุกกี้ใบเดียวกันแล้วลบไม่ออก
+ */
+export const { maxAge: _maxAge, ...clearCookieOptions } = cookieOptions;
+
+/**
+ * สถานะที่ใช้ระบบไม่ได้ — ตรวจทั้งตอน login และทุก request หลังจากนั้น
+ * อยู่ที่นี่ไม่ใช่ที่ auth/routes.js เพราะ middleware ต้องใช้ตัวเดียวกัน ไม่งั้นสองที่หลุดจากกันได้
+ */
+export const BLOCKED_STATUSES = { resigned: 'บัญชีนี้ลาออกแล้ว', suspended: 'บัญชีนี้ถูกพักงานอยู่' };
+
+/**
+ * ทุก request ที่ผ่าน middleware นี้ต้องมี session ที่ยังไม่หมดอายุ "และบัญชียังใช้งานได้อยู่"
+ *
+ * ไม่เชื่อ token อย่างเดียว เพราะ token อายุ 8 ชม. — พนักงานที่เพิ่งถูกกดลาออก/พักงาน
+ * จะยังยิง API ได้ต่อไปอีกเกือบทั้งกะถ้าคุกกี้ยังอยู่ในเครื่อง (รวมถึงเช็คอิน–เช็คเอาท์)
+ * เดิมมีแค่ /auth/me ที่ตรวจ ซึ่งกันได้แค่ตอนเปิดหน้าเว็บใหม่ ไม่ได้กันที่ API จริง
+ *
+ * ตำแหน่งที่อ่านมาถูกเก็บไว้ใน req.user ให้ requireAdmin กับสิทธิ์ย่อย (canSeeStaffPay) ใช้ต่อ
+ * จึงเหลือ query เดียวต่อ request เท่าเดิม ไม่ใช่สองครั้ง
+ */
 export function requireAuth(req, res, next) {
   const token = req.cookies?.[COOKIE_NAME];
   if (!token) return next(new ApiError(401, 'กรุณาเข้าสู่ระบบ'));
 
+  let payload;
   try {
-    const payload = jwt.verify(token, SECRET);
-    req.user = { employee_id: payload.sub, role: payload.role, name: payload.name };
-    next();
+    payload = jwt.verify(token, SECRET);
   } catch {
     // token หมดอายุหรือถูกแก้ไข — ล้างคุกกี้ทิ้งเพื่อไม่ให้เบราว์เซอร์ส่งของเสียมาซ้ำๆ
-    res.clearCookie(COOKIE_NAME, cookieOptions);
-    next(new ApiError(401, 'เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่'));
+    res.clearCookie(COOKIE_NAME, clearCookieOptions);
+    return next(new ApiError(401, 'เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่'));
   }
+
+  sql
+    .one('SELECT position, status FROM employees WHERE employee_id = :id', { id: payload.sub })
+    .then((emp) => {
+      if (!emp || BLOCKED_STATUSES[emp.status]) {
+        res.clearCookie(COOKIE_NAME, clearCookieOptions);
+        return next(new ApiError(401, emp ? `${BLOCKED_STATUSES[emp.status]} — ติดต่อผู้ดูแลระบบ` : 'บัญชีนี้ใช้งานไม่ได้แล้ว'));
+      }
+
+      req.user = {
+        employee_id: payload.sub,
+        name: payload.name,
+        // ตำแหน่ง/สิทธิ์อ่านสดจาก DB ไม่ใช่จาก token — เลื่อนหรือลดตำแหน่งแล้วมีผลทันที
+        position: emp.position,
+        role: roleForPosition(emp.position),
+      };
+      next();
+    })
+    .catch(next);
 }
 
 /**
  * เฉพาะผู้ดูแลระบบ (ตำแหน่งผู้จัดการ/HR) — วางต่อจาก requireAuth เสมอ (ต้องมี req.user ก่อน)
- *
- * เช็ค "ตำแหน่งสดจาก DB" ไม่เชื่อ role ใน token เพราะ token อายุ 8 ชม. อาจถือค่าเก่าอยู่
- * (เช่น เพิ่งเลื่อนตำแหน่งเป็นผู้จัดการ หรือกลับกันเพิ่งถูกลด) — เช็คสดจึงถูกเสมอและมีผลทันที
+ * ตำแหน่งถูกอ่านสดมาแล้วใน requireAuth จึงไม่ต้อง query ซ้ำที่นี่
  */
 export function requireAdmin(req, res, next) {
-  sql
-    .one('SELECT position FROM employees WHERE employee_id = :id', { id: req.user?.employee_id })
-    .then((emp) => {
-      if (!emp) return next(new ApiError(401, 'บัญชีนี้ใช้งานไม่ได้แล้ว'));
-      if (roleForPosition(emp.position) !== 'admin') {
-        return next(new ApiError(403, 'เฉพาะผู้จัดการหรือ HR เท่านั้นที่เข้าถึงส่วนนี้ได้'));
-      }
-      // เก็บตำแหน่งสดที่เพิ่งอ่านมาไว้ให้เส้นที่ต้องแยกสิทธิ์ย่อย (เช่น เห็นค่าจ้าง/กำไรไหม)
-      // ใช้ต่อได้เลยโดยไม่ต้อง query ซ้ำ และเป็นค่าสดเสมอเหมือนกับที่ใช้ตัดสิน admin
-      req.user.position = emp.position;
-      next();
-    })
-    .catch(next);
+  if (!req.user) return next(new ApiError(401, 'กรุณาเข้าสู่ระบบ'));
+  if (roleForPosition(req.user.position) !== 'admin') {
+    return next(new ApiError(403, 'เฉพาะผู้จัดการหรือ HR เท่านั้นที่เข้าถึงส่วนนี้ได้'));
+  }
+  next();
 }

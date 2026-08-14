@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api.js';
+import { useCanSeeStaffPay } from '../auth.jsx';
 import { useToast } from '../toast.jsx';
 import { useSheetSwipe } from '../lib/sheetSwipe.js';
 import { useScrollLock } from '../lib/scrollLock.js';
@@ -110,6 +111,9 @@ function QuickEdit({ item, onDone, onCancel }) {
 }
 
 export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, onChanged }) {
+  // ค่าจ้างพนักงานเห็นเฉพาะผู้จัดการ เหมือนหน้าแพ็คเกจและหน้าเปิดเคส
+  // (server ตัดฟิลด์ออกจาก payload ให้อยู่แล้ว ตรงนี้แค่ไม่วาดช่องเปล่าค้างไว้)
+  const seePay = useCanSeeStaffPay();
   const boxRef = useRef(null);
   // จอแคบ: ปัดลงเพื่อปิด — ใช้ ref เดียวกับ focus trap เพราะ element เดียวแปะสอง ref ไม่ได้
   useSheetSwipe(onClose, boxRef);
@@ -417,8 +421,10 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                     />
                   )}
                   <Field label="ค่าบริการที่ได้รับ" value={item.fee != null && formatBaht(item.fee)} />
-                  {/* ยอดที่พนักงานจะเห็นเป็นรายได้ของตัวเองเมื่อปิดเคส — ต้องเห็นก่อนกดปิด */}
-                  <Field label="ค่าจ้างพนักงาน" value={item.staff_pay != null && formatBaht(item.staff_pay)} />
+                  {/* ยอดที่พนักงานจะเห็นเป็นรายได้ของตัวเองเมื่อปิดเคส — ต้องเห็นก่อนกดปิด (เฉพาะผู้จัดการ) */}
+                  {seePay && (
+                    <Field label="ค่าจ้างพนักงาน" value={item.staff_pay != null && formatBaht(item.staff_pay)} />
+                  )}
                   <Field label="วันเริ่ม" value={item.start_date && formatDate(item.start_date)} />
                   <Field label="วันสิ้นสุด" value={item.end_date && formatDate(item.end_date)} />
                   {item.started_at && (
@@ -465,15 +471,19 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                   <div className="visit-summary approve-row">
                     <p className="muted">
                       <strong>รออนุมัติค่าจ้าง {pendingPay.length} กะ</strong>
+                      {/* ยอดรวมมาจากค่าจ้างรายกะ ซึ่งคนที่ไม่ใช่ผู้จัดการไม่ได้รับมาด้วย
+                          ถ้าโชว์ต่อจะกลายเป็น "รวม ฿0" ซึ่งอ่านแล้วเข้าใจผิดว่าไม่มีเงินต้องอนุมัติ */}
                       <span className="cell-sub">
-                        รวม {formatBaht(pendingPayTotal)} — พนักงานจะยังไม่เห็นยอดนี้จนกว่าจะอนุมัติ
+                        {seePay && `รวม ${formatBaht(pendingPayTotal)} — `}
+                        พนักงานจะยังไม่เห็นยอดนี้จนกว่าจะอนุมัติ
                       </span>
                     </p>
                     <button
                       className="btn primary"
                       disabled={busy}
                       onClick={() => {
-                        if (!confirm(`อนุมัติค่าจ้าง ${pendingPay.length} กะ รวม ${formatBaht(pendingPayTotal)}?`)) return;
+                        const total = seePay ? ` รวม ${formatBaht(pendingPayTotal)}` : '';
+                        if (!confirm(`อนุมัติค่าจ้าง ${pendingPay.length} กะ${total}?`)) return;
                         run(async () => {
                           const { changed } = await api.approveCasePay(item.case_id);
                           toast(`อนุมัติค่าจ้าง ${changed} กะแล้ว`);
@@ -744,10 +754,14 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                   className={`btn ${status === 'in_progress' ? 'primary' : ''}`}
                   disabled={busy}
                   onClick={() => {
-                    // ปิดเคส = ตรึงค่าจ้างของกะที่ทำไปแล้ว — บอกให้รู้ตัวก่อนกด
-                    const pay = item.staff_pay != null
-                      ? `\nค่าจ้างของกะที่ทำไปแล้วจะถูกตรึงตามยอดเคส ${formatBaht(item.staff_pay)}`
-                      : '\nเคสนี้ยังไม่ได้ระบุค่าจ้างพนักงาน — กะที่ทำไปแล้วจะยังไม่มียอด';
+                    /* ปิดเคส = ตรึงค่าจ้างของกะที่ทำไปแล้ว — บอกให้รู้ตัวก่อนกด
+                       คนที่ไม่เห็นค่าจ้างไม่มีตัวเลขมาให้เทียบ (server ตัดออกจาก payload)
+                       จึงบอกแค่ว่าเกิดอะไรขึ้น ไม่ใช่ทึกทักว่า "ยังไม่ได้ระบุค่าจ้าง" ทั้งที่อาจระบุไว้แล้ว */
+                    const pay = !seePay
+                      ? '\nค่าจ้างของกะที่ทำไปแล้วจะถูกตรึงตามยอดของเคส'
+                      : item.staff_pay != null
+                        ? `\nค่าจ้างของกะที่ทำไปแล้วจะถูกตรึงตามยอดเคส ${formatBaht(item.staff_pay)}`
+                        : '\nเคสนี้ยังไม่ได้ระบุค่าจ้างพนักงาน — กะที่ทำไปแล้วจะยังไม่มียอด';
 
                     /* ของค้างที่ต้องบอกก่อนปิด (server กันซ้ำอีกชั้นด้วย force)
                        กะที่ยังไม่ถึงวันจะถูกยกเลิก ส่วนกะที่ค้างเช็คเอาท์จะไม่มีชั่วโมง/ค่าจ้างเลย */

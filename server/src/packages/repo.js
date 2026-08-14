@@ -1,6 +1,6 @@
 import { sql, transaction } from '../db/index.js';
 
-const NOW = `to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD HH24:MI:SS')`;
+const NOW = `to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')`;
 
 // เปอร์เซ็นต์ที่คำนวณตอนอ่าน ไม่เก็บซ้ำใน DB — ต้องมีทั้งค่าบริการ (>0) และค่าตอบแทนจึงจะคำนวณได้ ไม่งั้นเป็น null
 //   margin      = ส่วนต่างที่บริษัทได้    = (ค่าบริการ - ค่าตอบแทน) / ค่าบริการ * 100

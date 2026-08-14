@@ -47,7 +47,7 @@ async function collect() {
   const sections = [
     {
       key: 'unstaffed',
-      title: 'กะวันนี้ที่ยังไม่มีคนไป',
+      title: 'กะวันนี้ที่ยังไม่มีคนรับ',
       lines: unstaffed.map((v) => `${esc(v.planned_start ?? 'ไม่ระบุเวลา')} · ${esc(v.client_name)} (${esc(v.case_id)})`),
     },
     {

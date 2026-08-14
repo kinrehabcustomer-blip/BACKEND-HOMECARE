@@ -67,8 +67,15 @@ export function errorHandler(err, req, res, next) {
    * คุ้มกว่าการปิดเงียบมาก (ไม่ส่ง stack เพราะยาวและไม่ช่วยคนหน้างาน)
    */
   console.error(`[${req.method} ${req.originalUrl}]`, err);
+
+  /* ข้อความดิบส่งให้เฉพาะผู้ดูแลระบบ (ผู้จัดการ/HR) ซึ่งเป็นคนที่ส่งต่อให้คนแก้ได้จริง
+     พนักงานภาคสนามเอาไปทำอะไรไม่ได้อยู่แล้ว และข้อความมักมีชื่อคอลัมน์/constraint ติดมาด้วย
+     — ไม่ใช่ความลับ แต่ก็ไม่มีเหตุผลจะยิงโครงสร้างฐานข้อมูลไปลงมือถือทุกเครื่องในทีม */
+  const forAdmin = req.user?.role === 'admin';
   return res.status(500).json({
     error: 'เกิดข้อผิดพลาดภายในระบบ',
-    technical: `${err?.name ?? 'Error'}: ${String(err?.message ?? '').slice(0, 300)}`,
+    ...(forAdmin
+      ? { technical: `${err?.name ?? 'Error'}: ${String(err?.message ?? '').slice(0, 300)}` }
+      : null),
   });
 }

@@ -40,7 +40,7 @@ const COLUMNS = [
   'note',
 ];
 
-const NOW = `to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD HH24:MI:SS')`;
+const NOW = `to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')`;
 
 export async function list({ q, customer_id, has_customer, status, page, per_page, sort, order }) {
   const where = [];

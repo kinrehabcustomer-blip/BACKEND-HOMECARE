@@ -27,6 +27,7 @@ import {
 } from './schema.js';
 import { geocode, reverseGeocode, searchPlaces } from '../lib/geocode.js';
 import { resolveMapLink } from '../lib/maplink.js';
+import { canSeeStaffPay } from '../lib/auth.js';
 import { ApiError, asyncRoute, notFound } from '../lib/errors.js';
 
 export const casesRouter = Router();
@@ -37,6 +38,56 @@ const ASSIGNABLE_STATUSES = ['active', 'probation'];
 // สถานะปลายทาง — เคสจบไปแล้ว ต้องกด "เปิดเคสใหม่" ก่อนถึงจะจับคู่/เริ่ม/ยกเลิกได้อีก
 const TERMINAL_STATUSES = ['closed', 'cancelled'];
 const isTerminal = (caseRow) => TERMINAL_STATUSES.includes(caseRow.status);
+
+/**
+ * ตัดต้นทุน/ค่าจ้างออกจากเคสก่อนส่งให้คนที่ไม่ใช่ผู้จัดการ (HR เปิดเคสได้ แต่ไม่เห็นตัวเลขนี้)
+ *
+ * หน้าแพ็คเกจกับกายภาพตัดฟิลด์พวกนี้ที่ payload มาตั้งแต่แรก แต่เส้นของเคสไม่เคยตัด —
+ * SELECT ของเคสพ่วง staff_pay ของเรท/แพ็คเกจมาด้วย (ไว้เติมค่าจ้างให้อัตโนมัติฝั่ง server)
+ * HR จึงเห็นค่าจ้างครบทุกใบผ่าน GET /api/cases ทั้งที่หน้าจอตั้งใจซ่อนไว้
+ *
+ * ตัดที่ชั้น route ไม่ใช่ที่ repo เพราะ repo ถูกเรียกจากฝั่ง server ด้วยกันเอง
+ * (payFromService, syncOpenFromCase) ซึ่งต้องใช้ตัวเลขจริงเสมอไม่ว่าใครเป็นคนกดปุ่ม
+ */
+const PAY_FIELDS = ['staff_pay', 'rate_staff_pay', 'physio_staff_pay'];
+
+function visible(req, caseRow) {
+  if (!caseRow || canSeeStaffPay(req.user?.position)) return caseRow;
+  const shown = { ...caseRow };
+  for (const f of PAY_FIELDS) delete shown[f];
+  return shown;
+}
+
+const visibleList = (req, rows) => rows.map((row) => visible(req, row));
+
+/**
+ * ค่าจ้าง "รายกะ" ก็เป็นตัวเลขเดียวกัน — ต้องปิดทางเดียวกับค่าจ้างของเคส
+ * ตารางกะเปิดจากหน้าเคส และมีช่องกรอกค่าจ้างต่อกะอยู่ในนั้น ถ้าปิดแต่ระดับเคสก็ยังรั่วอยู่ดี
+ * effective_pay = ยอดที่เกลี่ยได้ (ใช้เป็น placeholder ในช่องกรอก) จึงต้องตัดคู่กันไป
+ */
+const VISIT_PAY_FIELDS = ['staff_pay', 'effective_pay'];
+
+function visibleVisits(req, visits) {
+  if (canSeeStaffPay(req.user?.position)) return visits;
+  return visits.map((v) => {
+    const shown = { ...v };
+    for (const f of VISIT_PAY_FIELDS) delete shown[f];
+    return shown;
+  });
+}
+
+/** ผลลัพธ์ของการลงกะ/ลบกะ ห่อรายการกะไว้ใน .visits พร้อมตัวนับ — ตัดค่าจ้างในรายการแต่คงตัวนับไว้ */
+const visibleVisitResult = (req, result) => ({ ...result, visits: visibleVisits(req, result.visits) });
+
+/**
+ * ค่าจ้างรายกะที่ส่งมาจากคนที่ไม่มีสิทธิ์เห็น ต้องไม่ถูกเขียนลงไป — ถอดคีย์ทิ้ง ของเดิมจึงอยู่ครบ
+ * (หน้าเว็บของคนกลุ่มนี้ไม่มีช่องให้กรอกอยู่แล้ว ค่าที่หลุดมาจึงเป็นค่าว่างที่จะไปล้างของเดิมทิ้ง)
+ */
+function guardVisitPay(req, input) {
+  if (canSeeStaffPay(req.user?.position)) return input;
+  const { staff_pay, ...rest } = input;
+  return rest;
+}
 
 /** โหลดเคสจาก case_id (PK) ก่อนทุก route ที่มี :id — ไม่มีก็ 404 ตั้งแต่ตรงนี้ */
 casesRouter.param('id', (req, res, next, id) => {
@@ -190,7 +241,8 @@ casesRouter.get(
   '/',
   asyncRoute(async (req, res) => {
     const query = listQuerySchema.parse(req.query);
-    res.json(await repo.list(query));
+    const page = await repo.list(query);
+    res.json({ ...page, data: visibleList(req, page.data) });
   }),
 );
 
@@ -200,11 +252,11 @@ casesRouter.post(
     const input = createCaseSchema.parse(req.body);
     if (input.assigned_to) await ensureAssignable(input.assigned_to);
 
-    res.status(201).json(await repo.create(input, req.user));
+    res.status(201).json(visible(req, await repo.create(input, req.user)));
   }),
 );
 
-casesRouter.get('/:id', (req, res) => res.json(req.case));
+casesRouter.get('/:id', (req, res) => res.json(visible(req, req.case)));
 
 /** ประวัติการทำรายการของเคส — ใครจับคู่/ปิด/ยกเลิก เมื่อไหร่ (ดู case_events) */
 casesRouter.get(
@@ -231,10 +283,11 @@ casesRouter.patch(
     const updated = await repo.update(req.params.id, input, req.user);
 
     // แก้เคสแล้วใบแจ้งหนี้ที่ยังแก้ได้ (ร่าง/ออกใบแล้ว) ต้องตามให้ทัน — ดู syncOpenFromCase
+    // ส่ง updated ตัวเต็มเข้าไป ไม่ใช่ตัวที่ตัดค่าจ้างแล้ว — การซิงก์ใบต้องใช้ราคาจริงเสมอ
     const customer = updated.customer_id ? await customers.findById(updated.customer_id) : null;
     await invoices.syncOpenFromCase(updated, customer);
 
-    res.json(updated);
+    res.json(visible(req, updated));
   }),
 );
 
@@ -249,7 +302,7 @@ casesRouter.post(
     }
     await ensureAssignable(employee_id);
 
-    res.json(await repo.assign(req.params.id, employee_id, req.user));
+    res.json(visible(req, await repo.assign(req.params.id, employee_id, req.user)));
   }),
 );
 
@@ -258,7 +311,7 @@ casesRouter.post(
   '/:id/unassign',
   asyncRoute(async (req, res) => {
     if (isTerminal(req.case)) throw new ApiError(409, 'เคสนี้จบไปแล้ว');
-    res.json(await repo.unassign(req.params.id, req.user));
+    res.json(visible(req, await repo.unassign(req.params.id, req.user)));
   }),
 );
 
@@ -270,7 +323,7 @@ casesRouter.post(
     if (req.case.status !== 'assigned') {
       throw new ApiError(409, 'ต้องจับคู่พนักงานให้เรียบร้อยก่อนจึงจะเริ่มให้บริการได้');
     }
-    res.json(await repo.start(req.params.id, req.user));
+    res.json(visible(req, await repo.start(req.params.id, req.user)));
   }),
 );
 
@@ -292,7 +345,7 @@ casesRouter.post(
       throw new ApiError(409, `เคสนี้ยังมีกะค้าง: ${parts.join(' · ')} — ยืนยันอีกครั้งถ้าต้องการปิด`, { pending });
     }
 
-    res.json(await repo.close(req.params.id, req.body?.end_date, req.user));
+    res.json(visible(req, await repo.close(req.params.id, req.body?.end_date, req.user)));
   }),
 );
 
@@ -302,7 +355,7 @@ casesRouter.post(
   asyncRoute(async (req, res) => {
     if (isTerminal(req.case)) throw new ApiError(409, 'เคสนี้จบไปแล้ว');
     const { reason } = cancelSchema.parse(req.body ?? {});
-    res.json(await repo.cancel(req.params.id, reason, req.user));
+    res.json(visible(req, await repo.cancel(req.params.id, reason, req.user)));
   }),
 );
 
@@ -310,13 +363,44 @@ casesRouter.post(
   '/:id/reopen',
   asyncRoute(async (req, res) => {
     if (!isTerminal(req.case)) throw new ApiError(409, 'เคสนี้ยังไม่ได้ปิดหรือยกเลิก');
-    res.json(await repo.reopen(req.params.id, req.user));
+    res.json(visible(req, await repo.reopen(req.params.id, req.user)));
   }),
 );
 
+/**
+ * ลบเคสถาวร — ของที่หายไปด้วยไม่ได้อยู่แค่ในตาราง cases
+ *
+ * case_visits เป็น ON DELETE CASCADE: เวลาเข้า–ออก รูปเซลฟี่ และค่าจ้างที่อนุมัติไปแล้วหายตามทั้งหมด
+ * ส่วนใบแจ้งหนี้เป็น SET NULL: ใบยังอยู่แต่ขาดต้นทาง กดรีเฟรชไม่ได้อีกเลย
+ * ทั้งสองอย่างเป็นหลักฐาน ไม่ใช่ข้อมูลชั่วคราว — ต้องให้คนกดรู้ตัวก่อน ไม่ใช่ลบเงียบๆ
+ *
+ * ใช้กติกาเดียวกับปิดเคส: เตือนพร้อมบอกว่าติดอะไรบ้าง แล้วยืนยันด้วย ?force=true ถ้ายังจะลบจริง
+ * (ปกติควรใช้ "ยกเลิกเคส" แทน — เคสยังอยู่เป็นประวัติและกะที่ทำไปแล้วยังนับค่าจ้างตามเดิม)
+ */
 casesRouter.delete(
   '/:id',
   asyncRoute(async (req, res) => {
+    if (req.query.force !== 'true') {
+      const [attended, bills] = await Promise.all([
+        repo.attendedVisitCount(req.params.id),
+        invoices.listForCase(req.params.id),
+      ]);
+      const live = bills.filter((b) => b.status !== 'cancelled');
+
+      const blockers = [
+        attended > 0 && `${attended} กะที่เช็คอินไปแล้ว (เวลาทำงาน รูปเช็คอิน และค่าจ้างจะหายไปด้วย)`,
+        live.length > 0 && `ใบแจ้งหนี้ ${live.length} ใบที่ผูกกับเคสนี้`,
+      ].filter(Boolean);
+
+      if (blockers.length > 0) {
+        throw new ApiError(
+          409,
+          `เคสนี้มีข้อมูลที่จะหายไปด้วย: ${blockers.join(' · ')} — แนะนำให้ "ยกเลิกเคส" แทน หรือยืนยันอีกครั้งถ้าต้องการลบจริง`,
+          { attended_visits: attended, invoices: live.length },
+        );
+      }
+    }
+
     await repo.remove(req.params.id);
     res.status(204).end();
   }),
@@ -324,16 +408,24 @@ casesRouter.delete(
 
 // ---------- วันนัดให้บริการของเคส (ลงตารางว่าจะไปวันไหนบ้าง) ----------
 
+/** เคสที่ปิด/ยกเลิกไปแล้วลงกะเพิ่มไม่ได้ — กะที่ลงไปจะไม่มีใครไปทำ และไปโผล่บนปฏิทินของพนักงาน */
+function ensureSchedulable(caseRow) {
+  if (isTerminal(caseRow)) {
+    throw new ApiError(409, 'เคสนี้จบไปแล้ว — ต้องเปิดเคสใหม่ก่อนจึงจะลงกะเพิ่มได้');
+  }
+}
+
 casesRouter.get(
   '/:id/visits',
-  asyncRoute(async (req, res) => res.json(await repo.listVisits(req.params.id))),
+  asyncRoute(async (req, res) => res.json(visibleVisits(req, await repo.listVisits(req.params.id)))),
 );
 
 casesRouter.post(
   '/:id/visits',
   asyncRoute(async (req, res) => {
-    const input = createVisitSchema.parse(req.body);
-    res.status(201).json(await repo.addVisit(req.params.id, input));
+    ensureSchedulable(req.case);
+    const input = guardVisitPay(req, createVisitSchema.parse(req.body));
+    res.status(201).json(visibleVisitResult(req, await repo.addVisit(req.params.id, input)));
   }),
 );
 
@@ -341,8 +433,9 @@ casesRouter.post(
 casesRouter.post(
   '/:id/visits/bulk',
   asyncRoute(async (req, res) => {
-    const input = bulkVisitSchema.parse(req.body);
-    res.status(201).json(await repo.addVisits(req.params.id, input.dates, input));
+    ensureSchedulable(req.case);
+    const input = guardVisitPay(req, bulkVisitSchema.parse(req.body));
+    res.status(201).json(visibleVisitResult(req, await repo.addVisits(req.params.id, input.dates, input)));
   }),
 );
 
@@ -367,22 +460,38 @@ casesRouter.delete(
       from: req.query.from,
       to: req.query.to,
     });
-    res.json(await repo.removeVisitsOn(req.params.id, dates));
+    res.json(visibleVisitResult(req, await repo.removeVisitsOn(req.params.id, dates)));
   }),
 );
 
 casesRouter.patch(
   '/:id/visits/:visitId',
   asyncRoute(async (req, res) => {
-    const input = updateVisitSchema.parse(req.body);
-    res.json(await repo.updateVisit(req.params.id, Number(req.params.visitId), input));
+    const input = guardVisitPay(req, updateVisitSchema.parse(req.body));
+    res.json(visibleVisits(req, await repo.updateVisit(req.params.id, Number(req.params.visitId), input)));
   }),
 );
 
+/**
+ * ลบกะทีละใบ — กะที่เช็คอินไปแล้วลบไม่ได้ (กติกาเดียวกับการลบเป็นช่วงใน removeVisitsOn)
+ * ถ้าลงเวลาผิดให้ใช้ /adjust แก้เวลา หรือเปลี่ยนสถานะกะเป็น "ยกเลิก" แทนการลบทิ้ง
+ */
 casesRouter.delete(
   '/:id/visits/:visitId',
   asyncRoute(async (req, res) => {
-    res.json(await repo.removeVisit(req.params.id, Number(req.params.visitId)));
+    const visitId = Number(req.params.visitId);
+    const deleted = await repo.removeVisit(req.params.id, visitId);
+
+    if (!deleted) {
+      const visit = await repo.findVisit(visitId);
+      if (!visit || visit.case_id !== req.params.id) throw notFound('ไม่พบกะนี้');
+      throw new ApiError(
+        409,
+        'กะนี้เช็คอินไปแล้ว ลบไม่ได้ — เป็นบันทึกการทำงานจริงและเป็นฐานค่าจ้าง (ถ้าลงผิดให้แก้เวลา หรือเปลี่ยนสถานะเป็นยกเลิก)',
+      );
+    }
+
+    res.json(visibleVisits(req, await repo.listVisits(req.params.id)));
   }),
 );
 
@@ -390,10 +499,27 @@ casesRouter.delete(
 casesRouter.patch(
   '/:id/visits/:visitId/adjust',
   asyncRoute(async (req, res) => {
+    const visitId = Number(req.params.visitId);
     const input = adjustVisitSchema.parse(req.body);
-    res.json(
-      await repo.adjustVisit(req.params.id, Number(req.params.visitId), input, req.user),
-    );
+
+    /* schema ตรวจได้เฉพาะตอนส่งเวลามาครบคู่ — ส่งมาช่องเดียว (เช่น ปิดกะค้างโดยลงแค่เวลาออก)
+       ต้องเทียบกับค่าที่มีอยู่จริง ไม่งั้นยังลงเวลาออกก่อนเวลาเข้าได้อยู่ดี
+       กะที่ทำงานติดลบจะไปหักชั่วโมงของกะอื่นในเดือนเดียวกัน เพราะสรุปค่าตอบแทนรวมเป็นก้อนเดียว */
+    const current = await repo.findVisit(visitId);
+    if (!current || current.case_id !== req.params.id) throw notFound('ไม่พบกะนี้');
+
+    const nextIn = 'check_in_at' in input ? input.check_in_at : current.check_in_at;
+    const nextOut = 'check_out_at' in input ? input.check_out_at : current.check_out_at;
+
+    /* new Date(x).getTime() ไม่ใช่ Date.parse(x) — ค่าที่มาจาก DB เป็น object Date อยู่แล้ว
+       ส่ง object เข้า Date.parse มันจะแปลงเป็นข้อความก่อน ซึ่งทิ้งมิลลิวินาที
+       เทียบข้ามชนิด (ของใหม่เป็นข้อความเต็มความละเอียด ของเดิมถูกปัด) จึงพลาดได้ในช่วงวินาทีเดียวกัน */
+    const ms = (t) => new Date(t).getTime();
+    if (nextIn && nextOut && ms(nextOut) <= ms(nextIn)) {
+      throw new ApiError(400, 'เวลาออกต้องมาหลังเวลาเข้า');
+    }
+
+    res.json(await repo.adjustVisit(req.params.id, visitId, input, req.user));
   }),
 );
 

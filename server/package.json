@@ -11,7 +11,9 @@
     "start": "node src/index.js",
     "migrate": "node src/db/migrate.js",
     "seed:packages": "node src/db/seed-packages.js",
-    "reset:data": "node src/db/reset.js"
+    "reset:data": "node src/db/reset.js",
+    "test": "node --test test/logic.test.js",
+    "test:api": "node --env-file=test/db-tests.env --test test/api.test.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

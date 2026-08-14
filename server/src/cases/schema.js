@@ -266,7 +266,15 @@ export const adjustVisitSchema = z
     status: z.enum(VISIT_STATUSES, { errorMap: () => ({ message: 'สถานะวันนัดไม่ถูกต้อง' }) }),
     location_flagged: z.boolean(),
   })
-  .partial();
+  .partial()
+  .superRefine((v, ctx) => {
+    /* เวลาออกต้องมาหลังเวลาเข้า — ไม่งั้นได้กะที่ทำงานติดลบ แล้วไปหักชั่วโมงของกะอื่น
+       ในสรุปค่าตอบแทน (SUM(check_out_at - check_in_at) ของทั้งเดือนรวมกันเป็นก้อนเดียว)
+       ตรวจได้ที่นี่เฉพาะตอนส่งมาครบคู่ — ส่งมาช่องเดียวต้องเทียบกับค่าที่มีอยู่ใน DB (ดู route) */
+    if (v.check_in_at && v.check_out_at && Date.parse(v.check_out_at) <= Date.parse(v.check_in_at)) {
+      ctx.addIssue({ code: 'custom', path: ['check_out_at'], message: 'เวลาออกต้องมาหลังเวลาเข้า' });
+    }
+  });
 
 /**
  * อนุมัติ/ไม่อนุมัติค่าจ้างของกะ (ทีละหลายกะได้)

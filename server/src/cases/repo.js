@@ -43,7 +43,7 @@ const COLUMNS = [
   'note',
 ];
 
-const NOW = `to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD HH24:MI:SS')`;
+const NOW = `to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')`;
 
 /**
  * ข้อมูลความปลอดภัยของผู้ป่วยที่ต้อง "อ่านสดจากแฟ้ม" ไม่ใช่ snapshot ของเคส
@@ -437,7 +437,7 @@ export async function start(caseId, actor) {
       `UPDATE cases
        SET status = 'in_progress',
            started_at = ${NOW},
-           start_date = COALESCE(start_date, to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD')),
+           start_date = COALESCE(start_date, to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD')),
            updated_at = ${NOW}
        WHERE case_id = :case_id`,
       { case_id: caseId },
@@ -509,6 +509,21 @@ export async function pendingShifts(caseId) {
 
 export async function close(caseId, endDate, actor) {
   await transaction(async (tx) => {
+    /* ตรึงค่าจ้าง "ก่อน" ยกเลิกกะที่ยังไม่ถึงวัน — ลำดับนี้สำคัญมาก
+       BOOKED_VISITS นับเฉพาะกะที่ยังไม่ยกเลิก และอยู่ใน transaction เดียวกัน จึงเห็นผลของ UPDATE ก่อนหน้า
+       ถ้ายกเลิกก่อน ตัวหารจะหดลงเหลือเฉพาะกะที่ทำไปแล้ว ยอดต่อกะจึงพองขึ้นทันทีตอนปิดเคส
+       (เคส 30 กะ ทำจริง 10 แล้วปิดก่อนกำหนด: จาก staff_pay/30 กลายเป็น staff_pay/10)
+       ซึ่งกลับหัวกับเจตนาของการตรึง คือ "ล็อกตัวเลขที่เห็นอยู่ก่อนปิด" ไม่ใช่คิดใหม่
+       สองคำสั่งนี้แตะคนละชุดกันอยู่แล้ว (ตรึง = เช็คอินแล้ว · ยกเลิก = ยังไม่เช็คอิน) สลับลำดับได้ปลอดภัย */
+    const frozen = await tx.run(
+      `UPDATE case_visits v
+       SET staff_pay = c.staff_pay / NULLIF(b.n, 0), updated_at = ${NOW}
+       FROM cases c, ${BOOKED_VISITS} b
+       WHERE v.case_id = :case_id AND c.case_id = :case_id AND b.case_id = :case_id
+         AND v.staff_pay IS NULL AND v.check_in_at IS NOT NULL AND c.staff_pay IS NOT NULL`,
+      { case_id: caseId },
+    );
+
     // กะที่ยังไม่ถึงวันและไม่มีใครไป = งานที่จะไม่เกิดขึ้นแล้ว ยกเลิกทิ้งไปพร้อมกับการปิดเคส
     // ไม่งั้นปฏิทินเดือนหน้ายังขึ้นกะของเคสที่ปิดไปแล้ว และพนักงานยังเห็นในตารางงานของตัวเอง
     // กะของวันที่ผ่านมาแล้วไม่แตะ — ปล่อยให้ยังเป็น "ขาดงาน" ตามความจริง
@@ -518,15 +533,6 @@ export async function close(caseId, endDate, actor) {
        WHERE case_id = :case_id AND status = 'scheduled'
          AND check_in_at IS NULL AND visit_date >= :today`,
       { case_id: caseId, today: isoDateTH(new Date()) },
-    );
-
-    const frozen = await tx.run(
-      `UPDATE case_visits v
-       SET staff_pay = c.staff_pay / NULLIF(b.n, 0), updated_at = ${NOW}
-       FROM cases c, ${BOOKED_VISITS} b
-       WHERE v.case_id = :case_id AND c.case_id = :case_id AND b.case_id = :case_id
-         AND v.staff_pay IS NULL AND v.check_in_at IS NOT NULL AND c.staff_pay IS NOT NULL`,
-      { case_id: caseId },
     );
 
     await tx.run(
@@ -571,6 +577,18 @@ export async function reopen(caseId, actor) {
   return findById(caseId);
 }
 
+/**
+ * กะที่มีการเช็คอินจริงในเคสนี้ — ของที่จะหายไปพร้อมกับการลบเคส (case_visits เป็น ON DELETE CASCADE)
+ * ใช้เตือนก่อนลบ: เวลาทำงาน รูปเซลฟี่ และค่าจ้างที่อนุมัติไปแล้วอยู่ในแถวพวกนี้ทั้งหมด
+ */
+export async function attendedVisitCount(caseId) {
+  const row = await sql.one(
+    'SELECT COUNT(*) AS n FROM case_visits WHERE case_id = :id AND check_in_at IS NOT NULL',
+    { id: caseId },
+  );
+  return Number(row.n);
+}
+
 export async function remove(caseId) {
   const changes = await sql.run('DELETE FROM cases WHERE case_id = :id', { id: caseId });
   return changes > 0;
@@ -591,6 +609,15 @@ const VISIT_PAY = 'COALESCE(v.staff_pay, c.staff_pay / NULLIF(b.n, 0))';
 const BOOKED_VISITS = `
   (SELECT case_id, COUNT(*) AS n FROM case_visits WHERE status <> 'cancelled' GROUP BY case_id)
 `;
+
+/**
+ * กะที่ยังไม่ถูกยกเลิก — ต้องใช้คู่กับ BOOKED_VISITS เสมอ
+ *
+ * ตัวหาร (BOOKED_VISITS) ตัดกะที่ยกเลิกออกอยู่แล้ว ถ้าตัวเศษไม่ตัดด้วยจะได้สองผลพร้อมกัน:
+ * กะที่ถูกยกเลิกทั้งที่เช็คอิน–เอาท์ไปแล้ว "ยังได้เงิน" และ "หายจากตัวหาร" ทำให้กะที่เหลือได้เพิ่มไปด้วย
+ * ผลรวมที่จ่ายออกจึงเกิน cases.staff_pay ได้ ทั้งที่เคสหนึ่งใบ = แพ็คเกจหนึ่งชุด
+ */
+const NOT_CANCELLED = `v.status <> 'cancelled'`;
 
 /** กะทั้งหมดของเคสหนึ่งใบ พร้อมชื่อพนักงานที่นัดไว้ + สถานะเช็คอิน (state คำนวณตอนอ่าน) — เรียงตามวัน/เวลานัด */
 export function listVisits(caseId) {
@@ -835,12 +862,18 @@ export async function updateVisit(caseId, visitId, input) {
   return listVisits(caseId);
 }
 
+/**
+ * ลบกะทีละใบ — กะที่เช็คอินไปแล้วลบไม่ได้ เงื่อนไขเดียวกับ removeVisitsOn
+ * (เป็นบันทึกการทำงานจริง เป็นฐานค่าจ้าง และมีรูปเซลฟี่เป็นหลักฐานติดอยู่)
+ * คืน false เมื่อไม่ได้ลบ ให้ชั้น route ตอบ 409 พร้อมบอกเหตุผล
+ */
 export async function removeVisit(caseId, visitId) {
-  await sql.run('DELETE FROM case_visits WHERE visit_id = :visit_id AND case_id = :case_id', {
-    visit_id: visitId,
-    case_id: caseId,
-  });
-  return listVisits(caseId);
+  const deleted = await sql.run(
+    `DELETE FROM case_visits
+     WHERE visit_id = :visit_id AND case_id = :case_id AND check_in_at IS NULL`,
+    { visit_id: visitId, case_id: caseId },
+  );
+  return deleted > 0;
 }
 
 // ---------- เช็คอิน/เอาท์ของพนักงานภาคสนาม (case_visits ระดับกะ) ----------
@@ -969,7 +1002,7 @@ export function checkInVisit(
     const started = await tx.run(
       `UPDATE cases
        SET status = 'in_progress',
-           start_date = COALESCE(start_date, to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD')),
+           start_date = COALESCE(start_date, to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD')),
            updated_at = ${NOW}
        WHERE case_id = (SELECT case_id FROM case_visits WHERE visit_id = :id) AND status = 'assigned'`,
       { id: visitId },
@@ -1048,12 +1081,25 @@ export function attendanceList({ month, employee_id }) {
  */
 export const LATE_THRESHOLD_MINUTES = 30;
 
+/**
+ * ย้อนหลังได้ไกลสุดกี่วันในรายการต้องตรวจ
+ *
+ * เดิมกวาดทั้งตารางทุกครั้งที่เปิดหน้า และรายการโตขึ้นเรื่อยๆ ไม่มีเพดาน — ของค้างจากปีที่แล้ว
+ * ที่ไม่มีใครตามแล้วจะดันของใหม่ตกหน้าจอ และตัวเลขบนแท็บก็สูงจนเลิกมีความหมาย
+ * ใช้หลักเดียวกับอีเมลสรุปที่จำกัดขาดงานไว้ 14 วัน แต่กว้างกว่าเพราะหน้านี้ใช้ตามงานย้อนหลังจริง
+ * ประวัติทั้งหมดยังดูได้ที่แท็บ "ประวัติเช็คอิน" ซึ่งเลือกเดือนได้อยู่แล้ว
+ */
+const EXCEPTION_LOOKBACK_DAYS = 180;
+
 export function attendanceExceptions() {
-  const today = isoDateTH(new Date());
+  const now = new Date();
+  const today = isoDateTH(now);
+  const since = isoDateTH(new Date(now.getTime() - EXCEPTION_LOOKBACK_DAYS * 86_400_000));
   return sql
     .all(
       `${ADMIN_VISIT}
        WHERE v.status <> 'cancelled'
+         AND v.visit_date >= :since
          AND (
            v.location_flagged = TRUE
            OR v.off_schedule = TRUE
@@ -1062,7 +1108,7 @@ export function attendanceExceptions() {
            OR (v.check_in_at IS NULL AND v.visit_date < :today)
          )
        ORDER BY v.visit_date DESC, v.check_in_at DESC`,
-      { today, late: LATE_THRESHOLD_MINUTES },
+      { today, since, late: LATE_THRESHOLD_MINUTES },
     )
     .then((rows) =>
       rows
@@ -1087,7 +1133,7 @@ export function attendanceExceptions() {
  * พร้อมธงที่ทำให้กะนั้นน่าสงสัย (นอกพื้นที่ / นอกวันนัด / สาย / ทำงาน 0 นาที) — เรียงของที่ต้องดูก่อนขึ้นบน
  */
 export function pendingApprovals({ month, employee_id } = {}) {
-  const where = [`${DONE}`, `v.pay_status = 'pending'`];
+  const where = [`${DONE}`, NOT_CANCELLED, `v.pay_status = 'pending'`];
   const params = {};
   if (month) {
     where.push(`to_char(v.check_in_at AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM') = :month`);
@@ -1108,10 +1154,10 @@ export function pendingApprovals({ month, employee_id } = {}) {
               ROUND(EXTRACT(EPOCH FROM (v.check_out_at - v.check_in_at)) / 60) AS worked_minutes,
               c.client_name, c.status AS case_status,
               v.checked_in_by AS employee_id,
-              e.first_name || ' ' || e.last_name AS employee_name
+              ${WORKER_NAME} AS employee_name
        FROM case_visits v
        JOIN cases c     ON c.case_id     = v.case_id
-       JOIN employees e ON e.employee_id = v.checked_in_by
+       LEFT JOIN employees e ON e.employee_id = v.checked_in_by
        LEFT JOIN ${BOOKED_VISITS} b ON b.case_id = v.case_id
        WHERE ${where.join(' AND ')}
        ORDER BY v.visit_date DESC, v.check_in_at DESC`,
@@ -1262,14 +1308,21 @@ export async function adjustVisit(caseId, visitId, input, admin) {
 const WORKED_SHIFT = `
   FROM case_visits v
   JOIN cases c     ON c.case_id     = v.case_id
-  JOIN employees e ON e.employee_id = v.checked_in_by
+  LEFT JOIN employees e ON e.employee_id = v.checked_in_by
   LEFT JOIN ${BOOKED_VISITS} b    ON b.case_id   = v.case_id
   LEFT JOIN pkg_service_formats f ON f.format_id = c.pkg_format_id
   LEFT JOIN pkg_grades g          ON g.grade_id  = c.pkg_grade_id
   LEFT JOIN physio_packages pp    ON pp.physio_package_id = c.physio_package_id
   WHERE v.check_in_at IS NOT NULL
+    AND ${NOT_CANCELLED}
     AND to_char(v.check_in_at AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM') = :month
 `;
+
+/**
+ * ชื่อพนักงานที่เช็คอิน — LEFT JOIN เพราะ checked_in_by เป็น ON DELETE SET NULL
+ * ลบพนักงานถาวรแล้วกะที่เขาทำไปจริงต้องไม่หายจากรายงาน (INNER JOIN เดิมทำให้ยอดเดือนที่ปิดไปแล้วเปลี่ยนย้อนหลัง)
+ */
+const WORKER_NAME = `COALESCE(e.first_name || ' ' || e.last_name, '(พนักงานที่ถูกลบแล้ว)')`;
 
 /**
  * สรุปค่าตอบแทนรายเดือนต่อพนักงาน (payroll)
@@ -1296,7 +1349,7 @@ export async function attendanceReport(month, employeeId = null) {
 
   const rows = await sql.all(
     `SELECT v.checked_in_by AS employee_id,
-            e.first_name || ' ' || e.last_name AS employee_name,
+            ${WORKER_NAME} AS employee_name,
             COUNT(*) FILTER (WHERE ${DONE})                    AS shifts,
             COUNT(DISTINCT v.case_id) FILTER (WHERE ${DONE})   AS cases_worked,
             COALESCE(ROUND(SUM(EXTRACT(EPOCH FROM (v.check_out_at - v.check_in_at)) / 60)
@@ -1327,7 +1380,8 @@ export async function attendanceReport(month, employeeId = null) {
       rejected_shifts: Number(r.rejected_shifts),
       unpriced_shifts: Number(r.unpriced_shifts),
     }))
-    .sort((a, b) => a.employee_name.localeCompare(b.employee_name, 'th'));
+    // employee_name ว่างได้ถ้าพนักงานถูกลบถาวร (LEFT JOIN) — กัน localeCompare ล้มทั้งรายงาน
+    .sort((a, b) => (a.employee_name ?? '').localeCompare(b.employee_name ?? '', 'th'));
 }
 
 /**
