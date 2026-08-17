@@ -1,53 +1,22 @@
-import { useEffect, useRef } from 'react';
-import * as echarts from 'echarts/core';
-import { LineChart, BarChart } from 'echarts/charts';
-import { GridComponent, TooltipComponent, LegendComponent, TitleComponent } from 'echarts/components';
-import { CanvasRenderer } from 'echarts/renderers';
-
-/*
- * ลงทะเบียนเฉพาะชนิดกราฟ/ส่วนประกอบที่ใช้จริง — import ทั้งก้อน ('echarts') กินพื้นที่ ~1MB
- * ระวัง: option ที่อ้างส่วนประกอบซึ่งไม่ได้ลงทะเบียนไว้ (เช่น pie, dataZoom, visualMap)
- * จะไม่ error — มันแค่ไม่วาดออกมาเฉยๆ ถ้าลอก option จาก ECharts Gallery มาแล้วจอว่าง ให้เช็คบรรทัดนี้ก่อน
- */
-echarts.use([LineChart, BarChart, GridComponent, TooltipComponent, LegendComponent, TitleComponent, CanvasRenderer]);
+import { Suspense, lazy } from 'react';
 
 /**
- * ครอบ ECharts หนึ่ง instance ให้ใช้แบบ React ได้
+ * กราฟที่โหลดไลบรารีตอนจะวาดจริง — หน้าตาการใช้งานเหมือนเดิมทุกอย่าง (ผู้เรียกไม่ต้องแก้)
  *
- * option ควรถูกห่อด้วย useMemo ที่ฝั่งผู้เรียก — object ใหม่ทุกรอบ render จะยิง setOption รัวโดยไม่จำเป็น
+ * ECharts หนักราว 550 KB ซึ่งใหญ่กว่าโค้ดทั้งแอปรวมกัน และมีที่ใช้อยู่หน้าเดียวคือหน้าภาพรวม
+ * ผูกไว้ตรงๆ แล้วมันจะถูกมัดรวมไปกับหน้านั้น ทำให้เปิดหน้าภาพรวมครั้งแรกต้องรอโหลดก้อนใหญ่
+ * ก่อนจะเห็นแม้แต่ตัวเลขสรุปด้านบนที่ไม่ได้ใช้กราฟเลย
+ *
+ * แยกเป็นไฟล์ของตัวเองแล้ว ตัวเลขสรุปขึ้นทันที ส่วนกราฟค่อยเติมเข้ามาเมื่อไลบรารีมาถึง
  */
+const EChartCanvas = lazy(() => import('./EChartCanvas.jsx'));
+
 export default function EChart({ option, height = 280, className = '', ariaLabel }) {
-  const boxRef = useRef(null);
-  const chartRef = useRef(null);
-
-  // สร้าง/ทำลาย instance ครั้งเดียวตลอดอายุคอมโพเนนต์
-  useEffect(() => {
-    const chart = echarts.init(boxRef.current, null, { renderer: 'canvas' });
-    chartRef.current = chart;
-
-    // ECharts ไม่ resize ตามกล่องเอง — การ์ดในหน้านี้ยืดหดตามความกว้างจอ ต้องบอกมันทุกครั้ง
-    const observer = new ResizeObserver(() => chart.resize());
-    observer.observe(boxRef.current);
-
-    return () => {
-      observer.disconnect();
-      chart.dispose(); // ไม่ dispose = canvas ค้างใน memory ทุกครั้งที่เปลี่ยนหน้า
-      chartRef.current = null;
-    };
-  }, []);
-
-  // notMerge: true — กัน series/แกนของ option เก่าค้างอยู่ตอนสลับช่วงเวลาแล้วจำนวนจุดเปลี่ยน
-  useEffect(() => {
-    chartRef.current?.setOption(option, { notMerge: true });
-  }, [option]);
-
   return (
-    <div
-      ref={boxRef}
-      className={className}
-      style={{ height }}
-      role="img"
-      aria-label={ariaLabel}
-    />
+    /* ที่ว่างระหว่างรอต้องสูงเท่ากราฟจริงเป๊ะ ไม่งั้นเนื้อหาใต้กราฟจะกระโดดตอนโหลดเสร็จ
+       (กำลังอ่านตัวเลขอยู่แล้วบรรทัดเลื่อนหนีมือ) — ใส่ className เดิมด้วยเพื่อให้กินที่เท่ากันจริง */
+    <Suspense fallback={<div className={className} style={{ height }} aria-hidden="true" />}>
+      <EChartCanvas option={option} height={height} className={className} ariaLabel={ariaLabel} />
+    </Suspense>
   );
 }

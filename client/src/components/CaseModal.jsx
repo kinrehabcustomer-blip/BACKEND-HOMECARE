@@ -10,6 +10,7 @@ import InvoiceModal from './InvoiceModal.jsx';
 import {
   CASE_TYPE_LABELS, CASE_STATUS_LABELS, POSITION_LABELS, GENDER_LABELS, SERVICE_KIND_LABELS,
   INVOICE_STATUS_LABELS, CASE_EVENT_LABELS, formatBaht, formatDate, stampText, positionsForCase,
+  todayTH,
 } from '../labels.js';
 import LineIcon from './LineIcon.jsx';
 import ConfirmButton from './ConfirmButton.jsx';
@@ -765,7 +766,7 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
 
                     /* ของค้างที่ต้องบอกก่อนปิด (server กันซ้ำอีกชั้นด้วย force)
                        กะที่ยังไม่ถึงวันจะถูกยกเลิก ส่วนกะที่ค้างเช็คเอาท์จะไม่มีชั่วโมง/ค่าจ้างเลย */
-                    const today = new Date().toISOString().slice(0, 10);
+                    const today = todayTH();
                     const upcoming = visits.filter(
                       (v) => v.status === 'scheduled' && !v.check_in_at && v.visit_date >= today,
                     ).length;

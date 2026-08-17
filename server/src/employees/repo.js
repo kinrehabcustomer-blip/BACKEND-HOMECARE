@@ -30,10 +30,13 @@ const NOW = `to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')
 // คอลัมน์ที่ส่งออก API ได้ — เขียนชื่อทีละตัวแทน SELECT * เพื่อไม่ให้ password_hash หลุดออกไปหน้าเว็บ
 // photo_data ก็ไม่อยู่ในนี้ด้วยเหตุผลเดียวกับรูปใบรับรอง: ไบนารีรูปจะทำให้ทุก response อ้วนขึ้นหลายร้อย KB
 // ส่งไปแค่ "มีรูปไหม" ให้หน้าเว็บตัดสินใจว่าจะเรียก GET .../photo มาแสดงหรือไม่
+// คอลัมน์ role ไม่อยู่ในนี้โดยตั้งใจ — สิทธิ์ในระบบคิดจาก position ทั้งหมด (ดู roleForPosition)
+// ตัวคอลัมน์ยังค้างอยู่ในตารางจากก่อนเปลี่ยนวิธี และค่าเป็น 'staff' ตาม default เสมอ
+// ส่งออกไปด้วยจึงเป็นข้อมูลที่ "ดูเหมือนคำตอบ" แต่ผิด — ผู้จัดการก็จะได้ role: 'staff'
+// (role ที่ถูกต้องอยู่ใน /auth/me ซึ่งคำนวณสดจากตำแหน่ง)
 const PUBLIC = [
   'employee_id',
   ...COLUMNS,
-  'role',
   'must_change_password',
   'last_login_at',
   'created_at',

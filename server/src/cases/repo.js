@@ -962,12 +962,21 @@ export const attendanceForEmployee = (employeeId, ym) =>
     )
     .then((rows) => rows.map((v) => withVisitState(v)));
 
-/** ไบนารีรูปเซลฟี่ของกะ — ดึงเฉพาะตอนหน้าเว็บขอรูปจริง */
-export const findVisitPhoto = (visitId) =>
+/**
+ * ไบนารีรูปเซลฟี่ของกะ — ดึงเฉพาะตอนหน้าเว็บขอรูปจริง
+ *
+ * caseId = บังคับว่ากะต้องอยู่ในเคสนั้นจริง (เส้นของ admin ที่ path เป็น /cases/:id/visits/:visitId)
+ * ไม่ส่งมา = ผู้เรียกตรวจสิทธิ์เองมาแล้ว (ฝั่งพนักงานภาคสนามเทียบ assigned_to ก่อนเรียก)
+ * ต้องกันที่นี่ด้วย ไม่ใช่เชื่อว่า path ถูกเสมอ — เส้นพี่น้องกัน (/adjust) เทียบ case_id อยู่แล้ว
+ * ปล่อยให้ต่างกันไว้ วันหนึ่งจะมีคนอ่านเส้นนี้แล้วเข้าใจว่า :id ถูกใช้กรองด้วย ซึ่งไม่จริง
+ */
+export const findVisitPhoto = (visitId, caseId = null) =>
   sql.one(
     `SELECT check_in_photo_data AS data, check_in_photo_mime AS mime
-     FROM case_visits WHERE visit_id = :id AND check_in_photo_data IS NOT NULL`,
-    { id: visitId },
+     FROM case_visits
+     WHERE visit_id = :id AND check_in_photo_data IS NOT NULL
+       AND (:case_id::text IS NULL OR case_id = :case_id)`,
+    { id: visitId, case_id: caseId },
   );
 
 /**

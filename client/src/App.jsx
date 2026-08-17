@@ -1,31 +1,42 @@
-import { useEffect, useState } from 'react';
+import { Suspense, lazy, useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, NavLink, Navigate, Link, useNavigate, useLocation } from 'react-router-dom';
 import { AuthProvider, RequireAuth, useAuth } from './auth.jsx';
 import LoginPage from './pages/LoginPage.jsx';
-import ForgotPasswordPage from './pages/ForgotPasswordPage.jsx';
-import SettingsPage from './pages/SettingsPage.jsx';
-import EmployeeListPage from './pages/EmployeeListPage.jsx';
-import EmployeeFormPage from './pages/EmployeeFormPage.jsx';
-import EmployeeDetailPage from './pages/EmployeeDetailPage.jsx';
-import CaseListPage from './pages/CaseListPage.jsx';
-import CaseFormPage from './pages/CaseFormPage.jsx';
-import CalendarPage from './pages/CalendarPage.jsx';
-import InvoiceListPage from './pages/InvoiceListPage.jsx';
-import CustomerListPage from './pages/CustomerListPage.jsx';
-import CustomerFormPage from './pages/CustomerFormPage.jsx';
-import CustomerDetailPage from './pages/CustomerDetailPage.jsx';
-import PatientListPage from './pages/PatientListPage.jsx';
-import PatientFormPage from './pages/PatientFormPage.jsx';
-import PatientDetailPage from './pages/PatientDetailPage.jsx';
-import PackagesPage from './pages/PackagesPage.jsx';
-import PhysioPackagesPage from './pages/PhysioPackagesPage.jsx';
-import DashboardPage from './pages/DashboardPage.jsx';
-import AttendancePage from './pages/AttendancePage.jsx';
-import MyTodayPage from './pages/MyTodayPage.jsx';
-import MyCasesPage from './pages/MyCasesPage.jsx';
-import MyCalendarPage from './pages/MyCalendarPage.jsx';
-import MyAttendancePage from './pages/MyAttendancePage.jsx';
 import LineIcon from './components/LineIcon.jsx';
+
+/*
+ * ทุกหน้ายกเว้นหน้า login ถูกโหลดตอนกดเข้าไปดูจริง ไม่ใช่ตอนเปิดเว็บ
+ *
+ * เดิมรวมเป็นไฟล์เดียว 1.1 MB — พนักงานภาคสนามที่เข้าแค่ 4 หน้า (งานวันนี้/เคสของฉัน/ตารางงาน/
+ * ค่าตอบแทน) ต้องโหลดหน้าหลังบ้านทั้งหมดรวมทั้งไลบรารีกราฟติดมาด้วย ทั้งที่ไม่มีสิทธิ์เปิดสักหน้า
+ * คนกลุ่มนี้ใช้จากมือถือนอกสถานที่ ซึ่งเป็นที่ที่เน็ตแย่ที่สุด
+ *
+ * หน้า login ยังโหลดมาแต่แรก (ไม่ lazy) เพราะเป็นหน้าที่ทุกคนเจอก่อนเสมอ
+ * ทำให้ lazy ก็แค่เพิ่มการรอไปอีกรอบโดยไม่ได้ลดอะไร
+ */
+const ForgotPasswordPage = lazy(() => import('./pages/ForgotPasswordPage.jsx'));
+const SettingsPage = lazy(() => import('./pages/SettingsPage.jsx'));
+const EmployeeListPage = lazy(() => import('./pages/EmployeeListPage.jsx'));
+const EmployeeFormPage = lazy(() => import('./pages/EmployeeFormPage.jsx'));
+const EmployeeDetailPage = lazy(() => import('./pages/EmployeeDetailPage.jsx'));
+const CaseListPage = lazy(() => import('./pages/CaseListPage.jsx'));
+const CaseFormPage = lazy(() => import('./pages/CaseFormPage.jsx'));
+const CalendarPage = lazy(() => import('./pages/CalendarPage.jsx'));
+const InvoiceListPage = lazy(() => import('./pages/InvoiceListPage.jsx'));
+const CustomerListPage = lazy(() => import('./pages/CustomerListPage.jsx'));
+const CustomerFormPage = lazy(() => import('./pages/CustomerFormPage.jsx'));
+const CustomerDetailPage = lazy(() => import('./pages/CustomerDetailPage.jsx'));
+const PatientListPage = lazy(() => import('./pages/PatientListPage.jsx'));
+const PatientFormPage = lazy(() => import('./pages/PatientFormPage.jsx'));
+const PatientDetailPage = lazy(() => import('./pages/PatientDetailPage.jsx'));
+const PackagesPage = lazy(() => import('./pages/PackagesPage.jsx'));
+const PhysioPackagesPage = lazy(() => import('./pages/PhysioPackagesPage.jsx'));
+const DashboardPage = lazy(() => import('./pages/DashboardPage.jsx'));
+const AttendancePage = lazy(() => import('./pages/AttendancePage.jsx'));
+const MyTodayPage = lazy(() => import('./pages/MyTodayPage.jsx'));
+const MyCasesPage = lazy(() => import('./pages/MyCasesPage.jsx'));
+const MyCalendarPage = lazy(() => import('./pages/MyCalendarPage.jsx'));
+const MyAttendancePage = lazy(() => import('./pages/MyAttendancePage.jsx'));
 
 /* ไอคอนเมนูแบบเส้น (Lucide-style) — stroke=currentColor จึง tint ตามสีเมนู (จาง → ทองตอน active) เอง */
 const NAV_ICONS = {
@@ -214,48 +225,52 @@ export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <Routes>
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-          <Route path="/settings" element={<AppLayout><SettingsPage /></AppLayout>} />
-          {/* ลิงก์เดิมที่อาจถูก bookmark ไว้ ให้เด้งไปหน้าตั้งค่าแทน */}
-          <Route path="/change-password" element={<Navigate to="/settings" replace />} />
-          <Route path="/" element={<Navigate to="/dashboard" replace />} />
-          <Route path="/dashboard" element={<AppLayout admin><DashboardPage /></AppLayout>} />
-          <Route path="/employees" element={<AppLayout admin><EmployeeListPage /></AppLayout>} />
-          <Route path="/employees/new" element={<AppLayout admin><EmployeeFormPage /></AppLayout>} />
-          <Route path="/employees/:id" element={<AppLayout admin><EmployeeDetailPage /></AppLayout>} />
-          <Route path="/employees/:id/edit" element={<AppLayout admin><EmployeeFormPage /></AppLayout>} />
+        {/* หน้าที่ยังโหลดไม่เสร็จขึ้นข้อความเดียวกับตอนตรวจสิทธิ์ (ดู RequireAuth)
+            สองอย่างนี้เกิดต่อกันเป็นชุดเดียวในสายตาคนใช้ ถ้าใช้คนละข้อความจะเห็นจอกระพริบสองจังหวะ */}
+        <Suspense fallback={<p className="muted app-loading">กำลังโหลด…</p>}>
+          <Routes>
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+            <Route path="/settings" element={<AppLayout><SettingsPage /></AppLayout>} />
+            {/* ลิงก์เดิมที่อาจถูก bookmark ไว้ ให้เด้งไปหน้าตั้งค่าแทน */}
+            <Route path="/change-password" element={<Navigate to="/settings" replace />} />
+            <Route path="/" element={<Navigate to="/dashboard" replace />} />
+            <Route path="/dashboard" element={<AppLayout admin><DashboardPage /></AppLayout>} />
+            <Route path="/employees" element={<AppLayout admin><EmployeeListPage /></AppLayout>} />
+            <Route path="/employees/new" element={<AppLayout admin><EmployeeFormPage /></AppLayout>} />
+            <Route path="/employees/:id" element={<AppLayout admin><EmployeeDetailPage /></AppLayout>} />
+            <Route path="/employees/:id/edit" element={<AppLayout admin><EmployeeFormPage /></AppLayout>} />
 
-          <Route path="/cases" element={<AppLayout admin><CaseListPage /></AppLayout>} />
-          <Route path="/cases/new" element={<AppLayout admin><CaseFormPage /></AppLayout>} />
-          <Route path="/cases/:id/edit" element={<AppLayout admin><CaseFormPage /></AppLayout>} />
+            <Route path="/cases" element={<AppLayout admin><CaseListPage /></AppLayout>} />
+            <Route path="/cases/new" element={<AppLayout admin><CaseFormPage /></AppLayout>} />
+            <Route path="/cases/:id/edit" element={<AppLayout admin><CaseFormPage /></AppLayout>} />
 
-          <Route path="/calendar" element={<AppLayout admin><CalendarPage /></AppLayout>} />
-          <Route path="/attendance" element={<AppLayout admin><AttendancePage /></AppLayout>} />
-          <Route path="/invoices" element={<AppLayout admin><InvoiceListPage /></AppLayout>} />
+            <Route path="/calendar" element={<AppLayout admin><CalendarPage /></AppLayout>} />
+            <Route path="/attendance" element={<AppLayout admin><AttendancePage /></AppLayout>} />
+            <Route path="/invoices" element={<AppLayout admin><InvoiceListPage /></AppLayout>} />
 
-          {/* หน้าของพนักงานภาคสนาม — เข้าได้ทั้ง field และ admin (แสดงเฉพาะงานที่ตัวเองรับ) */}
-          <Route path="/my-today" element={<AppLayout><MyTodayPage /></AppLayout>} />
-          <Route path="/my-cases" element={<AppLayout><MyCasesPage /></AppLayout>} />
-          <Route path="/my-calendar" element={<AppLayout><MyCalendarPage /></AppLayout>} />
-          <Route path="/my-attendance" element={<AppLayout><MyAttendancePage /></AppLayout>} />
+            {/* หน้าของพนักงานภาคสนาม — เข้าได้ทั้ง field และ admin (แสดงเฉพาะงานที่ตัวเองรับ) */}
+            <Route path="/my-today" element={<AppLayout><MyTodayPage /></AppLayout>} />
+            <Route path="/my-cases" element={<AppLayout><MyCasesPage /></AppLayout>} />
+            <Route path="/my-calendar" element={<AppLayout><MyCalendarPage /></AppLayout>} />
+            <Route path="/my-attendance" element={<AppLayout><MyAttendancePage /></AppLayout>} />
 
-          <Route path="/customers" element={<AppLayout admin><CustomerListPage /></AppLayout>} />
-          <Route path="/customers/new" element={<AppLayout admin><CustomerFormPage /></AppLayout>} />
-          <Route path="/customers/:id" element={<AppLayout admin><CustomerDetailPage /></AppLayout>} />
-          <Route path="/customers/:id/edit" element={<AppLayout admin><CustomerFormPage /></AppLayout>} />
+            <Route path="/customers" element={<AppLayout admin><CustomerListPage /></AppLayout>} />
+            <Route path="/customers/new" element={<AppLayout admin><CustomerFormPage /></AppLayout>} />
+            <Route path="/customers/:id" element={<AppLayout admin><CustomerDetailPage /></AppLayout>} />
+            <Route path="/customers/:id/edit" element={<AppLayout admin><CustomerFormPage /></AppLayout>} />
 
-          <Route path="/patients" element={<AppLayout admin><PatientListPage /></AppLayout>} />
-          <Route path="/patients/new" element={<AppLayout admin><PatientFormPage /></AppLayout>} />
-          <Route path="/patients/:id" element={<AppLayout admin><PatientDetailPage /></AppLayout>} />
-          <Route path="/patients/:id/edit" element={<AppLayout admin><PatientFormPage /></AppLayout>} />
+            <Route path="/patients" element={<AppLayout admin><PatientListPage /></AppLayout>} />
+            <Route path="/patients/new" element={<AppLayout admin><PatientFormPage /></AppLayout>} />
+            <Route path="/patients/:id" element={<AppLayout admin><PatientDetailPage /></AppLayout>} />
+            <Route path="/patients/:id/edit" element={<AppLayout admin><PatientFormPage /></AppLayout>} />
 
-          <Route path="/packages" element={<AppLayout admin><PackagesPage /></AppLayout>} />
-          <Route path="/physio-packages" element={<AppLayout admin><PhysioPackagesPage /></AppLayout>} />
+            <Route path="/packages" element={<AppLayout admin><PackagesPage /></AppLayout>} />
+            <Route path="/physio-packages" element={<AppLayout admin><PhysioPackagesPage /></AppLayout>} />
 
-          <Route path="*" element={<AppLayout admin><p>ไม่พบหน้านี้</p></AppLayout>} />
-        </Routes>
+            <Route path="*" element={<AppLayout admin><p>ไม่พบหน้านี้</p></AppLayout>} />
+          </Routes>
+        </Suspense>
       </AuthProvider>
     </BrowserRouter>
   );

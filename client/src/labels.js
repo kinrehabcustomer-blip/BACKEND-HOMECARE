@@ -215,6 +215,16 @@ export const formatPercent = (value) => {
 export const formatDate = (value) =>
   value ? new Date(value).toLocaleDateString('th-TH', { dateStyle: 'medium' }) : '—';
 
+/**
+ * "วันนี้" ตามเวลาไทย รูปแบบ 'YYYY-MM-DD' — ใช้ทุกครั้งที่ส่งวันที่ขึ้นไปบันทึกที่ server
+ *
+ * `new Date().toISOString()` เป็น UTC ซึ่งช้ากว่าเวลาไทย 7 ชั่วโมง ทุกอย่างที่ทำระหว่าง
+ * เที่ยงคืนถึงตีเจ็ดจึงถูกลงวันที่เป็น "เมื่อวาน" (ปิดเคสตีสองของวันที่ 1 ได้วันสิ้นสุดเป็นวันที่ 31
+ * ของเดือนก่อน) ฝั่ง server แก้เรื่องนี้ไปแล้วด้วย TODAY() ที่บวกออฟเซ็ตไทย — ฝั่งนี้ต้องใช้เกณฑ์เดียวกัน
+ * ไม่งั้นวันที่ที่หน้าเว็บส่งไปกับวันที่ที่ server เติมให้เองจะเป็นคนละวันในช่วงเวลานั้น
+ */
+export const todayTH = () => new Date(Date.now() + 7 * 3.6e6).toISOString().slice(0, 10);
+
 /** ตัวเลขเงินบนเอกสาร — ทศนิยม 2 ตำแหน่งเสมอ ไม่มีสัญลักษณ์บาท (เช่น 12,000.00) */
 export const amountText = (value) =>
   Number(value ?? 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });

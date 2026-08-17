@@ -4,7 +4,7 @@ import { useAuth } from '../auth.jsx';
 import { useToast } from '../toast.jsx';
 import { useSheetSwipe } from '../lib/sheetSwipe.js';
 import { useScrollLock } from '../lib/scrollLock.js';
-import { INVOICE_STATUS_LABELS, amountText, bahtText, docDate } from '../labels.js';
+import { INVOICE_STATUS_LABELS, amountText, bahtText, docDate, todayTH } from '../labels.js';
 import LineIcon from './LineIcon.jsx';
 import ConfirmButton from './ConfirmButton.jsx';
 
@@ -48,8 +48,6 @@ function paidBy(method, total, status) {
 /** ช่องทางชำระเงิน — ตรงกับ 3 ช่องบนหัวเอกสาร (เงินสด / บัตรเครดิต / โอน) */
 const PAYMENT_METHODS = ['เงินสด', 'โอน', 'บัตรเครดิต'];
 
-const today = () => new Date().toISOString().slice(0, 10);
-
 export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onClose, onChanged, onReissued }) {
   const { user } = useAuth();
   const toast = useToast();
@@ -61,7 +59,7 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
   const [busy, setBusy] = useState(false);
   // ฟอร์มรับชำระ — ทำเป็นฟอร์มในหน้าแทน prompt() เพราะเบราว์เซอร์บล็อกกล่องเด้งได้ กดแล้วจะเหมือนปุ่มเสีย
   const [payOpen, setPayOpen] = useState(false);
-  const [payDate, setPayDate] = useState(today);
+  const [payDate, setPayDate] = useState(todayTH);
   const [payMethod, setPayMethod] = useState(PAYMENT_METHODS[0]);
 
   const load = () => api.getInvoice(invoiceId).then(setItem);

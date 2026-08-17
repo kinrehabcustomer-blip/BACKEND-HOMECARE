@@ -306,8 +306,12 @@ export const api = {
   // ---------- แจ้งเตือนอัตโนมัติ ----------
   /** ดูว่าตอนนี้มีของค้างอะไรบ้าง (ไม่ส่งอีเมล) */
   digestPreview: () => request('/notify/digest-preview'),
-  /** ส่งสรุปของค้างทางอีเมลเดี๋ยวนี้ — ปกติ cron ส่งให้เองวันละครั้ง ปุ่มนี้ไว้ทดสอบ/ส่งซ้ำ */
-  sendDailyDigest: () => request('/notify/daily-digest'),
+  /**
+   * ส่งสรุปของค้างทางอีเมลเดี๋ยวนี้ — ปกติ cron ส่งให้เองวันละครั้ง ปุ่มนี้ไว้ทดสอบ/ส่งซ้ำ
+   * เป็น POST เพราะสั่งให้ระบบ "ทำอะไรบางอย่าง" (ส่งอีเมลจริง) ไม่ใช่แค่อ่านข้อมูล
+   * ทาง GET เหลือไว้ให้ cron เท่านั้นและไม่รับคุกกี้แล้ว
+   */
+  sendDailyDigest: () => request('/notify/daily-digest', { method: 'POST' }),
 
   // ---------- ใบแจ้งหนี้ ----------
   listInvoices: (params = {}) => request(`/invoices?${new URLSearchParams(params)}`),

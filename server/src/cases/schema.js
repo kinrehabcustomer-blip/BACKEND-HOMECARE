@@ -95,6 +95,18 @@ export const cancelSchema = z.object({
   reason: z.string().trim().max(500).optional().nullable(),
 });
 
+/**
+ * ปิดเคส — end_date ลงเป็นวันสิ้นสุดบริการ · force = ยืนยันแล้วว่ารู้ว่ายังมีกะค้าง
+ *
+ * เดิมอ่านสองค่านี้จาก req.body ตรงๆ โดยไม่ผ่านตัวตรวจ (เส้นอื่นผ่านหมด) วันที่ผิดรูปจึงวิ่งไปตาย
+ * ที่ฐานข้อมูลด้วยรหัส 22007 ซึ่งไม่มีในตารางแปลข้อความ กลายเป็น 500 "เกิดข้อผิดพลาดภายในระบบ"
+ * ทั้งที่เป็นแค่ค่าที่กรอกผิด — ตรวจตรงนี้แล้วได้ 400 ที่บอกได้ว่าผิดช่องไหน
+ */
+export const closeCaseSchema = z.object({
+  end_date: date.optional().nullable(),
+  force: z.boolean().optional(),
+});
+
 // ช่วงเวลาที่เปิดเคส — ปีและเดือนแยกกัน (เดือนใช้ได้ต่อเมื่อระบุปีด้วย)
 export const periodSchema = z.object({
   year: z.string().regex(/^\d{4}$/, 'ปีต้องเป็นตัวเลข 4 หลัก (ค.ศ.)').optional(),

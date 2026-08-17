@@ -8,6 +8,7 @@ import {
   updateCaseSchema,
   assignSchema,
   cancelSchema,
+  closeCaseSchema,
   listQuerySchema,
   periodSchema,
   calendarQuerySchema,
@@ -336,8 +337,10 @@ casesRouter.post(
   asyncRoute(async (req, res) => {
     if (isTerminal(req.case)) throw new ApiError(409, 'เคสนี้จบไปแล้ว');
 
+    const { end_date, force } = closeCaseSchema.parse(req.body ?? {});
+
     const pending = await repo.pendingShifts(req.params.id);
-    if (!req.body?.force && (pending.upcoming > 0 || pending.open_shifts > 0)) {
+    if (!force && (pending.upcoming > 0 || pending.open_shifts > 0)) {
       const parts = [
         pending.upcoming > 0 && `${pending.upcoming} กะที่ยังไม่ถึงวันนัด (จะถูกยกเลิก)`,
         pending.open_shifts > 0 && `${pending.open_shifts} กะที่เช็คอินแล้วแต่ยังไม่เช็คเอาท์`,
@@ -345,7 +348,7 @@ casesRouter.post(
       throw new ApiError(409, `เคสนี้ยังมีกะค้าง: ${parts.join(' · ')} — ยืนยันอีกครั้งถ้าต้องการปิด`, { pending });
     }
 
-    res.json(visible(req, await repo.close(req.params.id, req.body?.end_date, req.user)));
+    res.json(visible(req, await repo.close(req.params.id, end_date, req.user)));
   }),
 );
 
@@ -527,7 +530,8 @@ casesRouter.patch(
 casesRouter.get(
   '/:id/visits/:visitId/photo',
   asyncRoute(async (req, res, next) => {
-    const row = await repo.findVisitPhoto(Number(req.params.visitId));
+    // ส่ง :id ไปกรองด้วย — กะของเคสอื่นต้องไม่หลุดออกทาง path ของเคสนี้
+    const row = await repo.findVisitPhoto(Number(req.params.visitId), req.params.id);
     if (!row) return next(notFound('กะนี้ไม่มีรูปเช็คอิน'));
     res.setHeader('Content-Type', row.mime);
     res.setHeader('Cache-Control', 'private, max-age=3600');

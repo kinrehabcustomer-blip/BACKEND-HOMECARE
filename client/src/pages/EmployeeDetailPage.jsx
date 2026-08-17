@@ -8,7 +8,7 @@ import LineIcon from '../components/LineIcon.jsx';
 import ConfirmButton from '../components/ConfirmButton.jsx';
 import {
   POSITION_LABELS, EMPLOYMENT_TYPE_LABELS, STATUS_LABELS, GENDER_LABELS,
-  formatBaht, formatDate,
+  formatBaht, formatDate, todayTH,
 } from '../labels.js';
 
 
@@ -43,7 +43,7 @@ export default function EmployeeDetailPage() {
   }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleResign() {
-    await api.resignEmployee(id, new Date().toISOString().slice(0, 10));
+    await api.resignEmployee(id, todayTH());
     reload();
   }
 

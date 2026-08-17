@@ -8,25 +8,45 @@ if (!process.env.DATABASE_URL) {
 
 export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false },
+  /* ตรวจใบรับรองของฝั่งเซิร์ฟเวอร์จริง — เดิมเป็น rejectUnauthorized: false ซึ่งแปลว่า
+     "เข้ารหัสก็จริง แต่ไม่สนว่าปลายทางเป็นใคร" ใครที่แทรกกลางทางได้ก็ยื่นใบรับรองปลอมแล้วอ่าน
+     ทั้งรหัสผ่านที่ hash ไว้ เลขบัตรประชาชน และประวัติการรักษาได้หมด
+     Neon ใช้ใบรับรองจาก CA สาธารณะ จึงผ่านการตรวจด้วยชุด CA ที่ Node มีมาให้อยู่แล้ว (ทดสอบแล้ว) */
+  ssl: { rejectUnauthorized: true },
   // serverless function หนึ่ง instance รับทีละ request — เปิด connection ค้างไว้เยอะไม่มีประโยชน์ และ Neon นับ quota
   max: 3,
   idleTimeoutMillis: 10_000,
 });
 
-// เรียงลำดับสำคัญ: กิน string literal ('...' รวม '' ที่ escape แล้ว) และ cast (::) ทิ้งไปก่อน
-// ไม่งั้น ':MI' ใน 'YYYY-MM-DD HH24:MI:SS' จะโดนนับเป็น named param
-const TOKEN = /'(?:[^']|'')*'|::|:([a-z_][a-z0-9_]*)/gi;
+// เรียงลำดับสำคัญ: กินสิ่งที่ ":" ข้างในไม่ใช่พารามิเตอร์ทิ้งไปก่อน แล้วค่อยจับ :name
+//   1. string literal ('...' รวม '' ที่ escape แล้ว) — ไม่งั้น ':MI' ใน 'YYYY-MM-DD HH24:MI:SS' โดนนับเป็น param
+//   2. คอมเมนต์ของ SQL (-- ถึงท้ายบรรทัด และ /* ... */) — คนเขียนคอมเมนต์อธิบายโดยอ้างชื่อพารามิเตอร์
+//      เป็นเรื่องปกติ ("total คิดจาก :amount - :discount") ถ้าไม่ข้าม ข้อความในคอมเมนต์จะถูกนับเป็น
+//      พารามิเตอร์จริง แล้วลำดับ $n เพี้ยนทั้งคำสั่ง — เคยกัดมาแล้วครั้งหนึ่ง (ดู syncOpenFromCase)
+//   3. cast (::)
+const TOKEN = /'(?:[^']|'')*'|--[^\n]*|\/\*[\s\S]*?\*\/|::|:([a-z_][a-z0-9_]*)/gi;
 
-/** แปลง :name ของ SQL เป็น $1..$n ที่ node-postgres ต้องการ (ชื่อเดียวกันใช้ $ ตัวเดิมซ้ำได้) */
+/**
+ * แปลง :name ของ SQL เป็น $1..$n ที่ node-postgres ต้องการ (ชื่อเดียวกันใช้ $ ตัวเดิมซ้ำได้)
+ *
+ * ชื่อที่ไม่มีใน params = โยนทิ้งทันที ไม่ใช่แทนด้วย NULL เงียบๆ
+ * โค้ดในโปรเจคนี้ประกอบคำสั่ง UPDATE จากชื่อคอลัมน์หลายที่ (`${c} = :${c}`) พิมพ์ชื่อผิดครั้งเดียว
+ * ถ้าปล่อยเป็น NULL คือ "บันทึกสำเร็จ" แต่ข้อมูลเดิมถูกล้างทิ้ง โดยไม่มีอะไรฟ้องเลยสักอย่าง
+ * ล้มตั้งแต่ตอนประกอบคำสั่งเจ็บน้อยกว่ามาก — และเจอตอนเทส ไม่ใช่ตอนข้อมูลหายไปแล้ว
+ *
+ * ส่งค่ามาเป็น null/undefined โดยตั้งใจยังทำได้ตามเดิม (เช็คว่า "มีคีย์ไหม" ไม่ใช่ "ค่าว่างไหม")
+ */
 function compile(text, params) {
   const values = [];
   const slots = new Map();
 
   const sql = text.replace(TOKEN, (match, name) => {
-    if (!name) return match; // literal หรือ cast — ปล่อยผ่าน
+    if (!name) return match; // literal / คอมเมนต์ / cast — ปล่อยผ่าน
 
     if (!slots.has(name)) {
+      if (!(name in params)) {
+        throw new Error(`ไม่พบพารามิเตอร์ :${name} ที่คำสั่ง SQL อ้างถึง — ตรวจชื่อให้ตรงกับที่ส่งเข้ามา`);
+      }
       values.push(params[name] ?? null);
       slots.set(name, values.length);
     }

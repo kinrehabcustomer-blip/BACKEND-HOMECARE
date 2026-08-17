@@ -21,6 +21,20 @@ if (!configured) {
 /** true = ส่งอีเมลได้จริง (ตั้งค่า SMTP ครบ) — ให้ผู้เรียกบอกผู้ใช้ได้ว่าทำไมไม่มีเมลเข้า */
 export const mailerReady = configured;
 
+/**
+ * กัน HTML จากข้อมูลผู้ใช้ไม่ให้หลุดไปเป็นแท็กจริงในอีเมล
+ *
+ * ฝั่งสรุปประจำวันประกอบข้อความมาแบบ escape แล้ว (ดู esc ใน notify/routes.js) แต่เมล OTP
+ * แปะชื่อพนักงานลง HTML ตรงๆ ชื่อมาจากช่องที่ admin กรอกเอง จึงใส่แท็กลงไปได้
+ * ไม่ใช่ช่องโจมตีที่น่ากลัวนัก แต่ไม่มีเหตุผลให้สองเมลในไฟล์เดียวกันปลอดภัยไม่เท่ากัน
+ */
+const escapeHtml = (s) =>
+  String(s ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+
 const SHELL = (title, body) => `
   <div style="font-family:'Segoe UI',sans-serif;max-width:640px;color:#1c2024">
     <p style="font-size:20px;font-weight:800;letter-spacing:2px;color:#0f7b6c;margin:0">KIN</p>
@@ -71,7 +85,7 @@ export async function sendOtpEmail({ to, name, code, minutes }) {
     <div style="font-family:'Segoe UI',sans-serif;max-width:480px;color:#1c2024">
       <p style="font-size:20px;font-weight:800;letter-spacing:2px;color:#0f7b6c;margin:0">KIN</p>
       <p style="font-size:12px;color:#6b7280;margin:2px 0 24px">Homecare · ระบบหลังบ้าน</p>
-      <p>สวัสดีคุณ ${name}</p>
+      <p>สวัสดีคุณ ${escapeHtml(name)}</p>
       <p>มีคำขอตั้งรหัสผ่านใหม่สำหรับบัญชีของคุณ กรุณาใช้รหัสยืนยันนี้:</p>
       <p style="font-size:32px;font-weight:700;letter-spacing:8px;background:#e6f3f1;color:#0f7b6c;
                 padding:16px;text-align:center;border-radius:10px;margin:20px 0">${code}</p>
