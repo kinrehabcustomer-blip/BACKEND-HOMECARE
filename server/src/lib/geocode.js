@@ -121,5 +121,3 @@ export async function reverseGeocode(lat, lng) {
     return null;
   }
 }
-
-export const geocodeConfigured = Boolean(KEY);

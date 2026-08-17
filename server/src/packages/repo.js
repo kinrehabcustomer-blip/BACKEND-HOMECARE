@@ -38,18 +38,9 @@ export async function getMatrix() {
   return { grades, formats, rates: rates.map(withComputed) };
 }
 
-/** ราคาช่องเดียว — ใช้ตอนเปิดเคสเพื่อดึงค่าบริการมาเป็น fee (grade_id ว่างได้ถ้ารูปแบบไม่อิงเกรด) */
-export function findRate({ format_id, grade_id, staff_tier }) {
-  return sql
-    .one(
-      `SELECT * FROM pkg_rates
-       WHERE format_id = :format_id
-         AND grade_id IS NOT DISTINCT FROM :grade_id
-         AND staff_tier = :staff_tier`,
-      { format_id, grade_id: grade_id ?? null, staff_tier },
-    )
-    .then((r) => (r ? withComputed(r) : null));
-}
+// การอ่านเรทของช่องเดียวอยู่ที่ payFromService ใน cases/repo.js (ที่เดียวที่ต้องใช้จริง)
+// เคยมี findRate ที่นี่ซึ่งใช้เงื่อนไขเดียวกันเป๊ะแต่ไม่มีใครเรียก — ลบทิ้งแล้ว
+// เหลือที่เดียว กติกาการจับคู่เรท (format + grade + tier) จึงมีคำตอบเดียวเสมอ
 
 // ---------- เกรด ----------
 export const findGrade = (id) => sql.one('SELECT * FROM pkg_grades WHERE grade_id = :id', { id });

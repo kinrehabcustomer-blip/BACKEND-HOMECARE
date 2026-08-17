@@ -205,13 +205,6 @@ export const formatBaht = (value) => {
   })}`;
 };
 
-/** ส่วนลดเป็นเปอร์เซ็นต์ — ตัดทศนิยมที่ไม่จำเป็นทิ้ง (10% ไม่ใช่ 10.00%, แต่ 12.5% คงไว้) */
-export const formatPercent = (value) => {
-  if (value == null) return '—';
-  const n = Number(value);
-  return `${n.toLocaleString('th-TH', { maximumFractionDigits: 2 })}%`;
-};
-
 export const formatDate = (value) =>
   value ? new Date(value).toLocaleDateString('th-TH', { dateStyle: 'medium' }) : '—';
 

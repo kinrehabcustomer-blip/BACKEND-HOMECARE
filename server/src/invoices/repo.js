@@ -152,11 +152,8 @@ export const findById = async (id) => {
   return withComputed({ ...row, items: await listItems(id) });
 };
 
-/** ใบแจ้งหนี้ทั้งหมดของลูกค้ารายหนึ่ง — ให้หน้าลูกค้าเอาไปแสดง */
-export const listForCustomer = (customerId) =>
-  sql
-    .all(`${SELECT_INVOICE} WHERE i.customer_id = :id ORDER BY i.invoice_id DESC`, { id: customerId })
-    .then((rows) => rows.map(withComputed));
+// ใบแจ้งหนี้ของลูกค้ารายหนึ่งดึงผ่าน list({ customer_id }) ซึ่งมีตัวกรอง/แบ่งหน้าครบอยู่แล้ว
+// เคยมี listForCustomer แยกไว้ที่นี่แต่ไม่มีใครเรียก — ลบทิ้งแล้ว
 
 /** ใบแจ้งหนี้ของเคสหนึ่งใบ — เคสหนึ่งออกได้ใบเดียว แต่ถ้ายกเลิกแล้วออกใหม่ได้ จึงคืนเป็นรายการ */
 export const listForCase = (caseId) =>

@@ -8,9 +8,9 @@ export class ApiError extends Error {
   }
 }
 
+// มีแต่ notFound ที่ถูกใช้จริง — เส้นอื่นเรียก new ApiError(400/409, ...) ตรงๆ พร้อมข้อความของตัวเอง
+// (เคยมี badRequest กับ conflict เป็นทางลัดคู่กัน แต่ไม่เคยมีใครเรียกเลยสักครั้ง จึงลบทิ้ง)
 export const notFound = (message = 'ไม่พบข้อมูล') => new ApiError(404, message);
-export const badRequest = (message, details) => new ApiError(400, message, details);
-export const conflict = (message) => new ApiError(409, message);
 
 /** ครอบ async handler ให้ error เด้งเข้า errorHandler แทนที่จะค้างเป็น unhandled rejection */
 export const asyncRoute = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
