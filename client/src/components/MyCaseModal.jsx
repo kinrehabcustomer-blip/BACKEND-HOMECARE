@@ -132,7 +132,15 @@ export default function MyCaseModal({ caseId, onClose }) {
                 <p className="muted report-where">
                   บันทึกรายงานได้ที่หน้า <strong>งานวันนี้</strong> ของกะนั้น — ตรงนี้ดูย้อนหลังได้อย่างเดียว
                 </p>
-                <CaseReports caseId={item.case_id} caseInfo={item} scope="my" currentEmployeeId={me} readOnly />
+                <CaseReports
+                  caseId={item.case_id}
+                  caseInfo={item}
+                  scope="my"
+                  currentEmployeeId={me}
+                  readOnly
+                  inlineLimit={3}
+                  archiveTitle={item.client_name}
+                />
               </section>
 
               {/* Homecare = ตารางกะ · กายภาพ = ตารางนัดเข้าคอร์ส */}

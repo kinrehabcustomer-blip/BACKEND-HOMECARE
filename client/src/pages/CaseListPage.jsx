@@ -278,8 +278,16 @@ export default function CaseListPage() {
                   )}
                 </td>
                 <td data-label="พนักงานที่รับ">
-                  {c.assigned_name ?? <span className="muted">—</span>}
-                  {c.assigned_to && <span className="cell-sub mono">{c.assigned_to}</span>}
+                  {/* เคสหนึ่งมีพนักงานได้หลายคน — โชว์ทุกคน ไม่ใช่แค่คนที่ระบบอ้างเป็นตัวหลัก
+                      รหัสพนักงานโชว์เฉพาะตอนมีคนเดียว ไม่งั้นแถวจะยาวจนอ่านชื่อไม่ทัน */}
+                  {c.assigned_name ? (
+                    <>
+                      {[c.assigned_name, c.team_names].filter(Boolean).join(' · ')}
+                      {c.assigned_to && !c.team_count && <span className="cell-sub mono">{c.assigned_to}</span>}
+                    </>
+                  ) : (
+                    <span className="muted">—</span>
+                  )}
                 </td>
                 <td data-label="สถานะ">
                   <span className={`badge case-${c.status}`}>{CASE_STATUS_LABELS[c.status]}</span>

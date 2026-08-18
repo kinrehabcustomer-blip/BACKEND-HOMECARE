@@ -1,6 +1,11 @@
 import { Router } from 'express';
 import * as cases from '../cases/repo.js';
-import { calendarQuerySchema, createReportSchema, updateReportSchema } from '../cases/schema.js';
+import {
+  calendarQuerySchema,
+  createReportSchema,
+  updateReportSchema,
+  reportQuerySchema,
+} from '../cases/schema.js';
 // กติกา "แก้แล้วต้องไม่เหลือใบเปล่า" ใช้ตัวเดียวกับฝั่งหลังบ้าน — เขียนแยกสองที่แล้ววันหนึ่งมันจะไม่ตรงกัน
 import { editReport, ensureVisitInCase } from '../cases/routes.js';
 import { decodeImage } from '../employees/schema.js';
@@ -238,7 +243,13 @@ myRouter.get(
   '/cases/:id/reports',
   asyncRoute(async (req, res, next) => {
     if (!(await myCaseRow(req))) return next(notFound('ไม่พบเคสนี้ หรือไม่ใช่เคสที่คุณรับผิดชอบ'));
-    res.json(await cases.listReports(req.params.id));
+
+    const query = reportQuerySchema.parse(req.query);
+    const [pageData, months] = await Promise.all([
+      cases.listReports(req.params.id, query),
+      cases.reportMonths(req.params.id),
+    ]);
+    res.json({ ...pageData, months });
   }),
 );
 

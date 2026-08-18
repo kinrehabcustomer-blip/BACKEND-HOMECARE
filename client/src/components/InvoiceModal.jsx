@@ -59,18 +59,28 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
   const [busy, setBusy] = useState(false);
   // ฟอร์มรับชำระ — ทำเป็นฟอร์มในหน้าแทน prompt() เพราะเบราว์เซอร์บล็อกกล่องเด้งได้ กดแล้วจะเหมือนปุ่มเสีย
   const [payOpen, setPayOpen] = useState(false);
+  const [payAmount, setPayAmount] = useState('');   // ว่าง = รับเต็มยอดที่ค้าง
+  const [depositDraft, setDepositDraft] = useState(''); // ยอดมัดจำที่กรอกในตัวเลือกแบ่งจ่าย
+  const [plan, setPlan] = useState([]);                 // ใบคู่ในแผนเดียวกัน (มัดจำ ↔ ส่วนที่เหลือ)
   const [payDate, setPayDate] = useState(todayTH);
   const [payMethod, setPayMethod] = useState(PAYMENT_METHODS[0]);
 
-  const load = () => api.getInvoice(invoiceId).then(setItem);
+  const load = () =>
+    Promise.all([api.getInvoice(invoiceId), api.invoicePlan(invoiceId)]).then(([v, sib]) => {
+      setItem(v);
+      setPlan(sib);
+    });
 
   useEffect(() => {
     let cancelled = false;
     setItem(null);
     setError(null);
-    api
-      .getInvoice(invoiceId)
-      .then((v) => !cancelled && setItem(v))
+    Promise.all([api.getInvoice(invoiceId), api.invoicePlan(invoiceId)])
+      .then(([v, sib]) => {
+        if (cancelled) return;
+        setItem(v);
+        setPlan(sib);
+      })
       .catch((e) => !cancelled && setError(e.message));
     return () => {
       cancelled = true;
@@ -204,8 +214,18 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
               <div>
                 <p className="mono muted">{item.invoice_id}</p>
                 <h2>{isReceipt ? 'ใบเสร็จรับเงิน' : 'ใบแจ้งหนี้'}</h2>
-                <span className={`badge invoice-${item.is_overdue ? 'overdue' : item.status}`}>
-                  {item.is_overdue ? 'เกินกำหนดชำระ' : INVOICE_STATUS_LABELS[item.status]}
+                {/* รับมาบางส่วนแล้วเป็นสถานะที่คนดูต้องรู้ก่อนอย่างอื่น — สำคัญกว่า "ออกใบแล้ว"
+                    แต่ยังไม่บังคับเหนือ "เกินกำหนด" ซึ่งเป็นเรื่องที่ต้องตามทวง */}
+                <span
+                  className={`badge invoice-${
+                    item.is_overdue ? 'overdue' : item.is_partial ? 'partial' : item.status
+                  }`}
+                >
+                  {item.is_overdue
+                    ? 'เกินกำหนดชำระ'
+                    : item.is_partial
+                      ? 'ชำระบางส่วน'
+                      : INVOICE_STATUS_LABELS[item.status]}
                 </span>
               </div>
               <div className="modal-head-actions">
@@ -228,6 +248,17 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
               {payOpen && (
                 <div className="notice pay-form no-print">
                   <label>
+                    จำนวนเงินที่รับ (บาท)
+                    <input
+                      type="number"
+                      min="0.01"
+                      max={item.balance}
+                      step="0.01"
+                      value={payAmount}
+                      onChange={(e) => setPayAmount(e.target.value)}
+                    />
+                  </label>
+                  <label>
                     วันที่ชำระ
                     <input type="date" value={payDate} onChange={(e) => setPayDate(e.target.value)} />
                   </label>
@@ -241,19 +272,23 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                     <button className="btn" disabled={busy} onClick={() => setPayOpen(false)}>ยกเลิก</button>
                     <button
                       className="btn primary"
-                      disabled={busy || !payDate}
+                      disabled={
+                        busy || !payDate || Number(payAmount) <= 0 || Number(payAmount) > item.balance
+                      }
                       onClick={() =>
                         run(async () => {
+                          const received = payAmount === '' ? item.balance : Number(payAmount);
                           await api.payInvoice(item.invoice_id, {
+                            amount: received,
                             paid_at: payDate,
                             payment_method: payMethod,
                           });
-                          toast(`รับชำระ ${amountText(item.total)} บาท แล้ว`);
+                          toast(`รับชำระ ${amountText(received)} บาท แล้ว`);
                           setPayOpen(false);
                         })
                       }
                     >
-                      ยืนยันรับชำระ {amountText(item.total)} บาท
+                      ยืนยันรับชำระ {amountText(payAmount === '' ? item.balance : Number(payAmount))} บาท
                     </button>
                   </div>
                 </div>
@@ -305,8 +340,142 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                 </div>
               )}
 
+              {/* สรุปเงินของใบนี้ — ยอดสุทธิ / มัดจำที่ตกลง / รับมาแล้ว / คงเหลือ
+                  แยกจากตัวเอกสารที่พิมพ์ เพราะเป็นเครื่องมือของคนเก็บเงิน ไม่ใช่ข้อความบนใบ */}
+              {item.status !== 'cancelled' && (
+                <section className="pay-summary no-print">
+                  <div className="pay-figures">
+                    <div>
+                      <span className="field-label">ยอดสุทธิ</span>
+                      <strong>{amountText(item.total)}</strong>
+                    </div>
+                    <div>
+                      <span className="field-label">รับมาแล้ว</span>
+                      <strong>{amountText(item.paid_amount)}</strong>
+                    </div>
+                    <div className={item.balance > 0 ? 'is-due' : ''}>
+                      <span className="field-label">คงเหลือ</span>
+                      <strong>{amountText(item.balance)}</strong>
+                    </div>
+                  </div>
+
+                  {/* ใบที่เป็นงวดหนึ่งของแผน — บอกว่าคู่กับใบไหน กดข้ามไปดูได้เลย
+                      ไม่งั้นคนเปิดดูใบมัดจำจะไม่รู้ว่ายังมีอีกใบที่ต้องตามเก็บ */}
+                  {item.is_plan_part && (
+                    <p className="muted plan-note">
+                      {item.billing_kind === 'deposit' ? 'ใบมัดจำ' : 'ใบส่วนที่เหลือ'}
+                      {plan.length > 0 && (
+                        <>
+                          {' · คู่กับ '}
+                          {plan.map((sib) => (
+                            <button
+                              key={sib.invoice_id}
+                              type="button"
+                              className="btn link-btn mono"
+                              onClick={() => onNavigate?.(sib.invoice_id)}
+                            >
+                              {sib.invoice_id}
+                            </button>
+                          ))}
+                          {' '}({amountText(plan[0].total)} บาท)
+                        </>
+                      )}
+                    </p>
+                  )}
+
+                  {item.payments?.length > 0 && (
+                    <ul className="pay-history">
+                      {item.payments.map((pmt) => (
+                        <li key={pmt.payment_id}>
+                          <span className="pay-history-date">{docDate(pmt.paid_at)}</span>
+                          <span className="pay-history-amount">{amountText(pmt.amount)}</span>
+                          <span className="muted">
+                            {pmt.is_deposit && <span className="badge deposit-tag">มัดจำ</span>}
+                            {pmt.method ?? '—'}
+                            {pmt.received_by_name && ` · รับโดย ${pmt.received_by_name}`}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </section>
+              )}
+
+              {/* ใบที่ระบบเตรียมไว้ตอนเปิดเคส ยังไม่ใช่เอกสารจนกว่าจะเลือกวิธีเก็บเงิน
+                  ตัวใบจึงถูกซ่อนไว้ก่อน — ส่งใบที่ยังไม่รู้ว่าจะเก็บเท่าไหร่ให้ลูกค้าไม่ได้ */}
+              {item.needs_plan && (
+                <section className="plan-choose no-print">
+                  <h3>เลือกวิธีเก็บเงิน</h3>
+                  <p className="muted">
+                    ยอดของเคสนี้คือ <strong>{amountText(item.total)}</strong> บาท —
+                    {' '}เลือกก่อนว่าจะเก็บครั้งเดียวจบ หรือแบ่งเก็บมัดจำก่อน
+                  </p>
+
+                  <div className="plan-options">
+                    <div className="plan-option">
+                      <h4>จ่ายเต็มจำนวน</h4>
+                      <p className="muted">ออกใบเดียว {amountText(item.total)} บาท</p>
+                      <button
+                        className="btn primary"
+                        disabled={busy || item.total <= 0}
+                        onClick={() =>
+                          run(async () => {
+                            await api.setInvoiceBillingPlan(item.invoice_id, { mode: 'full' });
+                            toast('ตั้งเป็นใบเก็บเต็มจำนวนแล้ว');
+                          })
+                        }
+                      >
+                        เก็บเต็มจำนวน
+                      </button>
+                    </div>
+
+                    <div className="plan-option">
+                      <h4>มัดจำก่อน แล้วเก็บส่วนที่เหลือ</h4>
+                      <label>
+                        ยอดมัดจำ (บาท)
+                        <input
+                          type="number"
+                          min="1"
+                          max={item.total}
+                          step="0.01"
+                          placeholder="เช่น 5000"
+                          value={depositDraft}
+                          onChange={(e) => setDepositDraft(e.target.value)}
+                        />
+                      </label>
+                      {/* บอกยอดใบที่สองให้เห็นตั้งแต่ยังไม่กด — ตัวเลขที่ต้องตามเก็บทีหลังคือสิ่งที่ต้องรู้ก่อนตัดสินใจ */}
+                      <p className="muted">
+                        {Number(depositDraft) > 0 && Number(depositDraft) < item.total
+                          ? `ใบที่ 1 มัดจำ ${amountText(Number(depositDraft))} · ใบที่ 2 คงเหลือ ${amountText(item.total - Number(depositDraft))}`
+                          : 'ระบบจะออกใบมัดจำ และใบส่วนที่เหลือให้อัตโนมัติ'}
+                      </p>
+                      <button
+                        className="btn primary"
+                        disabled={
+                          busy ||
+                          !(Number(depositDraft) > 0) ||
+                          Number(depositDraft) >= item.total
+                        }
+                        onClick={() =>
+                          run(async () => {
+                            const res = await api.setInvoiceBillingPlan(item.invoice_id, {
+                              mode: 'deposit',
+                              deposit_amount: Number(depositDraft),
+                            });
+                            setDepositDraft('');
+                            toast(`แบ่งเป็นใบมัดจำ ${amountText(res.total)} และใบส่วนที่เหลือแล้ว`);
+                          })
+                        }
+                      >
+                        แบ่งเก็บมัดจำ
+                      </button>
+                    </div>
+                  </div>
+                </section>
+              )}
+
               {/* เอกสารจริงที่จะถูกพิมพ์ — ตอนสั่งพิมพ์ CSS จะซ่อนทุกอย่างนอกกล่องนี้ */}
-              <div className="invoice-doc">
+              <div className={`invoice-doc ${item.needs_plan ? 'is-hidden' : ''}`}>
                 <p className="inv-printed">วันที่พิมพ์: {printStamp()}</p>
 
                 <div className="inv-header">
@@ -395,8 +564,24 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                       </td>
                       <td className="inv-r"><strong>{amountText(item.total)}</strong></td>
                     </tr>
+                    {/* ใบที่รับเงินมาบางส่วนแล้ว ต้องอ่านออกจากตัวเอกสารว่ารับไปเท่าไหร่และค้างเท่าไหร่
+                        ไม่งั้นลูกค้าถือใบที่เขียนยอดเต็มไว้ ทั้งที่จ่ายมัดจำไปแล้ว */}
+                    {item.paid_amount > 0 && item.balance > 0 && (
+                      <>
+                        <tr>
+                          <td colSpan={3} className="inv-r">รับชำระแล้ว/Paid</td>
+                          <td className="inv-r">{amountText(item.paid_amount)}</td>
+                        </tr>
+                        <tr>
+                          <td colSpan={3} className="inv-r">คงเหลือ/Balance</td>
+                          <td className="inv-r"><strong>{amountText(item.balance)}</strong></td>
+                        </tr>
+                      </>
+                    )}
                     <tr>
-                      <td colSpan={4} className="inv-r inv-words">( {bahtText(item.total)} )</td>
+                      <td colSpan={4} className="inv-r inv-words">
+                        ( {bahtText(item.balance > 0 && item.paid_amount > 0 ? item.balance : item.total)} )
+                      </td>
                     </tr>
                   </tfoot>
                 </table>
@@ -476,11 +661,14 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                 </ConfirmButton>
               )}
 
-              <button className="btn" onClick={() => window.print()}>พิมพ์ / บันทึก PDF</button>
+              {/* ยังไม่ได้เลือกวิธีเก็บเงิน = ยังไม่มีเอกสารให้พิมพ์/ออก/รับเงิน */}
+              {!item.needs_plan && (
+                <button className="btn" onClick={() => window.print()}>พิมพ์ / บันทึก PDF</button>
+              )}
 
               {/* ใบที่ไม่ตรงกับเคสมีปุ่มรีเฟรชอยู่ในกล่องเตือนแล้ว — ตรงนี้ไว้ให้ใบที่ยอดตรงอยู่แต่
                   อยากดึงข้อมูลใหม่ (เช่น ใบเก่าที่ยังไม่ได้แจกแจงส่วนลด หรือแก้ที่อยู่ลูกค้าทีหลัง) */}
-              {canEdit && item.case_id && !item.is_stale && (
+              {canEdit && item.case_id && !item.is_stale && !item.needs_plan && (
                 <button
                   className="btn"
                   disabled={busy}
@@ -490,7 +678,7 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                 </button>
               )}
 
-              {item.status === 'draft' && (
+              {item.status === 'draft' && !item.needs_plan && (
                 <button
                   className="btn primary"
                   disabled={busy}
@@ -502,11 +690,16 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                   ออกใบแจ้งหนี้
                 </button>
               )}
-              {(item.status === 'draft' || item.status === 'issued') && (
+              {(item.status === 'draft' || item.status === 'issued') && !item.needs_plan && (
                 <button
                   className={`btn ${item.status === 'issued' ? 'primary' : ''}`}
                   disabled={busy}
-                  onClick={() => setPayOpen((v) => !v)}
+                  onClick={() => {
+    /* เติมยอดที่ค้างของใบนี้ให้เลย — เงินมัดจำเป็น "ใบของตัวเอง" แล้ว ยอดค้างจึงคือยอดที่ควรรับ
+                       แก้ตัวเลขเองได้เสมอ (ลูกค้าโอนมาไม่ครบตามที่ตกลงก็มี) */
+                    setPayAmount(String(item.balance));
+                    setPayOpen((v) => !v);
+                  }}
                 >
                   บันทึกการชำระเงิน
                 </button>

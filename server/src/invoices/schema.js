@@ -55,10 +55,18 @@ export const updateInvoiceSchema = z
   })
   .partial();
 
-/** บันทึกการชำระเงิน */
+/**
+ * บันทึกการรับชำระหนึ่งงวด
+ *
+ * amount ว่าง = รับเต็มยอดที่ค้างอยู่ (พฤติกรรมเดิมของปุ่ม "ยืนยันรับชำระ")
+ * ส่งมาน้อยกว่ายอดค้าง = รับบางส่วน (เช่น มัดจำงวดแรก) ใบยังไม่ปิดจนกว่าจะครบ
+ * ยอดที่รับต้องมากกว่า 0 — งวดที่รับ 0 บาทไม่มีความหมาย มีแต่จะทำให้รายการรับเงินรก
+ */
 export const paySchema = z.object({
+  amount: money.positive('จำนวนเงินที่รับต้องมากกว่า 0').optional().nullable(),
   paid_at: date.optional(),          // ไม่ส่ง = วันนี้
   payment_method: optionalText,
+  note: optionalText,
 });
 
 /**
@@ -71,6 +79,23 @@ export const revenueQuerySchema = z
     points: z.coerce.number().int().min(2).max(90).optional(),
   })
   .transform((q) => ({ ...q, points: q.points ?? (q.bucket === 'week' ? 12 : 30) }));
+
+/**
+ * เลือกวิธีเก็บเงินของใบที่ยังไม่ได้ใช้เป็นเอกสาร
+ *   full    = เก็บครั้งเดียวจบ (ใบนี้คือยอดเต็ม)
+ *   deposit = แบ่งเป็นใบมัดจำ + ใบส่วนที่เหลือ · deposit_amount ต้องน้อยกว่ายอดเต็ม
+ *             (เท่ากับยอดเต็ม = ไม่ใช่การมัดจำ แต่คือเก็บเต็มจำนวน ซึ่งมีตัวเลือกของมันอยู่แล้ว)
+ */
+export const billingPlanSchema = z
+  .object({
+    mode: z.enum(['full', 'deposit'], { errorMap: () => ({ message: 'วิธีเก็บเงินไม่ถูกต้อง' }) }),
+    deposit_amount: money.positive('ยอดมัดจำต้องมากกว่า 0').optional().nullable(),
+  })
+  .superRefine((v, ctx) => {
+    if (v.mode === 'deposit' && v.deposit_amount == null) {
+      ctx.addIssue({ code: 'custom', path: ['deposit_amount'], message: 'กรุณากรอกยอดมัดจำ' });
+    }
+  });
 
 export const listQuerySchema = z.object({
   q: z.string().trim().optional(),

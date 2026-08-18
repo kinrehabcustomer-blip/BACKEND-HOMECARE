@@ -131,7 +131,7 @@ export default function InvoiceListPage() {
     }
   };
 
-  const stat = (s) => summary?.find((x) => x.status === s) ?? { count: 0, amount: 0 };
+  const stat = (s) => summary?.find((x) => x.status === s) ?? { count: 0, amount: 0, outstanding: 0 };
   const unpaid = stat('issued');
   // ยอดรวมของ "รายการที่กรองอยู่" ทุกสถานะ — ตอบคำถาม "ที่เห็นอยู่นี่รวมเท่าไหร่"
   const grandTotal = (summary ?? []).reduce((sum, s) => sum + s.amount, 0);
@@ -146,7 +146,9 @@ export default function InvoiceListPage() {
           <h1>ใบแจ้งหนี้</h1>
           <p className="muted">
             {result ? `ทั้งหมด ${result.pagination.total} ใบ · รวม ${formatBaht(grandTotal)} · ` : ''}
-            รอชำระ {unpaid.count} ใบ ({formatBaht(unpaid.amount)}) · ชำระแล้ว {stat('paid').count} ใบ
+            รอชำระ {unpaid.count} ใบ ({formatBaht(unpaid.outstanding)}
+            {unpaid.outstanding !== unpaid.amount && ` จาก ${formatBaht(unpaid.amount)}`}) ·
+            {' '}ชำระแล้ว {stat('paid').count} ใบ
             {filtered && <> · <span className="mono">เฉพาะที่กรองอยู่</span></>}
           </p>
         </div>

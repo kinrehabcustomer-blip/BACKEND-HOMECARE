@@ -7,6 +7,7 @@ import {
   createInvoiceSchema,
   updateInvoiceSchema,
   paySchema,
+  billingPlanSchema,
   listQuerySchema,
   revenueQuerySchema,
   INVOICE_STATUSES,
@@ -23,13 +24,28 @@ const OPEN_STATUSES = ['draft', 'issued'];
  * เคสมีผู้ว่าจ้างของตัวเองใช้อันนั้น — ไม่มีแต่แฟ้มผู้ป่วยผูกลูกค้าไว้ ให้ใช้ลูกค้าของผู้ป่วยแทน
  * (กรณีเปิดเคสตอนยังไม่รู้ผู้จ่าย แล้วเพิ่งมาผูกลูกค้ากับผู้ป่วยทีหลัง)
  */
-async function resolvePayer(caseRow) {
+export async function resolvePayer(caseRow) {
   if (caseRow.customer_id) return customers.findById(caseRow.customer_id);
   if (caseRow.patient_id) {
     const patient = await patients.findById(caseRow.patient_id);
     if (patient?.customer_id) return customers.findById(patient.customer_id);
   }
   return null;
+}
+
+/**
+ * ใบร่างของเคสหนึ่งใบ — ใช้ตอนเปิดเคสใหม่ (ระบบออกให้เอง ไม่ต้องรอคนกด)
+ *
+ * อยู่ที่นี่ไม่ใช่ที่ repo เพราะการหา "ผู้จ่าย" ต้องไล่จากเคส → ผู้ว่าจ้าง → แฟ้มผู้ป่วย
+ * ซึ่งเป็นตรรกะเดียวกับตอนกดออกใบเอง ถ้าเขียนแยกสองที่ วันหนึ่งใบที่ระบบออกให้กับใบที่คนกด
+ * จะได้ชื่อผู้จ่ายคนละคน
+ *
+ * ไม่ส่ง input อะไรไปเลย = ใช้ค่าที่คัดลอกมาจากเคสทั้งหมด (ยอด/ผู้จ่าย/รายการบริการ)
+ * ยังไม่ได้ตั้งค่าบริการก็ออกได้ ใบจะเป็นยอด 0 แล้วซิงก์ตามทีหลังตอนแก้เคส (ดู syncOpenFromCase)
+ */
+export async function createDraftForCase(caseRow, actor) {
+  const customer = await resolvePayer(caseRow);
+  return repo.createFromCase({ ...caseRow, customer }, {}, actor);
 }
 
 /** โหลดใบแจ้งหนี้ก่อนทุก route ที่มี :id — ไม่มีก็ 404 ตั้งแต่ตรงนี้ */
@@ -137,6 +153,35 @@ invoicesRouter.post(
   }),
 );
 
+/**
+ * เลือกวิธีเก็บเงิน (เต็มจำนวน / แบ่งมัดจำ) — ต้องเลือกก่อนถึงจะใช้ใบเป็นเอกสารได้
+ * เลือกได้ครั้งเดียว: ใบที่เลือกไปแล้วมีเลขที่เอกสารและอาจส่งให้ลูกค้าไปแล้ว
+ * เปลี่ยนใจให้ลบใบร่างทิ้งแล้วออกใหม่ (เลขที่เอกสารจะเดินต่อ ไม่ย้อนกลับ)
+ */
+invoicesRouter.post(
+  '/:id/billing-plan',
+  asyncRoute(async (req, res) => {
+    if (req.invoice.status !== 'draft') throw new ApiError(409, 'ใบนี้ออกไปแล้ว เปลี่ยนวิธีเก็บเงินไม่ได้');
+    if (req.invoice.billing_kind) throw new ApiError(409, 'ใบนี้เลือกวิธีเก็บเงินไปแล้ว');
+
+    const input = billingPlanSchema.parse(req.body ?? {});
+    if (input.mode === 'deposit' && input.deposit_amount >= req.invoice.total) {
+      throw new ApiError(400, 'ยอดมัดจำต้องน้อยกว่ายอดเต็ม — ถ้าเก็บทั้งหมดให้เลือก "เก็บเต็มจำนวน"');
+    }
+    if (req.invoice.total <= 0) {
+      throw new ApiError(409, 'ใบนี้ยังไม่มียอด — ตั้งค่าบริการของเคสก่อนจึงจะแบ่งงวดได้');
+    }
+
+    res.json(await repo.setBillingPlan(req.params.id, input, req.user));
+  }),
+);
+
+/** ใบคู่ในแผนเดียวกัน (มัดจำ ↔ ส่วนที่เหลือ) */
+invoicesRouter.get(
+  '/:id/plan',
+  asyncRoute(async (req, res) => res.json(await repo.listPlanSiblings(req.params.id))),
+);
+
 invoicesRouter.post(
   '/:id/issue',
   asyncRoute(async (req, res) => {
@@ -145,12 +190,21 @@ invoicesRouter.post(
   }),
 );
 
+/**
+ * รับชำระหนึ่งงวด — ไม่ส่งจำนวนเงินมา = รับเต็มยอดที่ค้าง
+ * รับได้ไม่เกินยอดค้าง: รับเกินแล้วยอดคงเหลือจะติดลบ ซึ่งอ่านไม่ออกว่าเป็นเงินทอนหรือกรอกผิด
+ */
 invoicesRouter.post(
   '/:id/pay',
   asyncRoute(async (req, res) => {
-    if (req.invoice.status === 'paid') throw new ApiError(409, 'ใบนี้ชำระแล้ว');
+    if (req.invoice.status === 'paid') throw new ApiError(409, 'ใบนี้ชำระครบแล้ว');
     if (req.invoice.status === 'cancelled') throw new ApiError(409, 'ใบนี้ถูกยกเลิกไปแล้ว');
-    res.json(await repo.pay(req.params.id, paySchema.parse(req.body ?? {}), req.user));
+    const input = paySchema.parse(req.body ?? {});
+    if (input.amount != null && input.amount > req.invoice.balance) {
+      throw new ApiError(400, `รับได้ไม่เกินยอดคงเหลือ (${req.invoice.balance.toLocaleString('th-TH')} บาท)`);
+    }
+
+    res.json(await repo.pay(req.params.id, input, req.user));
   }),
 );
 

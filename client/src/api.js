@@ -235,7 +235,7 @@ export const api = {
    * รายงานอาการผู้ป่วยของเคสที่ฉันเข้าถึงได้ — เห็นของทุกคนในเคส (ผลัดเวรต้องอ่านของกะก่อนหน้า)
    * แต่แก้ได้เฉพาะใบที่ตัวเองบันทึก และลบไม่ได้ (ให้ผู้จัดการลบจากหลังบ้าน)
    */
-  myCaseReports: (id) => request(`/my/cases/${id}/reports`),
+  myCaseReports: (id, params = {}) => request(`/my/cases/${id}/reports?${new URLSearchParams(params)}`),
   /** รายงานของกะเดียว (หน้างานวันนี้) — เคส/กะมาจากตัวกะเอง ไม่ต้องส่ง case_id */
   myVisitReports: (visitId) => request(`/my/visits/${visitId}/reports`),
   /** URL รูปแผลที่แนบในรายงาน — ใส่ใน <img src> ได้ (คุกกี้ session ไปด้วยอัตโนมัติ) */
@@ -343,6 +343,14 @@ export const api = {
   createInvoice: (body) => request('/invoices', { method: 'POST', body }),
   updateInvoice: (id, body) => request(`/invoices/${id}`, { method: 'PATCH', body }),
   refreshInvoice: (id) => request(`/invoices/${id}/refresh`, { method: 'POST' }),
+  /**
+   * เลือกวิธีเก็บเงินของใบ (ทำครั้งเดียวตอนยังเป็นร่าง)
+   * { mode: 'full' } = เก็บเต็มจำนวนในใบเดียว
+   * { mode: 'deposit', deposit_amount } = ใบนี้กลายเป็นใบมัดจำ แล้วระบบออกใบส่วนที่เหลือตามมาให้
+   */
+  setInvoiceBillingPlan: (id, body) => request(`/invoices/${id}/billing-plan`, { method: 'POST', body }),
+  /** ใบคู่ในแผนเดียวกัน (มัดจำ ↔ ส่วนที่เหลือ) */
+  invoicePlan: (id) => request(`/invoices/${id}/plan`),
   issueInvoice: (id) => request(`/invoices/${id}/issue`, { method: 'POST' }),
   payInvoice: (id, body) => request(`/invoices/${id}/pay`, { method: 'POST', body }),
   cancelInvoice: (id) => request(`/invoices/${id}/cancel`, { method: 'POST' }),
@@ -362,8 +370,12 @@ export const api = {
   updateVisit: (id, visitId, body) => request(`/cases/${id}/visits/${visitId}`, { method: 'PATCH', body }),
   deleteVisit: (id, visitId) => request(`/cases/${id}/visits/${visitId}`, { method: 'DELETE' }),
   // ---------- รายงานอาการผู้ป่วย (บันทึกทีละครั้งในเคส) ----------
-  /** รายงานทั้งหมดของเคส — ล่าสุดอยู่บน */
-  listCaseReports: (id) => request(`/cases/${id}/reports`),
+  /**
+   * คลังรายงานของเคส — ล่าสุดอยู่บน แบ่งหน้าเสมอ
+   * params: { month: 'YYYY-MM', type: 'abnormal'|'incident'|…, page, per_page }
+   * คืน { data, page, per_page, total, has_more, months } — months ไว้ทำตัวเลือกดูย้อนหลัง
+   */
+  listCaseReports: (id, params = {}) => request(`/cases/${id}/reports?${new URLSearchParams(params)}`),
   caseReportPhotoUrl: (id, reportId) => `/api/cases/${id}/reports/${reportId}/photo`,
   addCaseReport: (id, body) => request(`/cases/${id}/reports`, { method: 'POST', body }),
   updateCaseReport: (id, reportId, body) =>
@@ -374,6 +386,10 @@ export const api = {
   /** ประวัติการทำรายการของเคส (ใครจับคู่/ปิด/ยกเลิก เมื่อไหร่) — ใหม่สุดอยู่บน */
   listCaseEvents: (id) => request(`/cases/${id}/events`),
   assignCase: (id, employee_id) => request(`/cases/${id}/assign`, { method: 'POST', body: { employee_id } }),
+  /** ทีมพนักงานของเคส — คนที่ร่วมดูแลนอกเหนือจากผู้รับผิดชอบหลัก (ทุกตัวคืนรายชื่อทีมล่าสุด) */
+  listCaseTeam: (id) => request(`/cases/${id}/team`),
+  addCaseTeam: (id, employee_id) => request(`/cases/${id}/team`, { method: 'POST', body: { employee_id } }),
+  removeCaseTeam: (id, employee_id) => request(`/cases/${id}/team/${employee_id}`, { method: 'DELETE' }),
   unassignCase: (id) => request(`/cases/${id}/unassign`, { method: 'POST' }),
   startCase: (id) => request(`/cases/${id}/start`, { method: 'POST' }),
   /** ปิดเคส — force = ยืนยันแล้วว่ารู้ว่ายังมีกะค้าง (ไม่ส่ง = server จะตอบ 409 พร้อมบอกว่าค้างอะไร) */

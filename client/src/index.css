@@ -654,6 +654,9 @@ select option:checked {
 }
 
 /* กล่องพนักงานที่รับเคส + แถวจับคู่ใน popup */
+/* การ์ดพนักงานของเคสเรียงต่อกัน — ทุกคนหน้าตาเหมือนกัน ไม่มีคนหลัก/คนรอง */
+.assignee + .assignee { margin-top: 0.5rem; }
+
 .assignee {
   display: flex;
   align-items: center;
@@ -2686,7 +2689,7 @@ select option:checked {
 }
 .picker-list button:hover { background: var(--brand-soft); }
 .picker-list button.is-on { background: var(--brand); color: var(--brand-ink); font-weight: 700; }
-.pick-actions { display: flex; flex-wrap: wrap; gap: 0.375rem; }
+.pick-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
 .conflict-list { margin: 0.375rem 0 0; padding-left: 1.125rem; font-size: 0.8125rem; }
 
 /* วันที่ "เลือกไว้แต่ยังไม่บันทึก" — ต้องแยกจากวันที่จองแล้วให้ออกด้วยตาเปล่า
@@ -2792,9 +2795,11 @@ select option:checked {
   }
 
   /* ปุ่มหลักกินเต็มบรรทัด ปุ่มรองแบ่งครึ่ง — นิ้วเล็งง่ายกว่าปุ่มผอมสามปุ่มเรียงกัน */
-  .pick-actions { display: grid; grid-template-columns: 1fr 1fr; }
   .pick-actions .btn { justify-content: center; }
-  .pick-actions .btn.primary { grid-column: 1 / -1; }
+  /* ปุ่มหลักเต็มแถวบนสุด — เป็นปุ่มที่ต้องกดทุกครั้ง นิ้วจึงเล็งที่เดิมได้เสมอ */
+  .pick-actions .btn.primary { flex: 1 0 100%; }
+  /* ปุ่มรองแบ่งแถวถัดไปเท่าๆ กัน มีปุ่มเดียวก็เต็มแถว ไม่เหลือช่องว่างค้าง */
+  .pick-actions .btn:not(.primary) { flex: 1; }
   .pick-bar select { width: 100%; }
 
   /* เป้ากดขนาดนิ้ว (ตาม @media pointer: coarse ของทั้งระบบ) */
@@ -3015,7 +3020,7 @@ select option:checked {
   .pull-only-btn { display: none; }
 }
 
-.shift-actions { flex-shrink: 0; }
+.shift-actions { flex-shrink: 0; display: flex; gap: 0.5rem; }
 .shift-done { color: #1c7a4d; font-weight: 600; font-size: 0.875rem; }
 
 /* กล่องยืนยันเช็คเอาท์ — เข้ามาแทนที่ปุ่มในช่องเดิม ไม่ใช่แทรกเพิ่มเป็นแถวใหม่
@@ -3077,8 +3082,10 @@ select option:checked {
 
 @media (max-width: 768px) {
   .shift-card { flex-direction: column; align-items: stretch; }
-  .shift-actions { display: flex; }
-  .shift-actions .btn { flex: 1; }
+  /* ปุ่มกว้างตามข้อความของตัวเอง ไม่ยืดเต็มแถว — ตอนมีปุ่มเดียวการยืดเต็มยังพออ่านออกว่าเป็นปุ่มหลัก
+     แต่พอมีสองปุ่มที่ความยาวข้อความต่างกันมาก ("บันทึกอาการ" กับ "เช็คอิน") การบังคับให้กว้างเท่ากัน
+     ทำให้ปุ่มสั้นมีที่ว่างรอบตัวอักษรเยอะผิดสัดส่วน และดูเหมือนสองปุ่มมีน้ำหนักเท่ากันทั้งที่ไม่ใช่ */
+  .shift-actions { justify-content: flex-end; }
   /* ปุ่มยืนยันต้องกว้างเท่าปุ่มเช็คเอาท์เดิม — นิ้วเล็งที่เดิมได้ ไม่ต้องหาปุ่มใหม่ */
   .shift-confirm-actions .btn { flex: 1; }
 }
@@ -3155,20 +3162,6 @@ select option:checked {
 /* บอกว่าบันทึกใหม่ได้ที่ไหน — หน้าเคสเป็นที่อ่านย้อนหลัง ไม่ใช่ที่กรอก */
 .report-where { margin: -0.25rem 0 0.75rem; font-size: 0.8125rem; }
 
-.report-card {
-  padding: 0.75rem 0.875rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
-}
-.report-card-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.5rem;
-  margin-bottom: 0.5rem;
-}
-.report-card-head .cell-sub { display: block; }
 
 /* สัญญาณชีพเรียงเป็นชิปแทนตาราง — วัดไม่ครบทุกช่องเป็นเรื่องปกติ ตารางจะเหลือช่องว่างเต็มไปหมด
    ชิปมีเฉพาะค่าที่วัดจริง ตัวเลขจึงอ่านเรียงกันได้โดยไม่ต้องกวาดสายตาข้ามช่องเปล่า */
@@ -3328,27 +3321,73 @@ select option:checked {
 .care-photo { display: block; max-width: 16rem; }
 .care-photo img { width: 100%; border-radius: var(--radius); border: 1px solid var(--border); display: block; }
 
-/* แถวสรุปของใบที่ย่อไว้ — ทั้งแถวเป็นปุ่มกาง */
-.report-brief {
+/* ---------- คลังรายงาน: แถวย่อ + ตัวกรอง ---------- */
+
+/* ตัวกรอง (เดือน + เฉพาะที่ผิดปกติ) — แถวเดียวเหนือรายการ */
+.report-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+.report-filters select { width: auto; min-width: 11rem; font-size: 0.8125rem; padding: 0.375rem 1.75rem 0.375rem 0.5rem; }
+
+/* หัววันของกลุ่ม — เขียนวันครั้งเดียวต่อวัน แถวข้างในเหลือแค่เวลา */
+.report-day { display: flex; flex-direction: column; gap: 0.25rem; }
+.report-day-head {
+  margin: 0.375rem 0 0.125rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+/* แถวรายงานหนึ่งใบตอนย่อ — สูงเท่าบรรทัดเดียว ไม่ใช่การ์ดที่มีขอบเต็มใบ
+   เคสที่บันทึกวันละ 4 รอบ ครึ่งปีก็เกินเจ็ดร้อยใบ การ์ดใหญ่ใบละ 5 บรรทัดทำให้เลื่อนหาอะไรไม่เจอเลย */
+.report-row { border: 1px solid var(--border); border-radius: 0.5rem; background: var(--surface); }
+.report-row.is-open { border-color: var(--brand); }
+
+.report-row-head {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
+  align-items: baseline;
+  gap: 0.5rem;
   width: 100%;
-  padding: 0.5rem 0;
+  padding: 0.4375rem 0.625rem;
   border: 0;
   background: none;
   font: inherit;
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
   color: var(--text);
   text-align: left;
   cursor: pointer;
 }
-.report-brief-text { flex: 1; min-width: 0; }
-.report-brief-more { flex-shrink: 0; font-size: 0.75rem; color: var(--brand); font-weight: 600; }
-.report-brief:hover .report-brief-more { text-decoration: underline; }
+.report-row-head:hover { background: var(--bg); border-radius: 0.5rem; }
 
-.report-toggle {
+.report-row-time {
+  flex-shrink: 0;
+  min-width: 2.75rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: var(--muted);
+}
+/* เวลาที่มาจาก "ตอนกดบันทึก" ไม่ใช่ "เวลาที่วัด" — จางลงและไม่หนา ให้แยกออกโดยไม่ต้องมีคำอธิบาย */
+.report-row-time.is-recorded { font-weight: 400; opacity: 0.7; }
+
+/* สรุปยาวเกินสองบรรทัดให้ตัด — แถวต้องสูงคงที่ ไม่งั้นใบที่กรอกเยอะจะดันแถวอื่นจนสแกนไม่ได้ */
+.report-row-brief {
+  flex: 1;
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.report-row-brief .badge { margin-right: 0.3rem; }
+
+.report-row-by { flex-shrink: 0; font-size: 0.75rem; color: var(--muted); }
+
+/* คำว่า "ดูทั้งหมด" ท้ายแถว — บอกว่ากดกางได้ */
+.report-row-more { flex-shrink: 0; font-size: 0.75rem; font-weight: 600; color: var(--brand); }
+.report-row-head:hover .report-row-more { text-decoration: underline; }
+
+/* ปุ่มย่อกลับ — ชิดขวาท้ายใบที่กางอยู่ ตรงกับตำแหน่ง "ดูทั้งหมด" ตอนย่อ นิ้วกลับมากดที่เดิมได้ */
+.report-collapse {
+  display: block;
+  margin-left: auto;
   margin-top: 0.5rem;
   padding: 0.25rem 0;
   border: 0;
@@ -3359,8 +3398,31 @@ select option:checked {
   color: var(--brand);
   cursor: pointer;
 }
+.report-collapse:hover { text-decoration: underline; }
 
-/* ป้ายประเภทรายงานบนหัวการ์ด — เหตุการณ์ผิดปกติต้องเห็นก่อนกางอ่าน */
+.report-row-body { padding: 0.25rem 0.625rem 0.625rem; border-top: 1px solid var(--divider); }
+.report-row-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--divider);
+}
+.report-row-foot .cell-sub { margin: 0; }
+
+.report-more { align-self: center; margin-top: 0.25rem; font-size: 0.8125rem; }
+
+/* จอแคบ: ชื่อคนบันทึกลงไปอยู่บรรทัดล่างของสรุป ไม่บีบสรุปจนเหลือไม่กี่ตัวอักษร */
+@media (max-width: 600px) {
+  .report-row-head { flex-wrap: wrap; }
+  .report-row-brief { flex-basis: 100%; order: 3; }
+  .report-row-by { margin-left: auto; }
+}
+
+/* ป้ายประเภทรายงานในแถวย่อ — เหตุการณ์ผิดปกติต้องเห็นก่อนกางอ่าน */
 .badge.report-incident { margin-left: 0.4rem; background: var(--danger); color: #fff; }
 .badge.report-change { margin-left: 0.4rem; background: #f3e2c0; color: #7a5a12; }
 
@@ -3370,6 +3432,79 @@ select option:checked {
   .care-grid.cols-4 { grid-template-columns: repeat(4, 1fr); }
   /* ช่องข้อความยาวกินเต็มแถว ไม่ให้กล่องพิมพ์แคบจนพิมพ์สองบรรทัดแล้วเลื่อน */
   .care-grid .report-text { grid-column: 1 / -1; }
+}
+
+/* ---------- เงินมัดจำ / การรับชำระเป็นงวด ---------- */
+
+/* สรุปเงินของใบ — เครื่องมือของคนเก็บเงิน อยู่นอกตัวเอกสารที่พิมพ์ */
+.pay-summary {
+  margin: 0.75rem 0 1rem;
+  padding: 0.875rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+.pay-figures { display: flex; flex-wrap: wrap; gap: 1.25rem; }
+.pay-figures > div { display: flex; flex-direction: column; gap: 0.125rem; }
+.pay-figures strong { font-size: 1.0625rem; font-variant-numeric: tabular-nums; }
+/* ยอดที่ยังค้าง — ตัวเลขเดียวในกล่องที่ต้องทำอะไรต่อ จึงเป็นตัวเดียวที่มีสี */
+.pay-figures .is-due strong { color: var(--danger); }
+
+
+.pay-history { list-style: none; margin: 0.875rem 0 0; padding: 0.75rem 0 0; border-top: 1px solid var(--divider); }
+.pay-history li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.5rem; padding: 0.1875rem 0; font-size: 0.875rem; }
+.pay-history-date { min-width: 6.5rem; color: var(--muted); font-size: 0.8125rem; }
+.pay-history-amount { min-width: 6rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+/* ป้ายบอกว่างวดนั้นคือเงินมัดจำ */
+.badge.deposit-tag { margin-right: 0.35rem; background: var(--divider); color: var(--muted); }
+
+/* สถานะ "ชำระบางส่วน" — สีกลางระหว่างรอชำระกับชำระครบ (เงินเข้ามาแล้วแต่ยังไม่จบ) */
+.badge.invoice-partial { background: #f3e2c0; color: #7a5a12; }
+
+/* ฟอร์มรับเงินมีสามช่องแล้ว (จำนวน/วันที่/ช่องทาง) — บนจอแคบให้เรียงลงมาแทนการบีบให้อยู่แถวเดียว */
+@media (max-width: 600px) {
+  .pay-figures { gap: 0.75rem 1.25rem; }
+}
+
+/* ---------- เลือกวิธีเก็บเงิน (เต็มจำนวน / มัดจำก่อน) ---------- */
+
+/* ใบที่ยังไม่ได้เลือกวิธีเก็บเงิน ยังไม่ใช่เอกสาร — ซ่อนตัวใบไว้ก่อน ไม่ให้เผลอพิมพ์ส่งลูกค้า */
+.invoice-doc.is-hidden { display: none; }
+
+.plan-choose {
+  margin: 0.5rem 0 1rem;
+  padding: 1rem;
+  border: 1px solid var(--brand);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.plan-choose h3 { margin: 0 0 0.25rem; font-size: 1rem; }
+.plan-choose > .muted { margin: 0 0 0.875rem; font-size: 0.875rem; }
+
+/* สองทางเลือกวางคู่กัน — เทียบกันได้ในสายตาเดียว ไม่ต้องเลื่อนหา */
+.plan-options { display: grid; grid-template-columns: 1fr 1fr; gap: 0.875rem; }
+.plan-option {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.875rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+.plan-option h4 { margin: 0; font-size: 0.9375rem; }
+.plan-option p { margin: 0; font-size: 0.8125rem; }
+.plan-option label { display: flex; flex-direction: column; gap: 0.3125rem; font-size: 0.8125rem; font-weight: 600; color: var(--muted); }
+.plan-option input { font-weight: 400; color: var(--text); }
+/* ปุ่มอยู่ล่างสุดของการ์ดเสมอ ถึงข้อความสองการ์ดจะยาวไม่เท่ากัน */
+.plan-option .btn { margin-top: auto; }
+
+/* ใบนี้เป็นงวดไหนของแผน + ลิงก์ไปใบคู่ */
+.plan-note { margin: 0.75rem 0 0; font-size: 0.8125rem; }
+
+@media (max-width: 600px) {
+  .plan-options { grid-template-columns: 1fr; }
 }
 
 /* ---------- ลดการเคลื่อนไหว ----------

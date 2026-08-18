@@ -14,7 +14,6 @@ import {
   todayTH,
 } from '../labels.js';
 import LineIcon from './LineIcon.jsx';
-import ConfirmButton from './ConfirmButton.jsx';
 
 /**
  * ชื่อบริการของเคส — สองสายเก็บคนละที่ (Homecare = รูปแบบ+เกรด, กายภาพ = ชื่อแพ็คเกจ)
@@ -127,8 +126,10 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
   const [busy, setBusy] = useState(false);
   const [visits, setVisits] = useState([]);      // ใช้แค่สรุปจำนวนบนปุ่ม การจัดการจริงอยู่ใน popup ย่อย
   const [visitsOpen, setVisitsOpen] = useState(false);
-  // รายงานอาการผู้ป่วย — โหลดมาแค่ทำตัวเลขสรุป การกรอก/แก้อยู่ใน popup ย่อยเหมือนตารางกะ
-  const [reports, setReports] = useState([]);
+  /* รายงานอาการผู้ป่วย — หน้านี้ใช้แค่จำนวนกับใบล่าสุด การกรอก/แก้อยู่ใน popup ย่อยเหมือนตารางกะ
+     จึงขอมาหน้าละใบเดียว ไม่ดึงทั้งคลัง (เคสที่ดูแลต่อเนื่องมีได้หลายร้อยใบ) */
+  const [reports, setReports] = useState({ total: 0, latest: null });
+  const [team, setTeam] = useState([]); // คนที่ร่วมดูแลเคส นอกเหนือจากผู้รับผิดชอบหลัก
   const [reportsOpen, setReportsOpen] = useState(false);
   // ฟอร์มยืนยันการยกเลิกเคส — ทำเป็นฟอร์มในหน้าแทน prompt() ที่เบราว์เซอร์บล็อกได้
   const [cancelOpen, setCancelOpen] = useState(false);
@@ -147,14 +148,16 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
       api.listVisits(caseId),
       api.listInvoices({ case_id: caseId }),
       api.listCaseEvents(caseId),
-      api.listCaseReports(caseId),
-    ]).then(([c, list, v, inv, ev, rp]) => {
+      api.listCaseReports(caseId, { per_page: 1 }),
+      api.listCaseTeam(caseId),
+    ]).then(([c, list, v, inv, ev, rp, tm]) => {
       setItem(c);
       setStaff(list);
       setVisits(v);
       setInvoices(inv.data);
       setEvents(ev);
-      setReports(rp);
+      setReports({ total: rp.total, latest: rp.data[0] ?? null });
+      setTeam(tm);
     });
 
   useEffect(() => {
@@ -169,16 +172,18 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
       api.listVisits(caseId),
       api.listInvoices({ case_id: caseId }),
       api.listCaseEvents(caseId),
-      api.listCaseReports(caseId),
+      api.listCaseReports(caseId, { per_page: 1 }),
+      api.listCaseTeam(caseId),
     ])
-      .then(([c, list, v, inv, ev, rp]) => {
+      .then(([c, list, v, inv, ev, rp, tm]) => {
         if (cancelled) return;
         setItem(c);
         setStaff(list);
         setVisits(v);
         setInvoices(inv.data);
         setEvents(ev);
-        setReports(rp);
+        setReports({ total: rp.total, latest: rp.data[0] ?? null });
+      setTeam(tm);
         setPick(c.assigned_to ?? '');
       })
       .catch((err) => !cancelled && setError(err.message));
@@ -274,6 +279,27 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
 
   /* รายชื่อพนักงานที่ตรงกับระดับ/สายบริการของเคสนี้ — กติกาเดียวกับหน้าเปิดเคส (ดู positionsForCase)
      คนที่ถือเคสอยู่ตอนนี้ต้องอยู่ในรายการเสมอ ไม่งั้นช่องจะว่างทั้งที่มีคนรับอยู่ */
+  /* พนักงานของเคสเป็นรายชื่อเดียวเท่ากันหมด ไม่แบ่งคนหลัก/คนรองบนหน้าจอ
+     แต่ข้างในยังต้องมีหนึ่งคนถูกอ้างที่ cases.assigned_to เพราะสถานะเคส (จับคู่แล้ว/กำลังให้บริการ)
+     และกะที่ไม่ได้ระบุคนต้องรู้ว่าตกเป็นของใคร — ระบบเลือกให้เอง (คนแรกที่เพิ่ม) ไม่ต้องมาตั้งเอง
+     ถอดคนนั้นออกเมื่อไหร่ คนถัดไปในรายการจะถูกเลื่อนขึ้นแทนอัตโนมัติ (ดู unassign ใน repo) */
+  const caseStaff = item?.assigned_to
+    ? [
+        {
+          employee_id: item.assigned_to,
+          name: item.assigned_name,
+          position: item.assigned_position,
+          phone: item.assigned_phone,
+          added_at: item.assigned_at,
+          is_anchor: true, // คนที่ระบบอ้างอยู่ — ถอดออกต้องใช้เส้นอื่น (ไม่ต่างกันสำหรับคนใช้)
+        },
+        ...team,
+      ]
+    : team;
+
+  // คนที่อยู่ในเคสนี้อยู่แล้ว (หลักหรือในทีม) กดเพิ่มซ้ำไม่ได้ — server กันไว้อีกชั้นด้วย 409
+  const alreadyInCase = Boolean(pick) && caseStaff.some((m) => m.employee_id === pick);
+
   const wantedPositions = item ? positionsForCase(item) : null;
   const matchingStaff = wantedPositions ? staff.filter((e) => wantedPositions.includes(e.position)) : staff;
   const filtering = Boolean(wantedPositions) && !allStaff && matchingStaff.length > 0;
@@ -282,17 +308,6 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
     item?.assigned_to && !baseStaff.some((e) => e.employee_id === item.assigned_to)
       ? [...baseStaff, ...staff.filter((e) => e.employee_id === item.assigned_to)]
       : baseStaff;
-
-  /** ลบใบแจ้งหนี้ทิ้งถาวร แล้วถามต่อว่าจะออกใบใหม่ตามข้อมูลปัจจุบันเลยไหม */
-  function deleteInvoice(v) {
-    return run(async () => {
-      await api.deleteInvoice(v.invoice_id);
-      if (confirm('ลบแล้ว — ออกใบใหม่ตามข้อมูลปัจจุบันของเคสเลยไหม?')) {
-        const created = await api.createInvoice({ case_id: item.case_id });
-        setOpenInvoiceId(created.invoice_id);
-      }
-    });
-  }
 
   /**
    * ยกเลิกเคส — ยืนยันด้วยฟอร์มในหน้า ไม่ใช่ prompt()
@@ -511,20 +526,20 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                 <h3>รายงานอาการผู้ป่วย</h3>
                 <div className="visit-summary">
                   <p className="muted">
-                    {reports.length === 0 ? (
+                    {reports.total === 0 ? (
                       'ยังไม่มีรายงานอาการ'
                     ) : (
                       <>
-                        มีรายงาน <strong>{reports.length}</strong> ใบ
+                        มีรายงาน <strong>{reports.total}</strong> ใบ
                         <span className="cell-sub">
-                          ล่าสุด {formatDate(reports[0].report_date)}
-                          {reports[0].reported_by_name && ` · โดย ${reports[0].reported_by_name}`}
+                          ล่าสุด {formatDate(reports.latest.report_date)}
+                          {reports.latest.reported_by_name && ` · โดย ${reports.latest.reported_by_name}`}
                         </span>
                       </>
                     )}
                   </p>
                   <button className="btn" onClick={() => setReportsOpen(true)}>
-                    {reports.length === 0 ? 'บันทึกรายงาน' : 'ดู / บันทึกเพิ่ม'}
+                    ดูรายงาน
                   </button>
                 </div>
               </section>
@@ -533,46 +548,12 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
               <section>
                 <h3>ใบแจ้งหนี้</h3>
                 {invoices.length === 0 ? (
-                  <div className="visit-summary">
-                    <p className="muted">
-                      ยังไม่ได้ออกใบแจ้งหนี้
-                      {doneVisits > 0 && <span className="cell-sub">ทำไปแล้ว {doneVisits} กะ — เลือกออกตามกะได้</span>}
-                    </p>
-                    <div className="stack-actions">
-                      <button
-                        className="btn"
-                        disabled={busy || item.status === 'cancelled'}
-                        title={item.status === 'cancelled' ? 'เคสที่ยกเลิกแล้วออกใบแจ้งหนี้ไม่ได้' : undefined}
-                        onClick={() =>
-                          run(async () => {
-                            const created = await api.createInvoice({ case_id: item.case_id });
-                            setOpenInvoiceId(created.invoice_id);
-                          })
-                        }
-                      >
-                        ออกใบตามแพ็คเกจ
-                      </button>
-                      {/* เก็บเงินตามครั้งที่ไปจริง — ใบจะแตกเป็นรายการรายวัน ยอดเป็นสัดส่วนของกะที่ทำ
-                          ใช้กับเคสที่เก็บเงินระหว่างทาง หรือเคสที่ตกลงกันเป็นรายครั้ง */}
-                      {doneVisits > 0 && (
-                        <button
-                          className="btn"
-                          disabled={busy || item.status === 'cancelled'}
-                          onClick={() =>
-                            run(async () => {
-                              const created = await api.createInvoice({
-                                case_id: item.case_id,
-                                basis: 'visits',
-                              });
-                              setOpenInvoiceId(created.invoice_id);
-                            })
-                          }
-                        >
-                          ออกใบตามกะที่ไปจริง ({doneVisits})
-                        </button>
-                      )}
-                    </div>
-                  </div>
+                  /* ระบบออกใบร่างให้เองตั้งแต่เปิดเคสแล้ว หน้านี้จึงเป็นที่ "ดู" ไม่ใช่ที่ "ออกใบ"
+                     เคสที่ไม่มีใบคือเคสเก่าที่เปิดก่อนมีระบบออกอัตโนมัติ หรือใบถูกลบไป
+                     — ออกใบใหม่ได้ที่หน้าใบแจ้งหนี้ ไม่ปนอยู่ในหน้าเคสให้กดพลาดจนได้ใบซ้ำ */
+                  <p className="muted">
+                    ยังไม่มีใบแจ้งหนี้ของเคสนี้ (ปกติระบบออกใบร่างให้ตั้งแต่เปิดเคส)
+                  </p>
                 ) : (
                   invoices.map((v) => (
                     <div className="history-item" key={v.invoice_id}>
@@ -594,16 +575,6 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                         <button className="btn tiny" onClick={() => setOpenInvoiceId(v.invoice_id)}>
                           เปิดดู
                         </button>
-                        <ConfirmButton
-                          className="btn tiny danger-ghost"
-                          disabled={busy}
-                          title={`ลบใบแจ้งหนี้ ${v.invoice_id} ทิ้งถาวร?`}
-                          detail="ลบแล้วกู้คืนไม่ได้ และเลขที่ใบจะข้าม — ระบบจะถามต่อว่าจะออกใบใหม่ตามข้อมูลปัจจุบันเลยไหม"
-                          confirmLabel="ลบถาวร"
-                          onConfirm={() => deleteInvoice(v)}
-                        >
-                          ลบ
-                        </ConfirmButton>
                       </div>
                     </div>
                   ))
@@ -642,31 +613,39 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
               </section>
 
               <section>
-                <h3>พนักงานที่รับเคส</h3>
+                <h3>พนักงานที่รับเคส{caseStaff.length > 0 && ` (${caseStaff.length})`}</h3>
 
-                {item.assigned_to ? (
-                  <div className="assignee">
-                    <div>
-                      <strong>{item.assigned_name}</strong>
-                      <p className="muted">
-                        <span className="mono">{item.assigned_to}</span>
-                        {' · '}{POSITION_LABELS[item.assigned_position]}
-                        {item.assigned_phone && ` · ${item.assigned_phone}`}
-                      </p>
-                      <p className="muted">จับคู่เมื่อ {formatDate(item.assigned_at)}</p>
-                    </div>
-                    {!terminal && (
-                      <button
-                        className="btn danger-ghost"
-                        disabled={busy}
-                        onClick={() => run(() => api.unassignCase(item.case_id))}
-                      >
-                        ยกเลิกการจับคู่
-                      </button>
-                    )}
-                  </div>
-                ) : (
+                {caseStaff.length === 0 ? (
                   <p className="muted">ยังไม่มีพนักงานรับเคสนี้</p>
+                ) : (
+                  caseStaff.map((m) => (
+                    <div className="assignee" key={m.employee_id}>
+                      <div>
+                        <strong>{m.name}{m.nickname ? ' (' + m.nickname + ')' : ''}</strong>
+                        <p className="muted">
+                          <span className="mono">{m.employee_id}</span>
+                          {' · '}{POSITION_LABELS[m.position]}
+                          {m.phone && ` · ${m.phone}`}
+                        </p>
+                        <p className="muted">เพิ่มเมื่อ {formatDate(m.added_at)}</p>
+                      </div>
+                      {!terminal && (
+                        <button
+                          className="btn danger-ghost"
+                          disabled={busy}
+                          onClick={() =>
+                            run(() =>
+                              m.is_anchor
+                                ? api.unassignCase(item.case_id)
+                                : api.removeCaseTeam(item.case_id, m.employee_id),
+                            )
+                          }
+                        >
+                          นำออก
+                        </button>
+                      )}
+                    </div>
+                  ))
                 )}
 
                 {!terminal && (
@@ -683,12 +662,20 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                         </option>
                       ))}
                     </select>
+                    {/* ปุ่มเดียวเสมอ — คนแรกที่เพิ่มจะถูกใช้เป็นตัวอ้างของระบบให้เอง
+                        (เส้น API ที่ยิงจึงต่างกัน แต่สำหรับคนใช้คือ "เพิ่มพนักงาน" เหมือนกันหมด) */}
                     <button
                       className="btn primary"
-                      disabled={busy || !pick || pick === item.assigned_to}
-                      onClick={() => run(() => api.assignCase(item.case_id, pick))}
+                      disabled={busy || !pick || alreadyInCase}
+                      onClick={() =>
+                        run(() =>
+                          item.assigned_to
+                            ? api.addCaseTeam(item.case_id, pick)
+                            : api.assignCase(item.case_id, pick),
+                        )
+                      }
                     >
-                      {item.assigned_to ? 'เปลี่ยนพนักงาน' : 'จับคู่พนักงาน'}
+                      เพิ่มพนักงาน
                     </button>
                   </div>
                 )}

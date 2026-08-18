@@ -90,6 +90,14 @@ const SELECT_CASE = `
          pp.staff_pay                       AS physio_staff_pay,
          r.customer_price                   AS rate_customer_price,
          r.staff_pay                        AS rate_staff_pay,
+         /* คนอื่นในเคสนอกจากคนที่ assigned_to อ้างอยู่ — หน้ารายการต้องบอกได้ว่า "ใครดูแลเคสนี้บ้าง"
+            ไม่ใช่โชว์ชื่อเดียวทั้งที่มีสองคน ทำเป็น subquery ไม่ใช่ JOIN + GROUP BY
+            เพราะ SELECT นี้ถูกใช้ทั้งดึงทีละใบและดึงเป็นหน้า การ GROUP BY จะลามไปทุกคอลัมน์ */
+         (SELECT string_agg(te.first_name || ' ' || te.last_name, ' · ' ORDER BY t.added_at, t.employee_id)
+          FROM case_team t
+          JOIN employees te ON te.employee_id = t.employee_id
+          WHERE t.case_id = c.case_id) AS team_names,
+         (SELECT COUNT(*)::int FROM case_team t WHERE t.case_id = c.case_id) AS team_count,
          ${PATIENT_LIVE}
   FROM cases c
   LEFT JOIN employees e           ON e.employee_id  = c.assigned_to
@@ -185,18 +193,20 @@ export function listForEmployee(employeeId) {
   return sql.all(
     `${SELECT_CASE}
      WHERE c.assigned_to = :id
+        OR EXISTS (SELECT 1 FROM case_team t WHERE t.case_id = c.case_id AND t.employee_id = :id)
         OR EXISTS (SELECT 1 FROM case_visits v WHERE v.case_id = c.case_id AND v.assigned_to = :id)
      ORDER BY c.case_id DESC`,
     { id: employeeId },
   );
 }
 
-/** พนักงานภาคสนามเข้าถึงเคสนี้ได้ไหม (เป็นหัวหน้าเคส หรือมีกะในเคส) — ใช้กันดูเคสคนอื่น */
+/** พนักงานภาคสนามเข้าถึงเคสนี้ได้ไหม (ผู้รับผิดชอบหลัก / อยู่ในทีม / มีกะในเคส) — ใช้กันดูเคสคนอื่น */
 export async function hasFieldAccess(employeeId, caseId) {
   const row = await sql.one(
     `SELECT 1 FROM cases c
      WHERE c.case_id = :cid
        AND (c.assigned_to = :eid
+            OR EXISTS (SELECT 1 FROM case_team t WHERE t.case_id = c.case_id AND t.employee_id = :eid)
             OR EXISTS (SELECT 1 FROM case_visits v WHERE v.case_id = c.case_id AND v.assigned_to = :eid))`,
     { cid: caseId, eid: employeeId },
   );
@@ -423,6 +433,13 @@ export async function assign(caseId, employeeId, actor) {
       { case_id: caseId, employee_id: employeeId },
     );
 
+    /* คนที่ถูกตั้งเป็นผู้รับผิดชอบหลัก ต้องไม่ค้างอยู่ในทีมด้วย — ไม่งั้นชื่อเดียวโผล่สองที่บนหน้าจอ
+       และตอนถอดคนหลักออก ระบบจะ "เลื่อนคนเดิมขึ้นมาแทนตัวเอง" วนอยู่แบบนั้น */
+    await tx.run('DELETE FROM case_team WHERE case_id = :case_id AND employee_id = :employee_id', {
+      case_id: caseId,
+      employee_id: employeeId,
+    });
+
     // สลับคนกลางคันคือจังหวะที่ต้องไล่ย้อนได้มากที่สุด — บันทึกทั้งคนเก่าและคนใหม่ในบรรทัดเดียว
     const to = await staffLabel(tx, employeeId);
     const from = previous?.assigned_to ? await staffLabel(tx, previous.assigned_to) : null;
@@ -472,9 +489,87 @@ export async function cancel(caseId, reason, actor) {
   return findById(caseId);
 }
 
+// ---------- ทีมพนักงานของเคส (นอกเหนือจากผู้รับผิดชอบหลัก) ----------
+
+/** คนในทีม พร้อมข้อมูลติดต่อ — เรียงตามลำดับที่ถูกเพิ่มเข้ามา */
+export function listTeam(caseId) {
+  return sql.all(
+    `SELECT t.employee_id, t.added_at,
+            e.first_name || ' ' || e.last_name AS name,
+            e.nickname, e.position, e.phone
+     FROM case_team t
+     JOIN employees e ON e.employee_id = t.employee_id
+     WHERE t.case_id = :id
+     ORDER BY t.added_at, t.employee_id`,
+    { id: caseId },
+  );
+}
+
+/**
+ * เพิ่มคนเข้าทีม — คนที่เป็นผู้รับผิดชอบหลักอยู่แล้วไม่ต้องเพิ่มซ้ำ (คืน false ให้ route ตอบ 409)
+ * กดซ้ำ/สองคนกดพร้อมกันได้แถวเดียวเสมอ (PRIMARY KEY คุมไว้ + ON CONFLICT DO NOTHING)
+ */
+export async function addTeamMember(caseId, employeeId, actor) {
+  return transaction(async (tx) => {
+    const row = await tx.one('SELECT assigned_to FROM cases WHERE case_id = :id', { id: caseId });
+    if (row?.assigned_to === employeeId) return false;
+
+    const added = await tx.run(
+      `INSERT INTO case_team (case_id, employee_id, added_by)
+       VALUES (:case_id, :employee_id, :actor)
+       ON CONFLICT DO NOTHING`,
+      { case_id: caseId, employee_id: employeeId, actor: actor?.employee_id ?? null },
+    );
+    if (added === 0) return false; // อยู่ในทีมอยู่แล้ว
+
+    await logEvent(tx, caseId, 'assigned', `เพิ่ม ${await staffLabel(tx, employeeId)} เข้าทีมดูแลเคส`, actor);
+    return true;
+  });
+}
+
+/** นำคนออกจากทีม — ไม่แตะผู้รับผิดชอบหลัก (คนหลักถอดด้วย unassign เท่านั้น) */
+export async function removeTeamMember(caseId, employeeId, actor) {
+  return transaction(async (tx) => {
+    const removed = await tx.run(
+      'DELETE FROM case_team WHERE case_id = :case_id AND employee_id = :employee_id',
+      { case_id: caseId, employee_id: employeeId },
+    );
+    if (removed === 0) return false;
+
+    await logEvent(tx, caseId, 'unassigned', `นำ ${await staffLabel(tx, employeeId)} ออกจากทีมดูแลเคส`, actor);
+    return true;
+  });
+}
+
 export async function unassign(caseId, actor) {
   await transaction(async (tx) => {
     const previous = await tx.one('SELECT assigned_to FROM cases WHERE case_id = :id', { id: caseId });
+
+    /* ยังมีคนในทีมอยู่ = เคสนี้ยังมีคนดูแล ไม่ใช่เคสไร้คน — เลื่อนคนที่อยู่มานานที่สุดขึ้นเป็นหลัก
+       ถ้าปล่อยให้ assigned_to ว่างทั้งที่ทีมยังอยู่ สถานะจะกลายเป็น "ยังไม่จับคู่พนักงาน"
+       แล้วเคสจะไปโผล่ในคิวรอจับคู่ทั้งที่มีคนไปทำงานอยู่จริง */
+    const next = await tx.one(
+      'SELECT employee_id FROM case_team WHERE case_id = :id ORDER BY added_at, employee_id LIMIT 1',
+      { id: caseId },
+    );
+
+    const from = previous?.assigned_to ? await staffLabel(tx, previous.assigned_to) : null;
+
+    if (next) {
+      await tx.run(
+        `UPDATE cases SET assigned_to = :employee_id, assigned_at = ${NOW}, updated_at = ${NOW}
+         WHERE case_id = :case_id`,
+        { case_id: caseId, employee_id: next.employee_id },
+      );
+      await tx.run('DELETE FROM case_team WHERE case_id = :case_id AND employee_id = :employee_id', {
+        case_id: caseId,
+        employee_id: next.employee_id,
+      });
+
+      const to = await staffLabel(tx, next.employee_id);
+      await logEvent(tx, caseId, 'assigned', `ถอด ${from} ออก และเลื่อน ${to} ขึ้นเป็นผู้รับผิดชอบหลัก`, actor);
+      return;
+    }
 
     await tx.run(
       `UPDATE cases
@@ -482,8 +577,6 @@ export async function unassign(caseId, actor) {
        WHERE case_id = :case_id`,
       { case_id: caseId },
     );
-
-    const from = previous?.assigned_to ? await staffLabel(tx, previous.assigned_to) : null;
     await logEvent(tx, caseId, 'unassigned', from ? `ถอด ${from} ออกจากเคส` : 'ยกเลิกการจับคู่', actor);
   });
 
@@ -1642,12 +1735,58 @@ const withoutPhotoBytes = (row) => {
   return { ...rest, has_wound_photo: wound_photo_data != null };
 };
 
-/** รายงานทั้งหมดของเคส — ล่าสุดอยู่บน (คนเปิดดูอยากรู้อาการล่าสุดก่อนเสมอ) */
-export function listReports(caseId) {
-  return sql.all(
+/**
+ * คลังรายงานของเคส — ล่าสุดอยู่บน แบ่งหน้า + กรองตามเดือน/ประเภท
+ * (เคสดูแลต่อเนื่องบันทึกวันละหลายครั้ง ดึงทั้งหมดทุกครั้งที่เปิดดูไม่ไหว)
+ */
+export async function listReports(caseId, { month, type, page = 1, per_page = 20 } = {}) {
+  const where = ['r.case_id = :id'];
+  const params = { id: caseId };
+
+  if (month) {
+    // report_date เก็บเป็นข้อความ 'YYYY-MM-DD' จึงเทียบ prefix ได้ตรงๆ (เกณฑ์เดียวกับตัวกรองช่วงเวลาของเคส)
+    where.push('r.report_date LIKE :month');
+    params.month = `${month}%`;
+  }
+  if (type === 'abnormal') where.push("r.report_type <> 'routine'");
+  else if (type) {
+    where.push('r.report_type = :type');
+    params.type = type;
+  }
+
+  const clause = `WHERE ${where.join(' AND ')}`;
+  const { total } = await sql.one(`SELECT COUNT(*) AS total FROM case_reports r ${clause}`, params);
+
+  const rows = await sql.all(
     `SELECT ${REPORT_COLS} FROM case_reports r ${REPORT_VISIT}
-     WHERE r.case_id = :id
-     ORDER BY r.report_date DESC, r.report_id DESC`,
+     ${clause}
+     /* ในวันเดียวกันเรียงตามเวลาจริงเสมอ — ใบที่ไม่ได้ระบุ "เวลาที่วัด" ใช้เวลาที่กดบันทึกแทน
+        (NULLS LAST ทำให้ใบพวกนี้ไปกองท้ายวันทั้งที่อาจเป็นใบล่าสุด แล้วรายการดูเหมือนไม่ได้เรียง)
+        created_at เก็บเป็น 'YYYY-MM-DD HH:MM:SS' เวลาไทย จึงตัดเอา 'HH:MM' มาเทียบกับ report_time ได้ตรงๆ */
+     ORDER BY r.report_date DESC,
+              COALESCE(r.report_time, substr(r.created_at, 12, 5)) DESC,
+              r.report_id DESC
+     LIMIT :limit OFFSET :offset`,
+    { ...params, limit: per_page, offset: (page - 1) * per_page },
+  );
+
+  const count = Number(total);
+  return { data: rows, page, per_page, total: count, has_more: page * per_page < count };
+}
+
+/**
+ * เดือนที่มีรายงานอยู่จริง + จำนวนของแต่ละเดือน — ให้หน้าเว็บทำตัวเลือก "ดูย้อนหลังเดือนไหน"
+ * นับใบที่ไม่ใช่รอบปกติแยกไว้ด้วย เพื่อให้เห็นตั้งแต่ยังไม่กดว่าเดือนไหนมีเรื่องต้องตามอ่าน
+ */
+export function reportMonths(caseId) {
+  return sql.all(
+    `SELECT substr(report_date, 1, 7) AS month,
+            COUNT(*)::int AS total,
+            COUNT(*) FILTER (WHERE report_type <> 'routine')::int AS abnormal
+     FROM case_reports
+     WHERE case_id = :id
+     GROUP BY 1
+     ORDER BY 1 DESC`,
     { id: caseId },
   );
 }

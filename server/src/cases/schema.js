@@ -446,6 +446,20 @@ export const createReportSchema = reportFields.superRefine((v, ctx) => {
  */
 export const updateReportSchema = reportFields;
 
+/**
+ * ตัวกรองของคลังรายงาน — เคสที่ดูแลต่อเนื่องบันทึกวันละ 2–4 ครั้ง ครึ่งปีก็หลายร้อยใบ
+ * ส่งกลับทั้งหมดในครั้งเดียวไม่ไหวทั้งฝั่งเน็ตของพนักงานและฝั่งหน้าจอ
+ *
+ * type = 'abnormal' หมายถึง "ไม่ใช่รอบปกติ" (อาการเปลี่ยน + เหตุการณ์) รวมกัน
+ * เป็นสิ่งที่ถูกถามหาบ่อยที่สุดเวลาไล่ย้อนหลัง ("เดือนนี้มีอะไรผิดปกติบ้าง")
+ */
+export const reportQuerySchema = z.object({
+  month: z.string().regex(/^d{4}-(0[1-9]|1[0-2])$/, 'เดือนต้องอยู่ในรูปแบบ YYYY-MM').optional(),
+  type: z.enum(['routine', 'change', 'incident', 'abnormal']).optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  per_page: z.coerce.number().int().min(1).max(100).default(20),
+});
+
 
 // ---------- ระบบเช็คอิน (ฝั่ง admin) ----------
 

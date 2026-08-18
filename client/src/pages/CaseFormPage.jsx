@@ -534,7 +534,7 @@ export default function CaseFormPage() {
         navigate(`/cases?open=${id}`);
       } else {
         const created = await api.createCase(payload);
-        toast(`เปิดเคส ${created.case_id} แล้ว`);
+        toast(`เปิดเคส ${created.case_id} แล้ว · ระบบออกใบแจ้งหนี้ (ร่าง) ให้เรียบร้อย`);
         // เด้งกลับรายการพร้อมเปิดเคสที่เพิ่งสร้าง — เห็นผลทันทีและกดจับคู่พนักงานต่อได้เลย
         navigate(`/cases?open=${created.case_id}`);
       }

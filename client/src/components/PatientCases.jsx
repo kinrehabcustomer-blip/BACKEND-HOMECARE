@@ -31,7 +31,7 @@ export default function PatientCases({ cases = [], limit }) {
             <p className="muted">
               <span className="mono">{c.case_id}</span>
               {' · '}{CASE_TYPE_LABELS[c.case_type]}
-              {c.assigned_name && ` · ${c.assigned_name}`}
+              {c.assigned_name && ` · ${[c.assigned_name, c.team_names].filter(Boolean).join(' · ')}`}
             </p>
             <p className="muted">
               {c.start_date ? `เริ่ม ${formatDate(c.start_date)}` : 'ยังไม่ระบุวันเริ่ม'}

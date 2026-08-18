@@ -1016,3 +1016,109 @@ ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS rn_notified_to TEXT;
 -- ค้นรายงานที่ไม่ใช่รอบปกติ (อาการเปลี่ยน/เหตุการณ์) — สิ่งแรกที่ผู้จัดการจะถามหา
 CREATE INDEX IF NOT EXISTS idx_case_reports_incident
   ON case_reports (report_date DESC) WHERE report_type <> 'routine';
+
+-- ============================================================================
+-- ทีมพนักงานของเคส (case_team) — เคสหนึ่งมีคนดูแลได้มากกว่าหนึ่งคน
+--
+-- ของเดิม cases.assigned_to เก็บได้คนเดียว ซึ่งไม่พอกับงานจริง:
+-- เคสติดเตียงมีเวรเช้า/เวรดึกคนละคน และเคสที่มีทั้งผู้ช่วยพยาบาลกับนักกายภาพ
+-- ทางแก้เดิมคือสลับ assigned_to ไปมา ทำให้เห็นได้แค่คนล่าสุดว่าใครถือเคสนี้อยู่
+--
+-- ไม่ทิ้ง cases.assigned_to เพราะทั้งระบบยึดมันเป็น "ผู้รับผิดชอบหลัก":
+-- CHECK ของสถานะเคส (จับคู่แล้ว = ต้องมีคน), กะที่ไม่ระบุคนจะตกเป็นของคนนี้,
+-- และการเปลี่ยนสถานะเคสทั้งหมด — ตารางนี้จึงเป็น "คนที่เหลือในทีม" ไม่ใช่ตัวแทน
+--
+-- ON DELETE CASCADE ทั้งสองทาง: ลบเคสแล้วทีมหายตาม · ลบพนักงานถาวรแล้วชื่อหายจากทีม
+-- (ต่างจาก case_visits/case_reports ที่เป็นบันทึกการทำงานจริงและต้องเก็บไว้เป็นประวัติ
+--  ตารางนี้บอกแค่ "ตอนนี้ใครดูแลอยู่" ไม่ใช่หลักฐานว่าใครทำอะไรไปแล้ว)
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS case_team (
+  case_id     TEXT NOT NULL REFERENCES cases (case_id) ON DELETE CASCADE ON UPDATE CASCADE,
+  employee_id TEXT NOT NULL REFERENCES employees (employee_id) ON DELETE CASCADE ON UPDATE CASCADE,
+
+  -- ใครเพิ่มเข้ามาเมื่อไหร่ — ประวัติเต็มอยู่ใน case_events แล้ว ที่นี่เก็บไว้โชว์บนการ์ดของคนนั้น
+  added_at    TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS'),
+  added_by    TEXT REFERENCES employees (employee_id) ON DELETE SET NULL ON UPDATE CASCADE,
+
+  -- คนเดิมเพิ่มซ้ำไม่ได้ (กดปุ่มซ้ำ/สองคนกดพร้อมกันก็ได้แถวเดียว)
+  PRIMARY KEY (case_id, employee_id)
+);
+
+-- "เคสที่ฉันอยู่ในทีม" ถูกถามทุกครั้งที่พนักงานเปิดแอป
+CREATE INDEX IF NOT EXISTS idx_case_team_employee ON case_team (employee_id);
+
+-- ============================================================================
+-- เงินมัดจำ + การรับชำระหลายงวด
+--
+-- ของเดิมใบแจ้งหนี้จ่ายได้ครั้งเดียวจบ (กดชำระ = สถานะเป็น paid ทั้งใบ)
+-- แต่งานดูแลผู้ป่วยเก็บมัดจำก่อนเริ่มงานเป็นเรื่องปกติ แล้วเก็บส่วนที่เหลือทีหลัง
+-- ที่ผ่านมาจึงต้องออกใบสองใบแยกกัน ซึ่งทำให้ยอดรวมของเคสอ่านไม่ออกว่าตกลงกันเท่าไหร่
+--
+-- เงินที่รับจริงแต่ละครั้งอยู่ในตาราง invoice_payments — ไม่เก็บยอดสะสมซ้ำไว้บนใบ
+-- เพราะยอดสองที่มีวันหนึ่งจะไม่ตรงกัน (ลบรายการรับเงินแล้วลืมหักยอดสะสม)
+-- ============================================================================
+
+-- ---------- การรับชำระแต่ละครั้ง ----------
+-- ลบใบทิ้ง (ใบร่าง) แล้วรายการรับเงินหายตาม — ใบที่มีการรับเงินแล้วลบไม่ได้อยู่แล้ว (ต้อง "ยกเลิก" แทน)
+-- received_by_name เก็บชื่อ ณ ตอนนั้นคู่กับรหัส แบบเดียวกับผู้ออกใบ — คนรับเงินอาจลาออกทีหลัง
+CREATE TABLE IF NOT EXISTS invoice_payments (
+  payment_id   INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  invoice_id   TEXT NOT NULL REFERENCES invoices (invoice_id) ON DELETE CASCADE ON UPDATE CASCADE,
+
+  amount       DOUBLE PRECISION NOT NULL CHECK (amount > 0),
+  paid_at      TEXT NOT NULL,            -- 'YYYY-MM-DD' วันที่ได้รับเงินจริง
+  -- true = งวดนี้คือเงินมัดจำ (งวดแรก) · ใช้แยกในใบเสร็จและรายงาน
+  is_deposit   BOOLEAN NOT NULL DEFAULT FALSE,
+  method       TEXT,
+  note         TEXT,
+
+  received_by      TEXT REFERENCES employees (employee_id) ON DELETE SET NULL ON UPDATE CASCADE,
+  received_by_name TEXT,
+
+  created_at   TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')
+);
+
+CREATE INDEX IF NOT EXISTS idx_invoice_payments_invoice ON invoice_payments (invoice_id, payment_id);
+
+-- ใบที่ชำระครบไปแล้วก่อนมีระบบงวด — ย้ายเข้าเป็นรายการรับเงินหนึ่งงวด ให้ยอดที่รับแล้วตรงกับความจริง
+-- (ไม่งั้นใบเก่าทุกใบจะกลายเป็น "รับแล้ว 0 บาท" ทั้งที่ปิดยอดไปแล้ว)
+-- แตะเฉพาะใบที่ยังไม่มีรายการรับเงินเลย จึงรันซ้ำได้ไม่เกิดยอดซ้ำ
+INSERT INTO invoice_payments (invoice_id, amount, paid_at, method, received_by, received_by_name, created_at)
+SELECT i.invoice_id, i.total, COALESCE(i.paid_at, i.issue_date), i.payment_method, i.paid_by, i.paid_by_name, i.updated_at
+FROM invoices i
+WHERE i.status = 'paid'
+  AND i.total > 0
+  AND NOT EXISTS (SELECT 1 FROM invoice_payments p WHERE p.invoice_id = i.invoice_id);
+
+-- ============================================================================
+-- แผนการวางบิล: เก็บเต็มจำนวน หรือแบ่งเป็น "ใบมัดจำ" + "ใบส่วนที่เหลือ"
+--
+-- เงินมัดจำไม่ใช่ตัวเลขบนใบเดียว แต่เป็นใบของตัวเอง เพราะสิ่งที่ส่งให้ลูกค้าคือ "บิลที่ต้องจ่ายตอนนี้"
+-- ถ้าใช้ใบเดียวแล้วเขียนว่ารับมัดจำไปแล้วเท่าไหร่ ลูกค้าจะถือเอกสารที่ยอดหน้าใบไม่ใช่ยอดที่ต้องโอน
+--
+-- billing_kind: full = เก็บครั้งเดียวจบ · deposit = ใบมัดจำ (ใบแรก) · balance = ใบส่วนที่เหลือ
+--               NULL = เพิ่งเปิดเคส ยังไม่ได้เลือกว่าจะเก็บแบบไหน — ใบยังไม่ถูกใช้เป็นเอกสาร
+-- parent_invoice_id: ใบส่วนที่เหลือชี้กลับไปที่ใบมัดจำ ให้ไล่คู่กันได้ว่ามาจากแผนเดียวกัน
+--
+-- ห่อด้วย DO block เพราะการเติมค่าให้ใบเก่าต้องเกิดครั้งเดียวตอนเพิ่มคอลัมน์
+-- (schema.sql ถูกรันซ้ำทุกครั้งที่ deploy — ถ้าเขียน UPDATE ... WHERE billing_kind IS NULL ลอยไว้
+--  ใบที่เพิ่งเปิดเคสและยังไม่ได้เลือกวิธีเก็บเงิน จะโดนเหมาเป็น "เต็มจำนวน" ทุกครั้งที่ deploy)
+-- ============================================================================
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'invoices' AND column_name = 'billing_kind'
+  ) THEN
+    ALTER TABLE invoices ADD COLUMN billing_kind TEXT
+      CHECK (billing_kind IN ('full', 'deposit', 'balance'));
+
+    -- ใบทุกใบที่มีอยู่ก่อนหน้านี้คือใบเก็บเต็มจำนวน (ยังไม่เคยมีระบบแบ่งงวด)
+    UPDATE invoices SET billing_kind = 'full';
+  END IF;
+END $$;
+
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS parent_invoice_id TEXT
+  REFERENCES invoices (invoice_id) ON DELETE SET NULL ON UPDATE CASCADE;
+
+CREATE INDEX IF NOT EXISTS idx_invoices_parent ON invoices (parent_invoice_id);

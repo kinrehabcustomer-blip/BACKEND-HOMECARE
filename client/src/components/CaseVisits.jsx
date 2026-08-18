@@ -61,7 +61,7 @@ function dayClass(list) {
  * mode='shift' (Homecare)     เลือกคน + เวลาให้กับกะที่กำลังจะลง
  * mode='appointment' (กายภาพ) นับเป็น "ครั้ง" ในคอร์ส ไม่ต้องระบุคน/เวลา
  */
-export default function CaseVisits({ caseId, target = null, readOnly = false, mode = 'shift' }) {
+export default function CaseVisits({ caseId, caseItem = null, target = null, readOnly = false, mode = 'shift' }) {
   const toast = useToast();
   // ค่าจ้างรายกะเห็น/แก้ได้เฉพาะผู้จัดการ เหมือนค่าจ้างของเคส (server ตัดฟิลด์ให้อยู่แล้ว)
   const seePay = useCanSeeStaffPay();
@@ -93,17 +93,22 @@ export default function CaseVisits({ caseId, target = null, readOnly = false, mo
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([api.listVisits(caseId), api.assignableEmployees()])
-      .then(([v, s]) => {
+    /* ลงกะให้ได้เฉพาะคนที่รับผิดชอบเคสนี้ — ผู้รับผิดชอบหลัก + คนในทีม
+       เดิมเป็นรายชื่อพนักงานทั้งบริษัท ซึ่งเลือกผิดคนได้ง่ายมาก (ชื่อคล้ายกัน/เรียงติดกัน)
+       และกะที่ลงให้คนนอกเคสจะไปโผล่ในตารางงานของเขาโดยที่เขาไม่เคยรู้จักเคสนี้เลย */
+    Promise.all([api.listVisits(caseId), api.assignableEmployees(), api.listCaseTeam(caseId)])
+      .then(([v, all, team]) => {
         if (cancelled) return;
         setVisits(v);
-        setStaff(s);
+
+        const inCase = new Set([caseItem?.assigned_to, ...team.map((m) => m.employee_id)].filter(Boolean));
+        setStaff(all.filter((e) => inCase.has(e.employee_id)));
       })
       .catch((e) => !cancelled && setError(e.message));
     return () => {
       cancelled = true;
     };
-  }, [caseId]);
+  }, [caseId, caseItem?.assigned_to]);
 
   const byDate = useMemo(() => {
     const map = new Map();
@@ -354,13 +359,19 @@ export default function CaseVisits({ caseId, target = null, readOnly = false, mo
           {/* คนที่ไป: เฉพาะกะ Homecare — นัดกายภาพใช้ผู้รับผิดชอบหลักของเคส (นักกายภาพบำบัดของคอร์สนั้น) */}
           {!isAppt && (
             <select value={who} disabled={busy} onChange={(e) => setWho(e.target.value)}>
-              <option value="">— พนักงาน (ไม่ระบุ = ผู้รับผิดชอบหลัก) —</option>
+              <option value="">— ไม่ระบุคน —</option>
               {staff.map((s) => (
                 <option key={s.employee_id} value={s.employee_id}>
                   {s.first_name} {s.last_name} ({POSITION_LABELS[s.position]})
                 </option>
               ))}
             </select>
+          )}
+
+          {!isAppt && staff.length === 0 && (
+            <p className="muted visit-hint">
+              เคสนี้ยังไม่มีพนักงานให้เลือก — เพิ่มคนเข้าเคสที่หัวข้อ “พนักงานที่รับเคส” ก่อน
+            </p>
           )}
 
           {/* ช่วงเวลา: ใช้ทั้งสองโหมด — นัดกายภาพก็ต้องบอกคนไข้ได้ว่ามากี่โมง

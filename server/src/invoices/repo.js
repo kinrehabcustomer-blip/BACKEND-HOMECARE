@@ -18,6 +18,9 @@ const EDITABLE = [
 const SELECT_INVOICE = `
   SELECT i.*,
          EXISTS (SELECT 1 FROM invoice_items ii WHERE ii.invoice_id = i.invoice_id) AS has_items,
+         /* ยอดที่รับมาแล้วจริง คิดสดจากรายการรับเงินทุกครั้ง ไม่เก็บยอดสะสมซ้ำไว้บนใบ
+            (เก็บสองที่แล้ววันหนึ่งจะไม่ตรงกัน เช่น ลบรายการรับเงินแล้วลืมหักยอดสะสม) */
+         COALESCE((SELECT SUM(p.amount) FROM invoice_payments p WHERE p.invoice_id = i.invoice_id), 0) AS paid_amount,
          c.title       AS case_title,
          c.status      AS case_status,
          c.fee         AS case_fee,
@@ -75,14 +78,30 @@ const withComputed = (row) => {
   // ซึ่งเป็นตัวที่ต้องตรงกับค่าจ้างของเคส (ดู priceParts)
   // ใบที่แตกเป็นรายครั้ง (มี items) ตั้งใจให้ยอดเป็นสัดส่วนของกะที่ไปจริง ไม่ใช่ยอดเต็มของเคส
   // เทียบกับ fee ของเคสแล้วจะขึ้นป้าย "ไม่ตรงกับเคส" ตลอดทั้งที่ถูกต้องอยู่แล้ว
+  /* ใบที่เป็นงวดหนึ่งของแผน (มัดจำ/ส่วนที่เหลือ) ตั้งใจให้ยอดน้อยกว่าค่าบริการของเคสอยู่แล้ว
+     เทียบกับ fee ของเคสจะขึ้นป้าย "ไม่ตรงกับเคส" ตลอดทั้งที่ถูกต้อง — เกณฑ์เดียวกับใบที่แตกรายครั้ง */
+  const isPart = row.billing_kind === 'deposit' || row.billing_kind === 'balance';
   const feeStale =
-    !row.has_items &&
+    !row.has_items && !isPart &&
     row.case_id != null && row.case_fee != null && Number(row.case_fee) !== Number(row.total);
   const payerStale =
     row.case_id != null && row.case_payer_name != null && row.case_payer_name !== row.bill_to_name;
 
+  /* ยอดคงเหลือและ "ยังไม่ครบ" คิดที่นี่ที่เดียว หน้าเว็บจะได้ไม่คำนวณเงินเอง
+     ปัดสองตำแหน่งกันเศษทศนิยมลอย (0.1 + 0.2 ของ float) ที่ทำให้ใบจ่ายครบแล้วเหลือค้าง 0.0000001 บาท */
+  const paid = Math.round(Number(row.paid_amount ?? 0) * 100) / 100;
+  const balance = Math.round((Number(row.total ?? 0) - paid) * 100) / 100;
+
   return {
     ...row,
+    paid_amount: paid,
+    balance,
+    // รับมาบางส่วนแล้วแต่ยังไม่ครบ — ไม่เก็บเป็นสถานะในฐานข้อมูล คิดตอนอ่านเหมือน "เกินกำหนด"
+    is_partial: row.status !== 'cancelled' && paid > 0 && balance > 0,
+    // ใบที่ระบบเตรียมไว้ตอนเปิดเคส แต่ยังไม่ได้เลือกว่าจะเก็บเต็มจำนวนหรือแบ่งมัดจำ
+    // ยังไม่ใช่เอกสาร — หน้าเว็บจะให้เลือกวิธีเก็บเงินก่อน แล้วค่อยแสดงตัวใบ
+    needs_plan: row.status === 'draft' && row.billing_kind == null,
+    is_plan_part: isPart,
     is_overdue: row.status === 'issued' && row.due_date != null && row.due_date < TODAY(),
     fee_stale: feeStale,
     payer_stale: payerStale,
@@ -149,7 +168,8 @@ export async function list({ q, status, customer_id, case_id, overdue, page, per
 export const findById = async (id) => {
   const row = await sql.one(`${SELECT_INVOICE} WHERE i.invoice_id = :id`, { id });
   if (!row) return null;
-  return withComputed({ ...row, items: await listItems(id) });
+  const [items, payments] = await Promise.all([listItems(id), listPayments(id)]);
+  return withComputed({ ...row, items, payments });
 };
 
 // ใบแจ้งหนี้ของลูกค้ารายหนึ่งดึงผ่าน list({ customer_id }) ซึ่งมีตัวกรอง/แบ่งหน้าครบอยู่แล้ว
@@ -160,6 +180,14 @@ export const listForCase = (caseId) =>
   sql
     .all(`${SELECT_INVOICE} WHERE i.case_id = :id ORDER BY i.invoice_id DESC`, { id: caseId })
     .then((rows) => rows.map(withComputed));
+
+/** การรับชำระของใบ เรียงตามลำดับที่รับจริง — งวดแรกอยู่บน (มัดจำมักเป็นงวดแรก) */
+export const listPayments = (invoiceId) =>
+  sql.all(
+    `SELECT payment_id, amount, paid_at, is_deposit, method, note, received_by_name, created_at
+     FROM invoice_payments WHERE invoice_id = :id ORDER BY payment_id`,
+    { id: invoiceId },
+  );
 
 /** รายการย่อยของใบ (ว่าง = ใบแบบแพ็คเกจบรรทัดเดียวตามปกติ) */
 export const listItems = (invoiceId) =>
@@ -339,6 +367,10 @@ export async function syncOpenFromCase(caseRow, customer) {
          total               = GREATEST(0, :amount::double precision - :discount::double precision),
          updated_at          = ${NOW}
      WHERE case_id = :case_id AND status IN ${OPEN_STATUSES}
+       /* ใบมัดจำ/ใบส่วนที่เหลือมียอดของงวดนั้นโดยเฉพาะ ซิงก์ทับจะกลายเป็นยอดเต็มทั้งสองใบ
+          (ผู้จ่าย/ที่อยู่ก็ไม่ทับด้วย เพราะคำสั่งเดียวกัน — แก้ที่ใบเองหรือลบแล้วแบ่งใหม่) */
+       AND billing_kind IS DISTINCT FROM 'deposit'
+       AND billing_kind IS DISTINCT FROM 'balance'
        AND NOT EXISTS (SELECT 1 FROM invoice_items ii WHERE ii.invoice_id = invoices.invoice_id)`,
     {
       case_id: caseRow.case_id,
@@ -407,27 +439,154 @@ export async function issue(invoiceId) {
   return findById(invoiceId);
 }
 
-/** บันทึกรับชำระ — เก็บชื่อพนักงานที่รับเงินไว้ใช้เป็นผู้ลงนามบนใบเสร็จ (อาจคนละคนกับผู้ออกใบ) */
-export async function pay(invoiceId, { paid_at, payment_method }, actor) {
-  await sql.run(
-    `UPDATE invoices
-     SET status = 'paid',
-         paid_at = :paid_at,
-         payment_method = COALESCE(:payment_method, payment_method),
-         paid_by = :paid_by,
-         paid_by_name = :paid_by_name,
-         updated_at = ${NOW}
-     WHERE invoice_id = :id`,
-    {
-      id: invoiceId,
-      paid_at: paid_at ?? TODAY(),
-      payment_method: payment_method ?? null,
-      paid_by: actor?.employee_id ?? null,
-      paid_by_name: actor?.name ?? null,
-    },
-  );
-  return findById(invoiceId);
+/**
+ * บันทึกรับชำระหนึ่งงวด — เก็บเป็นรายการแยกทุกครั้ง (มัดจำก่อน แล้วเก็บส่วนที่เหลือทีหลัง)
+ *
+ * ไม่ส่ง amount มา = รับเต็มยอดที่ค้างอยู่ (พฤติกรรมเดิมของปุ่ม "ยืนยันรับชำระ")
+ * ใบจะเปลี่ยนเป็น "ชำระแล้ว" ก็ต่อเมื่อรับครบยอดสุทธิ — งวดแรกที่ยังไม่ครบ ใบยังเป็น "ออกใบแล้ว"
+ * (ปัดสองตำแหน่งก่อนเทียบ กันเศษทศนิยมลอยทำให้ใบที่จ่ายครบแล้วไม่ยอมปิด)
+ *
+ * เก็บชื่อพนักงานที่รับเงินไว้ทั้งบนงวดและบนใบ — บนใบใช้เป็นผู้ลงนามใบเสร็จ (คนรับงวดสุดท้าย)
+ */
+export async function pay(invoiceId, { amount, paid_at, payment_method, note }, actor) {
+  return transaction(async (tx) => {
+    const inv = await tx.one(
+      `SELECT i.total, i.billing_kind,
+              COALESCE((SELECT SUM(p.amount) FROM invoice_payments p WHERE p.invoice_id = i.invoice_id), 0) AS paid
+       FROM invoices i WHERE i.invoice_id = :id`,
+      { id: invoiceId },
+    );
+
+    const round = (n) => Math.round(Number(n) * 100) / 100;
+    const balance = round(Number(inv.total) - Number(inv.paid));
+    const received = round(amount ?? balance);
+
+    // ใบมัดจำทั้งใบคือเงินมัดจำ — ธงนี้ใช้แยกในใบเสร็จและรายงาน
+    const isDeposit = inv.billing_kind === 'deposit';
+
+    await tx.run(
+      `INSERT INTO invoice_payments
+         (invoice_id, amount, paid_at, is_deposit, method, note, received_by, received_by_name)
+       VALUES (:id, :amount, :paid_at, :is_deposit, :method, :note, :by, :by_name)`,
+      {
+        id: invoiceId,
+        amount: received,
+        paid_at: paid_at ?? TODAY(),
+        is_deposit: isDeposit,
+        method: payment_method ?? null,
+        note: note ?? null,
+        by: actor?.employee_id ?? null,
+        by_name: actor?.name ?? null,
+      },
+    );
+
+    const settled = round(Number(inv.paid) + received) >= round(Number(inv.total));
+
+    await tx.run(
+      `UPDATE invoices
+       SET status = CASE WHEN :settled THEN 'paid' ELSE status END,
+           paid_at = CASE WHEN :settled THEN :paid_at ELSE paid_at END,
+           payment_method = COALESCE(:payment_method, payment_method),
+           paid_by = :paid_by,
+           paid_by_name = :paid_by_name,
+           updated_at = ${NOW}
+       WHERE invoice_id = :id`,
+      {
+        id: invoiceId,
+        settled,
+        paid_at: paid_at ?? TODAY(),
+        payment_method: payment_method ?? null,
+        paid_by: actor?.employee_id ?? null,
+        paid_by_name: actor?.name ?? null,
+      },
+    );
+
+    return invoiceId;
+  }).then(findById);
 }
+
+/**
+ * เลือกวิธีเก็บเงินของใบ — ทำได้ครั้งเดียวตอนใบยังเป็นร่างและยังไม่ได้เลือก
+ *
+ * full    = ใบนี้คือยอดเต็ม จบในใบเดียว
+ * deposit = ใบนี้กลายเป็น "ใบมัดจำ" (ยอด = ที่กรอก) แล้วออก "ใบส่วนที่เหลือ" ตามมาอีกใบ
+ *           ยอดใบที่สอง = ยอดเต็มเดิม − มัดจำ · สองใบรวมกันได้เท่ากับค่าบริการของเคสเสมอ
+ *
+ * ทำใน transaction เดียว เพราะครึ่งทาง (ใบมัดจำถูกแก้แล้วแต่ใบส่วนที่เหลือยังไม่เกิด)
+ * แปลว่าลูกค้าจะได้บิลที่น้อยกว่าที่ตกลงไว้โดยไม่มีอะไรตามเก็บส่วนที่เหลือ
+ */
+export async function setBillingPlan(invoiceId, { mode, deposit_amount }, actor) {
+  return transaction(async (tx) => {
+    const inv = await tx.one('SELECT * FROM invoices WHERE invoice_id = :id', { id: invoiceId });
+
+    if (mode === 'full') {
+      await tx.run(
+        `UPDATE invoices SET billing_kind = 'full', updated_at = ${NOW} WHERE invoice_id = :id`,
+        { id: invoiceId },
+      );
+      return invoiceId;
+    }
+
+    const deposit = Math.round(Number(deposit_amount) * 100) / 100;
+    const rest = Math.round((Number(inv.total) - deposit) * 100) / 100;
+
+    // ใบแรกกลายเป็นใบมัดจำ — ส่วนลดถูกคิดไปแล้วในยอดเต็ม จึงไม่ยกมาที่งวด (ไม่งั้นลดซ้ำสองรอบ)
+    await tx.run(
+      `UPDATE invoices
+       SET billing_kind = 'deposit',
+           service_description = :description,
+           amount = :amount, discount = 0, total = :amount,
+           updated_at = ${NOW}
+       WHERE invoice_id = :id`,
+      { id: invoiceId, amount: deposit, description: `เงินมัดจำ — ${inv.service_description}` },
+    );
+
+    const nextId = await nextInvoiceId(tx);
+    await tx.run(
+      `INSERT INTO invoices
+         (invoice_id, case_id, customer_id, issue_date, due_date,
+          bill_to_name, bill_to_tax_id, bill_to_address,
+          service_description, amount, discount, total, payment_method, note,
+          issued_by, issued_by_name, billing_kind, parent_invoice_id)
+       VALUES
+         (:invoice_id, :case_id, :customer_id, :issue_date, :due_date,
+          :bill_to_name, :bill_to_tax_id, :bill_to_address,
+          :description, :amount, 0, :amount, :payment_method, :note,
+          :issued_by, :issued_by_name, 'balance', :parent)`,
+      {
+        invoice_id: nextId,
+        case_id: inv.case_id,
+        customer_id: inv.customer_id,
+        issue_date: inv.issue_date,
+        due_date: inv.due_date,
+        bill_to_name: inv.bill_to_name,
+        bill_to_tax_id: inv.bill_to_tax_id,
+        bill_to_address: inv.bill_to_address,
+        description: `ยอดคงเหลือหลังหักมัดจำ — ${inv.service_description}`,
+        amount: rest,
+        payment_method: inv.payment_method,
+        note: inv.note,
+        issued_by: actor?.employee_id ?? null,
+        issued_by_name: actor?.name ?? null,
+        parent: invoiceId,
+      },
+    );
+
+    return invoiceId;
+  }).then(findById);
+}
+
+/** ใบอื่นที่อยู่ในแผนเดียวกัน (คู่มัดจำ–ส่วนที่เหลือ) — ให้หน้าเว็บลิงก์ถึงกันได้ */
+export const listPlanSiblings = (invoiceId) =>
+  sql.all(
+    `SELECT invoice_id, billing_kind, total, status
+     FROM invoices
+     WHERE invoice_id <> :id
+       AND (parent_invoice_id = :id
+            OR invoice_id = (SELECT parent_invoice_id FROM invoices WHERE invoice_id = :id))
+     ORDER BY invoice_id`,
+    { id: invoiceId },
+  );
 
 /** ยกเลิก — ไม่ลบทิ้ง เพราะเลขที่เอกสารต้องเรียงต่อเนื่อง ห้ามข้าม */
 export async function cancel(invoiceId) {
@@ -448,10 +607,24 @@ export const remove = (invoiceId) =>
 export async function summary(filters = {}) {
   const { clause, params } = buildWhere(filters);
   const rows = await sql.all(
-    `SELECT i.status, COUNT(*) AS count, SUM(i.total) AS amount FROM invoices i ${clause} GROUP BY i.status`,
+    /* outstanding = เงินที่ยังไม่ได้รับจริง (ยอดสุทธิ − ที่รับมาแล้ว)
+       ตั้งแต่มีมัดจำ ใบที่ยัง "รอชำระ" อาจรับเงินมาแล้วบางส่วน การรวม total ทั้งใบ
+       จะทำให้ตัวเลข "รอชำระ" สูงกว่าเงินที่ต้องตามเก็บจริง แล้วไปวางแผนกระแสเงินสดผิด
+       amount (ยอดเต็มของใบ) ยังคงไว้ เพราะยอดรวมของรายการที่กรองอยู่ต้องเป็นยอดหน้าใบ */
+    `SELECT i.status,
+            COUNT(*) AS count,
+            SUM(i.total) AS amount,
+            SUM(GREATEST(0, i.total - COALESCE(
+              (SELECT SUM(p.amount) FROM invoice_payments p WHERE p.invoice_id = i.invoice_id), 0))) AS outstanding
+     FROM invoices i ${clause} GROUP BY i.status`,
     params,
   );
-  return rows.map((r) => ({ ...r, count: Number(r.count), amount: Number(r.amount ?? 0) }));
+  return rows.map((r) => ({
+    ...r,
+    count: Number(r.count),
+    amount: Number(r.amount ?? 0),
+    outstanding: Number(r.outstanding ?? 0),
+  }));
 }
 
 // ความละเอียดของแกนเวลาในกราฟรายได้ — ค่ามาจาก enum ใน schema แล้ว จึงต่อเข้า SQL ตรงๆ ได้

@@ -31,7 +31,13 @@ export default function CaseReportsModal({ caseItem, onClose }) {
         </header>
 
         <div className="modal-body">
-          <CaseReports caseId={caseItem.case_id} caseInfo={caseItem} scope="admin" onFormOpen={setFormOpen} />
+          <CaseReports
+            caseId={caseItem.case_id}
+            caseInfo={caseItem}
+            scope="admin"
+            allowAdd={false}
+            onFormOpen={setFormOpen}
+          />
         </div>
 
         {!formOpen && (

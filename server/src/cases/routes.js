@@ -3,6 +3,8 @@ import * as repo from './repo.js';
 import * as employees from '../employees/repo.js';
 import * as customers from '../customers/repo.js';
 import * as invoices from '../invoices/repo.js';
+// ตัวสร้างใบร่างอยู่ที่ชั้น route ของใบแจ้งหนี้ เพราะต้องใช้ตรรกะหาผู้จ่ายชุดเดียวกับตอนกดออกใบเอง
+import { createDraftForCase } from '../invoices/routes.js';
 import {
   createCaseSchema,
   updateCaseSchema,
@@ -24,6 +26,7 @@ import {
   decidePaySchema,
   createReportSchema,
   updateReportSchema,
+  reportQuerySchema,
   hasReportContent,
   attendanceQuerySchema,
   CASE_TYPES,
@@ -256,7 +259,21 @@ casesRouter.post(
     const input = createCaseSchema.parse(req.body);
     if (input.assigned_to) await ensureAssignable(input.assigned_to);
 
-    res.status(201).json(visible(req, await repo.create(input, req.user)));
+    const created = await repo.create(input, req.user);
+
+    /* เปิดเคสแล้วออกใบแจ้งหนี้ (ร่าง) ให้เลย — ทุกเคสจบด้วยการเก็บเงินอยู่แล้ว
+       การต้องกลับมากดออกใบทีหลังคือขั้นตอนที่ลืมได้ และลืมเมื่อไหร่ก็ไม่มีอะไรเตือน
+       เป็น "ร่าง" ไม่ใช่ใบที่ออกแล้ว จึงยังแก้/ลบได้ และซิงก์ตามเคสให้เองจนกว่าจะกดออกใบจริง
+
+       ใบล้มไม่ควรทำให้การเปิดเคสล้มตาม — เคสถูกสร้างไปแล้ว ตอบ error กลับไปจะกลายเป็น
+       "เปิดเคสไม่สำเร็จ" ทั้งที่เคสอยู่ในระบบแล้ว · ปุ่มออกใบเองในหน้าเคสยังใช้ได้ตามเดิม */
+    try {
+      await createDraftForCase(created, req.user);
+    } catch (err) {
+      console.error(`[POST /api/cases] ออกใบแจ้งหนี้อัตโนมัติให้ ${created.case_id} ไม่สำเร็จ:`, err.message);
+    }
+
+    res.status(201).json(visible(req, created));
   }),
 );
 
@@ -307,6 +324,45 @@ casesRouter.post(
     await ensureAssignable(employee_id);
 
     res.json(visible(req, await repo.assign(req.params.id, employee_id, req.user)));
+  }),
+);
+
+// ---------- ทีมพนักงานของเคส (เพิ่มคนดูแลได้มากกว่าหนึ่งคน) ----------
+
+/** คนในทีม (ไม่รวมผู้รับผิดชอบหลัก ซึ่งอยู่ในตัวเคสเอง) */
+casesRouter.get(
+  '/:id/team',
+  asyncRoute(async (req, res) => res.json(await repo.listTeam(req.params.id))),
+);
+
+/**
+ * เพิ่มคนเข้าทีมดูแลเคส — ใช้กติกาเดียวกับการจับคู่คนหลัก (ลาออก/พักงานรับเคสใหม่ไม่ได้)
+ * ต่างกันที่ไม่แตะสถานะเคสและไม่เปลี่ยนผู้รับผิดชอบหลัก
+ */
+casesRouter.post(
+  '/:id/team',
+  asyncRoute(async (req, res) => {
+    const { employee_id } = assignSchema.parse(req.body);
+
+    if (isTerminal(req.case)) {
+      throw new ApiError(409, 'เคสนี้จบไปแล้ว — ต้องเปิดเคสใหม่ก่อนจึงจะเพิ่มพนักงานได้');
+    }
+    await ensureAssignable(employee_id);
+
+    const added = await repo.addTeamMember(req.params.id, employee_id, req.user);
+    if (!added) throw new ApiError(409, 'พนักงานคนนี้อยู่ในเคสนี้อยู่แล้ว');
+
+    res.json(await repo.listTeam(req.params.id));
+  }),
+);
+
+/** นำคนออกจากทีม — ผู้รับผิดชอบหลักถอดด้วยปุ่ม "ยกเลิกการจับคู่" เท่านั้น (คนละเส้นกัน) */
+casesRouter.delete(
+  '/:id/team/:employeeId',
+  asyncRoute(async (req, res) => {
+    const removed = await repo.removeTeamMember(req.params.id, req.params.employeeId, req.user);
+    if (!removed) throw notFound('ไม่พบพนักงานคนนี้ในทีมของเคส');
+    res.json(await repo.listTeam(req.params.id));
   }),
 );
 
@@ -573,7 +629,15 @@ export async function editReport(caseId, report, input) {
 
 casesRouter.get(
   '/:id/reports',
-  asyncRoute(async (req, res) => res.json(await repo.listReports(req.params.id))),
+  asyncRoute(async (req, res) => {
+    const query = reportQuerySchema.parse(req.query);
+    // ส่งรายการเดือนไปด้วยทุกครั้ง — เป็น GROUP BY เล็กๆ ที่ทำให้หน้าเว็บไม่ต้องยิงเส้นที่สอง
+    const [pageData, months] = await Promise.all([
+      repo.listReports(req.params.id, query),
+      repo.reportMonths(req.params.id),
+    ]);
+    res.json({ ...pageData, months });
+  }),
 );
 
 casesRouter.post(

@@ -32,6 +32,7 @@ export default function CaseVisitsModal({ caseItem, readOnly = false, mode = 'sh
         <div className="modal-body">
           <CaseVisits
             caseId={caseItem.case_id}
+            caseItem={caseItem}
             target={caseItem.physio_sessions ?? null}
             readOnly={readOnly}
             mode={mode}
