@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
+import { useAuth } from '../auth.jsx';
+import CaseReports from './CaseReports.jsx';
 import { useSheetSwipe } from '../lib/sheetSwipe.js';
 import { useScrollLock } from '../lib/scrollLock.js';
 import {
@@ -35,6 +37,8 @@ function Field({ label, value }) {
  */
 export default function MyCaseModal({ caseId, onClose }) {
   const sheetRef = useSheetSwipe(onClose); // จอแคบ: ปัดลงเพื่อปิด
+  // รหัสของผู้ใช้ที่ล็อกอินอยู่ — ใช้ตัดสินว่ารายงานใบไหนเป็นของตัวเอง (จึงจะกดแก้ได้)
+  const me = useAuth()?.user?.employee_id ?? null;
   const [item, setItem] = useState(null);
   const [error, setError] = useState(null);
 
@@ -118,6 +122,17 @@ export default function MyCaseModal({ caseId, onClose }) {
                   <Field label="วันเริ่ม" value={item.start_date && formatDate(item.start_date)} />
                   <Field label="วันสิ้นสุด" value={item.end_date && formatDate(item.end_date)} />
                 </div>
+              </section>
+
+              {/* ที่นี่คือ "ประวัติ" อย่างเดียว — อ่านของทุกคนในเคสได้ (ผลัดเวรต้องรู้ว่ากะก่อนหน้าเจออะไร)
+                  แต่การบันทึกอยู่ที่หน้างานวันนี้ที่เดียว เพราะรายงานต้องผูกกับกะที่ไปทำจริงเสมอ
+                  ถ้าเปิดให้กรอกจากตรงนี้ด้วย จะได้รายงานที่ไม่รู้ว่าเป็นของนัดไหน */}
+              <section>
+                <h3>รายงานอาการผู้ป่วย</h3>
+                <p className="muted report-where">
+                  บันทึกรายงานได้ที่หน้า <strong>งานวันนี้</strong> ของกะนั้น — ตรงนี้ดูย้อนหลังได้อย่างเดียว
+                </p>
+                <CaseReports caseId={item.case_id} caseInfo={item} scope="my" currentEmployeeId={me} readOnly />
               </section>
 
               {/* Homecare = ตารางกะ · กายภาพ = ตารางนัดเข้าคอร์ส */}

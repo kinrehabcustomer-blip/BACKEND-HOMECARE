@@ -22,6 +22,9 @@ import {
   placeSearchSchema,
   adjustVisitSchema,
   decidePaySchema,
+  createReportSchema,
+  updateReportSchema,
+  hasReportContent,
   attendanceQuerySchema,
   CASE_TYPES,
   CASE_STATUSES,
@@ -536,6 +539,87 @@ casesRouter.get(
     res.setHeader('Content-Type', row.mime);
     res.setHeader('Cache-Control', 'private, max-age=3600');
     res.send(row.data);
+  }),
+);
+
+// ---------- รายงานอาการผู้ป่วย (case_reports) ----------
+
+/**
+ * แก้รายงานหนึ่งใบ — ใช้ร่วมกับเส้นของพนักงานภาคสนาม (my/routes.js)
+ * กติกา "ต้องเหลือเนื้อหาอย่างน้อยหนึ่งช่อง" ต้องเป็นชุดเดียวกันทั้งสองทาง ไม่งั้นทางหนึ่งจะรอด
+ *
+ * ตรวจกับผลลัพธ์หลังรวมของเดิม ไม่ใช่กับเฉพาะช่องที่ส่งมา — ส่ง symptoms: null มาช่องเดียว
+ * เพื่อล้างข้อความทิ้ง ก็ทำให้รายงานทั้งใบว่างได้เหมือนกัน (zod มองไม่เห็นเพราะไม่รู้ของเดิม)
+ */
+/**
+ * กะที่รายงานอ้างถึงต้องอยู่ในเคสเดียวกัน — ใช้ร่วมกับเส้นของพนักงานภาคสนาม
+ * zod ตรวจให้ไม่ได้เพราะต้องถามฐานข้อมูล และถ้าไม่ตรวจ รายงานจะไปเกาะกะของเคสอื่นได้
+ * (แล้วหน้าเคสนั้นจะขึ้น "ครั้งที่ 3" ของนัดที่ไม่เกี่ยวอะไรกันเลย)
+ */
+export async function ensureVisitInCase(caseId, visitId) {
+  if (visitId == null) return;
+  const visit = await repo.findVisit(visitId);
+  if (!visit || visit.case_id !== caseId) {
+    throw new ApiError(400, 'กะที่ระบุไม่ได้อยู่ในเคสนี้');
+  }
+}
+
+export async function editReport(caseId, report, input) {
+  if (!hasReportContent({ ...report, ...input })) {
+    throw new ApiError(400, 'รายงานต้องมีข้อมูลอย่างน้อยหนึ่งช่อง — ถ้าต้องการลบทั้งใบให้กดลบรายงาน');
+  }
+  return repo.updateReport(caseId, report.report_id, input);
+}
+
+casesRouter.get(
+  '/:id/reports',
+  asyncRoute(async (req, res) => res.json(await repo.listReports(req.params.id))),
+);
+
+casesRouter.post(
+  '/:id/reports',
+  asyncRoute(async (req, res) => {
+    const input = createReportSchema.parse(req.body ?? {});
+    await ensureVisitInCase(req.params.id, input.visit_id);
+    res.status(201).json(await repo.addReport(req.params.id, input, req.user));
+  }),
+);
+
+casesRouter.patch(
+  '/:id/reports/:reportId',
+  asyncRoute(async (req, res) => {
+    const report = await repo.findReport(req.params.id, Number(req.params.reportId));
+    if (!report) throw notFound('ไม่พบรายงานนี้');
+
+    const input = updateReportSchema.parse(req.body ?? {});
+    await ensureVisitInCase(req.params.id, input.visit_id);
+    res.json(await editReport(req.params.id, report, input));
+  }),
+);
+
+/** รูปแผลที่แนบมากับรายงาน — ส่งไฟล์ออกไปตรงๆ ให้แท็ก <img> เรียกได้ (คุกกี้ session ไปเอง) */
+casesRouter.get(
+  '/:id/reports/:reportId/photo',
+  asyncRoute(async (req, res, next) => {
+    // กรอง :id ด้วยเสมอ — รูปของเคสอื่นต้องไม่หลุดออกทาง path ของเคสนี้
+    const row = await repo.findReportPhoto(Number(req.params.reportId), req.params.id);
+    if (!row) return next(notFound('รายงานนี้ไม่มีรูปแผล'));
+    res.setHeader('Content-Type', row.mime);
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    res.send(row.data);
+  }),
+);
+
+/**
+ * ลบรายงานถาวร — เป็นบันทึกทางการแพทย์ จึงเปิดให้เฉพาะฝั่งหลังบ้าน (พนักงานภาคสนามลบของตัวเองไม่ได้)
+ * กรอกผิดให้แก้ที่ใบเดิม ซึ่งเหลือ updated_at ไว้ให้เห็นว่าถูกแก้เมื่อไหร่
+ */
+casesRouter.delete(
+  '/:id/reports/:reportId',
+  asyncRoute(async (req, res) => {
+    const deleted = await repo.removeReport(req.params.id, Number(req.params.reportId));
+    if (!deleted) throw notFound('ไม่พบรายงานนี้');
+    res.status(204).end();
   }),
 );
 

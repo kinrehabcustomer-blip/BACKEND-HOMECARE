@@ -794,3 +794,225 @@ BEGIN
     END LOOP;
   END LOOP;
 END $$;
+
+-- ============================================================================
+-- รายงานอาการผู้ป่วย (case_reports)
+--
+-- ของเดิมเคสมีช่องอาการอยู่ช่องเดียว (cases.current_symptoms) ซึ่งเป็น "อาการ ณ วันเปิดเคส"
+-- แก้ทับได้อย่างเดียว ย้อนดูไม่ได้ว่าเมื่อวานความดันเท่าไหร่ อาทิตย์ก่อนกินได้ไหม
+-- ทั้งที่งานดูแลผู้ป่วยตัดสินใจจากแนวโน้ม ไม่ใช่จากค่าล่าสุดค่าเดียว
+--
+-- ตารางนี้คือ "บันทึกทีละครั้ง" ของเคสหนึ่งใบ กรอกกี่ครั้งก็ได้ ไม่ผูกกับกะ (case_visits)
+-- เพราะเคสกายภาพ/เคสที่ไม่ได้ลงกะรายวันก็ต้องบันทึกอาการได้เหมือนกัน
+--
+-- สัญญาณชีพแยกเป็นคอลัมน์ละค่า ไม่ยัดรวมเป็นข้อความ — ต้องเรียงย้อนหลัง/ทำกราฟ/หาค่าผิดปกติได้
+-- ทุกช่องเว้นว่างได้ (วัดไม่ครบทุกครั้งเป็นเรื่องปกติหน้างาน) แต่ต้องมีอย่างน้อยหนึ่งช่อง (ตรวจที่ zod)
+--
+-- reported_by_name เก็บชื่อ ณ ตอนนั้นคู่กับรหัส แบบเดียวกับ case_events/invoices —
+-- คนบันทึกอาจเปลี่ยนชื่อหรือลาออกทีหลัง แต่บันทึกทางการแพทย์ต้องยังอ่านออกว่าตอนนั้นใครเขียน
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS case_reports (
+  report_id   INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  case_id     TEXT NOT NULL REFERENCES cases (case_id) ON DELETE CASCADE ON UPDATE CASCADE,
+
+  -- วันที่ของอาการที่บันทึก (ไม่ใช่วันที่กดบันทึก — กรอกย้อนหลังได้) · เวลาที่วัด 'HH:MM' เว้นได้
+  report_date TEXT NOT NULL,
+  report_time TEXT,
+
+  -- ---------- สัญญาณชีพ ----------
+  -- ช่วงที่รับได้กว้างกว่าค่าปกติของคน เพราะหน้าที่ของ CHECK คือกันพิมพ์ผิดคนละหลัก (ชีพจร 780)
+  -- ไม่ใช่ตัดสินว่าค่าไหนผิดปกติ — ค่าที่วิกฤตแต่จริงต้องบันทึกได้เสมอ
+  bp_systolic      INTEGER          CHECK (bp_systolic  BETWEEN 40 AND 300),  -- ความดันตัวบน (mmHg)
+  bp_diastolic     INTEGER          CHECK (bp_diastolic BETWEEN 20 AND 200),  -- ความดันตัวล่าง (mmHg)
+  pulse            INTEGER          CHECK (pulse BETWEEN 20 AND 250),         -- ชีพจร (ครั้ง/นาที)
+  respiratory_rate INTEGER          CHECK (respiratory_rate BETWEEN 4 AND 80),-- หายใจ (ครั้ง/นาที)
+  spo2             INTEGER          CHECK (spo2 BETWEEN 50 AND 100),          -- ออกซิเจนปลายนิ้ว (%)
+  temperature_c    DOUBLE PRECISION CHECK (temperature_c BETWEEN 30 AND 45),  -- อุณหภูมิ (°C)
+  blood_sugar      DOUBLE PRECISION CHECK (blood_sugar BETWEEN 10 AND 800),   -- น้ำตาลปลายนิ้ว (mg/dL)
+  pain_score       INTEGER          CHECK (pain_score BETWEEN 0 AND 10),      -- ระดับความเจ็บปวด 0–10
+
+  -- ---------- อาการ / การดูแล ----------
+  symptoms      TEXT,  -- อาการที่พบวันนี้
+  care_given    TEXT,  -- การดูแลที่ให้
+  intake_output TEXT,  -- อาหาร / ขับถ่าย / การนอน
+  follow_up     TEXT,  -- สิ่งที่ต้องติดตามต่อ
+  note          TEXT,
+
+  reported_by      TEXT REFERENCES employees (employee_id) ON DELETE SET NULL ON UPDATE CASCADE,
+  reported_by_name TEXT,
+
+  created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS'),
+  updated_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')
+);
+
+-- อ่านเป็นชุดของเคสเดียวเสมอ เรียงล่าสุดขึ้นก่อน (report_id ตัดสินเมื่อวันเดียวกันมีหลายรอบ)
+CREATE INDEX IF NOT EXISTS idx_case_reports_case ON case_reports (case_id, report_date DESC, report_id DESC);
+
+-- ---------- ผูกรายงานเข้ากับ "กะ/นัด" ที่ไปทำจริง ----------
+-- ของเดิมรายงานผูกกับเคสอย่างเดียว จึงตอบไม่ได้ว่าคอร์สกายภาพ 10 ครั้ง บันทึกอาการครบทุกครั้งหรือยัง
+-- (นับจำนวนแถวไม่ได้ เพราะวันเดียวบันทึกซ้ำได้ และรายงานที่ไม่ได้เกิดจากการไปเยี่ยมก็มี)
+--
+-- เว้นว่างได้ = รายงานของเคสที่ไม่ได้ผูกกับกะไหน เช่น พยาบาลโทรติดตามอาการทางโทรศัพท์
+-- ON DELETE SET NULL ไม่ใช่ CASCADE — ลบกะทิ้งแล้วบันทึกอาการต้องไม่หายตาม
+-- (เป็นบันทึกทางการแพทย์ ไม่ใช่ข้อมูลประกอบของกะ) แค่กลายเป็นรายงานที่ไม่ผูกกับนัดไหน
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS visit_id INTEGER
+  REFERENCES case_visits (visit_id) ON DELETE SET NULL;
+
+-- "กะนี้บันทึกรายงานหรือยัง" ถูกถามทุกครั้งที่เปิดหน้างานวันนี้ของพนักงาน
+CREATE INDEX IF NOT EXISTS idx_case_reports_visit ON case_reports (visit_id);
+
+-- ============================================================================
+-- แบบบันทึกการดูแลประจำวัน (Caregiver Daily Care Record)
+--
+-- ของเดิมเป็นฟอร์มสั้น (สัญญาณชีพ + อาการ 5 ช่องข้อความ) ใช้ได้กับทุกเคส
+-- แต่ไม่พอสำหรับเคสดูแลระยะยาว: NG feeding, ดูดเสมหะ, ปริมาณขับถ่าย, การเปลี่ยนท่า
+-- ล้วนเป็นตัวเลข/สถานะที่ต้องเทียบข้ามเวรได้ ไม่ใช่ข้อความอิสระที่คนอ่านต้องมาตีความเอง
+--
+-- ใช้ตารางเดิม (case_reports) ไม่แยกตารางใหม่ เพราะเป็น "บันทึกอาการหนึ่งครั้ง" เหมือนกัน
+-- ต่างกันแค่เคสประเภทไหนกรอกกี่ช่อง — ทุกคอลัมน์ว่างได้ ฟอร์มสั้นจึงยังบันทึกได้เหมือนเดิม
+-- (หน้าเว็บเลือกฟอร์มจากประเภทเคส: ดูแลผู้สูงอายุ/ติดเตียง/หลังผ่าตัด ที่เป็นสาย Homecare)
+--
+-- ค่าที่เป็นตัวเลือกตายตัวเก็บเป็นรหัสอังกฤษ + CHECK ให้ฐานข้อมูลกันค่าแปลกปลอม
+-- คำไทยที่แสดงอยู่ฝั่งหน้าเว็บที่เดียว (labels.js) แบบเดียวกับสถานะเคส/ตำแหน่งพนักงาน
+-- ============================================================================
+
+-- ---------- 1. ข้อมูลการปฏิบัติงาน ----------
+-- เวร: day = 07:00-19:00, night = 19:00-07:00, other = นอกเหนือจากนี้ (ระบุในหมายเหตุ)
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS shift TEXT CHECK (shift IN ('day', 'night', 'other'));
+-- routine = รอบปกติ, change = อาการเปลี่ยนจากเดิม, incident = เหตุการณ์ผิดปกติที่ต้องรายงานทันที
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS report_type TEXT NOT NULL DEFAULT 'routine'
+  CHECK (report_type IN ('routine', 'change', 'incident'));
+
+-- ---------- 2. สภาพทั่วไป ----------
+-- คำถามแรกของฟอร์ม: เทียบกับรายงานครั้งก่อนแล้วเป็นอย่างไร
+-- การจับ "การเปลี่ยนแปลงจากเดิม" มีค่ากว่าตัวเลขดิบ เพราะค่าปกติของผู้ป่วยแต่ละคนไม่เท่ากัน
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS condition_change TEXT
+  CHECK (condition_change IN ('same', 'better', 'worse', 'new_issue'));
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS consciousness TEXT
+  CHECK (consciousness IN ('alert', 'drowsy', 'confused', 'restless', 'unresponsive', 'other'));
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS mood TEXT
+  CHECK (mood IN ('normal', 'anxious', 'aggressive', 'uncooperative', 'other'));
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS breathing TEXT
+  CHECK (breathing IN ('normal', 'dyspnea', 'cough', 'sputum_up', 'other'));
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS sleep TEXT
+  CHECK (sleep IN ('good', 'interrupted', 'insomnia', 'hypersomnia'));
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS pain_location TEXT;
+
+-- ---------- 3. สัญญาณชีพ (ที่เหลืออยู่ในตารางแล้ว) ----------
+-- น้ำหนัก: ติดตามเฉพาะบางเคส (บวมน้ำ/ภาวะโภชนาการ) จึงไม่บังคับ
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS weight_kg DOUBLE PRECISION
+  CHECK (weight_kg > 0 AND weight_kg <= 500);
+
+-- ---------- 4. ระบบหายใจ / Tracheostomy / Oxygen ----------
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS oxygen_use TEXT CHECK (oxygen_use IN ('none', 'in_use'));
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS oxygen_lpm DOUBLE PRECISION
+  CHECK (oxygen_lpm >= 0 AND oxygen_lpm <= 60);
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS sputum_amount TEXT
+  CHECK (sputum_amount IN ('none', 'small', 'moderate', 'large'));
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS sputum_color TEXT
+  CHECK (sputum_color IN ('clear', 'white', 'yellow', 'green', 'blood', 'other'));
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS sputum_character TEXT
+  CHECK (sputum_character IN ('thin', 'thick', 'sticky'));
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS suction_status TEXT
+  CHECK (suction_status IN ('done', 'not_needed', 'problem'));
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS suction_count INTEGER
+  CHECK (suction_count >= 0 AND suction_count <= 99);
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS trach_status TEXT CHECK (trach_status IN ('normal', 'problem'));
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS inner_tube_care TEXT
+  CHECK (inner_tube_care IN ('done', 'not_done', 'na'));
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS cuff_care TEXT CHECK (cuff_care IN ('done', 'problem', 'na'));
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS neck_wound TEXT
+  CHECK (neck_wound IN ('normal', 'red', 'swollen', 'discharge', 'other'));
+
+-- ---------- 5. อาหารและน้ำ ----------
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS feed_route TEXT CHECK (feed_route IN ('oral', 'ng', 'peg'));
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS feed_formula TEXT;
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS feed_volume_ml DOUBLE PRECISION
+  CHECK (feed_volume_ml >= 0 AND feed_volume_ml <= 5000);
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS feed_rate_ml_hr DOUBLE PRECISION
+  CHECK (feed_rate_ml_hr >= 0 AND feed_rate_ml_hr <= 1000);
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS water_flush_ml DOUBLE PRECISION
+  CHECK (water_flush_ml >= 0 AND water_flush_ml <= 5000);
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS feed_tolerance TEXT
+  CHECK (feed_tolerance IN ('normal', 'fullness', 'nausea', 'vomiting', 'bloating', 'other'));
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS gastric_output_ml DOUBLE PRECISION
+  CHECK (gastric_output_ml >= 0 AND gastric_output_ml <= 5000);
+
+-- ---------- 6. การขับถ่าย ----------
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS urine_ml DOUBLE PRECISION
+  CHECK (urine_ml >= 0 AND urine_ml <= 10000);
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS urine_color TEXT
+  CHECK (urine_color IN ('normal', 'dark', 'cloudy', 'blood', 'other'));
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS urine_odor BOOLEAN;   -- true = กลิ่นผิดปกติ
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS foley_status TEXT CHECK (foley_status IN ('normal', 'problem', 'na'));
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS stool_count INTEGER CHECK (stool_count >= 0 AND stool_count <= 30);
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS stool_amount TEXT CHECK (stool_amount IN ('small', 'moderate', 'large'));
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS stool_grams DOUBLE PRECISION
+  CHECK (stool_grams >= 0 AND stool_grams <= 5000);
+-- Bristol Stool Scale 1-7 (มาตรฐานสากล ใช้เลขเดียวแทนการบรรยายลักษณะ)
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS stool_scale INTEGER CHECK (stool_scale BETWEEN 1 AND 7);
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS diaper_changes INTEGER
+  CHECK (diaper_changes >= 0 AND diaper_changes <= 30);
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS gas_vent_ml DOUBLE PRECISION
+  CHECK (gas_vent_ml >= 0 AND gas_vent_ml <= 5000);
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS other_output_ml DOUBLE PRECISION
+  CHECK (other_output_ml >= 0 AND other_output_ml <= 5000);
+
+-- ---------- 7. ADL / การดูแลตัวบุคคล ----------
+-- BOOLEAN ที่ว่างได้: NULL = ไม่ได้ระบุ/ไม่เกี่ยวกับเคสนี้, true = ทำแล้ว, false = ไม่ได้ทำ
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS adl_bath        BOOLEAN;
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS adl_oral_care   BOOLEAN;
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS adl_hair_wash   BOOLEAN;
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS adl_skin_care   BOOLEAN;
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS adl_clothes     BOOLEAN;
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS adl_eye_care    BOOLEAN;
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS adl_transfer    BOOLEAN;
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS adl_ambulation  BOOLEAN;
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS positioning_count INTEGER
+  CHECK (positioning_count >= 0 AND positioning_count <= 48);
+
+-- ---------- 8. ฟื้นฟู / กิจกรรม ----------
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS rehab_rom TEXT CHECK (rehab_rom IN ('done', 'not_done', 'na'));
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS rehab_program TEXT CHECK (rehab_program IN ('done', 'not_done', 'na'));
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS rehab_minutes INTEGER CHECK (rehab_minutes >= 0 AND rehab_minutes <= 600);
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS rehab_cooperation TEXT CHECK (rehab_cooperation IN ('good', 'fair', 'poor'));
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS rehab_after TEXT
+  CHECK (rehab_after IN ('normal', 'tired', 'pain', 'abnormal'));
+
+-- ---------- 9. ผิวหนัง / แผล ----------
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS skin_status TEXT CHECK (skin_status IN ('normal', 'abnormal'));
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS skin_redness BOOLEAN;
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS pressure_sore BOOLEAN;
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS wound_progress TEXT CHECK (wound_progress IN ('better', 'same', 'worse', 'na'));
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS wound_location TEXT;
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS dressing_done BOOLEAN;
+-- รูปแผล: เก็บ BYTEA ในฐานข้อมูลแบบเดียวกับรูปเช็คอิน/ใบรับรอง (เบราว์เซอร์ย่อก่อนส่ง)
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS wound_photo_data BYTEA;
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS wound_photo_mime TEXT;
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS wound_photo_size INTEGER;
+
+-- ---------- 10. สายและอุปกรณ์ทางการแพทย์ ----------
+-- ok = อยู่ตำแหน่งปกติ/ทำงานปกติ, problem = ผิดปกติ (ต้องกรอกรายละเอียด), na = เคสนี้ไม่มีอุปกรณ์นี้
+-- แยกเป็นคอลัมน์ละชิ้นแทน JSON เพื่อให้ค้น/นับได้ตรงๆ ว่าเดือนนี้มีปัญหาสาย NG กี่ครั้ง
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS dev_ng        TEXT CHECK (dev_ng        IN ('ok', 'problem', 'na'));
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS dev_peg       TEXT CHECK (dev_peg       IN ('ok', 'problem', 'na'));
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS dev_trach     TEXT CHECK (dev_trach     IN ('ok', 'problem', 'na'));
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS dev_foley     TEXT CHECK (dev_foley     IN ('ok', 'problem', 'na'));
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS dev_oxygen    TEXT CHECK (dev_oxygen    IN ('ok', 'problem', 'na'));
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS dev_feed_pump TEXT CHECK (dev_feed_pump IN ('ok', 'problem', 'na'));
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS dev_suction   TEXT CHECK (dev_suction   IN ('ok', 'problem', 'na'));
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS dev_colostomy TEXT CHECK (dev_colostomy IN ('ok', 'problem', 'na'));
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS device_issue  TEXT;
+
+-- ---------- 11. สิ่งผิดปกติ / เหตุการณ์ ----------
+-- เก็บเป็น array เพราะเหตุการณ์เดียวเข้าได้หลายข้อ (ล้ม + เลือดออก พร้อมกัน)
+-- ไม่ผูก CHECK กับรายการที่ใช้อยู่ เพราะรายการเหตุการณ์ต้องเพิ่มได้ตามที่หน้างานเจอจริง
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS incident_types TEXT[];
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS incident_detail TEXT;
+-- แจ้งพยาบาลแล้วหรือยัง: เวลาที่แจ้ง 'HH:MM' และแจ้งใคร (บันทึกไว้ ไม่ใช่แค่ธง "แจ้งแล้ว")
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS rn_notified_at TEXT;
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS rn_notified_to TEXT;
+
+-- ค้นรายงานที่ไม่ใช่รอบปกติ (อาการเปลี่ยน/เหตุการณ์) — สิ่งแรกที่ผู้จัดการจะถามหา
+CREATE INDEX IF NOT EXISTS idx_case_reports_incident
+  ON case_reports (report_date DESC) WHERE report_type <> 'routine';

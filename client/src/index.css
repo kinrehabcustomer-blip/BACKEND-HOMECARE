@@ -3150,6 +3150,228 @@ select option:checked {
 .table tfoot th { background: var(--bg); border-top: 2px solid var(--border); font-weight: 700; }
 .att-filter { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
 
+/* ---------- รายงานอาการผู้ป่วย (บันทึกทีละครั้งในเคส) ---------- */
+.report-list { display: flex; flex-direction: column; gap: 0.75rem; }
+/* บอกว่าบันทึกใหม่ได้ที่ไหน — หน้าเคสเป็นที่อ่านย้อนหลัง ไม่ใช่ที่กรอก */
+.report-where { margin: -0.25rem 0 0.75rem; font-size: 0.8125rem; }
+
+.report-card {
+  padding: 0.75rem 0.875rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.report-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+.report-card-head .cell-sub { display: block; }
+
+/* สัญญาณชีพเรียงเป็นชิปแทนตาราง — วัดไม่ครบทุกช่องเป็นเรื่องปกติ ตารางจะเหลือช่องว่างเต็มไปหมด
+   ชิปมีเฉพาะค่าที่วัดจริง ตัวเลขจึงอ่านเรียงกันได้โดยไม่ต้องกวาดสายตาข้ามช่องเปล่า */
+.vital-chips {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+  margin: 0 0 0.625rem;
+  padding: 0;
+}
+.vital-chips li {
+  display: flex;
+  flex-direction: column;
+  gap: 0.0625rem;
+  min-width: 4.5rem;
+  padding: 0.3125rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--bg);
+}
+.vital-label { font-size: 0.6875rem; color: var(--muted); }
+.vital-value { font-size: 0.9375rem; font-weight: 700; }
+.vital-unit { font-size: 0.6875rem; font-weight: 400; color: var(--muted); }
+
+.report-text-row { margin: 0 0 0.5rem; }
+.report-text-row .field-label { display: block; }
+/* พนักงานพิมพ์เป็นข้อๆ แยกบรรทัดกันเป็นปกติ — ถ้ายุบบรรทัดทิ้งจะกลายเป็นพืดเดียวที่อ่านยากกว่าเดิม */
+.report-text-value { white-space: pre-wrap; font-size: 0.875rem; }
+
+/* วันที่ + เวลาอยู่แถวเดียวกัน — ปุ่มเลือกเวลาต้องกว้างเท่าช่องวันที่ ไม่ใช่ปุ่มเล็กสองปุ่มลอยอยู่ */
+.report-when .time-select { margin-top: 0.3125rem; }
+.report-when .picker { flex: 1; }
+.report-when .picker-btn { width: 100%; justify-content: space-between; padding: 0.5rem 0.625rem; font-size: 0.9375rem; }
+
+/* ฟอร์มกรอก — ขีดซ้ายสีแบรนด์ให้แยกออกจากการ์ดรายงานที่บันทึกไปแล้ว (หน้าตาใกล้กันมาก) */
+.report-form {
+  padding: 0.875rem;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--brand);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.report-form-head { margin: 1.125rem 0 0.5rem; font-size: 0.8125rem; font-weight: 600; color: var(--muted); }
+.report-form .error { margin-bottom: 0.75rem; }
+
+/* ช่องตัวเลขสั้นๆ ทั้งแถบ — คงสองคอลัมน์ไว้บนมือถือด้วย (กฎรวมของ .grid.cols-2 ยุบเหลือคอลัมน์เดียว)
+   แปดช่องเรียงลงมาช่องละบรรทัดบนจอมือถือ = ต้องเลื่อนทั้งหน้าจอกว่าจะกรอกครบ */
+.grid.cols-2.report-vitals { grid-template-columns: 1fr 1fr; }
+
+.report-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3125rem;
+  margin-bottom: 0.625rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+/* ข้อความที่พิมพ์ต้องอ่านเป็นเนื้อหา ไม่ใช่ป้ายชื่อช่อง (label ครอบ textarea อยู่ จึงสืบทอดสีจางมา) */
+.report-text textarea { font-weight: 400; color: var(--text); }
+
+/* จอกว้าง (คอมพิวเตอร์): กางออกทางแนวนอนแทนการเลื่อนลงยาว
+   ฟอร์มนี้มี 8 ช่องตัวเลข + 5 ช่องข้อความ เรียงลงมาสองคอลัมน์บนจอ PC ต้องเลื่อนเกือบสามหน้าจอ
+   กว่าจะกรอกจบ ทั้งที่ที่ว่างด้านข้างเหลืออีกครึ่งจอ — สัญญาณชีพวางได้ 4 ช่องต่อแถวสบายๆ
+   เพราะเป็นตัวเลขสั้นๆ ส่วนช่องข้อความจับคู่กันได้ทีละสอง */
+@media (min-width: 900px) {
+  .grid.cols-2.report-vitals { grid-template-columns: repeat(4, 1fr); }
+
+  .report-texts { display: grid; grid-template-columns: 1fr 1fr; gap: 0 1.25rem; }
+  /* หมายเหตุเป็นช่องปลายเปิด (เรื่องอื่นๆ ที่คนเวรถัดไปควรรู้) — ให้เต็มแถวไปเลย */
+  .report-texts .report-text:last-child { grid-column: 1 / -1; }
+
+  /* วันที่+เวลาไม่ต้องยืดเต็มความกว้างกล่อง ช่องจะกว้างเกินเนื้อหาไปมาก */
+  .report-when { max-width: 30rem; }
+}
+
+/* ---------- แบบบันทึกการดูแลประจำวัน (ฟอร์มเต็ม) ---------- */
+
+/* หมวดพับได้ — ฟอร์มมี 12 หมวด กางหมดพร้อมกันบนมือถือคือเลื่อนยาวจนหาที่ค้างไว้ไม่เจอ
+   หมวดที่มีเฉพาะบางเคส (เจาะคอ/ให้อาหารทางสาย/อุปกรณ์) พับไว้ก่อน แล้วกางเองถ้าใบนั้นมีข้อมูล */
+.care-section { border-top: 1px solid var(--divider); padding-top: 0.25rem; margin-top: 0.75rem; }
+.care-section:first-of-type { border-top: 0; margin-top: 0; }
+.care-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  gap: 0.5rem;
+  padding: 0.75rem 0 0.5rem;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.care-toggle { font-size: 1.125rem; color: var(--muted); line-height: 1; }
+
+/* หมวดที่ต้องสะดุดตา (คำถามเทียบครั้งก่อน / เหตุการณ์ผิดปกติ) */
+.care-section.is-key { border-left: 3px solid var(--brand); padding-left: 0.75rem; }
+.care-field.is-key .field-label { color: var(--text); font-weight: 600; }
+
+.care-hint { margin: 0 0 0.5rem; font-size: 0.75rem; color: var(--muted); }
+
+.care-grid { display: grid; grid-template-columns: 1fr; gap: 0.875rem; }
+.care-field { display: flex; flex-direction: column; gap: 0.375rem; }
+.care-field .field-label { font-size: 0.8125rem; }
+
+/* ช่องตัวเลขในฟอร์มนี้เรียงเป็นตารางย่อยของตัวเอง ไม่ยืมโครง .grid ของฟอร์มอื่น
+   เพราะหมวดหนึ่งมีทั้งชิปและตัวเลขปนกัน การบังคับคอลัมน์รวมจะทำให้ชิปโดนบีบจนตัดคำ */
+.care-num { display: flex; flex-direction: column; gap: 0.3125rem; font-size: 0.8125rem; font-weight: 600; color: var(--muted); }
+.care-num input { font-weight: 400; color: var(--text); }
+.care-num .care-hint { margin: 0; font-weight: 400; }
+
+/* ชิปตัวเลือก — เป้ากดขนาดนิ้ว เพราะพนักงานกรอกจากมือถือขณะยืนอยู่ข้างเตียง */
+.chip-row { display: flex; flex-wrap: wrap; gap: 0.375rem; }
+.chip {
+  padding: 0.4375rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  font: inherit;
+  font-size: 0.8125rem;
+  color: var(--text);
+  cursor: pointer;
+}
+.chip:hover:not(:disabled) { border-color: var(--border-hover); }
+.chip.is-on { background: var(--brand); border-color: var(--brand); color: var(--brand-ink); font-weight: 600; }
+.chip:disabled { opacity: 0.6; cursor: default; }
+
+/* หน้าตรวจทานก่อนส่ง + หน้าดูรายงานที่บันทึกแล้ว ใช้หน้าตาเดียวกัน
+   (สิ่งที่เห็นก่อนกดยืนยัน ต้องหน้าตาเหมือนสิ่งที่จะถูกบันทึกจริง) */
+.care-review, .care-view { display: flex; flex-direction: column; gap: 0.75rem; }
+.care-review-block, .care-view-block { border-left: 2px solid var(--divider); padding-left: 0.75rem; }
+.care-view-block.is-key { border-left-color: var(--danger); }
+.care-review-block h5, .care-view-block h5 {
+  margin: 0 0 0.375rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--muted);
+}
+.care-review-block ul, .care-view-block ul { margin: 0; padding: 0; list-style: none; }
+.care-review-block li, .care-view-block li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.5rem;
+  padding: 0.1875rem 0;
+  font-size: 0.875rem;
+}
+/* ป้ายชื่อช่องกว้างเท่ากันทั้งบล็อก ค่าจึงเรียงตรงกันเป็นคอลัมน์ — กวาดตาหาค่าที่เปลี่ยนได้เร็ว */
+.care-review-block li .field-label, .care-view-block li .field-label { min-width: 11rem; flex-shrink: 0; }
+.care-view-text { white-space: pre-wrap; }
+
+.care-photo { display: block; max-width: 16rem; }
+.care-photo img { width: 100%; border-radius: var(--radius); border: 1px solid var(--border); display: block; }
+
+/* แถวสรุปของใบที่ย่อไว้ — ทั้งแถวเป็นปุ่มกาง */
+.report-brief {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 0.5rem 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 0.875rem;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.report-brief-text { flex: 1; min-width: 0; }
+.report-brief-more { flex-shrink: 0; font-size: 0.75rem; color: var(--brand); font-weight: 600; }
+.report-brief:hover .report-brief-more { text-decoration: underline; }
+
+.report-toggle {
+  margin-top: 0.5rem;
+  padding: 0.25rem 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--brand);
+  cursor: pointer;
+}
+
+/* ป้ายประเภทรายงานบนหัวการ์ด — เหตุการณ์ผิดปกติต้องเห็นก่อนกางอ่าน */
+.badge.report-incident { margin-left: 0.4rem; background: var(--danger); color: #fff; }
+.badge.report-change { margin-left: 0.4rem; background: #f3e2c0; color: #7a5a12; }
+
+@media (min-width: 900px) {
+  .care-grid { grid-template-columns: 1fr 1fr; }
+  /* สัญญาณชีพเป็นตัวเลขสั้นๆ ล้วน วางได้ 4 ช่องต่อแถวโดยไม่บีบ */
+  .care-grid.cols-4 { grid-template-columns: repeat(4, 1fr); }
+  /* ช่องข้อความยาวกินเต็มแถว ไม่ให้กล่องพิมพ์แคบจนพิมพ์สองบรรทัดแล้วเลื่อน */
+  .care-grid .report-text { grid-column: 1 / -1; }
+}
+
 /* ---------- ลดการเคลื่อนไหว ----------
    บางคนตั้งระบบไว้ว่าให้ลดแอนิเมชัน (แพ้การเคลื่อนไหว/เวียนหัว) — ให้ปรากฏขึ้นเฉยๆ
    ต้องอยู่ท้ายไฟล์: media query ไม่เพิ่ม specificity ถ้าวางก่อนบล็อกมือถือ

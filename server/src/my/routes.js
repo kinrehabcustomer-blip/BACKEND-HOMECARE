@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import * as cases from '../cases/repo.js';
-import { calendarQuerySchema } from '../cases/schema.js';
+import { calendarQuerySchema, createReportSchema, updateReportSchema } from '../cases/schema.js';
+// กติกา "แก้แล้วต้องไม่เหลือใบเปล่า" ใช้ตัวเดียวกับฝั่งหลังบ้าน — เขียนแยกสองที่แล้ววันหนึ่งมันจะไม่ตรงกัน
+import { editReport, ensureVisitInCase } from '../cases/routes.js';
 import { decodeImage } from '../employees/schema.js';
 import { distanceMeters, DEFAULT_GEOFENCE_M } from '../lib/geo.js';
 import { checkInSchema, checkOutSchema, attendanceQuerySchema } from './schema.js';
@@ -216,6 +218,100 @@ myRouter.post(
     const result = await cases.checkOutVisit(visit.visit_id, { lat: input.lat ?? null, lng: input.lng ?? null });
     if (!result) throw new ApiError(409, 'เช็คเอาท์ไม่สำเร็จ');
     res.json(result);
+  }),
+);
+
+// ---------- รายงานอาการผู้ป่วย (เคสของฉัน) ----------
+
+/**
+ * เคสที่ผู้เรียกเข้าถึงได้จริง (เป็นหัวหน้าเคส หรือมีกะในเคส) — ไม่ใช่ก็คืน null
+ * เกณฑ์เดียวกับ GET /my/cases/:id เพื่อไม่ให้เส้นรายงานเปิดกว้างกว่าเส้นที่ดูรายละเอียดเคส
+ */
+async function myCaseRow(req) {
+  const caseRow = await cases.findById(req.params.id);
+  if (!caseRow || !(await cases.hasFieldAccess(req.user.employee_id, req.params.id))) return null;
+  return caseRow;
+}
+
+/** รายงานอาการทั้งหมดของเคส — พนักงานที่เข้าเคสได้เห็นของทุกคน (ผลัดกันเข้าเวรต้องอ่านของกะก่อนหน้า) */
+myRouter.get(
+  '/cases/:id/reports',
+  asyncRoute(async (req, res, next) => {
+    if (!(await myCaseRow(req))) return next(notFound('ไม่พบเคสนี้ หรือไม่ใช่เคสที่คุณรับผิดชอบ'));
+    res.json(await cases.listReports(req.params.id));
+  }),
+);
+
+/* ไม่มีเส้น "สร้างรายงานที่ระดับเคส" สำหรับพนักงานภาคสนามโดยตั้งใจ
+   รายงานของพนักงานต้องผูกกับกะที่ไปทำจริงเสมอ จึงบันทึกได้จากหน้างานวันนี้ทางเดียว
+   (POST /my/visits/:id/reports ด้านล่าง) — ที่นี่เหลือไว้แค่อ่านย้อนหลังกับแก้ใบของตัวเอง
+   ฝั่งหลังบ้านยังสร้างที่ระดับเคสได้ สำหรับรายงานที่ไม่ได้เกิดจากการไปเยี่ยม เช่น พยาบาลโทรติดตามอาการ */
+
+/**
+ * แก้รายงานของตัวเอง — ใบที่คนอื่นเขียนแก้ไม่ได้ (ตอบ 404 เหมือนไม่มี ไม่บอกใบ้ว่ามีใบนี้อยู่)
+ * ลบไม่ได้ทั้งของตัวเองและของคนอื่น — เป็นบันทึกทางการแพทย์ ให้ผู้จัดการเป็นคนลบจากหลังบ้าน
+ */
+myRouter.patch(
+  '/cases/:id/reports/:reportId',
+  asyncRoute(async (req, res, next) => {
+    const caseRow = await myCaseRow(req);
+    if (!caseRow) return next(notFound('ไม่พบเคสนี้ หรือไม่ใช่เคสที่คุณรับผิดชอบ'));
+    if (CLOSED_CASE.includes(caseRow.status)) throw new ApiError(409, 'เคสนี้จบไปแล้ว แก้รายงานไม่ได้');
+
+    const report = await cases.findReport(req.params.id, Number(req.params.reportId));
+    if (!report || report.reported_by !== req.user.employee_id) {
+      return next(notFound('ไม่พบรายงานนี้ หรือไม่ใช่รายงานที่คุณบันทึกไว้'));
+    }
+
+    const input = updateReportSchema.parse(req.body ?? {});
+    await ensureVisitInCase(req.params.id, input.visit_id);
+    res.json(await editReport(req.params.id, report, input));
+  }),
+);
+
+/** รูปแผลของรายงานในเคสที่ฉันเข้าถึงได้ — เกณฑ์เดียวกับการอ่านรายงาน */
+myRouter.get(
+  '/cases/:id/reports/:reportId/photo',
+  asyncRoute(async (req, res, next) => {
+    if (!(await myCaseRow(req))) return next(notFound('ไม่พบเคสนี้ หรือไม่ใช่เคสที่คุณรับผิดชอบ'));
+
+    const row = await cases.findReportPhoto(Number(req.params.reportId), req.params.id);
+    if (!row) return next(notFound('รายงานนี้ไม่มีรูปแผล'));
+    res.setHeader('Content-Type', row.mime);
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    res.send(row.data);
+  }),
+);
+
+// ---------- รายงานอาการรายกะ (หน้างานวันนี้) ----------
+// เคสกายภาพ 10 ครั้ง = 10 กะ จึงต้องบันทึกได้ครบ 10 ใบ โดยแต่ละใบรู้ว่าเป็นของนัดครั้งไหน
+// เส้นนี้อ้างด้วย visit_id ตรงๆ แบบเดียวกับเช็คอิน/เช็คเอาท์ — หน้างานวันนี้มีแต่กะอยู่ในมือ ไม่ได้เปิดจากหน้าเคส
+
+/** รายงานของกะนี้ (ของทุกคนที่บันทึกไว้ ไม่ใช่เฉพาะของฉัน) */
+myRouter.get(
+  '/visits/:id/reports',
+  asyncRoute(async (req, res, next) => {
+    const visit = await myVisit(req);
+    if (!visit) return next(notFound('ไม่พบกะนี้ หรือไม่ใช่กะที่คุณรับผิดชอบ'));
+    res.json(await cases.listReportsForVisit(visit.visit_id));
+  }),
+);
+
+/**
+ * บันทึกรายงานของกะนี้ — เคส/กะมาจากตัวกะเอง ไม่รับจาก body (ลงรายงานให้กะคนอื่นไม่ได้)
+ * ไม่บังคับว่าต้องเช็คอินก่อน: กะที่ลืมกดเช็คอินก็ยังต้องบันทึกอาการที่เจอได้
+ * และวันเดียวบันทึกซ้ำได้ (เช้า/เย็น อาการเปลี่ยน) — ไม่ปิดกั้นไว้ที่ใบเดียวต่อกะ
+ */
+myRouter.post(
+  '/visits/:id/reports',
+  asyncRoute(async (req, res, next) => {
+    const visit = await myVisit(req);
+    if (!visit) return next(notFound('ไม่พบกะนี้ หรือไม่ใช่กะที่คุณรับผิดชอบ'));
+    if (CLOSED_CASE.includes(visit.case_status)) throw new ApiError(409, 'เคสนี้จบไปแล้ว บันทึกรายงานเพิ่มไม่ได้');
+
+    const input = createReportSchema.parse(req.body ?? {});
+    const report = await cases.addReport(visit.case_id, { ...input, visit_id: visit.visit_id }, req.user);
+    res.status(201).json(report);
   }),
 );
 

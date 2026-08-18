@@ -231,6 +231,19 @@ export const api = {
   myAttendanceReport: (month) => request(`/my/attendance/report${month ? `?month=${month}` : ''}`),
   checkIn: (visitId, body) => request(`/my/visits/${visitId}/check-in`, { method: 'POST', body }),
   checkOut: (visitId, body) => request(`/my/visits/${visitId}/check-out`, { method: 'POST', body }),
+  /**
+   * รายงานอาการผู้ป่วยของเคสที่ฉันเข้าถึงได้ — เห็นของทุกคนในเคส (ผลัดเวรต้องอ่านของกะก่อนหน้า)
+   * แต่แก้ได้เฉพาะใบที่ตัวเองบันทึก และลบไม่ได้ (ให้ผู้จัดการลบจากหลังบ้าน)
+   */
+  myCaseReports: (id) => request(`/my/cases/${id}/reports`),
+  /** รายงานของกะเดียว (หน้างานวันนี้) — เคส/กะมาจากตัวกะเอง ไม่ต้องส่ง case_id */
+  myVisitReports: (visitId) => request(`/my/visits/${visitId}/reports`),
+  /** URL รูปแผลที่แนบในรายงาน — ใส่ใน <img src> ได้ (คุกกี้ session ไปด้วยอัตโนมัติ) */
+  myReportPhotoUrl: (caseId, reportId) => `/api/my/cases/${caseId}/reports/${reportId}/photo`,
+  addMyVisitReport: (visitId, body) => request(`/my/visits/${visitId}/reports`, { method: 'POST', body }),
+  updateMyCaseReport: (id, reportId, body) =>
+    request(`/my/cases/${id}/reports/${reportId}`, { method: 'PATCH', body }),
+
   /** URL รูปเซลฟี่ตอนเช็คอิน — ใส่ใน <img src> ได้ (คุกกี้ session ไปด้วยอัตโนมัติ) */
   visitPhotoUrl: (visitId) => `/api/my/visits/${visitId}/photo`,
 
@@ -348,6 +361,16 @@ export const api = {
     request(`/cases/${id}/visits?${new URLSearchParams({ dates: dates.join(',') })}`, { method: 'DELETE' }),
   updateVisit: (id, visitId, body) => request(`/cases/${id}/visits/${visitId}`, { method: 'PATCH', body }),
   deleteVisit: (id, visitId) => request(`/cases/${id}/visits/${visitId}`, { method: 'DELETE' }),
+  // ---------- รายงานอาการผู้ป่วย (บันทึกทีละครั้งในเคส) ----------
+  /** รายงานทั้งหมดของเคส — ล่าสุดอยู่บน */
+  listCaseReports: (id) => request(`/cases/${id}/reports`),
+  caseReportPhotoUrl: (id, reportId) => `/api/cases/${id}/reports/${reportId}/photo`,
+  addCaseReport: (id, body) => request(`/cases/${id}/reports`, { method: 'POST', body }),
+  updateCaseReport: (id, reportId, body) =>
+    request(`/cases/${id}/reports/${reportId}`, { method: 'PATCH', body }),
+  deleteCaseReport: (id, reportId) =>
+    request(`/cases/${id}/reports/${reportId}`, { method: 'DELETE' }),
+
   /** ประวัติการทำรายการของเคส (ใครจับคู่/ปิด/ยกเลิก เมื่อไหร่) — ใหม่สุดอยู่บน */
   listCaseEvents: (id) => request(`/cases/${id}/events`),
   assignCase: (id, employee_id) => request(`/cases/${id}/assign`, { method: 'POST', body: { employee_id } }),

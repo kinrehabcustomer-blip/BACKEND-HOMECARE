@@ -1,4 +1,10 @@
 import { sql, nextCaseId, transaction } from '../db/index.js';
+/* รายการช่องของรายงานมาจาก schema.js ที่เดียว — ฟอร์มมี 80 กว่าช่อง การก๊อปรายชื่อมาไว้สองที่
+   แปลว่าวันหนึ่งจะมีช่องที่ผ่าน validation แล้วแต่ไม่ถูกเขียนลงตาราง (บันทึกสำเร็จแต่ข้อมูลหาย)
+   ต่างจากตาราง cases ที่ยังประกาศ COLUMNS เอง เพราะช่องน้อยและมีคอลัมน์ที่ระบบเติมเองปนอยู่ */
+import { REPORT_CONTENT_FIELDS } from './schema.js';
+import { decodeImage } from '../employees/schema.js';
+import { ApiError } from '../lib/errors.js';
 
 const COLUMNS = [
   'title',
@@ -886,12 +892,14 @@ const MY_VISIT = `
          v.check_in_late_minutes, v.off_schedule,
          v.pay_status, v.pay_note,
          (v.check_in_photo_data IS NOT NULL) AS has_photo,
+         (SELECT COUNT(*) FROM case_reports r WHERE r.visit_id = v.visit_id)::int AS report_count,
          c.status AS case_status, c.case_type, c.client_name, c.address, c.client_phone,
          c.service_kind, c.start_date, c.end_date,
          c.geo_lat AS case_geo_lat, c.geo_lng AS case_geo_lng, c.geofence_radius_m AS case_radius,
          c.medical_history, c.current_symptoms, c.medical_devices, c.care_goal,
          c.patient_gender, c.patient_age,
          f.name  AS format_name, g.name AS grade_name,
+         c.physio_package_id,
          pp.name AS physio_package_name, pp.sessions AS physio_sessions,
          ${PATIENT_LIVE}
   FROM case_visits v
@@ -1554,4 +1562,178 @@ export function assignableEmployees() {
      GROUP BY e.employee_id
      ORDER BY e.employee_id`,
   ).then((rows) => rows.map((r) => ({ ...r, active_cases: Number(r.active_cases) })));
+}
+
+// ============================================================================
+// รายงานอาการผู้ป่วย (case_reports) — บันทึกทีละครั้งของเคสหนึ่งใบ
+//
+// ต่างจาก cases.current_symptoms ที่เป็น "อาการ ณ วันเปิดเคส" ช่องเดียวซึ่งแก้ทับไปเรื่อยๆ
+// ตารางนี้เก็บทุกครั้งที่บันทึกไว้ทั้งหมด — ย้อนดูแนวโน้มได้ว่าอาทิตย์ที่แล้วความดันเท่าไหร่
+// ============================================================================
+
+// ชื่อคอลัมน์ที่ให้แก้ได้ — ประกาศที่นี่ (ไม่ใช่ยืมจาก schema.js) ตามแบบเดียวกับ COLUMNS ของเคส
+// zod ตรวจ "ค่าที่รับได้" ส่วนที่นี่ตัดสิน "คอลัมน์ที่จะเขียนลงตาราง" คนละหน้าที่กัน
+/* ช่องกำกับ (ไม่ใช่เนื้อหา) + ทุกช่องเนื้อหาจาก schema — ยกเว้นรูปแผลที่ไม่ได้ลงคอลัมน์เดียว
+   (wound_photo เป็น data URL ขาเข้า ต้องแตกเป็น data/mime/size สามคอลัมน์ ดู photoColumns) */
+const REPORT_META = ['visit_id', 'report_date', 'report_time', 'shift', 'report_type'];
+const REPORT_COLUMNS = [...REPORT_META, ...REPORT_CONTENT_FIELDS.filter((f) => f !== 'wound_photo')];
+
+/**
+ * รูปแผล — รับมาเป็น data URL แล้วเก็บเป็นไบนารีในฐานข้อมูล (แบบเดียวกับรูปเช็คอิน/ใบรับรอง)
+ * ส่ง wound_photo: null มา = ลบรูปเดิมทิ้ง · ไม่ส่งคีย์นี้มาเลย = ไม่แตะรูปเดิม
+ * คืน object ว่างเมื่อไม่ต้องแตะ เพื่อให้ผู้เรียกเอาไป spread รวมกับค่าอื่นได้เลย
+ */
+function photoColumns(input) {
+  if (!('wound_photo' in input)) return {};
+  if (!input.wound_photo) return { wound_photo_data: null, wound_photo_mime: null, wound_photo_size: null };
+
+  try {
+    const img = decodeImage(input.wound_photo);
+    return { wound_photo_data: img.data, wound_photo_mime: img.mime, wound_photo_size: img.size };
+  } catch (err) {
+    // ไฟล์ไม่ใช่รูป/ใหญ่เกิน = ผู้ส่งแก้เองได้ ต้องได้ข้อความบอก ไม่ใช่ "เกิดข้อผิดพลาดภายในระบบ"
+    throw new ApiError(400, err.message);
+  }
+}
+
+// วันที่ของฐานข้อมูล (โซนไทย) — ใช้เป็นค่าปริยายของ report_date ซึ่ง NOT NULL
+// ไม่ให้หน้าเว็บส่งวันนี้มาเอง เพราะนาฬิกาเครื่องพนักงานเชื่อไม่ได้ (เหตุผลเดียวกับเวลาเช็คอิน)
+const TODAY_TH = `to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD')`;
+
+/**
+ * report_date เป็น NOT NULL — ส่งมาว่างถือว่า "วันนี้" ไม่ใช่ค่าที่ผิด
+ * ใช้ร่วมกันทั้งตอนเพิ่มและตอนแก้ ค่าปริยายจึงมาจากที่เดียว
+ */
+const slot = (c) => (c === 'report_date' ? `COALESCE(:report_date, ${TODAY_TH})` : `:${c}`);
+
+/** ช่องที่เว้นว่างต้องลงเป็น NULL ไม่ใช่ '' — ไม่งั้นหน้าเว็บต้องมาแยกเองว่า "ว่าง" คือแบบไหน */
+const blank = (v) => (typeof v === 'string' && v.trim() === '' ? null : v ?? null);
+
+/* กะที่รายงานผูกอยู่ — เอาไปแสดงว่าเป็นบันทึกของนัดวันไหน
+   ไม่คิดเลข "ครั้งที่เท่าไหร่" ให้ เพราะระบบไม่ได้ไล่ว่าต้องครบกี่ครั้ง แค่แนบรายงานกับนัดที่ไปทำ */
+const REPORT_VISIT = `
+  LEFT JOIN case_visits v ON v.visit_id = r.visit_id
+`;
+/* ไล่ชื่อคอลัมน์เองแทน r.* — r.* จะลากไบนารีรูปแผล (หลักแสนไบต์ต่อใบ) มาทุกแถวที่โหลดรายการ
+   ประกอบจาก REPORT_COLUMNS ที่มาจาก schema อยู่แล้ว เพิ่มช่องใหม่จึงไม่ต้องมาต่อรายการที่นี่ซ้ำ */
+const REPORT_COLS = [
+  'r.report_id',
+  'r.case_id',
+  ...REPORT_COLUMNS.map((c) => `r.${c}`),
+  'r.wound_photo_mime',
+  'r.wound_photo_size',
+  '(r.wound_photo_data IS NOT NULL) AS has_wound_photo',
+  'r.reported_by',
+  'r.reported_by_name',
+  'r.created_at',
+  'r.updated_at',
+  'v.visit_date',
+  'v.planned_start',
+  'v.planned_end',
+].join(', ');
+
+/**
+ * รูปแผลเป็นไบนารีหลักแสนไบต์ ส่งกลับไปกับ JSON ทุกครั้งที่โหลดรายการไม่ไหว
+ * ตัดออกแล้วบอกแค่ว่ามีรูปไหม — หน้าเว็บไปดึงรูปจริงจาก endpoint รูปทีละใบเอง
+ */
+const withoutPhotoBytes = (row) => {
+  if (!row) return row;
+  const { wound_photo_data, ...rest } = row;
+  return { ...rest, has_wound_photo: wound_photo_data != null };
+};
+
+/** รายงานทั้งหมดของเคส — ล่าสุดอยู่บน (คนเปิดดูอยากรู้อาการล่าสุดก่อนเสมอ) */
+export function listReports(caseId) {
+  return sql.all(
+    `SELECT ${REPORT_COLS} FROM case_reports r ${REPORT_VISIT}
+     WHERE r.case_id = :id
+     ORDER BY r.report_date DESC, r.report_id DESC`,
+    { id: caseId },
+  );
+}
+
+/** รายงานของกะเดียว — หน้างานวันนี้ของพนักงานเปิดดู/บันทึกจากตรงนี้ */
+export function listReportsForVisit(visitId) {
+  return sql.all(
+    `SELECT ${REPORT_COLS} FROM case_reports r ${REPORT_VISIT}
+     WHERE r.visit_id = :id
+     ORDER BY r.report_id DESC`,
+    { id: visitId },
+  );
+}
+
+/** รายงานใบเดียว — กรองด้วย case_id ด้วยเสมอ ใบของเคสอื่นต้องไม่หลุดออกทาง path ของเคสนี้ */
+export function findReport(caseId, reportId) {
+  return sql.one(
+    'SELECT * FROM case_reports WHERE report_id = :rid AND case_id = :cid',
+    { rid: reportId, cid: caseId },
+  );
+}
+
+/**
+ * บันทึกรายงานใหม่ — ผู้บันทึกมาจาก session (req.user) ไม่รับจาก body
+ * เก็บชื่อ ณ ตอนนั้นคู่กับรหัส เพราะคนบันทึกอาจเปลี่ยนชื่อ/ลาออกทีหลัง แต่บันทึกต้องยังอ่านออก
+ */
+export async function addReport(caseId, input, actor) {
+  const photo = photoColumns(input);
+  const columns = [...REPORT_COLUMNS, ...Object.keys(photo)];
+
+  const values = {
+    case_id: caseId,
+    reported_by: actor?.employee_id ?? null,
+    reported_by_name: actor?.name ?? null,
+    ...photo,
+  };
+  for (const c of REPORT_COLUMNS) values[c] = blank(input[c]);
+
+  const row = await sql.one(
+    `INSERT INTO case_reports (case_id, reported_by, reported_by_name, ${columns.join(', ')})
+     VALUES (:case_id, :reported_by, :reported_by_name, ${columns.map(slot).join(', ')})
+     RETURNING *`,
+    values,
+  );
+  return withoutPhotoBytes(row);
+}
+
+/**
+ * แก้รายงาน — เขียนเฉพาะช่องที่ส่งมา (ช่องที่ไม่ส่งมาคงของเดิมไว้)
+ * report_date ล้างเป็นค่าว่างไม่ได้ (NOT NULL) — ส่ง null มาถือว่า "ใช้วันนี้"
+ * ไม่แตะ reported_by: เจ้าของบันทึกคือคนที่เขียนครั้งแรก การแก้ไม่ใช่การเปลี่ยนผู้บันทึก
+ */
+export async function updateReport(caseId, reportId, input) {
+  const photo = photoColumns(input);
+  const fields = [...REPORT_COLUMNS.filter((c) => c in input), ...Object.keys(photo)];
+  if (fields.length === 0) return findReport(caseId, reportId);
+
+  const values = { cid: caseId, rid: reportId, ...photo };
+  for (const c of REPORT_COLUMNS) if (c in input) values[c] = blank(input[c]);
+
+  const set = fields.map((c) => `${c} = ${slot(c)}`);
+
+  const row = await sql.one(
+    `UPDATE case_reports SET ${set.join(', ')}, updated_at = ${NOW}
+     WHERE report_id = :rid AND case_id = :cid
+     RETURNING *`,
+    values,
+  );
+  return withoutPhotoBytes(row);
+}
+
+/** รูปแผลของรายงาน — ส่งเป็นไฟล์ผ่าน endpoint แยก ไม่ยัดกลับไปใน JSON */
+export const findReportPhoto = (reportId, caseId = null) =>
+  sql.one(
+    `SELECT wound_photo_data AS data, wound_photo_mime AS mime
+     FROM case_reports
+     WHERE report_id = :id AND wound_photo_data IS NOT NULL
+       AND (:case_id::text IS NULL OR case_id = :case_id)`,
+    { id: reportId, case_id: caseId },
+  );
+
+/** ลบรายงาน — คืน false ถ้าไม่มีใบนี้ในเคสนี้ (ให้ route ตอบ 404 แทนที่จะเงียบ) */
+export async function removeReport(caseId, reportId) {
+  const deleted = await sql.run(
+    'DELETE FROM case_reports WHERE report_id = :rid AND case_id = :cid',
+    { rid: reportId, cid: caseId },
+  );
+  return deleted > 0;
 }

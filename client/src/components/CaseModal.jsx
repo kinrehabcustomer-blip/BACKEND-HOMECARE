@@ -6,6 +6,7 @@ import { useToast } from '../toast.jsx';
 import { useSheetSwipe } from '../lib/sheetSwipe.js';
 import { useScrollLock } from '../lib/scrollLock.js';
 import CaseVisitsModal from './CaseVisitsModal.jsx';
+import CaseReportsModal from './CaseReportsModal.jsx';
 import InvoiceModal from './InvoiceModal.jsx';
 import {
   CASE_TYPE_LABELS, CASE_STATUS_LABELS, POSITION_LABELS, GENDER_LABELS, SERVICE_KIND_LABELS,
@@ -126,6 +127,9 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
   const [busy, setBusy] = useState(false);
   const [visits, setVisits] = useState([]);      // ใช้แค่สรุปจำนวนบนปุ่ม การจัดการจริงอยู่ใน popup ย่อย
   const [visitsOpen, setVisitsOpen] = useState(false);
+  // รายงานอาการผู้ป่วย — โหลดมาแค่ทำตัวเลขสรุป การกรอก/แก้อยู่ใน popup ย่อยเหมือนตารางกะ
+  const [reports, setReports] = useState([]);
+  const [reportsOpen, setReportsOpen] = useState(false);
   // ฟอร์มยืนยันการยกเลิกเคส — ทำเป็นฟอร์มในหน้าแทน prompt() ที่เบราว์เซอร์บล็อกได้
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
@@ -143,12 +147,14 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
       api.listVisits(caseId),
       api.listInvoices({ case_id: caseId }),
       api.listCaseEvents(caseId),
-    ]).then(([c, list, v, inv, ev]) => {
+      api.listCaseReports(caseId),
+    ]).then(([c, list, v, inv, ev, rp]) => {
       setItem(c);
       setStaff(list);
       setVisits(v);
       setInvoices(inv.data);
       setEvents(ev);
+      setReports(rp);
     });
 
   useEffect(() => {
@@ -163,14 +169,16 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
       api.listVisits(caseId),
       api.listInvoices({ case_id: caseId }),
       api.listCaseEvents(caseId),
+      api.listCaseReports(caseId),
     ])
-      .then(([c, list, v, inv, ev]) => {
+      .then(([c, list, v, inv, ev, rp]) => {
         if (cancelled) return;
         setItem(c);
         setStaff(list);
         setVisits(v);
         setInvoices(inv.data);
         setEvents(ev);
+        setReports(rp);
         setPick(c.assigned_to ?? '');
       })
       .catch((err) => !cancelled && setError(err.message));
@@ -197,7 +205,7 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
     const onKeyDown = (e) => {
       if (e.key === 'Escape') {
         // popup ย่อยเปิดอยู่ = ให้มันปิดตัวเองก่อน ไม่ใช่ปิดทั้งสองชั้นพร้อมกัน
-        if (visitsOpen || openInvoiceId) return;
+        if (visitsOpen || reportsOpen || openInvoiceId) return;
         e.stopPropagation();
         // กำลังแก้อยู่ / ยืนยันยกเลิกอยู่ — Esc ควรพับสิ่งนั้นก่อน ไม่ใช่ปิดทั้งกล่องจนที่พิมพ์ไว้หาย
         if (cancelOpen) setCancelOpen(false);
@@ -206,7 +214,7 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
         return;
       }
 
-      if (e.key !== 'Tab' || visitsOpen || openInvoiceId) return;
+      if (e.key !== 'Tab' || visitsOpen || reportsOpen || openInvoiceId) return;
 
       const items = [...(boxRef.current?.querySelectorAll(FOCUSABLE) ?? [])].filter((el) => el.offsetParent !== null);
       if (items.length === 0) return;
@@ -224,7 +232,7 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
 
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [onClose, visitsOpen, openInvoiceId, editing, cancelOpen]);
+  }, [onClose, visitsOpen, reportsOpen, openInvoiceId, editing, cancelOpen]);
 
   // ตำแหน่งของเคสนี้ในรายการหน้าปัจจุบัน — ใช้ทำปุ่มดูเคสก่อนหน้า/ถัดไป
   const index = siblings.indexOf(caseId);
@@ -257,6 +265,7 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
   // วันที่ยกเลิกไม่นับเป็นนัดที่จองไว้ แต่ยังเก็บไว้เป็นประวัติใน popup
   const bookedVisits = visits.filter((v) => v.status !== 'cancelled').length;
   const doneVisits = visits.filter((v) => v.status === 'done').length;
+
 
   /* กะที่ทำจบแล้วแต่ค่าจ้างยังไม่ได้อนุมัติ — ตอนปิดเคสคือจังหวะที่ผู้จัดการกำลังดูงานก้อนนี้อยู่พอดี
      จึงควรอนุมัติได้จากตรงนี้เลย ไม่ต้องไปตามหาในคิวรวมของทั้งบริษัททีหลัง */
@@ -495,6 +504,29 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                     </button>
                   </div>
                 )}
+              </section>
+
+              {/* บันทึกอาการรายครั้ง — ต่างจาก "อาการปัจจุบัน" ด้านบนที่เป็น snapshot ณ วันเปิดเคส */}
+              <section>
+                <h3>รายงานอาการผู้ป่วย</h3>
+                <div className="visit-summary">
+                  <p className="muted">
+                    {reports.length === 0 ? (
+                      'ยังไม่มีรายงานอาการ'
+                    ) : (
+                      <>
+                        มีรายงาน <strong>{reports.length}</strong> ใบ
+                        <span className="cell-sub">
+                          ล่าสุด {formatDate(reports[0].report_date)}
+                          {reports[0].reported_by_name && ` · โดย ${reports[0].reported_by_name}`}
+                        </span>
+                      </>
+                    )}
+                  </p>
+                  <button className="btn" onClick={() => setReportsOpen(true)}>
+                    {reports.length === 0 ? 'บันทึกรายงาน' : 'ดู / บันทึกเพิ่ม'}
+                  </button>
+                </div>
               </section>
 
               {/* ออกใบแจ้งหนี้จากเคสนี้ — ระบบคัดลอกผู้จ่าย/ที่อยู่/ค่าจ้างไปให้เอง */}
@@ -794,6 +826,16 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                 mode={isPhysio ? 'appointment' : 'shift'}
                 onClose={() => {
                   setVisitsOpen(false);
+                  load().catch(() => {});
+                }}
+              />
+            )}
+
+            {reportsOpen && (
+              <CaseReportsModal
+                caseItem={item}
+                onClose={() => {
+                  setReportsOpen(false);
                   load().catch(() => {});
                 }}
               />

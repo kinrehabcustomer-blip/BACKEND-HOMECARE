@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import CheckInModal from '../components/CheckInModal.jsx';
+import VisitReportModal from '../components/VisitReportModal.jsx';
 import { serviceName } from '../components/MyCaseModal.jsx';
 import { getPosition } from '../lib/geo.js';
 import PageRefresh, { RefreshButton } from '../components/PageRefresh.jsx';
@@ -14,6 +15,7 @@ export default function MyTodayPage() {
   const [loadedAt, setLoadedAt] = useState(null);     // เวลาที่ข้อมูลชุดที่เห็นอยู่ถูกดึงมา
   const [loading, setLoading] = useState(false);
   const [checkinFor, setCheckinFor] = useState(null); // กะที่กำลังจะเช็คอิน (เปิด modal)
+  const [reportFor, setReportFor] = useState(null);   // กะที่กำลังบันทึกรายงานอาการ
   const [busyId, setBusyId] = useState(null);         // กะที่กำลังเช็คเอาท์
 
   /* หน้านี้เปิดค้างไว้ทั้งวัน — เดิมโหลดครั้งเดียวตอนเปิดแล้วไม่ดึงใหม่อีกเลย
@@ -101,9 +103,20 @@ export default function MyTodayPage() {
               busy={busyId === v.visit_id}
               onCheckIn={() => setCheckinFor(v)}
               onCheckOut={() => checkOut(v)}
+              onReport={() => setReportFor(v)}
             />
           ))}
         </div>
+      )}
+
+      {/* บันทึกรายงานอาการของกะนี้ — ปิดแล้วดึงรายการใหม่ ตัวเลขบนปุ่มจะได้ตรง
+          (กะเดียวบันทึกได้หลายใบ เช่น วัดเช้าแล้ววัดซ้ำตอนเย็น) */}
+      {reportFor && (
+        <VisitReportModal
+          visit={reportFor}
+          onSaved={load}
+          onClose={() => setReportFor(null)}
+        />
       )}
 
       {checkinFor && (
@@ -120,7 +133,7 @@ export default function MyTodayPage() {
   );
 }
 
-function ShiftCard({ visit, busy, onCheckIn, onCheckOut }) {
+function ShiftCard({ visit, busy, onCheckIn, onCheckOut, onReport }) {
   const planned = [visit.planned_start, visit.planned_end].filter(Boolean).join(' - ');
   const canCheckOut = visit.state === 'working' || visit.state === 'stale';
 
@@ -211,6 +224,11 @@ function ShiftCard({ visit, busy, onCheckIn, onCheckOut }) {
         </div>
       ) : (
         <div className="shift-actions">
+          {/* บันทึกอาการได้ทุกสถานะของกะ — ลืมกดเช็คอินก็ยังต้องบันทึกสิ่งที่เจอได้
+              ป้ายบอกแค่ว่ากะนี้มีบันทึกแล้วหรือยัง ไม่ได้ไล่ว่าต้องครบกี่ครั้ง */}
+          <button className="btn" disabled={busy} onClick={onReport}>
+            {visit.report_count > 0 ? 'รายงานอาการ' : 'บันทึกอาการ'}
+          </button>
           {visit.state === 'scheduled' && (
             <button className="btn primary" disabled={busy} onClick={onCheckIn}>เช็คอิน</button>
           )}

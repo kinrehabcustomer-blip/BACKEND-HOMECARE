@@ -18,7 +18,7 @@ await import('../src/lib/env.js');
 process.env.DATABASE_URL ||= 'postgresql://placeholder/placeholder';
 process.env.JWT_SECRET ||= 'x'.repeat(48);
 
-const { adjustVisitSchema, bulkVisitSchema, visitRangeSchema } = await import('../src/cases/schema.js');
+const { adjustVisitSchema, bulkVisitSchema, visitRangeSchema, createReportSchema, hasReportContent, REPORT_CONTENT_FIELDS } = await import('../src/cases/schema.js');
 const { withVisitState } = await import('../src/cases/repo.js');
 const { distanceMeters, DEFAULT_GEOFENCE_M } = await import('../src/lib/geo.js');
 const { roleForPosition, canSeeStaffPay, stripPayFields, BLOCKED_STATUSES } = await import('../src/lib/auth.js');
@@ -234,5 +234,105 @@ describe('geofence', () => {
   });
   test('รัศมีปริยาย 200 เมตร', () => {
     assert.equal(DEFAULT_GEOFENCE_M, 200);
+  });
+});
+
+// ---------- รายงานอาการผู้ป่วย ----------
+describe('createReportSchema — รายงานว่างเปล่าต้องบันทึกไม่ได้', () => {
+  test('กรอกช่องเดียวก็พอ (วัดไม่ครบเป็นเรื่องปกติหน้างาน)', () => {
+    assert.equal(createReportSchema.safeParse({ pulse: 78 }).success, true);
+    assert.equal(createReportSchema.safeParse({ symptoms: 'มีไข้ต่ำๆ' }).success, true);
+  });
+
+  test('มีแต่วันที่/เวลา = ปฏิเสธ (แถวที่บอกว่ามีการบันทึกทั้งที่ไม่มีอะไรให้อ่าน)', () => {
+    const r = createReportSchema.safeParse({ report_date: '2026-08-18', report_time: '09:00' });
+    assert.equal(r.success, false);
+    assert.match(r.error.issues[0].message, /อย่างน้อยหนึ่งช่อง/);
+  });
+
+  test('ข้อความที่มีแต่ช่องว่าง ไม่นับว่ากรอกแล้ว', () => {
+    assert.equal(createReportSchema.safeParse({ symptoms: '   ' }).success, false);
+  });
+
+  test('0 นับว่ากรอกแล้ว — ความเจ็บปวดระดับ 0 คือคำตอบ ไม่ใช่ช่องว่าง', () => {
+    assert.equal(createReportSchema.safeParse({ pain_score: 0 }).success, true);
+  });
+
+  test('ค่าเกินช่วงต้องบอกได้ว่าผิดช่องไหน (ไม่ปล่อยไปตายที่ CHECK ของฐานข้อมูล)', () => {
+    const r = createReportSchema.safeParse({ pulse: 780 });
+    assert.equal(r.success, false);
+    assert.deepEqual(r.error.issues[0].path, ['pulse']);
+    assert.match(r.error.issues[0].message, /20–250/);
+  });
+
+  test('อุณหภูมิมีทศนิยมได้ แต่ชีพจรต้องเป็นจำนวนเต็ม', () => {
+    assert.equal(createReportSchema.safeParse({ temperature_c: 36.8 }).success, true);
+    assert.equal(createReportSchema.safeParse({ pulse: 78.5 }).success, false);
+  });
+});
+
+describe('hasReportContent — ตอนแก้ต้องตรวจกับผลลัพธ์หลังรวมของเดิม', () => {
+  const saved = { pulse: 78, symptoms: 'มีไข้' };
+
+  test('ล้างข้อความทิ้งแต่ยังเหลือสัญญาณชีพ = ยังบันทึกได้', () => {
+    assert.equal(hasReportContent({ ...saved, symptoms: null }), true);
+  });
+
+  test('ล้างจนไม่เหลืออะไรเลย = ต้องกันไว้ (zod มองไม่เห็นเพราะส่งมาช่องเดียว)', () => {
+    assert.equal(hasReportContent({ ...saved, symptoms: null, pulse: null }), false);
+  });
+});
+
+// ---------- แบบบันทึกการดูแลประจำวัน ----------
+describe('createReportSchema — ฟอร์มเต็มของเคสดูแลต่อเนื่อง', () => {
+  test('บันทึกที่มีแต่ช่องติ๊ก (ไม่มีตัวเลข/ข้อความ) ก็เป็นรายงานที่สมบูรณ์', () => {
+    const r = createReportSchema.safeParse({ adl_bath: true, positioning_count: 6, shift: 'day' });
+    assert.equal(r.success, true);
+  });
+
+  test('"ไม่ได้ทำ" (false) นับเป็นเนื้อหา — เป็นคำตอบ ไม่ใช่ช่องว่าง', () => {
+    assert.equal(createReportSchema.safeParse({ adl_bath: false }).success, true);
+  });
+
+  test('มีแต่ช่องกำกับ (เวร/ประเภทรายงาน) = ยังไม่ได้บันทึกอะไร', () => {
+    const r = createReportSchema.safeParse({ shift: 'night', report_type: 'routine' });
+    assert.equal(r.success, false);
+    assert.match(r.error.issues[0].message, /อย่างน้อยหนึ่งช่อง/);
+  });
+
+  test('ตัวเลือกนอกรายการถูกปฏิเสธพร้อมบอกชื่อช่อง (ไม่หลุดไปชน CHECK ของฐานข้อมูล)', () => {
+    const r = createReportSchema.safeParse({ sputum_color: 'ม่วง' });
+    assert.equal(r.success, false);
+    assert.deepEqual(r.error.issues[0].path, ['sputum_color']);
+    assert.match(r.error.issues[0].message, /สีเสมหะ/);
+  });
+
+  test('เหตุการณ์ผิดปกติเลือกได้หลายข้อพร้อมกัน', () => {
+    const r = createReportSchema.safeParse({ incident_types: ['fall', 'bleeding'], incident_detail: 'ล้มข้างเตียง' });
+    assert.equal(r.success, true);
+    assert.deepEqual(r.data.incident_types, ['fall', 'bleeding']);
+  });
+
+  test('ปริมาณติดลบถูกปฏิเสธ (ปัสสาวะ -50 ml ไม่มีทางเป็นของจริง)', () => {
+    assert.equal(createReportSchema.safeParse({ urine_ml: -50 }).success, false);
+  });
+
+  test('Bristol scale รับเฉพาะ 1–7', () => {
+    assert.equal(createReportSchema.safeParse({ stool_scale: 4 }).success, true);
+    assert.equal(createReportSchema.safeParse({ stool_scale: 8 }).success, false);
+  });
+});
+
+describe('REPORT_CONTENT_FIELDS — เส้นแบ่ง "เนื้อหา" กับ "ข้อมูลกำกับ"', () => {
+  test('ช่องกำกับต้องไม่ถูกนับเป็นเนื้อหา ไม่งั้นใบเปล่าจะผ่านไปได้', () => {
+    for (const meta of ['visit_id', 'report_date', 'report_time', 'shift', 'report_type']) {
+      assert.equal(REPORT_CONTENT_FIELDS.includes(meta), false, `${meta} ไม่ควรเป็นเนื้อหา`);
+    }
+  });
+
+  test('ครอบทุกหมวดของฟอร์มเต็ม (สัญญาณชีพ ทางเดินหายใจ อาหาร ขับถ่าย ADL แผล อุปกรณ์ เหตุการณ์)', () => {
+    for (const f of ['pulse', 'suction_status', 'feed_volume_ml', 'urine_ml', 'adl_bath', 'pressure_sore', 'dev_ng', 'incident_types']) {
+      assert.equal(REPORT_CONTENT_FIELDS.includes(f), true, `${f} หายไปจากรายการเนื้อหา`);
+    }
   });
 });
