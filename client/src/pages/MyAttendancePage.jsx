@@ -14,6 +14,7 @@ export default function MyAttendancePage() {
   const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const [report, setReport] = useState(null);
   const [rows, setRows] = useState(null);
+  const [payslips, setPayslips] = useState([]);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -22,10 +23,11 @@ export default function MyAttendancePage() {
      แล้วค่อยกลับมาเป็นภาพกระพริบที่ไม่มีใครสั่ง ของเดิมที่อ่านอยู่ควรค้างไว้จนกว่าของใหม่จะมา */
   const load = useCallback(() => {
     setLoading(true);
-    return Promise.all([api.myAttendanceReport(month), api.myAttendance(month)])
-      .then(([r, list]) => {
+    return Promise.all([api.myAttendanceReport(month), api.myAttendance(month), api.myPayslips()])
+      .then(([r, list, slips]) => {
         setReport(r);
         setRows(list);
+        setPayslips(slips);
         setError(null); // เปลี่ยนเดือนแล้วโหลดผ่าน error ของเดือนก่อนต้องหายไปด้วย
       })
       .catch((e) => setError(e.message))
@@ -74,6 +76,15 @@ export default function MyAttendancePage() {
                   {report.pending_shifts > 0 ? `${report.pending_shifts} กะ` : 'ยืนยันครบแล้ว'}
                 </span>
               </div>
+              {/* อนุมัติแล้วยังไม่ใช่ได้เงิน — เงินออกจริงตอนรอบจ่ายถูกปิด
+                  ไม่แยกสองตัวนี้ พนักงานจะอ่านยอดบนสุดว่า "ได้แล้ว" ทั้งก้อน แล้วมาถามว่าทำไมเงินไม่เข้า */}
+              <div className="tile is-static">
+                <span className="tile-label">รอโอน</span>
+                <span className="tile-value">{formatBaht(report.unpaid_pay ?? 0)}</span>
+                <span className="tile-share">
+                  {(report.unpaid_pay ?? 0) > 0 ? 'จะเข้ารอบจ่ายถัดไป' : `โอนแล้ว ${formatBaht(report.paid_pay ?? 0)}`}
+                </span>
+              </div>
               <div className="tile is-static">
                 <span className="tile-label">ชั่วโมงทำงาน</span>
                 <span className="tile-value">{(report.minutes / 60).toFixed(1)}</span>
@@ -97,6 +108,30 @@ export default function MyAttendancePage() {
               {report.unpriced_shifts > 0 && report.rejected_shifts > 0 && ' · '}
               {report.rejected_shifts > 0 && `มี ${report.rejected_shifts} กะที่ไม่ได้รับอนุมัติ ดูเหตุผลได้ที่รายการกะด้านล่าง`}
             </p>
+          )}
+
+          {/* สลิปของรอบที่จ่ายไปแล้ว — ไม่ผูกกับเดือนที่เลือกด้านบน เพราะรอบหนึ่งกวาดกะข้ามเดือนได้
+              (กะเก่าที่เพิ่งอนุมัติจะถูกจ่ายในรอบถัดไป ซึ่งเป็นคนละเดือนกับวันที่ไปทำงาน) */}
+          {payslips.length > 0 && (
+            <section className="card">
+              <h2>รอบที่จ่ายแล้ว ({payslips.length})</h2>
+              {payslips.map((s) => (
+                <div className="history-item" key={s.item_id}>
+                  <div>
+                    <strong>{formatBaht(s.total_pay)}</strong>
+                    <p className="muted">
+                      <span className="mono">{s.run_id}</span>
+                      {' · '}{s.period_month} รอบที่ {s.round_no}
+                      {' · '}{s.shifts} กะ
+                    </p>
+                  </div>
+                  <div className="muted">
+                    จ่าย {formatDate(s.pay_date)}
+                    {s.method && <span className="cell-sub">{s.method}</span>}
+                  </div>
+                </div>
+              ))}
+            </section>
           )}
 
           {/* ที่มาของยอด — ให้กางดูได้ว่าเงินมาจากเคสไหนบ้าง ไม่ใช่เห็นแค่ก้อนเดียว */}

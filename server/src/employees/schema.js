@@ -46,7 +46,6 @@ export const createEmployeeSchema = z.object({
 
   hire_date: date.optional().nullable(),
   resign_date: date.optional().nullable(),
-  base_salary: z.number().nonnegative('เงินเดือนต้องไม่ติดลบ').optional().nullable(),
 
   emergency_contact_name: optionalText,
   emergency_contact_phone: optionalText,

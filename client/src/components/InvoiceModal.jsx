@@ -10,6 +10,10 @@ import ConfirmButton from './ConfirmButton.jsx';
 
 const FOCUSABLE = 'a[href], button:not(:disabled), input, select, textarea, [tabindex]:not([tabindex="-1"])';
 
+/* action คืนค่านี้ = ใบที่เปิดอยู่ถูกลบไปแล้ว ห้ามโหลดซ้ำ
+   ไม่งั้น run() จะไปดึงใบที่เพิ่งลบแล้วได้ 404 มาขึ้นเป็นข้อความแดงทับสิ่งที่เพิ่งบอกไป */
+const GONE = Symbol('gone');
+
 /** ข้อมูลผู้ออกเอกสาร — แก้ที่เดียวตรงนี้ เปลี่ยนทุกใบ */
 const ISSUER = {
   // ไฟล์เดียวกับที่ใช้บนแถบเมนู/หน้าเข้าสู่ระบบ (client/public/) — เปลี่ยนไฟล์ทีเดียวเปลี่ยนทุกที่
@@ -61,6 +65,7 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
   const [payOpen, setPayOpen] = useState(false);
   const [payAmount, setPayAmount] = useState('');   // ว่าง = รับเต็มยอดที่ค้าง
   const [depositDraft, setDepositDraft] = useState(''); // ยอดมัดจำที่กรอกในตัวเลือกแบ่งจ่าย
+  const [depositEdit, setDepositEdit] = useState('');   // ยอดมัดจำในช่องแก้ไขของใบมัดจำที่แบ่งงวดไปแล้ว
   const [plan, setPlan] = useState([]);                 // ใบคู่ในแผนเดียวกัน (มัดจำ ↔ ส่วนที่เหลือ)
   const [payDate, setPayDate] = useState(todayTH);
   const [payMethod, setPayMethod] = useState(PAYMENT_METHODS[0]);
@@ -86,6 +91,12 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
       cancelled = true;
     };
   }, [invoiceId]);
+
+  /* เติมยอดมัดจำปัจจุบันลงช่องแก้ไขทุกครั้งที่ใบถูกโหลด (รวมหลังบันทึกด้วย — run() โหลดซ้ำให้เสมอ)
+     ช่องเปล่าจะอ่านไม่ออกว่าตอนนี้ตกลงกันไว้เท่าไหร่ แล้วคนกรอกต้องเลื่อนไปดูยอดข้างบนเอง */
+  useEffect(() => {
+    setDepositEdit(item?.billing_kind === 'deposit' ? String(item.total) : '');
+  }, [item?.invoice_id, item?.billing_kind, item?.total]);
 
   /*
    * ล็อกไม่ให้หน้าหลังเลื่อนตาม + คืนโฟกัสกลับไปที่แถวเดิมตอนปิด (ไม่ใช่ดีดกลับไปต้นหน้า)
@@ -139,8 +150,8 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
     setBusy(true);
     setError(null);
     try {
-      await action();
-      await load();
+      const result = await action();
+      if (result !== GONE) await load();
       onChanged?.();
     } catch (e) {
       setError(e.message);
@@ -168,20 +179,37 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
   /**
    * ลบใบทิ้งถาวร แล้วถามต่อว่าจะออกใบใหม่ตามข้อมูลปัจจุบันเลยไหม
    * ไม่ออกให้อัตโนมัติ เพราะบางครั้งลบเพราะไม่เก็บเงินเคสนี้แล้ว ไม่ได้จะออกใบแทน
+   *
+   * ถามเฉพาะตอนเคสไม่เหลือใบร่างแล้วจริงๆ — ของเดิมถามทุกครั้ง คนกดก็ตอบ "ใช่" ทุกครั้ง
+   * เคสที่มีใบร่างซ้ำอยู่สองใบจึงลบเท่าไหร่ก็ไม่มีวันเหลือใบเดียว (ลบใบหนึ่ง ได้ใบใหม่มาแทนทันที)
    */
   function deleteInvoice() {
     return run(async () => {
-      await api.deleteInvoice(item.invoice_id);
-      toast(`ลบ ${item.invoice_id} แล้ว`);
-      if (!item.case_id) return onClose();
+      // ลบใบมัดจำ/ใบส่วนที่เหลือ = ลบทั้งแผน server จึงคืนรายการที่ลบจริงมาให้บอกคนกดตามนั้น
+      const { deleted = [item.invoice_id] } = (await api.deleteInvoice(item.invoice_id)) ?? {};
+      toast(deleted.length > 1 ? `ลบทั้งแผน (${deleted.join(' และ ')}) แล้ว` : `ลบ ${deleted[0]} แล้ว`);
+      if (!item.case_id) {
+        onClose();
+        return GONE;
+      }
 
-      if (confirm('ลบแล้ว — ออกใบใหม่ตามข้อมูลปัจจุบันของเคสเลยไหม?')) {
+      /* เคสยังเหลือใบร่างอยู่ = ได้สิ่งที่ต้องการแล้ว (เหลือใบเดียว) พาไปเปิดใบนั้นแทนการออกใบใหม่
+         ถึงจะพลาดกดออกใหม่ server ก็ปฏิเสธให้อีกชั้น (ดู POST /api/invoices) */
+      const { data: drafts } = await api.listInvoices({ case_id: item.case_id, status: 'draft', per_page: 1 });
+      if (drafts.length > 0) {
+        toast(`เคสนี้เหลือใบร่าง ${drafts[0].invoice_id} ใบเดียวแล้ว`);
+        onReissued?.(drafts[0].invoice_id);
+        return GONE;
+      }
+
+      if (confirm('ลบแล้ว — ออกใบร่างใหม่ให้เลือกวิธีเก็บเงินอีกครั้งเลยไหม?')) {
         const created = await api.createInvoice({ case_id: item.case_id });
         toast(`ออกใบใหม่ ${created.invoice_id} แล้ว`);
         onReissued?.(created.invoice_id);
       } else {
         onClose(); // ใบที่เปิดอยู่ถูกลบไปแล้ว ค้างหน้าไว้ไม่ได้
       }
+      return GONE;
     });
   }
 
@@ -192,12 +220,20 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
     (isReceipt ? item?.paid_by_name : null) ||
     item?.issued_by_name ||
     '';
+  /* ยอดเต็มที่ตกลงกับลูกค้า = ใบมัดจำ + ใบส่วนที่เหลือ ไม่ใช่ค่าจ้างของเคส
+     (ใบที่แบ่งงวดแล้วไม่ซิงก์ตามเคส ยอดที่ตกลงกันจึงอยู่ในใบทั้งสองเท่านั้น — เกณฑ์เดียวกับฝั่ง server) */
+  const planTotal = item?.is_plan_part && plan.length > 0 ? item.total + Number(plan[0].total) : 0;
+  const depositValue = Number(depositEdit);
+  const depositValid = depositValue > 0 && depositValue < planTotal;
+
   const pay = item ? paidBy(item.payment_method, item.total, item.status) : {};
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div
-        className="modal modal-wide"
+        /* ยังไม่ได้เลือกวิธีเก็บเงิน = ตัวเอกสารถูกซ่อนอยู่ เหลือแค่กล่องตัวเลือกสองใบ
+           ความกว้าง 60rem ที่ไว้วางใบแจ้งหนี้จึงกลายเป็นที่ว่างรอบๆ กล่องเล็กๆ กลางจอ */
+        className={`modal modal-wide ${item?.needs_plan ? 'is-choosing' : ''}`}
         role="dialog"
         aria-modal="true"
         aria-label="ใบแจ้งหนี้"
@@ -342,7 +378,7 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
 
               {/* สรุปเงินของใบนี้ — ยอดสุทธิ / มัดจำที่ตกลง / รับมาแล้ว / คงเหลือ
                   แยกจากตัวเอกสารที่พิมพ์ เพราะเป็นเครื่องมือของคนเก็บเงิน ไม่ใช่ข้อความบนใบ */}
-              {item.status !== 'cancelled' && (
+              {item.status !== 'cancelled' && !item.needs_plan && (
                 <section className="pay-summary no-print">
                   <div className="pay-figures">
                     <div>
@@ -383,6 +419,59 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                     </p>
                   )}
 
+                  {/* แก้ยอดมัดจำได้ทันทีโดยไม่ต้องลบใบ — ยอดเต็มของแผนคงเดิม ใบส่วนที่เหลือขยับตามให้เอง
+                      ของเดิมเลือกวิธีเก็บเงินได้ครั้งเดียว ตกลงมัดจำใหม่ทีไรต้องลบทั้งแผนทิ้งแล้วแบ่งใหม่
+                      ซึ่งทำให้เลขที่เอกสารข้ามและใบที่ส่งให้ลูกค้าไปแล้วหายไปทั้งคู่ เพราะตัวเลขเดียวเปลี่ยน */}
+                  {item.billing_kind === 'deposit' && canEdit && plan.length > 0 && (
+                    <div className="deposit-edit">
+                      <label>
+                        ยอดมัดจำ (บาท)
+                        <input
+                          type="number"
+                          min="0.01"
+                          max={planTotal}
+                          step="0.01"
+                          value={depositEdit}
+                          onChange={(e) => setDepositEdit(e.target.value)}
+                        />
+                      </label>
+                      <div className="deposit-edit-side">
+                        {/* บอกยอดใบคู่ตั้งแต่ยังไม่กดบันทึก — ตัวเลขที่ต้องตามเก็บทีหลังคือสิ่งที่ต้องเห็นก่อนตัดสินใจ */}
+                        <p className="muted">
+                          {depositValid ? (
+                            <>
+                              ใบส่วนที่เหลือ <span className="mono">{plan[0].invoice_id}</span> จะกลายเป็น{' '}
+                              <strong>{amountText(planTotal - depositValue)}</strong> บาท
+                            </>
+                          ) : (
+                            `ยอดเต็มที่ตกลงไว้คือ ${amountText(planTotal)} บาท — ยอดมัดจำต้องมากกว่า 0 และน้อยกว่ายอดนี้`
+                          )}
+                        </p>
+                        <button
+                          className="btn"
+                          disabled={busy || !depositValid || depositValue === item.total}
+                          onClick={() =>
+                            run(async () => {
+                              await api.updateDepositAmount(item.invoice_id, { deposit_amount: depositValue });
+                              toast(`แก้ยอดมัดจำเป็น ${amountText(depositValue)} บาทแล้ว`);
+                            })
+                          }
+                        >
+                          บันทึกยอดมัดจำ
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* เปิดมาจากใบส่วนที่เหลือ — ยอดใบนี้ไม่ใช่ตัวเลขอิสระ บอกให้รู้ว่าไปแก้ที่ไหน
+                      ไม่งั้นจะเห็นแค่ว่าใบนี้แก้ยอดไม่ได้ แล้วเข้าใจว่าต้องลบทั้งแผนทิ้งเหมือนเดิม */}
+                  {item.billing_kind === 'balance' && canEdit && plan.length > 0 && (
+                    <p className="muted plan-note">
+                      ยอดของใบนี้คือยอดเต็มหักมัดจำ — แก้ได้ที่ช่อง “ยอดมัดจำ” ในใบมัดจำ{' '}
+                      <span className="mono">{plan[0].invoice_id}</span> แล้วใบนี้จะเปลี่ยนตามเอง
+                    </p>
+                  )}
+
                   {item.payments?.length > 0 && (
                     <ul className="pay-history">
                       {item.payments.map((pmt) => (
@@ -406,15 +495,20 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
               {item.needs_plan && (
                 <section className="plan-choose no-print">
                   <h3>เลือกวิธีเก็บเงิน</h3>
-                  <p className="muted">
-                    ยอดของเคสนี้คือ <strong>{amountText(item.total)}</strong> บาท —
-                    {' '}เลือกก่อนว่าจะเก็บครั้งเดียวจบ หรือแบ่งเก็บมัดจำก่อน
-                  </p>
+                  {/* ไม่ทวนยอดซ้ำตรงนี้ — การ์ดซ้ายแสดงยอดเต็มเป็นตัวเลขใหญ่อยู่แล้ว
+                      ประโยคนำจึงเหลือหน้าที่เดียวคือบอกว่ากำลังให้เลือกอะไร (และจบในบรรทัดเดียว) */}
+                  <p className="muted">เลือกก่อนว่าจะเก็บครั้งเดียวจบ หรือแบ่งเก็บมัดจำก่อน</p>
 
                   <div className="plan-options">
                     <div className="plan-option">
                       <h4>จ่ายเต็มจำนวน</h4>
-                      <p className="muted">ออกใบเดียว {amountText(item.total)} บาท</p>
+                      {/* ป้ายกำกับ + ตัวเลข วางตรงกับป้ายกำกับ + ช่องกรอกของการ์ดขวาแถวต่อแถว
+                          สองใบจึงอ่านคู่กันได้ทีละบรรทัด ไม่ใช่สองก้อนที่บังเอิญวางข้างกัน */}
+                      <div className="plan-figure">
+                        <span className="plan-figure-label">ยอดเต็ม</span>
+                        <p className="plan-amount">{amountText(item.total)}<span> บาท</span></p>
+                      </div>
+                      <p className="muted">ออกใบเดียว เก็บครั้งเดียวจบ ไม่มีใบตามเก็บทีหลัง</p>
                       <button
                         className="btn primary"
                         disabled={busy || item.total <= 0}
@@ -636,8 +730,18 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                 <ConfirmButton
                   className="btn danger-ghost foot-danger"
                   disabled={busy}
-                  title={`ลบใบแจ้งหนี้ ${item.invoice_id} ทิ้งถาวร?`}
-                  detail="ลบแล้วกู้คืนไม่ได้ และเลขที่ใบจะข้าม"
+                  /* ใบที่เป็นงวดของแผนถูกลบพร้อมใบคู่เสมอ — ต้องบอกตั้งแต่ในกล่องยืนยัน
+                     ไม่ใช่ให้รู้ตอนกดไปแล้วว่าอีกใบหายไปด้วย */
+                  title={
+                    item.is_plan_part && plan.length > 0
+                      ? `ลบทั้งแผนมัดจำ (${[item.invoice_id, ...plan.map((s) => s.invoice_id)].join(' และ ')}) ทิ้งถาวร?`
+                      : `ลบใบแจ้งหนี้ ${item.invoice_id} ทิ้งถาวร?`
+                  }
+                  detail={
+                    item.is_plan_part && plan.length > 0
+                      ? 'ใบมัดจำกับใบส่วนที่เหลือเป็นยอดเดียวกันคนละครึ่ง จึงถูกลบพร้อมกันทั้งคู่ · ลบแล้วกู้คืนไม่ได้ และเลขที่ใบจะข้าม — จากนั้นระบบจะถามว่าจะออกใบร่างใหม่ให้เลือกวิธีเก็บเงินอีกครั้งไหม'
+                      : 'ลบแล้วกู้คืนไม่ได้ และเลขที่ใบจะข้าม'
+                  }
                   confirmLabel="ลบถาวร"
                   onConfirm={deleteInvoice}
                 >

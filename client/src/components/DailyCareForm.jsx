@@ -6,7 +6,10 @@ import TimeSelect from './TimeSelect.jsx';
 import FileButton from './FileButton.jsx';
 
 /**
- * แบบบันทึกการดูแลประจำวัน — วาดทุกช่องจากนิยามใน lib/dailyCare.js
+ * ฟอร์มบันทึกรายงานแบบมีโครงสร้าง — วาดทุกช่องจากนิยามที่ส่งเข้ามาทาง sections
+ *
+ * ใช้ได้กับทุกชุดช่องที่ประกาศไว้ใน lib/dailyCare.js (ดูแลประจำวัน / กายภาพบำบัด)
+ * ตัวฟอร์มไม่รู้จักช่องไหนเป็นพิเศษเลย — เพิ่มฟอร์มใหม่ = เพิ่มนิยาม ไม่ต้องแตะไฟล์นี้
  *
  * ปุ่มชิปแทน <select> เกือบทั้งฟอร์ม เพราะพนักงานกรอกจากมือถือขณะอยู่หน้างาน
  * การกดชิปหนึ่งครั้งจบเร็วกว่าเปิด dropdown แล้วเลื่อนหา และเห็นทุกตัวเลือกพร้อมกัน
@@ -16,13 +19,13 @@ import FileButton from './FileButton.jsx';
  */
 
 /** ค่าเริ่มต้นของฟอร์ม — ทุกช่อง undefined = ยังไม่กรอก (ไม่ใช่ '' เพื่อให้แยกจาก "ล้างค่า" ได้) */
-function toForm(report) {
+function toForm(report, sections) {
   const out = {
     report_date: report?.report_date ?? todayTH(),
     report_time: report?.report_time ?? '',
     report_type: report?.report_type ?? 'routine',
   };
-  for (const s of DAILY_SECTIONS) {
+  for (const s of sections) {
     for (const f of s.fields) {
       if (f.key in out) continue;
       // รูป: undefined = ยังไม่แตะ (ไม่ส่งคีย์ไป รูปเดิมอยู่ครบ) · null = สั่งลบ · ข้อความ = รูปใหม่
@@ -33,10 +36,10 @@ function toForm(report) {
 }
 
 /** ฟอร์ม -> payload ที่ API รับ (ตัวเลขต้องเป็น number, ช่องว่างเป็น null) */
-function toPayload(form) {
+function toPayload(form, sections) {
   const out = { report_date: form.report_date || null, report_time: form.report_time || null };
 
-  for (const s of DAILY_SECTIONS) {
+  for (const s of sections) {
     for (const f of s.fields) {
       const v = form[f.key];
       if (f.type === 'number') out[f.key] = v === '' || v == null ? null : Number(v);
@@ -245,16 +248,16 @@ function Section({ section, form, set, disabled, photoUrl }) {
 }
 
 /** หน้าตรวจทานก่อนส่ง — เห็นทั้งใบในหน้าเดียวว่ากำลังจะบันทึกอะไร */
-function Review({ form }) {
+function Review({ form, sections }) {
   const filled = useMemo(
     () =>
-      DAILY_SECTIONS.map((s) => ({
+      sections.map((s) => ({
         ...s,
         rows: s.fields
           .map((f) => [f, dailyValueText(f, form[f.key] === '' ? null : form[f.key])])
           .filter(([, text]) => text != null),
       })).filter((s) => s.rows.length > 0),
-    [form],
+    [form, sections],
   );
 
   return (
@@ -276,13 +279,21 @@ function Review({ form }) {
   );
 }
 
-export default function DailyCareForm({ initial, busy, error, photoUrl = null, onSubmit, onCancel }) {
-  const [form, setForm] = useState(() => toForm(initial));
+export default function DailyCareForm({
+  initial,
+  sections = DAILY_SECTIONS,
+  busy,
+  error,
+  photoUrl = null,
+  onSubmit,
+  onCancel,
+}) {
+  const [form, setForm] = useState(() => toForm(initial, sections));
   const [reviewing, setReviewing] = useState(false);
   const set = (key, value) => setForm((prev) => ({ ...prev, [key]: value }));
 
   // ยังไม่ได้กรอกอะไรเลย = ยังส่งไม่ได้ (server ปฏิเสธใบเปล่าอยู่แล้ว แต่รู้ตั้งแต่ก่อนกดดีกว่า)
-  const blank = !DAILY_SECTIONS.some((s) =>
+  const blank = !sections.some((s) =>
     s.fields.some((f) => f.key !== 'report_type' && f.key !== 'shift' && isFilled(form[f.key])),
   );
 
@@ -292,7 +303,7 @@ export default function DailyCareForm({ initial, busy, error, photoUrl = null, o
       onSubmit={(e) => {
         e.preventDefault();
         if (!reviewing) return setReviewing(true);
-        onSubmit(toPayload(form));
+        onSubmit(toPayload(form, sections));
       }}
     >
       {error && <p className="error">{error}</p>}
@@ -307,10 +318,10 @@ export default function DailyCareForm({ initial, busy, error, photoUrl = null, o
       {reviewing ? (
         <>
           <h4 className="report-form-head">ตรวจทานก่อนส่ง</h4>
-          <Review form={form} />
+          <Review form={form} sections={sections} />
         </>
       ) : (
-        DAILY_SECTIONS.map((s) => (
+        sections.map((s) => (
           <Section key={s.key} section={s} form={form} set={set} disabled={busy} photoUrl={photoUrl} />
         ))
       )}

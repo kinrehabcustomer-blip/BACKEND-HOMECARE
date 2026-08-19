@@ -1,14 +1,14 @@
 import { DAILY_SECTIONS, dailyValueText, isFilled } from '../lib/dailyCare.js';
 
 /**
- * แสดงแบบบันทึกการดูแลประจำวันที่บันทึกไว้แล้ว — วาดจากนิยามชุดเดียวกับฟอร์ม
+ * แสดงรายงานที่บันทึกไว้แล้ว — วาดจากนิยามชุดเดียวกับฟอร์ม (ส่ง sections ชุดเดียวกันเข้ามา)
  *
  * โชว์เฉพาะช่องที่กรอกไว้จริง ไม่วาดช่องว่างทิ้งไว้: ใบหนึ่งมีได้ 80 ช่อง
  * แต่เวรหนึ่งกรอกจริงราว 15–25 ช่อง ถ้าโชว์ครบทุกช่องคนอ่านจะต้องกวาดตาผ่าน "ไม่ได้ระบุ" เต็มหน้า
  * กว่าจะเจอสิ่งที่เปลี่ยนไป ซึ่งเป็นสิ่งเดียวที่เขาเปิดเข้ามาดู
  */
-export default function DailyCareView({ report, photoUrl = null }) {
-  const blocks = DAILY_SECTIONS.map((s) => ({
+export default function DailyCareView({ report, sections = DAILY_SECTIONS, photoUrl = null }) {
+  const blocks = sections.map((s) => ({
     key: s.key,
     title: s.title,
     highlight: s.highlight,

@@ -97,6 +97,14 @@ export const billingPlanSchema = z
     }
   });
 
+/**
+ * แก้ยอดมัดจำของแผนที่แบ่งใบไปแล้ว — ยอดเต็มของแผนไม่เปลี่ยน ใบส่วนที่เหลือถูกคิดใหม่ให้ผลรวมเท่าเดิม
+ * มัดจำ 0 บาทไม่มีอยู่จริง (เท่ากับไม่ได้แบ่งใบตั้งแต่แรก) จึงต้องมากกว่า 0 เหมือนตอนแบ่งงวดครั้งแรก
+ */
+export const depositAmountSchema = z.object({
+  deposit_amount: money.positive('ยอดมัดจำต้องมากกว่า 0'),
+});
+
 export const listQuerySchema = z.object({
   q: z.string().trim().optional(),
   status: z.enum(INVOICE_STATUSES).optional(),

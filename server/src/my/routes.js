@@ -10,6 +10,7 @@ import {
 import { editReport, ensureVisitInCase } from '../cases/routes.js';
 import { decodeImage } from '../employees/schema.js';
 import { distanceMeters, DEFAULT_GEOFENCE_M } from '../lib/geo.js';
+import * as payroll from '../payroll/repo.js';
 import { checkInSchema, checkOutSchema, attendanceQuerySchema } from './schema.js';
 import { ApiError, asyncRoute, notFound } from '../lib/errors.js';
 
@@ -129,11 +130,23 @@ myRouter.get(
         pending_shifts: 0,
         rejected_shifts: 0,
         unpriced_shifts: 0,
+        paid_pay: 0,
+        paid_shifts: 0,
+        unpaid_pay: 0,
       }),
       cases: paidCases,
       open_cases: openCases,
     });
   }),
+);
+
+/**
+ * สลิปของฉัน — เฉพาะรอบที่จ่ายจริงแล้วเท่านั้น
+ * รอบที่ยังเป็นร่างคือตัวเลขที่ผู้จัดการยังปรับได้ ให้พนักงานเห็นก่อนจะกลายเป็นการสัญญาเงินที่ยังไม่แน่
+ */
+myRouter.get(
+  '/payslips',
+  asyncRoute(async (req, res) => res.json(await payroll.payslipsFor(req.user.employee_id))),
 );
 
 /** ประวัติการมาทำงานของฉัน (รายเดือน) — ไม่ส่ง month = เดือนปัจจุบัน */

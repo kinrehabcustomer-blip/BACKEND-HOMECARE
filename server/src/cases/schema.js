@@ -395,6 +395,23 @@ const reportFields = z.object({
   rn_notified_at: time.optional().nullable(),
   rn_notified_to: optionalText,
 
+  /* ---------- 12. กายภาพบำบัด ----------
+     ใช้เฉพาะเคสสายกายภาพ (หน้าเว็บเลือกฟอร์มจากประเภทเคส) — เคสอื่นไม่เห็นช่องพวกนี้
+     แต่ schema เดียวกันทั้งหมด เพราะเป็นรายงานตารางเดียวกัน และเคสหนึ่งอาจมีทั้งสองแบบได้ */
+  physio_treatments: z.array(z.string().trim().min(1).max(40)).max(20).optional().nullable(),
+  assist_level: choice(
+    ['independent', 'supervision', 'min_assist', 'mod_assist', 'max_assist', 'dependent'],
+    'ระดับการช่วยเหลือ',
+  ),
+  walk_aid: choice(['none', 'cane', 'walker', 'wheelchair', 'unable'], 'อุปกรณ์ช่วยเดิน'),
+  walk_distance_m: amount(5000, 'ระยะทางที่เดินได้', 'เมตร', { integer: false }),
+  post_pain_score: vital(0, 10, 'ระดับความเจ็บปวดหลังทำ', '(0–10)'),
+  post_bp_systolic: vital(40, 300, 'ความดันตัวบนหลังทำ', 'mmHg'),
+  post_bp_diastolic: vital(20, 200, 'ความดันตัวล่างหลังทำ', 'mmHg'),
+  post_pulse: vital(20, 250, 'ชีพจรหลังทำ', 'ครั้ง/นาที'),
+  post_spo2: vital(50, 100, 'ออกซิเจนปลายนิ้วหลังทำ', '%'),
+  home_program: choice(DONE, 'โปรแกรมที่บ้าน'),
+
   // ---------- ข้อความสรุป (ใช้ทั้งฟอร์มสั้นและฟอร์มเต็ม) ----------
   symptoms: reportText,
   care_given: reportText,
@@ -454,7 +471,7 @@ export const updateReportSchema = reportFields;
  * เป็นสิ่งที่ถูกถามหาบ่อยที่สุดเวลาไล่ย้อนหลัง ("เดือนนี้มีอะไรผิดปกติบ้าง")
  */
 export const reportQuerySchema = z.object({
-  month: z.string().regex(/^d{4}-(0[1-9]|1[0-2])$/, 'เดือนต้องอยู่ในรูปแบบ YYYY-MM').optional(),
+  month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'เดือนต้องอยู่ในรูปแบบ YYYY-MM').optional(),
   type: z.enum(['routine', 'change', 'incident', 'abnormal']).optional(),
   page: z.coerce.number().int().min(1).default(1),
   per_page: z.coerce.number().int().min(1).max(100).default(20),

@@ -18,7 +18,6 @@ CREATE TABLE IF NOT EXISTS employees (
 
   hire_date               TEXT,
   resign_date             TEXT,
-  base_salary             DOUBLE PRECISION,
 
   emergency_contact_name  TEXT,
   emergency_contact_phone TEXT,
@@ -1018,6 +1017,48 @@ CREATE INDEX IF NOT EXISTS idx_case_reports_incident
   ON case_reports (report_date DESC) WHERE report_type <> 'routine';
 
 -- ============================================================================
+-- แบบบันทึกการรักษาทางกายภาพบำบัด (Physiotherapy Session Record)
+--
+-- เคสกายภาพไม่ได้ "ดูแลต่อเนื่องทั้งเวร" แต่เป็นการรักษาเป็นครั้ง ครั้งละ 45–60 นาที
+-- ฟอร์มดูแลประจำวันจึงใช้ไม่ได้: ไม่มี NG/ขับถ่าย/เปลี่ยนผ้าอ้อมให้กรอก
+-- ส่วนสิ่งที่ต้องบันทึกจริง (ทำท่าอะไร ผู้ป่วยทำได้แค่ไหน ปวดเปลี่ยนไปไหม ทนได้หรือไม่)
+-- กลับไม่มีช่องอยู่เลย ที่ผ่านมาจึงถูกยัดลงช่องข้อความอิสระ ซึ่งเทียบข้ามครั้งไม่ได้
+--
+-- ใช้ตาราง case_reports เดิมเหมือนกัน (เป็น "บันทึกหนึ่งครั้ง" แบบเดียวกัน ต่างแค่ชุดช่องที่กรอก)
+-- และใช้คอลัมน์เดิมซ้ำให้มากที่สุด — ปวด/สัญญาณชีพ/ระยะเวลา/ความร่วมมือ/เหตุการณ์ผิดปกติ
+-- มีอยู่แล้วทั้งหมด เพิ่มเฉพาะสิ่งที่ฟอร์มเดิมไม่มีที่เก็บจริงๆ
+--
+-- ค่าหลังการรักษาแยกเป็นคอลัมน์ของตัวเอง (post_*) ไม่ใช่บันทึกเป็นรายงานอีกใบ
+-- เพราะ "ก่อน→หลัง ของครั้งเดียวกัน" คือตัวเลขที่ใช้ตัดสินว่าโปรแกรมหนักไปหรือได้ผล
+-- ถ้าแยกใบจะเทียบคู่กันไม่ได้เลยเวลาไล่ย้อนหลัง (และไม่รู้ว่าใบไหนคู่กับใบไหน)
+-- ============================================================================
+
+-- การรักษาที่ให้ในครั้งนี้ — array เพราะครั้งหนึ่งทำหลายอย่างเป็นปกติ (ยืด + ฝึกเดิน + ประคบร้อน)
+-- ไม่ผูก CHECK แบบเดียวกับ incident_types: รายการหัตถการต้องเพิ่มได้ตามที่หน้างานใช้จริง
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS physio_treatments TEXT[];
+
+-- ระดับการช่วยเหลือ = ตัวชี้วัดผลลัพธ์หลักของงานฟื้นฟู (ตัวเลขที่ควรดีขึ้นเมื่อคอร์สเดินไป)
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS assist_level TEXT
+  CHECK (assist_level IN ('independent', 'supervision', 'min_assist', 'mod_assist', 'max_assist', 'dependent'));
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS walk_aid TEXT
+  CHECK (walk_aid IN ('none', 'cane', 'walker', 'wheelchair', 'unable'));
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS walk_distance_m DOUBLE PRECISION
+  CHECK (walk_distance_m >= 0 AND walk_distance_m <= 5000);
+
+-- ---------- หลังการรักษา ----------
+-- ปวดก่อน (pain_score) เทียบปวดหลัง = ผลของครั้งนี้ · สัญญาณชีพหลังออกกำลัง = ความปลอดภัย
+-- ช่วงค่าตรงกับคอลัมน์ก่อนทำทุกตัว เพื่อให้เทียบกันได้ตรงๆ และกันพิมพ์ผิดคนละหลักเหมือนกัน
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS post_pain_score   INTEGER CHECK (post_pain_score BETWEEN 0 AND 10);
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS post_bp_systolic  INTEGER CHECK (post_bp_systolic  BETWEEN 40 AND 300);
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS post_bp_diastolic INTEGER CHECK (post_bp_diastolic BETWEEN 20 AND 200);
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS post_pulse        INTEGER CHECK (post_pulse BETWEEN 20 AND 250);
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS post_spo2         INTEGER CHECK (post_spo2 BETWEEN 50 AND 100);
+
+-- โปรแกรมที่บ้าน — ผลของคอร์สกายภาพขึ้นกับสิ่งที่ทำต่อในวันที่นักกายภาพไม่ได้ไป
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS home_program TEXT
+  CHECK (home_program IN ('done', 'not_done', 'na'));
+
+-- ============================================================================
 -- ทีมพนักงานของเคส (case_team) — เคสหนึ่งมีคนดูแลได้มากกว่าหนึ่งคน
 --
 -- ของเดิม cases.assigned_to เก็บได้คนเดียว ซึ่งไม่พอกับงานจริง:
@@ -1122,3 +1163,96 @@ ALTER TABLE invoices ADD COLUMN IF NOT EXISTS parent_invoice_id TEXT
   REFERENCES invoices (invoice_id) ON DELETE SET NULL ON UPDATE CASCADE;
 
 CREATE INDEX IF NOT EXISTS idx_invoices_parent ON invoices (parent_invoice_id);
+
+
+-- ============================================================================
+-- รอบจ่ายค่าตอบแทนพนักงาน (payroll)
+--
+-- ระบบเดิมตอบได้แค่ "เดือนนี้ต้องจ่ายใครเท่าไหร่" (ดู attendanceReport) แต่ไม่มีอะไรบันทึกว่า
+-- "จ่ายไปแล้วหรือยัง" เงินหนึ่งกะจึงมีแค่สองสถานะ: รอตรวจ กับ อนุมัติแล้ว
+-- คนทำบัญชีต้องจำเอง/จดนอกระบบว่ารอบที่แล้วจ่ายถึงกะไหน ซึ่งพลาดแล้วคือจ่ายซ้ำหรือจ่ายขาด
+--
+-- ---------- "รอบ" คืออะไร ----------
+-- รอบ = ตะกร้าของกะที่อนุมัติแล้วและ "ยังไม่เคยถูกจ่าย" โดยมีวันตัดรอบเป็นเพดาน — ไม่มีขอบล่าง
+--
+-- จงใจไม่ใช้ช่วงวันตายตัว (1-15 / 16-สิ้นเดือน) เพราะกะที่อนุมัติช้าจะตกหล่นถาวร:
+-- กะวันที่ 12 ที่เพิ่งกดอนุมัติวันที่ 20 จะไม่อยู่ในรอบแรก (ปิดไปแล้ว) และไม่เข้าเกณฑ์วันของรอบสอง
+-- เงินก้อนนั้นหายไปเงียบๆ ไม่มีอะไรฟ้อง — แบบไม่มีขอบล่าง กะตกค้างจะถูกกวาดเข้ารอบถัดไปเสมอ
+--
+-- ---------- กันจ่ายซ้ำ ----------
+-- payroll_lines.visit_id เป็น PRIMARY KEY = กะหนึ่งอยู่ได้รอบเดียวตลอดกาล
+-- กันที่ระดับฐานข้อมูล ไม่ใช่แค่ระดับโค้ด เพราะการจ่ายซ้ำคือเงินที่หายออกจากบริษัทจริงๆ
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS payroll_runs (
+  run_id       TEXT PRIMARY KEY,              -- PAY-0001
+
+  period_month TEXT NOT NULL,                 -- 'YYYY-MM' เดือนของรอบ (ไว้จัดกลุ่ม/ทำรายงาน)
+  round_no     INTEGER NOT NULL CHECK (round_no BETWEEN 1 AND 3),
+  -- วันตัดรอบ: กะที่เช็คอินถึงวันนี้ (เวลาไทย) และอนุมัติแล้วจะถูกกวาดเข้ารอบ ไม่มีขอบล่าง
+  period_to    TEXT NOT NULL,                 -- 'YYYY-MM-DD'
+
+  -- draft = ร่าง ปรับได้/ลบได้ · paid = จ่ายแล้ว ล็อกทั้งรอบ · cancelled = ยกเลิก (กะกลับเข้ากองรอจ่าย)
+  status       TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'paid', 'cancelled')),
+  pay_date     TEXT,                          -- วันที่จ่ายจริง (มีเมื่อปิดรอบ)
+  method       TEXT,                          -- ช่องทางจ่าย เป็นข้อความอิสระ (เงินสด/โอน)
+  note         TEXT,
+
+  -- ผู้ทำรายการ เก็บชื่อ ณ ตอนนั้นคู่กับรหัส แบบเดียวกับใบแจ้งหนี้ — คนกดอาจลาออกทีหลัง
+  created_by      TEXT REFERENCES employees (employee_id) ON DELETE SET NULL ON UPDATE CASCADE,
+  created_by_name TEXT,
+  paid_by         TEXT REFERENCES employees (employee_id) ON DELETE SET NULL ON UPDATE CASCADE,
+  paid_by_name    TEXT,
+
+  created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS'),
+  updated_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')
+);
+
+-- เดือนหนึ่งมีรอบที่ 1/2/3 ได้อย่างละครั้ง — ยกเว้นรอบที่ยกเลิกไปแล้ว (เปิดรอบเดิมใหม่ได้)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_payroll_runs_period
+  ON payroll_runs (period_month, round_no) WHERE status <> 'cancelled';
+
+-- ---------- สลิปหนึ่งใบต่อพนักงานหนึ่งคนในรอบนั้น ----------
+-- ตัวเลขบนสลิปถูกตรึงไว้ตอนสร้างรอบ ไม่ได้คิดสดจากกะทุกครั้งที่เปิดดู
+-- (payroll_lines อาจหายไปถ้าเคสถูกลบทิ้ง — สลิปที่จ่ายไปแล้วต้องยังอ่านออกว่าจ่ายไปเท่าไหร่)
+CREATE TABLE IF NOT EXISTS payroll_items (
+  item_id       INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  run_id        TEXT NOT NULL REFERENCES payroll_runs (run_id) ON DELETE CASCADE ON UPDATE CASCADE,
+
+  employee_id   TEXT REFERENCES employees (employee_id) ON DELETE SET NULL ON UPDATE CASCADE,
+  employee_name TEXT NOT NULL,               -- ชื่อ ณ ตอนจ่าย
+
+  shifts        INTEGER NOT NULL DEFAULT 0 CHECK (shifts >= 0),
+  minutes       INTEGER NOT NULL DEFAULT 0 CHECK (minutes >= 0),
+  total_pay     DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK (total_pay >= 0),
+
+  created_at    TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')
+);
+
+-- คนหนึ่งมีสลิปได้ใบเดียวต่อรอบ
+CREATE UNIQUE INDEX IF NOT EXISTS idx_payroll_items_run_employee
+  ON payroll_items (run_id, employee_id);
+
+-- ---------- กะไหนอยู่ในสลิปไหน ----------
+-- visit_id เป็น PK = กะหนึ่งเข้าได้รอบเดียวตลอดกาล (แถวนี้คือ "หลักฐานว่ากะนี้จ่ายไปแล้ว")
+-- amount ตรึงยอด ณ วันสร้างรอบ — ปรับค่าจ้างของเคสทีหลังแล้วสลิปที่จ่ายไปต้องไม่ขยับตาม
+--   (หลักการเดียวกับ bill_to_* ของใบแจ้งหนี้ที่เป็นสำเนา ณ วันออกใบ)
+-- ยกเลิกรอบ = ลบแถวพวกนี้ทิ้ง กะจึงกลับเข้ากองรอจ่ายเองโดยอัตโนมัติ
+CREATE TABLE IF NOT EXISTS payroll_lines (
+  visit_id INTEGER PRIMARY KEY REFERENCES case_visits (visit_id) ON DELETE CASCADE,
+  item_id  INTEGER NOT NULL REFERENCES payroll_items (item_id) ON DELETE CASCADE,
+  amount   DOUBLE PRECISION NOT NULL CHECK (amount >= 0)
+);
+
+CREATE INDEX IF NOT EXISTS idx_payroll_lines_item ON payroll_lines (item_id);
+
+-- ============================================================================
+-- เงินเดือนประจำถูกเอาออกจากระบบ — พนักงานได้ค่าตอบแทนจาก "กะที่ไปทำจริง" อย่างเดียว
+--
+-- ช่อง base_salary ไม่เคยถูกใช้คิดเงินเลยแม้แต่ที่เดียว (ค่าตอบแทนคิดจาก case_visits.staff_pay
+-- ทั้งหมด ดู attendanceReport) มันจึงเป็นตัวเลขที่โชว์อยู่ในแฟ้มพนักงานโดยไม่มีความหมาย
+-- และอ่านแล้วเข้าใจผิดได้ว่าคนนี้มีเงินเดือนประจำด้วย
+--
+-- DROP ... IF EXISTS จึงเงียบบนฐานใหม่ที่ไม่เคยมีคอลัมน์นี้ (ลบออกจาก CREATE TABLE ข้างบนแล้ว)
+-- ============================================================================
+ALTER TABLE employees DROP COLUMN IF EXISTS base_salary;

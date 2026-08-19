@@ -23,6 +23,7 @@ const CaseListPage = lazy(() => import('./pages/CaseListPage.jsx'));
 const CaseFormPage = lazy(() => import('./pages/CaseFormPage.jsx'));
 const CalendarPage = lazy(() => import('./pages/CalendarPage.jsx'));
 const InvoiceListPage = lazy(() => import('./pages/InvoiceListPage.jsx'));
+const PayrollPage = lazy(() => import('./pages/PayrollPage.jsx'));
 const CustomerListPage = lazy(() => import('./pages/CustomerListPage.jsx'));
 const CustomerFormPage = lazy(() => import('./pages/CustomerFormPage.jsx'));
 const CustomerDetailPage = lazy(() => import('./pages/CustomerDetailPage.jsx'));
@@ -51,6 +52,7 @@ const NAV_ICONS = {
   activity: (<path d="M22 12h-4l-3 9L9 3l-3 9H2" />),
   user: (<><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></>),
   today: (<><rect x="3" y="4" width="18" height="18" rx="2" /><path d="M3 10h18M8 2v4M16 2v4" /><path d="M9 15l2 2 4-4" /></>),
+  wallet: (<><path d="M3 7a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><path d="M3 9h18" /><path d="M16 13.5h2.5" /></>),
 };
 
 function NavIcon({ name }) {
@@ -70,6 +72,7 @@ const ADMIN_NAV = [
   { to: '/calendar', icon: 'calendar', label: 'ตารางงาน' },
   { to: '/attendance', icon: 'clock', label: 'การมาทำงาน' },
   { to: '/invoices', icon: 'invoice', label: 'ใบแจ้งหนี้' },
+  { to: '/payroll', icon: 'wallet', label: 'ค่าตอบแทนพนักงาน' },
   { to: '/customers', icon: 'users', label: 'ลูกค้า' },
   { to: '/patients', icon: 'heart', label: 'ผู้รับการดูแล' },
   { to: '/packages', icon: 'home', label: 'แพ็คเกจ Homecare' },
@@ -248,6 +251,7 @@ export default function App() {
             <Route path="/calendar" element={<AppLayout admin><CalendarPage /></AppLayout>} />
             <Route path="/attendance" element={<AppLayout admin><AttendancePage /></AppLayout>} />
             <Route path="/invoices" element={<AppLayout admin><InvoiceListPage /></AppLayout>} />
+            <Route path="/payroll" element={<AppLayout admin><PayrollPage /></AppLayout>} />
 
             {/* หน้าของพนักงานภาคสนาม — เข้าได้ทั้ง field และ admin (แสดงเฉพาะงานที่ตัวเองรับ) */}
             <Route path="/my-today" element={<AppLayout><MyTodayPage /></AppLayout>} />

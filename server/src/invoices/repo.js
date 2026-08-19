@@ -181,6 +181,21 @@ export const listForCase = (caseId) =>
     .all(`${SELECT_INVOICE} WHERE i.case_id = :id ORDER BY i.invoice_id DESC`, { id: caseId })
     .then((rows) => rows.map(withComputed));
 
+/**
+ * ใบร่างที่ยังค้างอยู่ของเคส — เคสหนึ่งมีใบร่างได้ทีละใบเท่านั้น
+ *
+ * ใบร่างคือเอกสารที่ยังไม่ได้ส่งให้ใคร มีสองใบพร้อมกันเมื่อไหร่ก็ไม่มีทางรู้ว่าใบไหนคือใบจริง
+ * แถมใบร่างซิงก์ตามเคสให้เองทั้งคู่ (ดู syncOpenFromCase) จึงกลายเป็นใบเหมือนกันเป๊ะสองใบ
+ * ต่างจากใบที่ออก/ชำระแล้วซึ่งมีหลายใบต่อเคสได้ตามปกติ (เก็บเป็นงวด หรือออกตามกะที่ไปจริง)
+ */
+export const findDraftForCase = (caseId) =>
+  sql.one(
+    `SELECT invoice_id FROM invoices
+     WHERE case_id = :id AND status = 'draft'
+     ORDER BY invoice_id LIMIT 1`,
+    { id: caseId },
+  );
+
 /** การรับชำระของใบ เรียงตามลำดับที่รับจริง — งวดแรกอยู่บน (มัดจำมักเป็นงวดแรก) */
 export const listPayments = (invoiceId) =>
   sql.all(
@@ -579,7 +594,8 @@ export async function setBillingPlan(invoiceId, { mode, deposit_amount }, actor)
 /** ใบอื่นที่อยู่ในแผนเดียวกัน (คู่มัดจำ–ส่วนที่เหลือ) — ให้หน้าเว็บลิงก์ถึงกันได้ */
 export const listPlanSiblings = (invoiceId) =>
   sql.all(
-    `SELECT invoice_id, billing_kind, total, status
+    `SELECT invoice_id, billing_kind, total, status,
+            COALESCE((SELECT SUM(p.amount) FROM invoice_payments p WHERE p.invoice_id = invoices.invoice_id), 0) AS paid_amount
      FROM invoices
      WHERE invoice_id <> :id
        AND (parent_invoice_id = :id
@@ -587,6 +603,57 @@ export const listPlanSiblings = (invoiceId) =>
      ORDER BY invoice_id`,
     { id: invoiceId },
   );
+
+/**
+ * แก้ยอดมัดจำของแผนที่แบ่งใบไปแล้ว — ใบส่วนที่เหลือถูกคิดใหม่ให้สองใบรวมกันได้เท่าเดิมเสมอ
+ *
+ * ยอดเต็มของแผน = ยอดใบมัดจำ + ยอดใบส่วนที่เหลือ ณ ตอนนี้ ไม่ใช่ค่าจ้างของเคส
+ * เพราะใบที่แบ่งงวดแล้วไม่ถูกซิงก์ตามเคส (ดู syncOpenFromCase) ยอดที่ตกลงกับลูกค้าจึงอยู่ในใบเท่านั้น
+ * ถ้าไปอ่านค่าจ้างของเคสสด ใบที่ตกลงกันไว้ก่อนแล้วเคสถูกแก้ราคาทีหลังจะเด้งเป็นยอดใหม่โดยไม่มีใครสั่ง
+ *
+ * อ่านยอดของทั้งคู่ใหม่ในทรานแซกชันนี้เอง ไม่รับมาจากผู้เรียก — ระหว่างที่คนหนึ่งกำลังกรอกยอดใหม่
+ * อีกคนอาจเพิ่งรับเงินเข้ามา ตัวเลขที่อ่านไว้ตอนเปิดหน้าจึงเก่าได้เสมอ
+ *
+ * ยอดใหม่ของใบไหนเท่ากับเงินที่รับมาแล้วพอดี = ใบนั้นปิดยอดทันที ไม่ต้องให้ไปกดรับชำระ 0 บาท
+ * (เกิดตอนลดยอดมัดจำลงมาเท่ากับที่ลูกค้าโอนมาแล้ว — ใบจะค้างอยู่ทั้งที่ไม่เหลืออะไรให้เก็บ)
+ */
+export async function setDepositAmount(depositId, deposit) {
+  return transaction(async (tx) => {
+    const rows = await tx.all(
+      `SELECT i.invoice_id, i.total,
+              COALESCE((SELECT SUM(p.amount) FROM invoice_payments p WHERE p.invoice_id = i.invoice_id), 0) AS paid,
+              (SELECT MAX(p.paid_at) FROM invoice_payments p WHERE p.invoice_id = i.invoice_id) AS last_paid_at
+       FROM invoices i
+       WHERE i.invoice_id = :id OR i.parent_invoice_id = :id`,
+      { id: depositId },
+    );
+
+    const round = (n) => Math.round(Number(n) * 100) / 100;
+    const planTotal = round(rows.reduce((sum, r) => sum + Number(r.total), 0));
+    const depositNew = round(deposit);
+    const restNew = round(planTotal - depositNew);
+
+    for (const row of rows) {
+      const amount = row.invoice_id === depositId ? depositNew : restNew;
+      const paid = round(row.paid);
+      const settled = paid > 0 && amount <= paid;
+
+      await tx.run(
+        `UPDATE invoices
+         SET amount   = :amount,
+             discount = 0,
+             total    = :amount,
+             status   = CASE WHEN :settled THEN 'paid' ELSE status END,
+             paid_at  = CASE WHEN :settled THEN COALESCE(paid_at, :last_paid) ELSE paid_at END,
+             updated_at = ${NOW}
+         WHERE invoice_id = :invoice_id`,
+        { invoice_id: row.invoice_id, amount, settled, last_paid: row.last_paid_at },
+      );
+    }
+
+    return depositId;
+  }).then(findById);
+}
 
 /** ยกเลิก — ไม่ลบทิ้ง เพราะเลขที่เอกสารต้องเรียงต่อเนื่อง ห้ามข้าม */
 export async function cancel(invoiceId) {
@@ -597,8 +664,31 @@ export async function cancel(invoiceId) {
   return findById(invoiceId);
 }
 
+/**
+ * ลบใบทิ้งถาวร — ใบที่เป็นงวดหนึ่งของแผนมัดจำถูกลบทั้งแผน ไม่ใช่ทีละใบ
+ *
+ * ใบมัดจำกับใบส่วนที่เหลือคือยอดเดียวกันคนละครึ่ง ลบใบเดียวจะเหลืออีกใบลอยอยู่โดยไม่มีอะไรรับส่วนที่หายไป
+ * (ลบใบมัดจำแล้วเงินมัดจำไม่มีใบไหนเรียกเก็บอีกเลย ส่วนใบที่เหลือก็ยังเขียนว่า "ยอดคงเหลือหลังหักมัดจำ"
+ *  ทั้งที่ไม่มีมัดจำแล้ว — ลูกค้าได้บิลที่น้อยกว่าที่ตกลงไว้โดยไม่มีใครสังเกต เพราะ parent_invoice_id
+ *  เป็น ON DELETE SET NULL ใบที่เหลือจึงเงียบสนิท ไม่มีอะไรฟ้องว่าขาดคู่ไป)
+ * ลบทั้งแผนแล้วออกใบร่างใหม่ให้เลือกวิธีเก็บเงินอีกรอบ จึงเป็นทางเดียวที่ยอดไม่หายไประหว่างทาง
+ *
+ * ใบที่ยกเลิกไปแล้วในแผนไม่ถูกลบตาม — ตั้งใจเก็บไว้เป็นประวัติ และไม่ถูกนับเป็นเงินอยู่แล้ว
+ *
+ * รากของแผน = COALESCE(parent_invoice_id, invoice_id): ใบมัดจำเป็นรากของตัวเอง ใบส่วนที่เหลือชี้กลับไปหามัน
+ * ใบที่ไม่ได้แบ่งงวดจึงเป็นแผนที่มีสมาชิกใบเดียวคือตัวมันเอง — คำสั่งเดียวใช้ได้กับทั้งสองแบบ
+ */
 export const remove = (invoiceId) =>
-  sql.run('DELETE FROM invoices WHERE invoice_id = :id', { id: invoiceId }).then((n) => n > 0);
+  sql
+    .all(
+      `DELETE FROM invoices
+       WHERE COALESCE(parent_invoice_id, invoice_id) =
+             (SELECT COALESCE(parent_invoice_id, invoice_id) FROM invoices WHERE invoice_id = :id)
+         AND (invoice_id = :id OR status <> 'cancelled')
+       RETURNING invoice_id`,
+      { id: invoiceId },
+    )
+    .then((rows) => rows.map((r) => r.invoice_id));
 
 /**
  * ยอดสรุปแยกตามสถานะ — รับตัวกรองชุดเดียวกับ list() เพื่อให้ตัวเลขด้านบนตรงกับรายการที่เห็น

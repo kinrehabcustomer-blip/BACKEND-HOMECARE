@@ -19,7 +19,6 @@ const COLUMNS = [
   'status',
   'hire_date',
   'resign_date',
-  'base_salary',
   'emergency_contact_name',
   'emergency_contact_phone',
   'note',

@@ -6,7 +6,9 @@ import { pool, sql } from './index.js';
 
 /**
  * ล้างข้อมูลให้กลับไปเป็น "ระบบใหม่ที่ยังไม่เคยใช้" — เก็บไว้แค่สองอย่าง
- *   1. ตารางราคา: เกรด / รูปแบบบริการ / เรท Homecare และแพ็คเกจกายภาพบำบัด
+ * 
+ * 
+ * 
  *   2. พนักงานคนแรก (ปริยาย EMP-0001 = ผู้จัดการ) พร้อมรหัสผ่านและรูปของเขา
  *
  * แล้วตั้งตัวนับรหัสใหม่ ให้ของถัดไปเริ่มที่ 0001 (ยกเว้นพนักงานที่เริ่มนับต่อจากคนที่เก็บไว้)
@@ -26,6 +28,9 @@ const keep = (args.find((a) => a.startsWith('--keep=')) ?? '--keep=EMP-0001').sp
 // ลำดับการลบไล่จากตารางที่ถูกอ้างถึงน้อยที่สุดขึ้นไป — ลูกของแต่ละตัวหายตามเองด้วย FK CASCADE
 // (invoice_items ← invoices · case_visits, case_events ← cases · ใบรับรอง/ผลงาน/OTP ← employees)
 const STEPS = [
+  // ต้องมาก่อนเคส: payroll_lines ชี้ไปที่ case_visits ด้วย ON DELETE CASCADE
+  // ลบเคสก่อนจะทำให้กะหายไปพร้อมบรรทัดของสลิป เหลือสลิปที่ยอดไม่ตรงกับรายการข้างใน
+  ['payroll_runs', 'DELETE FROM payroll_runs', 'รอบจ่ายค่าตอบแทน (+ สลิป)'],
   ['invoices', 'DELETE FROM invoices', 'ใบแจ้งหนี้ (+ รายการย่อย)'],
   ['cases', 'DELETE FROM cases', 'เคส (+ กะงาน + ประวัติการทำรายการ)'],
   ['patients', 'DELETE FROM patients', 'ผู้รับการดูแล'],
@@ -35,7 +40,7 @@ const STEPS = [
 ];
 
 // ของถัดไปเริ่มที่ 0001 · พนักงานนับต่อจากคนที่เก็บไว้ ไม่งั้นคนถัดไปจะได้รหัสชนกับเขา
-const COUNTERS = { customer: 0, patient: 0, case: 0, invoice: 0 };
+const COUNTERS = { customer: 0, patient: 0, case: 0, invoice: 0, payroll: 0 };
 
 /** สำรองทุกตารางลงไฟล์ JSON ก่อนลบ — ตัดคอลัมน์รูปออก (BYTEA ทำให้ไฟล์บวมเป็นสิบเมกะไบต์) */
 async function backup() {

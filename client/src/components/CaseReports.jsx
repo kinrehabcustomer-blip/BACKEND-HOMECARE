@@ -6,7 +6,14 @@ import ConfirmButton from './ConfirmButton.jsx';
 import ReportArchiveModal from './ReportArchiveModal.jsx';
 import DailyCareForm from './DailyCareForm.jsx';
 import DailyCareView from './DailyCareView.jsx';
-import { usesDailyRecord, dailyBrief } from '../lib/dailyCare.js';
+import {
+  usesDailyRecord,
+  usesPhysioRecord,
+  dailyBrief,
+  physioBrief,
+  DAILY_SECTIONS,
+  PHYSIO_SECTIONS,
+} from '../lib/dailyCare.js';
 import TimeSelect from './TimeSelect.jsx';
 
 /**
@@ -206,11 +213,17 @@ export default function CaseReports({
   const toast = useToast();
   const isAdmin = scope === 'admin';
 
-  /* เคสดูแลต่อเนื่องสาย Homecare (ผู้สูงอายุ/ติดเตียง/หลังผ่าตัด) ใช้แบบบันทึกประจำวันเต็มรูปแบบ
-     เคสอื่น (กายภาพ/เฝ้าไข้/พาไปหาหมอ) ใช้ฟอร์มสั้นเหมือนเดิม — ไม่มี NG/ขับถ่าย/เปลี่ยนท่าให้กรอก
-     ไม่รู้จักเคส (ไม่ได้ส่ง caseInfo มา) = ใช้ฟอร์มสั้น ซึ่งเป็นชุดช่องย่อยของฟอร์มเต็มอยู่แล้ว */
+  /* ฟอร์มถูกเลือกจากประเภทเคส — คนละงานกันต้องกรอกคนละชุดช่อง:
+       เคสดูแลต่อเนื่องสาย Homecare (ผู้สูงอายุ/ติดเตียง/หลังผ่าตัด) = แบบบันทึกการดูแลประจำวัน
+       เคสกายภาพบำบัด                                             = แบบบันทึกการรักษารายครั้ง
+       เคสอื่น (เฝ้าไข้/พาไปหาหมอ) และเคสที่ไม่ได้ส่ง caseInfo มา   = ฟอร์มสั้นเหมือนเดิม
+     ฟอร์มสั้นเป็นชุดช่องย่อยของทั้งสองแบบอยู่แล้ว จึงเป็นค่าปริยายที่ปลอดภัย */
+  const physio = usesPhysioRecord(caseInfo);
   const daily = usesDailyRecord(caseInfo);
-  const Form = daily ? DailyCareForm : ReportForm;
+  const structured = physio || daily;
+  const sections = physio ? PHYSIO_SECTIONS : DAILY_SECTIONS;
+  const brief = physio ? physioBrief : dailyBrief;
+  const Form = structured ? DailyCareForm : ReportForm;
 
   const [reports, setReports] = useState(null);        // ใบที่โหลดมาแล้ว (สะสมเมื่อกด "ดูเก่ากว่านี้")
   const [meta, setMeta] = useState({ total: 0, has_more: false, months: [] });
@@ -364,6 +377,7 @@ export default function CaseReports({
       {adding && (
         <Form
           initial={null}
+          sections={sections}
           busy={busy}
           error={formError}
           onSubmit={save}
@@ -415,6 +429,7 @@ export default function CaseReports({
               <Form
                 key={r.report_id}
                 initial={r}
+                sections={sections}
                 busy={busy}
                 error={formError}
                 photoUrl={photoUrl(r)}
@@ -435,7 +450,7 @@ export default function CaseReports({
                         {r.report_type === 'incident' ? 'ผิดปกติ' : 'เปลี่ยน'}
                       </span>
                     )}
-                    {(daily ? dailyBrief(r) : simpleBrief(r)).join(' · ') || 'ดูรายละเอียด'}
+                    {(structured ? brief(r) : simpleBrief(r)).join(' · ') || 'ดูรายละเอียด'}
                   </span>
 
                   <span className="report-row-by">{r.reported_by_name ?? '—'}</span>
@@ -446,8 +461,8 @@ export default function CaseReports({
 
                 {openId === r.report_id && (
                   <div className="report-row-body">
-                    {daily ? (
-                      <DailyCareView report={r} photoUrl={photoUrl(r)} />
+                    {structured ? (
+                      <DailyCareView report={r} sections={sections} photoUrl={photoUrl(r)} />
                     ) : (
                       <>
                         {vitalChips(r).length > 0 && (

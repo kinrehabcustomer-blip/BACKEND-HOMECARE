@@ -702,10 +702,10 @@ export async function remove(caseId) {
  * เกลี่ยแทนที่จะบังคับให้กรอกทีละกะ เพราะราคาที่ตกลงกับลูกค้าเป็นราคาต่อ "แพ็คเกจ" ไม่ใช่ต่อครั้ง
  * กะที่ทำไปแล้วจะถูกตรึงยอดตอนปิดเคส (ดู close) ยอดย้อนหลังจึงไม่ขยับตามการเพิ่ม/ลดกะทีหลัง
  */
-const VISIT_PAY = 'COALESCE(v.staff_pay, c.staff_pay / NULLIF(b.n, 0))';
+export const VISIT_PAY = 'COALESCE(v.staff_pay, c.staff_pay / NULLIF(b.n, 0))';
 
 /** จำนวนกะที่นัดไว้ต่อเคส (ไม่นับกะที่ยกเลิก) = ตัวหารของการเกลี่ยค่าจ้าง */
-const BOOKED_VISITS = `
+export const BOOKED_VISITS = `
   (SELECT case_id, COUNT(*) AS n FROM case_visits WHERE status <> 'cancelled' GROUP BY case_id)
 `;
 
@@ -716,7 +716,7 @@ const BOOKED_VISITS = `
  * กะที่ถูกยกเลิกทั้งที่เช็คอิน–เอาท์ไปแล้ว "ยังได้เงิน" และ "หายจากตัวหาร" ทำให้กะที่เหลือได้เพิ่มไปด้วย
  * ผลรวมที่จ่ายออกจึงเกิน cases.staff_pay ได้ ทั้งที่เคสหนึ่งใบ = แพ็คเกจหนึ่งชุด
  */
-const NOT_CANCELLED = `v.status <> 'cancelled'`;
+export const NOT_CANCELLED = `v.status <> 'cancelled'`;
 
 /** กะทั้งหมดของเคสหนึ่งใบ พร้อมชื่อพนักงานที่นัดไว้ + สถานะเช็คอิน (state คำนวณตอนอ่าน) — เรียงตามวัน/เวลานัด */
 export function listVisits(caseId) {
@@ -1432,7 +1432,7 @@ const WORKED_SHIFT = `
  * ชื่อพนักงานที่เช็คอิน — LEFT JOIN เพราะ checked_in_by เป็น ON DELETE SET NULL
  * ลบพนักงานถาวรแล้วกะที่เขาทำไปจริงต้องไม่หายจากรายงาน (INNER JOIN เดิมทำให้ยอดเดือนที่ปิดไปแล้วเปลี่ยนย้อนหลัง)
  */
-const WORKER_NAME = `COALESCE(e.first_name || ' ' || e.last_name, '(พนักงานที่ถูกลบแล้ว)')`;
+export const WORKER_NAME = `COALESCE(e.first_name || ' ' || e.last_name, '(พนักงานที่ถูกลบแล้ว)')`;
 
 /**
  * สรุปค่าตอบแทนรายเดือนต่อพนักงาน (payroll)
@@ -1451,6 +1451,8 @@ const WORKER_NAME = `COALESCE(e.first_name || ' ' || e.last_name, '(พนัก
 const DONE = `v.check_out_at IS NOT NULL`;
 const PAYABLE = `${DONE} AND v.pay_status = 'approved'`;
 const AWAITING = `${DONE} AND v.pay_status = 'pending'`;
+/** กะที่ถูกผูกเข้ารอบจ่ายไปแล้ว = จ่ายออกไปแล้วจริง (แถวใน payroll_lines คือหลักฐานนั้น) */
+const IN_PAYROLL = `EXISTS (SELECT 1 FROM payroll_lines pl WHERE pl.visit_id = v.visit_id)`;
 
 export async function attendanceReport(month, employeeId = null) {
   // ใส่เงื่อนไข (และพารามิเตอร์) เฉพาะตอนใช้จริง — ตัวแปลง :name ไล่หาชื่อจาก SQL ที่มีอยู่จริงเท่านั้น
@@ -1466,6 +1468,11 @@ export async function attendanceReport(month, employeeId = null) {
                      FILTER (WHERE ${DONE})), 0)               AS minutes,
             COALESCE(SUM(${VISIT_PAY}) FILTER (WHERE ${PAYABLE}), 0)  AS pay,
             COUNT(*) FILTER (WHERE ${PAYABLE})                        AS approved_shifts,
+            /* อนุมัติแล้วยังไม่ใช่ "ได้เงินแล้ว" — เงินออกจริงตอนรอบจ่ายถูกปิด (ดูโมดูล payroll)
+               แยกสองตัวนี้ออกมาเพื่อให้ทั้งพนักงานและผู้จัดการตอบได้ว่ายังค้างจ่ายอยู่เท่าไหร่ */
+            COALESCE(SUM(${VISIT_PAY}) FILTER (WHERE ${PAYABLE} AND ${IN_PAYROLL}), 0)     AS paid_pay,
+            COUNT(*) FILTER (WHERE ${PAYABLE} AND ${IN_PAYROLL})                           AS paid_shifts,
+            COALESCE(SUM(${VISIT_PAY}) FILTER (WHERE ${PAYABLE} AND NOT ${IN_PAYROLL}), 0) AS unpaid_pay,
             COALESCE(SUM(${VISIT_PAY}) FILTER (WHERE ${AWAITING}), 0) AS pending_pay,
             COUNT(*) FILTER (WHERE ${AWAITING})                       AS pending_shifts,
             COUNT(*) FILTER (WHERE ${DONE} AND v.pay_status = 'rejected') AS rejected_shifts,
@@ -1485,6 +1492,9 @@ export async function attendanceReport(month, employeeId = null) {
       minutes: Number(r.minutes),
       pay: Number(r.pay),
       approved_shifts: Number(r.approved_shifts),
+      paid_pay: Number(r.paid_pay),
+      paid_shifts: Number(r.paid_shifts),
+      unpaid_pay: Number(r.unpaid_pay),
       pending_pay: Number(r.pending_pay),
       pending_shifts: Number(r.pending_shifts),
       rejected_shifts: Number(r.rejected_shifts),

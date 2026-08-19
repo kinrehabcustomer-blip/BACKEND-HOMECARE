@@ -12,20 +12,14 @@ const BLANK = {
   nickname: '', national_id: '', phone: '', email: '',
   gender: '', birth_date: '', address: '', education: '',
   position: 'caregiver', employment_type: 'fulltime', status: 'active',
-  hire_date: '', base_salary: '',
+  hire_date: '',
   emergency_contact_name: '', emergency_contact_phone: '', note: '',
 };
 
 /** ช่องว่างในฟอร์มต้องส่งเป็น null ไม่ใช่ "" — ไม่งั้นจะไม่ผ่าน validation ของ email/date/national_id */
 function toPayload(form) {
   const payload = {};
-  for (const [key, value] of Object.entries(form)) {
-    if (key === 'base_salary') {
-      payload[key] = value === '' ? null : Number(value);
-    } else {
-      payload[key] = value === '' ? null : value;
-    }
-  }
+  for (const [key, value] of Object.entries(form)) payload[key] = value === '' ? null : value;
   return payload;
 }
 
@@ -237,10 +231,6 @@ export default function EmployeeFormPage() {
             <label>วันเริ่มงาน
               <input type="date" name="hire_date" {...field('hire_date')} />
               {fieldError('hire_date')}
-            </label>
-            <label>ค่าจ้าง (บาท)
-              <input type="number" min="0" step="0.01" name="base_salary" {...field('base_salary')} />
-              {fieldError('base_salary')}
             </label>
           </div>
         </details>

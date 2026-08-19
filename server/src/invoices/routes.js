@@ -6,6 +6,7 @@ import * as patients from '../patients/repo.js';
 import {
   createInvoiceSchema,
   updateInvoiceSchema,
+  depositAmountSchema,
   paySchema,
   billingPlanSchema,
   listQuerySchema,
@@ -44,6 +45,11 @@ export async function resolvePayer(caseRow) {
  * ยังไม่ได้ตั้งค่าบริการก็ออกได้ ใบจะเป็นยอด 0 แล้วซิงก์ตามทีหลังตอนแก้เคส (ดู syncOpenFromCase)
  */
 export async function createDraftForCase(caseRow, actor) {
+  /* กันใบร่างซ้ำไว้ตรงนี้ด้วย ไม่ใช่แค่ที่ปุ่มออกใบ — เส้นนี้ทำงานเองตอนเปิดเคส
+     ถ้าคำขอเปิดเคสถูกยิงซ้ำ (เน็ตหลุดกลางทางแล้วกดใหม่) จะได้ไม่เหลือใบร่างค้างสองใบเงียบๆ */
+  const existing = await repo.findDraftForCase(caseRow.case_id);
+  if (existing) return repo.findById(existing.invoice_id);
+
   const customer = await resolvePayer(caseRow);
   return repo.createFromCase({ ...caseRow, customer }, {}, actor);
 }
@@ -94,6 +100,19 @@ invoicesRouter.post(
       throw new ApiError(409, 'เคสนี้ถูกยกเลิกไปแล้ว ออกใบแจ้งหนี้ไม่ได้');
     }
 
+    /* เคสนี้มีใบร่างค้างอยู่แล้ว — ออกเพิ่มจะได้ใบเหมือนกันสองใบที่แยกไม่ออกว่าใบไหนคือใบจริง
+       (ที่มาของใบซ้ำคือปุ่ม "ลบแล้วออกใบใหม่" ซึ่งเสนอออกใบใหม่ให้ทุกครั้งโดยไม่ได้ดูว่าเคสยังมีใบร่างอยู่ไหม)
+       กันที่นี่ ไม่ใช่แค่ซ่อนปุ่มฝั่งหน้าเว็บ เพราะ endpoint เรียกตรงได้
+       ส่งรหัสใบเดิมกลับไปด้วย หน้าเว็บจะได้พาไปเปิดใบนั้นแทนที่จะให้ไล่หาเอง */
+    const draft = await repo.findDraftForCase(input.case_id);
+    if (draft) {
+      throw new ApiError(
+        409,
+        `เคสนี้มีใบร่าง ${draft.invoice_id} ค้างอยู่แล้ว — แก้ใบเดิมหรือลบทิ้งก่อนจึงจะออกใบใหม่ได้`,
+        { existing_invoice_id: draft.invoice_id },
+      );
+    }
+
     // ดึงลูกค้าเต็มๆ เพื่อเอาเลขผู้เสียภาษี/ที่อยู่ออกบิลมาคัดลอก (SELECT ของเคสมีแค่ชื่อ)
     // เคสไม่มีผู้ว่าจ้างแต่ผูกลูกค้าไว้ที่แฟ้มผู้ป่วย → ใช้ลูกค้าของผู้ป่วย ชื่อจะได้ขึ้นในใบ
     const customer = await resolvePayer(caseRow);
@@ -123,6 +142,16 @@ invoicesRouter.patch(
   asyncRoute(async (req, res) => {
     if (!OPEN_STATUSES.includes(req.invoice.status)) {
       throw new ApiError(409, 'ใบที่ชำระ/ยกเลิกแล้วแก้ไม่ได้ — ต้องยกเลิกแล้วออกใบใหม่');
+    }
+    /* ใบมัดจำ/ใบส่วนที่เหลือถือยอดของงวดตัวเอง สองใบต้องรวมกันได้เท่ายอดที่ตกลงไว้เสมอ
+       แก้ยอดทีละใบผลรวมจะเพี้ยนเงียบๆ (เก็บได้ไม่ครบ หรือเกินกว่าที่ตกลง)
+       — ใช้ /deposit ซึ่งขยับให้ทั้งคู่พร้อมกันแทน */
+    const body = req.body ?? {};
+    if (req.invoice.is_plan_part && ('amount' in body || 'discount' in body)) {
+      throw new ApiError(
+        409,
+        'ใบนี้เป็นงวดหนึ่งของแผนมัดจำ — แก้ยอดที่ช่อง "ยอดมัดจำ" ของใบมัดจำ เพื่อให้ใบคู่ขยับตามกัน',
+      );
     }
     res.json(await repo.update(req.params.id, updateInvoiceSchema.parse(req.body)));
   }),
@@ -173,6 +202,78 @@ invoicesRouter.post(
     }
 
     res.json(await repo.setBillingPlan(req.params.id, input, req.user));
+  }),
+);
+
+/**
+ * แก้ยอดมัดจำโดยไม่ต้องลบใบทิ้ง — ยอดเต็มของแผนคงเดิม ใบส่วนที่เหลือขยับตามให้เอง
+ *
+ * ของเดิมเลือกวิธีเก็บเงินได้ครั้งเดียวจบ ตกลงยอดมัดจำใหม่กับลูกค้าทีไรต้องลบทั้งแผนทิ้งแล้วแบ่งใหม่
+ * ซึ่งทำให้เลขที่เอกสารข้ามและใบที่ส่งให้ลูกค้าไปแล้วหายไปทั้งคู่ ทั้งที่แค่ตัวเลขเดียวเปลี่ยน
+ *
+ * แก้ได้ที่ "ใบมัดจำ" เท่านั้น — ใบส่วนที่เหลือคือ "ยอดเต็มลบมัดจำ" ตามนิยาม ไม่ใช่ตัวเลขอิสระ
+ * ถ้าให้แก้ได้ทั้งสองทาง จะตอบไม่ได้ทันทีว่าที่แก้นั้นแปลว่ายอดเต็มเปลี่ยน หรือมัดจำเปลี่ยน
+ */
+invoicesRouter.patch(
+  '/:id/deposit',
+  asyncRoute(async (req, res) => {
+    const inv = req.invoice;
+    if (inv.billing_kind !== 'deposit') {
+      throw new ApiError(
+        409,
+        inv.billing_kind === 'balance'
+          ? 'ยอดของใบส่วนที่เหลือคิดมาจากยอดมัดจำ — แก้ที่ใบมัดจำแล้วใบนี้จะเปลี่ยนตามเอง'
+          : 'ใบนี้ไม่ได้แบ่งเก็บมัดจำ จึงไม่มียอดมัดจำให้แก้',
+      );
+    }
+    if (!OPEN_STATUSES.includes(inv.status)) {
+      throw new ApiError(409, 'ใบมัดจำที่ชำระครบ/ยกเลิกแล้วแก้ยอดไม่ได้ — เงินที่รับมาแล้วเป็นข้อเท็จจริงไปแล้ว');
+    }
+
+    // ใบส่วนที่เหลือต้องยังแก้ได้ด้วย ไม่งั้นส่วนต่างไม่มีใบไหนรับไป แล้วสองใบรวมกันไม่เท่ายอดที่ตกลง
+    const [sibling] = await repo.listPlanSiblings(inv.invoice_id);
+    if (!sibling) {
+      throw new ApiError(409, 'ไม่พบใบส่วนที่เหลือของแผนนี้ — แก้ยอดมัดจำแล้วจะไม่มีใบไหนรับส่วนต่างไป');
+    }
+    const balance = await repo.findById(sibling.invoice_id);
+    if (!OPEN_STATUSES.includes(balance.status)) {
+      throw new ApiError(
+        409,
+        `ใบส่วนที่เหลือ ${balance.invoice_id} ${balance.status === 'paid' ? 'ชำระครบแล้ว' : 'ถูกยกเลิกแล้ว'}` +
+          ' — แก้ยอดมัดจำไม่ได้ เพราะยอดของอีกใบต้องขยับตามกันเสมอ',
+      );
+    }
+
+    const { deposit_amount } = depositAmountSchema.parse(req.body ?? {});
+    const round = (n) => Math.round(n * 100) / 100;
+    const baht = (n) => n.toLocaleString('th-TH');
+    const planTotal = round(inv.total + balance.total);
+    const rest = round(planTotal - deposit_amount);
+
+    if (deposit_amount >= planTotal) {
+      throw new ApiError(
+        400,
+        `ยอดมัดจำต้องน้อยกว่ายอดเต็มของแผน (${baht(planTotal)} บาท)` +
+          ' — ถ้าจะเก็บทั้งหมดในใบเดียว ให้ลบใบส่วนที่เหลือแล้วออกใบใหม่',
+      );
+    }
+    /* รับเงินมาแล้วเท่าไหร่ ลดยอดลงต่ำกว่านั้นไม่ได้ทั้งสองใบ — ยอดคงเหลือจะติดลบ
+       ซึ่งอ่านไม่ออกว่าเป็นเงินที่ต้องทอนคืนหรือกรอกผิด (กติกาเดียวกับตอนรับชำระเกินยอด) */
+    if (deposit_amount < inv.paid_amount) {
+      throw new ApiError(
+        400,
+        `ใบมัดจำนี้รับเงินมาแล้ว ${baht(inv.paid_amount)} บาท — ตั้งยอดมัดจำต่ำกว่านี้ไม่ได้`,
+      );
+    }
+    if (rest < balance.paid_amount) {
+      throw new ApiError(
+        400,
+        `ใบส่วนที่เหลือ ${balance.invoice_id} รับเงินมาแล้ว ${baht(balance.paid_amount)} บาท` +
+          ` — ยอดมัดจำจึงสูงได้ไม่เกิน ${baht(round(planTotal - balance.paid_amount))} บาท`,
+      );
+    }
+
+    res.json(await repo.setDepositAmount(inv.invoice_id, deposit_amount));
   }),
 );
 
@@ -231,10 +332,27 @@ invoicesRouter.post(
 invoicesRouter.delete(
   '/:id',
   asyncRoute(async (req, res) => {
-    if (req.invoice.status === 'paid') {
+    /* เทียบกับเงินที่รับมาแล้วจริง ไม่ใช่แค่สถานะ "ชำระแล้ว" — ใบที่รับมัดจำมาบางส่วนยังเป็น "ออกใบแล้ว"
+       อยู่จนกว่าจะรับครบ ถ้าดูแค่สถานะจะลบผ่านฉลุยแล้วรายการรับเงินหายตามไปด้วย (ON DELETE CASCADE) */
+    if (req.invoice.status === 'paid' || req.invoice.paid_amount > 0) {
       throw new ApiError(409, 'ใบที่รับชำระแล้วลบทิ้งไม่ได้ — ให้กด "ยกเลิกใบนี้" แทน (ใบจะยังอยู่เป็นประวัติ)');
     }
-    await repo.remove(req.params.id);
-    res.status(204).end();
+
+    /* ใบในแผนเดียวกันถูกลบไปด้วยทั้งชุด (ดู repo.remove) — ใบไหนรับเงินมาแล้วก็ลบทั้งแผนไม่ได้
+       เหตุผลเดียวกับข้างบน ต่างกันแค่หลักฐานการเงินอยู่บนใบคู่ ไม่ใช่ใบที่กดลบ */
+    const plan = await repo.listPlanSiblings(req.params.id);
+    const settled = plan.find(
+      (s) => s.status !== 'cancelled' && (s.status === 'paid' || Number(s.paid_amount) > 0),
+    );
+    if (settled) {
+      throw new ApiError(
+        409,
+        `ใบ ${settled.invoice_id} ในแผนเดียวกันรับชำระมาแล้ว — ลบใบนี้ต้องลบทั้งแผนจึงทำไม่ได้ ` +
+          'ให้กด "ยกเลิกใบนี้" แทน (ใบจะยังอยู่เป็นประวัติ)',
+      );
+    }
+
+    // คืนรายการที่ลบจริงกลับไป หน้าเว็บจะได้บอกได้ว่าลบไปกี่ใบ (ลบใบมัดจำ = ใบส่วนที่เหลือหายไปด้วย)
+    res.json({ deleted: await repo.remove(req.params.id) });
   }),
 );

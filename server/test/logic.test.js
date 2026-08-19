@@ -19,6 +19,7 @@ process.env.DATABASE_URL ||= 'postgresql://placeholder/placeholder';
 process.env.JWT_SECRET ||= 'x'.repeat(48);
 
 const { adjustVisitSchema, bulkVisitSchema, visitRangeSchema, createReportSchema, hasReportContent, REPORT_CONTENT_FIELDS } = await import('../src/cases/schema.js');
+const { createRunSchema } = await import('../src/payroll/schema.js');
 const { withVisitState } = await import('../src/cases/repo.js');
 const { distanceMeters, DEFAULT_GEOFENCE_M } = await import('../src/lib/geo.js');
 const { roleForPosition, canSeeStaffPay, stripPayFields, BLOCKED_STATUSES } = await import('../src/lib/auth.js');
@@ -323,6 +324,88 @@ describe('createReportSchema — ฟอร์มเต็มของเคส�
   });
 });
 
+describe('createReportSchema — ฟอร์มกายภาพบำบัด', () => {
+  test('ปวดก่อน/หลังเป็นคนละช่อง — คู่นี้คือผลของการรักษาครั้งนั้น ไม่ใช่ค่าเดียวทับกัน', () => {
+    const r = createReportSchema.safeParse({ pain_score: 7, post_pain_score: 3 });
+    assert.equal(r.success, true);
+    assert.equal(r.data.pain_score, 7);
+    assert.equal(r.data.post_pain_score, 3);
+  });
+
+  test('หัตถการเลือกได้หลายอย่างในครั้งเดียว (ยืด + ฝึกเดิน + ประคบร้อน เป็นเรื่องปกติ)', () => {
+    const r = createReportSchema.safeParse({ physio_treatments: ['rom', 'gait', 'heat_cold'] });
+    assert.equal(r.success, true);
+    assert.deepEqual(r.data.physio_treatments, ['rom', 'gait', 'heat_cold']);
+  });
+
+  test('ระดับการช่วยเหลือนอกรายการถูกปฏิเสธพร้อมบอกชื่อช่อง', () => {
+    const r = createReportSchema.safeParse({ assist_level: 'ช่วยนิดหน่อย' });
+    assert.equal(r.success, false);
+    assert.deepEqual(r.error.issues[0].path, ['assist_level']);
+    assert.match(r.error.issues[0].message, /ระดับการช่วยเหลือ/);
+  });
+
+  test('สัญญาณชีพหลังทำใช้ช่วงเดียวกับก่อนทำ — ไม่งั้นค่าคู่กันจะเทียบกันไม่ได้', () => {
+    for (const [pre, post] of [
+      ['bp_systolic', 'post_bp_systolic'],
+      ['bp_diastolic', 'post_bp_diastolic'],
+      ['pulse', 'post_pulse'],
+      ['spo2', 'post_spo2'],
+      ['pain_score', 'post_pain_score'],
+    ]) {
+      for (const value of [-1, 1000]) {
+        assert.equal(
+          createReportSchema.safeParse({ [pre]: value }).success,
+          createReportSchema.safeParse({ [post]: value }).success,
+          `${pre} กับ ${post} รับค่าไม่เท่ากันที่ ${value}`,
+        );
+      }
+    }
+  });
+
+  test('บันทึกที่มีแต่หัตถการกับระยะเวลา ก็เป็นรายงานที่สมบูรณ์', () => {
+    assert.equal(createReportSchema.safeParse({ physio_treatments: ['rom'], rehab_minutes: 45 }).success, true);
+  });
+});
+
+/* นิยามฟอร์มอยู่ฝั่งหน้าเว็บ (client/src/lib/dailyCare.js) ส่วนกฎการรับค่าอยู่ฝั่งนี้
+   พิมพ์ชื่อช่องผิดที่ฝั่งใดฝั่งหนึ่ง = ช่องนั้นกรอกได้บนหน้าจอแต่หายไปเงียบๆ ตอนบันทึก
+   ไม่มี error ให้เห็นเลยเพราะ zod ตัดคีย์ที่ไม่รู้จักทิ้ง — จับด้วยตาไม่ได้ ต้องให้เทสจับ */
+describe('นิยามฟอร์มฝั่งหน้าเว็บต้องตรงกับ schema ฝั่ง server', () => {
+  test('ทุกช่องในฟอร์มดูแลประจำวันและฟอร์มกายภาพ มีอยู่จริงใน createReportSchema', async () => {
+    const { DAILY_SECTIONS, PHYSIO_SECTIONS } = await import('../../client/src/lib/dailyCare.js');
+    const known = new Set([...REPORT_CONTENT_FIELDS, 'visit_id', 'report_date', 'report_time', 'shift', 'report_type']);
+
+    for (const [name, sections] of [['ดูแลประจำวัน', DAILY_SECTIONS], ['กายภาพบำบัด', PHYSIO_SECTIONS]]) {
+      for (const s of sections) {
+        for (const f of s.fields) {
+          assert.equal(known.has(f.key), true, `ฟอร์ม${name} มีช่อง ${f.key} ที่ schema ฝั่ง server ไม่รู้จัก`);
+        }
+      }
+    }
+  });
+
+  test('ตัวเลือกของช่องแบบเลือกหนึ่ง ต้องเป็นค่าที่ schema ยอมรับ (ไม่หลุดไปชน CHECK ของฐานข้อมูล)', async () => {
+    const { DAILY_SECTIONS, PHYSIO_SECTIONS } = await import('../../client/src/lib/dailyCare.js');
+
+    for (const sections of [DAILY_SECTIONS, PHYSIO_SECTIONS]) {
+      for (const s of sections) {
+        for (const f of s.fields) {
+          if (f.type !== 'choice') continue;
+          for (const o of f.options) {
+            assert.equal(
+              // pulse เป็นตัวประกอบให้ใบไม่ว่าง (ช่องกำกับอย่าง shift อยู่คนเดียวจะถูกปฏิเสธเพราะใบเปล่า ไม่ใช่เพราะตัวเลือกผิด)
+              createReportSchema.safeParse({ [f.key]: o.value, pulse: 80 }).success,
+              true,
+              `ช่อง ${f.key} มีตัวเลือก "${o.value}" ที่ schema ปฏิเสธ`,
+            );
+          }
+        }
+      }
+    }
+  });
+});
+
 describe('REPORT_CONTENT_FIELDS — เส้นแบ่ง "เนื้อหา" กับ "ข้อมูลกำกับ"', () => {
   test('ช่องกำกับต้องไม่ถูกนับเป็นเนื้อหา ไม่งั้นใบเปล่าจะผ่านไปได้', () => {
     for (const meta of ['visit_id', 'report_date', 'report_time', 'shift', 'report_type']) {
@@ -334,5 +417,28 @@ describe('REPORT_CONTENT_FIELDS — เส้นแบ่ง "เนื้อห
     for (const f of ['pulse', 'suction_status', 'feed_volume_ml', 'urine_ml', 'adl_bath', 'pressure_sore', 'dev_ng', 'incident_types']) {
       assert.equal(REPORT_CONTENT_FIELDS.includes(f), true, `${f} หายไปจากรายการเนื้อหา`);
     }
+  });
+});
+
+describe('createRunSchema — รอบจ่ายค่าตอบแทน', () => {
+  const ok = { period_month: '2026-08', round_no: 2, period_to: '2026-08-31' };
+
+  test('รอบปกติผ่าน', () => {
+    assert.equal(createRunSchema.safeParse(ok).success, true);
+  });
+
+  test('เดือนหนึ่งแบ่งจ่ายได้ 1–3 รอบเท่านั้น', () => {
+    for (const n of [1, 2, 3]) assert.equal(createRunSchema.safeParse({ ...ok, round_no: n }).success, true);
+    for (const n of [0, 4, 12]) assert.equal(createRunSchema.safeParse({ ...ok, round_no: n }).success, false);
+  });
+
+  test('วันตัดรอบก่อนเดือนของรอบถูกปฏิเสธ — รอบแบบนั้นไม่มีทางมีกะของเดือนตัวเองเลย', () => {
+    const r = createRunSchema.safeParse({ ...ok, period_to: '2026-07-31' });
+    assert.equal(r.success, false);
+    assert.deepEqual(r.error.issues[0].path, ['period_to']);
+  });
+
+  test('วันตัดรอบหลังเดือนของรอบยังผ่าน — รอบกวาดกะตกค้างข้ามเดือนได้ตามนิยาม', () => {
+    assert.equal(createRunSchema.safeParse({ ...ok, period_to: '2026-09-05' }).success, true);
   });
 });

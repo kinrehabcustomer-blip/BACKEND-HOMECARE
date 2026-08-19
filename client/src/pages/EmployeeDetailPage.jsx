@@ -7,8 +7,7 @@ import ErrorBar from '../components/ErrorBar.jsx';
 import LineIcon from '../components/LineIcon.jsx';
 import ConfirmButton from '../components/ConfirmButton.jsx';
 import {
-  POSITION_LABELS, EMPLOYMENT_TYPE_LABELS, STATUS_LABELS, GENDER_LABELS,
-  formatBaht, formatDate, todayTH,
+  POSITION_LABELS, EMPLOYMENT_TYPE_LABELS, STATUS_LABELS, GENDER_LABELS, formatDate, todayTH,
 } from '../labels.js';
 
 
@@ -116,7 +115,6 @@ export default function EmployeeDetailPage() {
           <Row label="ประเภทการจ้าง">{EMPLOYMENT_TYPE_LABELS[employee.employment_type]}</Row>
           <Row label="วันเริ่มงาน">{formatDate(employee.hire_date)}</Row>
           <Row label="วันลาออก">{formatDate(employee.resign_date)}</Row>
-          <Row label="ค่าจ้าง">{formatBaht(employee.base_salary)}</Row>
           <Row label="หมายเหตุ">{employee.note}</Row>
         </section>
       </div>

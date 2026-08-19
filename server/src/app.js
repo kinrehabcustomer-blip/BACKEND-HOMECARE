@@ -9,6 +9,7 @@ import { patientsRouter } from './patients/routes.js';
 import { packagesRouter } from './packages/routes.js';
 import { physioRouter } from './physio/routes.js';
 import { invoicesRouter } from './invoices/routes.js';
+import { payrollRouter } from './payroll/routes.js';
 import { myRouter } from './my/routes.js';
 import { notifyRouter } from './notify/routes.js';
 import { errorHandler } from './lib/errors.js';
@@ -35,6 +36,7 @@ export function createApp() {
   app.use('/api/packages', requireAuth, requireAdmin, packagesRouter);
   app.use('/api/physio', requireAuth, requireAdmin, physioRouter);
   app.use('/api/invoices', requireAuth, requireAdmin, invoicesRouter);
+  app.use('/api/payroll', requireAuth, requireAdmin, payrollRouter);
 
   // ส่วนของพนักงานภาคสนาม — เห็นเฉพาะเคสของตัวเอง (กรองด้วย employee_id ในเส้น) จึงไม่ต้อง requireAdmin
   app.use('/api/my', requireAuth, myRouter);

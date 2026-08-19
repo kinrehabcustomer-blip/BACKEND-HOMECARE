@@ -7,8 +7,7 @@ import { useScrollLock } from '../lib/scrollLock.js';
 import WorkHistory from './WorkHistory.jsx';
 import Avatar from './Avatar.jsx';
 import {
-  POSITION_LABELS, EMPLOYMENT_TYPE_LABELS, STATUS_LABELS, GENDER_LABELS,
-  formatBaht, formatDate,
+  POSITION_LABELS, EMPLOYMENT_TYPE_LABELS, STATUS_LABELS, GENDER_LABELS, formatDate,
 } from '../labels.js';
 import LineIcon from './LineIcon.jsx';
 
@@ -297,7 +296,6 @@ export default function EmployeeModal({ employeeId, siblings = [], onNavigate, o
                 <h3>ข้อมูลการจ้างงาน</h3>
                 <div className="field-grid">
                   {/* ส่ง null เมื่อไม่มีค่า ให้ Field ขึ้น "ไม่ได้ระบุ" แทนที่จะเป็นขีด — */}
-                  <Field label="ค่าจ้าง" value={employee.base_salary != null && formatBaht(employee.base_salary)} />
                   <Field label="วันเริ่มงาน" value={employee.hire_date && formatDate(employee.hire_date)} />
                   <Field label="อายุงาน" value={employee.resign_date ? null : yearsSince(employee.hire_date)} />
                   <Field label="วันลาออก" value={employee.resign_date && formatDate(employee.resign_date)} />

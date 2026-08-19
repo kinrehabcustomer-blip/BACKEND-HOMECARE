@@ -227,6 +227,8 @@ export const api = {
   // ตารางงาน + เช็คอิน/เอาท์
   myToday: () => request('/my/today'),
   myAttendance: (month) => request(`/my/attendance${month ? `?month=${month}` : ''}`),
+  /** สลิปค่าตอบแทนของตัวเอง — เฉพาะรอบที่จ่ายจริงแล้ว */
+  myPayslips: () => request('/my/payslips'),
   /** สรุปค่าตอบแทนรายเดือนของตัวเอง — คืนแถวเดียว (ตัวเลขของผู้เรียกเท่านั้น) */
   myAttendanceReport: (month) => request(`/my/attendance/report${month ? `?month=${month}` : ''}`),
   checkIn: (visitId, body) => request(`/my/visits/${visitId}/check-in`, { method: 'POST', body }),
@@ -349,12 +351,32 @@ export const api = {
    * { mode: 'deposit', deposit_amount } = ใบนี้กลายเป็นใบมัดจำ แล้วระบบออกใบส่วนที่เหลือตามมาให้
    */
   setInvoiceBillingPlan: (id, body) => request(`/invoices/${id}/billing-plan`, { method: 'POST', body }),
+  /**
+   * แก้ยอดมัดจำของแผนที่แบ่งใบไว้แล้ว — เรียกที่ "ใบมัดจำ" เท่านั้น
+   * ยอดเต็มของแผนไม่เปลี่ยน ใบส่วนที่เหลือถูกคิดใหม่ให้เองในทรานแซกชันเดียวกัน
+   */
+  updateDepositAmount: (id, body) => request(`/invoices/${id}/deposit`, { method: 'PATCH', body }),
   /** ใบคู่ในแผนเดียวกัน (มัดจำ ↔ ส่วนที่เหลือ) */
   invoicePlan: (id) => request(`/invoices/${id}/plan`),
   issueInvoice: (id) => request(`/invoices/${id}/issue`, { method: 'POST' }),
   payInvoice: (id, body) => request(`/invoices/${id}/pay`, { method: 'POST', body }),
   cancelInvoice: (id) => request(`/invoices/${id}/cancel`, { method: 'POST' }),
   deleteInvoice: (id) => request(`/invoices/${id}`, { method: 'DELETE' }),
+
+  // ---------- รอบจ่ายค่าตอบแทนพนักงาน ----------
+  /** ใครจะได้เท่าไหร่ถ้าปิดรอบที่วันนี้ — ดูก่อนกดเปิดรอบจริง */
+  payrollPreview: (period_to) => request(`/payroll/preview?period_to=${period_to}`),
+  listPayrollRuns: (params = {}) => request(`/payroll?${new URLSearchParams(params)}`),
+  getPayrollRun: (id) => request(`/payroll/${id}`),
+  createPayrollRun: (body) => request('/payroll', { method: 'POST', body }),
+  /** ดึงกะที่อนุมัติเพิ่มหลังเปิดรอบเข้ามาใหม่ทั้งรอบ */
+  rebuildPayrollRun: (id) => request(`/payroll/${id}/rebuild`, { method: 'POST' }),
+  payrollItemVisits: (id, itemId) => request(`/payroll/${id}/items/${itemId}/visits`),
+  /** เอาคนออกจากรอบนี้ — กะของเขากลับเข้ากองรอจ่าย ไปโผล่รอบถัดไปเอง */
+  removePayrollItem: (id, itemId) => request(`/payroll/${id}/items/${itemId}`, { method: 'DELETE' }),
+  payPayrollRun: (id, body) => request(`/payroll/${id}/pay`, { method: 'POST', body }),
+  cancelPayrollRun: (id) => request(`/payroll/${id}/cancel`, { method: 'POST' }),
+  deletePayrollRun: (id) => request(`/payroll/${id}`, { method: 'DELETE' }),
 
   // วันนัดให้บริการของเคส — ทุกตัวคืน "รายการวันนัดล่าสุดทั้งหมด" กลับมา ไม่ต้องดึงซ้ำเอง
   listVisits: (id) => request(`/cases/${id}/visits`),

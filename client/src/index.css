@@ -70,9 +70,9 @@ html {
   --brand-ink: #1a160c;      /* ตัวอักษรเข้มบนปุ่มทองสว่าง */
   --danger: #ff5a4d;
 }
-/* กล่องข้อความสามแบบต้องเข้มลงในโหมดกลางคืน ไม่งั้นเป็นแผ่นสว่างจ้ากลางจอมืด */
+/* กล่องข้อความที่เหลือต้องเข้มลงในโหมดกลางคืน ไม่งั้นเป็นแผ่นสว่างจ้ากลางจอมืด
+   (.notice ไม่ต้องมีกฎที่นี่แล้ว — มันใช้ตัวแปรของธีมล้วน จึงสลับตามโหมดเอง) */
 :root[data-theme='dark'] .error  { background: #3a201d; border-color: #5c322c; color: #f0a89c; }
-:root[data-theme='dark'] .notice { background: #16302b; border-color: #245046; color: #7fd3bd; }
 :root[data-theme='dark'] .banner { background: #34291a; border-color: #574529; color: #e0b877; }
 :root[data-theme='dark'] .banner a { color: #e0b877; }
 
@@ -179,10 +179,21 @@ body {
   white-space: pre-wrap; /* error จาก zod มีหลายบรรทัด */
 }
 
-.notice { background: #e3f5ec; border-color: #b8e3cd; border-left: 3px solid #1c7a4d; color: #1c7a4d; }
+/* กล่องหมายเหตุ — ใช้สีของธีมเอง (ครีมทอง + ขีดทองด้านซ้าย) ไม่ใช่เขียวมิ้นต์แบบเดิม
+   เขียวไม่มีอยู่ในจานสีของ KIN เลย กล่องนี้จึงดูเหมือนหลุดมาจากคนละเว็บ
+   และเกือบทุกที่ที่ใช้มันไม่ได้แปลว่า "สำเร็จ" แต่เป็น "หมายเหตุ/คำอธิบาย" — เช่น กล่องเลือกวิธีเก็บเงิน
+   บล็อกรายละเอียดรอบจ่าย ข้อความใต้ฟอร์ม สีเขียวจึงสื่อผิดตั้งแต่แรก
+   (สีเขียวยังใช้อยู่ที่ป้ายสถานะ "ชำระแล้ว/กำลังทำงาน" ซึ่งเขียว = ความหมายจริงๆ)
+
+   เขียนด้วยตัวแปรของธีมล้วน จึงตามโหมดกลางคืนไปเองโดยไม่ต้องมีกฎซ้อนแยกอีกชุด */
+.notice {
+  background: var(--brand-soft);
+  border-color: color-mix(in srgb, var(--brand) 30%, transparent);
+  color: var(--text);
+}
 
 /* แถบเตือนว่ายังใช้รหัสผ่านเริ่มต้นอยู่ */
-.banner { background: #fff3dc; border-color: #f2ddb0; border-left: 3px solid #d99400; color: #9a6700; margin-bottom: 1.125rem; }
+.banner { background: #fff3dc; border-color: #f2ddb0; color: #9a6700; margin-bottom: 1.125rem; }
 .banner a { color: #9a6700; font-weight: 700; }
 
 /* ---------- sidebar ---------- */
@@ -337,7 +348,7 @@ body {
 
 /* pre-line — ข้อความ error หลายบรรทัดมีจริง (รายการช่องที่กรอกผิดจาก zod และรายละเอียดทางเทคนิคของ 500)
    ถ้าไม่ตั้ง เบราว์เซอร์จะยุบ \n เป็นช่องว่าง แล้วทุกอย่างต่อกันเป็นพรืดอ่านไม่ออก */
-.error { background: #fdecea; border-color: #f5c6c2; border-left: 3px solid var(--danger); color: var(--danger); white-space: pre-line; }
+.error { background: #fdecea; border-color: #f5c6c2; color: var(--danger); white-space: pre-line; }
 /* ในหน้าที่มีเนื้อหาต่อท้าย (ฟอร์ม/ตาราง) ต้องเว้นระยะใต้กล่อง — ในการ์ด login ใช้ gap ของ flex อยู่แล้ว */
 .content .error { margin-bottom: 1rem; }
 
@@ -822,6 +833,9 @@ select option:checked {
 .modal-head-actions { display: flex; align-items: flex-start; gap: 0.5rem; flex-shrink: 0; }
 /* ปุ่มทำลายอยู่คนละฝั่งกับปุ่มที่กดกันจริง — ระยะห่างคือสิ่งที่กันการกดพลาด */
 .modal-foot .foot-danger { margin-right: auto; }
+/* เหลือปุ่มลบปุ่มเดียวทั้งแถว (ใบที่ยังไม่ได้เลือกวิธีเก็บเงิน — ปิดด้วยกากบาทมุมบนอยู่แล้ว)
+   ไม่มีปุ่มอื่นให้ต้องกันระยะแล้ว การหลบไปชิดซ้ายจึงเหลือแค่ช่องว่างยาวๆ ข้างเดียว */
+.modal-foot .foot-danger:only-child { flex: 1; margin-right: 0; justify-content: center; }
 .modal-nav { display: flex; gap: 0.25rem; }
 .modal-nav .icon-btn { padding: 0.125rem 0.5rem; font-size: 1.125rem; line-height: 1.2; }
 
@@ -1226,7 +1240,8 @@ select option:checked {
 }
 
 /* ใบที่รอบันทึก — พื้นเหลืองจางบอกว่ายังไม่ได้ลงฐานข้อมูลจริง */
-.cert.pending { background: #fffdf5; border-left: 3px solid #f2ddb0; padding-left: 0.75rem; }
+/* ใบที่รอบันทึก — พื้นทองจางบอกว่ายังไม่ได้ลงฐานข้อมูลจริง (เดิมพึ่งขีดซ้ายซึ่งเอาออกแล้ว) */
+.cert.pending { background: var(--brand-soft); padding-left: 0.75rem; }
 .cert.pending .cert-thumb.empty { cursor: default; }
 
 /* ---------- ผลงาน (โปรไฟล์พนักงาน) ---------- */
@@ -1355,6 +1370,11 @@ select option:checked {
 .form textarea[aria-invalid='true'] { border-color: var(--danger); }
 /* คำอธิบายใต้ช่องกรอกในฟอร์ม (เช่น บอกว่าเติมข้อมูลจากลูกค้าให้แล้ว) */
 .form-hint { grid-column: 1 / -1; margin-top: -0.5rem; }
+
+/* คำอธิบายใต้แถบตัวกรองของแท็บ — ห้ามใช้ .form-hint ตรงนี้
+   .form-hint มี margin-top ติดลบไว้สำหรับหินต์ที่อยู่ใต้ช่องกรอกในกริด
+   พอเอามาใช้เดี่ยวๆ นอกกริด มันจะดูดตัวเองขึ้นไปทับบรรทัดบน (และทับกันเองเมื่อวางสองย่อหน้าติดกัน) */
+.tab-hint { margin: 0 0 0.875rem; font-size: 0.8125rem; line-height: 1.65; }
 
 /* ---------- ค้นหา/เลือกลูกค้าในฟอร์มเคส ---------- */
 .customer-picker { margin-bottom: 1.125rem; }
@@ -1686,16 +1706,26 @@ select option:checked {
   /* ปุ่มสุดท้ายที่ไม่มีคู่ (ปุ่มรวมเป็นเลขคี่) กินเต็มบรรทัด — ดีกว่าปล่อยครึ่งบรรทัดว่างข้างเดียว
      ครอบคลุมกรณี popup ที่มีปุ่มเดียวด้วย (เป็นทั้งลูกคนแรกและคนสุดท้าย) */
   .modal-foot .btn:last-child:nth-child(odd) { grid-column: 1 / -1; }
+  /* footer ที่มีปุ่มลบ: ปุ่มลบถูกย้ายไปเป็นแถวของตัวเองท้ายสุด จึงไม่ได้ร่วมหารสองคอลัมน์ด้วย
+     แต่มันยังนับเป็นลูกคนที่หนึ่งอยู่ ความคี่/คู่ของปุ่มที่เหลือจึงสลับข้างกับ footer ที่ไม่มีปุ่มลบ
+     ผลคือใบที่เหลือแค่ "ลบใบนี้ + ปิด" ได้ปุ่มปิดกว้างครึ่งเดียวลอยอยู่ซ้าย ดูเหมือนวางพลาด
+     (ปุ่มลบอยู่ต้นเสมอในทุก popup ที่มีมัน จึงใช้ ~ ไล่จากมันได้ตรงๆ) */
+  .modal-foot .foot-danger ~ .btn:last-child:nth-child(odd) { grid-column: auto; }
+  .modal-foot .foot-danger ~ .btn:last-child:nth-child(even) { grid-column: 1 / -1; }
   /* ปุ่มลบเคยใช้ margin-right: auto ดันไปชิดซ้ายสุด ให้ห่างจากปุ่มที่กดกันจริง
      ในกริดคำสั่งนั้นไม่มีผล ปุ่มลบจะไปนั่งติดปุ่มปกติแทน ซึ่งอันตรายกว่าเดิม
      จึงย้ายลงไปเป็นแถวของตัวเองท้ายสุด — ยังคงหลักการเดิมคือ "ระยะห่างคือสิ่งที่กันการกดพลาด"
      (order ใช้ได้กับ grid item เหมือน flex ปุ่มอื่นเป็น order 0 ปริยาย) */
   .modal-foot .foot-danger {
     order: 1;
-    grid-column: 1 / -1;
+    /* ครึ่งบรรทัด ไม่ใช่เต็มบรรทัด — ปุ่มที่กดแล้วกู้คืนไม่ได้ ไม่ควรเป็นเป้าที่ใหญ่ที่สุดบนจอ
+       (บนจอคอมมันเป็นปุ่มขนาดปกติที่ถูกดันไปชิดซ้าย ตรงนี้คือการรักษาน้ำหนักเดิมไว้บนจอแคบ) */
+    grid-column: 1 / 2;
     margin-right: 0;
-    margin-top: 0.25rem;
+    margin-top: 0.375rem;
   }
+  /* ปุ่มเดียวทั้งแถวก็ไม่มีแถวไหนให้ต้องเว้นระยะจากมัน — เต็มบรรทัดเหมือนปุ่มเดี่ยวอื่นๆ */
+  .modal-foot .foot-danger:only-child { grid-column: 1 / -1; margin-top: 0; }
 
   /* ฟอร์มจับคู่พนักงาน/ใบรับรอง: ปุ่มตกลงมาใต้ช่องกรอก */
   .assign-form, .cert-form { flex-direction: column; }
@@ -1873,13 +1903,13 @@ select option:checked {
   color: var(--text);
   background: var(--surface);
   border: 1px solid var(--border);
-  border-left: 3px solid #1c7a4d;
   border-radius: var(--radius);
   box-shadow: 0 6px 20px rgb(0 0 0 / 0.14);
   cursor: pointer;
   animation: toast-in 0.16s ease-out;
 }
-.toast-error { border-left-color: var(--danger); }
+/* toast ที่เป็นข้อผิดพลาด — ใช้ขอบกับตัวหนังสือสีแดงทั้งใบแทนขีดซ้าย */
+.toast-error { border-color: var(--danger); color: var(--danger); }
 
 @keyframes toast-in {
   from { opacity: 0; transform: translateY(0.5rem); }
@@ -2476,6 +2506,8 @@ select option:checked {
 .modal.modal-narrow { max-width: 30rem; }
 /* หน้าต่างที่มีตารางอยู่ข้างใน — กว้างกว่า popup ปกติ ไม่งั้นคอลัมน์เบียดจนอ่านไม่ออก */
 .modal.modal-wide { max-width: 60rem; }
+/* ตอนเลือกวิธีเก็บเงินยังไม่มีเอกสารให้กาง — ย่อกล่องลงเท่าที่เนื้อหาต้องการจริง */
+.modal.modal-wide.is-choosing { max-width: 40rem; }
 
 /* กล่องยืนยันก่อนลบ — แคบกว่า popup ปกติ เพราะมีแค่คำถามกับปุ่มสองปุ่ม
    ไม่มี header แยก คำถามคือหัวข้อในตัวมันเอง จะได้ไม่มีอะไรให้อ่านเกินจำเป็นก่อนตัดสินใจ */
@@ -3029,8 +3061,8 @@ select option:checked {
 .shift-confirm-when { margin: 0; font-size: 0.8125rem; }
 .shift-confirm-warn { margin: 0; font-size: 0.75rem; color: var(--danger); max-width: 22rem; }
 .shift-confirm-actions { display: flex; gap: 0.5rem; }
-/* แถบสีซ้ายบอกสถานะกะแบบเร็ว */
-.shift-card.visit-working { border-left: 3px solid var(--brand); }
+/* กะที่กำลังทำอยู่ — ขอบสีแบรนด์ทั้งใบ (เดิมเป็นแถบสีที่ขอบซ้ายใบเดียว) */
+.shift-card.visit-working { border-color: var(--brand); }
 .shift-card.visit-done { opacity: 0.8; }
 
 .gps-status {
@@ -3197,11 +3229,10 @@ select option:checked {
 .report-when .picker { flex: 1; }
 .report-when .picker-btn { width: 100%; justify-content: space-between; padding: 0.5rem 0.625rem; font-size: 0.9375rem; }
 
-/* ฟอร์มกรอก — ขีดซ้ายสีแบรนด์ให้แยกออกจากการ์ดรายงานที่บันทึกไปแล้ว (หน้าตาใกล้กันมาก) */
+/* ฟอร์มกรอก — ขอบสีแบรนด์ทั้งใบให้แยกออกจากการ์ดรายงานที่บันทึกไปแล้ว (หน้าตาใกล้กันมาก) */
 .report-form {
   padding: 0.875rem;
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--brand);
+  border: 1px solid var(--brand);
   border-radius: var(--radius);
   background: var(--surface);
 }
@@ -3263,8 +3294,9 @@ select option:checked {
 }
 .care-toggle { font-size: 1.125rem; color: var(--muted); line-height: 1; }
 
-/* หมวดที่ต้องสะดุดตา (คำถามเทียบครั้งก่อน / เหตุการณ์ผิดปกติ) */
-.care-section.is-key { border-left: 3px solid var(--brand); padding-left: 0.75rem; }
+/* หมวดที่ต้องสะดุดตา (คำถามเทียบครั้งก่อน / เหตุการณ์ผิดปกติ)
+   ใช้หัวข้อสีแบรนด์แทนขีดซ้าย — เห็นชัดเท่ากันโดยไม่ต้องมีแถบสีคาอยู่ริมกล่อง */
+.care-section.is-key .care-section-head { color: var(--brand); }
 .care-field.is-key .field-label { color: var(--text); font-weight: 600; }
 
 .care-hint { margin: 0 0 0.5rem; font-size: 0.75rem; color: var(--muted); }
@@ -3299,7 +3331,9 @@ select option:checked {
    (สิ่งที่เห็นก่อนกดยืนยัน ต้องหน้าตาเหมือนสิ่งที่จะถูกบันทึกจริง) */
 .care-review, .care-view { display: flex; flex-direction: column; gap: 0.75rem; }
 .care-review-block, .care-view-block { border-left: 2px solid var(--divider); padding-left: 0.75rem; }
-.care-view-block.is-key { border-left-color: var(--danger); }
+/* บล็อกที่ต้องสะดุดตา (เหตุการณ์ผิดปกติ) — ใช้หัวข้อสีแดงแทนการย้อมเส้นซ้ายให้เข้ม
+   เส้นซ้ายที่เหลืออยู่เป็นเส้นจางของโครงรายการ ไม่ใช่แถบสีบอกสถานะ */
+.care-view-block.is-key h5 { color: var(--danger); }
 .care-review-block h5, .care-view-block h5 {
   margin: 0 0 0.375rem;
   font-size: 0.75rem;
@@ -3467,36 +3501,91 @@ select option:checked {
   .pay-figures { gap: 0.75rem 1.25rem; }
 }
 
+/* แก้ยอดมัดจำของแผนที่แบ่งใบไปแล้ว — อยู่ในกล่องสรุปเงิน เพราะเป็นยอดที่ตกลงกับลูกค้า ไม่ใช่ข้อความบนใบ */
+.deposit-edit {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.875rem;
+  margin: 0.875rem 0 0;
+  padding: 0.875rem 0 0;
+  border-top: 1px solid var(--divider);
+}
+.deposit-edit label { display: flex; flex-direction: column; gap: 0.3125rem; font-size: 0.8125rem; font-weight: 600; color: var(--muted); }
+.deposit-edit input { width: 9.5rem; font-weight: 400; color: var(--text); }
+/* ข้อความบอกยอดใบคู่กับปุ่มบันทึกอยู่แถวเดียวกัน — ผลของสิ่งที่กำลังจะกดอยู่ติดกับปุ่ม */
+.deposit-edit-side { display: flex; flex: 1; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.625rem; }
+.deposit-edit-side p { margin: 0; font-size: 0.8125rem; }
+
+@media (max-width: 600px) {
+  .deposit-edit input { width: 100%; }
+  .deposit-edit-side { justify-content: flex-start; }
+}
+
 /* ---------- เลือกวิธีเก็บเงิน (เต็มจำนวน / มัดจำก่อน) ---------- */
 
 /* ใบที่ยังไม่ได้เลือกวิธีเก็บเงิน ยังไม่ใช่เอกสาร — ซ่อนตัวใบไว้ก่อน ไม่ให้เผลอพิมพ์ส่งลูกค้า */
 .invoice-doc.is-hidden { display: none; }
 
+/* กล่องเดียวที่อยู่ในโมดัลตอนนั้น จึงจัดกลางและคุมความกว้างไว้
+   ปล่อยให้ยืดเต็มความกว้างของกล่องใบแจ้งหนี้ การ์ดสองใบจะกว้างจนตัวหนังสือลอยอยู่มุมซ้าย
+
+   ไม่ครอบกรอบอีกชั้น — การ์ดสองใบเป็นก้อนของตัวเองอยู่แล้ว กรอบซ้อนกรอบทำให้สายตา
+   ต้องข้ามเส้นสองชั้นกว่าจะถึงสิ่งที่ต้องเลือก และกินความกว้างไปฟรีๆ ทั้งสองข้าง */
 .plan-choose {
-  margin: 0.5rem 0 1rem;
-  padding: 1rem;
-  border: 1px solid var(--brand);
-  border-radius: var(--radius);
-  background: var(--surface);
+  max-width: 34rem;
+  margin: 1rem auto 0.5rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: center;
 }
-.plan-choose h3 { margin: 0 0 0.25rem; font-size: 1rem; }
-.plan-choose > .muted { margin: 0 0 0.875rem; font-size: 0.875rem; }
+.plan-choose h3 { margin: 0 0 0.375rem; font-size: 1.125rem; letter-spacing: -0.01em; }
+.plan-choose > .muted { max-width: 28rem; margin: 0 auto 1.25rem; font-size: 0.875rem; line-height: 1.6; }
 
 /* สองทางเลือกวางคู่กัน — เทียบกันได้ในสายตาเดียว ไม่ต้องเลื่อนหา */
-.plan-options { display: grid; grid-template-columns: 1fr 1fr; gap: 0.875rem; }
+.plan-options { display: grid; grid-template-columns: 1fr 1fr; gap: 0.875rem; text-align: left; }
 .plan-option {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
-  padding: 0.875rem;
+  gap: 0.75rem;
+  padding: 1.125rem 1rem 1rem;
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-card);
   background: var(--bg);
+  transition: border-color 130ms ease, box-shadow 130ms ease, transform 130ms ease;
+}
+/* ทั้งใบคือหนึ่งทางเลือก ไม่ใช่แค่ปุ่มที่อยู่ข้างใน — จึงยกขึ้นทั้งใบตอนเล็ง
+   focus-within ด้วย เพราะการ์ดขวาถูก "เลือก" ด้วยการแตะช่องกรอก ไม่ใช่การเอาเมาส์ไปวาง */
+.plan-option:hover,
+.plan-option:focus-within {
+  border-color: var(--brand);
+  box-shadow: 0 0.375rem 1rem rgb(36 31 23 / 8%);
+  transform: translateY(-2px);
 }
 .plan-option h4 { margin: 0; font-size: 0.9375rem; }
-.plan-option p { margin: 0; font-size: 0.8125rem; }
-.plan-option label { display: flex; flex-direction: column; gap: 0.3125rem; font-size: 0.8125rem; font-weight: 600; color: var(--muted); }
-.plan-option input { font-weight: 400; color: var(--text); }
+.plan-option p { margin: 0; font-size: 0.8125rem; line-height: 1.55; }
+/* ป้ายกำกับ+ค่าของสองการ์ดใช้โครงเดียวกัน (ยอดเต็มที่พิมพ์ไว้แล้ว ↔ ยอดมัดจำที่ต้องกรอก) */
+.plan-figure,
+.plan-option label { display: flex; flex-direction: column; gap: 0.3125rem; }
+.plan-figure-label,
+.plan-option label { font-size: 0.75rem; font-weight: 600; color: var(--muted); }
+.plan-option input {
+  width: 100%;
+  padding: 0.5rem 0.6875rem;
+  font-size: 1rem;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+.plan-option .plan-amount {
+  font-size: 1.625rem;
+  font-weight: 700;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+.plan-option .plan-amount span { margin-left: 0.25rem; font-size: 0.8125rem; font-weight: 500; color: var(--muted); }
 /* ปุ่มอยู่ล่างสุดของการ์ดเสมอ ถึงข้อความสองการ์ดจะยาวไม่เท่ากัน */
 .plan-option .btn { margin-top: auto; }
 
@@ -3505,6 +3594,57 @@ select option:checked {
 
 @media (max-width: 600px) {
   .plan-options { grid-template-columns: 1fr; }
+}
+
+/* ---------- รอบจ่ายค่าตอบแทน ---------- */
+
+/* แถวปุ่มท้ายรอบมีได้ถึงสี่ปุ่ม และป้ายภาษาไทยยาวไม่เท่ากันเลยสักปุ่ม
+   flex แถวเดียว (quick-edit-actions) จะบีบให้ปุ่มแคบจนคำแตกเป็นสองบรรทัดคนละที่กัน
+   — จัดเป็นกริดคอลัมน์เท่ากันแทน ทุกปุ่มกว้างเท่ากันและสูงเท่ากันเสมอ */
+.payroll-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+  margin-top: 0.875rem;
+}
+.payroll-actions .btn { justify-content: center; }
+/* เหลือปุ่มเดียว (รอบที่จ่ายแล้วมีแค่ "ยกเลิกรอบ") = เต็มแถว ไม่ใช่ลอยครึ่งเดียว */
+.payroll-actions .btn:only-child { grid-column: 1 / -1; }
+
+/* จอกว้างพอวางเรียงเดียวได้ — สี่ช่องเท่ากัน ยังสมมาตรและไม่กินความกว้างทั้งกล่อง */
+@media (min-width: 601px) {
+  .payroll-actions {
+    grid-template-columns: repeat(4, minmax(0, auto));
+    justify-content: end;
+  }
+  .payroll-actions .btn { min-width: 8.5rem; }
+}
+
+/* ยอดรวมของรอบ — อยู่เหนือรายชื่อเสมอ เพราะเป็นตัวเลขที่ใช้ตัดสินใจก่อนกดเปิด/กดจ่าย */
+.payroll-sum {
+  margin: 0.875rem 0 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  font-size: 0.875rem;
+}
+
+/* รายชื่อพนักงานในรอบ — ทีมโตขึ้นเท่าไหร่รายการก็ยาวขึ้นเท่านั้น
+   ถ้าปล่อยให้ยืดไปเรื่อยๆ ปุ่ม "เปิดรอบนี้" / "บันทึกการจ่าย" จะถูกดันตกจอไปทุกครั้ง
+   จึงให้รายชื่อเลื่อนในกล่องของตัวเอง ปุ่มที่ต้องกดจริงยังอยู่กับที่เสมอ */
+.payroll-people {
+  max-height: 24rem;
+  overflow-y: auto;
+  padding-right: 0.25rem;
+  border-top: 1px solid var(--divider);
+}
+.payroll-people .history-item { padding: 0.5rem 0; }
+.payroll-people-end { display: flex; align-items: center; gap: 0.625rem; flex-shrink: 0; }
+
+@media (max-width: 600px) {
+  /* จอเตี้ยกว่าและมีช่องกรอกสามช่องเรียงลงมาแล้ว — ให้รายชื่อกินไม่เกินราวหนึ่งในสามของจอ
+     ปุ่มที่ต้องกดจริงจะได้อยู่ในระยะที่เลื่อนนิดเดียวก็ถึง ไม่ใช่ต้องไถผ่านทั้งทีม */
+  .payroll-people { max-height: 30vh; }
 }
 
 /* ---------- ลดการเคลื่อนไหว ----------
@@ -3517,6 +3657,9 @@ select option:checked {
      ส่วนการลากตามนิ้วและไถลลงตอนปิดยังอยู่ครบ — นั่นคือการตอบสนองต่อมือของผู้ใช้เอง
      ไม่ใช่การเคลื่อนไหวที่จู่ๆ ก็เกิดขึ้นเอง (transition ตอนนั้นถูกตั้งเป็น inline จาก JS อยู่แล้ว) */
   .modal { transition: none; }
+  /* การ์ดตัวเลือกวิธีเก็บเงินยกตัวขึ้นตอนเอาเมาส์วาง — คงไว้แค่การเปลี่ยนสีเส้นขอบ */
+  .plan-option { transition: none; }
+  .plan-option:hover, .plan-option:focus-within { transform: none; }
 }
 
 /* ไอคอนที่อยู่ "ในบรรทัดข้อความ" (เช่น ⚠ หน้าคำเตือน, หมุดหน้าที่อยู่)
