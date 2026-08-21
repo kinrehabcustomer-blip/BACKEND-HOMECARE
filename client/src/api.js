@@ -369,14 +369,14 @@ export const api = {
   listPayrollRuns: (params = {}) => request(`/payroll?${new URLSearchParams(params)}`),
   getPayrollRun: (id) => request(`/payroll/${id}`),
   createPayrollRun: (body) => request('/payroll', { method: 'POST', body }),
-  /** ดึงกะที่อนุมัติเพิ่มหลังเปิดรอบเข้ามาใหม่ทั้งรอบ */
+  /** ดึงค่าจ้างที่ปล่อยเพิ่มหลังเปิดรอบเข้ามาใหม่ทั้งรอบ */
   rebuildPayrollRun: (id) => request(`/payroll/${id}/rebuild`, { method: 'POST' }),
-  payrollItemVisits: (id, itemId) => request(`/payroll/${id}/items/${itemId}/visits`),
+  /** ค่าจ้างทุกก้อนในสลิปใบหนึ่ง — หนึ่งบรรทัด = ค่าจ้างหนึ่งก้อนของหนึ่งเคส */
+  payrollItemPayouts: (id, itemId) => request(`/payroll/${id}/items/${itemId}/payouts`),
   /** เอาคนออกจากรอบนี้ — กะของเขากลับเข้ากองรอจ่าย ไปโผล่รอบถัดไปเอง */
   removePayrollItem: (id, itemId) => request(`/payroll/${id}/items/${itemId}`, { method: 'DELETE' }),
   payPayrollRun: (id, body) => request(`/payroll/${id}/pay`, { method: 'POST', body }),
   cancelPayrollRun: (id) => request(`/payroll/${id}/cancel`, { method: 'POST' }),
-  deletePayrollRun: (id) => request(`/payroll/${id}`, { method: 'DELETE' }),
 
   // วันนัดให้บริการของเคส — ทุกตัวคืน "รายการวันนัดล่าสุดทั้งหมด" กลับมา ไม่ต้องดึงซ้ำเอง
   listVisits: (id) => request(`/cases/${id}/visits`),
@@ -390,6 +390,21 @@ export const api = {
   deleteVisitsOn: (id, dates) =>
     request(`/cases/${id}/visits?${new URLSearchParams({ dates: dates.join(',') })}`, { method: 'DELETE' }),
   updateVisit: (id, visitId, body) => request(`/cases/${id}/visits/${visitId}`, { method: 'PATCH', body }),
+
+  // ---------- ค่าจ้างของเคส (ก้อนเดียว ผู้จัดการกดปล่อย) ----------
+  /** ยอดเหมา · ปล่อยไปแล้ว · คงเหลือ · ถ้าปล่อยตอนนี้ใครได้เท่าไหร่ */
+  /* คิวค่าจ้าง — เคสที่มีเงินให้จัดการทั้งหมด ใช้ที่แท็บ "ปล่อยค่าจ้าง" ของหน้ารอบจ่าย */
+  payrollCaseQueue: () => request('/payroll/case-queue'),
+  /* ที่มาของยอดรายคนในแท็บสรุป — เคสอะไรบ้าง ใบละเท่าไหร่ */
+  payrollEmployeeCases: (month, employeeId) =>
+    request(`/payroll/employee-cases?month=${month}&employee_id=${employeeId}`),
+  casePayStatus: (id) => request(`/cases/${id}/pay`),
+  /** ปล่อยค่าจ้าง — ไม่ส่ง amount = ปล่อยยอดคงเหลือทั้งหมด */
+  releaseCasePay: (id, body = {}) => request(`/cases/${id}/pay/release`, { method: 'POST', body }),
+  /* ตั้งข้อตกลงส่วนแบ่งของเคส (ใครได้เท่าไหร่) — ส่งรายการว่าง = กลับไปหารเท่ากันทุกคน */
+  setCasePayShares: (id, shares) => request(`/cases/${id}/pay/shares`, { method: 'PUT', body: { shares } }),
+  /** ถอนก้อนที่ปล่อยผิดคืน (ได้เฉพาะก้อนที่ยังไม่ถูกจ่ายออกไป) */
+  cancelCasePayout: (id, payoutId) => request(`/cases/${id}/pay/${payoutId}`, { method: 'DELETE' }),
   deleteVisit: (id, visitId) => request(`/cases/${id}/visits/${visitId}`, { method: 'DELETE' }),
   // ---------- รายงานอาการผู้ป่วย (บันทึกทีละครั้งในเคส) ----------
   /**

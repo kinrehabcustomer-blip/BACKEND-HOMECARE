@@ -67,13 +67,13 @@ export default function MyAttendancePage() {
             </div>
 
             <div className="tiles">
-              {/* เงินที่ทำไปแล้วแต่ยังไม่ได้ — ต้องเห็นชัดพอๆ กับยอดที่ได้แล้ว
-                  ไม่งั้นพนักงานที่ทำงานทั้งเดือนจะเปิดมาเห็น ฿0 แล้วคิดว่าระบบไม่นับให้ */}
+              {/* กะที่รอผู้จัดการยืนยัน — ยังไม่ใช่ยอดเงิน เพราะค่าจ้างเป็นก้อนต่อเคส
+                  แต่ต้องเห็น เพราะกะที่ยังไม่ยืนยันจะไม่ถูกนับเป็นสัดส่วนตอนแบ่งค่าจ้าง */}
               <div className="tile is-static">
-                <span className="tile-label">รออนุมัติ</span>
-                <span className="tile-value">{formatBaht(report.pending_pay)}</span>
+                <span className="tile-label">กะรออนุมัติ</span>
+                <span className="tile-value">{report.pending_shifts}</span>
                 <span className="tile-share">
-                  {report.pending_shifts > 0 ? `${report.pending_shifts} กะ` : 'ยืนยันครบแล้ว'}
+                  {report.pending_shifts > 0 ? 'รอผู้จัดการยืนยัน' : 'ยืนยันครบแล้ว'}
                 </span>
               </div>
               {/* อนุมัติแล้วยังไม่ใช่ได้เงิน — เงินออกจริงตอนรอบจ่ายถูกปิด
@@ -102,11 +102,9 @@ export default function MyAttendancePage() {
 
           {/* คำอธิบายกติกาทั่วไปถูกเอาออกแล้ว — ขึ้นแถบนี้เฉพาะตอนมีเรื่องที่พนักงานต้องทำอะไรต่อจริงๆ
               (กะที่ยังไม่มีค่าจ้าง / กะที่ไม่ได้รับอนุมัติ) ไม่งั้นเขาจะไม่รู้เลยว่าต้องไปถามใคร */}
-          {(report.unpriced_shifts > 0 || report.rejected_shifts > 0) && (
+          {report.rejected_shifts > 0 && (
             <p className="notice">
-              {report.unpriced_shifts > 0 && 'มีกะที่ระบบยังไม่รู้ค่าจ้าง กรุณาสอบถามฝ่ายบุคคล'}
-              {report.unpriced_shifts > 0 && report.rejected_shifts > 0 && ' · '}
-              {report.rejected_shifts > 0 && `มี ${report.rejected_shifts} กะที่ไม่ได้รับอนุมัติ ดูเหตุผลได้ที่รายการกะด้านล่าง`}
+              มี {report.rejected_shifts} กะที่ไม่ได้รับอนุมัติ ดูเหตุผลได้ที่รายการกะด้านล่าง
             </p>
           )}
 
@@ -119,11 +117,33 @@ export default function MyAttendancePage() {
                 <div className="history-item" key={s.item_id}>
                   <div>
                     <strong>{formatBaht(s.total_pay)}</strong>
+                    {/* จำนวนเคส ไม่ใช่จำนวนกะ — เงินก้อนนี้ประกอบด้วยงวดของเคส ไม่ได้คิดเป็นรายกะ */}
                     <p className="muted">
                       <span className="mono">{s.run_id}</span>
                       {' · '}{s.period_month} รอบที่ {s.round_no}
-                      {' · '}{s.shifts} กะ
+                      {' · '}{(s.cases ?? []).length} เคส
                     </p>
+
+                    {/* เงินเข้าบัญชีเป็นก้อนเดียวรวมทุกเคส แต่ก้อนนั้นต้องกางได้ว่ามาจากเคสไหน
+                        เคสละเท่าไหร่ งวดที่เท่าไหร่ — พนักงานที่จำได้ว่า "เคสนี้ตกลงงวดแรก 7,000"
+                        ไม่มีทางรู้เลยว่ายอดนั้นรวมอยู่ในใบนี้หรือยัง ถ้าเห็นแต่ยอดรวม
+                        กางไว้เลยไม่ต้องกด: สลิปหนึ่งใบมีไม่กี่เคส และนี่คือสิ่งที่เปิดมาดู */}
+                    {(s.cases ?? []).length > 0 && (
+                      <ul className="plain-list payroll-item-cases">
+                        {s.cases.map((c) => (
+                          <li key={c.case_id}>
+                            <span>
+                              {c.client_name ?? c.case_title ?? 'เคสที่ถูกลบแล้ว'}
+                              <span className="cell-sub mono">{c.case_id}</span>
+                            </span>
+                            <span>
+                              {formatBaht(c.amount)}
+                              <span className="cell-sub">งวดที่ {c.installments.join(', ')}</span>
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
                   </div>
                   <div className="muted">
                     จ่าย {formatDate(s.pay_date)}
@@ -150,11 +170,18 @@ export default function MyAttendancePage() {
                     </p>
                   </div>
                   <div className="pay-cell">
-                    <strong className={c.unpriced_shifts > 0 && c.pay === 0 ? 'muted' : ''}>
-                      {c.unpriced_shifts > 0 && c.pay === 0 ? 'ยังไม่ระบุค่าจ้าง' : formatBaht(c.pay)}
+                    {/* ค่าจ้างเป็นก้อนต่อเคส ผู้จัดการเป็นคนกดปล่อย — ยังไม่ปล่อยก็ยังไม่มียอดของเดือนนี้
+                        บอกให้ตรงว่า "ยังไม่ถูกปล่อย" ไม่ใช่ ฿0 ซึ่งอ่านแล้วเหมือนทำงานฟรี */}
+                    <strong className={c.pay === 0 ? 'muted' : ''}>
+                      {c.pay === 0 ? 'ยังไม่ปล่อยค่าจ้าง' : formatBaht(c.pay)}
                     </strong>
+                    {/* ค่าจ้างของเคสแบ่งจ่ายได้ถึงสามงวด — ยอดก้อนนี้เป็นงวดไหนคือสิ่งที่บอกได้ว่า
+                        "ได้ครบตามที่ตกลงแล้ว" หรือ "ยังมีงวดต่อไปรออยู่" ซึ่งตัวเลขเปล่าๆ บอกไม่ได้ */}
+                    {c.installments && (
+                      <span className="cell-sub">งวดที่ {c.installments}</span>
+                    )}
                     {c.pending_shifts > 0 && (
-                      <span className="cell-sub">รออนุมัติ {formatBaht(c.pending_pay)} ({c.pending_shifts} กะ)</span>
+                      <span className="cell-sub">รออนุมัติ {c.pending_shifts} กะ</span>
                     )}
                   </div>
                 </div>

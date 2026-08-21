@@ -8,14 +8,22 @@ import PageRefresh from '../components/PageRefresh.jsx';
 import ConfirmButton from '../components/ConfirmButton.jsx';
 import TimeSelect from '../components/TimeSelect.jsx';
 import MonthPicker from '../components/MonthPicker.jsx';
+import { Approvals } from '../components/PayrollTabs.jsx';
 import { downloadCsv, thisMonth, LATE_MINUTES } from '../lib/attendanceUi.js';
 import { useSheetSwipe } from '../lib/sheetSwipe.js';
 import { useScrollLock } from '../lib/scrollLock.js';
 
-/* หน้านี้เหลือแค่เรื่อง "เข้า–ออกงาน" — คิวอนุมัติค่าจ้างกับสรุปค่าตอบแทนย้ายไปหน้ารอบจ่ายแล้ว
-   เพราะทั้งคู่เป็นเรื่องเงิน อยู่ในสายพานเดียวกับการเปิดรอบ/จ่ายจริง ไม่ใช่เรื่องการมาทำงาน */
+/* หน้านี้คือเรื่อง "เข้า–ออกงาน" ทั้งหมด — รวมการยืนยันกะกลับมาด้วย
+
+   คิวยืนยันกะเคยถูกย้ายไปอยู่หน้าค่าตอบแทนตอนที่มันเป็น "ประตูของเงิน" (กะต้องถูกอนุมัติก่อน
+   เงินถึงจะแบ่งได้) แต่ตอนนี้ประตูของเงินคือการปิดเคส ไม่ใช่ตารางกะแล้ว การยืนยันกะจึงกลับไปเป็น
+   สิ่งที่มันเป็นจริงๆ ตั้งแต่แรก: การตรวจว่าใครมา ใครขาด ใครสาย — เรื่องของหน้านี้ล้วนๆ
+
+   ผลพลอยได้คือหน้าค่าตอบแทนเหลือสามขั้นที่เป็นเรื่องเงินจริงทั้งหมด ไม่มีขั้นที่ไม่ได้กระทบเงิน
+   ปนอยู่ให้เข้าใจผิดว่าต้องทำก่อนถึงจะจ่ายได้ */
 const TABS = {
   exceptions: 'รายการต้องตรวจ',
+  approvals: 'ยืนยันกะ',
   log: 'ประวัติเช็คอิน',
 };
 
@@ -99,7 +107,7 @@ export default function AttendancePage() {
           <p className="muted">
             ติดตามการเช็คอิน–เอาท์ของพนักงานภาคสนาม และแก้เวลาที่ลงผิด ·
             {' '}เรื่องค่าจ้าง (อนุมัติ/สรุป/จ่าย) อยู่ที่{' '}
-            <Link className="link" to="/payroll">รอบจ่ายค่าตอบแทน</Link>
+            <Link className="link" to="/payroll">ค่าตอบแทนพนักงาน</Link>
           </p>
         </div>
       </header>
@@ -126,6 +134,18 @@ export default function AttendancePage() {
           error={exError}
           onReload={loadExceptions}
           filters={employeePicker}
+        />
+      )}
+
+      {/* ยืนยันว่ากะที่ทำจบแล้วเกิดขึ้นจริง — ไม่กระทบการจ่ายเงินแล้ว แต่ยังเป็นตัวตัดสิน
+          ว่ากะไหนถูกนับในสรุปการมาทำงาน และเป็นที่เดียวที่ปฏิเสธกะที่น่าสงสัยได้ */}
+      {tab === 'approvals' && (
+        <Approvals
+          month={month}
+          employeeId={employeeId}
+          patch={patch}
+          employeePicker={employeePicker}
+          reloadKey={reloadKey}
         />
       )}
       {tab === 'log' && (

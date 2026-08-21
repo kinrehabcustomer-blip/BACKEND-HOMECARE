@@ -115,6 +115,9 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
   // ค่าจ้างพนักงานเห็นเฉพาะผู้จัดการ เหมือนหน้าแพ็คเกจและหน้าเปิดเคส
   // (server ตัดฟิลด์ออกจาก payload ให้อยู่แล้ว ตรงนี้แค่ไม่วาดช่องเปล่าค้างไว้)
   const seePay = useCanSeeStaffPay();
+  /* เดิมมีแต่ QuickEdit ที่เรียก useToast() ทั้งที่ตัว CaseModal เองก็เรียก toast() อยู่
+     (ปุ่ม "อนุมัติทั้งหมด") — พังเงียบมาตลอดเพราะอยู่ใน onClick จึงโยนต่อเมื่อมีคนกดจริง */
+  const toast = useToast();
   const boxRef = useRef(null);
   // จอแคบ: ปัดลงเพื่อปิด — ใช้ ref เดียวกับ focus trap เพราะ element เดียวแปะสอง ref ไม่ได้
   useSheetSwipe(onClose, boxRef);
@@ -275,7 +278,6 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
   /* กะที่ทำจบแล้วแต่ค่าจ้างยังไม่ได้อนุมัติ — ตอนปิดเคสคือจังหวะที่ผู้จัดการกำลังดูงานก้อนนี้อยู่พอดี
      จึงควรอนุมัติได้จากตรงนี้เลย ไม่ต้องไปตามหาในคิวรวมของทั้งบริษัททีหลัง */
   const pendingPay = visits.filter((v) => v.check_out_at && v.pay_status === 'pending');
-  const pendingPayTotal = pendingPay.reduce((s, v) => s + (v.effective_pay ?? 0), 0);
 
   /* รายชื่อพนักงานที่ตรงกับระดับ/สายบริการของเคสนี้ — กติกาเดียวกับหน้าเปิดเคส (ดู positionsForCase)
      คนที่ถือเคสอยู่ตอนนี้ต้องอยู่ในรายการเสมอ ไม่งั้นช่องจะว่างทั้งที่มีคนรับอยู่ */
@@ -495,23 +497,19 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                 {pendingPay.length > 0 && (
                   <div className="visit-summary approve-row">
                     <p className="muted">
-                      <strong>รออนุมัติค่าจ้าง {pendingPay.length} กะ</strong>
-                      {/* ยอดรวมมาจากค่าจ้างรายกะ ซึ่งคนที่ไม่ใช่ผู้จัดการไม่ได้รับมาด้วย
-                          ถ้าโชว์ต่อจะกลายเป็น "รวม ฿0" ซึ่งอ่านแล้วเข้าใจผิดว่าไม่มีเงินต้องอนุมัติ */}
+                      <strong>รออนุมัติ {pendingPay.length} กะ</strong>
                       <span className="cell-sub">
-                        {seePay && `รวม ${formatBaht(pendingPayTotal)} — `}
-                        พนักงานจะยังไม่เห็นยอดนี้จนกว่าจะอนุมัติ
+                        กะที่อนุมัติแล้วคือฐานที่ใช้แบ่งค่าจ้างของเคส — ต้องอนุมัติก่อนจึงจะปล่อยเงินได้
                       </span>
                     </p>
                     <button
                       className="btn primary"
                       disabled={busy}
                       onClick={() => {
-                        const total = seePay ? ` รวม ${formatBaht(pendingPayTotal)}` : '';
-                        if (!confirm(`อนุมัติค่าจ้าง ${pendingPay.length} กะ${total}?`)) return;
+                        if (!confirm(`อนุมัติ ${pendingPay.length} กะ?`)) return;
                         run(async () => {
                           const { changed } = await api.approveCasePay(item.case_id);
-                          toast(`อนุมัติค่าจ้าง ${changed} กะแล้ว`);
+                          toast(`อนุมัติแล้ว ${changed} กะ`);
                         });
                       }}
                     >
@@ -520,6 +518,10 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                   </div>
                 )}
               </section>
+
+              {/* เรื่องเงินไม่อยู่ในหน้านี้แล้ว — ปล่อยค่าจ้าง/แบ่งส่วน/ดูงวด ทำที่แท็บ "ปล่อยค่าจ้าง"
+                  ของหน้ารอบจ่าย ซึ่งเห็นทุกเคสพร้อมกัน ไม่ต้องเปิดทีละใบ
+                  หน้าเคสเหลือไว้เรื่องงานล้วนๆ: ตารางกะ · รายงานอาการ · ใบแจ้งหนี้ของลูกค้า */}
 
               {/* บันทึกอาการรายครั้ง — ต่างจาก "อาการปัจจุบัน" ด้านบนที่เป็น snapshot ณ วันเปิดเคส */}
               <section>

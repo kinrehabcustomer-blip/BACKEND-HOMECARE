@@ -604,8 +604,13 @@ ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS location_flagged    BOOLEAN NOT
 ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS adjusted_by TEXT
   REFERENCES employees (employee_id) ON DELETE SET NULL ON UPDATE CASCADE;
 
--- ---------- รูปเซลฟี่ตอนเช็คอิน (ไม่บังคับ) ----------
+-- ---------- รูปเซลฟี่ตอนเช็คอิน (บังคับตั้งแต่ ส.ค. 2026) ----------
 -- หลักฐานว่าคนไปจริง (กัน GPS ปลอม) — เก็บ BYTEA ใน DB เหมือนรูปพนักงาน/ใบรับรอง เบราว์เซอร์ย่อก่อนส่ง
+--
+-- คอลัมน์ยังเป็น NULL ได้ ทั้งที่กติกาบังคับให้ถ่ายแล้ว — บังคับที่ checkInSchema (my/schema.js) แทน
+-- เพราะเช็คอินที่เกิดก่อนกติกานี้ไม่มีรูป ใส่ NOT NULL แล้ว migration ล้มทันที
+-- และการไล่ลบ/เติมรูปย้อนหลังให้ผ่าน constraint คือการแก้ประวัติการทำงานจริงเพื่อให้ตรงกับกฎที่เพิ่งตั้ง
+-- ซึ่งแย่กว่าการยอมรับว่ากะเก่าไม่มีรูป (ดูได้จาก has_photo ที่ส่งไปให้หน้า admin อยู่แล้ว)
 ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS check_in_photo_data BYTEA;
 ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS check_in_photo_mime TEXT;
 ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS check_in_photo_size INTEGER;
@@ -1256,3 +1261,116 @@ CREATE INDEX IF NOT EXISTS idx_payroll_lines_item ON payroll_lines (item_id);
 -- DROP ... IF EXISTS จึงเงียบบนฐานใหม่ที่ไม่เคยมีคอลัมน์นี้ (ลบออกจาก CREATE TABLE ข้างบนแล้ว)
 -- ============================================================================
 ALTER TABLE employees DROP COLUMN IF EXISTS base_salary;
+
+-- ============================================================================
+-- ค่าจ้างพนักงาน = "ก้อนเดียวต่อเคส" ไม่ใช่ยอดต่อครั้ง
+--
+-- ของเดิมเอา cases.staff_pay หารด้วยจำนวนกะที่นัดไว้ (เคส 20,000 นัด 10 ครั้ง = ครั้งละ 2,000)
+-- ซึ่งผิดกับวิธีตกลงงานจริง: ราคาที่ตกลงกันคือค่าจ้างของ "งานทั้งชิ้น" ไม่ใช่ค่าแรงรายครั้ง
+-- และการหารทำให้ตัวเลขไม่นิ่ง เพราะตัวหารคือจำนวนกะที่ยังไม่ยกเลิก ซึ่งขยับได้ตลอด —
+-- เพิ่มกะทีหลังยอดของกะที่ทำไปแล้วลดลง · ยกเลิกกะแล้วยอดของกะที่เหลือพองขึ้น
+-- ทั้งสองอย่างเกิดย้อนหลังกับงานที่ทำไปแล้ว โดยไม่มีใครสั่งและไม่มีอะไรฟ้อง
+--
+-- ตารางนี้แทนที่กลไกนั้นด้วยการกระทำที่ชัดเจนหนึ่งครั้ง: ผู้จัดการ "ปล่อยค่าจ้าง" ของเคส
+-- ระบุยอดเอง (ปริยาย = ยอดคงเหลือของเคส) แล้วระบบแบ่งให้ตามจำนวนกะที่แต่ละคนทำจริง
+--
+-- ปล่อยได้หลายครั้งต่อเคส — เคสที่ลากข้ามเดือนจึงทยอยจ่ายได้ ไม่ต้องรอปิดเคสถึงจะได้เงิน
+-- และยอดที่ปล่อยแล้วเป็นตัวเลขตายตัวทันที (amount ในแถวนี้) ไม่คิดสดจากอะไรอีกเลย
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS case_payouts (
+  payout_id     INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  case_id       TEXT NOT NULL REFERENCES cases (case_id) ON DELETE CASCADE ON UPDATE CASCADE,
+
+  -- ผู้รับ เก็บชื่อ ณ ตอนปล่อยคู่กับรหัส แบบเดียวกับสลิป/ใบแจ้งหนี้ (คนรับอาจลาออกทีหลัง)
+  employee_id   TEXT REFERENCES employees (employee_id) ON DELETE SET NULL ON UPDATE CASCADE,
+  employee_name TEXT NOT NULL,
+
+  amount        DOUBLE PRECISION NOT NULL CHECK (amount >= 0),
+  -- ฐานที่ใช้แบ่ง ณ ตอนปล่อย — เก็บไว้อธิบายที่มาของยอด ไม่ได้เอาไปคิดเงินซ้ำ
+  shifts        INTEGER NOT NULL DEFAULT 0 CHECK (shifts >= 0),
+  minutes       INTEGER NOT NULL DEFAULT 0 CHECK (minutes >= 0),
+
+  released_at      TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS'),
+  released_by      TEXT REFERENCES employees (employee_id) ON DELETE SET NULL ON UPDATE CASCADE,
+  released_by_name TEXT,
+  note             TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_case_payouts_case     ON case_payouts (case_id);
+CREATE INDEX IF NOT EXISTS idx_case_payouts_employee ON case_payouts (employee_id, released_at);
+
+-- ---------- งวดที่เท่าไหร่ของเคสนี้ ----------
+--
+-- ค่าจ้างหนึ่งเคสแบ่งจ่ายได้ไม่เกิน 5 งวด (เช่น เคส 20,000 → งวดแรก 7,000 · งวดที่สอง 13,000)
+-- ปกติจ่ายทีเดียวจบ (1 งวด) การซอยเป็นหลายงวดคือกรณีที่ตกลงกันไว้เป็นพิเศษ
+-- เลขงวดนับ "ต่อเคส" ไม่ใช่ต่อคน: การกดปล่อยหนึ่งครั้งสร้างหลายแถว (คนละแถวต่อผู้รับ)
+-- แต่ทุกแถวในครั้งนั้นเป็นงวดเดียวกัน เพราะสิ่งที่ตกลงกันคือ "เคสนี้แบ่งจ่ายกี่ครั้ง"
+-- ไม่ใช่ "คนนี้รับเงินกี่ครั้ง"
+--
+-- ไม่ใส่เพดาน 3 เป็น CHECK ที่ฐานข้อมูล เพราะเคสเก่าที่เกิดก่อนกติกานี้ปล่อยมาแล้วกี่ครั้งก็ได้
+-- (migrate.js ไล่เติมเลขงวดย้อนหลังตามเวลาที่ปล่อย) ถ้าใส่ CHECK ข้อมูลจริงที่มีอยู่จะเข้าไม่ได้
+-- เพดานจึงบังคับที่ชั้นแอป (ดู MAX_INSTALLMENTS ใน cases/repo.js) ซึ่งกันเฉพาะการปล่อยครั้งใหม่
+ALTER TABLE case_payouts ADD COLUMN IF NOT EXISTS installment_no INTEGER NOT NULL DEFAULT 1 CHECK (installment_no >= 1);
+
+CREATE INDEX IF NOT EXISTS idx_case_payouts_installment ON case_payouts (case_id, installment_no);
+
+-- ---------- กำหนดจ่ายของงวด ----------
+--
+-- ผู้จัดการตกลงกับพนักงานว่า "งวดนี้จ่ายวันไหน" ตั้งแต่ตอนปล่อย ไม่ใช่ไปรู้เอาตอนโอนจริง —
+-- เคสที่แบ่งสามงวดคือการนัดจ่ายสามครั้ง ถ้าไม่มีวันนัดติดอยู่กับงวด พนักงานถามได้อย่างเดียวว่า
+-- "เมื่อไหร่จะได้" แล้วไม่มีใครตอบได้จากในระบบเลย
+--
+-- ต่างจาก payroll_runs.pay_date ซึ่งเป็น "วันที่โอนเงินออกไปจริง" ของทั้งรอบ:
+-- อันนี้คือวันที่ตั้งใจไว้ (แผน) อีกอันคือวันที่เกิดขึ้นจริง (ผล) — สองอย่างนี้ไม่ตรงกันได้
+-- และการเก็บแยกกันคือสิ่งเดียวที่ทำให้ตอบได้ว่า "จ่ายช้ากว่านัดไปกี่วัน"
+--
+-- ว่างได้ = ยังไม่ได้นัด (ของเก่าที่ปล่อยก่อนมีช่องนี้ทั้งหมดเป็น NULL ซึ่งถูกต้องตามความจริง)
+ALTER TABLE case_payouts ADD COLUMN IF NOT EXISTS due_date TEXT;
+
+-- ============================================================================
+-- ส่วนแบ่งค่าจ้างที่ตกลงกันไว้ของเคส — "เคสนี้ ใครได้เท่าไหร่"
+--
+-- ค่าจ้างของเคส (cases.staff_pay) คือเงินที่เหลือหลังหักส่วนของบริษัทออกจากค่าบริการแล้ว
+-- (ส่วนของบริษัท = fee - staff_pay ไม่ได้เก็บเป็นช่องของตัวเอง เพราะเลขที่สามที่ต้องคอยให้ตรง
+--  กับอีกสองตัวคือเลขที่ผิดได้เงียบๆ — คำนวณตอนอ่านแล้วมันผิดไม่ได้เลย)
+--
+-- ค่าปริยายคือ "หารเท่ากันทุกคนที่ทำงานในเคส" — สองคนคนละครึ่ง สามคนหารสาม
+-- ตารางนี้มีไว้เก็บ "ข้อตกลงที่ต่างจากนั้น" เท่านั้น เช่น เคสค่าจ้าง 15,000 ที่ตกลงกันว่า
+-- คนที่ลงแรงมากกว่ารับ 9,000 อีกคนรับ 6,000 — เคสที่หารเท่ากันตามปกติจะไม่มีแถวที่นี่เลย
+--
+-- ทำไมไม่เก็บเป็นเปอร์เซ็นต์: คนตกลงกันเป็นบาท ("เธอ 9 พัน ฉัน 6 พัน") ไม่ใช่ 60/40
+-- ถ้าเก็บเป็นสัดส่วนแล้วแปลงกลับ ตัวเลขที่โผล่บนหน้าจอจะไม่ใช่ตัวเลขที่คุยกันไว้
+-- (ผลรวมต้องเท่ากับ staff_pay ตอนตั้ง ถ้าค่าจ้างของเคสถูกแก้ทีหลังจนไม่ตรง หน้าจอจะฟ้องให้ตั้งใหม่)
+--
+-- ข้อตกลงนี้เป็นตัวถ่วงน้ำหนักของทุกงวด ไม่ใช่ของงวดใดงวดหนึ่ง — ปล่อยงวดแรก 7,000
+-- ก็แบ่งตามสัดส่วน 9:6 ของงวดนั้น แล้วงวดถัดไปไล่ชดเชยจนจบเคสได้ 9,000/6,000 พอดี
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS case_pay_shares (
+  case_id     TEXT NOT NULL REFERENCES cases (case_id) ON DELETE CASCADE ON UPDATE CASCADE,
+  -- ลบพนักงานออกจากทะเบียน = ข้อตกลงของเขาหายไปด้วย (ผลรวมจะไม่ตรงแล้วหน้าจอจะฟ้องให้ตั้งใหม่)
+  employee_id TEXT NOT NULL REFERENCES employees (employee_id) ON DELETE CASCADE ON UPDATE CASCADE,
+
+  -- 0 ได้ = ตกลงกันว่าคนนี้ไม่รับค่าจ้างของเคสนี้ (ต่างจาก "ยังไม่ได้ตั้ง" ซึ่งคือไม่มีแถว)
+  share       DOUBLE PRECISION NOT NULL CHECK (share >= 0),
+
+  updated_at      TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS'),
+  updated_by      TEXT REFERENCES employees (employee_id) ON DELETE SET NULL ON UPDATE CASCADE,
+  updated_by_name TEXT,
+
+  PRIMARY KEY (case_id, employee_id)
+);
+
+-- ---------- ยอดที่ปล่อยแล้วก้อนไหน อยู่ในสลิปใบไหน ----------
+-- payout_id เป็น PK = ยอดหนึ่งก้อนเข้าได้รอบเดียวตลอดกาล (ตัวกันจ่ายซ้ำ หลักการเดียวกับ payroll_lines เดิม)
+-- ยกเลิกรอบ = ลบแถวพวกนี้ทิ้ง ยอดจึงกลับเข้ากองรอจ่ายเองโดยอัตโนมัติ
+CREATE TABLE IF NOT EXISTS payroll_payout_lines (
+  payout_id INTEGER PRIMARY KEY REFERENCES case_payouts (payout_id) ON DELETE CASCADE,
+  item_id   INTEGER NOT NULL REFERENCES payroll_items (item_id) ON DELETE CASCADE,
+  amount    DOUBLE PRECISION NOT NULL CHECK (amount >= 0)
+);
+
+CREATE INDEX IF NOT EXISTS idx_payroll_payout_lines_item ON payroll_payout_lines (item_id);
+
+-- ---------- payroll_lines (รายกะ) = ของเดิม เก็บไว้อ่านอย่างเดียว ----------
+-- รอบที่จ่ายไปแล้วก่อนเปลี่ยนวิธีคิด ยังต้องกางดูได้ว่ายอดมาจากกะไหนบ้าง จึงไม่ลบตารางทิ้ง
+-- แต่จะไม่มีแถวใหม่เกิดขึ้นอีก — เส้นทางเงินทั้งหมดย้ายไป case_payouts แล้ว

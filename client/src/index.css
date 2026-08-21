@@ -83,6 +83,28 @@ body {
   background: var(--bg);
 }
 
+/* ไม่มีหน้าไหนในระบบนี้ที่ตั้งใจให้เลื่อนซ้ายขวาทั้งหน้า — ของที่กว้างเกินจอโดยธรรมชาติ
+   (ตารางในโหมดปัด) มีกล่องเลื่อนของตัวเองอยู่แล้วคือ .table-wrap ถ้ามีอะไรหลุดออกมาอีก
+   มันคือบั๊ก ไม่ใช่ความตั้งใจ และอาการของมันบนมือถือคือสิ่งที่ทำให้คนคิดว่าแอปพัง:
+   เลื่อนพลาดนิดเดียวแล้วโลโก้กับหัวข้อหายไปครึ่งหนึ่ง โดยไม่มีทางรู้ว่าต้องเลื่อนกลับ
+
+   ใช้ clip ไม่ใช่ hidden — hidden ทำให้ html/body กลายเป็นกล่องเลื่อน ซึ่งจะทำให้
+   position: sticky ของลูกหลาน (แถบยืนยันท้ายจอ, หัวตาราง) เกาะผิดกล่องแล้วเลิกทำงาน
+   ส่วน clip แค่ตัดทิ้งเฉยๆ ไม่สร้างกล่องเลื่อนใหม่ */
+html,
+body { overflow-x: clip; }
+
+/* Safari ต่ำกว่า 16 (iOS 15 ลงไป ซึ่งยังมีใช้อยู่จริงในเครื่องที่อัปเดตไม่ได้) ไม่รู้จัก clip
+   แล้ว "ไม่รู้จัก" ของ CSS แปลว่าทิ้งทั้งบรรทัด — กฎข้างบนจึงหายไปเงียบๆ ทั้งข้อ
+   ไม่ได้ผลอะไรเลยบนเครื่องที่ต้องการมันที่สุด
+
+   ยอมแลกด้วย hidden เฉพาะเบราว์เซอร์กลุ่มนั้น: sticky บางจุดอาจเพี้ยน แต่แลกกับการที่
+   ทั้งหน้าเลื่อนซ้ายขวาจนโลโก้กับหัวข้อหายไปครึ่งหนึ่ง อย่างหลังแย่กว่ามาก */
+@supports not (overflow-x: clip) {
+  html,
+  body { overflow-x: hidden; }
+}
+
 .app { display: flex; min-height: 100vh; }
 .app-loading { padding: 2.5rem; text-align: center; }
 
@@ -107,7 +129,7 @@ body {
   box-shadow: 0 0.75rem 2rem rgb(0 0 0 / 6%);
 }
 .login-brand { display: flex; flex-direction: column; gap: 2px; margin-bottom: 0.5rem; }
-.login-card h1 { margin: 0; font-size: 1.375rem; }
+.login-card h1 { margin: 0; font-size: 1.375rem; font-weight: 700; line-height: 1.3; letter-spacing: -0.015em; }
 .login-card > .muted { margin-top: -0.5rem; }
 .login-card label {
   display: flex;
@@ -338,7 +360,28 @@ body {
   margin-bottom: 1.375rem;
 }
 .page-head > div { min-width: 0; } /* ให้ข้อความสรุปยาวๆ หดและตัดบรรทัดได้ แทนที่จะดันปุ่มออกนอกจอ */
-.page-head h1 { margin: 2px 0 0.375rem; font-size: 1.5rem; }
+
+/* หัวข้อหน้า — ตั้งที่เดียว ใช้กับทุกหน้า (ทุกหน้าห่อหัวด้วย .page-head เหมือนกันหมด)
+
+   Anuphan เป็นฟอนต์ตัวแปรที่มีแกน opsz: พอขยายถึงขนาดหัวข้อ ตัวอักษรจะกว้างและช่องไฟห่างขึ้นเอง
+   ปล่อยไว้แล้วคำจะอ่านเป็นตัวอักษรที่ลอยห่างกัน ไม่ใช่ก้อนเดียว — บีบ letter-spacing กลับเล็กน้อย
+   (เกณฑ์เดียวกับตัวเลขยอดเงินในระบบที่ใช้ -0.02em)
+
+   ตั้ง font-weight เองแทนการพึ่งค่าปริยายของเบราว์เซอร์ ซึ่งแปลผลกับฟอนต์ตัวแปรไม่เท่ากันทุกเครื่อง */
+.page-head h1 {
+  margin: 0 0 0.25rem;
+  font-size: 1.5rem;
+  font-weight: 700;
+  line-height: 1.3;
+  letter-spacing: -0.015em;
+  /* ทองของแบรนด์ (เฉดเดียวกับโลโก้ KIN) — หัวข้อหน้าเป็นที่เดียวที่ใช้สีนี้กับตัวหนังสือขนาดใหญ่
+     ตัวหนัง 1.5rem/700 ผ่านเกณฑ์ contrast ของ WCAG สำหรับ large text บนพื้นครีมของธีม
+     ที่เหลือในหน้ายังเป็นสีข้อความปกติ ลำดับความสำคัญจึงไม่เพี้ยน */
+  color: var(--brand);
+}
+/* บรรทัดสรุปใต้หัวข้อ — 0.8125rem เล็กเกินไปเมื่อวางคู่กับหัวข้อ 1.5rem
+   สองบรรทัดเลยดูหลุดจากกันแทนที่จะเป็นคู่เดียวกัน */
+.page-head > div > .muted { font-size: 0.875rem; line-height: 1.55; }
 .actions { display: flex; gap: 0.5rem; }
 .muted { color: var(--muted); font-size: 0.8125rem; margin: 0; }
 .mono { font-family: ui-monospace, 'Cascadia Mono', monospace; }
@@ -829,7 +872,7 @@ select option:checked {
   padding: 1.375rem 1.5rem 1rem;
   border-bottom: 1px solid var(--border);
 }
-.modal-head h2 { margin: 2px 0 0.5rem; font-size: 1.25rem; }
+.modal-head h2 { margin: 2px 0 0.5rem; font-size: 1.25rem; font-weight: 700; line-height: 1.3; letter-spacing: -0.015em; }
 .modal-head-actions { display: flex; align-items: flex-start; gap: 0.5rem; flex-shrink: 0; }
 /* ปุ่มทำลายอยู่คนละฝั่งกับปุ่มที่กดกันจริง — ระยะห่างคือสิ่งที่กันการกดพลาด */
 .modal-foot .foot-danger { margin-right: auto; }
@@ -1070,7 +1113,15 @@ select option:checked {
   .hero-card { padding: 1.25rem 1.125rem; }
   .tiles { gap: 0.5rem; }
   .tile { padding: 0.75rem 0.75rem 0.6875rem; }
-  .tile-value { font-size: 1.5rem; }
+  /* ยอดเงินเป็นฟอนต์ mono ตัวโต "฿2,387.50" กว้างเกิน 9rem ที่เป็นความกว้างขั้นต่ำเดิมของไทล์
+     พอเนื้อหาล้นช่องกริด มันดันความกว้างของทั้งหน้าออกไปจนขอบขวาโดนตัด
+
+     ทางแก้คือย่อตัวเลขให้พอดีช่อง ไม่ใช่ให้มันตกบรรทัด — ตัวเลขเงินที่หักกลางเป็น
+     "฿2,387.5" บรรทัดหนึ่งแล้ว "0" อีกบรรทัด อ่านผิดเป็นคนละจำนวนได้ทันที
+     ซึ่งแย่กว่าตัวเลขที่เล็กลงนิดหน่อยมาก (เคยลองแบบตกบรรทัดแล้ว เห็นกับตาว่าอ่านผิด) */
+  .tiles { grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr)); }
+  .tile { min-width: 0; }
+  .tile-value { font-size: clamp(1.125rem, 5.5vw, 1.5rem); }
   /* ป้ายยาวตกสองบรรทัดได้ — จุดสีต้องอยู่แนวเดียวกับบรรทัดแรก ไม่ใช่กลางก้อนข้อความ */
   .tile-label { align-items: flex-start; line-height: 1.35; }
   .tile-label .dot { margin-top: 0.3125rem; }
@@ -1789,6 +1840,19 @@ select option:checked {
     text-align: right;         /* ล้าง text-align: center ของคอลัมน์ที่ 3 เป็นต้นไป */
     background: none;          /* แถวรวมท้ายตารางมีพื้นของตัวเอง — ในการ์ดไม่ต้อง */
     border: none;
+
+    /* ล้าง nowrap + ellipsis ของโหมดตาราง — สามบรรทัดนี้สำคัญพอๆ กับ display: block
+       ในโหมดตาราง มันมีไว้ให้ทุกคอลัมน์กว้างเท่ากันและทุกแถวสูงเท่ากัน (ตัดข้อความที่เกิน
+       ดีกว่าให้คอลัมน์ยืดจนตารางเบี้ยว) แต่ในการ์ด ช่องกว้างเท่าจออยู่แล้วและสูงได้ตามใจ
+       การตัดทิ้งจึงไม่มีเหตุผลรองรับเลย — "ต้นกล้า เก่งกาจ · ทดสอบ ลองดี · CASE-0009"
+       กลายเป็น "…CASE-0…" ซึ่งรหัสเคสคือตัวระบุหลักที่ต้องอ่านออกเสมอ (เหตุผลเดียวกับ
+       min-width ของตารางในโหมดปัด) และ nowrap ที่ค้างอยู่ยังทำให้ข้อความยาวดันความกว้าง
+       ของการ์ดออกไปแทนที่จะตกบรรทัด ซึ่งเป็นที่มาของ "หน้าเลื่อนซ้ายขวาได้" บนมือถือ
+       overflow-wrap: anywhere ปิดท้าย: คำเดียวยาวๆ (อีเมล/ลิงก์) ต้องหักบรรทัดได้ ไม่ใช่ยื่นออกนอกจอ */
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
   /* ป้ายกำกับลอยซ้าย ไม่ใช่ flex item — ค่าในช่องมักเป็นหลายชิ้น (ข้อความ + .muted + .cell-sub)
      ถ้าทำเป็น flex ทุกชิ้นจะกลายเป็น item แยกกันแล้วถูก space-between ดันกระจายคนละมุม
@@ -1814,6 +1878,12 @@ select option:checked {
   .table-cards .name-cell { display: inline-flex; vertical-align: middle; }
   .table-cards .cell-sub { display: inline; margin-top: 0; }
   .table-cards .cell-sub::before { content: ' · '; }
+
+  /* แถวที่กางออกมาไม่ใช่ "ช่องในการ์ด" — มันคือแผงเต็มความกว้างที่มีโครงของตัวเอง
+     กฎการ์ด (บรรทัดรองต่อท้ายด้วย "·") ทำให้สรุปสามบรรทัดในแผงกลายเป็นย่อหน้าเดียวรวด
+     ที่ขึ้นต้นด้วยจุดลอยๆ — คืนค่าเดิมให้ทุกอย่างที่อยู่ในแถวกาง */
+  .table-cards tbody tr.row-expand .cell-sub { display: block; margin-top: 2px; }
+  .table-cards tbody tr.row-expand .cell-sub::before { content: none; }
 
   /* ---- หัวการ์ด ----
      สามช่องนี้คือ "ตัวระบุแถว" ไม่ใช่รายละเอียด — ดึงขึ้นไปไว้บรรทัดบนสุดด้วย order ค่าติดลบ
@@ -1869,10 +1939,24 @@ select option:checked {
   /* ปุ่มจัดการท้ายแถว (หน้าการมาทำงาน) — เต็มความกว้างการ์ด ขนาดพอให้กดด้วยนิ้ว */
   .table.table-cards tbody td.row-actions:not(:empty) {
     display: flex;
+    flex-wrap: wrap;           /* สี่ปุ่มในจอ 375px ต้องได้ตกแถวสอง ไม่ใช่บีบกันจนคำในปุ่มหัก */
     gap: 0.5rem;
     padding-top: 0.625rem;
   }
-  .table-cards tbody td.row-actions .btn { flex: 1; justify-content: center; padding: 0.4375rem 0.5rem; }
+  /* ชื่อปุ่มห้ามตกบรรทัด — ปุ่มที่เขียนว่า "บันทึก / เวลาจริง" สองบรรทัดอ่านเป็นคนละคำสั่ง
+     (การ์ดล้าง white-space: nowrap ของโหมดตารางไปแล้ว จึงต้องสั่งกลับเฉพาะที่ปุ่ม)
+     flex-basis กว้างพอให้ปุ่มยาวสุดในหน้านี้อยู่ได้ทั้งคำ ที่เหลือให้ยืดแบ่งแถวกันเอง */
+  .table-cards tbody td.row-actions .btn {
+    flex: 1 1 7.5rem;
+    justify-content: center;
+    padding: 0.4375rem 0.5rem;
+    white-space: nowrap;
+  }
+
+  /* รหัส (CASE-0009 / EMP-0001) ต้องอยู่เป็นก้อนเดียว — ตกไปทั้งบรรทัดได้ แต่หักกลางรหัสไม่ได้
+     ไม่งั้น overflow-wrap: anywhere ของช่องในการ์ดจะตัดมันเป็น "CASE-" / "0009" คนละบรรทัด
+     ซึ่งอ่านแล้วไม่รู้ว่ารหัสเต็มคืออะไร และก๊อปไปวางต่อก็ไม่ได้ */
+  .table-cards tbody td .mono { white-space: nowrap; }
 
   /* ตารางที่กลายเป็นการ์ดแล้วไม่มีอะไรให้ปัดแนวนอน
      แต่ตารางที่ยังเป็นตารางจริงๆ (เรทแพ็คเกจ ฯลฯ) ยังต้องปัดในกล่องของตัวเอง
@@ -2878,6 +2962,91 @@ select option:checked {
   text-align: right;
 }
 
+/* ---------- แบ่งค่าจ้างของงวดให้พนักงานหลายคน ----------
+   ยอดของงวดอยู่บรรทัดบน ส่วนแบ่งรายคนอยู่ล่าง แล้วปิดท้ายด้วยผลรวมที่ต้องตรงกัน
+   เรียงตามลำดับที่คนกรอกจริง: ตกลงยอดก้อนก่อน แล้วค่อยว่ากันว่าใครได้เท่าไหร่ */
+.pay-release-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem; }
+.pay-release-row > p { margin: 0; }
+
+/* ข้อตกลงส่วนแบ่งของเคส — อยู่เหนือแผงปล่อยเงิน เพราะมันคือของที่ต้องตกลงกันให้จบก่อน
+   ปกติเป็นบรรทัดเดียว (หารเท่ากัน) จึงไม่ควรกินพื้นที่เท่าแผงที่ต้องกรอกจริง */
+/* แถวที่กางออกมาใต้แถวหลักของตาราง (รายเคสของพนักงานคนนั้น)
+   เป็นของแถวข้างบน ไม่ใช่แถวใหม่ — จึงไม่มีความสูงคงที่ ไม่จัดกลาง และตัดข้อความไม่ได้ */
+/* ต้องเขียน .table.table-indexed ด้วย — ในตารางที่มีคอลัมน์ลำดับ กฎ
+   ".table.table-indexed td:first-child { text-align: center }" มี specificity สูงกว่า
+   และแถวที่กางออกมามี td ใบเดียว (colSpan) ซึ่งเป็น first-child พอดี
+   ผลคือทั้งแผงถูกจัดกลางทั้งก้อน — ฟอร์ม ปุ่ม สรุปยอด ลอยอยู่กลางตารางหมด */
+.table tbody tr.row-expand td,
+.table.table-indexed tbody tr.row-expand td {
+  height: auto;
+  padding: 0 0.875rem 0.75rem;
+  text-align: left;
+  white-space: normal;
+  overflow: visible;
+}
+
+/* วันที่จ่ายของรอบ — เหลือช่องเดียวแล้ว ไม่ต้องเป็นกริดอีก */
+.payroll-pay { margin: 0.75rem 0; }
+.payroll-pay label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+.payroll-pay input { max-width: 11rem; }
+
+/* ตัวเลือกจำนวนงวด — บรรทัดเดียวเหนือฟอร์ม เพราะมันคือคำถามที่ตอบก่อนกรอกยอด
+   ("จ่ายทีเดียวหรือซอย") ไม่ใช่ช่องกรอกอีกช่องที่ต้องเติมทุกครั้ง */
+.pay-parts {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+.pay-parts select { width: auto; font-weight: 400; }
+.pay-parts .muted { font-weight: 400; }
+
+/* ฟอร์มปล่อยงวด — ใช้ .grid.cols-2 ของทั้งระบบ (ป้ายบนช่อง ยุบเป็นคอลัมน์เดียวบนจอแคบ)
+   เหลือแค่คุมความกว้างไม่ให้ช่องยืดเต็มตารางกว้างๆ จนดูเหมือนฟอร์มคนละอัน */
+.pay-release-form { margin: 0.625rem 0 0.875rem; max-width: 26rem; }
+.pay-release-form .cell-sub { font-weight: 400; }
+
+/* กล่องย่อยของแผงค่าจ้าง — เรียงลงล่างเสมอ คั่นด้วยเส้นประ
+   ไม่ใช้ .visit-summary เพราะอันนั้นเป็น flex แนวนอนสำหรับ "หัวข้อ + ปุ่ม" บรรทัดเดียว
+   พอเอามาครอบกล่องที่มีสามบล็อกซ้อนกัน บล็อกจะกางไปยืนข้างกันเอง */
+.pay-block { margin-top: 0.875rem; padding-top: 0.875rem; border-top: 1px dashed var(--divider); }
+.pay-block:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+.pay-block > p { margin: 0; }
+.pay-block > .plain-list { margin-top: 0.5rem; }
+
+.pay-agreement > .pay-release-row { margin-top: 0; padding-top: 0; border-top: 0; }
+
+.pay-split { margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px dashed var(--divider); }
+.pay-split > p { margin: 0; }
+
+.pay-split-rows { margin-top: 0.5rem; display: grid; gap: 0.5rem; }
+.pay-split-rows li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+/* ผลรวมกับปุ่มคืนค่าอยู่บรรทัดเดียวกัน — ตัวเลขที่ไม่ตรงกับยอดของงวดคือสิ่งเดียวที่ขวางการกดปล่อย
+   ปุ่มแก้กลับจึงต้องอยู่ติดกับตัวเลขนั้น ไม่ใช่ไปซ่อนอยู่ที่อื่นในแผง */
+.pay-split-sum {
+  margin-top: 0.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
 /* แพ้ยา/แพ้อาหาร — ข้อมูลความปลอดภัย ต้องสะดุดตากว่าช่องอื่นในหน้าเดียวกัน */
 .allergy-alert {
   border-color: var(--danger);
@@ -3130,13 +3299,46 @@ select option:checked {
 .visit-who { flex: 1; min-width: 0; font-size: 0.8125rem; }
 
 /* หน้าการมาทำงาน (admin) */
-.att-tabs { display: flex; gap: 0.5rem; margin-bottom: 1rem; border-bottom: 1px solid var(--border); }
+/* แถบแท็บ: สี่อันไม่พอดีจอ 430px — ให้ปัดในแถบของตัวเองแทนที่จะให้คำในแท็บหักบรรทัด
+   ("รออนุมัติค่า / จ้าง" สองบรรทัดอ่านเป็นคนละคำ และทำให้แถบสูงเป็นสองเท่าโดยเปล่าประโยชน์)
+   ชื่อแท็บย่อไม่ได้มากกว่านี้ — มันคือชื่อขั้นตอนของสายพานเงินซึ่งต้องแยกออกจากกันให้ชัด */
+.att-tabs {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.att-tabs::-webkit-scrollbar { display: none; }
+.att-tab { flex-shrink: 0; white-space: nowrap; }
 .att-tab {
   padding: 0.5rem 0.875rem; border: none; background: none; cursor: pointer;
   color: var(--muted); font-size: 0.875rem; font-weight: 600;
   border-bottom: 2px solid transparent; margin-bottom: -1px;
 }
 .att-tab.is-active { color: var(--brand); border-bottom-color: var(--brand); }
+
+/* ปุ่มทางไปต่อในกล่องว่าง — กล่องว่างที่บอกแค่ "ไม่มีอะไร" คือทางตัน
+   ทุกกล่องว่างในสายพานนี้ควรบอกได้ว่าของที่ค้างอยู่ที่ไหน และขั้นถัดไปคืออะไร */
+.empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-top: 0.875rem;
+}
+
+/* เลขลำดับขั้นบนแท็บ — จางกว่าชื่อแท็บเพราะมันคือข้อมูลกำกับ ไม่ใช่ชื่อ
+   แต่ต้องมี ไม่งั้นสี่ชื่อที่เรียงกันอยู่ไม่ได้บอกว่าอะไรมาก่อนอะไร */
+.tab-step {
+  margin-right: 0.375rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--muted);
+  opacity: 0.75;
+}
+.att-tab.is-active .tab-step { color: var(--brand); opacity: 1; }
 
 /* ตัวเลขงานค้างบนแท็บ — เห็นได้จากแท็บอื่นโดยไม่ต้องกดเข้าไปเช็ค */
 .tab-count {
@@ -3620,14 +3822,36 @@ select option:checked {
   .payroll-actions .btn { min-width: 8.5rem; }
 }
 
-/* ยอดรวมของรอบ — อยู่เหนือรายชื่อเสมอ เพราะเป็นตัวเลขที่ใช้ตัดสินใจก่อนกดเปิด/กดจ่าย */
-.payroll-sum {
-  margin: 0.875rem 0 0.5rem;
-  padding: 0.5rem 0.75rem;
-  border-radius: var(--radius);
-  background: var(--surface-2);
-  font-size: 0.875rem;
+/* ฟอร์มเปิดรอบกับรายละเอียดรอบไม่ครอบกล่องสีอีกแล้ว — คั่นด้วยเส้นบางเส้นเดียวก็พอ
+   หน้านี้มีข้อมูลจริงไม่กี่บรรทัด กล่องพื้นสีเลยกลายเป็นน้ำหนักที่ไม่ได้ช่วยให้อ่านง่ายขึ้น */
+.payroll-open,
+.payroll-detail {
+  margin: 0.5rem 0 1rem;
+  padding: 0.875rem 0 0;
+  border-top: 1px solid var(--border);
 }
+.payroll-note { margin: 0.5rem 0 0; font-size: 0.8125rem; }
+
+/* รหัสรอบกับป้ายสถานะอ่านคู่กัน — อยู่บรรทัดเดียวกัน ไม่แยกเป็นคนละคอลัมน์ */
+.run-id { display: inline-flex; align-items: center; gap: 0.5rem; }
+/* ทับ .table .badge ที่บังคับความกว้าง 6rem ไว้สำหรับคอลัมน์สถานะเดี่ยวๆ —
+   ป้ายที่มาอยู่ในบรรทัดเดียวกับรหัสรอบต้องกว้างเท่าข้อความ ไม่งั้นล้นคอลัมน์จนโดนตัด */
+.run-id .badge { min-width: 0; }
+
+/* ช่องเดียวที่ต้องตัดสินใจตอนเปิดรอบ — ทำให้ใหญ่กว่าช่องกรอกทั่วไปเพราะเป็นของชิ้นเดียวในฟอร์ม */
+.payroll-cutoff { display: flex; flex-direction: column; gap: 0.375rem; max-width: 16rem; font-size: 0.8125rem; font-weight: 600; color: var(--muted); }
+.payroll-cutoff input { font-size: 1rem; font-weight: 400; color: var(--text); }
+
+/* ป้ายชื่อรอบที่ระบบตั้งให้ — ยืนยันกลับไปว่าวันที่เลือกจะกลายเป็นรอบไหน ก่อนกดสร้างจริง */
+.payroll-name { margin: 0.625rem 0 0; font-size: 0.875rem; }
+.payroll-name.is-blocked { color: var(--danger); font-weight: 600; }
+
+/* ตัวเลขที่เห็นเป็นของ "ตอนนี้" หรือ "ตอนที่จ่าย" — คนละความหมาย ต้องอ่านออกจากบรรทัดเดียว */
+.payroll-freshness { margin: 0.25rem 0 0.75rem; font-size: 0.75rem; }
+.payroll-freshness.is-live { color: var(--brand); }
+
+/* ยอดรวมของรอบ — อยู่เหนือรายชื่อเสมอ เพราะเป็นตัวเลขที่ใช้ตัดสินใจก่อนกดเปิด/กดจ่าย */
+.payroll-sum { margin: 0.875rem 0 0.25rem; font-size: 0.875rem; }
 
 /* รายชื่อพนักงานในรอบ — ทีมโตขึ้นเท่าไหร่รายการก็ยาวขึ้นเท่านั้น
    ถ้าปล่อยให้ยืดไปเรื่อยๆ ปุ่ม "เปิดรอบนี้" / "บันทึกการจ่าย" จะถูกดันตกจอไปทุกครั้ง
@@ -3639,12 +3863,128 @@ select option:checked {
   border-top: 1px solid var(--divider);
 }
 .payroll-people .history-item { padding: 0.5rem 0; }
+/* เส้นคั่นเป็นของ "คนหนึ่งคน" ไม่ใช่ของแถวชื่อ — พอกางที่มารายเคส รายการเคสต้องอยู่เหนือเส้น
+   ไม่ใช่หลุดไปอยู่ใต้เส้นจนดูเหมือนเป็นของคนถัดไป */
+.payroll-people .payroll-person { padding-bottom: 0.25rem; }
+.payroll-people .payroll-person:not(:last-child) { border-bottom: 1px dashed var(--divider); }
+.payroll-people .payroll-person .history-item { border-bottom: 0; }
 .payroll-people-end { display: flex; align-items: center; gap: 0.625rem; flex-shrink: 0; }
+
+/* flex item ปริยายคือ min-width: auto = "ห้ามแคบกว่าเนื้อหาของตัวเอง" ชื่อผู้รับบริการยาวๆ
+   หรือยอดเงินหลายหลักจึงไม่ยอมตกบรรทัด แล้วไปดันความกว้างของหน้าจนขอบขวาโดนตัดบนมือถือ
+   สั่ง min-width: 0 คือการบอกว่า "ยุบได้ ตกบรรทัดเอา" ซึ่งเป็นสิ่งที่ควรเกิดกับข้อความเสมอ */
+.payroll-people .history-item > div:first-child,
+.pay-release-row > p,
+.pay-split-rows li > span:first-child,
+.payroll-item-cases li > span:first-child { min-width: 0; overflow-wrap: anywhere; }
+
+/* รหัสรอบกับป้ายสถานะอยู่บรรทัดเดียวกันเมื่อมีที่ ไม่มีที่ก็ตกบรรทัด แทนที่จะยื่นออกนอกการ์ด */
+.run-id { flex-wrap: wrap; }
+
+/* ---------- แท็บปล่อยค่าจ้าง ----------
+   แผงของเคสที่กางออกมา ต้องดูเป็น "ของที่ห้อยอยู่ใต้แถวนี้" ไม่ใช่ก้อนใหม่ที่ลอยมา
+   เยื้องเข้าไปพร้อมเส้นข้าง = กติกาเดียวกับรายการที่มารายเคสในรอบจ่าย */
+.case-pay {
+  margin: 0.5rem 0 0.75rem;
+  padding-left: 0.75rem;
+  border-left: 2px solid var(--divider);
+}
+/* .payroll-people มี max-height + overflow-y เพื่อให้รายชื่อ "ในรอบหนึ่งรอบ" เลื่อนในกล่องตัวเอง
+   (ปุ่มจ่ายจะได้ไม่ตกจอเมื่อทีมมีสามสิบคน) — แต่คิวเคสไม่ใช่รายการที่มีปุ่มรออยู่ข้างล่าง
+   มันคือเนื้อหาหลักของแท็บ และแต่ละแถวยังกางแผงจัดการออกมาได้อีก ยัดไว้ในกล่องสูง 30vh
+   แปลว่าแผงที่กางออกมาถูกขังอยู่ในช่องเล็กๆ ที่ต้องเลื่อนสองชั้นซ้อนกัน */
+.payroll-people.pay-queue { max-height: none; overflow-y: visible; padding-right: 0; }
+.pay-queue .payroll-person { padding-bottom: 0.5rem; }
+
+/* ช่องติ๊กที่อยู่ในบรรทัดเดียวกับข้อความกำกับ — ทั้งบรรทัดกดได้เพราะเป็น <label> */
+.check-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8125rem;
+  color: var(--muted);
+  cursor: pointer;
+}
+.check-inline input { margin: 0; }
+
+/* ---------- ที่มาของยอด: รายเคสใต้ยอดรวม ----------
+   ใช้ <ul> เพราะมันเป็นรายการจริงๆ แต่จุดนำหน้ากับย่อหน้าซ้ายของเบราว์เซอร์
+   ไม่ได้ช่วยอะไรกับแถวตัวเลขเงินที่มีสองฝั่งอยู่แล้ว */
+.plain-list { list-style: none; margin: 0; padding: 0; }
+
+/* ชื่อคนเป็นปุ่มกางรายละเอียด ไม่ใช่ลิงก์ที่พาไปไหน — หน้าตาจึงเหมือนข้อความเดิมทุกอย่าง
+   บอกว่ากดได้ตอนชี้เท่านั้น ถ้าทำให้เป็นสีลิงก์ตลอดเวลา ทั้งรอบจะกลายเป็นทะเลสีน้ำเงิน */
+.linkish {
+  appearance: none;
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.linkish:hover strong { color: var(--brand); }
+
+/* ขนาดตัวอักษรของรายการที่มา/ส่วนแบ่ง ต้องเท่ากับข้อความรอบๆ ในแผงเดียวกัน
+   รายการเคสหลุดออกมาเป็นพี่น้องของแถวชื่อแล้ว จึงไม่ได้ขนาดจาก .history-item อีกต่อไป
+   ปล่อยไว้มันจะกลายเป็น 1rem ซึ่งใหญ่กว่าชื่อคนที่มันห้อยอยู่ใต้ — อ่านแล้วสลับลำดับความสำคัญกัน */
+.payroll-item-cases,
+.pay-split-rows { font-size: 0.8125rem; }
+
+.payroll-item-cases { margin-top: 0.5rem; display: grid; gap: 0.375rem; }
+.payroll-item-cases li {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding-left: 0.625rem;
+  border-left: 2px solid var(--divider);
+}
+.payroll-item-cases li > span:last-child { text-align: right; flex-shrink: 0; }
 
 @media (max-width: 600px) {
   /* จอเตี้ยกว่าและมีช่องกรอกสามช่องเรียงลงมาแล้ว — ให้รายชื่อกินไม่เกินราวหนึ่งในสามของจอ
      ปุ่มที่ต้องกดจริงจะได้อยู่ในระยะที่เลื่อนนิดเดียวก็ถึง ไม่ใช่ต้องไถผ่านทั้งทีม */
   .payroll-people { max-height: 30vh; }
+}
+
+/* ---------- จอแคบ: แถวสองฝั่งของเรื่องเงิน เลิกยืนข้างกัน ----------
+
+   ต้องอยู่ท้ายไฟล์ด้วยเหตุผลเดียวกับบล็อกลดการเคลื่อนไหวข้างล่าง: media query ไม่เพิ่ม specificity
+   กฎฐานของแผงพวกนี้ (.pay-split-sum, .payroll-item-cases, .history-item) อยู่ล่างกว่าบล็อกมือถือหลัก
+   ถ้าเขียนไว้ในนั้นจะโดนทับทั้งชุดโดยไม่มีอะไรฟ้อง — เคยพลาดมาแล้วครั้งหนึ่งตอนทำหน้านี้
+
+   ฝั่งซ้ายเป็นชื่อคน/ชื่อเคสซึ่งยาวได้เรื่อยๆ ฝั่งขวาเป็นตัวเลขหรือช่องกรอก พอบีบให้อยู่ข้างกัน
+   ในจอ 400px ทั้งสองฝั่งแคบจนอ่านไม่ออกพร้อมกัน — ชื่อตกสามบรรทัด ส่วนตัวเลขไปกองมุมขวา
+   ห่างจากชื่อที่มันอธิบาย ซ้อนกันแล้วแต่ละอย่างได้เต็มความกว้าง และตัวเลขยังชิดขวา
+   จึงยังกวาดตาอ่านเป็นคอลัมน์เงินได้เหมือนเดิม */
+@media (max-width: 600px) {
+  .payroll-item-cases li,
+  .pay-split-rows li,
+  .pay-release-row,
+  .pay-split-sum {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.375rem;
+  }
+  .pay-split-rows .visit-pay-input,
+  .pay-release-row .visit-pay-input { width: 100%; }
+
+  /* ปุ่มของแผงข้อตกลงส่วนแบ่ง — สองปุ่มที่ถูกบีบจนคำในปุ่มตกบรรทัด ("กลับไป / หารเท่า / กัน")
+     อ่านยากกว่าปุ่มเต็มความกว้างสองปุ่มเรียงกัน และเป็นเป้าที่นิ้วกดพลาดง่ายกว่าด้วย */
+  .pay-agreement .pick-actions,
+  .pay-split-sum .pick-actions { width: 100%; }
+  .pay-agreement .pick-actions .btn,
+  .pay-split-sum .pick-actions .btn { flex: 1; }
+
+  /* รายเคสที่กางออกมาเป็น <tr> ของตัวเอง ซึ่งในโหมดการ์ดจะกลายเป็นการ์ดใบใหม่ —
+     ดึงขึ้นไปเชื่อมกับการ์ดของคนนั้น ไม่งั้นอ่านเป็นเคสของคนถัดไป */
+  .table-cards tbody tr.row-expand {
+    margin-top: -0.625rem;
+    border-top: 0;
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+  }
 }
 
 /* ---------- ลดการเคลื่อนไหว ----------
@@ -3671,4 +4011,60 @@ select option:checked {
   flex-shrink: 0;
   vertical-align: -0.14em;
   margin-right: 0.2em;
+}
+
+/* ---------- หน้าค่าตอบแทน: แถบสรุปเหนือรายการรอบ ---------- */
+
+/* บรรทัดที่สามใต้ตัวเลขนำ — .hero เดิมมีแค่ป้ายกับตัวเลข (หน้าพนักงานไม่ต้องการบรรทัดนี้)
+   หน้าผู้จัดการต้องบอกต่อว่า "แล้วยังไง" เพราะ ฿0 กับ ฿12,000 นำไปสู่การกระทำคนละอย่าง */
+.hero-sub { margin-top: 0.375rem; font-size: 0.8125rem; }
+
+/* ตัวหารของ "รอบที่เปิดไปแล้ว/เพดาน" — เล็กกว่าตัวเศษ เพราะเพดานเป็นบริบท ไม่ใช่ตัวเลขที่ต้องอ่าน
+   คลาสของตัวเอง ไม่ใช้ .tile-of ซ้ำ — อันนั้นเป็นคำต่อท้ายแบบ " ของทั้งหมด" ของหน้าภาพรวม
+   ซึ่งถูกซ่อนบนจอแคบเพื่อประหยัดที่ ตัวหารของเราหายไปด้วยไม่ได้ (เหลือ "2" เฉยๆ = คนละความหมาย) */
+.tile-frac { font-size: 1rem; font-weight: 600; color: var(--muted); }
+
+/* แบนเนอร์ระดับหน้า — ไม่ใช้ .stale-tag เพราะอันนั้นเป็นป้ายเล็กที่ห้อยท้ายค่าในตาราง
+   (margin ของมันเป็น !important จึงเว้นระยะของตัวเองไม่ได้ด้วย) เรื่องที่บอกคือ
+   "มีเงินที่ยังไม่ถึงพนักงาน" ซึ่งใหญ่พอที่จะมีกล่องของตัวเอง ไม่ใช่ตัวหนังสือลอยๆ */
+.payroll-alert {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0 0 1rem;
+  padding: 0.625rem 0.875rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 7%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
+  border-radius: var(--radius);
+}
+
+/* แถบคำอธิบาย + ปุ่มเปิดรอบ — ข้อความยาวกว่าปุ่มมาก ถ้าไม่ดันปุ่มไปชิดขวา
+   สองอย่างนี้จะลอยอยู่กลางแถบโดยไม่มีแนวอะไรร่วมกัน */
+.payroll-bar { justify-content: space-between; }
+.payroll-bar .tab-hint { margin: 0; flex: 1; min-width: 14rem; }
+
+@media (max-width: 600px) {
+  /* จอแคบ: ปุ่มเปิดรอบเป็นการกระทำหลักของแท็บนี้ — ให้เต็มความกว้างแทนที่จะเบียดท้ายข้อความ */
+  .payroll-bar .btn { width: 100%; justify-content: center; }
+}
+
+/* คำอธิบายบรรทัดที่สองในแบนเนอร์ — สีอ่อนกว่าและไม่หนา เพราะเป็นการแก้ความเข้าใจผิด
+   ไม่ใช่ตัวคำเตือนเอง (ถ้าหนาเท่ากันทั้งสองบรรทัด จะไม่รู้ว่าอันไหนคือสิ่งที่ต้องทำ) */
+.payroll-alert-sub { display: block; margin-top: 0.1875rem; font-weight: 400; opacity: 0.85; }
+/* ลิงก์ท้ายแบนเนอร์ — ดันไปชิดขวาและไม่ให้หดตามข้อความที่ยาวขึ้น */
+.payroll-alert > .link { margin-left: auto; flex-shrink: 0; white-space: nowrap; }
+/* ไอคอนอยู่แนวเดียวกับบรรทัดแรก ไม่ใช่กลางก้อนข้อความสองบรรทัด */
+.payroll-alert { align-items: flex-start; }
+.payroll-alert > .text-ico { margin-top: 0.125rem; flex-shrink: 0; }
+/* ก้อนข้อความยืดเต็มที่เหลือ — ไม่งั้นตอนตกบรรทัด (จอแคบ) มันจะหลุดลงไปทั้งก้อน
+   ทิ้งไอคอนไว้บนบรรทัดของตัวเองโดดๆ ซึ่งอ่านเหมือนสัญลักษณ์ที่ไม่ได้หมายถึงอะไร */
+.payroll-alert > span { flex: 1; min-width: 0; }
+
+@media (max-width: 600px) {
+  /* จอแคบ: ลิงก์ลงบรรทัดใหม่เต็มความกว้าง แทนที่จะบีบข้อความจนตกหลายบรรทัด */
+  .payroll-alert { flex-wrap: wrap; }
+  .payroll-alert > .link { margin-left: 0; }
 }

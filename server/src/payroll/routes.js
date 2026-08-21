@@ -5,9 +5,12 @@ import {
   payRunSchema,
   previewQuerySchema,
   listQuerySchema,
+  employeeCasesQuerySchema,
   PAYROLL_STATUSES,
 } from './schema.js';
 import { ApiError, asyncRoute, notFound } from '../lib/errors.js';
+import { canSeeStaffPay } from '../lib/auth.js';
+import * as cases from '../cases/repo.js';
 
 export const payrollRouter = Router();
 
@@ -31,19 +34,56 @@ payrollRouter.param('id', (req, res, next, id) => {
 payrollRouter.get('/meta', (req, res) => res.json({ statuses: PAYROLL_STATUSES }));
 
 /**
+ * คิวค่าจ้าง — เคสที่มีเงินให้จัดการ พร้อมสถานะการปล่อยของแต่ละใบ
+ *
+ * อยู่ที่โมดูล payroll ไม่ใช่ cases เพราะมันเป็นมุมมองของ "คนทำเรื่องเงิน" ไม่ใช่ของตัวเคสเอง —
+ * เคสหนึ่งใบไม่รู้จักคิวนี้ แต่หน้ารอบจ่ายต้องเห็นทุกใบพร้อมกันเพื่อไล่ปล่อยทีเดียวจบ
+ * (ต้องอยู่เหนือ '/:id' ไม่งั้นโดนจับเป็นรหัสรอบ — กติกาเดียวกับ '/preview')
+ */
+/**
+ * เคสทั้งหมดที่พนักงานคนหนึ่งลงแรงในเดือนนั้น พร้อมค่าจ้างของแต่ละใบ
+ *
+ * ที่มาของยอดในแท็บสรุป — ตัวเลขรวมต่อคนตอบได้แค่ว่า "ได้เท่าไหร่" แต่คำถามถัดมาเสมอคือ
+ * "มาจากเคสไหนบ้าง" ซึ่งเดิมตอบได้เฉพาะฝั่งพนักงาน (หน้าค่าตอบแทนของฉัน) ส่วนผู้จัดการ
+ * ที่ต้องตอบคำถามนี้เวลาถูกถามจริงๆ กลับไม่มีที่ให้กาง
+ *
+ * ใช้ตัวคำนวณตัวเดียวกับฝั่งพนักงาน (payoutCases) ตัวเลขสองหน้าจึงตรงกันเสมอโดยไม่ต้องคอยไล่ให้ตรง
+ */
+payrollRouter.get(
+  '/employee-cases',
+  asyncRoute(async (req, res) => {
+    if (!canSeeStaffPay(req.user?.position)) {
+      throw new ApiError(403, 'เฉพาะผู้จัดการเท่านั้นที่ดูค่าจ้างรายเคสได้');
+    }
+    const { month, employee_id } = employeeCasesQuerySchema.parse(req.query);
+    res.json(await cases.payoutCases(month, employee_id));
+  }),
+);
+
+payrollRouter.get(
+  '/case-queue',
+  asyncRoute(async (req, res) => {
+    if (!canSeeStaffPay(req.user?.position)) {
+      throw new ApiError(403, 'เฉพาะผู้จัดการเท่านั้นที่ดูค่าจ้างของเคสได้');
+    }
+    res.json(await cases.payQueue());
+  }),
+);
+
+/**
  * ดูก่อนเปิดรอบว่าจะได้ใครบ้าง เท่าไหร่ — ต้องอยู่เหนือ '/:id' ไม่งั้นโดนจับเป็นรหัสรอบ
- * unpriced = กะที่อนุมัติแล้วแต่ยังไม่มีค่าจ้าง จึงไม่ถูกกวาดเข้ารอบ (ต้องเห็นก่อนกดสร้าง
- * ไม่ใช่มารู้ทีหลังว่าทำไมยอดของบางคนหายไป)
+ * unreleased_cases = เคสที่ทำงานจบและอนุมัติกะแล้ว แต่ผู้จัดการยังไม่กดปล่อยค่าจ้าง จึงไม่มีอะไรให้กวาด
+ * (ต้องเห็นก่อนกดสร้าง ไม่ใช่มารู้ทีหลังว่าทำไมยอดของบางคนหายไป)
  */
 payrollRouter.get(
   '/preview',
   asyncRoute(async (req, res) => {
     const { period_to } = previewQuerySchema.parse(req.query);
-    const [rows, unpriced] = await Promise.all([
+    const [rows, unreleased] = await Promise.all([
       repo.preview(period_to),
-      repo.unpricedShifts(period_to),
+      repo.unreleasedCases(period_to),
     ]);
-    res.json({ period_to, rows, unpriced_shifts: unpriced });
+    res.json({ period_to, rows, unreleased_cases: unreleased });
   }),
 );
 
@@ -53,24 +93,25 @@ payrollRouter.get(
 );
 
 /**
- * เปิดรอบจ่าย — ระบบกวาดกะที่อนุมัติแล้วและยังไม่เคยถูกจ่ายเข้ามาให้เอง
- *
- * กันรอบซ้ำที่นี่ด้วย ไม่ปล่อยให้ไปชน UNIQUE index แล้วได้ข้อความ "ข้อมูลนี้ซ้ำกับที่มีอยู่แล้ว"
- * ซึ่งไม่บอกว่าไปซ้ำกับรอบไหน คนกดต้องไล่หาเอง
+ * เปิดรอบจ่าย — กรอกแค่วันตัดรอบ ระบบตั้งชื่อรอบ (เดือน + รอบที่) ให้เอง
+ * แล้วกวาดค่าจ้างทุกก้อนที่ปล่อยแล้วและยังไม่เคยถูกจ่ายเข้ามา
  */
 payrollRouter.post(
   '/',
   asyncRoute(async (req, res) => {
     const input = createRunSchema.parse(req.body);
 
-    const existing = await repo.list({ month: input.period_month });
-    const clash = existing.find((r) => r.round_no === input.round_no && r.status !== 'cancelled');
-    if (clash) {
-      throw new ApiError(
-        409,
-        `เดือน ${input.period_month} มีรอบที่ ${input.round_no} อยู่แล้ว (${clash.run_id})`,
-        { existing_run_id: clash.run_id },
-      );
+    // ตัดรอบล่วงหน้าไม่ได้ — งานที่ยังไม่เกิดจ่ายไม่ได้ และกะในอนาคตยังไม่มีทางเช็คเอาท์
+    if (input.period_to > TODAY()) {
+      throw new ApiError(400, 'วันตัดรอบต้องไม่เกินวันนี้');
+    }
+
+    /* เดือนหนึ่งแบ่งจ่ายได้ไม่เกิน 3 รอบ (ไม่นับรอบที่ยกเลิก) — บอกให้ชัดว่าตอนนี้กี่รอบแล้ว
+       ไม่ใช่แค่ปฏิเสธเฉยๆ ให้คนกดต้องไปนับเอง */
+    const month = input.period_to.slice(0, 7);
+    const used = await repo.roundsInMonth(month);
+    if (used >= 3) {
+      throw new ApiError(409, `เดือน ${month} เปิดครบ 3 รอบแล้ว — ถ้าจะเปิดเพิ่มต้องยกเลิกรอบใดรอบหนึ่งก่อน`);
     }
 
     res.status(201).json(await repo.createRun(input, req.user));
@@ -79,30 +120,30 @@ payrollRouter.post(
 
 payrollRouter.get('/:id', (req, res) => res.json(req.run));
 
-/** กะทั้งหมดที่อยู่ในสลิปใบหนึ่ง — ที่มาของยอด */
+/** ค่าจ้างทุกก้อนที่อยู่ในสลิปใบหนึ่ง — ที่มาของยอด (หนึ่งบรรทัด = ค่าจ้างหนึ่งก้อนของหนึ่งเคส) */
 payrollRouter.get(
-  '/:id/items/:itemId/visits',
+  '/:id/items/:itemId/payouts',
   asyncRoute(async (req, res) => {
     const item = await repo.findItem(req.params.itemId);
     if (!item || item.run_id !== req.params.id) throw notFound('ไม่พบสลิปใบนี้ในรอบที่ระบุ');
-    res.json(await repo.itemVisits(req.params.itemId));
+    res.json(await repo.itemPayouts(req.params.itemId));
   }),
 );
 
 /**
- * ดึงกะใหม่ทั้งรอบ — ใช้ตอนอนุมัติกะเพิ่มหลังเปิดรอบไปแล้ว
+ * ดึงยอดใหม่ทั้งรอบ — ใช้ตอนปล่อยค่าจ้างเพิ่มหลังเปิดรอบไปแล้ว
  * ล้างของเดิมทิ้งแล้วกวาดใหม่ทั้งหมด คนที่ถูกเอาออกจากรอบไปก่อนหน้านี้จะกลับมาด้วย
  */
 payrollRouter.post(
   '/:id/rebuild',
   asyncRoute(async (req, res) => {
-    if (!editable(req.run)) throw new ApiError(409, 'รอบที่จ่าย/ยกเลิกแล้วดึงกะใหม่ไม่ได้');
+    if (!editable(req.run)) throw new ApiError(409, 'รอบที่จ่าย/ยกเลิกแล้วดึงยอดใหม่ไม่ได้');
     res.json(await repo.rebuild(req.params.id, req.run.period_to));
   }),
 );
 
 /**
- * เอาคนออกจากรอบนี้ (ยังไม่จ่ายให้รอบนี้) — กะของเขากลับเข้ากองรอจ่ายทันที
+ * เอาคนออกจากรอบนี้ (ยังไม่จ่ายให้รอบนี้) — ค่าจ้างของเขากลับเข้ากองรอจ่ายทันที
  * จึงไปโผล่ในรอบถัดไปเองโดยไม่ต้องจำ ไม่ใช่การตัดสิทธิ์
  */
 payrollRouter.delete(
@@ -134,8 +175,8 @@ payrollRouter.post(
 );
 
 /**
- * ยกเลิกรอบ — รอบยังอยู่เป็นประวัติ แต่กะทั้งหมดกลับเข้ากองรอจ่าย
- * ใช้กับรอบที่จ่ายผิด/จ่ายไม่ครบด้วย: กะที่ถูกปลดจะไปโผล่ในรอบถัดไปเอง ไม่มีทางตกหล่น
+ * ยกเลิกรอบ — รอบยังอยู่เป็นประวัติ แต่ค่าจ้างทุกก้อนกลับเข้ากองรอจ่าย
+ * ใช้กับรอบที่จ่ายผิด/จ่ายไม่ครบด้วย: ก้อนที่ถูกปลดจะไปโผล่ในรอบถัดไปเอง ไม่มีทางตกหล่น
  */
 payrollRouter.post(
   '/:id/cancel',

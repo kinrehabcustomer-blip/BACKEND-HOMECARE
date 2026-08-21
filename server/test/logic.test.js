@@ -20,7 +20,8 @@ process.env.JWT_SECRET ||= 'x'.repeat(48);
 
 const { adjustVisitSchema, bulkVisitSchema, visitRangeSchema, createReportSchema, hasReportContent, REPORT_CONTENT_FIELDS } = await import('../src/cases/schema.js');
 const { createRunSchema } = await import('../src/payroll/schema.js');
-const { withVisitState } = await import('../src/cases/repo.js');
+const { checkInSchema } = await import('../src/my/schema.js');
+const { withVisitState, allocateShares, weightsFor, MAX_INSTALLMENTS } = await import('../src/cases/repo.js');
 const { distanceMeters, DEFAULT_GEOFENCE_M } = await import('../src/lib/geo.js');
 const { roleForPosition, canSeeStaffPay, stripPayFields, BLOCKED_STATUSES } = await import('../src/lib/auth.js');
 const { errorHandler, ApiError } = await import('../src/lib/errors.js');
@@ -421,24 +422,364 @@ describe('REPORT_CONTENT_FIELDS — เส้นแบ่ง "เนื้อห
 });
 
 describe('createRunSchema — รอบจ่ายค่าตอบแทน', () => {
-  const ok = { period_month: '2026-08', round_no: 2, period_to: '2026-08-31' };
-
-  test('รอบปกติผ่าน', () => {
-    assert.equal(createRunSchema.safeParse(ok).success, true);
+  test('กรอกแค่วันตัดรอบก็เปิดรอบได้', () => {
+    assert.equal(createRunSchema.safeParse({ period_to: '2026-08-31' }).success, true);
   });
 
-  test('เดือนหนึ่งแบ่งจ่ายได้ 1–3 รอบเท่านั้น', () => {
-    for (const n of [1, 2, 3]) assert.equal(createRunSchema.safeParse({ ...ok, round_no: n }).success, true);
-    for (const n of [0, 4, 12]) assert.equal(createRunSchema.safeParse({ ...ok, round_no: n }).success, false);
+  test('ไม่มีวันตัดรอบ = เปิดไม่ได้ — เป็นข้อมูลชิ้นเดียวที่รอบต้องมี', () => {
+    assert.equal(createRunSchema.safeParse({}).success, false);
   });
 
-  test('วันตัดรอบก่อนเดือนของรอบถูกปฏิเสธ — รอบแบบนั้นไม่มีทางมีกะของเดือนตัวเองเลย', () => {
-    const r = createRunSchema.safeParse({ ...ok, period_to: '2026-07-31' });
+  test('รูปแบบวันที่ผิดถูกปฏิเสธพร้อมบอกชื่อช่อง', () => {
+    const r = createRunSchema.safeParse({ period_to: '2026-8-1' });
     assert.equal(r.success, false);
     assert.deepEqual(r.error.issues[0].path, ['period_to']);
   });
 
-  test('วันตัดรอบหลังเดือนของรอบยังผ่าน — รอบกวาดกะตกค้างข้ามเดือนได้ตามนิยาม', () => {
-    assert.equal(createRunSchema.safeParse({ ...ok, period_to: '2026-09-05' }).success, true);
+  /* เดือนกับเลขรอบเป็นของที่ระบบตั้งเองจากวันตัดรอบ (ดู createRun) — ส่งมาก็ต้องไม่มีผล
+     ถ้าวันหนึ่งมีใครเผลอเปิดช่องพวกนี้ให้กรอกอีก ป้ายชื่อรอบจะหลุดจากสิ่งที่รอบกวาดมาจริงทันที */
+  test('เดือน/รอบที่ ที่ส่งมาเองถูกตัดทิ้ง ไม่ใช้เป็นค่าของรอบ', () => {
+    const r = createRunSchema.parse({ period_to: '2026-08-31', period_month: '2026-01', round_no: 9 });
+    assert.deepEqual(Object.keys(r).filter((k) => r[k] !== undefined), ['period_to']);
+  });
+
+  test('วันตัดรอบข้ามเดือนได้ — รอบกวาดกะตกค้างจากเดือนก่อนมาด้วยตามนิยาม', () => {
+    assert.equal(createRunSchema.safeParse({ period_to: '2026-09-05' }).success, true);
+  });
+});
+
+describe('checkInSchema — เช็คอินต้องมีรูปเซลฟี่', () => {
+  const photo = 'data:image/jpeg;base64,/9j/4AAQSkZJRg=';
+
+  /* รูปคือหลักฐานชิ้นเดียวที่พนักงานคุมเองได้และปลอมยากกว่าพิกัด — ถ้าเผลอเปิดให้เว้นว่างอีก
+     กะที่น่าสงสัยจะเหลือแค่ GPS ให้ตรวจ ซึ่งคลาดเองได้หลายสิบเมตรจนธงนอกพื้นที่ไม่มีความหมาย */
+  test('ไม่ส่งรูปมา = เช็คอินไม่ได้ พร้อมบอกว่าต้องทำอะไร', () => {
+    const r = checkInSchema.safeParse({ lat: 13.7, lng: 100.5 });
+    assert.equal(r.success, false);
+    assert.deepEqual(r.error.issues.at(-1).path, ['photo']);
+    assert.match(r.error.issues.at(-1).message, /ถ่ายรูป/);
+  });
+
+  test('ส่ง null มาก็ไม่ผ่าน (ค่าว่างที่ตั้งใจ ไม่ใช่ข้อยกเว้น)', () => {
+    assert.equal(checkInSchema.safeParse({ photo: null }).success, false);
+  });
+
+  test('ไฟล์ที่ไม่ใช่รูปถูกปฏิเสธด้วยข้อความคนละอันกับตอนไม่ส่งรูป', () => {
+    const r = checkInSchema.safeParse({ photo: 'data:text/plain;base64,aGVsbG8=' });
+    assert.equal(r.success, false);
+    assert.match(r.error.issues[0].message, /รูปภาพ/);
+  });
+
+  /* GPS ไม่บังคับโดยตั้งใจ — พนักงานคุมกล้องได้ แต่คุมสัญญาณ/สิทธิ์ตำแหน่งไม่ได้
+     บล็อกเพราะ GPS = กันคนที่ไปทำงานจริงออกจากระบบ (กะแบบนั้นถูกติดธงให้ตรวจแทนอยู่แล้ว) */
+  test('มีรูปแต่ไม่มีพิกัด = ยังเช็คอินได้', () => {
+    assert.equal(checkInSchema.safeParse({ photo }).success, true);
+  });
+});
+
+// ---------- แบ่งค่าจ้างของงวดให้ผู้รับ ----------
+describe('allocateShares — เคสที่มีพนักงานคนเดียว', () => {
+  /* เคสตัวอย่างของกติกานี้: ยอดเหมา 20,000 ตกลงจ่ายสองงวด 7,000 แล้ว 13,000
+     ผู้รับคนเดียวจึงต้องได้เต็มยอดของงวดนั้นเป๊ะ ไม่ใช่ตัวเลขที่ถูกเกลี่ยจนเพี้ยน */
+  test('ได้เต็มยอดของงวด', () => {
+    const rows = allocateShares([{ employee_id: 'EMP-0001', shifts: 8, paid: 0 }], 7000);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].amount, 7000);
+  });
+
+  test('งวดที่สองก็ยังได้เต็ม — ของที่ได้ไปแล้วไม่ถูกหักซ้ำ', () => {
+    const rows = allocateShares([{ employee_id: 'EMP-0001', shifts: 10, paid: 7000 }], 13000);
+    assert.equal(rows[0].amount, 13000);
+  });
+
+  /* กะไม่ใช่ประตูของเงินอีกแล้ว — คนที่ยังไม่เคยเช็คอินเลยก็รับค่าจ้างของเคสได้
+     (พนักงานลืมเช็คอินทั้งเคสเกิดขึ้นจริง และไม่ควรแปลว่าเขาทำงานฟรี)
+     สิ่งเดียวที่ทำให้แบ่งไม่ได้คือ "ไม่มีใครอยู่ในเคสเลย" ซึ่งแปลว่าไม่รู้จะจ่ายให้ใคร */
+  test('ยังไม่เคยเช็คอินเลยก็ยังได้เต็มยอดของงวด', () => {
+    const rows = allocateShares([{ employee_id: 'A', shifts: 0, paid: 0 }], 5000);
+    assert.equal(rows[0].amount, 5000);
+  });
+
+  test('ไม่มีใครอยู่ในเคสเลย = ไม่แบ่งให้ใคร ไม่ใช่ NaN จากการหารศูนย์', () => {
+    assert.deepEqual(allocateShares([], 5000), []);
+  });
+
+  test('ข้อมูลอื่นของผู้รับติดไปด้วย — ตอนบันทึกต้องรู้ชื่อและนาทีที่ทำ', () => {
+    const rows = allocateShares(
+      [{ employee_id: 'A', employee_name: 'สมชาย', shifts: 2, minutes: 480, paid: 0 }],
+      1000,
+    );
+    assert.equal(rows[0].employee_name, 'สมชาย');
+    assert.equal(rows[0].minutes, 480);
+  });
+});
+
+describe('allocateShares — เคสที่มีพนักงานหลายคน (ค่าปริยาย: หารเท่ากัน)', () => {
+  const sum = (rows) => Math.round(rows.reduce((s, r) => s + r.amount, 0) * 100) / 100;
+  const of = (rows, id) => rows.find((r) => r.employee_id === id).amount;
+
+  /* หัวใจของกติกา: หารเท่ากันตามหัว ไม่ใช่ตามจำนวนกะ — คนที่ไปน้อยครั้งอาจรับกะที่หนักกว่า
+     และเรื่องพวกนี้ตกลงกันด้วยปากเปล่า ไม่ได้อยู่ในตารางกะ ถ้าจะแบ่งไม่เท่ากันต้องเป็นการตัดสินใจ
+     ของคน (ตั้งข้อตกลง) ไม่ใช่ผลข้างเคียงของตัวเลขที่ระบบบังเอิญมี */
+  test('สองคน = คนละครึ่ง แม้จำนวนกะจะต่างกันมาก', () => {
+    const rows = allocateShares(
+      [{ employee_id: 'A', shifts: 8, paid: 0 }, { employee_id: 'B', shifts: 2, paid: 0 }],
+      15000,
+    );
+    assert.deepEqual(rows.map((r) => r.amount), [7500, 7500]);
+  });
+
+  test('สามคน = หารสาม', () => {
+    const rows = allocateShares(
+      [
+        { employee_id: 'A', shifts: 4, paid: 0 },
+        { employee_id: 'B', shifts: 3, paid: 0 },
+        { employee_id: 'C', shifts: 1, paid: 0 },
+      ],
+      15000,
+    );
+    assert.deepEqual(rows.map((r) => r.amount), [5000, 5000, 5000]);
+  });
+
+  /* นับหัวจาก "ใครอยู่ในเคส" ไม่ใช่ "ใครมีกะที่ยืนยันแล้ว" — ถ้าจะไม่ให้ใครสักคน
+     ต้องเป็นการตัดสินใจของผู้จัดการ (ตั้งส่วนแบ่งเป็น 0) ไม่ใช่ผลข้างเคียงของตารางกะ */
+  test('คนที่ยังไม่เคยเช็คอินก็ถูกนับเป็นหัวในการหาร', () => {
+    const rows = allocateShares(
+      [{ employee_id: 'A', shifts: 5, paid: 0 }, { employee_id: 'B', shifts: 0, paid: 0 }],
+      10000,
+    );
+    assert.deepEqual(rows.map((r) => r.amount), [5000, 5000]);
+  });
+
+  /* งวดแรกถูกปล่อยตอนที่อีกคนยังไม่มีกะที่อนุมัติ ถ้าแบ่งเฉพาะเงินของงวดนั้น คนที่มาทีหลัง
+     จะเสียส่วนแบ่งถาวรทั้งที่ตกลงกันว่าคนละครึ่ง — งวดหลังต้องแก้ความเอียงนั้นให้เอง */
+  test('งวดหลังไล่ชดเชยงวดก่อน — จบเคสแล้วได้คนละครึ่งตามที่ตกลง', () => {
+    // งวดที่ 1: ปล่อย 7,000 ตอนที่เคสยังมีชื่อ A คนเดียว (B เพิ่งมาเสริมทีหลัง)
+    const first = allocateShares([{ employee_id: 'A', shifts: 5, paid: 0 }], 7000);
+    assert.equal(of(first, 'A'), 7000);
+
+    // งวดที่ 2: ปล่อย 8,000 ที่เหลือ ตอนที่ทั้งคู่พร้อมแล้ว
+    const second = allocateShares(
+      [{ employee_id: 'A', shifts: 5, paid: 7000 }, { employee_id: 'B', shifts: 5, paid: 0 }],
+      8000,
+    );
+    assert.equal(of(second, 'A'), 500);
+    assert.equal(of(second, 'B'), 7500);
+    assert.equal(7000 + of(second, 'A'), 7500);
+  });
+
+  /* ได้เกินส่วนของตัวเองไปแล้วเรียกคืนไม่ได้ (เงินออกไปแล้ว) ทำได้แค่หยุดจ่ายเพิ่มจนคนอื่นไล่ทัน
+     ถ้าปล่อยให้ส่วนที่ขาดติดลบไปหารต่อ คนที่ยังไม่ได้เงินจะได้ยอดติดลบ ซึ่งลงฐานข้อมูลไม่ได้ */
+  test('คนที่ได้ล่วงหน้าเกินส่วนของตัวเองแล้ว ได้ 0 ในงวดนี้ ไม่ใช่ยอดติดลบ', () => {
+    const rows = allocateShares(
+      [{ employee_id: 'A', shifts: 5, paid: 9000 }, { employee_id: 'B', shifts: 5, paid: 0 }],
+      6000,
+    );
+    assert.equal(of(rows, 'A'), 0);
+    assert.equal(of(rows, 'B'), 6000);
+    assert.equal(sum(rows), 6000);
+  });
+
+  test('ยอดไม่พอให้ทุกคนถึงส่วนของตัวเอง = คนที่ยังขาดโดนหารลดตามส่วน ไม่ใช่คนแรกได้ก่อนจนหมด', () => {
+    const rows = allocateShares(
+      [{ employee_id: 'A', shifts: 5, paid: 0 }, { employee_id: 'B', shifts: 5, paid: 0 }],
+      1000,
+    );
+    assert.deepEqual(rows.map((r) => r.amount), [500, 500]);
+  });
+
+  /* จุดที่พังเงียบที่สุดของการแบ่งเงิน: 20,000 ÷ 3 = 6,666.666… ถ้าให้ทุกคนปัดเอง
+     ผลรวมจะเป็น 20,000.01 คือจ่ายเกินที่ตกลงไปหนึ่งสตางค์ทุกครั้งที่แบ่งไม่ลงตัว */
+  test('เศษการปัดตกที่คนสุดท้ายที่มีส่วนได้ — ผลรวมเท่ากับยอดของงวดเป๊ะ', () => {
+    const rows = allocateShares(
+      [
+        { employee_id: 'A', shifts: 1, paid: 0 },
+        { employee_id: 'B', shifts: 1, paid: 0 },
+        { employee_id: 'C', shifts: 1, paid: 0 },
+      ],
+      20000,
+    );
+    assert.equal(sum(rows), 20000);
+    assert.deepEqual(rows.map((r) => r.amount), [6666.67, 6666.67, 6666.66]);
+  });
+
+  /* แถวสุดท้ายอาจเป็นคนที่ไม่ได้ส่วนแบ่งในงวดนี้ (ตกลงกันว่าไม่รับ) — โยนเศษให้เขา
+     คือสร้างก้อนเงิน 1 สตางค์ที่อธิบายไม่ได้ และทำให้คนที่ควรได้ ได้ไม่ครบ */
+  test('เศษไม่ตกใส่คนที่ตกลงว่าไม่รับ', () => {
+    const rows = allocateShares(
+      [
+        { employee_id: 'A', shifts: 1, paid: 0, share: 1 },
+        { employee_id: 'B', shifts: 1, paid: 0, share: 1 },
+        { employee_id: 'ZERO', shifts: 0, paid: 0, share: 0 },
+      ],
+      10000.01,
+    );
+    assert.equal(of(rows, 'ZERO'), 0);
+    assert.equal(sum(rows), 10000.01);
+  });
+
+  test('จ่ายครบทุกงวดแล้ว ทุกคนได้เท่ากันพอดี ไม่ว่าจะซอยงวดยังไง', () => {
+    const people = [{ employee_id: 'A', shifts: 7 }, { employee_id: 'B', shifts: 3 }, { employee_id: 'C', shifts: 5 }];
+    const paid = { A: 0, B: 0, C: 0 };
+
+    for (const amount of [4000, 5500.25, 5499.75]) {
+      const rows = allocateShares(people.map((p) => ({ ...p, paid: paid[p.employee_id] })), amount);
+      assert.equal(sum(rows), amount);
+      for (const r of rows) paid[r.employee_id] = Math.round((paid[r.employee_id] + r.amount) * 100) / 100;
+    }
+
+    assert.equal(Math.round((paid.A + paid.B + paid.C) * 100) / 100, 15000);
+    for (const p of people) assert.ok(Math.abs(paid[p.employee_id] - 5000) < 0.02);
+  });
+});
+
+describe('allocateShares — เคสที่ตกลงส่วนแบ่งกันไว้เป็นพิเศษ', () => {
+  const sum = (rows) => Math.round(rows.reduce((s, r) => s + r.amount, 0) * 100) / 100;
+  const of = (rows, id) => rows.find((r) => r.employee_id === id).amount;
+
+  /* เคสตัวอย่างของกติกานี้: ค่าจ้าง 15,000 ที่ปกติหารครึ่ง (คนละ 7,500) แต่ตกลงกันแล้วว่า
+     คนที่ลงแรงมากกว่ารับ 9,000 อีกคนรับ 6,000 — ข้อตกลงเป็นของทั้งเคส ไม่ใช่ของงวดใดงวดหนึ่ง */
+  test('ทุกงวดแบ่งตามสัดส่วนที่ตกลง แล้วจบเคสได้ตรงตามที่ตกลงพอดี', () => {
+    const first = allocateShares(
+      [
+        { employee_id: 'A', shifts: 6, paid: 0, share: 9000 },
+        { employee_id: 'B', shifts: 4, paid: 0, share: 6000 },
+      ],
+      7000,
+    );
+    assert.deepEqual(first.map((r) => r.amount), [4200, 2800]); // 60:40 ของงวดนี้
+
+    const second = allocateShares(
+      [
+        { employee_id: 'A', shifts: 6, paid: 4200, share: 9000 },
+        { employee_id: 'B', shifts: 4, paid: 2800, share: 6000 },
+      ],
+      8000,
+    );
+    assert.equal(4200 + of(second, 'A'), 9000);
+    assert.equal(2800 + of(second, 'B'), 6000);
+  });
+
+  test('ข้อตกลงชนะจำนวนกะ — คนที่ทำกะน้อยกว่ารับมากกว่าได้ถ้าตกลงกันแบบนั้น', () => {
+    const rows = allocateShares(
+      [
+        { employee_id: 'A', shifts: 1, paid: 0, share: 12000 },
+        { employee_id: 'B', shifts: 9, paid: 0, share: 3000 },
+      ],
+      15000,
+    );
+    assert.equal(of(rows, 'A'), 12000);
+    assert.equal(of(rows, 'B'), 3000);
+  });
+
+  /* ตั้ง 0 ให้ใคร = ตกลงกันว่าคนนั้นไม่รับค่าจ้างของเคสนี้ ซึ่งต่างจาก "ยังไม่ได้ตั้ง" (null)
+     ถ้ายุบสองอย่างนี้เป็นค่าเดียวกัน การตกลงว่า "คนนี้ไม่รับ" จะสั่งไม่ได้เลย */
+  test('ตั้งส่วนแบ่งเป็น 0 = ไม่รับค่าจ้างของเคสนี้ ทั้งที่มีกะอยู่', () => {
+    const rows = allocateShares(
+      [
+        { employee_id: 'A', shifts: 5, paid: 0, share: 15000 },
+        { employee_id: 'B', shifts: 5, paid: 0, share: 0 },
+      ],
+      15000,
+    );
+    assert.equal(of(rows, 'A'), 15000);
+    assert.equal(of(rows, 'B'), 0);
+  });
+
+  test('มีข้อตกลงแค่บางคน = คนที่ไม่มีถือว่าไม่รับ (ไม่กลับไปหารเท่ากันครึ่งทาง)', () => {
+    const rows = allocateShares(
+      [
+        { employee_id: 'A', shifts: 5, paid: 0, share: 15000 },
+        { employee_id: 'B', shifts: 5, paid: 0 },
+      ],
+      15000,
+    );
+    assert.equal(of(rows, 'A'), 15000);
+    assert.equal(of(rows, 'B'), 0);
+  });
+
+  test('ผลรวมข้อตกลงไม่ตรงกับค่าจ้างของเคส ก็ยังใช้เป็นสัดส่วนได้ (หน้าจอเป็นคนฟ้อง)', () => {
+    const rows = allocateShares(
+      [
+        { employee_id: 'A', shifts: 5, paid: 0, share: 6 },
+        { employee_id: 'B', shifts: 5, paid: 0, share: 4 },
+      ],
+      15000,
+    );
+    assert.deepEqual(rows.map((r) => r.amount), [9000, 6000]);
+    assert.equal(sum(rows), 15000);
+  });
+
+  test('ข้อตกลงเป็น 0 ทุกคน = ไม่มีใครรับ จึงไม่แบ่งอะไรเลย', () => {
+    assert.deepEqual(
+      allocateShares(
+        [{ employee_id: 'A', shifts: 5, paid: 0, share: 0 }, { employee_id: 'B', shifts: 5, paid: 0, share: 0 }],
+        15000,
+      ),
+      [],
+    );
+  });
+});
+
+describe('ตัวแบ่งค่าจ้างฝั่งหน้าเว็บต้องให้ผลตรงกับฝั่ง server', () => {
+  /* หน้าจอโชว์ส่วนแบ่งให้ดูก่อนกด แล้วส่งตัวเลขชุดนั้นไปบันทึกเลย ส่วน server คิดเองได้ด้วย
+     เมื่อไม่มีใครส่งมา — สองสูตรนี้ต่างกันเมื่อไหร่ ตัวเลขที่ผู้จัดการเห็นกับที่ลงจริงจะไม่ใช่ตัวเดียวกัน
+     โปรเจคนี้ไม่มีโค้ดที่ใช้ร่วมกันสองฝั่ง จึงพินกันด้วยเทสนี้แทน */
+  const CASES = [
+    [[{ employee_id: 'A', shifts: 5, paid: 0 }], 7000],
+    [[{ employee_id: 'A', shifts: 5, paid: 0 }, { employee_id: 'B', shifts: 5, paid: 0 }], 13000],
+    [[{ employee_id: 'A', shifts: 5, paid: 7000 }, { employee_id: 'B', shifts: 5, paid: 0 }], 8000],
+    [[{ employee_id: 'A', shifts: 5, paid: 9000 }, { employee_id: 'B', shifts: 15, paid: 0 }], 6000],
+    [[{ employee_id: 'A', shifts: 1, paid: 0 }, { employee_id: 'B', shifts: 1, paid: 0 }, { employee_id: 'C', shifts: 1, paid: 0 }], 20000],
+    [[{ employee_id: 'A', shifts: 3, paid: 120.5 }, { employee_id: 'B', shifts: 4, paid: 0 }], 7000.55],
+    [[{ employee_id: 'A', shifts: 0, paid: 0 }], 5000],
+    [[{ employee_id: 'A', shifts: 2, paid: 0 }, { employee_id: 'Z', shifts: 0, paid: 900 }], 3000],
+    // มีข้อตกลง — สองฝั่งต้องตีความ share = null / 0 เหมือนกันเป๊ะ ไม่งั้นคนที่ "ตกลงว่าไม่รับ" จะได้เงิน
+    [[{ employee_id: 'A', shifts: 6, paid: 0, share: 9000 }, { employee_id: 'B', shifts: 4, paid: 0, share: 6000 }], 7000],
+    [[{ employee_id: 'A', shifts: 5, paid: 0, share: 15000 }, { employee_id: 'B', shifts: 5, paid: 0, share: 0 }], 15000],
+    [[{ employee_id: 'A', shifts: 5, paid: 0, share: 15000 }, { employee_id: 'B', shifts: 5, paid: 0 }], 15000],
+  ];
+
+  test('แบ่งเงินของงวดได้ผลเท่ากันทุกกรณีที่ไล่เทียบ', async () => {
+    const { allocateShares: onClient } = await import('../../client/src/lib/payShare.js');
+
+    for (const [shares, amount] of CASES) {
+      assert.deepEqual(
+        onClient(shares, amount).map((r) => [r.employee_id, r.amount]),
+        allocateShares(shares, amount).map((r) => [r.employee_id, r.amount]),
+        `ผลต่างกันที่ ${JSON.stringify(shares)} ยอด ${amount}`,
+      );
+    }
+  });
+
+  /* น้ำหนักคือกฎ "หารเท่ากันหรือตามข้อตกลง" ตัวจริง — ผลลัพธ์สุดท้ายอาจบังเอิญเท่ากัน
+     ทั้งที่กฎต่างกัน (เช่นตอนที่ทุกคนได้ 0 อยู่ดี) จึงเทียบตัวกฎเองด้วย */
+  test('น้ำหนักของแต่ละคนตีความเหมือนกัน', async () => {
+    const { weightsFor: onClient } = await import('../../client/src/lib/payShare.js');
+    for (const [shares] of CASES) {
+      assert.deepEqual(onClient(shares), weightsFor(shares), `น้ำหนักต่างกันที่ ${JSON.stringify(shares)}`);
+    }
+  });
+
+  /* entitlements อยู่ฝั่งหน้าเว็บอย่างเดียว (ใช้โชว์ว่าใครควรได้เท่าไหร่ทั้งเคส) แต่มันต่อยอดจาก
+     weightsFor เดียวกัน — ผลรวมจึงต้องเท่ากับค่าจ้างของเคสเป๊ะ ไม่งั้นตัวเลขบนหน้าจอไม่ลงตัว */
+  test('ส่วนของทั้งเคสรวมกันแล้วเท่ากับค่าจ้างของเคสเสมอ', async () => {
+    const { entitlements } = await import('../../client/src/lib/payShare.js');
+
+    for (const [shares] of CASES) {
+      const out = entitlements(shares, 15000);
+      const total = Math.round(out.reduce((s, v) => s + v, 0) * 100) / 100;
+      // ไม่มีใครมีน้ำหนักเลย (ยังไม่มีกะที่อนุมัติ) = ไม่มีส่วนของใครให้แสดง
+      const anyWeight = weightsFor(shares).some((w) => w > 0);
+      assert.equal(total, anyWeight ? 15000 : 0, `ผลรวมไม่ลงตัวที่ ${JSON.stringify(shares)}`);
+    }
+  });
+});
+
+describe('เพดานงวดของเคส', () => {
+  /* ค่าปริยายของการจ่ายคือทีเดียวจบ — ตัวเลขนี้คือขอบบนของกรณีที่ตกลงกันว่าจะซอย
+     ไม่ใช่จำนวนงวดที่ทุกเคสต้องมี (หน้าจอจึงไม่โชว์ "งวดที่ 1 จาก 5" ให้เข้าใจผิด) */
+  test('แบ่งจ่ายได้สูงสุด 5 งวดต่อเคส', () => {
+    assert.equal(MAX_INSTALLMENTS, 5);
   });
 });

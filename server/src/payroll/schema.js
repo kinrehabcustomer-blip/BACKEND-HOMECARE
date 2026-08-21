@@ -7,35 +7,19 @@ const month = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'เดือนต้
 const optionalText = z.string().trim().max(500).optional().nullable();
 
 /**
- * เปิดรอบจ่าย
+ * เปิดรอบจ่าย — กรอกแค่ "วันตัดรอบ" ช่องเดียว
  *
- * round_no จำกัด 1–3 ตามที่ตกลงกันว่าเดือนหนึ่งแบ่งจ่ายได้ไม่เกินสามรอบ
- * (ฐานข้อมูลมี CHECK ตัวเดียวกัน — ที่นี่ตอบเป็น 400 พร้อมชื่อช่อง แทนที่จะไปตายที่ CHECK)
+ * เดือนของรอบกับเลขรอบที่ ระบบตั้งให้เองจากวันตัดรอบ (ดู createRun ใน repo)
+ * ของเดิมให้กรอกเองทั้งสามช่อง ทั้งที่ตัวกวาดกะใช้แต่วันตัดรอบ — เดือน/รอบที่จึงเป็นแค่ป้ายชื่อ
+ * ที่หลุดจากความจริงได้ (ใส่ป้าย "ส.ค. รอบที่ 1" แต่ตั้งวันตัดรอบเป็น ก.ย. ก็ได้ ไม่มีอะไรทัก)
  *
  * period_to = วันตัดรอบ ไม่ใช่ "วันเริ่มรอบ" เพราะรอบไม่มีขอบล่าง: กะที่อนุมัติแล้วและยังไม่เคย
  * ถูกจ่ายจะถูกกวาดเข้ามาทั้งหมดไม่ว่าทำไว้เมื่อไหร่ (ดู ELIGIBLE ใน repo)
- * ต้องไม่อยู่ก่อนเดือนของรอบ ไม่งั้นรอบจะไม่มีทางมีกะของเดือนตัวเองเลยสักกะ
  */
-export const createRunSchema = z
-  .object({
-    period_month: month,
-    round_no: z.coerce
-      .number({ invalid_type_error: 'รอบที่ต้องเป็นตัวเลข' })
-      .int('รอบที่ต้องเป็นจำนวนเต็ม')
-      .min(1, 'เดือนหนึ่งแบ่งจ่ายได้ 1–3 รอบ')
-      .max(3, 'เดือนหนึ่งแบ่งจ่ายได้ 1–3 รอบ'),
-    period_to: date,
-    note: optionalText,
-  })
-  .superRefine((v, ctx) => {
-    if (v.period_to < `${v.period_month}-01`) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['period_to'],
-        message: 'วันตัดรอบต้องไม่อยู่ก่อนเดือนของรอบ',
-      });
-    }
-  });
+export const createRunSchema = z.object({
+  period_to: date,
+  note: optionalText,
+});
 
 /** ปิดรอบเป็น "จ่ายแล้ว" — ไม่ส่งวันที่มา = วันนี้ (ปกติกดตอนโอนเงินเสร็จพอดี) */
 export const payRunSchema = z.object({
@@ -45,6 +29,12 @@ export const payRunSchema = z.object({
 });
 
 export const previewQuerySchema = z.object({ period_to: date });
+
+/** ที่มาของยอดในแท็บสรุป — ต้องระบุทั้งเดือนและคน เพราะมันคือการกางยอดของช่องเดียวในตาราง */
+export const employeeCasesQuerySchema = z.object({
+  month,
+  employee_id: z.string().trim().min(1),
+});
 
 export const listQuerySchema = z.object({
   month: month.optional(),

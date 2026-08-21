@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api.js';
 import { useToast } from '../toast.jsx';
@@ -30,6 +30,13 @@ export function Approvals({ month, employeeId, patch, employeePicker, reloadKey 
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
 
+  /* กะที่ยังเช็คอิน–เอาท์ไม่ครบ (ขาดงาน / ค้างเช็คเอาท์) — ไม่มีวันโผล่ในคิวนี้ เพราะคิวนี้
+     รับเฉพาะกะที่ "ทำจบแล้ว" (มีเวลาออก) ที่ยังไม่ถูกยืนยัน
+     ต้องนับให้เห็นตอนคิวว่าง ไม่งั้นหน้าจอจะบอกว่า "ยืนยันครบแล้ว" ทั้งที่ยังมีงานค้างอยู่อีกที่หนึ่ง
+     แล้วเงินของกะพวกนั้นก็เงียบหายไปโดยไม่มีใครรู้ว่าต้องไปทำอะไรต่อที่ไหน
+     โหลดเฉพาะตอนคิวว่างเท่านั้น — ถ้ามีของให้ทำอยู่แล้ว ตัวเลขนี้ไม่ได้ช่วยอะไร */
+  const [stuck, setStuck] = useState(null);
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -40,6 +47,13 @@ export function Approvals({ month, employeeId, patch, employeePicker, reloadKey 
         setRows(r);
         setPicked(new Set());  // เปลี่ยนตัวกรองแล้วสิ่งที่ติ๊กไว้ไม่เกี่ยวข้องอีกต่อไป
         setError(null);
+        setStuck(null);
+        if (r.length === 0) {
+          api
+            .attendanceExceptions()
+            .then((x) => !cancelled && setStuck(x.length))
+            .catch(() => {});
+        }
       })
       .catch((e) => !cancelled && setError(e.message))
       .finally(() => !cancelled && setLoading(false));
@@ -102,18 +116,32 @@ export function Approvals({ month, employeeId, patch, employeePicker, reloadKey 
     <>
       <MonthPicker month={month} onChange={(m) => patch({ month: m })}>{employeePicker}</MonthPicker>
 
-      <p className="muted tab-hint">
-        กะที่เช็คเอาท์แล้วยัง<strong>ไม่เป็นเงิน</strong>จนกว่าจะอนุมัติที่นี่ · <strong>แตะที่แถวเพื่อเลือก</strong>
-      </p>
+      {/* เหลือไว้แค่ท่าที่มองไม่เห็นจากหน้าจอ — ว่าแถวทั้งแถวกดเลือกได้ ไม่ใช่ต้องจิ้มช่องติ๊ก */}
+      <p className="muted tab-hint"><strong>แตะที่แถวเพื่อเลือก</strong></p>
 
       {error && <p className="error">{error}</p>}
 
       {loading && !rows ? (
         <p className="muted">กำลังโหลด…</p>
       ) : rows?.length === 0 ? (
+        /* คิวว่างไม่ได้แปลว่าไม่มีอะไรต้องทำ — บอกทั้งสองทางที่ไปต่อได้จริง
+           (กะที่ค้างอยู่คนละที่ · ขั้นถัดไปของสายพาน) ไม่งั้นหน้าจอนี้เป็นทางตัน */
         <section className="card empty-state">
-          <p><LineIcon name="check" className="text-ico" />ไม่มีกะรออนุมัติ</p>
-          <p className="muted">ค่าจ้างของเดือนนี้ยืนยันครบแล้ว</p>
+          <p><LineIcon name="check" className="text-ico" />ไม่มีกะรออนุมัติในเดือนนี้</p>
+          <p className="muted">
+            คิวนี้รับเฉพาะกะที่<strong>เช็คอิน–เอาท์ครบแล้ว</strong> — กะที่ขาดงานหรือค้างเช็คเอาท์
+            อยู่ที่แท็บ “รายการต้องตรวจ”
+            <span className="cell-sub">
+              การยืนยันกะไม่ได้กั้นการจ่ายเงิน — ค่าจ้างปล่อยได้ตั้งแต่ปิดเคส
+            </span>
+          </p>
+          <div className="empty-actions">
+            {stuck > 0 && (
+              <Link className="btn primary" to="/attendance">
+                มี {stuck} กะที่ต้องตรวจ →
+              </Link>
+            )}
+          </div>
         </section>
       ) : rows?.length > 0 ? (
         <>
@@ -239,6 +267,25 @@ export function PayoutSummary({ month, employeeId, patch, employeePicker, reload
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  /* ที่มาของยอดรายคน — ยอดรวมตอบได้แค่ "ได้เท่าไหร่" แต่คำถามถัดมาเสมอคือ "มาจากเคสไหนบ้าง"
+     โหลดตอนกดเท่านั้น เพราะเดือนหนึ่งมีพนักงานหลายสิบคน ส่วนใหญ่ไม่ได้ถูกกางดู */
+  const [openId, setOpenId] = useState(null);
+  const [cases, setCases] = useState(null);
+
+  function toggleCases(id) {
+    if (openId === id) {
+      setOpenId(null);
+      setCases(null);
+      return;
+    }
+    setOpenId(id);
+    setCases(null); // ล้างก่อนเสมอ ไม่งั้นระหว่างรอจะเห็นเคสของคนก่อนหน้าค้างอยู่ใต้ชื่อคนใหม่
+    api
+      .payrollEmployeeCases(month, id)
+      .then(setCases)
+      .catch((e) => setError(e.message));
+  }
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -247,6 +294,8 @@ export function PayoutSummary({ month, employeeId, patch, employeePicker, reload
       .then((r) => {
         if (cancelled) return;
         setRows(r);
+        setOpenId(null);
+        setCases(null);
         setError(null); // เปลี่ยนเดือนแล้วโหลดผ่าน error ของเดือนก่อนต้องหายไปด้วย
       })
       .catch((e) => !cancelled && setError(e.message))
@@ -259,13 +308,13 @@ export function PayoutSummary({ month, employeeId, patch, employeePicker, reload
     downloadCsv(
       // ใส่รหัสพนักงานในชื่อไฟล์ตอนกรองคนเดียว — ไม่งั้นไฟล์ของคนละคนทับกันในโฟลเดอร์ดาวน์โหลด
       `payroll-${month}${employeeId ? `-${employeeId}` : ''}.csv`,
-      ['รหัสพนักงาน', 'ชื่อ', 'จำนวนกะ', 'ชั่วโมงรวม', 'เคสที่ทำ', 'ค่าจ้างที่อนุมัติแล้ว (บาท)',
-        'จ่ายไปแล้ว (บาท)', 'ยังไม่ได้จ่าย (บาท)',
-        'กะที่อนุมัติแล้ว', 'รออนุมัติ (บาท)', 'กะที่รออนุมัติ', 'กะที่ไม่อนุมัติ', 'กะที่ยังไม่ระบุค่าจ้าง'],
+      ['รหัสพนักงาน', 'ชื่อ', 'จำนวนกะ', 'ชั่วโมงรวม', 'เคสที่ทำ', 'ค่าจ้างที่ปล่อยแล้ว (บาท)',
+        'จ่ายไปแล้ว (บาท)', 'ยังไม่ได้จ่าย (บาท)', 'เคสที่ปล่อยค่าจ้าง',
+        'กะที่อนุมัติแล้ว', 'กะที่รออนุมัติ', 'กะที่ไม่อนุมัติ'],
       rows.map((r) => [
         r.employee_id, r.employee_name, r.shifts, (r.minutes / 60).toFixed(1), r.cases_worked, r.pay,
-        r.paid_pay ?? 0, r.unpaid_pay ?? 0,
-        r.approved_shifts, r.pending_pay, r.pending_shifts, r.rejected_shifts, r.unpriced_shifts,
+        r.paid_pay ?? 0, r.unpaid_pay ?? 0, r.cases_paid ?? 0,
+        r.approved_shifts, r.pending_shifts, r.rejected_shifts,
       ]),
     );
   }
@@ -273,7 +322,7 @@ export function PayoutSummary({ month, employeeId, patch, employeePicker, reload
   const totalShifts = rows?.reduce((s, r) => s + r.shifts, 0) ?? 0;
   const totalMinutes = rows?.reduce((s, r) => s + r.minutes, 0) ?? 0;
   const totalPay = rows?.reduce((s, r) => s + r.pay, 0) ?? 0;
-  const totalPending = rows?.reduce((s, r) => s + r.pending_pay, 0) ?? 0;
+  const totalPendingShifts = rows?.reduce((s, r) => s + (r.pending_shifts ?? 0), 0) ?? 0;
   const totalUnpaid = rows?.reduce((s, r) => s + (r.unpaid_pay ?? 0), 0) ?? 0;
 
   return (
@@ -283,13 +332,7 @@ export function PayoutSummary({ month, employeeId, patch, employeePicker, reload
         {rows?.length > 0 && <button className="btn" onClick={exportCsv}><LineIcon name="download" />ดาวน์โหลด CSV</button>}
       </MonthPicker>
 
-      {/* แท็บนี้กับแท็บรอบจ่ายนับคนละแกน ตัวเลขจึงไม่เท่ากันเป็นปกติ —
-          ไม่เขียนไว้ คนอ่านจะคิดว่ามีแท็บใดแท็บหนึ่งคำนวณผิด แล้วไปไล่หาบั๊กที่ไม่มีอยู่ */}
-      <p className="muted tab-hint">
-        นับเฉพาะกะที่อนุมัติแล้วใน<strong>เดือนที่ไปทำงาน</strong> ไม่ว่าจะจ่ายไปหรือยัง ·
-        เงินที่ออกจริงดูที่แท็บ <Link className="link" to="/payroll">รอบจ่าย</Link>{' '}
-        ซึ่งนับ<strong>ตามรอบ</strong> — ตัวเลขสองที่จึงต่างกันเป็นปกติ
-      </p>
+      <p className="muted tab-hint"><strong>แตะชื่อพนักงานเพื่อดูรายเคส</strong></p>
 
       {error && <p className="error">{error}</p>}
 
@@ -308,8 +351,17 @@ export function PayoutSummary({ month, employeeId, patch, employeePicker, reload
             </thead>
             <tbody>
               {rows.map((r) => (
-                <tr key={r.employee_id}>
-                  <td data-label="พนักงาน">{r.employee_name}<span className="cell-sub mono">{r.employee_id}</span></td>
+                <Fragment key={r.employee_id}>
+                <tr>
+                  <td data-label="พนักงาน">
+                    <button className="linkish" onClick={() => toggleCases(r.employee_id)}>
+                      {r.employee_name}
+                    </button>
+                    <span className="cell-sub mono">{r.employee_id}</span>
+                    <span className="cell-sub">
+                      {openId === r.employee_id ? 'แตะเพื่อย่อ' : 'แตะชื่อเพื่อดูรายเคส'}
+                    </span>
+                  </td>
                   <td data-label="จำนวนกะ">
                     {r.shifts}
                     <span className="cell-sub">{r.cases_worked} เคส</span>
@@ -318,9 +370,9 @@ export function PayoutSummary({ month, employeeId, patch, employeePicker, reload
                   {/* เงินที่ค้างอยู่ที่โต๊ะผู้จัดการเอง ไม่ใช่ปัญหาของพนักงาน — กดไปที่คิวอนุมัติได้เลย */}
                   <td data-label="รออนุมัติ">
                     {r.pending_shifts > 0 ? (
-                      <Link className="link" to={`/payroll?tab=approvals&month=${month}&employee_id=${r.employee_id}`}>
-                        {formatBaht(r.pending_pay)}
-                        <span className="cell-sub">{r.pending_shifts} กะ →</span>
+                      <Link className="link" to={`/attendance?tab=approvals&month=${month}&employee_id=${r.employee_id}`}>
+                        {r.pending_shifts} กะ
+                        <span className="cell-sub">ยืนยันกะก่อนจึงจะแบ่งค่าจ้างได้ →</span>
                       </Link>
                     ) : (
                       <span className="muted">—</span>
@@ -336,11 +388,11 @@ export function PayoutSummary({ month, employeeId, patch, employeePicker, reload
                     {(r.paid_pay ?? 0) > 0 && (r.unpaid_pay ?? 0) === 0 && (
                       <span className="cell-sub">จ่ายครบแล้ว</span>
                     )}
-                    {/* กดไปหาเคสของคนนี้ได้เลย — เดิมรู้ว่ามีปัญหาแต่ไม่รู้ว่าเคสไหน */}
-                    {r.unpriced_shifts > 0 && (
+                    {/* ทำงานแล้วแต่ยังไม่มีใครกดปล่อยค่าจ้าง — กดไปหาเคสของคนนี้ได้เลย */}
+                    {r.pay === 0 && r.approved_shifts > 0 && (
                       <span className="cell-sub">
                         <Link className="link flag-text" to={`/cases?assigned_to=${r.employee_id}`}>
-                          {r.unpriced_shifts} กะยังไม่ระบุค่าจ้าง →
+                          ยังไม่ได้ปล่อยค่าจ้าง →
                         </Link>
                       </span>
                     )}
@@ -349,6 +401,42 @@ export function PayoutSummary({ month, employeeId, patch, employeePicker, reload
                     )}
                   </td>
                 </tr>
+
+                {/* ทำไปกี่เคส เคสอะไรบ้าง ใบละเท่าไหร่ — กางใต้แถวของคนนั้น กินเต็มความกว้าง
+                    เพราะชื่อผู้รับบริการยาวกว่าคอลัมน์ "พนักงาน" ที่กว้างแค่หนึ่งในห้าของตาราง */}
+                {openId === r.employee_id && (
+                  <tr className="row-expand">
+                    <td colSpan={5}>
+                      {cases === null ? (
+                        <span className="muted">กำลังโหลด…</span>
+                      ) : cases.length === 0 ? (
+                        <span className="muted">เดือนนี้ยังไม่มีเคส</span>
+                      ) : (
+                        <ul className="plain-list payroll-item-cases">
+                          {cases.map((c) => (
+                            <li key={c.case_id}>
+                              <span>
+                                {c.client_name}
+                                <span className="cell-sub mono">{c.case_id}</span>
+                              </span>
+                              <span>
+                                {c.pay === 0 ? (
+                                  <span className="muted">ยังไม่ปล่อยค่าจ้าง</span>
+                                ) : (
+                                  formatBaht(c.pay)
+                                )}
+                                {c.installments && (
+                                  <span className="cell-sub">งวดที่ {c.installments}</span>
+                                )}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </td>
+                  </tr>
+                )}
+                </Fragment>
               ))}
             </tbody>
             {/* data-label ไม่ได้มีไว้แค่สวย — จอเล็กหัวตารางถูกซ่อน แถวรวมที่เหลือแต่ตัวเลขเปล่าๆ
@@ -358,7 +446,7 @@ export function PayoutSummary({ month, employeeId, patch, employeePicker, reload
                 <th data-label="พนักงาน">รวม {rows.length} คน</th>
                 <th data-label="จำนวนกะ">{totalShifts}</th>
                 <th data-label="ชั่วโมงรวม">{durationText(totalMinutes)}</th>
-                <th data-label="รออนุมัติ">{totalPending > 0 ? formatBaht(totalPending) : '—'}</th>
+                <th data-label="รออนุมัติ">{totalPendingShifts > 0 ? `${totalPendingShifts} กะ` : '—'}</th>
                 <th data-label="ค่าจ้างรวม">
                   {formatBaht(totalPay)}
                   {totalUnpaid > 0 && <span className="cell-sub">รอจ่าย {formatBaht(totalUnpaid)}</span>}

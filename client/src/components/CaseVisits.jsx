@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
-import { useCanSeeStaffPay } from '../auth.jsx';
 import { useToast } from '../toast.jsx';
 import {
   POSITION_LABELS, VISIT_STATE_LABELS, MONTH_LABELS, formatBaht, formatDate, timeText, toBuddhistYear,
@@ -64,7 +63,6 @@ function dayClass(list) {
 export default function CaseVisits({ caseId, caseItem = null, target = null, readOnly = false, mode = 'shift' }) {
   const toast = useToast();
   // ค่าจ้างรายกะเห็น/แก้ได้เฉพาะผู้จัดการ เหมือนค่าจ้างของเคส (server ตัดฟิลด์ให้อยู่แล้ว)
-  const seePay = useCanSeeStaffPay();
   const isAppt = mode === 'appointment';
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
@@ -226,17 +224,6 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
     );
   }
 
-  /**
-   * ตั้งค่าจ้างเฉพาะกะนี้ (ว่าง = กลับไปเกลี่ยจากยอดเคส) — บันทึกตอนออกจากช่อง
-   * ค่าไม่เปลี่ยนก็ไม่ยิง ไม่งั้นแค่คลิกผ่านช่องก็เขียน DB ทุกครั้ง
-   */
-  function savePay(v, raw) {
-    const text = raw.trim();
-    const value = text === '' ? null : Number(text);
-    if (value != null && !Number.isFinite(value)) return;
-    if ((v.staff_pay ?? null) === value) return;
-    return run(() => api.updateVisit(caseId, v.visit_id, { staff_pay: value }));
-  }
 
   function shiftMonth(delta) {
     const d = new Date(year, month - 1 + delta, 1);
@@ -477,23 +464,6 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
                   {v.off_schedule && <> · <LineIcon name="alert" className="text-ico" />นอกวันนัด</>}
                 </span>
                 <span className={`badge visit-${v.state}`}>{VISIT_STATE_LABELS[v.state]}</span>
-                {/* ค่าจ้างของกะนี้ — ว่างไว้ = เกลี่ยจากยอดเคส (ตัวเลขที่เกลี่ยได้โชว์เป็น placeholder)
-                    กรอกทับได้เมื่อกะนั้นตกลงกันเป็นพิเศษ เช่น ไปครึ่งวัน หรือค่าเดินทางเพิ่ม */}
-                {!seePay ? null : readOnly ? (
-                  v.effective_pay != null && <span className="visit-pay muted">{formatBaht(v.effective_pay)}</span>
-                ) : (
-                  <input
-                    type="number"
-                    min="0"
-                    step="10"
-                    className="visit-pay-input"
-                    title="ค่าจ้างของกะนี้ — เว้นว่าง = เกลี่ยจากค่าจ้างของเคส"
-                    disabled={busy}
-                    defaultValue={v.staff_pay ?? ''}
-                    placeholder={v.effective_pay == null ? '฿ ค่าจ้าง' : `฿${Math.round(v.effective_pay)}`}
-                    onBlur={(e) => savePay(v, e.target.value)}
-                  />
-                )}
                 {!readOnly && (
                   <button
                     type="button"

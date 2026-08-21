@@ -15,7 +15,7 @@ import {
   STATUSES,
 } from './schema.js';
 import { ApiError, asyncRoute, notFound } from '../lib/errors.js';
-import { canSeeStaffPay } from '../lib/auth.js';
+import { canSeeStaffPay, BLOCKED_STATUSES } from '../lib/auth.js';
 
 export const employeesRouter = Router();
 
@@ -108,10 +108,15 @@ export async function ensurePositionChangeAllowed(req, target, nextPosition) {
   }
 }
 
-/** ลาออก/ลบผู้จัดการคนสุดท้ายก็ทำให้ไม่เหลือใครดูแลระบบเหมือนกัน — ใช้เกณฑ์เดียวกัน */
-export async function ensureRemovable(target) {
+/**
+ * ลาออก/พักงาน/ลบ ผู้จัดการคนสุดท้าย ล้วนทำให้ไม่เหลือใครดูแลระบบเหมือนกัน — ใช้เกณฑ์เดียวกันทุกทาง
+ *
+ * ไม่ใช่แค่ "เสียของ" ชั่วคราว แต่กู้เองไม่ได้: เมื่อไม่เหลือผู้จัดการ ก็ไม่มีใครมีสิทธิ์
+ * ตั้งผู้จัดการคนใหม่ได้อีกเลย (ดู ensureCanGrantManager) ต้องเข้าไปแก้ที่ฐานข้อมูลตรงๆ ทางเดียว
+ */
+export async function ensureRemovable(target, action = 'นำคนนี้ออกได้') {
   if (target.position === 'manager' && (await repo.activeManagerCount(target.employee_id)) === 0) {
-    throw new ApiError(409, 'นี่คือผู้จัดการคนสุดท้ายที่ใช้งานได้ — ตั้งผู้จัดการคนใหม่ก่อนจึงจะนำคนนี้ออกได้');
+    throw new ApiError(409, `นี่คือผู้จัดการคนสุดท้ายที่ใช้งานได้ — ตั้งผู้จัดการคนใหม่ก่อนจึงจะ${action}`);
   }
 }
 
@@ -121,9 +126,19 @@ employeesRouter.patch(
     const input = updateEmployeeSchema.parse(req.body);
     await ensurePositionChangeAllowed(req, req.employee, input.position);
 
+    const statusChanged = input.status && input.status !== req.employee.status;
+
     // ปิดบัญชีตัวเอง (ลาออก/พักงาน) แล้วเด้งตัวเองออกทันทีเป็นอุบัติเหตุที่กู้เองไม่ได้
-    if (req.employee.employee_id === req.user.employee_id && input.status && input.status !== req.employee.status) {
+    if (req.employee.employee_id === req.user.employee_id && statusChanged) {
       throw new ApiError(403, 'เปลี่ยนสถานะของตัวเองไม่ได้ — ต้องให้ผู้จัดการคนอื่นเป็นคนแก้ให้');
+    }
+
+    /* ตั้งสถานะเป็นลาออก/พักงาน = บัญชีนั้น login ไม่ได้อีก (ดู BLOCKED_STATUSES) ซึ่งให้ผลเท่ากับ
+       การนำคนออกจากระบบทุกประการ ปุ่ม "นำออก" (DELETE) กันผู้จัดการคนสุดท้ายไว้แล้วด้วย
+       ensureRemovable แต่ถ้าไม่กันที่นี่ด้วย ช่องสถานะในฟอร์มแก้ไขก็เป็นประตูอีกบานที่เปิดอยู่เฉยๆ
+       — และเป็นบานที่เดินเข้าง่ายกว่า เพราะดูเหมือนแค่แก้ข้อมูลพนักงานตามปกติ */
+    if (statusChanged && BLOCKED_STATUSES[input.status]) {
+      await ensureRemovable(req.employee, 'ปิดบัญชีคนนี้ได้');
     }
 
     res.json(await repo.update(req.params.id, input));

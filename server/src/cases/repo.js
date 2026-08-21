@@ -608,20 +608,10 @@ export async function pendingShifts(caseId) {
 
 export async function close(caseId, endDate, actor) {
   await transaction(async (tx) => {
-    /* ตรึงค่าจ้าง "ก่อน" ยกเลิกกะที่ยังไม่ถึงวัน — ลำดับนี้สำคัญมาก
-       BOOKED_VISITS นับเฉพาะกะที่ยังไม่ยกเลิก และอยู่ใน transaction เดียวกัน จึงเห็นผลของ UPDATE ก่อนหน้า
-       ถ้ายกเลิกก่อน ตัวหารจะหดลงเหลือเฉพาะกะที่ทำไปแล้ว ยอดต่อกะจึงพองขึ้นทันทีตอนปิดเคส
-       (เคส 30 กะ ทำจริง 10 แล้วปิดก่อนกำหนด: จาก staff_pay/30 กลายเป็น staff_pay/10)
-       ซึ่งกลับหัวกับเจตนาของการตรึง คือ "ล็อกตัวเลขที่เห็นอยู่ก่อนปิด" ไม่ใช่คิดใหม่
-       สองคำสั่งนี้แตะคนละชุดกันอยู่แล้ว (ตรึง = เช็คอินแล้ว · ยกเลิก = ยังไม่เช็คอิน) สลับลำดับได้ปลอดภัย */
-    const frozen = await tx.run(
-      `UPDATE case_visits v
-       SET staff_pay = c.staff_pay / NULLIF(b.n, 0), updated_at = ${NOW}
-       FROM cases c, ${BOOKED_VISITS} b
-       WHERE v.case_id = :case_id AND c.case_id = :case_id AND b.case_id = :case_id
-         AND v.staff_pay IS NULL AND v.check_in_at IS NOT NULL AND c.staff_pay IS NOT NULL`,
-      { case_id: caseId },
-    );
+    /* เดิมตรงนี้ "ตรึงค่าจ้าง" ลงทุกกะที่เช็คอินแล้ว (staff_pay / จำนวนกะที่นัดไว้) เพราะยอดต่อกะ
+       เป็นการเกลี่ยสดที่ขยับตามตัวหารได้ตลอด การปิดเคสจึงต้องล็อกตัวเลขไว้ก่อนที่ตัวหารจะเปลี่ยน
+       ตอนนี้ไม่มีการเกลี่ยแล้ว — ค่าจ้างเป็นก้อนเดียวที่ผู้จัดการกดปล่อยเอง และยอดที่ปล่อยแล้ว
+       เป็นตัวเลขตายตัวตั้งแต่วินาทีที่ปล่อย (ดู releasePay) จึงไม่มีอะไรให้ตรึงอีก */
 
     // กะที่ยังไม่ถึงวันและไม่มีใครไป = งานที่จะไม่เกิดขึ้นแล้ว ยกเลิกทิ้งไปพร้อมกับการปิดเคส
     // ไม่งั้นปฏิทินเดือนหน้ายังขึ้นกะของเคสที่ปิดไปแล้ว และพนักงานยังเห็นในตารางงานของตัวเอง
@@ -644,11 +634,8 @@ export async function close(caseId, endDate, actor) {
       { case_id: caseId, end_date: endDate ?? null },
     );
 
-    const notes = [
-      frozen > 0 && `ตรึงค่าจ้าง ${frozen} กะ`,
-      dropped > 0 && `ยกเลิกกะที่ยังไม่ถึงวัน ${dropped} กะ`,
-    ].filter(Boolean);
-    await logEvent(tx, caseId, 'closed', notes.length ? `ปิดเคส · ${notes.join(' · ')}` : 'ปิดเคส', actor);
+    const note = dropped > 0 ? `ปิดเคส · ยกเลิกกะที่ยังไม่ถึงวัน ${dropped} กะ` : 'ปิดเคส';
+    await logEvent(tx, caseId, 'closed', note, actor);
   });
 
   return findById(caseId);
@@ -696,26 +683,17 @@ export async function remove(caseId) {
 // ---------- วันนัดให้บริการ (case_visits) ----------
 
 /**
- * ค่าจ้างของกะหนึ่งกะ — ตั้งไว้ที่กะเองก่อน ไม่ได้ตั้งก็เกลี่ยยอดของเคสตามจำนวนกะที่นัดไว้
- * ต้องมี alias v (case_visits), c (cases) และ b (จำนวนกะที่นัดไว้ต่อเคส) อยู่ใน query ที่เอาไปใช้
+ * ค่าจ้างพนักงานไม่ผูกกับกะอีกต่อไป — เป็น "ก้อนเดียวต่อเคส" ที่ผู้จัดการกดปล่อย (ดู releasePay)
  *
- * เกลี่ยแทนที่จะบังคับให้กรอกทีละกะ เพราะราคาที่ตกลงกับลูกค้าเป็นราคาต่อ "แพ็คเกจ" ไม่ใช่ต่อครั้ง
- * กะที่ทำไปแล้วจะถูกตรึงยอดตอนปิดเคส (ดู close) ยอดย้อนหลังจึงไม่ขยับตามการเพิ่ม/ลดกะทีหลัง
- */
-export const VISIT_PAY = 'COALESCE(v.staff_pay, c.staff_pay / NULLIF(b.n, 0))';
-
-/** จำนวนกะที่นัดไว้ต่อเคส (ไม่นับกะที่ยกเลิก) = ตัวหารของการเกลี่ยค่าจ้าง */
-export const BOOKED_VISITS = `
-  (SELECT case_id, COUNT(*) AS n FROM case_visits WHERE status <> 'cancelled' GROUP BY case_id)
-`;
-
-/**
- * กะที่ยังไม่ถูกยกเลิก — ต้องใช้คู่กับ BOOKED_VISITS เสมอ
+ * เดิมมี VISIT_PAY = COALESCE(v.staff_pay, c.staff_pay / จำนวนกะที่นัดไว้) ซึ่งแปลว่า
+ * เคส 20,000 นัด 10 ครั้ง = ครั้งละ 2,000 — ไม่ตรงกับวิธีตกลงงานจริง (ตกลงกันเป็นค่าจ้างของงานทั้งชิ้น)
+ * และตัวหารขยับได้ตลอด ยอดของกะที่ทำไปแล้วจึงเปลี่ยนย้อนหลังทุกครั้งที่เพิ่ม/ยกเลิกกะ
  *
- * ตัวหาร (BOOKED_VISITS) ตัดกะที่ยกเลิกออกอยู่แล้ว ถ้าตัวเศษไม่ตัดด้วยจะได้สองผลพร้อมกัน:
- * กะที่ถูกยกเลิกทั้งที่เช็คอิน–เอาท์ไปแล้ว "ยังได้เงิน" และ "หายจากตัวหาร" ทำให้กะที่เหลือได้เพิ่มไปด้วย
- * ผลรวมที่จ่ายออกจึงเกิน cases.staff_pay ได้ ทั้งที่เคสหนึ่งใบ = แพ็คเกจหนึ่งชุด
+ * ตอนนี้กะทำหน้าที่เดียวคือบันทึกว่า "ใครไปทำงานวันไหน กี่ชั่วโมง" ซึ่งเป็นฐานของ
+ * สัดส่วนการแบ่งตอนปล่อยค่าจ้าง ไม่ใช่ตัวคูณของเงิน
  */
+
+/** กะที่ยังไม่ถูกยกเลิก — กะที่ยกเลิกไม่นับเป็นงานที่ทำจริงทั้งในรายงานและในการแบ่งค่าจ้าง */
 export const NOT_CANCELLED = `v.status <> 'cancelled'`;
 
 /** กะทั้งหมดของเคสหนึ่งใบ พร้อมชื่อพนักงานที่นัดไว้ + สถานะเช็คอิน (state คำนวณตอนอ่าน) — เรียงตามวัน/เวลานัด */
@@ -725,14 +703,11 @@ export function listVisits(caseId) {
       `SELECT v.visit_id, v.case_id, v.visit_date, v.status, v.note,
               v.assigned_to, v.planned_start, v.planned_end,
               v.check_in_at, v.check_out_at, v.check_in_distance_m, v.location_flagged,
-              v.check_in_late_minutes, v.off_schedule, v.staff_pay,
+              v.check_in_late_minutes, v.off_schedule,
               v.pay_status, v.pay_note, v.approved_by_name,
-              ${VISIT_PAY} AS effective_pay,
               e.first_name || ' ' || e.last_name AS assigned_name,
               e.nickname                          AS assigned_nickname
        FROM case_visits v
-       JOIN cases c ON c.case_id = v.case_id
-       LEFT JOIN ${BOOKED_VISITS} b ON b.case_id = v.case_id
        LEFT JOIN employees e ON e.employee_id = v.assigned_to
        WHERE v.case_id = :id
        ORDER BY v.visit_date, v.planned_start NULLS FIRST, v.visit_id`,
@@ -1260,7 +1235,6 @@ export function pendingApprovals({ month, employee_id } = {}) {
               v.check_in_at, v.check_out_at, v.check_in_distance_m,
               v.location_flagged, v.off_schedule, v.check_in_late_minutes,
               v.status AS visit_status,
-              ${VISIT_PAY} AS pay,
               ROUND(EXTRACT(EPOCH FROM (v.check_out_at - v.check_in_at)) / 60) AS worked_minutes,
               c.client_name, c.status AS case_status,
               v.checked_in_by AS employee_id,
@@ -1268,7 +1242,6 @@ export function pendingApprovals({ month, employee_id } = {}) {
        FROM case_visits v
        JOIN cases c     ON c.case_id     = v.case_id
        LEFT JOIN employees e ON e.employee_id = v.checked_in_by
-       LEFT JOIN ${BOOKED_VISITS} b ON b.case_id = v.case_id
        WHERE ${where.join(' AND ')}
        ORDER BY v.visit_date DESC, v.check_in_at DESC`,
       params,
@@ -1276,7 +1249,6 @@ export function pendingApprovals({ month, employee_id } = {}) {
     .then((rows) =>
       rows.map((r) => ({
         ...r,
-        pay: r.pay == null ? null : Number(r.pay),
         worked_minutes: r.worked_minutes == null ? null : Number(r.worked_minutes),
       })),
     );
@@ -1419,7 +1391,6 @@ const WORKED_SHIFT = `
   FROM case_visits v
   JOIN cases c     ON c.case_id     = v.case_id
   LEFT JOIN employees e ON e.employee_id = v.checked_in_by
-  LEFT JOIN ${BOOKED_VISITS} b    ON b.case_id   = v.case_id
   LEFT JOIN pkg_service_formats f ON f.format_id = c.pkg_format_id
   LEFT JOIN pkg_grades g          ON g.grade_id  = c.pkg_grade_id
   LEFT JOIN physio_packages pp    ON pp.physio_package_id = c.physio_package_id
@@ -1434,74 +1405,136 @@ const WORKED_SHIFT = `
  */
 export const WORKER_NAME = `COALESCE(e.first_name || ' ' || e.last_name, '(พนักงานที่ถูกลบแล้ว)')`;
 
-/**
- * สรุปค่าตอบแทนรายเดือนต่อพนักงาน (payroll)
- *
- * ค่าจ้างและชั่วโมงนับจากฐานเดียวกัน = "กะที่เช็คอินจริง" ของ "คนที่เช็คอินจริง" (checked_in_by)
- * ในเดือนที่เช็คอิน — ไม่ใช่ยอดของเคสที่ปิดในเดือนนั้นเหมือนเดิม
- * ของเดิมจ่ายให้ผู้รับผิดชอบเคส ณ ตอนปิด: เปลี่ยนคนกลางคันแล้วคนที่ไปทำจริงได้ศูนย์
- * และเคสที่ลากข้ามเดือนจะเทเงินทั้งก้อนลงเดือนที่ปิด
- *
- * ยอดต่อกะดู VISIT_PAY (ค่าจ้างของกะเอง ไม่มีก็เกลี่ยจากยอดเคส) — ตรึงเป็นตัวเลขถาวรตอนปิดเคส
- * ค่าจ้างที่ใช้เป็น snapshot ที่คัดลอกไว้ในเคส ไม่ได้อ่านสดจากตารางเรท ยอดย้อนหลังจึงไม่ขยับตามการปรับราคา
- *
- * employeeId = ดูของคนเดียว (ฝั่งพนักงานภาคสนามที่เห็นได้เฉพาะของตัวเอง) — ไม่ส่ง = ทุกคน (admin)
- */
-/** กะที่ทำจบแล้ว = ฐานของชั่วโมง · กะที่อนุมัติแล้วเท่านั้น = ฐานของเงิน */
+/** กะที่ทำจบแล้ว = ฐานของชั่วโมง · กะที่อนุมัติแล้ว = ฐานของสัดส่วนตอนแบ่งค่าจ้าง */
 const DONE = `v.check_out_at IS NOT NULL`;
 const PAYABLE = `${DONE} AND v.pay_status = 'approved'`;
 const AWAITING = `${DONE} AND v.pay_status = 'pending'`;
-/** กะที่ถูกผูกเข้ารอบจ่ายไปแล้ว = จ่ายออกไปแล้วจริง (แถวใน payroll_lines คือหลักฐานนั้น) */
-const IN_PAYROLL = `EXISTS (SELECT 1 FROM payroll_lines pl WHERE pl.visit_id = v.visit_id)`;
 
+/**
+ * ยอดที่ปล่อยแล้วก้อนนี้ เงินออกไปจริงหรือยัง = อยู่ในรอบจ่าย "ที่ปิดจ่ายแล้ว" หรือเปล่า
+ *
+ * ต้องไล่ถึง payroll_runs.status ไม่ใช่ดูแค่ว่ามีแถวใน payroll_payout_lines ไหม — แถวนั้นเกิดตั้งแต่
+ * ตอนเปิดรอบซึ่งยังเป็นร่าง ยังปรับรายชื่อ/ยกเลิกทั้งรอบได้อยู่ ถ้านับเป็นจ่ายแล้วตั้งแต่ตรงนั้น
+ * หน้าของพนักงานจะขึ้นว่า "โอนแล้ว" ทันทีที่ผู้จัดการกดเปิดรอบ ทั้งที่ยังไม่มีเงินออกจากบริษัท
+ */
+const PAYOUT_SETTLED = `EXISTS (
+  SELECT 1 FROM payroll_payout_lines pl
+  JOIN payroll_items pi ON pi.item_id = pl.item_id
+  JOIN payroll_runs  pr ON pr.run_id  = pi.run_id
+  WHERE pl.payout_id = p.payout_id AND pr.status = 'paid'
+)`;
+
+/**
+ * สรุปค่าตอบแทนรายเดือนต่อพนักงาน
+ *
+ * สองฐานคนละก้อน รวมกันตอนท้าย เพราะมันตอบคนละคำถาม:
+ *   ชั่วโมง/กะ = case_visits ของเดือนที่ "เช็คอิน" (ไปทำงานวันไหนบ้าง กี่ชั่วโมง)
+ *   เงิน       = case_payouts ของเดือนที่ "ปล่อยค่าจ้าง" (ได้เงินเท่าไหร่)
+ *
+ * เดิมสองอย่างนี้มาจาก query เดียวกันเพราะเงินผูกกับกะ (เกลี่ย staff_pay หารจำนวนกะ)
+ * พอค่าจ้างเป็นก้อนเดียวต่อเคส มันไม่ผูกกันอีกแล้ว — เคสที่ทำข้ามเดือนแล้วปล่อยเงินเดือนถัดไป
+ * จะมีชั่วโมงอยู่เดือนหนึ่งและเงินอยู่อีกเดือนหนึ่ง ซึ่งตรงกับความจริงมากกว่าการยัดให้อยู่เดือนเดียวกัน
+ *
+ * employeeId = ดูของคนเดียว (ฝั่งพนักงานภาคสนามที่เห็นได้เฉพาะของตัวเอง) — ไม่ส่ง = ทุกคน (admin)
+ */
 export async function attendanceReport(month, employeeId = null) {
   // ใส่เงื่อนไข (และพารามิเตอร์) เฉพาะตอนใช้จริง — ตัวแปลง :name ไล่หาชื่อจาก SQL ที่มีอยู่จริงเท่านั้น
-  const params = { month };
-  if (employeeId) params.emp = employeeId;
+  const shiftParams = { month };
+  const payParams = { month };
+  if (employeeId) {
+    shiftParams.emp = employeeId;
+    payParams.emp = employeeId;
+  }
 
-  const rows = await sql.all(
-    `SELECT v.checked_in_by AS employee_id,
-            ${WORKER_NAME} AS employee_name,
-            COUNT(*) FILTER (WHERE ${DONE})                    AS shifts,
-            COUNT(DISTINCT v.case_id) FILTER (WHERE ${DONE})   AS cases_worked,
-            COALESCE(ROUND(SUM(EXTRACT(EPOCH FROM (v.check_out_at - v.check_in_at)) / 60)
-                     FILTER (WHERE ${DONE})), 0)               AS minutes,
-            COALESCE(SUM(${VISIT_PAY}) FILTER (WHERE ${PAYABLE}), 0)  AS pay,
-            COUNT(*) FILTER (WHERE ${PAYABLE})                        AS approved_shifts,
-            /* อนุมัติแล้วยังไม่ใช่ "ได้เงินแล้ว" — เงินออกจริงตอนรอบจ่ายถูกปิด (ดูโมดูล payroll)
-               แยกสองตัวนี้ออกมาเพื่อให้ทั้งพนักงานและผู้จัดการตอบได้ว่ายังค้างจ่ายอยู่เท่าไหร่ */
-            COALESCE(SUM(${VISIT_PAY}) FILTER (WHERE ${PAYABLE} AND ${IN_PAYROLL}), 0)     AS paid_pay,
-            COUNT(*) FILTER (WHERE ${PAYABLE} AND ${IN_PAYROLL})                           AS paid_shifts,
-            COALESCE(SUM(${VISIT_PAY}) FILTER (WHERE ${PAYABLE} AND NOT ${IN_PAYROLL}), 0) AS unpaid_pay,
-            COALESCE(SUM(${VISIT_PAY}) FILTER (WHERE ${AWAITING}), 0) AS pending_pay,
-            COUNT(*) FILTER (WHERE ${AWAITING})                       AS pending_shifts,
-            COUNT(*) FILTER (WHERE ${DONE} AND v.pay_status = 'rejected') AS rejected_shifts,
-            COUNT(*) FILTER (WHERE ${DONE} AND ${VISIT_PAY} IS NULL)  AS unpriced_shifts
-     ${WORKED_SHIFT}
-       ${employeeId ? 'AND v.checked_in_by = :emp' : ''}
-     GROUP BY v.checked_in_by, e.first_name, e.last_name`,
-    params,
-  );
+  const [shiftRows, payRows] = await Promise.all([
+    sql.all(
+      `SELECT v.checked_in_by AS employee_id,
+              ${WORKER_NAME} AS employee_name,
+              COUNT(*) FILTER (WHERE ${DONE})                    AS shifts,
+              COUNT(DISTINCT v.case_id) FILTER (WHERE ${DONE})   AS cases_worked,
+              COALESCE(ROUND(SUM(EXTRACT(EPOCH FROM (v.check_out_at - v.check_in_at)) / 60)
+                       FILTER (WHERE ${DONE})), 0)               AS minutes,
+              COUNT(*) FILTER (WHERE ${PAYABLE})                 AS approved_shifts,
+              COUNT(*) FILTER (WHERE ${AWAITING})                AS pending_shifts,
+              COUNT(*) FILTER (WHERE ${DONE} AND v.pay_status = 'rejected') AS rejected_shifts
+       ${WORKED_SHIFT}
+         ${employeeId ? 'AND v.checked_in_by = :emp' : ''}
+       GROUP BY v.checked_in_by, e.first_name, e.last_name`,
+      shiftParams,
+    ),
+    sql.all(
+      /* ปล่อยแล้วยังไม่ใช่ "ได้เงินแล้ว" — เงินออกจริงตอนรอบจ่ายถูกปิด (ดูโมดูล payroll)
+         แยกสองตัวนี้ออกมาเพื่อให้ทั้งพนักงานและผู้จัดการตอบได้ว่ายังค้างจ่ายอยู่เท่าไหร่ */
+      `SELECT p.employee_id,
+              MAX(p.employee_name) AS employee_name,
+              COALESCE(SUM(p.amount), 0) AS pay,
+              COALESCE(SUM(p.amount) FILTER (WHERE ${PAYOUT_SETTLED}), 0)     AS paid_pay,
+              COALESCE(SUM(p.amount) FILTER (WHERE NOT ${PAYOUT_SETTLED}), 0) AS unpaid_pay,
+              COUNT(*)                                        AS payouts,
+              COUNT(*) FILTER (WHERE ${PAYOUT_SETTLED})       AS paid_payouts,
+              COALESCE(SUM(p.shifts), 0)  AS paid_shifts,
+              COUNT(DISTINCT p.case_id)   AS cases_paid
+       FROM case_payouts p
+       WHERE substr(p.released_at, 1, 7) = :month
+         ${employeeId ? 'AND p.employee_id = :emp' : ''}
+       GROUP BY p.employee_id`,
+      payParams,
+    ),
+  ]);
 
-  return rows
-    .map((r) => ({
-      employee_id: r.employee_id,
-      employee_name: r.employee_name,
+  /* รวมสองฝั่งด้วย employee_id — คนที่มีแต่ชั่วโมง (ยังไม่ปล่อยเงิน) หรือมีแต่เงิน
+     (ปล่อยค่าจ้างของงานเดือนก่อน) ต้องขึ้นทั้งคู่ ไม่ใช่หายไปเพราะอีกฝั่งไม่มีแถว */
+    const merged = new Map();
+  const blank = (id, name) => ({
+    employee_id: id,
+    employee_name: name,
+    shifts: 0,
+    cases_worked: 0,
+    minutes: 0,
+    approved_shifts: 0,
+    pending_shifts: 0,
+    rejected_shifts: 0,
+    pay: 0,
+    paid_pay: 0,
+    unpaid_pay: 0,
+    payouts: 0,
+    paid_payouts: 0,
+    paid_shifts: 0,
+    cases_paid: 0,
+  });
+
+  for (const r of shiftRows) {
+    merged.set(r.employee_id, {
+      ...blank(r.employee_id, r.employee_name),
       shifts: Number(r.shifts),
       cases_worked: Number(r.cases_worked),
       minutes: Number(r.minutes),
-      pay: Number(r.pay),
       approved_shifts: Number(r.approved_shifts),
-      paid_pay: Number(r.paid_pay),
-      paid_shifts: Number(r.paid_shifts),
-      unpaid_pay: Number(r.unpaid_pay),
-      pending_pay: Number(r.pending_pay),
       pending_shifts: Number(r.pending_shifts),
       rejected_shifts: Number(r.rejected_shifts),
-      unpriced_shifts: Number(r.unpriced_shifts),
-    }))
-    // employee_name ว่างได้ถ้าพนักงานถูกลบถาวร (LEFT JOIN) — กัน localeCompare ล้มทั้งรายงาน
-    .sort((a, b) => (a.employee_name ?? '').localeCompare(b.employee_name ?? '', 'th'));
+    });
+  }
+
+  for (const r of payRows) {
+    const row = merged.get(r.employee_id) ?? blank(r.employee_id, r.employee_name);
+    merged.set(r.employee_id, {
+      ...row,
+      employee_name: row.employee_name ?? r.employee_name,
+      pay: Number(r.pay),
+      paid_pay: Number(r.paid_pay),
+      unpaid_pay: Number(r.unpaid_pay),
+      payouts: Number(r.payouts),
+      paid_payouts: Number(r.paid_payouts),
+      paid_shifts: Number(r.paid_shifts),
+      cases_paid: Number(r.cases_paid),
+    });
+  }
+
+  return (
+    [...merged.values()]
+      // employee_name ว่างได้ถ้าพนักงานถูกลบถาวร (LEFT JOIN) — กัน localeCompare ล้มทั้งรายงาน
+      .sort((a, b) => (a.employee_name ?? '').localeCompare(b.employee_name ?? '', 'th'))
+  );
 }
 
 /**
@@ -1511,16 +1544,30 @@ export async function attendanceReport(month, employeeId = null) {
 export function payoutCases(month, employeeId) {
   return sql
     .all(
+      /* LEFT JOIN case_payouts — เคสที่ลงแรงแล้วแต่ผู้จัดการยังไม่ปล่อยค่าจ้าง ต้องขึ้นด้วย
+         (ยอดเป็น 0 พร้อมป้ายว่ายังไม่ปล่อย) ไม่ใช่หายไปจนพนักงานนึกว่าไม่ได้ถูกนับ
+         นับเฉพาะยอดที่ปล่อยในเดือนที่ขอ ให้ตรงกับ pay ของ attendanceReport เดือนเดียวกัน */
       `SELECT c.case_id, c.title, c.client_name, c.case_type, c.service_kind, c.status,
               c.closed_at, c.start_date, c.end_date,
               COUNT(*) FILTER (WHERE ${DONE}) AS shifts,
-              COALESCE(SUM(${VISIT_PAY}) FILTER (WHERE ${PAYABLE}), 0) AS pay,
               COUNT(*) FILTER (WHERE ${AWAITING}) AS pending_shifts,
-              COALESCE(SUM(${VISIT_PAY}) FILTER (WHERE ${AWAITING}), 0) AS pending_pay,
-              COUNT(*) FILTER (WHERE ${DONE} AND ${VISIT_PAY} IS NULL) AS unpriced_shifts,
               MAX(v.visit_date) AS last_visit_date,
               f.name  AS format_name, g.name AS grade_name,
-              pp.name AS physio_package_name, pp.sessions AS physio_sessions
+              pp.name AS physio_package_name, pp.sessions AS physio_sessions,
+              COALESCE((SELECT SUM(p.amount) FROM case_payouts p
+                        WHERE p.case_id = c.case_id AND p.employee_id = :emp
+                          AND substr(p.released_at, 1, 7) = :month), 0) AS pay,
+              COALESCE((SELECT SUM(p.amount) FROM case_payouts p
+                        WHERE p.case_id = c.case_id AND p.employee_id = :emp), 0) AS pay_all_time,
+              /* ยอดของเดือนนี้เป็นงวดที่เท่าไหร่ของเคส (เดือนเดียวอาจได้สองงวดถ้าปล่อยถี่)
+                 พนักงานที่ตกลงไว้ว่า "เคสนี้แบ่งสองงวด" ต้องอ่านออกว่าที่ได้ไปคืองวดไหน
+                 ไม่ใช่เห็นแค่ตัวเลขก้อนหนึ่งแล้วต้องเดาเองว่าครบหรือยัง */
+              (SELECT string_agg(x.no::text, ', ' ORDER BY x.no)
+                 FROM (SELECT DISTINCT p.installment_no AS no FROM case_payouts p
+                       WHERE p.case_id = c.case_id AND p.employee_id = :emp
+                         AND substr(p.released_at, 1, 7) = :month) x) AS installments,
+              COALESCE((SELECT MAX(p.installment_no) FROM case_payouts p
+                        WHERE p.case_id = c.case_id), 0) AS case_installments
        ${WORKED_SHIFT}
          AND v.checked_in_by = :emp
        GROUP BY c.case_id, c.title, c.client_name, c.case_type, c.service_kind, c.status,
@@ -1533,10 +1580,545 @@ export function payoutCases(month, employeeId) {
       rows.map((r) => ({
         ...r,
         shifts: Number(r.shifts),
+        pending_shifts: Number(r.pending_shifts),
         pay: Number(r.pay),
-        unpriced_shifts: Number(r.unpriced_shifts),
+        pay_all_time: Number(r.pay_all_time),
+        case_installments: Number(r.case_installments),
       })),
     );
+}
+
+// ---------- ปล่อยค่าจ้างของเคส (case_payouts) ----------
+
+/**
+ * คิวค่าจ้าง — เคสทุกใบที่มีเงินให้จัดการ พร้อมสถานะว่าปล่อยไปแล้วเท่าไหร่ เหลือกี่งวด
+ *
+ * มีไว้ให้หน้ารอบจ่ายทำงานเรื่องเงินได้จบในหน้าเดียว โดยไม่ต้องเด้งไปเปิดเคสทีละใบ —
+ * เดิมการ "ปล่อยค่าจ้าง" ซ่อนอยู่ในหน้าเคส ซึ่งเป็นหน้าที่เปิดเพื่อดูเรื่องงาน (ตารางกะ รายงานอาการ)
+ * คนที่กำลังทำเรื่องเงินจึงต้องสลับหน้าไปมาทีละเคส และไม่มีที่ไหนเลยที่เห็นภาพรวมว่า
+ * "ตอนนี้มีเงินค้างต้องปล่อยกี่เคส รวมเท่าไหร่"
+ *
+ * เกณฑ์: ตั้งค่าจ้างไว้แล้ว + มีกะที่อนุมัติแล้วอย่างน้อยหนึ่งกะ (ไม่งั้นยังไม่รู้ว่าจะแบ่งให้ใคร)
+ * pending = ยังปล่อยไม่ครบยอด · ส่งมาทั้งสองกลุ่มเพื่อให้ฝั่งหน้าจอสลับดู "ที่จ่ายครบแล้ว" ได้
+ * โดยไม่ต้องยิงใหม่ (เคสทั้งระบบมีหลักร้อย ไม่ใช่หลักแสน — แบ่งหน้ายังไม่คุ้มความซับซ้อน)
+ */
+export function payQueue() {
+  return sql
+    .all(
+      `SELECT c.case_id, c.title, c.client_name, c.status, c.staff_pay, c.fee,
+              c.case_type, c.service_kind, c.closed_at, c.end_date,
+              COALESCE(p.released, 0)     AS released,
+              COALESCE(p.installments, 0) AS installments_used,
+              COALESCE(w.workers, 0)      AS workers,
+              w.worker_names,
+              lv.last_visit_date
+       FROM cases c
+       LEFT JOIN (
+         SELECT case_id, SUM(amount) AS released, MAX(installment_no) AS installments
+         FROM case_payouts GROUP BY case_id
+       ) p ON p.case_id = c.case_id
+
+       /* คนที่จะได้เงินของเคสนี้ ต้องเป็นชุดเดียวกับที่แบ่งเงินจริง (ดู payShares) —
+          ถ้านับแต่คนที่เช็คอิน เคสที่มอบหมายไว้แล้วแต่ยังไม่มีใครเช็คอินจะขึ้นว่า "0 คน"
+          ทั้งที่กดปล่อยเงินได้และมีคนรับอยู่จริง ซึ่งอ่านแล้วเหมือนระบบพัง
+
+          เอาชื่อมาด้วย ไม่ใช่แค่จำนวน — หน้านี้คือหน้าจ่ายเงิน คำถามแรกคือ "จ่ายให้ใคร"
+          ส่วนเคสไหนนั้นรหัสเคสบอกอยู่แล้ว · UNION ตัดคนซ้ำให้ตั้งแต่ในตัวมันเอง */
+       LEFT JOIN (
+         SELECT u.case_id,
+                COUNT(*)::int AS workers,
+                string_agg(
+                  COALESCE(e.first_name || ' ' || e.last_name, '(พนักงานที่ถูกลบแล้ว)'),
+                  ' · ' ORDER BY e.first_name, e.last_name
+                ) AS worker_names
+         FROM (
+           SELECT v.case_id, v.checked_in_by AS employee_id FROM case_visits v
+           WHERE ${NOT_CANCELLED} AND v.checked_in_by IS NOT NULL
+           UNION
+           SELECT v.case_id, v.assigned_to FROM case_visits v
+           WHERE ${NOT_CANCELLED} AND v.assigned_to IS NOT NULL
+           UNION
+           SELECT c2.case_id, c2.assigned_to FROM cases c2 WHERE c2.assigned_to IS NOT NULL
+         ) u
+         LEFT JOIN employees e ON e.employee_id = u.employee_id
+         GROUP BY u.case_id
+       ) w ON w.case_id = c.case_id
+
+       LEFT JOIN (
+         SELECT v.case_id, MAX(v.visit_date) AS last_visit_date
+         FROM case_visits v WHERE ${NOT_CANCELLED}
+         GROUP BY v.case_id
+       ) lv ON lv.case_id = c.case_id
+
+       WHERE c.staff_pay IS NOT NULL
+         /* สามสถานะนี้เท่านั้น = เคสที่มีคนทำงานอยู่จริงหรือทำจบแล้ว
+            ตัด unassigned ทิ้งเพราะยังไม่มีใครรับงาน จ่ายไปก็ไม่รู้จะจ่ายให้ใคร
+            และตัด cancelled เพราะงานไม่ได้เกิดขึ้น */
+         AND c.status IN ('assigned', 'in_progress', 'closed')
+       /* เรียงตามความเร่ง: ปิดเคสแล้วและยังค้างเงิน = ต้องทำก่อน · ปิดแล้วจ่ายครบ = ดูย้อนหลัง
+          เคสที่ยังไม่ปิดอยู่กลางๆ เพราะปล่อยงวดระหว่างทางได้ แต่ไม่ใช่ของที่ต้องรีบ */
+       ORDER BY (c.status = 'closed' AND (c.staff_pay - COALESCE(p.released, 0)) > 0) DESC,
+                (c.staff_pay - COALESCE(p.released, 0)) > 0 DESC,
+                COALESCE(c.closed_at, lv.last_visit_date) DESC NULLS LAST,
+                c.case_id DESC`,
+    )
+    .then((rows) =>
+      rows.map((r) => {
+        const total = Number(r.staff_pay);
+        const released = Math.round(Number(r.released) * 100) / 100;
+        return {
+          ...r,
+          staff_pay: total,
+          fee: r.fee == null ? null : Number(r.fee),
+          released,
+          remaining: Math.round((total - released) * 100) / 100,
+          installments_used: Number(r.installments_used),
+          workers: Number(r.workers),
+        };
+      }),
+    );
+}
+
+/**
+ * หนึ่งเคสแบ่งจ่ายได้กี่งวด — เพดานอยู่ที่ชั้นนี้ ไม่ใช่ที่ฐานข้อมูล (ดูเหตุผลใน db/schema.sql)
+ *
+ * ค่าปริยายของการจ่ายคือ "ทีเดียวจบ" — เพดานนี้คือขอบบนของกรณีที่ตกลงกันว่าจะซอย
+ * ไม่ใช่จำนวนงวดที่ทุกเคสต้องมี · เกินห้างวดคือการทยอยจ่ายทีละนิดจนทั้งพนักงานและผู้จัดการ
+ * ไล่ไม่ทันว่าเคสหนึ่งจ่ายไปแล้วเท่าไหร่ เหลือเท่าไหร่
+ */
+export const MAX_INSTALLMENTS = 5;
+
+/** ปัดเป็นสตางค์ — เงินไม่มีทศนิยมที่สาม และ 0.1 + 0.2 ของ JS ก็ไม่ควรโผล่มาในสลิป */
+const round = (n) => Math.round(n * 100) / 100;
+
+/**
+ * น้ำหนักของแต่ละคนในการแบ่งค่าจ้างของเคส
+ *
+ * ค่าปริยาย = หารเท่ากันทุกคนที่อยู่ในเคสนี้ (สองคนคนละครึ่ง สามคนหารสาม)
+ * ไม่ผูกกับจำนวนกะและไม่ผูกกับว่ากะถูกยืนยันหรือยัง — งานหนึ่งเคสไม่ได้แบ่งกันเป็นกะๆ
+ * เท่าๆ กันอยู่แล้ว คนที่ไปน้อยครั้งอาจรับกะที่หนักกว่า และเรื่องพวกนี้ตกลงกันด้วยปากเปล่า
+ * ไม่ได้อยู่ในตารางกะ · ตารางกะจึงเป็นเรื่องของ "การมาทำงาน" ไม่ใช่ตัวหารเงิน
+ *
+ * ถ้าตกลงกันไว้เป็นอย่างอื่น (case_pay_shares) ใช้ยอดที่ตกลงเป็นน้ำหนักแทน —
+ * ตกลงกันว่า 9,000 กับ 6,000 ทุกงวดก็แบ่งกัน 60:40 ไม่ว่างวดนั้นจะปล่อยเท่าไหร่
+ *
+ * "มีข้อตกลง" ดูที่มีแถวไหม ไม่ใช่ดูว่ายอดมากกว่าศูนย์ไหม — ตั้ง 0 ให้ใครคือการตกลงว่า
+ * คนนั้นไม่รับค่าจ้างของเคสนี้ ซึ่งต่างจากยังไม่เคยตั้ง
+ */
+export function weightsFor(shares) {
+  const agreed = shares.some((r) => r.share != null);
+  return shares.map((r) => (agreed ? (r.share ?? 0) : 1));
+}
+
+/**
+ * แบ่งเงินของงวดหนึ่งให้ผู้รับหลายคน — "เกลี่ยให้ไล่ทันเป้าหมาย" ไม่ใช่แบ่งเฉพาะเงินก้อนนี้
+ *
+ * เคสที่มีพนักงานคนเดียวไม่มีอะไรต้องคิด แต่พอมีหลายคนแล้วแบ่งจ่ายหลายงวด การแบ่งเงิน
+ * ทีละงวดโดยดูแค่งวดนั้นให้ผลที่ผิดถาวร เพราะรายชื่อคนที่ "พร้อมรับ" ของแต่ละงวดไม่เท่ากัน:
+ *
+ *   เคสค่าจ้าง 15,000 · สมชายกับสมหญิงตกลงหารครึ่ง (คนละ 7,500)
+ *   งวดที่ 1 ปล่อย 7,000 ตอนที่สมหญิงยังไม่มีกะที่อนุมัติ → สมชายได้ 7,000 คนเดียว
+ *   งวดที่ 2 ปล่อย 8,000 ตอนที่ทั้งคู่พร้อมแล้ว
+ *     → ถ้าหารครึ่งเฉพาะงวดนี้: คนละ 4,000 · รวมทั้งเคส สมชาย 11,000 · สมหญิง 4,000
+ *   ทั้งที่ตกลงกันว่าคนละครึ่ง และไม่มีใครเลือกให้เป็นแบบนั้น — มันเป็นผลข้างเคียงของ
+ *   "วันที่กดปล่อยงวดแรก" ล้วนๆ ซึ่งไม่ควรมีผลกับใครได้เท่าไหร่
+ *
+ * ตัวนี้คิดจากปลายทางแทน: ถ้าเงินที่ปล่อยไปแล้วบวกงวดนี้คือ T แต่ละคนควรมีสะสม T×(น้ำหนักของตัวเอง/น้ำหนักรวม)
+ * ส่วนที่ยังขาดของแต่ละคนคือสิทธิ์ในงวดนี้ แล้วเอาเงินของงวดมาแบ่งตามส่วนที่ขาดนั้น
+ *   → งวดที่ 2 ข้างบน: เป้าหมายคนละ 7,500 · สมชายขาด 500 สมหญิงขาด 7,500
+ *     ได้ 500 กับ 7,500 · รวมทั้งเคสคนละ 7,500 พอดี — งวดหลังแก้ความเอียงของงวดก่อนให้เอง
+ *
+ * ใครที่ได้เกินส่วนของตัวเองไปแล้ว (ส่วนที่ขาดติดลบ) ถูกตัดเป็น 0 ไม่ใช่ให้เขาคืนเงิน —
+ * เงินที่ออกไปแล้วเรียกคืนผ่านระบบไม่ได้ ทำได้แค่ไม่จ่ายเพิ่มจนกว่าคนอื่นจะไล่ทัน
+ * (ถ้ายอดที่เหลือไม่พอให้ทุกคนถึงเป้า ทุกคนที่ยังขาดจะโดนหารลดตามส่วนเท่าๆ กัน)
+ *
+ * เศษการปัดตกที่ "คนสุดท้ายที่ยังมีส่วนได้" ไม่ใช่แถวสุดท้ายเฉยๆ — แถวสุดท้ายอาจเป็นคนที่ได้ 0
+ * ในงวดนี้ การโยนเศษให้เขาคือการสร้างก้อนเงิน 1 สตางค์ที่ไม่มีเหตุผลจะอธิบาย
+ */
+export function allocateShares(shares, amount) {
+  const weights = weightsFor(shares);
+  const totalWeight = weights.reduce((s, w) => s + w, 0);
+  if (totalWeight === 0) return [];
+
+  // เป้าหมาย = เงินทั้งหมดของเคสที่จะปล่อยไปแล้วหลังจบงวดนี้ (ของเดิม + ของงวดนี้)
+  const target = shares.reduce((s, r) => s + (r.paid ?? 0), 0) + amount;
+
+  const rows = shares.map((r, i) => ({
+    ...r,
+    owed: Math.max(0, round((target * weights[i]) / totalWeight - (r.paid ?? 0))),
+  }));
+
+  /* ผลรวมของส่วนที่ขาดมากกว่า amount เสมอเมื่อ amount > 0 (พิสูจน์: ผลรวมก่อนตัดลบ = amount พอดี
+     การตัดลบเป็นศูนย์มีแต่จะทำให้มากขึ้น) — เช็คไว้กัน amount = 0 ที่หลุดมาถึงตรงนี้ ไม่ให้หารศูนย์ */
+  const totalOwed = rows.reduce((s, r) => s + r.owed, 0);
+  if (totalOwed === 0) return [];
+
+  for (const r of rows) r.amount = round((amount * r.owed) / totalOwed);
+
+  const receivers = rows.filter((r) => r.owed > 0);
+  const allocated = receivers.slice(0, -1).reduce((s, r) => s + r.amount, 0);
+  receivers[receivers.length - 1].amount = round(amount - allocated);
+
+  return rows;
+}
+
+/**
+ * สถานะค่าจ้างของเคสหนึ่งใบ — ผู้จัดการต้องเห็นก่อนกดปล่อยว่าเหลือเท่าไหร่ และจะแบ่งให้ใครบ้าง
+ *
+ * released = ปล่อยไปแล้วรวมเท่าไหร่ · remaining = ยอดเหมาลบที่ปล่อยไปแล้ว
+ * split    = ถ้ากดปล่อยยอดคงเหลือตอนนี้ ใครจะได้เท่าไหร่ (สัดส่วนตามกะที่อนุมัติแล้ว)
+ *
+ * ตัวเลขชุด installment_* คือกติกา "แบ่งจ่ายได้ไม่เกิน 3 งวดต่อเคส" ที่ต้องเห็นก่อนกด
+ * ไม่ใช่ไปเจอตอนถูกปฏิเสธ — เพราะงวดสุดท้ายคือจุดที่ตัดสินใจกลับไม่ได้: กรอกน้อยกว่ายอดคงเหลือ
+ * แล้วเงินส่วนที่เหลือจะปล่อยไม่ได้อีกเลย ต้องถอนงวดที่ปล่อยผิดคืนก่อนถึงจะแก้ได้
+ */
+export async function payStatus(caseId) {
+  const [row, split, payouts] = await Promise.all([
+    sql.one(
+      /* นับงวดจาก MAX ไม่ใช่ COUNT — ถอนงวดกลางคืนแล้วเลขงวดของงวดหลังต้องไม่เลื่อนตาม
+         (ถ้านับจำนวนแถว งวดที่ 3 จะกลายเป็นงวดที่ 2 ทั้งที่บนสลิปที่ปล่อยไปแล้วเขียนว่า 3) */
+      `SELECT c.staff_pay, c.fee,
+              COALESCE((SELECT SUM(p.amount) FROM case_payouts p WHERE p.case_id = c.case_id), 0) AS released,
+              COALESCE((SELECT MAX(p.installment_no) FROM case_payouts p WHERE p.case_id = c.case_id), 0) AS last_installment
+       FROM cases c WHERE c.case_id = :id`,
+      { id: caseId },
+    ),
+    payShares(sql, caseId),
+    listPayouts(caseId),
+  ]);
+  if (!row) return null;
+
+  const total = row.staff_pay == null ? null : Number(row.staff_pay);
+  const fee = row.fee == null ? null : Number(row.fee);
+  const released = round(Number(row.released));
+  const last = Number(row.last_installment);
+
+  /* ข้อตกลงส่วนแบ่ง: มีแถวไหม และรวมแล้วเท่ากับค่าจ้างของเคสหรือเปล่า
+     ไม่ตรงได้จริงเมื่อค่าจ้างของเคสถูกแก้ทีหลัง หรือคนที่ตกลงไว้ถูกลบออกจากทะเบียน —
+     ปล่อยต่อได้ (สัดส่วนยังใช้ได้) แต่ต้องฟ้อง ไม่ใช่เกลี่ยเงียบๆ ตามตัวเลขที่ไม่มีใครยืนยันแล้ว */
+  const agreedRows = split.filter((r) => r.share != null);
+  const agreedTotal = agreedRows.length ? round(agreedRows.reduce((n, r) => n + r.share, 0)) : null;
+
+  return {
+    staff_pay: total,
+
+    /* ค่าบริการที่เก็บลูกค้า กับส่วนที่เหลืออยู่ที่บริษัท — ไม่ได้เก็บเป็นช่องของตัวเอง
+       คำนวณจาก fee - staff_pay ตอนอ่าน จึงไม่มีวันขัดกันเอง (ดูเหตุผลใน db/schema.sql)
+       ต้องเห็นตรงนี้เพราะคนตั้งยอดคิดเป็น "เคส 20,000 บริษัทเอา 5,000 พนักงานได้ 15,000"
+       ไม่ใช่ "staff_pay = 15,000" ลอยๆ ที่ไม่รู้ว่าเทียบกับอะไร */
+    fee,
+    company_share: fee == null || total == null ? null : round(fee - total),
+
+    has_agreement: agreedRows.length > 0,
+    agreed_total: agreedTotal,
+    agreement_matches: agreedTotal == null || total == null ? true : agreedTotal === round(total),
+
+    released,
+    remaining: total == null ? null : round(total - released),
+    shares: split,
+    payouts,
+
+    max_installments: MAX_INSTALLMENTS,
+    installments_used: last,
+    // เคสเก่าที่ปล่อยเกิน 3 งวดมาก่อนกติกานี้มีอยู่จริง — คุมไม่ให้เหลือติดลบ
+    installments_left: Math.max(0, MAX_INSTALLMENTS - last),
+    next_installment: last + 1,
+    is_final_installment: last + 1 === MAX_INSTALLMENTS,
+  };
+}
+
+/**
+ * ผู้มีส่วนได้ของเคสนี้ = ทุกคนที่อยู่ในเคส ไม่ว่ากะจะครบหรือถูกยืนยันแล้วหรือยัง
+ *
+ * รวมสี่ทาง: คนที่เคยเช็คอิน · คนที่ถูกนัดกะไว้ · คนที่ถูกมอบหมายทั้งเคส · คนที่เคยได้เงินของเคสนี้
+ * (บวกคนที่ตั้งส่วนแบ่งไว้) — เกณฑ์เดิมคือ "ต้องมีกะที่อนุมัติแล้ว" ซึ่งแปลว่าเคสที่พนักงาน
+ * ลืมเช็คอินทั้งเคส จ่ายเงินไม่ได้เลยทั้งที่งานเกิดขึ้นจริงและเคสปิดไปแล้ว
+ *
+ * ตารางกะเป็นเรื่องของ "การมาทำงาน" — มีไว้ตรวจว่าใครมาสาย/ขาด ไม่ใช่ประตูของเงิน
+ * ประตูของเงินคือคนกดปล่อย ซึ่งเป็นการตัดสินใจของผู้จัดการที่เห็นงานจริงอยู่แล้ว
+ *
+ * ต้องรวมคนที่เคยได้เงินไปแล้วเสมอ แม้ตอนนี้จะไม่มีกะเหลืออยู่ (กะถูกยกเลิกทีหลัง) —
+ * ไม่งั้นเงินที่จ่ายให้เขาไปแล้วจะหายจากฐานการเกลี่ย แล้วงวดถัดไปจะคิดเป้าหมายของคนอื่นต่ำกว่าจริง
+ *
+ * paid = ได้ไปแล้วเท่าไหร่จากเคสนี้ (ทุกงวดรวมกัน) คือฐานของการเกลี่ยใน allocateShares
+ */
+function payShares(tx, caseId) {
+  return tx
+    .all(
+      /* รวมรายชื่อจากสามทางก่อน แล้วค่อยดึงตัวเลขของแต่ละทางมาแปะ — เขียนเป็น FULL OUTER JOIN
+         ซ้อนกันสามชั้นได้เหมือนกัน แต่ COALESCE ของ employee_id จะยาวจนอ่านไม่ออกว่าใครคือใคร */
+      `WITH people AS (
+         SELECT v.checked_in_by AS employee_id FROM case_visits v
+         WHERE v.case_id = :id AND ${NOT_CANCELLED} AND v.checked_in_by IS NOT NULL
+         UNION
+         SELECT v.assigned_to FROM case_visits v
+         WHERE v.case_id = :id AND ${NOT_CANCELLED} AND v.assigned_to IS NOT NULL
+         UNION
+         SELECT c.assigned_to FROM cases c
+         WHERE c.case_id = :id AND c.assigned_to IS NOT NULL
+         UNION
+         SELECT p.employee_id FROM case_payouts p
+         WHERE p.case_id = :id AND p.employee_id IS NOT NULL
+         UNION
+         SELECT sh.employee_id FROM case_pay_shares sh WHERE sh.case_id = :id
+       ),
+       /* จำนวนกะที่ทำจบแล้วจริง — เก็บไว้เป็นข้อมูลประกอบเท่านั้น ไม่ได้เอาไปคิดเงิน
+          (ไม่กรองด้วย pay_status แล้ว เพราะการยืนยันกะไม่ใช่ประตูของเงินอีกต่อไป) */
+       worked AS (
+         SELECT v.checked_in_by AS employee_id,
+                COUNT(*)::int   AS shifts,
+                GREATEST(0, COALESCE(ROUND(SUM(
+                  EXTRACT(EPOCH FROM (v.check_out_at - v.check_in_at)) / 60)), 0))::int AS minutes
+         FROM case_visits v
+         WHERE v.case_id = :id
+           AND v.check_out_at IS NOT NULL
+           AND ${NOT_CANCELLED}
+           AND v.checked_in_by IS NOT NULL
+         GROUP BY v.checked_in_by
+       ),
+       received AS (
+         SELECT p.employee_id,
+                MAX(p.employee_name) AS employee_name,
+                SUM(p.amount)        AS paid
+         FROM case_payouts p
+         WHERE p.case_id = :id AND p.employee_id IS NOT NULL
+         GROUP BY p.employee_id
+       )
+       SELECT pe.employee_id,
+              /* ไล่จากชื่อในทะเบียนก่อน แล้วค่อยชื่อ ณ ตอนที่ปล่อยเงิน — ใช้ WORKER_NAME ตรงๆ ไม่ได้
+                 เพราะมันมีตัวสำรองเป็น "(พนักงานที่ถูกลบแล้ว)" อยู่ในตัวแล้ว ชื่อจริงที่เก็บไว้บนก้อนเงิน
+                 จึงไม่มีวันได้ใช้ ทั้งที่มันคือสิ่งเดียวที่บอกได้ว่าเงินก้อนนั้นเคยจ่ายให้ใคร */
+              COALESCE(e.first_name || ' ' || e.last_name, r.employee_name, '(พนักงานที่ถูกลบแล้ว)') AS employee_name,
+              COALESCE(w.shifts, 0)  AS shifts,
+              COALESCE(w.minutes, 0) AS minutes,
+              COALESCE(r.paid, 0)    AS paid,
+              sh.share               AS share
+       FROM people pe
+       LEFT JOIN worked   w  ON w.employee_id  = pe.employee_id
+       LEFT JOIN received r  ON r.employee_id  = pe.employee_id
+       LEFT JOIN case_pay_shares sh ON sh.case_id = :id AND sh.employee_id = pe.employee_id
+       LEFT JOIN employees e ON e.employee_id = pe.employee_id
+       ORDER BY COALESCE(w.shifts, 0) DESC, pe.employee_id`,
+      { id: caseId },
+    )
+    .then((rows) =>
+      rows.map((r) => ({
+        ...r,
+        shifts: Number(r.shifts),
+        minutes: Number(r.minutes),
+        paid: round(Number(r.paid)),
+        // null = ยังไม่เคยตั้งข้อตกลงให้คนนี้ · 0 = ตกลงว่าไม่รับ — สองอย่างนี้ต้องไม่ยุบเป็นค่าเดียวกัน
+        share: r.share == null ? null : round(Number(r.share)),
+      })),
+    );
+}
+
+/**
+ * ตั้ง (หรือล้าง) ข้อตกลงส่วนแบ่งของเคส — ส่งรายการว่างมา = กลับไปหารเท่ากันตามปกติ
+ *
+ * เขียนทับทั้งชุดเสมอ ไม่ใช่แก้ทีละคน เพราะส่วนแบ่งเป็นของที่ต้องมองพร้อมกันทั้งเคส:
+ * แก้ของคนหนึ่งโดยไม่แตะคนอื่น = ผลรวมไม่ตรงกับค่าจ้างของเคสทันที
+ */
+export function setPayShares(caseId, rows, actor) {
+  return transaction(async (tx) => {
+    const people = await payShares(tx, caseId);
+    const nameOf = (id) => people.find((r) => r.employee_id === id)?.employee_name ?? id;
+
+    await tx.run('DELETE FROM case_pay_shares WHERE case_id = :id', { id: caseId });
+
+    for (const r of rows) {
+      await tx.run(
+        `INSERT INTO case_pay_shares (case_id, employee_id, share, updated_by, updated_by_name)
+         VALUES (:case_id, :emp, :share, :by, :by_name)`,
+        {
+          case_id: caseId,
+          emp: r.employee_id,
+          share: round(r.share),
+          by: actor?.employee_id ?? null,
+          by_name: actor?.name ?? null,
+        },
+      );
+    }
+
+    await logEvent(
+      tx,
+      caseId,
+      'pay_shares',
+      rows.length === 0
+        ? 'ล้างข้อตกลงส่วนแบ่ง — กลับไปหารเท่ากันทุกคน'
+        : `ตั้งส่วนแบ่งค่าจ้าง — ${rows
+            .map((r) => `${nameOf(r.employee_id)} ${round(r.share).toLocaleString('th-TH')}`)
+            .join(' · ')}`,
+      actor,
+    );
+  }).then(() => payStatus(caseId));
+}
+
+/** ยอดที่ปล่อยไปแล้วของเคส พร้อมสถานะว่าเข้ารอบจ่ายไปหรือยัง */
+export function listPayouts(caseId) {
+  return sql
+    .all(
+      `SELECT p.payout_id, p.installment_no, p.employee_id, p.employee_name, p.amount, p.shifts, p.minutes,
+              p.due_date, p.released_at, p.released_by_name, p.note,
+              pi.run_id, pr.status AS run_status
+       FROM case_payouts p
+       LEFT JOIN payroll_payout_lines pl ON pl.payout_id = p.payout_id
+       LEFT JOIN payroll_items pi ON pi.item_id = pl.item_id
+       LEFT JOIN payroll_runs  pr ON pr.run_id  = pi.run_id
+       WHERE p.case_id = :id
+       ORDER BY p.payout_id DESC`,
+      { id: caseId },
+    )
+    .then((rows) =>
+      rows.map((r) => ({ ...r, amount: Number(r.amount), installment_no: Number(r.installment_no) })),
+    );
+}
+
+/**
+ * ปล่อยค่าจ้างของเคสหนึ่งงวด แล้วแบ่งตามสัดส่วนกะที่แต่ละคนทำจริง
+ *
+ * ยอดที่ปล่อยกลายเป็นตัวเลขตายตัวทันที ไม่คิดสดจากอะไรอีกเลย — แก้ค่าจ้างของเคสทีหลัง
+ * หรือเพิ่ม/ลบกะทีหลัง ก็ไม่กระทบยอดที่ปล่อยไปแล้ว (ต่างจากของเดิมที่ทุกอย่างขยับตลอดเวลา)
+ *
+ * หนึ่งครั้งที่กด = หนึ่งงวดของเคส (ไม่เกิน MAX_INSTALLMENTS งวด) ต่อให้แตกเป็นหลายแถวเพราะมี
+ * ผู้รับหลายคน ทุกแถวก็ถือเลขงวดเดียวกัน — เคส 20,000 ที่ตกลงจ่ายสองงวดจึงอ่านได้ว่า
+ * "งวดที่ 1 = 7,000 · งวดที่ 2 = 13,000" ไม่ใช่กองก้อนเงินที่ต้องมานั่งไล่จับคู่เอง
+ *
+ * เพดานงวดตรวจ "ในทรานแซกชันเดียวกับที่นับ" ไม่ใช่ตรวจที่ route แล้วค่อยมาเขียน:
+ * ผู้จัดการสองคนกดปล่อยพร้อมกันคนละหน้าจอ ทั้งคู่จะอ่านเจอว่าเหลืออีกหนึ่งงวดเหมือนกัน
+ * แล้วเคสก็จะมี 4 งวดโดยไม่มีอะไรฟ้อง (route ยังตรวจอยู่ ไว้ตอบข้อความที่อ่านรู้เรื่อง —
+ * ชั้นนี้คือชั้นที่กันของจริง)
+ *
+ * shares (ไม่บังคับ) = ผู้จัดการกำหนดเองว่าใครได้เท่าไหร่ในงวดนี้ ไม่ส่งมา = ให้ระบบเกลี่ยให้
+ * (ดู allocateShares) การเกลี่ยของระบบเป็น "ข้อเสนอ" เสมอ เพราะเงินที่ตกลงกับพนักงานแต่ละคน
+ * เป็นเรื่องที่คุยกันเป็นรายกรณี — คนที่รับกะกลางคืนหรือเคสยาก อาจได้มากกว่าสัดส่วนกะของตัวเอง
+ * ซึ่งไม่มีทางอนุมานจากข้อมูลในระบบได้เลย
+ *
+ * ผลรวมของ shares ต้องเท่ากับ amount เป๊ะ ไม่ใช่ "เอา amount ไปเกลี่ยตาม shares อีกที" —
+ * ตัวเลขที่ผู้จัดการเห็นบนหน้าจอตอนกด ต้องเป็นตัวเลขเดียวกับที่ลงฐานข้อมูล ไม่มีการคิดใหม่ระหว่างทาง
+ */
+/**
+ * ตรวจส่วนแบ่งที่ผู้จัดการกรอกเอง แล้วแปะข้อมูลผู้รับ (ชื่อ/กะ/นาที) กลับเข้าไป
+ *
+ * ตรวจสามอย่างที่พังแล้วเงียบ: จ่ายให้คนที่ไม่เกี่ยวกับเคสนี้ · ใส่ชื่อคนเดิมซ้ำสองบรรทัด
+ * (สองแถวคนเดียวกันในงวดเดียว อ่านยังไงก็เหมือนจ่ายซ้ำ) · ผลรวมไม่ตรงกับยอดของงวด
+ * ซึ่งอันสุดท้ายคืออันที่อันตรายที่สุด — ยอดเหมาของเคสจะไม่มีทางลงตัวอีกเลยถ้าปล่อยผ่าน
+ */
+function applyChosenShares(shares, chosen, amount) {
+  const known = new Map(shares.map((r) => [r.employee_id, r]));
+
+  const stranger = chosen.find((c) => !known.has(c.employee_id));
+  if (stranger) return { reason: 'unknown_employee', employee_id: stranger.employee_id };
+
+  const ids = new Set(chosen.map((c) => c.employee_id));
+  if (ids.size !== chosen.length) return { reason: 'duplicate_employee' };
+
+  const sum = round(chosen.reduce((n, c) => n + c.amount, 0));
+  if (sum !== round(amount)) return { reason: 'share_sum_mismatch', sum };
+
+  return { rows: chosen.map((c) => ({ ...known.get(c.employee_id), amount: round(c.amount) })) };
+}
+
+export async function releasePay(caseId, { amount, note, due_date, shares: chosen }, actor) {
+  return transaction(async (tx) => {
+    /* จองแถวเคสไว้ก่อนนับงวด — ตัวนับงวดอ่านจาก case_payouts ซึ่งเป็น "แถวที่ยังไม่มี"
+       จะล็อกตรงๆ ไม่ได้ ต้องล็อกที่เคสซึ่งเป็นสิ่งที่ทุกคนที่ปล่อยเงินของเคสนี้ต้องผ่าน */
+    await tx.one('SELECT case_id FROM cases WHERE case_id = :id FOR UPDATE', { id: caseId });
+
+    const { last } = await tx.one(
+      `SELECT COALESCE(MAX(installment_no), 0) AS last FROM case_payouts WHERE case_id = :id`,
+      { id: caseId },
+    );
+    const installment = Number(last) + 1;
+    if (installment > MAX_INSTALLMENTS) {
+      return { released: [], reason: 'installment_limit', installments_used: Number(last) };
+    }
+
+    /* เหลือด่านเดียว: ต้องรู้ว่าจะจ่ายให้ใคร — เคสที่ไม่มีทั้งคนเช็คอิน ไม่มีคนถูกนัด
+       และไม่มีคนถูกมอบหมาย คือเคสที่ยังไม่มีใครทำ จ่ายไม่ได้เพราะไม่รู้จะจ่ายให้ใคร
+       (ไม่ได้เช็ค "กะอนุมัติแล้ว" อีกแล้ว — ดูเหตุผลใน payShares) */
+    const shares = await payShares(tx, caseId);
+    if (shares.length === 0) return { released: [], reason: 'no_one_in_case' };
+
+    const split = chosen ? applyChosenShares(shares, chosen, amount) : { rows: allocateShares(shares, amount) };
+    if (split.reason) return { released: [], ...split };
+
+    /* ก้อน 0 บาทไม่ต้องบันทึก — คนที่ไม่ได้ส่วนแบ่งในงวดนี้ (ยังไม่มีกะ หรือได้ล่วงหน้าไปแล้ว)
+       ไม่ใช่ "ได้ศูนย์บาท" แต่คือ "ไม่มีรายการในงวดนี้" ซึ่งอ่านต่างกันมากบนสลิปและในประวัติ */
+    const rows = split.rows.filter((r) => r.amount > 0);
+    if (rows.length === 0) return { released: [], reason: 'nothing_to_pay' };
+
+    const released = [];
+    for (const r of rows) {
+      const { payout_id } = await tx.one(
+        `INSERT INTO case_payouts
+           (case_id, installment_no, employee_id, employee_name, amount, shifts, minutes,
+            due_date, released_by, released_by_name, note)
+         VALUES (:case_id, :installment, :employee_id, :employee_name, :amount, :shifts, :minutes,
+                 :due_date, :by, :by_name, :note)
+         RETURNING payout_id`,
+        {
+          case_id: caseId,
+          installment,
+          due_date: due_date ?? null,
+          employee_id: r.employee_id,
+          employee_name: r.employee_name,
+          amount: r.amount,
+          shifts: r.shifts,
+          minutes: r.minutes,
+          by: actor?.employee_id ?? null,
+          by_name: actor?.name ?? null,
+          note: note ?? null,
+        },
+      );
+      released.push({ ...r, payout_id, installment_no: installment });
+    }
+
+    /* ประวัติต้องบอกว่าใครได้เท่าไหร่ ไม่ใช่แค่ยอดรวมของงวด — เคสที่มีหลายคนแล้วมีคนทักทีหลังว่า
+       "ทำไมได้ไม่เท่ากัน" คำตอบต้องอยู่ในบรรทัดเดียวนี้ ไม่ใช่ต้องไปไล่ทีละก้อน
+       และต้องแยกด้วยว่าเป็นการเกลี่ยของระบบหรือผู้จัดการกำหนดเอง — คนละเรื่องกันเวลาย้อนกลับมาดู */
+    const who = rows.map((r) => `${r.employee_name} ${r.amount.toLocaleString('th-TH')}`).join(' · ');
+    await logEvent(
+      tx,
+      caseId,
+      'pay_released',
+      `ปล่อยค่าจ้างงวดที่ ${installment}/${MAX_INSTALLMENTS} จำนวน ${amount.toLocaleString('th-TH')} บาท` +
+        `${due_date ? ` (นัดจ่าย ${due_date})` : ''}${chosen ? ' · กำหนดส่วนแบ่งเอง' : ''} — ${who}`,
+      actor,
+    );
+
+    return { released, installment_no: installment };
+  });
+}
+
+/**
+ * ถอนยอดที่ปล่อยไปแล้วคืน — ได้เฉพาะก้อนที่ยังไม่เข้ารอบจ่ายที่ปิดแล้ว
+ * (เข้ารอบร่างอยู่ก็ถอนได้ แถวใน payroll_payout_lines หายตาม CASCADE ยอดของรอบจึงลดลงเอง)
+ */
+export async function cancelPayout(caseId, payoutId, actor) {
+  return transaction(async (tx) => {
+    const row = await tx.one(
+      `SELECT p.payout_id, p.installment_no, p.employee_name, p.amount, pr.status AS run_status
+       FROM case_payouts p
+       LEFT JOIN payroll_payout_lines pl ON pl.payout_id = p.payout_id
+       LEFT JOIN payroll_items pi ON pi.item_id = pl.item_id
+       LEFT JOIN payroll_runs  pr ON pr.run_id  = pi.run_id
+       WHERE p.payout_id = :id AND p.case_id = :case_id`,
+      { id: payoutId, case_id: caseId },
+    );
+    if (!row) return { ok: false, reason: 'not_found' };
+    if (row.run_status === 'paid') return { ok: false, reason: 'already_paid' };
+
+    await tx.run('DELETE FROM case_payouts WHERE payout_id = :id', { id: payoutId });
+    await logEvent(
+      tx,
+      caseId,
+      'pay_released',
+      `ถอนค่าจ้างงวดที่ ${row.installment_no} ที่ปล่อยไว้คืน ${Number(row.amount).toLocaleString('th-TH')} บาท (${row.employee_name})`,
+      actor,
+    );
+    return { ok: true };
+  });
 }
 
 /** เคสที่ยังทำอยู่ของพนักงานคนหนึ่ง (ยังไม่ปิด/ยกเลิก) — โชว์เป็นจำนวนงานที่ถืออยู่ ไม่ใช่ยอดเงิน */

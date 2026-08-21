@@ -92,6 +92,59 @@ export const assignSchema = z.object({
   employee_id: z.string().trim().min(1, 'กรุณาเลือกพนักงาน'),
 });
 
+/**
+ * ปล่อยค่าจ้างของเคสหนึ่งก้อน — ค่าจ้างพนักงานเป็นยอดเหมาของทั้งเคส ไม่ใช่ยอดต่อครั้ง
+ *
+ * amount ไม่ส่งมา = ยอดคงเหลือของเคส (ยอดเหมา − ที่ปล่อยไปแล้ว) ซึ่งเป็นกรณีปกติ
+ * ส่งมาเอง = จ่ายบางส่วน หรือจ่ายไม่เต็มเพราะปิดเคสก่อนกำหนด — ผู้จัดการเป็นคนตัดสิน
+ * ไม่ให้ระบบเกลี่ยตามสัดส่วนงานที่ทำเอง เพราะยอดที่ตกลงกับพนักงานเป็นเรื่องที่คุยกันเป็นรายกรณี
+ *
+ * ปล่อย 0 บาทไม่มีความหมาย มีแต่จะทำให้รายการค่าจ้างรก (เกณฑ์เดียวกับการรับชำระในใบแจ้งหนี้)
+ */
+export const releasePaySchema = z.object({
+  amount: z.number().positive('ยอดที่ปล่อยต้องมากกว่า 0').optional().nullable(),
+  note: optionalText,
+
+  /* วันที่นัดจ่ายงวดนี้ — ไม่บังคับ (ปล่อยไว้ว่างแปลว่ายังไม่ได้นัด) แต่ถ้าใส่มาต้องเป็นวันที่จริง
+     ไม่ห้ามวันในอดีต เพราะการบันทึกย้อนหลังว่า "งวดนี้นัดไว้เมื่อวาน" เป็นเรื่องปกติ */
+  due_date: date.optional().nullable(),
+
+  /* เคสที่มีพนักงานหลายคน: ใครได้เท่าไหร่ในงวดนี้
+     ไม่ส่งมา = ให้ระบบเกลี่ยตามกะที่ทำจริง (พร้อมไล่ชดเชยงวดก่อน ดู allocateShares)
+     ส่งมา = ผู้จัดการตัดสินเอง ซึ่งเป็นเรื่องปกติเพราะยอดที่ตกลงกับแต่ละคนไม่ได้มาจากจำนวนกะเสมอไป
+
+     0 บาทเป็นค่าที่ยอมรับตรงนี้ (ต่างจาก amount ของทั้งงวด) เพราะมันแปลว่า "คนนี้ไม่รับงวดนี้"
+     ซึ่งต้องส่งมาได้ ไม่งั้นการเอาใครออกจากงวดจะทำได้ทางเดียวคือตัดชื่อออกจากรายการ
+     แล้วผลรวมก็จะไม่ตรงกับยอดของงวดโดยไม่มีใครตั้งใจ (แถว 0 ไม่ถูกบันทึกเป็นก้อนเงิน) */
+  shares: z
+    .array(
+      z.object({
+        employee_id: z.string().trim().min(1),
+        amount: z.number().min(0, 'ส่วนแบ่งติดลบไม่ได้'),
+      }),
+    )
+    .min(1)
+    .optional(),
+});
+
+/**
+ * ข้อตกลงส่วนแบ่งค่าจ้างของเคส — "เคสนี้ ใครได้เท่าไหร่" ตั้งครั้งเดียว ใช้กับทุกงวด
+ *
+ * ส่งรายการว่างมา = ล้างข้อตกลง กลับไปหารเท่ากันทุกคนตามปกติ (สองคนคนละครึ่ง สามคนหารสาม)
+ * ต้องส่งได้ ไม่งั้นการ "เลิกตกลงพิเศษ" จะทำไม่ได้เลยนอกจากไปตั้งเลขที่หารเท่ากันเองทีละคน
+ *
+ * 0 บาทเป็นค่าที่ยอมรับ = ตกลงว่าคนนี้ไม่รับค่าจ้างของเคสนี้ (ต่างจากไม่มีชื่อในรายการ
+ * ซึ่งแปลว่ายังไม่ได้ตั้ง แล้วผลรวมก็จะไม่ตรงกับค่าจ้างของเคส)
+ */
+export const payShareAgreementSchema = z.object({
+  shares: z.array(
+    z.object({
+      employee_id: z.string().trim().min(1),
+      share: z.number().min(0, 'ส่วนแบ่งติดลบไม่ได้'),
+    }),
+  ),
+});
+
 // ยกเลิกเคส — เหตุผลไม่บังคับ แต่เก็บไว้ให้ไล่ประวัติได้ว่าทำไมถึงยกเลิก
 export const cancelSchema = z.object({
   reason: z.string().trim().max(500).optional().nullable(),
@@ -121,16 +174,12 @@ export const VISIT_STATUSES = ['scheduled', 'done', 'cancelled'];
 // เวลานัด 'HH:MM' แบบ 24 ชม. — ว่างได้ (บางเคสไม่กำหนดเวลาตายตัว)
 const time = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'เวลาต้องอยู่ในรูปแบบ HH:MM (24 ชม.)');
 
-// ค่าจ้างเฉพาะกะ — เว้นว่าง = เกลี่ยจากยอดเคสหารจำนวนกะที่นัดไว้ (ดู VISIT_PAY ใน repo)
-const visitPay = z.number().nonnegative('ค่าจ้างต้องไม่ติดลบ');
-
 export const createVisitSchema = z.object({
   visit_date: date,
   // พนักงานที่นัดให้ไปกะนี้ — เว้นว่าง = ใช้ผู้รับผิดชอบหลักของเคส (repo เติมให้)
   assigned_to: z.string().trim().min(1).optional().nullable(),
   planned_start: time.optional().nullable(),
   planned_end: time.optional().nullable(),
-  staff_pay: visitPay.optional().nullable(),
   note: optionalText,
 });
 
@@ -165,7 +214,6 @@ export const bulkVisitSchema = z
     assigned_to: z.string().trim().min(1).optional().nullable(),
     planned_start: time.optional().nullable(),
     planned_end: time.optional().nullable(),
-    staff_pay: visitPay.optional().nullable(),
     note: optionalText,
   })
   .superRefine((v, ctx) => {
@@ -236,14 +284,14 @@ export const visitRangeSchema = z
     dates: v.dates?.length ? [...new Set(v.dates)].sort() : datesInRange(v.from, v.to),
   }));
 
-// แก้ได้ทั้งเลื่อนวัน เปลี่ยนคนที่ไป เวลานัด ค่าจ้าง สถานะ (ไปมาแล้ว/ไม่ได้ไป) และหมายเหตุ
+// แก้ได้ทั้งเลื่อนวัน เปลี่ยนคนที่ไป เวลานัด สถานะ (ไปมาแล้ว/ไม่ได้ไป) และหมายเหตุ
+// ไม่มีค่าจ้างรายกะแล้ว — ค่าจ้างเป็นก้อนเดียวต่อเคส กดปล่อยที่หน้าเคส (ดู releasePaySchema)
 export const updateVisitSchema = z
   .object({
     visit_date: date,
     assigned_to: z.string().trim().min(1).nullable(),
     planned_start: time.nullable(),
     planned_end: time.nullable(),
-    staff_pay: visitPay.nullable(),
     status: z.enum(VISIT_STATUSES, { errorMap: () => ({ message: 'สถานะวันนัดไม่ถูกต้อง' }) }),
     note: optionalText,
   })

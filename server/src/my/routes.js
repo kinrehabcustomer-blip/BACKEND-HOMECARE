@@ -22,8 +22,31 @@ import { ApiError, asyncRoute, notFound } from '../lib/errors.js';
  */
 export const myRouter = Router();
 
-// ค่าจ้างที่บริษัทได้ ไม่ให้พนักงานภาคสนามเห็น (ใช้กับ SELECT ของ listForEmployee ที่มี fee ติดมา)
-const stripFinancial = ({ fee, ...rest }) => rest;
+/**
+ * ตัวเลขการเงินทั้งหมดออกก่อนส่งให้พนักงานภาคสนาม
+ *
+ * เดิมตัดแค่ fee ช่องเดียว แต่ SELECT ของเคสพ่วงมาอีกหลายตัว: ยอดเหมาค่าจ้างของเคส (staff_pay)
+ * ค่าจ้างตามเรท/แพ็คเกจ และ "ราคาขายลูกค้า" (rate_customer_price / physio_original_price)
+ * พนักงานภาคสนามจึงเห็นทั้งต้นทุนและราคาขายของทุกเคสที่ตัวเองเข้าถึงได้ ผ่าน /api/my/cases
+ *
+ * ใช้รายชื่อเดียวกับฝั่ง admin ไม่ได้ เพราะฝั่งนั้นซ่อนจาก HR คนละชุดกัน — ฝั่งนี้ตัดหมดทุกตัว
+ * (ค่าตอบแทนของตัวเองดูได้ที่ /my/attendance/report กับ /my/payslips ซึ่งกรองด้วย session อยู่แล้ว)
+ */
+const MONEY_FIELDS = [
+  'fee',
+  'staff_pay',
+  'rate_staff_pay',
+  'rate_customer_price',
+  'physio_staff_pay',
+  'physio_original_price',
+];
+
+function stripFinancial(row) {
+  if (!row) return row;
+  const shown = { ...row };
+  for (const f of MONEY_FIELDS) delete shown[f];
+  return shown;
+}
 
 // เคสที่จบแล้ว เช็คอินไม่ได้
 const CLOSED_CASE = ['closed', 'cancelled'];
@@ -101,7 +124,8 @@ myRouter.get(
  * สรุปค่าตอบแทนของฉัน (รายเดือน) — ต้องมาก่อน '/attendance' ไม่ให้ path ชนกัน
  * ใช้ตัวคำนวณเดียวกับหน้า payroll ของ admin แต่บังคับกรองด้วย employee_id จาก session
  *
- * ยอดเงินมาจากกะที่เช็คอิน/เอาท์ครบในเดือนนั้น — ส่งรายการเคสไปด้วยเพื่อให้กางดูที่มาของยอดได้
+ * ชั่วโมง/กะ มาจากกะที่เช็คอินในเดือนนั้น ส่วนเงินมาจากค่าจ้างที่ถูกปล่อยในเดือนนั้น
+ * (คนละฐานกันตั้งแต่ค่าจ้างเป็นก้อนต่อเคส — ดู attendanceReport) ส่งรายการเคสไปด้วยให้กางดูที่มาได้
  * ยังไม่มีข้อมูลในเดือนนั้น = ไม่มีแถวกลับมา ตอบเป็นศูนย์แทน null ให้หน้าเว็บแสดงได้เลย
  */
 myRouter.get(
@@ -124,15 +148,16 @@ myRouter.get(
         shifts: 0,
         cases_worked: 0,
         minutes: 0,
-        pay: 0,
         approved_shifts: 0,
-        pending_pay: 0,
         pending_shifts: 0,
         rejected_shifts: 0,
-        unpriced_shifts: 0,
+        pay: 0,
         paid_pay: 0,
-        paid_shifts: 0,
         unpaid_pay: 0,
+        payouts: 0,
+        paid_payouts: 0,
+        paid_shifts: 0,
+        cases_paid: 0,
       }),
       cases: paidCases,
       open_cases: openCases,

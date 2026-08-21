@@ -9,6 +9,8 @@ import {
   createCaseSchema,
   updateCaseSchema,
   assignSchema,
+  releasePaySchema,
+  payShareAgreementSchema,
   cancelSchema,
   closeCaseSchema,
   listQuerySchema,
@@ -67,34 +69,8 @@ function visible(req, caseRow) {
 
 const visibleList = (req, rows) => rows.map((row) => visible(req, row));
 
-/**
- * ค่าจ้าง "รายกะ" ก็เป็นตัวเลขเดียวกัน — ต้องปิดทางเดียวกับค่าจ้างของเคส
- * ตารางกะเปิดจากหน้าเคส และมีช่องกรอกค่าจ้างต่อกะอยู่ในนั้น ถ้าปิดแต่ระดับเคสก็ยังรั่วอยู่ดี
- * effective_pay = ยอดที่เกลี่ยได้ (ใช้เป็น placeholder ในช่องกรอก) จึงต้องตัดคู่กันไป
- */
-const VISIT_PAY_FIELDS = ['staff_pay', 'effective_pay'];
-
-function visibleVisits(req, visits) {
-  if (canSeeStaffPay(req.user?.position)) return visits;
-  return visits.map((v) => {
-    const shown = { ...v };
-    for (const f of VISIT_PAY_FIELDS) delete shown[f];
-    return shown;
-  });
-}
-
-/** ผลลัพธ์ของการลงกะ/ลบกะ ห่อรายการกะไว้ใน .visits พร้อมตัวนับ — ตัดค่าจ้างในรายการแต่คงตัวนับไว้ */
-const visibleVisitResult = (req, result) => ({ ...result, visits: visibleVisits(req, result.visits) });
-
-/**
- * ค่าจ้างรายกะที่ส่งมาจากคนที่ไม่มีสิทธิ์เห็น ต้องไม่ถูกเขียนลงไป — ถอดคีย์ทิ้ง ของเดิมจึงอยู่ครบ
- * (หน้าเว็บของคนกลุ่มนี้ไม่มีช่องให้กรอกอยู่แล้ว ค่าที่หลุดมาจึงเป็นค่าว่างที่จะไปล้างของเดิมทิ้ง)
- */
-function guardVisitPay(req, input) {
-  if (canSeeStaffPay(req.user?.position)) return input;
-  const { staff_pay, ...rest } = input;
-  return rest;
-}
+/* กะไม่มีตัวเลขค่าจ้างติดมาแล้ว — ค่าจ้างเป็นก้อนเดียวต่อเคส (ดู PAY_FIELDS ด้านบน + releasePay)
+   จึงไม่ต้องกรองรายการกะ และไม่ต้องกันค่าจ้างรายกะที่ส่งเข้ามา เพราะไม่มีช่องนั้นให้เขียนอีกแล้ว */
 
 /** โหลดเคสจาก case_id (PK) ก่อนทุก route ที่มี :id — ไม่มีก็ 404 ตั้งแต่ตรงนี้ */
 casesRouter.param('id', (req, res, next, id) => {
@@ -283,6 +259,185 @@ casesRouter.get('/:id', (req, res) => res.json(visible(req, req.case)));
 casesRouter.get(
   '/:id/events',
   asyncRoute(async (req, res) => res.json(await repo.listEvents(req.params.id))),
+);
+
+// ---------- ค่าจ้างของเคส (ก้อนเดียว ผู้จัดการกดปล่อยเอง) ----------
+
+/** ตัวเลขเงินในข้อความ error — อ่านง่ายกว่า 15000 ที่ต้องนับหลักเอง */
+const baht = (n) => Number(n).toLocaleString('th-TH');
+
+/** เฉพาะผู้จัดการเท่านั้นที่แตะเรื่องเงินค่าจ้างได้ — HR เห็นเคสได้แต่ไม่เห็นและไม่สั่งจ่ายตัวเลขนี้ */
+function ensureCanPay(req) {
+  if (!canSeeStaffPay(req.user?.position)) {
+    throw new ApiError(403, 'เฉพาะผู้จัดการเท่านั้นที่ปล่อยค่าจ้างได้');
+  }
+}
+
+/** ค่าจ้างของเคสนี้: ยอดเหมา · ปล่อยไปแล้วเท่าไหร่ · เหลือเท่าไหร่ · ถ้าปล่อยตอนนี้ใครได้เท่าไหร่ */
+casesRouter.get(
+  '/:id/pay',
+  asyncRoute(async (req, res) => {
+    ensureCanPay(req);
+    res.json(await repo.payStatus(req.params.id));
+  }),
+);
+
+/**
+ * ตั้งข้อตกลงส่วนแบ่งของเคส — "เคสนี้ ใครได้เท่าไหร่" ใช้กับทุกงวดที่ปล่อยหลังจากนี้
+ *
+ * ค่าปริยายของระบบคือหารเท่ากันทุกคนที่ลงแรงในเคส (สองคนคนละครึ่ง สามคนหารสาม)
+ * เส้นนี้มีไว้สำหรับตอนที่ตกลงกันเป็นอย่างอื่น เช่น ค่าจ้าง 15,000 ที่คนลงแรงมากกว่ารับ 9,000
+ * อีกคนรับ 6,000 — ตั้งครั้งเดียวแล้วทุกงวดแบ่งตามนี้เอง ไม่ต้องมานั่งคิดเลขทุกครั้งที่ปล่อย
+ *
+ * ผลรวมต้องเท่ากับค่าจ้างของเคสพอดี เพราะมันคือการ "แบ่งก้อนนั้น" ไม่ใช่ตั้งเป้าลอยๆ
+ * ถ้าไม่บังคับ เคสจะจบลงด้วยเงินที่แบ่งไม่หมดหรือแบ่งเกินโดยไม่มีใครรู้จนถึงงวดสุดท้าย
+ */
+casesRouter.put(
+  '/:id/pay/shares',
+  asyncRoute(async (req, res) => {
+    ensureCanPay(req);
+    const { shares } = payShareAgreementSchema.parse(req.body ?? {});
+
+    const status = await repo.payStatus(req.params.id);
+    if (status.staff_pay == null) {
+      throw new ApiError(409, 'เคสนี้ยังไม่ได้ตั้งค่าจ้างพนักงาน — ตั้งยอดของเคสก่อนจึงจะแบ่งส่วนได้');
+    }
+
+    if (shares.length > 0) {
+      const known = new Set(status.shares.map((r) => r.employee_id));
+      const stranger = shares.find((r) => !known.has(r.employee_id));
+      if (stranger) {
+        throw new ApiError(
+          400,
+          `${stranger.employee_id} ไม่ได้มีส่วนในเคสนี้ — ตั้งส่วนแบ่งได้เฉพาะคนที่มีกะที่อนุมัติแล้ว` +
+            ' หรือเคยได้รับค่าจ้างของเคสนี้ไปก่อนหน้า',
+        );
+      }
+
+      if (new Set(shares.map((r) => r.employee_id)).size !== shares.length) {
+        throw new ApiError(400, 'มีชื่อพนักงานซ้ำในข้อตกลง — หนึ่งคนมีได้บรรทัดเดียว');
+      }
+
+      const sum = Math.round(shares.reduce((n, r) => n + r.share, 0) * 100) / 100;
+      if (sum !== Math.round(status.staff_pay * 100) / 100) {
+        throw new ApiError(
+          400,
+          `ผลรวมของส่วนแบ่งคือ ${baht(sum)} บาท แต่ค่าจ้างของเคสคือ ${baht(status.staff_pay)} บาท — ` +
+            'ต้องเท่ากันพอดี ไม่งั้นจะมีเงินที่ไม่มีเจ้าของหรือแบ่งเกินก้อนที่มีอยู่',
+        );
+      }
+    }
+
+    res.json(await repo.setPayShares(req.params.id, shares, req.user));
+  }),
+);
+
+/**
+ * ปล่อยค่าจ้างของเคส — ทีละงวด แบ่งตามข้อตกลงส่วนแบ่ง (ปริยาย = หารเท่ากัน)
+ *
+ * ไม่ระบุยอด = ปล่อยยอดคงเหลือทั้งหมด (กรณีปกติ: งานจบแล้วจ่ายให้ครบ)
+ * ระบุเอง = แบ่งจ่ายเป็นงวด เช่น เคส 20,000 ที่ตกลงกันไว้สองงวด → กรอก 7,000 แล้วที่เหลือ
+ * 13,000 ค่อยปล่อยเป็นงวดที่สอง (ยอดที่กรอกถูกหักออกจากยอดเหมาทันที ไม่ต้องมานั่งลบเอง)
+ *
+ * เพดานคือ MAX_INSTALLMENTS งวดต่อเคส และนับแยกทุกเคส — เคสอื่นของพนักงานคนเดียวกัน
+ * มีงวดของตัวเองครบชุด ไม่ใช่โควตารวมของคน
+ *
+ * ห้ามปล่อยเกินยอดเหมาของเคส — "เคสหนึ่งใบ = งานหนึ่งชิ้น = ค่าจ้างหนึ่งก้อน"
+ * ถ้าตกลงเพิ่มกับพนักงานจริง ให้แก้ค่าจ้างของเคสก่อน จะได้เหลือร่องรอยว่ายอดที่ตกลงเปลี่ยนไปเท่าไหร่
+ */
+casesRouter.post(
+  '/:id/pay/release',
+  asyncRoute(async (req, res) => {
+    ensureCanPay(req);
+    const input = releasePaySchema.parse(req.body ?? {});
+
+    const status = await repo.payStatus(req.params.id);
+    if (status.staff_pay == null) {
+      throw new ApiError(409, 'เคสนี้ยังไม่ได้ตั้งค่าจ้างพนักงาน — ตั้งยอดเหมาของเคสก่อนจึงจะปล่อยได้');
+    }
+    /* ด่านเดียวที่เหลือ: ต้องรู้ว่าจะจ่ายให้ใคร — ไม่ได้ดูว่ากะครบหรือถูกยืนยันแล้วหรือยัง */
+    if (status.shares.length === 0) {
+      throw new ApiError(
+        409,
+        'เคสนี้ยังไม่มีพนักงานเลย จึงไม่รู้ว่าจะจ่ายให้ใคร — มอบหมายพนักงานหรือลงกะให้เคสนี้ก่อน',
+      );
+    }
+
+    /* บอกทางออกให้ด้วย ไม่ใช่แค่ปิดประตู — ยอดที่ยังค้างอยู่ต้องออกทางใดทางหนึ่งเสมอ
+       (ถอนงวดที่ปล่อยผิดคืนแล้วปล่อยใหม่ให้เต็ม หรือลดยอดเหมาลงถ้าตกลงกันว่าจ่ายเท่านี้จริง) */
+    if (status.installments_left === 0) {
+      throw new ApiError(
+        409,
+        `เคสนี้แบ่งจ่ายครบ ${status.max_installments} งวดแล้ว (ปล่อยไปรวม ${baht(status.released)} บาท` +
+          `${status.remaining > 0 ? `, ยังเหลือ ${baht(status.remaining)} บาท` : ''}) — ` +
+          'ถ้ายังต้องจ่ายอีก ให้ถอนงวดที่ปล่อยผิดคืนก่อน แล้วปล่อยใหม่ให้เต็มยอดในงวดนั้น',
+      );
+    }
+
+    const amount = input.amount ?? status.remaining;
+    if (amount <= 0) {
+      throw new ApiError(409, `เคสนี้ปล่อยค่าจ้างครบ ${baht(status.staff_pay)} บาทแล้ว ไม่เหลือยอดให้ปล่อย`);
+    }
+    if (amount > status.remaining) {
+      throw new ApiError(
+        400,
+        `ปล่อยได้ไม่เกินยอดคงเหลือของเคส (${baht(status.remaining)} บาท จากยอดเหมา ${baht(status.staff_pay)})` +
+          ' — ถ้าตกลงจ่ายเพิ่ม ให้แก้ค่าจ้างของเคสก่อน',
+      );
+    }
+
+    /* ชั้นนี้กันกรณีที่สองหน้าจอกดพร้อมกันจนงวดเกินเพดาน — status ที่อ่านไว้ข้างบนเก่าไปแล้ว
+       ตอนที่ repo นับจริงในทรานแซกชัน (ดูเหตุผลเต็มใน releasePay) */
+    const result = await repo.releasePay(
+      req.params.id,
+      { amount, note: input.note, due_date: input.due_date, shares: input.shares },
+      req.user,
+    );
+
+    if (result.reason === 'installment_limit') {
+      throw new ApiError(409, `เคสนี้แบ่งจ่ายครบ ${repo.MAX_INSTALLMENTS} งวดแล้ว — มีคนปล่อยงวดสุดท้ายไปพร้อมกันพอดี`);
+    }
+    if (result.reason === 'unknown_employee') {
+      throw new ApiError(
+        400,
+        `${result.employee_id} ไม่ได้มีส่วนในเคสนี้ — แบ่งค่าจ้างให้ได้เฉพาะคนที่มีกะที่อนุมัติแล้ว` +
+          ' หรือเคยได้รับค่าจ้างของเคสนี้ไปก่อนหน้า',
+      );
+    }
+    if (result.reason === 'duplicate_employee') {
+      throw new ApiError(400, 'มีชื่อพนักงานซ้ำในรายการแบ่ง — หนึ่งคนมีได้บรรทัดเดียวต่อหนึ่งงวด');
+    }
+    if (result.reason === 'share_sum_mismatch') {
+      throw new ApiError(
+        400,
+        `ผลรวมของส่วนแบ่งคือ ${baht(result.sum)} บาท แต่ยอดของงวดนี้คือ ${baht(amount)} บาท — ` +
+          'ต้องเท่ากันพอดี ไม่งั้นยอดเหมาของเคสจะไม่ลงตัว',
+      );
+    }
+    if (result.reason === 'no_one_in_case') {
+      throw new ApiError(409, 'เคสนี้ยังไม่มีพนักงานเลย จึงไม่รู้ว่าจะจ่ายให้ใคร');
+    }
+    if (result.reason === 'nothing_to_pay') {
+      throw new ApiError(400, 'ไม่มีใครได้ส่วนแบ่งในงวดนี้เลย — ต้องมีอย่างน้อยหนึ่งคนที่ได้มากกว่า 0');
+    }
+
+    res.status(201).json(await repo.payStatus(req.params.id));
+  }),
+);
+
+/** ถอนยอดที่ปล่อยผิดคืน — ได้เฉพาะก้อนที่ยังไม่ถูกจ่ายออกไปจริง */
+casesRouter.delete(
+  '/:id/pay/:payoutId',
+  asyncRoute(async (req, res) => {
+    ensureCanPay(req);
+    const result = await repo.cancelPayout(req.params.id, Number(req.params.payoutId), req.user);
+
+    if (result.reason === 'not_found') throw notFound('ไม่พบรายการค่าจ้างนี้ในเคสนี้');
+    if (result.reason === 'already_paid') {
+      throw new ApiError(409, 'ก้อนนี้จ่ายออกไปแล้ว ถอนคืนไม่ได้ — ต้องยกเลิกรอบจ่ายนั้นก่อน');
+    }
+    res.json(await repo.payStatus(req.params.id));
+  }),
 );
 
 /**
@@ -479,15 +634,15 @@ function ensureSchedulable(caseRow) {
 
 casesRouter.get(
   '/:id/visits',
-  asyncRoute(async (req, res) => res.json(visibleVisits(req, await repo.listVisits(req.params.id)))),
+  asyncRoute(async (req, res) => res.json(await repo.listVisits(req.params.id))),
 );
 
 casesRouter.post(
   '/:id/visits',
   asyncRoute(async (req, res) => {
     ensureSchedulable(req.case);
-    const input = guardVisitPay(req, createVisitSchema.parse(req.body));
-    res.status(201).json(visibleVisitResult(req, await repo.addVisit(req.params.id, input)));
+    const input = createVisitSchema.parse(req.body);
+    res.status(201).json(await repo.addVisit(req.params.id, input));
   }),
 );
 
@@ -496,8 +651,8 @@ casesRouter.post(
   '/:id/visits/bulk',
   asyncRoute(async (req, res) => {
     ensureSchedulable(req.case);
-    const input = guardVisitPay(req, bulkVisitSchema.parse(req.body));
-    res.status(201).json(visibleVisitResult(req, await repo.addVisits(req.params.id, input.dates, input)));
+    const input = bulkVisitSchema.parse(req.body);
+    res.status(201).json(await repo.addVisits(req.params.id, input.dates, input));
   }),
 );
 
@@ -522,15 +677,15 @@ casesRouter.delete(
       from: req.query.from,
       to: req.query.to,
     });
-    res.json(visibleVisitResult(req, await repo.removeVisitsOn(req.params.id, dates)));
+    res.json(await repo.removeVisitsOn(req.params.id, dates));
   }),
 );
 
 casesRouter.patch(
   '/:id/visits/:visitId',
   asyncRoute(async (req, res) => {
-    const input = guardVisitPay(req, updateVisitSchema.parse(req.body));
-    res.json(visibleVisits(req, await repo.updateVisit(req.params.id, Number(req.params.visitId), input)));
+    const input = updateVisitSchema.parse(req.body);
+    res.json(await repo.updateVisit(req.params.id, Number(req.params.visitId), input));
   }),
 );
 
@@ -553,7 +708,7 @@ casesRouter.delete(
       );
     }
 
-    res.json(visibleVisits(req, await repo.listVisits(req.params.id)));
+    res.json(await repo.listVisits(req.params.id));
   }),
 );
 

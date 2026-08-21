@@ -11,9 +11,13 @@ import { CASE_TYPE_LABELS } from '../labels.js';
 import LineIcon from './LineIcon.jsx';
 
 /**
- * popup ยืนยันเช็คอินกะ — ขอ GPS ตอนเปิด แล้วให้แนบเซลฟี่ได้ (ไม่บังคับ)
+ * popup ยืนยันเช็คอินกะ — ขอ GPS ตอนเปิด และ "ต้องถ่ายเซลฟี่" ก่อนถึงจะกดยืนยันได้
  * เวลาเช็คอินจริงตั้งจากฝั่ง server (now()) — ที่นี่แค่ส่งพิกัด/รูปประกอบ
  * onDone(updatedVisit) เมื่อเช็คอินสำเร็จ (พ่อแม่เอาไปรีเฟรชรายการ)
+ *
+ * รูปบังคับ แต่ GPS ไม่บังคับ — ต่างกันเพราะพนักงานคุมกล้องได้เอง แต่คุม GPS ไม่ได้
+ * (ปฏิเสธสิทธิ์ไว้ก่อนหน้า สัญญาณไม่เข้า อยู่ในตึก) บล็อกเช็คอินเพราะ GPS จะกลายเป็นกันคนทำงานจริงออก
+ * กะที่ไม่มีพิกัดถูกติดธงให้ผู้จัดการตรวจแทนอยู่แล้ว (ดู flagged ใน my/routes.js)
  */
 export default function CheckInModal({ visit, onDone, onClose }) {
   const sheetRef = useSheetSwipe(onClose);    // จอแคบ: ปัดลงเพื่อปิด
@@ -111,15 +115,16 @@ export default function CheckInModal({ visit, onDone, onClose }) {
           {/* แผนที่จุดที่เช็คอิน — โชว์เมื่อได้พิกัดและตั้ง key แล้ว (ไม่มี key ก็ซ่อนไปเอง) */}
           {pos?.ok && <LocationMap lat={pos.lat} lng={pos.lng} />}
 
-          {/* เซลฟี่ (ไม่บังคับ) */}
+          {/* เซลฟี่ — บังคับ ปุ่มยืนยันจะกดไม่ได้จนกว่าจะมีรูป */}
           <section className="checkin-photo">
-            <h3>รูปเซลฟี่ (ไม่บังคับ)</h3>
+            <h3>รูปเซลฟี่</h3>
             {photo ? (
               <div className="checkin-photo-preview">
                 <img src={photo} alt="เซลฟี่เช็คอิน" />
-                <button type="button" className="btn tiny danger-ghost" onClick={() => setPhoto(null)} disabled={busy}>
-                  เอารูปออก
-                </button>
+                {/* ถ่ายใหม่ได้ แต่ลบทิ้งเฉยๆ ไม่ได้ — เอาออกแล้วต้องถ่ายใหม่อยู่ดีถึงจะเช็คอินได้ */}
+                <FileButton icon="camera" capture="user" busy={photoBusy} onPick={pickPhoto}>
+                  ถ่ายใหม่
+                </FileButton>
               </div>
             ) : (
               // capture=user = เปิดกล้องหน้าบนมือถือ
@@ -127,7 +132,11 @@ export default function CheckInModal({ visit, onDone, onClose }) {
                 ถ่ายรูป
               </FileButton>
             )}
-            <p className="muted">ช่วยยืนยันว่าคุณอยู่หน้างานจริง</p>
+            <p className="muted">
+              {photo
+                ? 'ยืนยันว่าคุณอยู่หน้างานจริง'
+                : 'ต้องถ่ายรูปก่อนจึงจะเช็คอินได้ — เป็นหลักฐานว่าคุณอยู่หน้างานจริง'}
+            </p>
           </section>
 
           {error && <pre className="error">{error}</pre>}
@@ -135,8 +144,8 @@ export default function CheckInModal({ visit, onDone, onClose }) {
 
         <footer className="modal-foot">
           <button className="btn" onClick={onClose} disabled={busy}>ยกเลิก</button>
-          <button className="btn primary" onClick={submit} disabled={busy || locating || photoBusy}>
-            {busy ? 'กำลังเช็คอิน…' : 'ยืนยันเช็คอิน'}
+          <button className="btn primary" onClick={submit} disabled={busy || locating || photoBusy || !photo}>
+            {busy ? 'กำลังเช็คอิน…' : !photo ? 'ถ่ายรูปก่อนเช็คอิน' : 'ยืนยันเช็คอิน'}
           </button>
         </footer>
       </div>
