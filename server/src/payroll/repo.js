@@ -41,6 +41,21 @@ const ELIGIBLE_ROWS = `
 `;
 
 /**
+ * ข้อมูลของ payout ชุดที่ fill ล็อกและยืนยันแล้วว่าจะรับเข้ารอบนี้
+ * ไม่มี NOT EXISTS ตรงนี้โดยตั้งใจ: หลัง re-check เราตรึงรายการ ID ไว้ชุดเดียว เพื่อให้ INSERT
+ * payroll_items กับ payroll_payout_lines เห็นสมาชิกตรงกันแม้รอบอื่นถูกยกเลิกระหว่างสอง statement
+ */
+const LOCKED_PAYOUT_ROWS = `
+  SELECT p.payout_id, p.case_id, p.employee_id, p.employee_name,
+         p.shifts, p.minutes, p.amount, p.due_date,
+         ${RELEASE_DATE} AS release_date
+  FROM case_payouts p
+  WHERE p.payout_id = ANY(:payout_ids::int[])
+    AND p.employee_id IS NOT NULL
+    AND ${RELEASE_DATE} <= :period_to
+`;
+
+/**
  * ยอดรายสลิปที่คิดจากก้อนที่ผูกอยู่จริง — ใช้กับรอบที่ยังเป็นร่าง
  *
  * ต้องคิดจากแถวที่ผูกอยู่ ไม่ใช่อ่าน payroll_items ตรงๆ เพราะระหว่างที่ยังเป็นร่าง
@@ -66,6 +81,37 @@ const num = (row, fields) => {
   for (const f of fields) out[f] = Number(out[f] ?? 0);
   return out;
 };
+
+/** สถานะที่ยอมให้แต่ละคำสั่งทำงาน — ใช้กับ snapshot ที่อ่านหลังได้ row lock แล้วเท่านั้น */
+const RUN_ACTION_STATES = {
+  rebuild: ['draft'],
+  remove_item: ['draft'],
+  pay: ['draft'],
+  cancel: ['draft', 'paid'],
+  remove: ['draft'],
+};
+
+export function assessPayrollRunAction(action, status) {
+  const allowed = RUN_ACTION_STATES[action];
+  if (!allowed) throw new Error(`ไม่รู้จักคำสั่ง payroll: ${action}`);
+  return allowed.includes(status) ? { status } : { reason: 'invalid_status', status };
+}
+
+/**
+ * ล็อกรอบก่อนตรวจสถานะทุกครั้ง — route param เป็นเพียงข้อมูลสำหรับแสดงผลและอาจเก่าได้แล้ว
+ * คำสั่งของรอบเดียวกันจึงต่อคิวกัน และคนที่ได้ lock ทีหลังจะตัดสินจากสถานะที่คำสั่งก่อนหน้า commit จริง
+ */
+export async function payrollRunForUpdate(tx, runId, action) {
+  const run = await tx.one(
+    `SELECT run_id, status, period_month, period_to
+     FROM payroll_runs WHERE run_id = :id FOR UPDATE`,
+    { id: runId },
+  );
+  if (!run) return { reason: 'not_found' };
+
+  const assessment = assessPayrollRunAction(action, run.status);
+  return assessment.reason ? { ...assessment, run } : { run };
+}
 
 /**
  * ใครจะได้เท่าไหร่ถ้าเปิดรอบด้วยวันตัดรอบนี้ — ดูก่อนกดสร้างจริง
@@ -123,79 +169,193 @@ export async function unreleasedCases(periodTo) {
  * แต่สลิปที่จ่ายเงินออกไปแล้วต้องยังอ่านออกว่าจ่ายเท่าไหร่
  */
 async function fill(tx, runId, periodTo) {
-  const params = { run: runId, period_to: periodTo };
+  const lockParams = { period_to: periodTo };
 
+  /* ล็อกก้อนเงินจริงก่อนผูกเข้ารอบ — cancelPayout ล็อกแถวเดียวกันก่อนลบ
+     จึงไม่มีช่วงที่ก้อนถูกถอนพร้อมกับกำลังถูก fill เข้า payroll run คนละ transaction
+
+     เก็บ ID จาก statement นี้ไว้ด้วย: ถ้า query สร้างสลิปกลับไปอ่าน ELIGIBLE ใหม่ ยอดที่เพิ่งถูกปล่อย
+     หลัง statement lock จบจะหลุดเข้ารอบโดยไม่เคยถูกล็อก และชนกับการถอนยอดได้ */
+  const locked = await tx.all(
+    `SELECT p.payout_id
+     ${ELIGIBLE}
+     ORDER BY p.payout_id
+     FOR UPDATE OF p`,
+    lockParams,
+  );
+  if (locked.length === 0) return;
+
+  /* SELECT FOR UPDATE อาจเริ่มด้วย snapshot ที่ payout ยังว่าง แล้วต้องรอ fill อื่นซึ่งผูกก้อนนั้น
+     ไปก่อนเรา — อ่านใหม่หลังได้ lock เพื่อคัด snapshot เก่าทิ้ง จากนั้นใช้ ID ชุดนี้เหมือนกันทั้งสอง INSERT */
+  const available = await tx.all(
+    `SELECT p.payout_id
+     FROM case_payouts p
+     WHERE p.payout_id = ANY(:payout_ids::int[])
+       AND p.employee_id IS NOT NULL
+       AND ${RELEASE_DATE} <= :period_to
+       AND NOT EXISTS (SELECT 1 FROM payroll_payout_lines pl WHERE pl.payout_id = p.payout_id)
+     ORDER BY p.payout_id`,
+    {
+      period_to: periodTo,
+      payout_ids: locked.map((row) => Number(row.payout_id)),
+    },
+  );
+  if (available.length === 0) return;
+
+  const params = {
+    run: runId,
+    period_to: periodTo,
+    payout_ids: available.map((row) => Number(row.payout_id)),
+  };
+
+  /* จัดกลุ่มด้วย "รหัสพนักงาน" เท่านั้น ไม่รวมชื่อ — employee_name ในแต่ละก้อนเป็น snapshot
+     ณ วันที่ปล่อย คนที่เปลี่ยนชื่อ/นามสกุลระหว่างทางจึงมีก้อนที่ชื่อไม่ตรงกันได้
+
+     ถ้าจัดกลุ่มด้วยชื่อด้วย คนคนเดียวจะได้สลิปสองใบ แล้ว INSERT ถัดไป (ที่ผูกด้วย employee_id
+     อย่างเดียว) จะผูกก้อนเดียวกันเข้าสองใบ ชน PRIMARY KEY ของ payroll_payout_lines.payout_id
+     ผลคือ "เปิดรอบจ่ายไม่ได้ทั้งเดือน" โดยไม่มีอะไรบอกว่าเพราะมีคนเปลี่ยนชื่อ
+     (ถ้าไม่ชน PK ก็จะกลายเป็นนับกะ/ยอดซ้ำสองเท่าแทน ซึ่งแย่กว่า)
+
+     ชื่อบนสลิปใช้ของก้อนล่าสุด — เป็นชื่อที่ใกล้วันจ่ายที่สุด ตรงกับที่คนรับใช้อยู่จริงตอนนี้ */
   await tx.run(
     `INSERT INTO payroll_items (run_id, employee_id, employee_name, shifts, minutes, total_pay)
-     SELECT :run, x.employee_id, x.employee_name,
+     SELECT :run, x.employee_id,
+            (array_agg(x.employee_name ORDER BY x.payout_id DESC))[1],
             COALESCE(SUM(x.shifts), 0)::int,
             COALESCE(SUM(x.minutes), 0)::int,
             SUM(x.amount)
-     FROM (${ELIGIBLE_ROWS}) x
-     GROUP BY x.employee_id, x.employee_name`,
+     FROM (${LOCKED_PAYOUT_ROWS}) x
+     GROUP BY x.employee_id`,
     params,
   );
 
   await tx.run(
     `INSERT INTO payroll_payout_lines (payout_id, item_id, amount)
      SELECT x.payout_id, i.item_id, x.amount
-     FROM (${ELIGIBLE_ROWS}) x
+     FROM (${LOCKED_PAYOUT_ROWS}) x
      JOIN payroll_items i ON i.run_id = :run AND i.employee_id = x.employee_id`,
     params,
   );
 }
 
-/** เดือนหนึ่งเปิดไปแล้วกี่รอบ (ไม่นับรอบที่ยกเลิก) — ตัวตั้งของเลข "รอบที่" ของรอบถัดไป */
-export async function roundsInMonth(month) {
-  const row = await sql.one(
-    `SELECT COUNT(*) AS n FROM payroll_runs
-     WHERE period_month = :month AND status <> 'cancelled'`,
-    { month },
+const MAX_ROUNDS_PER_MONTH = 3;
+
+/** เลือกเลข 1–3 ตัวแรกที่ยังไม่มีรอบ active — COUNT + 1 ใช้ไม่ได้เมื่อรอบก่อนหน้าถูกยกเลิกจนเกิดช่องว่าง */
+export function firstAvailablePayrollRound(activeRounds) {
+  const used = new Set(activeRounds.map((row) => Number(row?.round_no ?? row)));
+  for (let round = 1; round <= MAX_ROUNDS_PER_MONTH; round += 1) {
+    if (!used.has(round)) return round;
+  }
+  return null;
+}
+
+export async function payrollMonthForUpdate(tx, periodMonth) {
+  await tx.one(
+    `SELECT pg_advisory_xact_lock(
+       hashtext('homecare.payroll_runs'),
+       hashtext(:month)
+     ) AS locked`,
+    { month: periodMonth },
   );
-  return Number(row?.n ?? 0);
+}
+
+/**
+ * จองสิทธิ์เลือกเลขรอบของเดือนนี้จน transaction จบ
+ *
+ * payroll_runs ไม่มีแถวแม่ประจำเดือนให้ SELECT FOR UPDATE ตอนที่ยังไม่เคยเปิดรอบ จึงใช้ transaction-level
+ * advisory lock แยกตาม period_month แทน คำขอสร้างรอบเดือนเดียวกันจะต่อคิว ส่วนคนละเดือนยังทำพร้อมกันได้
+ * hash ชนกันได้แค่ทำให้คนละเดือนรอกันเกินจำเป็น ไม่ทำให้เลือกเลขผิด เพราะ query ยังกรองเดือนจริงอีกครั้ง
+ */
+export async function payrollRoundSlotForUpdate(tx, periodMonth) {
+  await payrollMonthForUpdate(tx, periodMonth);
+
+  // อ่านหลังได้ lock ด้วย statement ใหม่ เพื่อเห็นรอบที่คำขอก่อนหน้าเพิ่ง commit
+  const rows = await tx.all(
+    `SELECT round_no FROM payroll_runs
+     WHERE period_month = :month AND status <> 'cancelled'
+     ORDER BY round_no`,
+    { month: periodMonth },
+  );
+  const active_rounds = rows.map((row) => Number(row.round_no));
+  const round_no = firstAvailablePayrollRound(active_rounds);
+
+  return round_no == null
+    ? { reason: 'round_limit', period_month: periodMonth, active_rounds }
+    : { period_month: periodMonth, round_no, active_rounds };
+}
+
+/**
+ * การยกเลิก/ลบรอบคือการคืนช่องเลข 1–3 จึงต้องใช้ lock เดือนเดียวกับ createRun ด้วย
+ * อ่านเดือนได้ก่อนแต่ยังไม่ใช้สถานะตัดสิน จากนั้น lock ตามลำดับ month → run เสมอเพื่อไม่สร้างวงจร deadlock
+ */
+export async function payrollRunForRoundSlotUpdate(tx, runId, action) {
+  const initial = await tx.one(
+    'SELECT period_month FROM payroll_runs WHERE run_id = :id',
+    { id: runId },
+  );
+  if (!initial) return { reason: 'not_found' };
+
+  await payrollMonthForUpdate(tx, initial.period_month);
+  const state = await payrollRunForUpdate(tx, runId, action);
+  if (!state.reason && state.run.period_month !== initial.period_month) {
+    return { reason: 'state_changed', run: state.run };
+  }
+  return state;
 }
 
 /**
  * เปิดรอบ — เดือนกับเลขรอบมาจากวันตัดรอบ ไม่ได้ให้กรอกเอง
  * ป้ายชื่อจึงตรงกับสิ่งที่รอบกวาดมาจริงเสมอ (ดูเหตุผลเต็มใน schema.js)
  */
-export function createRun({ period_to, note }, actor) {
-  return transaction(async (tx) => {
-    const period_month = period_to.slice(0, 7);
-    const { n } = await tx.one(
-      `SELECT COUNT(*) AS n FROM payroll_runs
-       WHERE period_month = :month AND status <> 'cancelled'`,
-      { month: period_month },
-    );
-    const round_no = Number(n) + 1;
+export async function createRunForTransaction(tx, { period_to, note }, actor) {
+  const period_month = period_to.slice(0, 7);
+  const slot = await payrollRoundSlotForUpdate(tx, period_month);
+  if (slot.reason) return slot;
+  const { round_no } = slot;
 
-    const runId = await nextPayrollId(tx);
-    await tx.run(
-      `INSERT INTO payroll_runs
-         (run_id, period_month, round_no, period_to, note, created_by, created_by_name)
-       VALUES (:run_id, :period_month, :round_no, :period_to, :note, :by, :by_name)`,
-      {
-        run_id: runId,
-        period_month,
-        round_no,
-        period_to,
-        note: note ?? null,
-        by: actor?.employee_id ?? null,
-        by_name: actor?.name ?? null,
-      },
-    );
-    await fill(tx, runId, period_to);
-    return runId;
-  }).then(findById);
+  // ขอเลข PAY หลังยืนยันว่ามีช่องแล้วเท่านั้น — คำขอที่เต็มจึงไม่กินเลข counter ทิ้ง
+  const runId = await nextPayrollId(tx);
+  await tx.run(
+    `INSERT INTO payroll_runs
+       (run_id, period_month, round_no, period_to, note, created_by, created_by_name)
+     VALUES (:run_id, :period_month, :round_no, :period_to, :note, :by, :by_name)`,
+    {
+      run_id: runId,
+      period_month,
+      round_no,
+      period_to,
+      note: note ?? null,
+      by: actor?.employee_id ?? null,
+      by_name: actor?.name ?? null,
+    },
+  );
+  await fill(tx, runId, period_to);
+  return { run_id: runId };
+}
+
+export async function createRun(input, actor) {
+  const result = await transaction((tx) => createRunForTransaction(tx, input, actor));
+  if (result.reason) return result;
+  return (await findById(result.run_id)) ?? { reason: 'not_found' };
 }
 
 /** ดึงยอดใหม่ทั้งรอบ (ร่างเท่านั้น) — ล้างของเดิมทิ้งแล้วกวาดใหม่ คนที่ถูกเอาออกไปจะกลับมาด้วย */
-export function rebuild(runId, periodTo) {
-  return transaction(async (tx) => {
-    await tx.run('DELETE FROM payroll_items WHERE run_id = :id', { id: runId });
-    await fill(tx, runId, periodTo);
-    return runId;
-  }).then(findById);
+export async function rebuild(runId) {
+  const result = await transaction(async (tx) => {
+    const state = await payrollRunForUpdate(tx, runId, 'rebuild');
+    if (state.reason) return state;
+
+    await tx.run(
+      `DELETE FROM payroll_items i
+       WHERE i.run_id = :id
+         AND EXISTS (SELECT 1 FROM payroll_runs r WHERE r.run_id = i.run_id AND r.status = 'draft')`,
+      { id: runId },
+    );
+    await fill(tx, runId, state.run.period_to);
+    return { run_id: runId };
+  });
+  if (result.reason) return result;
+  return (await findById(result.run_id)) ?? { reason: 'not_found' };
 }
 
 /* ยอดรวมของรอบ — ร่างคิดจากก้อนที่ผูกอยู่จริง ส่วนรอบที่จ่าย/ยกเลิกแล้วอ่านที่ตรึงไว้บนสลิป
@@ -247,7 +407,11 @@ export async function list({ month, status } = {}) {
     `SELECT r.*, ${RUN_TOTALS}
      FROM payroll_runs r
      ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
-     ORDER BY r.period_month DESC, r.round_no DESC`,
+     /* ใหม่สุดอยู่บนสุดเสมอ — เรียงตามเวลาที่เปิดรอบ ไม่ใช่ตามเลขรอบ
+        เลขรอบเลือกจากช่อง 1–3 ที่ยังว่าง (ดู payrollRoundSlotForUpdate) เดือนที่ยกเลิกไปแล้วสองรอบจึงมี "รอบที่ 1"
+        ใบใหม่เกิดขึ้นได้อีก แล้วมันจะไปโผล่ท้ายรายการใต้รอบที่ยกเลิกซึ่งเก่ากว่ามาก
+        run_id ปิดท้ายไว้เผื่อสองรอบเปิดในวินาทีเดียวกัน (created_at ละเอียดถึงแค่วินาที) */
+     ORDER BY r.period_month DESC, r.created_at DESC, r.run_id DESC`,
     params,
   );
   return rows.map((r) => num(r, ['round_no', 'employees', 'shifts', 'total_pay', 'cases', 'payouts']));
@@ -314,8 +478,22 @@ export const findItem = (itemId) =>
   );
 
 /** เอาคนออกจากรอบ — ก้อนเงินของเขากลับเข้ากองรอจ่ายทันที (payroll_payout_lines ถูกลบตาม) */
-export const removeItem = (itemId) =>
-  sql.run('DELETE FROM payroll_items WHERE item_id = :id', { id: itemId });
+export async function removeItem(runId, itemId) {
+  const result = await transaction(async (tx) => {
+    const state = await payrollRunForUpdate(tx, runId, 'remove_item');
+    if (state.reason) return state;
+
+    const removed = await tx.run(
+      `DELETE FROM payroll_items i
+       WHERE i.item_id = :item_id AND i.run_id = :run_id
+         AND EXISTS (SELECT 1 FROM payroll_runs r WHERE r.run_id = i.run_id AND r.status = 'draft')`,
+      { item_id: itemId, run_id: runId },
+    );
+    return removed > 0 ? { run_id: runId } : { reason: 'item_not_found' };
+  });
+  if (result.reason) return result;
+  return (await findById(result.run_id)) ?? { reason: 'not_found' };
+}
 
 /**
  * ปิดรอบเป็น "จ่ายแล้ว" — ตรึงตัวเลขทั้งรอบ ณ วินาทีนี้ แล้วล็อก
@@ -324,27 +502,45 @@ export const removeItem = (itemId) =>
  * ให้ตรงกับก้อนที่ผูกอยู่จริง ณ ตอนกดจ่าย — เผื่อมีการถอนยอดคืนระหว่างที่รอบยังเป็นร่าง
  */
 export async function pay(runId, { pay_date, method, note }, actor) {
-  await transaction(async (tx) => {
+  const result = await transaction(async (tx) => {
+    const state = await payrollRunForUpdate(tx, runId, 'pay');
+    if (state.reason) return state;
+
+    // อ่านหลังได้ lock ด้วย statement ใหม่ — remove/rebuild ที่ commit ก่อนหน้าจึงสะท้อนในจำนวนล่าสุด
+    const counts = await tx.one(
+      `SELECT COUNT(DISTINCT i.item_id) AS employees, COUNT(pl.payout_id) AS payouts
+       FROM payroll_items i
+       LEFT JOIN payroll_payout_lines pl ON pl.item_id = i.item_id
+       WHERE i.run_id = :id`,
+      { id: runId },
+    );
+    if (Number(counts.employees) === 0 || Number(counts.payouts) === 0) {
+      return { reason: 'empty_run' };
+    }
+
     // 1) ยอดบนสลิป = ผลรวมของก้อนที่ผูกอยู่ (ล้างเป็นศูนย์ก่อน เผื่อสลิปที่ไม่เหลือก้อนเงินแล้ว)
     await tx.run(
-      `UPDATE payroll_items SET shifts = 0, minutes = 0, total_pay = 0 WHERE run_id = :id`,
+      `UPDATE payroll_items i SET shifts = 0, minutes = 0, total_pay = 0
+       WHERE i.run_id = :id
+         AND EXISTS (SELECT 1 FROM payroll_runs r WHERE r.run_id = i.run_id AND r.status = 'draft')`,
       { id: runId },
     );
     await tx.run(
       `UPDATE payroll_items i
        SET shifts = t.shifts, minutes = t.minutes, total_pay = t.total_pay
        FROM (${LIVE_ITEMS}) t
-       WHERE i.item_id = t.item_id AND i.run_id = :id`,
+       WHERE i.item_id = t.item_id AND i.run_id = :id
+         AND EXISTS (SELECT 1 FROM payroll_runs r WHERE r.run_id = i.run_id AND r.status = 'draft')`,
       { id: runId },
     );
 
     // 2) ปิดรอบ
-    await tx.run(
+    const transitioned = await tx.run(
       `UPDATE payroll_runs
        SET status = 'paid', pay_date = :pay_date, method = :method,
            note = COALESCE(:note, note),
            paid_by = :by, paid_by_name = :by_name, updated_at = ${NOW}
-       WHERE run_id = :id`,
+       WHERE run_id = :id AND status = 'draft'`,
       {
         id: runId,
         pay_date,
@@ -354,8 +550,11 @@ export async function pay(runId, { pay_date, method, note }, actor) {
         by_name: actor?.name ?? null,
       },
     );
+    if (transitioned !== 1) throw new Error(`สถานะรอบ ${runId} เปลี่ยนหลังได้ row lock`);
+    return { run_id: runId };
   });
-  return findById(runId);
+  if (result.reason) return result;
+  return (await findById(result.run_id)) ?? { reason: 'not_found' };
 }
 
 /**
@@ -363,22 +562,41 @@ export async function pay(runId, { pay_date, method, note }, actor) {
  * ลบเฉพาะ payroll_payout_lines ไม่ลบสลิป เพื่อให้ยังอ่านย้อนได้ว่ารอบที่ยกเลิกไปเคยจะจ่ายใครเท่าไหร่
  */
 export async function cancel(runId) {
-  await transaction(async (tx) => {
+  const result = await transaction(async (tx) => {
+    const state = await payrollRunForRoundSlotUpdate(tx, runId, 'cancel');
+    if (state.reason) return state;
+
     await tx.run(
       `DELETE FROM payroll_payout_lines
-       WHERE item_id IN (SELECT item_id FROM payroll_items WHERE run_id = :id)`,
+       WHERE item_id IN (SELECT item_id FROM payroll_items WHERE run_id = :id)
+         AND EXISTS (SELECT 1 FROM payroll_runs WHERE run_id = :id AND status IN ('draft', 'paid'))`,
       { id: runId },
     );
-    await tx.run(
-      `UPDATE payroll_runs SET status = 'cancelled', updated_at = ${NOW} WHERE run_id = :id`,
+    const transitioned = await tx.run(
+      `UPDATE payroll_runs SET status = 'cancelled', updated_at = ${NOW}
+       WHERE run_id = :id AND status IN ('draft', 'paid')`,
       { id: runId },
     );
+    if (transitioned !== 1) throw new Error(`สถานะรอบ ${runId} เปลี่ยนหลังได้ row lock`);
+    return { run_id: runId };
   });
-  return findById(runId);
+  if (result.reason) return result;
+  return (await findById(result.run_id)) ?? { reason: 'not_found' };
 }
 
-export const remove = (runId) =>
-  sql.run('DELETE FROM payroll_runs WHERE run_id = :id', { id: runId }).then((n) => n > 0);
+export function remove(runId) {
+  return transaction(async (tx) => {
+    const state = await payrollRunForRoundSlotUpdate(tx, runId, 'remove');
+    if (state.reason) return state;
+
+    const removed = await tx.run(
+      `DELETE FROM payroll_runs WHERE run_id = :id AND status = 'draft'`,
+      { id: runId },
+    );
+    if (removed !== 1) throw new Error(`สถานะรอบ ${runId} เปลี่ยนหลังได้ row lock`);
+    return { ok: true };
+  });
+}
 
 /**
  * สลิปของพนักงานคนหนึ่งทุกรอบที่จ่ายแล้ว — ฝั่งพนักงานเห็นเฉพาะรอบที่จ่ายจริงแล้วเท่านั้น

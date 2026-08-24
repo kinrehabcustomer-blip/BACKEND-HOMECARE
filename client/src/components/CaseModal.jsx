@@ -6,7 +6,9 @@ import { useToast } from '../toast.jsx';
 import { useSheetSwipe } from '../lib/sheetSwipe.js';
 import { useScrollLock } from '../lib/scrollLock.js';
 import CaseVisitsModal from './CaseVisitsModal.jsx';
-import CaseReportsModal from './CaseReportsModal.jsx';
+import CaseReports from './CaseReports.jsx';
+import CaseReportDoc from './CaseReportDoc.jsx';
+import ReportArchiveModal from './ReportArchiveModal.jsx';
 import InvoiceModal from './InvoiceModal.jsx';
 import {
   CASE_TYPE_LABELS, CASE_STATUS_LABELS, POSITION_LABELS, GENDER_LABELS, SERVICE_KIND_LABELS,
@@ -129,10 +131,18 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
   const [busy, setBusy] = useState(false);
   const [visits, setVisits] = useState([]);      // ใช้แค่สรุปจำนวนบนปุ่ม การจัดการจริงอยู่ใน popup ย่อย
   const [visitsOpen, setVisitsOpen] = useState(false);
-  /* รายงานอาการผู้ป่วย — หน้านี้ใช้แค่จำนวนกับใบล่าสุด การกรอก/แก้อยู่ใน popup ย่อยเหมือนตารางกะ
-     จึงขอมาหน้าละใบเดียว ไม่ดึงทั้งคลัง (เคสที่ดูแลต่อเนื่องมีได้หลายร้อยใบ) */
-  const [reports, setReports] = useState({ total: 0, latest: null });
+  /* รายงานอาการผู้ป่วย — ตัวรายการกางอยู่ในหน้าแล้ว (ดูส่วน "รายงานอาการผู้ป่วย" ข้างล่าง)
+     ตัวนี้เหลือไว้เป็นจำนวนรวม ใช้ตัดสินว่าจะโชว์ปุ่มพิมพ์ไหม — ขอมาหน้าละใบเดียว ไม่ดึงทั้งคลัง */
+  const [reports, setReports] = useState({ total: 0 });
   const [team, setTeam] = useState([]); // คนที่ร่วมดูแลเคส นอกเหนือจากผู้รับผิดชอบหลัก
+  /* ฟอร์มแก้รายงานกางอยู่ในหน้า — Esc/Tab ต้องไม่ปิดทั้งกล่องจนที่พิมพ์ไว้หาย */
+  const [reportFormOpen, setReportFormOpen] = useState(false);
+  /* ใบที่กำลังจะพิมพ์ — โหลดรายงานทั้งคลังตอนกดเท่านั้น (หน้าปกติใช้แค่ไม่กี่ใบล่าสุด)
+     ค้างไว้หลังพิมพ์เสร็จก็ไม่มีผล เพราะตัวใบถูกซ่อนบนจออยู่แล้ว */
+  const [printReports, setPrintReports] = useState(null);
+  const [printing, setPrinting] = useState(false);
+  /* ตารางรายงานทั้งหมดใน popup — หน้าเคสกางแค่ใบล่าสุด แต่ต้องมีทางไล่ย้อนหลังทั้งคลัง
+     "ในระบบ" เสมอ ไม่ใช่ต้องพิมพ์เป็น PDF ออกไปก่อนถึงจะอ่านครบ */
   const [reportsOpen, setReportsOpen] = useState(false);
   // ฟอร์มยืนยันการยกเลิกเคส — ทำเป็นฟอร์มในหน้าแทน prompt() ที่เบราว์เซอร์บล็อกได้
   const [cancelOpen, setCancelOpen] = useState(false);
@@ -159,9 +169,51 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
       setVisits(v);
       setInvoices(inv.data);
       setEvents(ev);
-      setReports({ total: rp.total, latest: rp.data[0] ?? null });
+      setReports({ total: rp.total });
       setTeam(tm);
     });
+
+  /**
+   * ปิดกล่อง — ถามก่อนถ้ายังมีฟอร์มกางค้างอยู่
+   *
+   * ฟอร์มในหน้าเต็ม (เพิ่ม/แก้พนักงาน ลูกค้า เคส) มีตัวเตือนก่อนออกจากหน้ามานานแล้ว
+   * แต่ฟอร์มที่กางอยู่ใน popup ไม่มีอะไรกันเลย — เผลอกดพื้นหลังหรือปุ่มกากบาททีเดียว
+   * ที่พิมพ์ไว้หายทันทีโดยไม่มีจังหวะให้ยั้ง ซึ่งเป็นการกดที่พลาดง่ายกว่าการปิดทั้งแท็บมาก
+   */
+  const requestClose = () => {
+    const pending = editing ? 'ข้อมูลเคสที่แก้ค้างไว้' : reportFormOpen ? 'รายงานที่กรอกค้างไว้' : null;
+    if (pending && !confirm(`ยังไม่ได้บันทึก${pending} — ปิดแล้วจะหาย ปิดเลยไหม?`)) return;
+    onClose();
+  };
+
+  /* สั่งพิมพ์แบบฟอร์มรายงาน — โหลดทั้งคลังก่อน แล้วค่อยเรียกเครื่องพิมพ์
+     (หน้าปกติกางแค่ 3 ใบล่าสุด แต่ใบที่ส่งออกไปต้องครบทุกครั้งที่ไปดูแล)
+     per_page 100 คือเพดานของ endpoint — เคสที่ยาวกว่านั้นบอกให้รู้ว่าใบนี้ไม่ครบ ไม่ใช่ตัดเงียบๆ */
+  async function printReportForm() {
+    setPrinting(true);
+    setError(null);
+    try {
+      const res = await api.listCaseReports(caseId, { per_page: 100 });
+      if (res.has_more) toast(`เคสนี้มี ${res.total} ใบ — ใบที่พิมพ์รวม 100 ใบล่าสุด`);
+      setPrintReports(res.data);
+    } catch (err) {
+      setError(err.message);
+      setPrinting(false);
+    }
+  }
+
+  /* เรียกเครื่องพิมพ์หลังใบถูกวาดลงหน้าจริงแล้ว — window.print() หยุดรอทั้งหน้าอยู่แล้ว
+     จึงต้องมั่นใจว่า React commit เสร็จก่อน (effect ทำงานหลัง commit ตามนิยาม) */
+  useEffect(() => {
+    if (!printReports) return;
+    window.print();
+    setPrinting(false);
+  }, [printReports]);
+
+  // เปลี่ยนเคส = ใบที่เตรียมไว้ของเคสก่อนหน้าต้องทิ้ง ไม่งั้นกดพิมพ์เคสใหม่แล้วได้รายงานของเคสเก่า
+  useEffect(() => {
+    setPrintReports(null);
+  }, [caseId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -185,7 +237,7 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
         setVisits(v);
         setInvoices(inv.data);
         setEvents(ev);
-        setReports({ total: rp.total, latest: rp.data[0] ?? null });
+        setReports({ total: rp.total });
       setTeam(tm);
         setPick(c.assigned_to ?? '');
       })
@@ -218,6 +270,7 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
         // กำลังแก้อยู่ / ยืนยันยกเลิกอยู่ — Esc ควรพับสิ่งนั้นก่อน ไม่ใช่ปิดทั้งกล่องจนที่พิมพ์ไว้หาย
         if (cancelOpen) setCancelOpen(false);
         else if (editing) setEditing(false);
+        else if (reportFormOpen) return; // ฟอร์มรายงานมีปุ่ม "ยกเลิก" ของตัวเอง ให้กดที่นั่น
         else onClose();
         return;
       }
@@ -240,7 +293,7 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
 
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [onClose, visitsOpen, reportsOpen, openInvoiceId, editing, cancelOpen]);
+  }, [onClose, visitsOpen, reportsOpen, openInvoiceId, editing, cancelOpen, reportFormOpen]);
 
   // ตำแหน่งของเคสนี้ในรายการหน้าปัจจุบัน — ใช้ทำปุ่มดูเคสก่อนหน้า/ถัดไป
   const index = siblings.indexOf(caseId);
@@ -327,7 +380,7 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
   }
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <div className="modal-backdrop" onClick={requestClose}>
       <div
         className="modal"
         role="dialog"
@@ -360,7 +413,7 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                     <button className="btn icon-btn" disabled={!nextId} onClick={() => onNavigate?.(nextId)} title="เคสถัดไป" aria-label="เคสถัดไป"><LineIcon name="chevron-right" /></button>
                   </span>
                 )}
-                <button className="modal-close" onClick={onClose} aria-label="ปิด">×</button>
+                <button className="modal-close" onClick={requestClose} aria-label="ปิด">×</button>
               </div>
             </header>
 
@@ -523,27 +576,47 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                   ของหน้ารอบจ่าย ซึ่งเห็นทุกเคสพร้อมกัน ไม่ต้องเปิดทีละใบ
                   หน้าเคสเหลือไว้เรื่องงานล้วนๆ: ตารางกะ · รายงานอาการ · ใบแจ้งหนี้ของลูกค้า */}
 
-              {/* บันทึกอาการรายครั้ง — ต่างจาก "อาการปัจจุบัน" ด้านบนที่เป็น snapshot ณ วันเปิดเคส */}
+              {/* บันทึกอาการรายครั้ง — ต่างจาก "อาการปัจจุบัน" ด้านบนที่เป็น snapshot ณ วันเปิดเคส
+
+                  กางอยู่ในหน้าเลย ไม่ใช่ซ่อนหลังปุ่ม "ดูรายงาน" อีกชั้น — สิ่งที่คนเปิดเคสมาดูจริงๆ
+                  คือ "ไปแล้วเจออะไรบ้าง" ไม่ใช่ "มีรายงานกี่ใบ" ซึ่งเป็นตัวเลขที่ตอบอะไรไม่ได้เลย
+                  (ฝั่งพนักงานกางมาตั้งแต่แรกอยู่แล้ว ฝั่งจัดการเห็นน้อยกว่าคนที่เขียนรายงานเอง
+                  ทั้งที่เป็นฝั่งที่ต้องตอบญาติและตรวจงาน)
+
+                  inlineLimit: เคสที่ดูแลต่อเนื่องมีวันละ 2–4 ใบ กางทั้งคลังจะดันทุกอย่างตกจอ
+                  ที่เกินไปดูได้ในคลังเต็ม (ปุ่มของ CaseReports เอง) — กติกาเดียวกับฝั่งพนักงาน */}
               <section>
-                <h3>รายงานอาการผู้ป่วย</h3>
-                <div className="visit-summary">
-                  <p className="muted">
-                    {reports.total === 0 ? (
-                      'ยังไม่มีรายงานอาการ'
-                    ) : (
-                      <>
-                        มีรายงาน <strong>{reports.total}</strong> ใบ
-                        <span className="cell-sub">
-                          ล่าสุด {formatDate(reports.latest.report_date)}
-                          {reports.latest.reported_by_name && ` · โดย ${reports.latest.reported_by_name}`}
-                        </span>
-                      </>
-                    )}
-                  </p>
-                  <button className="btn" onClick={() => setReportsOpen(true)}>
-                    ดูรายงาน
-                  </button>
+                <div className="section-head">
+                  <h3>รายงานอาการผู้ป่วย</h3>
+                  {/* สองทางที่ต่างกันจริงๆ: อ่านในระบบ (กางดูรายใบ แก้ไขได้ กรองตามเดือน/ที่ผิดปกติ)
+                      กับใบกระดาษที่ส่งออกไปข้างนอก (ญาติขอดู แพทย์ขอประวัติ เก็บเข้าแฟ้มตอนปิดเคส)
+                      ทางแรกต้องอยู่ตรงนี้ด้วยเสมอ ไม่ใช่โผล่เฉพาะตอนรายงานเยอะจนล้นออกนอกหน้า */}
+                  {reports.total > 0 && (
+                    <span className="head-actions">
+                      <button className="btn tiny" onClick={() => setReportsOpen(true)}>
+                        <LineIcon name="eye" />ดูรายงานทั้งหมด ({reports.total})
+                      </button>
+                      <button className="btn tiny" disabled={printing} onClick={printReportForm}>
+                        <LineIcon name="printer" />{printing ? 'กำลังเตรียม…' : 'พิมพ์ / บันทึก PDF'}
+                      </button>
+                    </span>
+                  )}
                 </div>
+                <p className="muted report-where">
+                  บันทึกรายงานได้ที่หน้า <strong>งานวันนี้</strong> ของกะนั้น — ตรงนี้ดูย้อนหลังและแก้ไขได้
+                </p>
+                <CaseReports
+                  caseId={item.case_id}
+                  caseInfo={item}
+                  scope="admin"
+                  allowAdd={false}
+                  inlineLimit={3}
+                  archiveTitle={item.client_name}
+                  onFormOpen={setReportFormOpen}
+                  onChanged={() => load().catch(() => {})}
+                />
+                {/* ใบที่จะถูกพิมพ์ — ซ่อนอยู่บนจอ โผล่เฉพาะตอนสั่งพิมพ์ (ดู .report-doc ใน index.css) */}
+                <CaseReportDoc caseItem={item} reports={printReports} />
               </section>
 
               {/* ออกใบแจ้งหนี้จากเคสนี้ — ระบบคัดลอกผู้จ่าย/ที่อยู่/ค่าจ้างไปให้เอง */}
@@ -820,9 +893,14 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
               />
             )}
 
+            {/* ตารางรายงานทั้งหมด — ตัวเดียวกับที่ CaseReports เปิดเองตอนรายงานล้นหน้า
+                ปิดแล้วดึงเคสใหม่ เพราะแก้/ลบรายงานจากในนั้นได้ จำนวนบนปุ่มต้องตรง */}
             {reportsOpen && (
-              <CaseReportsModal
-                caseItem={item}
+              <ReportArchiveModal
+                caseId={item.case_id}
+                caseInfo={item}
+                title={item.client_name}
+                scope="admin"
                 onClose={() => {
                   setReportsOpen(false);
                   load().catch(() => {});

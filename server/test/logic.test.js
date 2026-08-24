@@ -18,14 +18,760 @@ await import('../src/lib/env.js');
 process.env.DATABASE_URL ||= 'postgresql://placeholder/placeholder';
 process.env.JWT_SECRET ||= 'x'.repeat(48);
 
-const { adjustVisitSchema, bulkVisitSchema, visitRangeSchema, createReportSchema, hasReportContent, REPORT_CONTENT_FIELDS } = await import('../src/cases/schema.js');
+const { createCaseSchema, updateCaseSchema, adjustVisitSchema, bulkVisitSchema, visitRangeSchema, createReportSchema, hasReportContent, REPORT_CONTENT_FIELDS } = await import('../src/cases/schema.js');
+const { updateInvoiceSchema, paySchema } = await import('../src/invoices/schema.js');
 const { createRunSchema } = await import('../src/payroll/schema.js');
+const { isCalendarDate } = await import('../src/lib/dates.js');
+const { isAllowedHost } = await import('../src/lib/maplink.js');
+const { generateTempPassword } = await import('../src/lib/auth.js');
 const { checkInSchema } = await import('../src/my/schema.js');
-const { withVisitState, allocateShares, weightsFor, MAX_INSTALLMENTS } = await import('../src/cases/repo.js');
+const {
+  withVisitState,
+  allocateShares,
+  weightsFor,
+  staffPayUpdateMode,
+  assessStaffPayUpdate,
+  staffPayUpdateForTransaction,
+  payoutCancellationForUpdate,
+  assessReleaseCapacity,
+  MAX_INSTALLMENTS,
+} = await import('../src/cases/repo.js');
+const {
+  assessInvoiceAction,
+  invoiceForUpdate,
+  invoicePlanForUpdate,
+  invoiceMutationResult,
+  assessPaymentCapacity,
+  paymentCapacityForUpdate,
+  updateInvoiceForTransaction,
+  issueInvoiceForTransaction,
+  setBillingPlanForTransaction,
+  setDepositAmountForTransaction,
+  removeInvoiceForTransaction,
+} = await import('../src/invoices/repo.js');
+const {
+  firstAvailablePayrollRound,
+  payrollRoundSlotForUpdate,
+  payrollRunForRoundSlotUpdate,
+  createRunForTransaction,
+  assessPayrollRunAction,
+  payrollRunForUpdate,
+} = await import('../src/payroll/repo.js');
+const { firstAvailablePayrollRound: firstAvailablePayrollRoundOnClient } = await import('../../client/src/lib/payrollUi.js');
 const { distanceMeters, DEFAULT_GEOFENCE_M } = await import('../src/lib/geo.js');
-const { roleForPosition, canSeeStaffPay, stripPayFields, BLOCKED_STATUSES } = await import('../src/lib/auth.js');
+const { roleForPosition, canSeeStaffPay, requireManager, stripPayFields, BLOCKED_STATUSES } = await import('../src/lib/auth.js');
 const { errorHandler, ApiError } = await import('../src/lib/errors.js');
 const guards = await import('../src/employees/routes.js');
+const caseGuards = await import('../src/cases/routes.js');
+
+// ---------- contract ค่าจ้างของเคส ----------
+describe('staff_pay — schema, สิทธิ์ และการคำนวณใหม่ต้องตรงกัน', () => {
+  const base = { case_type: 'other', client_name: 'ผู้ป่วยทดสอบ' };
+
+  test('schema เก็บ staff_pay ของ manager ไว้ ไม่ strip ทิ้ง', () => {
+    assert.equal(createCaseSchema.parse({ ...base, staff_pay: 1234 }).staff_pay, 1234);
+    assert.equal(updateCaseSchema.parse({ staff_pay: 0 }).staff_pay, 0);
+    assert.equal(updateCaseSchema.parse({ staff_pay: null }).staff_pay, null);
+    assert.equal(createCaseSchema.safeParse({ ...base, staff_pay: -1 }).success, false);
+  });
+
+  test('manager ตั้งค่าจ้างได้ แต่ HR ส่งคีย์นี้ตรงเข้า API ไม่ได้', () => {
+    assert.doesNotThrow(() => caseGuards.ensureCanSetStaffPay({ user: { position: 'manager' } }, { staff_pay: 9000 }));
+    assert.throws(
+      () => caseGuards.ensureCanSetStaffPay({ user: { position: 'hr' } }, { staff_pay: 9000 }),
+      (error) => error.status === 403,
+    );
+    assert.doesNotThrow(() => caseGuards.ensureCanSetStaffPay({ user: { position: 'hr' } }, { note: 'แก้หมายเหตุ' }));
+  });
+
+  test('ไม่เปลี่ยนบริการและไม่ส่ง staff_pay = รักษาค่าพิเศษเดิม', () => {
+    const current = { service_kind: 'homecare', pkg_format_id: 1, pkg_grade_id: 2, pkg_staff_tier: 'NA' };
+    assert.equal(staffPayUpdateMode(current, { ...current, note: 'แก้หมายเหตุ' }), 'preserve');
+  });
+
+  test('เปลี่ยนบริการโดยไม่ส่ง staff_pay = ดึงค่าจากบริการใหม่', () => {
+    const current = { service_kind: 'homecare', pkg_format_id: 1, pkg_grade_id: 2, pkg_staff_tier: 'NA' };
+    assert.equal(staffPayUpdateMode(current, { ...current, pkg_staff_tier: 'PN' }), 'service');
+    assert.equal(staffPayUpdateMode(current, { service_kind: 'physio', physio_package_id: 5 }), 'service');
+  });
+
+  test('ตัวเลขที่ manager ส่งเป็น custom; null หมายถึงกลับไปใช้ค่าบริการ', () => {
+    assert.equal(staffPayUpdateMode({}, { staff_pay: 7777 }), 'explicit');
+    assert.equal(staffPayUpdateMode({}, { staff_pay: 0 }), 'explicit');
+    assert.equal(staffPayUpdateMode({}, { staff_pay: null }), 'service');
+  });
+
+  test('ค่าจ้างใหม่ต้องไม่ต่ำกว่ายอดที่ปล่อยแล้ว แต่เท่ากันหรือสูงกว่ายังแก้ได้', () => {
+    assert.equal(assessStaffPayUpdate(6999, 7000).reason, 'below_released');
+    assert.equal(assessStaffPayUpdate(6999.994, 7000).reason, 'below_released');
+    assert.equal(assessStaffPayUpdate(null, 7000).reason, 'below_released');
+    assert.deepEqual(assessStaffPayUpdate(7000, 7000), { staff_pay: 7000, released: 7000 });
+    assert.deepEqual(assessStaffPayUpdate(6999.996, 7000), { staff_pay: 7000, released: 7000 });
+    assert.deepEqual(assessStaffPayUpdate(9000, 7000), { staff_pay: 9000, released: 7000 });
+    assert.deepEqual(assessStaffPayUpdate(0, 0), { staff_pay: 0, released: 0 });
+    assert.deepEqual(assessStaffPayUpdate(null, 0), { staff_pay: null, released: 0 });
+  });
+
+  test('ล็อก case ก่อนอ่าน SUM payouts และหยุดก่อน UPDATE เมื่อยอดใหม่ต่ำเกินไป', async () => {
+    const calls = [];
+    const tx = {
+      one: async (query) => {
+        calls.push(query);
+        if (query.includes('FOR UPDATE')) {
+          return { case_id: 'CASE-0001', staff_pay: 10000, service_kind: 'homecare' };
+        }
+        if (query.includes('SUM(amount)')) return { released: 7000 };
+        throw new Error(`unexpected query: ${query}`);
+      },
+    };
+
+    await assert.rejects(
+      () => staffPayUpdateForTransaction(tx, 'CASE-0001', { staff_pay: 6000 }),
+      (error) => error.status === 409,
+    );
+    assert.match(calls[0], /FOR UPDATE/);
+    assert.match(calls[1], /SUM\(amount\)/);
+    assert.equal(calls.length, 2);
+  });
+
+  test('ไม่เปลี่ยน staff_pay ไม่ต้องอ่าน payouts แต่ยังล็อก case เพื่อเทียบ service ล่าสุด', async () => {
+    const calls = [];
+    const tx = {
+      one: async (query) => {
+        calls.push(query);
+        return { case_id: 'CASE-0001', staff_pay: 10000, service_kind: 'homecare' };
+      },
+    };
+
+    const state = await staffPayUpdateForTransaction(tx, 'CASE-0001', { note: 'แก้หมายเหตุ' });
+    assert.equal(state.mode, 'preserve');
+    assert.equal(state.staff_pay, 10000);
+    assert.equal(calls.length, 1);
+    assert.match(calls[0], /FOR UPDATE/);
+  });
+
+  test('HR เปลี่ยนบริการแล้วค่าจากเรทใหม่ต่ำกว่ายอดที่ปล่อยไปแล้ว = 409', async () => {
+    const calls = [];
+    const tx = {
+      one: async (query) => {
+        calls.push(query);
+        if (query.includes('FOR UPDATE')) {
+          return {
+            case_id: 'CASE-0001',
+            staff_pay: 10000,
+            service_kind: 'homecare',
+            pkg_format_id: 1,
+            pkg_grade_id: 2,
+            pkg_staff_tier: 'NA',
+          };
+        }
+        if (query.includes('FROM pkg_rates')) return { staff_pay: 6000 };
+        if (query.includes('SUM(amount)')) return { released: 7000 };
+        throw new Error(`unexpected query: ${query}`);
+      },
+    };
+
+    await assert.rejects(
+      () => staffPayUpdateForTransaction(tx, 'CASE-0001', { pkg_staff_tier: 'PN' }),
+      (error) => error.status === 409,
+    );
+    assert.match(calls[0], /FOR UPDATE/);
+    assert.match(calls[1], /FROM pkg_rates/);
+    assert.match(calls[2], /SUM\(amount\)/);
+    assert.equal(calls.length, 3);
+  });
+});
+
+// ---------- เพดานยอดปล่อยค่าจ้างภายใต้ transaction ----------
+describe('assessReleaseCapacity — ห้ามปล่อยค่าจ้างเกินยอดเหมาของเคส', () => {
+  test('ไม่ระบุยอด = ใช้ยอดคงเหลือล่าสุด', () => {
+    assert.deepEqual(assessReleaseCapacity(20000, 7000, undefined), {
+      staff_pay: 20000,
+      released: 7000,
+      remaining: 13000,
+      amount: 13000,
+    });
+  });
+
+  test('คำขอที่ถือยอดเก่ามาถูกปฏิเสธหลังอีกคำขอปล่อยเงินไปแล้ว', () => {
+    assert.deepEqual(assessReleaseCapacity(20000, 15000, 13000), {
+      reason: 'amount_exceeds_remaining',
+      staff_pay: 20000,
+      released: 15000,
+      remaining: 5000,
+      amount: 13000,
+    });
+  });
+
+  test('ปล่อยครบแล้ว คำขอถัดไปถูกปฏิเสธ', () => {
+    assert.equal(assessReleaseCapacity(20000, 20000, undefined).reason, 'fully_released');
+    assert.equal(assessReleaseCapacity(20000, 21000, 1).reason, 'fully_released');
+  });
+
+  test('staff_pay ถูกล้างระหว่างทำรายการ = ไม่เขียน payout', () => {
+    assert.equal(assessReleaseCapacity(null, 7000, 1000).reason, 'staff_pay_not_set');
+  });
+});
+
+// ---------- เพดานยอดรับชำระ invoice ภายใต้ transaction ----------
+describe('assessPaymentCapacity — ห้ามรับชำระเกินยอดคงเหลือ', () => {
+  test('ไม่ระบุยอด = ใช้ยอดคงเหลือล่าสุด', () => {
+    assert.deepEqual(assessPaymentCapacity('issued', 20000, 7000, undefined), {
+      total: 20000,
+      paid: 7000,
+      balance: 13000,
+      amount: 13000,
+    });
+  });
+
+  test('คำขอที่ถือ balance เก่ามาถูกปฏิเสธหลังอีกคำขอรับเงินไปแล้ว', () => {
+    assert.deepEqual(assessPaymentCapacity('issued', 20000, 15000, 13000), {
+      reason: 'amount_exceeds_balance',
+      total: 20000,
+      paid: 15000,
+      balance: 5000,
+      amount: 13000,
+    });
+  });
+
+  test('ใบที่รับครบหรือถูกยกเลิกแล้วรับเพิ่มไม่ได้', () => {
+    assert.equal(assessPaymentCapacity('paid', 20000, 20000, undefined).reason, 'fully_paid');
+    assert.equal(assessPaymentCapacity('issued', 20000, 21000, 1).reason, 'fully_paid');
+    assert.equal(assessPaymentCapacity('cancelled', 20000, 0, 1).reason, 'cancelled');
+  });
+
+  test('รับบางส่วนที่ไม่เกินยอดคงเหลือได้', () => {
+    assert.equal(assessPaymentCapacity('issued', 20000, 7000, 5000).amount, 5000);
+  });
+
+  test('ล็อก invoice ก่อน แล้วจึงอ่าน SUM payments ด้วย statement ถัดไป', async () => {
+    const calls = [];
+    const tx = {
+      one: async (query) => {
+        calls.push(query);
+        if (query.includes('FOR UPDATE')) {
+          return { invoice_id: 'INV-0001', total: 20000, billing_kind: 'full', status: 'issued' };
+        }
+        if (query.includes('SUM(amount)')) return { paid: 15000 };
+        throw new Error(`unexpected query: ${query}`);
+      },
+    };
+
+    const result = await paymentCapacityForUpdate(tx, 'INV-0001', undefined);
+    assert.equal(result.amount, 5000);
+    assert.match(calls[0], /FOR UPDATE/);
+    assert.match(calls[1], /SUM\(amount\)/);
+  });
+
+  test('ไม่พบ invoice แล้วหยุดก่อนอ่านตาราง payments', async () => {
+    let queries = 0;
+    const result = await paymentCapacityForUpdate(
+      { one: async () => ((queries += 1), null) },
+      'INV-MISSING',
+      100,
+    );
+    assert.equal(result.reason, 'not_found');
+    assert.equal(queries, 1);
+  });
+
+  test('ยังไม่เลือกแผนวางบิลแล้วหยุดหลัง lock โดยไม่สร้าง payment', async () => {
+    let queries = 0;
+    const result = await paymentCapacityForUpdate(
+      {
+        one: async () => {
+          queries += 1;
+          return { invoice_id: 'INV-0001', total: 20000, billing_kind: null, status: 'draft' };
+        },
+      },
+      'INV-0001',
+      1000,
+    );
+    assert.equal(result.reason, 'billing_plan_required');
+    assert.equal(queries, 1);
+  });
+});
+
+// ---------- mutation ของ invoice ต้องตัดสินจากข้อมูลหลังได้ row lock ----------
+describe('invoice mutations — สถานะ แผน และ payment ต้อง recheck ใน transaction', () => {
+  test('state matrix รักษากติกาเดิม และยกเลิกใบ paid ได้แต่แก้/ออกซ้ำไม่ได้', () => {
+    for (const status of ['draft', 'issued']) {
+      assert.equal(assessInvoiceAction('update', status).reason, undefined);
+    }
+    assert.equal(assessInvoiceAction('issue', 'draft').reason, undefined);
+    assert.equal(assessInvoiceAction('billing_plan', 'draft').reason, undefined);
+    assert.equal(assessInvoiceAction('cancel', 'paid').reason, undefined);
+    assert.equal(assessInvoiceAction('update', 'paid').reason, 'invalid_status');
+    assert.equal(assessInvoiceAction('issue', 'cancelled').reason, 'invalid_status');
+    assert.equal(assessInvoiceAction('cancel', 'cancelled').reason, 'invalid_status');
+  });
+
+  test('single-row mutation อ่านสถานะล่าสุดด้วย FOR UPDATE ก่อนอนุญาต', async () => {
+    const calls = [];
+    const result = await invoiceForUpdate(
+      {
+        one: async (query) => {
+          calls.push(query);
+          return { invoice_id: 'INV-0001', status: 'paid' };
+        },
+      },
+      'INV-0001',
+      'update',
+    );
+    assert.equal(result.reason, 'invalid_status');
+    assert.equal(result.status, 'paid');
+    assert.match(calls[0], /FOR UPDATE/);
+  });
+
+  test('ใบถูกลบหลัง commit แต่ก่อนโหลด response = คืน conflict ไม่ใช่ null/500', async () => {
+    let loads = 0;
+    const result = await invoiceMutationResult(
+      { invoice_id: 'INV-0001' },
+      async () => ((loads += 1), null),
+    );
+    assert.deepEqual(result, { reason: 'state_changed' });
+    assert.equal(loads, 1);
+
+    const conflict = await invoiceMutationResult(
+      { reason: 'invalid_status' },
+      async () => {
+        throw new Error('reason เดิมต้องไม่โหลด DB ซ้ำ');
+      },
+    );
+    assert.equal(conflict.reason, 'invalid_status');
+  });
+
+  test('plan mutation ล็อก root ก่อน แล้วค่อยอ่าน children ใหม่ตาม invoice_id', async () => {
+    const calls = [];
+    const tx = {
+      one: async (query, params) => {
+        calls.push({ query, params });
+        if (query.includes('COALESCE(parent_invoice_id')) {
+          return { invoice_id: 'INV-0002', root_id: 'INV-0001' };
+        }
+        if (query.includes('SELECT * FROM invoices WHERE invoice_id = :root_id')) {
+          return { invoice_id: 'INV-0001', parent_invoice_id: null, billing_kind: 'deposit' };
+        }
+        throw new Error(`unexpected query: ${query}`);
+      },
+      all: async (query, params) => {
+        calls.push({ query, params });
+        return [{ invoice_id: 'INV-0002', parent_invoice_id: 'INV-0001', billing_kind: 'balance' }];
+      },
+    };
+
+    const plan = await invoicePlanForUpdate(tx, 'INV-0002');
+    assert.equal(plan.root_id, 'INV-0001');
+    assert.equal(plan.target.invoice_id, 'INV-0002');
+    assert.match(calls[1].query, /invoice_id = :root_id FOR UPDATE/);
+    assert.match(calls[2].query, /ORDER BY invoice_id[\s\S]*FOR UPDATE/);
+  });
+
+  test('แก้ยอดหลังมี partial payment แล้วห้ามลด total ต่ำกว่าเงินที่รับจริง', async () => {
+    let mutations = 0;
+    const result = await updateInvoiceForTransaction(
+      {
+        one: async (query) => {
+          if (query.includes('FROM invoices i')) {
+            return {
+              invoice_id: 'INV-0001', status: 'issued', billing_kind: 'full', amount: 100, discount: 0,
+            };
+          }
+          if (query.includes('SUM(amount)')) return { paid: 80, last_paid_at: '2026-08-24' };
+          throw new Error(`unexpected query: ${query}`);
+        },
+        run: async () => ((mutations += 1), 1),
+      },
+      'INV-0001',
+      { amount: 70 },
+    );
+    assert.equal(result.reason, 'amount_below_paid');
+    assert.equal(result.paid, 80);
+    assert.equal(mutations, 0);
+  });
+
+  test('API รับเงินเป็นหน่วยสตางค์เท่านั้น และ total ที่บันทึกตรงกับค่าที่ใช้ตรวจ', async () => {
+    assert.equal(updateInvoiceSchema.safeParse({ amount: 0.105 }).success, false);
+    assert.equal(paySchema.safeParse({ amount: 0.001 }).success, false);
+    assert.equal(updateInvoiceSchema.safeParse({ amount: 0.11 }).success, true);
+
+    let mutation;
+    const result = await updateInvoiceForTransaction(
+      {
+        one: async (query) => {
+          if (query.includes('FROM invoices i')) {
+            return {
+              invoice_id: 'INV-0001', status: 'issued', billing_kind: 'full', amount: 1, discount: 0,
+            };
+          }
+          return { paid: 0.11, last_paid_at: '2026-08-24' };
+        },
+        run: async (query, params) => {
+          mutation = { query, params };
+          return 1;
+        },
+      },
+      'INV-0001',
+      { amount: 0.105 },
+    );
+    assert.equal(result.reason, undefined);
+    assert.match(mutation.query, /total = :next_total/);
+    assert.equal(mutation.params.next_total, 0.11);
+    assert.equal(mutation.params.settled, true);
+  });
+
+  test('ออกใบไม่ได้หากยังไม่เลือก full/deposit แม้ snapshot ก่อนหน้าเคยอนุญาต', async () => {
+    let mutations = 0;
+    const result = await issueInvoiceForTransaction(
+      {
+        one: async () => ({ invoice_id: 'INV-0001', status: 'draft', billing_kind: null }),
+        run: async () => ((mutations += 1), 1),
+      },
+      'INV-0001',
+    );
+    assert.equal(result.reason, 'billing_plan_required');
+    assert.equal(mutations, 0);
+  });
+
+  test('คำขอแบ่งงวดที่รอ lock เห็น billing_kind ที่อีกคำขอเพิ่งตั้งและไม่สร้าง child ซ้ำ', async () => {
+    let mutations = 0;
+    const result = await setBillingPlanForTransaction(
+      {
+        one: async () => ({ invoice_id: 'INV-0001', status: 'draft', billing_kind: 'deposit' }),
+        all: async () => {
+          throw new Error('ต้องหยุดก่อนอ่าน children');
+        },
+        run: async () => ((mutations += 1), 1),
+      },
+      'INV-0001',
+      { mode: 'deposit', deposit_amount: 30 },
+      null,
+    );
+    assert.equal(result.reason, 'billing_plan_already_set');
+    assert.equal(mutations, 0);
+  });
+
+  test('แก้มัดจำอ่าน payment หลังล็อกใบคู่ และกันยอด balance ต่ำกว่าเงินที่เพิ่งรับ', async () => {
+    const calls = [];
+    let mutations = 0;
+    const tx = {
+      one: async (query) => {
+        calls.push(query);
+        if (query.includes('COALESCE(parent_invoice_id')) {
+          return { invoice_id: 'INV-0001', root_id: 'INV-0001' };
+        }
+        return {
+          invoice_id: 'INV-0001', parent_invoice_id: null, billing_kind: 'deposit', status: 'issued', total: 60,
+        };
+      },
+      all: async (query) => {
+        calls.push(query);
+        if (query.includes('parent_invoice_id = :root_id')) {
+          return [{
+            invoice_id: 'INV-0002', parent_invoice_id: 'INV-0001', billing_kind: 'balance', status: 'issued', total: 40,
+          }];
+        }
+        if (query.includes('FROM invoice_payments')) {
+          return [
+            { invoice_id: 'INV-0001', paid: 10, last_paid_at: '2026-08-01' },
+            { invoice_id: 'INV-0002', paid: 35, last_paid_at: '2026-08-24' },
+          ];
+        }
+        throw new Error(`unexpected query: ${query}`);
+      },
+      run: async () => ((mutations += 1), 1),
+    };
+
+    const result = await setDepositAmountForTransaction(tx, 'INV-0001', 70);
+    assert.equal(result.reason, 'balance_below_paid');
+    assert.equal(result.invoice_id, 'INV-0002');
+    assert.equal(mutations, 0);
+    assert.ok(calls.findIndex((q) => q.includes('FOR UPDATE')) < calls.findIndex((q) => q.includes('FROM invoice_payments')));
+  });
+
+  test('รับเงิน commit ก่อนคำขอลบได้ lock แล้ว การลบเห็นยอดใหม่และไม่ยิง DELETE', async () => {
+    const calls = [];
+    const tx = {
+      one: async (query) => {
+        calls.push(query);
+        if (query.includes('COALESCE(parent_invoice_id')) {
+          return { invoice_id: 'INV-0001', root_id: 'INV-0001' };
+        }
+        return {
+          invoice_id: 'INV-0001', parent_invoice_id: null, billing_kind: 'deposit', status: 'issued',
+        };
+      },
+      all: async (query) => {
+        calls.push(query);
+        if (query.includes('parent_invoice_id = :root_id')) {
+          return [{
+            invoice_id: 'INV-0002', parent_invoice_id: 'INV-0001', billing_kind: 'balance', status: 'issued',
+          }];
+        }
+        if (query.includes('FROM invoice_payments')) return [{ invoice_id: 'INV-0002', paid: 500 }];
+        if (query.includes('DELETE FROM invoices')) throw new Error('ต้องไม่ลบใบที่รับเงินแล้ว');
+        throw new Error(`unexpected query: ${query}`);
+      },
+    };
+
+    const result = await removeInvoiceForTransaction(tx, 'INV-0001');
+    assert.equal(result.reason, 'has_payments');
+    assert.equal(result.invoice_id, 'INV-0002');
+    assert.equal(calls.some((q) => q.includes('DELETE FROM invoices')), false);
+    assert.ok(calls.findIndex((q) => q.includes('FOR UPDATE')) < calls.findIndex((q) => q.includes('FROM invoice_payments')));
+  });
+});
+
+// ---------- สถานะรอบจ่ายต้องตัดสินหลังได้ row lock ----------
+describe('payroll run transitions — paid/cancelled ต้องไม่ถูกแก้จาก snapshot เก่า', () => {
+  test('ทุกคำสั่งแก้รอบร่างได้ตามกติกา; paid ยกเลิกได้อย่างเดียว; cancelled แตะซ้ำไม่ได้', () => {
+    for (const action of ['rebuild', 'remove_item', 'pay', 'cancel', 'remove']) {
+      assert.equal(assessPayrollRunAction(action, 'draft').reason, undefined, action);
+    }
+
+    assert.equal(assessPayrollRunAction('cancel', 'paid').reason, undefined);
+    for (const action of ['rebuild', 'remove_item', 'pay', 'remove']) {
+      assert.equal(assessPayrollRunAction(action, 'paid').reason, 'invalid_status', action);
+    }
+    for (const action of ['rebuild', 'remove_item', 'pay', 'cancel', 'remove']) {
+      assert.equal(assessPayrollRunAction(action, 'cancelled').reason, 'invalid_status', action);
+    }
+  });
+
+  test('อ่านสถานะด้วย SELECT FOR UPDATE และปฏิเสธสถานะล่าสุดก่อน mutation', async () => {
+    const calls = [];
+    const result = await payrollRunForUpdate(
+      {
+        one: async (query) => {
+          calls.push(query);
+          return { run_id: 'PAY-0001', status: 'paid', period_to: '2026-08-15' };
+        },
+      },
+      'PAY-0001',
+      'remove',
+    );
+
+    assert.equal(result.reason, 'invalid_status');
+    assert.equal(result.status, 'paid');
+    assert.equal(calls.length, 1);
+    assert.match(calls[0], /FOR UPDATE/);
+  });
+
+  test('ไม่พบรอบแล้วหยุดหลัง query lock แรก', async () => {
+    let queries = 0;
+    const result = await payrollRunForUpdate(
+      { one: async () => ((queries += 1), null) },
+      'PAY-MISSING',
+      'pay',
+    );
+    assert.equal(result.reason, 'not_found');
+    assert.equal(queries, 1);
+  });
+
+  test('ถอน payout ที่รอบเพิ่งเปลี่ยนเป็น paid ถูกกันหลัง lock และ re-read', async () => {
+    const calls = [];
+    const tx = {
+      one: async (query) => {
+        calls.push(query);
+        if (query.includes('SELECT p.payout_id, pi.run_id')) return { payout_id: 7, run_id: 'PAY-0001' };
+        if (query.includes('FROM payroll_runs') && query.includes('FOR UPDATE')) {
+          return { run_id: 'PAY-0001', status: 'paid' };
+        }
+        if (query.includes('FROM cases') && query.includes('FOR UPDATE')) return { case_id: 'CASE-0001' };
+        if (query.includes('FROM case_payouts') && query.includes('FOR UPDATE')) {
+          return { payout_id: 7, installment_no: 1, employee_name: 'ทดสอบ', amount: 7000 };
+        }
+        if (query.includes('SELECT pi.run_id, pr.status')) {
+          return { run_id: 'PAY-0001', run_status: 'paid' };
+        }
+        throw new Error(`unexpected query: ${query}`);
+      },
+    };
+
+    const result = await payoutCancellationForUpdate(tx, 'CASE-0001', 7);
+    assert.equal(result.reason, 'already_paid');
+    assert.match(calls[1], /payroll_runs[\s\S]*FOR UPDATE/);
+    assert.match(calls[2], /FROM cases[\s\S]*FOR UPDATE/);
+    assert.match(calls[3], /FROM case_payouts[\s\S]*FOR UPDATE/);
+    assert.equal(calls.length, 5);
+  });
+
+  test('binding เปลี่ยนจากไม่มีรอบเป็นมีรอบระหว่างถอน = 409/retry ไม่ไล่ lock กลับลำดับ', async () => {
+    const calls = [];
+    const tx = {
+      one: async (query) => {
+        calls.push(query);
+        if (query.includes('SELECT p.payout_id, pi.run_id')) return { payout_id: 7, run_id: null };
+        if (query.includes('FROM cases') && query.includes('FOR UPDATE')) return { case_id: 'CASE-0001' };
+        if (query.includes('FROM case_payouts') && query.includes('FOR UPDATE')) {
+          return { payout_id: 7, installment_no: 1, employee_name: 'ทดสอบ', amount: 7000 };
+        }
+        if (query.includes('SELECT pi.run_id, pr.status')) {
+          return { run_id: 'PAY-0002', run_status: 'draft' };
+        }
+        throw new Error(`unexpected query: ${query}`);
+      },
+    };
+
+    const result = await payoutCancellationForUpdate(tx, 'CASE-0001', 7);
+    assert.equal(result.reason, 'state_changed');
+    assert.equal(calls.some((q) => q.includes('FROM payroll_runs') && q.includes('FOR UPDATE')), false);
+    assert.equal(calls.length, 4);
+  });
+});
+
+// ---------- เลขรอบต้องใช้ช่อง active ที่ว่าง และจองการเลือกต่อเดือน ----------
+describe('payroll round allocation — ช่องว่างและคำขอพร้อมกันต้องไม่ชนเลขรอบ', () => {
+  test('เลือกเลขต่ำสุดที่ว่าง ไม่ใช้ COUNT + 1', () => {
+    const scenarios = [
+      { active: [], expected: 1 },
+      { active: [1], expected: 2 },
+      { active: [1, 3], expected: 2 },
+      { active: [2, 3], expected: 1 },
+      { active: [1, 2, 3], expected: null },
+    ];
+
+    for (const { active, expected } of scenarios) {
+      assert.equal(firstAvailablePayrollRound(active), expected, `server: ${active}`);
+      assert.equal(firstAvailablePayrollRoundOnClient(active), expected, `client: ${active}`);
+    }
+  });
+
+  test('ล็อกเดือนก่อนอ่านรอบ active และเห็นช่องว่างจากค่าที่อ่านหลัง lock', async () => {
+    const calls = [];
+    const tx = {
+      one: async (query, params) => {
+        calls.push({ query, params });
+        return { locked: '' };
+      },
+      all: async (query, params) => {
+        calls.push({ query, params });
+        return [{ round_no: '1' }, { round_no: '3' }];
+      },
+    };
+
+    const result = await payrollRoundSlotForUpdate(tx, '2026-08');
+    assert.deepEqual(result, {
+      period_month: '2026-08',
+      round_no: 2,
+      active_rounds: [1, 3],
+    });
+    assert.match(calls[0].query, /pg_advisory_xact_lock/);
+    assert.match(calls[1].query, /status <> 'cancelled'/);
+    assert.deepEqual(calls.map((call) => call.params), [
+      { month: '2026-08' },
+      { month: '2026-08' },
+    ]);
+  });
+
+  test('ครบสามช่องแล้วคืนเหตุผลให้ route ตอบ 409', async () => {
+    const result = await payrollRoundSlotForUpdate(
+      {
+        one: async () => ({ locked: '' }),
+        all: async () => [{ round_no: 1 }, { round_no: 2 }, { round_no: 3 }],
+      },
+      '2026-08',
+    );
+    assert.deepEqual(result, {
+      reason: 'round_limit',
+      period_month: '2026-08',
+      active_rounds: [1, 2, 3],
+    });
+  });
+
+  test('เต็มแล้วหยุดก่อนขอ run_id และก่อน INSERT', async () => {
+    const calls = [];
+    const result = await createRunForTransaction(
+      {
+        one: async (query) => {
+          calls.push(query);
+          if (query.includes('pg_advisory_xact_lock')) return { locked: '' };
+          throw new Error(`ไม่ควรมาถึง query นี้: ${query}`);
+        },
+        all: async (query) => {
+          calls.push(query);
+          return [{ round_no: 1 }, { round_no: 2 }, { round_no: 3 }];
+        },
+        run: async (query) => {
+          throw new Error(`ไม่ควร INSERT เมื่อเต็ม: ${query}`);
+        },
+      },
+      { period_to: '2026-08-31' },
+      { employee_id: 'EMP-0001', name: 'ผู้จัดการ' },
+    );
+
+    assert.equal(result.reason, 'round_limit');
+    assert.equal(calls.length, 2);
+    assert.equal(calls.some((query) => query.includes('id_counters')), false);
+  });
+
+  test('ช่องกลางว่างแล้ว INSERT ด้วยเลขนั้น ก่อน fill ชุด payout', async () => {
+    const calls = [];
+    let inserted = null;
+    const result = await createRunForTransaction(
+      {
+        one: async (query) => {
+          calls.push(query);
+          if (query.includes('pg_advisory_xact_lock')) return { locked: '' };
+          if (query.includes('INSERT INTO id_counters')) return { value: 42 };
+          throw new Error(`unexpected query: ${query}`);
+        },
+        all: async (query) => {
+          calls.push(query);
+          if (query.includes('SELECT round_no FROM payroll_runs')) {
+            return [{ round_no: 1 }, { round_no: 3 }];
+          }
+          if (query.includes('FOR UPDATE OF p')) return [];
+          throw new Error(`unexpected query: ${query}`);
+        },
+        run: async (query, params) => {
+          calls.push(query);
+          if (!query.includes('INSERT INTO payroll_runs')) throw new Error(`unexpected query: ${query}`);
+          inserted = params;
+          return 1;
+        },
+      },
+      { period_to: '2026-08-31', note: 'รอบแทนช่องว่าง' },
+      { employee_id: 'EMP-0001', name: 'ผู้จัดการ' },
+    );
+
+    assert.deepEqual(result, { run_id: 'PAY-0042' });
+    assert.equal(inserted.round_no, 2);
+    assert.equal(inserted.period_month, '2026-08');
+    assert.equal(inserted.note, 'รอบแทนช่องว่าง');
+    assert.match(calls.at(-1), /FOR UPDATE OF p/);
+  });
+
+  test('ยกเลิก/ลบรอบล็อก month ก่อน row lock เพื่อคืนช่องโดยไม่แข่งกับ create', async () => {
+    const calls = [];
+    const result = await payrollRunForRoundSlotUpdate(
+      {
+        one: async (query) => {
+          calls.push(query);
+          if (query.includes('SELECT period_month FROM payroll_runs')) {
+            return { period_month: '2026-08' };
+          }
+          if (query.includes('pg_advisory_xact_lock')) return { locked: '' };
+          if (query.includes('FOR UPDATE')) {
+            return {
+              run_id: 'PAY-0001',
+              period_month: '2026-08',
+              period_to: '2026-08-15',
+              status: 'draft',
+            };
+          }
+          throw new Error(`unexpected query: ${query}`);
+        },
+      },
+      'PAY-0001',
+      'remove',
+    );
+
+    assert.equal(result.run.run_id, 'PAY-0001');
+    assert.match(calls[0], /SELECT period_month FROM payroll_runs/);
+    assert.match(calls[1], /pg_advisory_xact_lock/);
+    assert.match(calls[2], /FOR UPDATE/);
+  });
+});
 
 // ---------- เวลาออกต้องมาหลังเวลาเข้า ----------
 describe('adjustVisitSchema — กันเวลาออกมาก่อนเวลาเข้า', () => {
@@ -108,6 +854,21 @@ describe('สิทธิ์ตามตำแหน่ง', () => {
     assert.equal(canSeeStaffPay('hr'), false);
     assert.equal(canSeeStaffPay('nurse'), false);
     assert.equal(canSeeStaffPay(undefined), false);
+  });
+
+  test('ด่าน manager-only ให้ผู้จัดการผ่าน แต่กัน HR/field และคนที่ยังไม่ login', () => {
+    const check = (user) => {
+      let result = { called: false, error: null };
+      requireManager({ user }, {}, (error) => {
+        result = { called: true, error: error ?? null };
+      });
+      return result;
+    };
+
+    assert.deepEqual(check({ position: 'manager' }), { called: true, error: null });
+    assert.equal(check({ position: 'hr' }).error.status, 403);
+    assert.equal(check({ position: 'nurse' }).error.status, 403);
+    assert.equal(check(undefined).error.status, 401);
   });
 
   test('stripPayFields ตัด staff_pay/margin/staff_share ทิ้ง แต่คงราคาลูกค้าไว้', () => {
@@ -781,5 +1542,71 @@ describe('เพดานงวดของเคส', () => {
      ไม่ใช่จำนวนงวดที่ทุกเคสต้องมี (หน้าจอจึงไม่โชว์ "งวดที่ 1 จาก 5" ให้เข้าใจผิด) */
   test('แบ่งจ่ายได้สูงสุด 5 งวดต่อเคส', () => {
     assert.equal(MAX_INSTALLMENTS, 5);
+  });
+});
+
+/* ==========================================================================
+   ชุดที่เพิ่มตอนอุดช่องโหว่รอบตรวจความปลอดภัย — แต่ละอันผูกกับข้อที่เคยเป็นบั๊กจริง
+   ========================================================================== */
+
+describe('วันที่ต้องมีอยู่จริงในปฏิทิน (lib/dates.js)', () => {
+  test('วันปกติผ่าน', () => {
+    assert.equal(isCalendarDate('2026-08-24'), true);
+    assert.equal(isCalendarDate('2024-02-29'), true); // ปีอธิกสุรทิน
+  });
+
+  test('วันที่ไม่มีอยู่จริงต้องไม่ผ่าน แม้รูปแบบจะถูก', () => {
+    // ของเดิมตรวจด้วยรูปแบบอย่างเดียว ทั้งสามอันนี้จึงลงฐานข้อมูลได้ (คอลัมน์เป็น TEXT)
+    assert.equal(isCalendarDate('2026-02-31'), false);
+    assert.equal(isCalendarDate('2026-02-29'), false);
+    assert.equal(isCalendarDate('2026-13-45'), false);
+    assert.equal(isCalendarDate('2026-00-10'), false);
+  });
+
+  test('รูปแบบผิด/ไม่ใช่ข้อความ ก็ไม่ผ่าน', () => {
+    assert.equal(isCalendarDate('26-8-4'), false);
+    assert.equal(isCalendarDate(''), false);
+    assert.equal(isCalendarDate(null), false);
+    assert.equal(isCalendarDate(20260824), false);
+  });
+});
+
+describe('โดเมนที่ยอมให้ server ยิงออกไป (lib/maplink.js)', () => {
+  test('โดเมนของ Google จริงผ่าน', () => {
+    for (const h of ['maps.google.com', 'www.google.com', 'google.co.th', 'maps.app.goo.gl', 'goo.gl', 'g.co']) {
+      assert.equal(isAllowedHost(h), true, h);
+    }
+  });
+
+  test('โดเมนคนอื่นที่ตั้งซับโดเมนชื่อ google ต้องไม่ผ่าน', () => {
+    // ของเดิม /(^|\.)(google\.[a-z.]+|...)$/ ปล่อยสามอันนี้ผ่านหมด = SSRF
+    for (const h of ['google.evil.com', 'www.google.attacker.io', 'google.xyz.io', 'notgoogle.com', 'evil.com']) {
+      assert.equal(isAllowedHost(h), false, h);
+    }
+  });
+
+  test('ไม่พังกับค่าว่าง และตัดจุดท้าย FQDN ให้', () => {
+    assert.equal(isAllowedHost('maps.google.com.'), true);
+    assert.equal(isAllowedHost(''), false);
+    assert.equal(isAllowedHost(null), false);
+  });
+});
+
+describe('รหัสผ่านชั่วคราวของพนักงานใหม่ (lib/auth.js)', () => {
+  test('ยาวพอและไม่ซ้ำกันในแต่ละครั้ง', () => {
+    const a = generateTempPassword();
+    const b = generateTempPassword();
+    assert.equal(a.length, 12);
+    assert.notEqual(a, b);
+  });
+
+  test('ไม่มีตัวอักษรที่อ่านสลับกันง่าย (0 O 1 I l)', () => {
+    const pool = new Set();
+    for (let i = 0; i < 50; i += 1) for (const ch of generateTempPassword()) pool.add(ch);
+    for (const bad of ['0', 'O', '1', 'I', 'l']) assert.ok(!pool.has(bad), `ไม่ควรมี ${bad}`);
+  });
+
+  test('ไม่ใช่รหัสพนักงาน — ของเดิมตั้งเป็น employee_id ซึ่งเดาได้ทันที', () => {
+    assert.notEqual(generateTempPassword(), 'EMP-0007');
   });
 });

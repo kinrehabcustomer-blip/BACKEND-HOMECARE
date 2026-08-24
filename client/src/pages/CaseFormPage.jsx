@@ -153,6 +153,9 @@ export default function CaseFormPage() {
   function applySelection(next) {
     setForm((prev) => {
       const merged = { ...prev, ...next };
+      // เปลี่ยนตัวเลือกบริการแล้วค่าจ้างเดิมไม่ใช่ default ของบริการใหม่อีกต่อไป
+      // ล้างก่อน แล้วเติมค่าของเรทใหม่เมื่อเลือกครบ; ถ้าเรทใหม่ยังไม่ตั้งค่า ช่องต้องว่างให้เห็นจริง
+      merged.staff_pay = '';
       const fmt = matrix?.formats.find((f) => f.format_id === Number(merged.pkg_format_id));
       if (fmt && !fmt.graded) merged.pkg_grade_id = ''; // รูปแบบไม่อิงเกรด ล้างเกรดทิ้ง
       const gid = fmt?.graded ? (merged.pkg_grade_id === '' ? null : Number(merged.pkg_grade_id)) : null;
@@ -202,12 +205,13 @@ export default function CaseFormPage() {
    * เปลี่ยนสายบริการ -> ล้างสิ่งที่เลือกไว้ของสายเดิม
    * ไม่ล้าง ค่าที่ค้างจะถูกส่งไปบันทึกด้วย กลายเป็นเคสที่มีทั้งเรท Homecare และแพ็คเกจกายภาพบำบัด
    * (ฝั่ง server ล้างซ้ำให้อีกชั้น — ที่นี่ล้างเพื่อให้สิ่งที่เห็นบนจอตรงกับสิ่งที่จะถูกบันทึก)
-   * ไม่แตะค่าจ้างที่กรอกไว้ — เลือกแพ็คเกจใหม่แล้วมันจะถูกเติมทับให้เอง
+   * ล้างค่าจ้างเดิมทันที — ป้องกันค่าของบริการเก่าค้างอยู่ถ้าบริการใหม่ยังไม่ตั้ง staff_pay
    */
   function changeKind(kind) {
     setForm((prev) => ({
       ...prev,
       service_kind: kind,
+      staff_pay: '',
       ...(kind !== 'homecare' ? { pkg_format_id: '', pkg_grade_id: '', pkg_staff_tier: '' } : null),
       ...(kind !== 'physio' ? { physio_package_id: '' } : null),
     }));
@@ -216,7 +220,7 @@ export default function CaseFormPage() {
   /** เลือกแพ็คเกจกายภาพบำบัด -> คัดลอกราคาพิเศษมาเป็นค่าจ้าง (คัดลอก ไม่ใช่อ้างอิง เหมือนฝั่ง Homecare) */
   function applyPhysio(value) {
     setForm((prev) => {
-      const merged = { ...prev, physio_package_id: value };
+      const merged = { ...prev, physio_package_id: value, staff_pay: '' };
       const p = physio.find((x) => x.physio_package_id === Number(value));
       if (p && p.special_price != null) merged.fee = String(p.special_price);
       if (p && p.staff_pay != null) merged.staff_pay = String(p.staff_pay);
@@ -269,10 +273,19 @@ export default function CaseFormPage() {
       setMatches([]);
       return;
     }
+    /* ธง cancelled: พิมพ์ต่อระหว่างที่คำค้นก่อนหน้ายังไม่กลับมา ผลของคำเก่าที่มาถึงทีหลัง
+       จะทับรายการที่ตรงกับสิ่งที่พิมพ์อยู่จริง (debounce กันได้แค่จำนวนครั้งที่ยิง ไม่ได้กันลำดับที่ตอบกลับ) */
+    let cancelled = false;
     const timer = setTimeout(() => {
-      api.listPatients({ q: query.trim(), per_page: 8 }).then((r) => setMatches(r.data)).catch(() => {});
+      api
+        .listPatients({ q: query.trim(), per_page: 8 })
+        .then((r) => !cancelled && setMatches(r.data))
+        .catch(() => {});
     }, 250);
-    return () => clearTimeout(timer);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, [query, form.patient_id]);
 
   /**

@@ -2,7 +2,7 @@ import '../lib/env.js';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { pool, sql } from './index.js';
+import { pool, sql, transaction } from './index.js';
 
 /**
  * ล้างข้อมูลให้กลับไปเป็น "ระบบใหม่ที่ยังไม่เคยใช้" — เก็บไว้แค่สองอย่าง
@@ -42,22 +42,42 @@ const STEPS = [
 // ของถัดไปเริ่มที่ 0001 · พนักงานนับต่อจากคนที่เก็บไว้ ไม่งั้นคนถัดไปจะได้รหัสชนกับเขา
 const COUNTERS = { customer: 0, patient: 0, case: 0, invoice: 0, payroll: 0 };
 
-/** สำรองทุกตารางลงไฟล์ JSON ก่อนลบ — ตัดคอลัมน์รูปออก (BYTEA ทำให้ไฟล์บวมเป็นสิบเมกะไบต์) */
+/**
+ * สำรองทุกตารางลงไฟล์ JSON ก่อนลบ — รวมคอลัมน์รูปภาพด้วย
+ *
+ * เดิมตัด BYTEA ออกเพื่อไม่ให้ไฟล์บวม ซึ่งแปลว่า "ไฟล์สำรอง" ไม่ได้สำรองรูปเซลฟี่ตอนเช็คอิน
+ * รูปแผลในรายงานอาการ ใบรับรองของพนักงาน และรูปโปรไฟล์ — ของที่กู้กลับไม่ได้เลยถ้าลบไปแล้ว
+ * และเป็นหลักฐานการทำงาน/ทางการแพทย์ ไม่ใช่ของประดับ
+ *
+ * เก็บเป็น base64 (ใหญ่กว่าไฟล์จริงราว 1.33 เท่า) พร้อมธงบอกชนิดไว้ให้ตอนกู้คืนรู้ว่าต้องแปลงกลับ
+ */
 async function backup() {
   const tables = await sql.all(
     `SELECT table_name FROM information_schema.tables
      WHERE table_schema = 'public' ORDER BY table_name`,
   );
 
-  const dump = { taken_at: new Date().toISOString(), note: 'ไม่รวมคอลัมน์รูปภาพ (BYTEA)', tables: {} };
+  const dump = {
+    taken_at: new Date().toISOString(),
+    note: 'รวมคอลัมน์รูปภาพ (BYTEA) เก็บเป็น base64',
+    tables: {},
+  };
   for (const { table_name: t } of tables) {
     const cols = await sql.all(
-      `SELECT column_name FROM information_schema.columns
-       WHERE table_schema = 'public' AND table_name = :t AND data_type <> 'bytea'
+      `SELECT column_name, data_type FROM information_schema.columns
+       WHERE table_schema = 'public' AND table_name = :t
        ORDER BY ordinal_position`,
       { t },
     );
-    dump.tables[t] = await sql.all(`SELECT ${cols.map((c) => `"${c.column_name}"`).join(', ')} FROM ${t}`);
+    // แปลงเป็น base64 ตั้งแต่ใน SQL — ดึง Buffer ขึ้นมาทั้งตารางแล้วค่อยแปลงกินหน่วยความจำเป็นสองเท่า
+    const select = cols
+      .map((c) =>
+        c.data_type === 'bytea'
+          ? `encode("${c.column_name}", 'base64') AS "${c.column_name}"`
+          : `"${c.column_name}"`,
+      )
+      .join(', ');
+    dump.tables[t] = await sql.all(`SELECT ${select} FROM ${t}`);
   }
 
   const dir = join(dirname(fileURLToPath(import.meta.url)), '../../data');
@@ -96,10 +116,16 @@ if (!confirmed) {
 console.log(`\nสำรองข้อมูลก่อน…`);
 console.log(`  → ${await backup()}`);
 
-for (const [, statement, label] of STEPS) {
-  const n = await sql.run(statement, { keep });
-  console.log(`ลบ ${label}: ${n} แถว`);
-}
+/* ลบทั้งชุดใน transaction เดียว — เดิมเป็น statement เรียงกันเฉยๆ ถ้าพังกลางทาง
+   (เน็ตหลุด/ติด FK/กด Ctrl-C) ฐานจะค้างอยู่ในสภาพ "ลบไปครึ่งเดียว" ซึ่งแย่กว่าไม่ได้ลบเลย:
+   เคสหายแต่ใบแจ้งหนี้ยังอยู่ · กะหายแต่ payout ยังอยู่ แล้วไม่มีคำสั่งไหนพากลับมาได้
+   ล้มเมื่อไหร่ให้ rollback ทั้งก้อน แล้วค่อยแก้ต้นเหตุแล้วรันใหม่ */
+await transaction(async (tx) => {
+  for (const [, statement, label] of STEPS) {
+    const n = await tx.run(statement, { keep });
+    console.log(`ลบ ${label}: ${n} แถว`);
+  }
+});
 
 for (const [name, value] of Object.entries(COUNTERS)) {
   await sql.run(

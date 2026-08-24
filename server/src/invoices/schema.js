@@ -1,10 +1,15 @@
 import { z } from 'zod';
+import { zodDate } from '../lib/dates.js';
 
 export const INVOICE_STATUSES = ['draft', 'issued', 'paid', 'cancelled'];
 
-const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'ต้องอยู่ในรูปแบบ YYYY-MM-DD');
+// วันที่ต้องมีอยู่จริงในปฏิทิน ไม่ใช่แค่รูปแบบถูก (2026-02-31 เคยผ่านได้ — ดู lib/dates.js)
+const date = zodDate(z);
 const optionalText = z.string().trim().max(500).optional().nullable();
-const money = z.number().nonnegative('จำนวนเงินต้องไม่ติดลบ');
+const money = z
+  .number()
+  .nonnegative('จำนวนเงินต้องไม่ติดลบ')
+  .multipleOf(0.01, 'จำนวนเงินต้องมีทศนิยมไม่เกิน 2 ตำแหน่ง');
 
 /**
  * สร้างใบแจ้งหนี้ — ปกติสร้างจากเคส (ส่ง case_id มา) แล้ว server คัดลอกชื่อผู้จ่าย/ที่อยู่/ค่าบริการมาให้เอง
@@ -63,6 +68,7 @@ export const updateInvoiceSchema = z
  * ยอดที่รับต้องมากกว่า 0 — งวดที่รับ 0 บาทไม่มีความหมาย มีแต่จะทำให้รายการรับเงินรก
  */
 export const paySchema = z.object({
+  request_id: z.string().uuid('รหัสคำขอรับชำระไม่ถูกต้อง'),
   amount: money.positive('จำนวนเงินที่รับต้องมากกว่า 0').optional().nullable(),
   paid_at: date.optional(),          // ไม่ส่ง = วันนี้
   payment_method: optionalText,

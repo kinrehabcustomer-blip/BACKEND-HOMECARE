@@ -1,5 +1,5 @@
 import { sql, nextEmployeeId, transaction } from '../db/index.js';
-import { hashPassword } from '../lib/auth.js';
+import { hashPassword, generateTempPassword } from '../lib/auth.js';
 
 const COLUMNS = [
   'first_name',
@@ -120,15 +120,18 @@ export function create(input) {
     const values = { employee_id: employeeId };
     for (const col of COLUMNS) values[col] = input[col] ?? null;
 
-    // รหัสผ่านเริ่มต้นคือรหัสพนักงานของตัวเอง — เก็บเป็น hash ไม่เก็บ plain text
-    values.password_hash = await hashPassword(employeeId);
+    /* รหัสผ่านชั่วคราวสุ่มใหม่ทุกคน — เก็บเฉพาะ hash และคืน plain กลับไปครั้งเดียวเท่านั้น
+       (must_change_password เป็น TRUE ตั้งแต่ default ของตาราง และมีด่านบังคับที่ API แล้ว) */
+    const tempPassword = generateTempPassword();
+    values.password_hash = await hashPassword(tempPassword);
 
-    return tx.one(
+    const created = await tx.one(
       `INSERT INTO employees (employee_id, password_hash, ${COLUMNS.join(', ')})
        VALUES (:employee_id, :password_hash, ${COLUMNS.map((c) => `:${c}`).join(', ')})
        RETURNING ${PUBLIC}`,
       values,
     );
+    return { ...created, temp_password: tempPassword };
   });
 }
 
@@ -157,6 +160,30 @@ export function resign(employeeId, resignDate) {
      RETURNING ${PUBLIC}`,
     { employee_id: employeeId, resign_date: resignDate ?? null },
   );
+}
+
+/**
+ * สิ่งที่จะหายไปถ้าลบพนักงานคนนี้ถาวร — ใช้กันไม่ให้ลบทับประวัติที่กู้ไม่ได้
+ *
+ * FK ของทั้งสองตารางเป็น ON DELETE SET NULL: ลบแล้วกะจะไม่มีเจ้าของ (checked_in_by = NULL)
+ * และค่าจ้างที่ปล่อยไว้แต่ยังไม่ได้จ่ายจะถูกตัดออกจากรอบจ่ายทุกอันตลอดไป
+ * เพราะเงื่อนไข ELIGIBLE ของ payroll กรอง employee_id IS NULL ทิ้ง — เงินค้างอยู่แบบไม่มีใครเห็น
+ */
+export async function removalBlockers(employeeId) {
+  const row = await sql.one(
+    `SELECT
+       (SELECT COUNT(*) FROM case_visits v WHERE v.checked_in_by = :id) AS worked_visits,
+       (SELECT COUNT(*) FROM case_payouts p
+        WHERE p.employee_id = :id
+          AND NOT EXISTS (
+            SELECT 1 FROM payroll_payout_lines pl
+            JOIN payroll_items i ON i.item_id = pl.item_id
+            JOIN payroll_runs r  ON r.run_id  = i.run_id
+            WHERE pl.payout_id = p.payout_id AND r.status = 'paid'
+          )) AS unpaid_payouts`,
+    { id: employeeId },
+  );
+  return { worked_visits: Number(row?.worked_visits ?? 0), unpaid_payouts: Number(row?.unpaid_payouts ?? 0) };
 }
 
 export async function remove(employeeId) {

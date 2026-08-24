@@ -9,16 +9,12 @@ import {
   PAYROLL_STATUSES,
 } from './schema.js';
 import { ApiError, asyncRoute, notFound } from '../lib/errors.js';
-import { canSeeStaffPay } from '../lib/auth.js';
 import * as cases from '../cases/repo.js';
 
 export const payrollRouter = Router();
 
 /** วันนี้ตามเวลาไทย — เกณฑ์เดียวกับทั้งระบบ (ดูหมายเหตุเรื่อง UTC ใน db/schema.sql) */
 const TODAY = () => new Date(Date.now() + 7 * 3.6e6).toISOString().slice(0, 10);
-
-/** รอบที่ยังปรับได้ = ร่างเท่านั้น · จ่ายแล้ว/ยกเลิกแล้วต้องยกเลิกก่อนถึงจะแตะได้ */
-const editable = (run) => run.status === 'draft';
 
 payrollRouter.param('id', (req, res, next, id) => {
   repo
@@ -52,9 +48,6 @@ payrollRouter.get('/meta', (req, res) => res.json({ statuses: PAYROLL_STATUSES }
 payrollRouter.get(
   '/employee-cases',
   asyncRoute(async (req, res) => {
-    if (!canSeeStaffPay(req.user?.position)) {
-      throw new ApiError(403, 'เฉพาะผู้จัดการเท่านั้นที่ดูค่าจ้างรายเคสได้');
-    }
     const { month, employee_id } = employeeCasesQuerySchema.parse(req.query);
     res.json(await cases.payoutCases(month, employee_id));
   }),
@@ -63,9 +56,6 @@ payrollRouter.get(
 payrollRouter.get(
   '/case-queue',
   asyncRoute(async (req, res) => {
-    if (!canSeeStaffPay(req.user?.position)) {
-      throw new ApiError(403, 'เฉพาะผู้จัดการเท่านั้นที่ดูค่าจ้างของเคสได้');
-    }
     res.json(await cases.payQueue());
   }),
 );
@@ -106,15 +96,18 @@ payrollRouter.post(
       throw new ApiError(400, 'วันตัดรอบต้องไม่เกินวันนี้');
     }
 
-    /* เดือนหนึ่งแบ่งจ่ายได้ไม่เกิน 3 รอบ (ไม่นับรอบที่ยกเลิก) — บอกให้ชัดว่าตอนนี้กี่รอบแล้ว
-       ไม่ใช่แค่ปฏิเสธเฉยๆ ให้คนกดต้องไปนับเอง */
-    const month = input.period_to.slice(0, 7);
-    const used = await repo.roundsInMonth(month);
-    if (used >= 3) {
-      throw new ApiError(409, `เดือน ${month} เปิดครบ 3 รอบแล้ว — ถ้าจะเปิดเพิ่มต้องยกเลิกรอบใดรอบหนึ่งก่อน`);
+    /* ตรวจเพดานและเลือกเลขรอบใน transaction เดียวกัน — precheck ตรง route กันคำขอพร้อมกันไม่ได้ */
+    const result = await repo.createRun(input, req.user);
+    if (result.reason === 'round_limit') {
+      throw new ApiError(
+        409,
+        `เดือน ${result.period_month} เปิดครบ 3 รอบแล้ว — ถ้าจะเปิดเพิ่มต้องยกเลิกรอบใดรอบหนึ่งก่อน`,
+      );
     }
-
-    res.status(201).json(await repo.createRun(input, req.user));
+    if (result.reason === 'not_found') {
+      throw new ApiError(409, 'รอบที่เพิ่งสร้างถูกเปลี่ยนแปลงระหว่างทำรายการ กรุณาโหลดข้อมูลใหม่');
+    }
+    res.status(201).json(result);
   }),
 );
 
@@ -137,8 +130,12 @@ payrollRouter.get(
 payrollRouter.post(
   '/:id/rebuild',
   asyncRoute(async (req, res) => {
-    if (!editable(req.run)) throw new ApiError(409, 'รอบที่จ่าย/ยกเลิกแล้วดึงยอดใหม่ไม่ได้');
-    res.json(await repo.rebuild(req.params.id, req.run.period_to));
+    const result = await repo.rebuild(req.params.id);
+    if (result.reason === 'not_found') throw notFound('ไม่พบรอบจ่ายนี้');
+    if (result.reason === 'invalid_status') {
+      throw new ApiError(409, 'รอบที่จ่าย/ยกเลิกแล้วดึงยอดใหม่ไม่ได้');
+    }
+    res.json(result);
   }),
 );
 
@@ -149,13 +146,13 @@ payrollRouter.post(
 payrollRouter.delete(
   '/:id/items/:itemId',
   asyncRoute(async (req, res) => {
-    if (!editable(req.run)) throw new ApiError(409, 'รอบที่จ่าย/ยกเลิกแล้วแก้รายชื่อไม่ได้');
-
-    const item = await repo.findItem(req.params.itemId);
-    if (!item || item.run_id !== req.params.id) throw notFound('ไม่พบสลิปใบนี้ในรอบที่ระบุ');
-
-    await repo.removeItem(req.params.itemId);
-    res.json(await repo.findById(req.params.id));
+    const result = await repo.removeItem(req.params.id, req.params.itemId);
+    if (result.reason === 'not_found') throw notFound('ไม่พบรอบจ่ายนี้');
+    if (result.reason === 'invalid_status') {
+      throw new ApiError(409, 'รอบที่จ่าย/ยกเลิกแล้วแก้รายชื่อไม่ได้');
+    }
+    if (result.reason === 'item_not_found') throw notFound('ไม่พบสลิปใบนี้ในรอบที่ระบุ');
+    res.json(result);
   }),
 );
 
@@ -163,14 +160,20 @@ payrollRouter.delete(
 payrollRouter.post(
   '/:id/pay',
   asyncRoute(async (req, res) => {
-    if (req.run.status === 'paid') throw new ApiError(409, 'รอบนี้จ่ายไปแล้ว');
-    if (req.run.status === 'cancelled') throw new ApiError(409, 'รอบนี้ถูกยกเลิกไปแล้ว');
-    if (req.run.employees === 0) {
-      throw new ApiError(409, 'รอบนี้ยังไม่มีใครอยู่ในรายการ — ไม่มีอะไรให้จ่าย');
-    }
-
     const input = payRunSchema.parse(req.body ?? {});
-    res.json(await repo.pay(req.params.id, { ...input, pay_date: input.pay_date ?? TODAY() }, req.user));
+    const result = await repo.pay(
+      req.params.id,
+      { ...input, pay_date: input.pay_date ?? TODAY() },
+      req.user,
+    );
+    if (result.reason === 'not_found') throw notFound('ไม่พบรอบจ่ายนี้');
+    if (result.reason === 'invalid_status') {
+      throw new ApiError(409, result.status === 'paid' ? 'รอบนี้จ่ายไปแล้ว' : 'รอบนี้ถูกยกเลิกไปแล้ว');
+    }
+    if (result.reason === 'empty_run') {
+      throw new ApiError(409, 'รอบนี้ยังไม่มียอดค่าจ้างอยู่ในรายการ — ไม่มีอะไรให้จ่าย');
+    }
+    res.json(result);
   }),
 );
 
@@ -181,8 +184,13 @@ payrollRouter.post(
 payrollRouter.post(
   '/:id/cancel',
   asyncRoute(async (req, res) => {
-    if (req.run.status === 'cancelled') throw new ApiError(409, 'รอบนี้ถูกยกเลิกไปแล้ว');
-    res.json(await repo.cancel(req.params.id));
+    const result = await repo.cancel(req.params.id);
+    if (result.reason === 'not_found') throw notFound('ไม่พบรอบจ่ายนี้');
+    if (result.reason === 'invalid_status') throw new ApiError(409, 'รอบนี้ถูกยกเลิกไปแล้ว');
+    if (result.reason === 'state_changed') {
+      throw new ApiError(409, 'เดือนของรอบเปลี่ยนระหว่างทำรายการ กรุณาโหลดข้อมูลใหม่แล้วลองอีกครั้ง');
+    }
+    res.json(result);
   }),
 );
 
@@ -193,10 +201,14 @@ payrollRouter.post(
 payrollRouter.delete(
   '/:id',
   asyncRoute(async (req, res) => {
-    if (!editable(req.run)) {
+    const result = await repo.remove(req.params.id);
+    if (result.reason === 'not_found') throw notFound('ไม่พบรอบจ่ายนี้');
+    if (result.reason === 'state_changed') {
+      throw new ApiError(409, 'เดือนของรอบเปลี่ยนระหว่างทำรายการ กรุณาโหลดข้อมูลใหม่แล้วลองอีกครั้ง');
+    }
+    if (result.reason === 'invalid_status') {
       throw new ApiError(409, 'รอบที่จ่าย/ยกเลิกแล้วลบทิ้งไม่ได้ — ใช้ "ยกเลิกรอบ" แทน');
     }
-    await repo.remove(req.params.id);
     res.status(204).end();
   }),
 );

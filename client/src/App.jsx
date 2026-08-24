@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, NavLink, Navigate, Link, useNavigate, use
 import { AuthProvider, RequireAuth, useAuth } from './auth.jsx';
 import LoginPage from './pages/LoginPage.jsx';
 import LineIcon from './components/LineIcon.jsx';
+import ChangePasswordForm from './components/ChangePasswordForm.jsx';
 
 /*
  * ทุกหน้ายกเว้นหน้า login ถูกโหลดตอนกดเข้าไปดูจริง ไม่ใช่ตอนเปิดเว็บ
@@ -72,7 +73,7 @@ const ADMIN_NAV = [
   { to: '/calendar', icon: 'calendar', label: 'ตารางงาน' },
   { to: '/attendance', icon: 'clock', label: 'การมาทำงาน' },
   { to: '/invoices', icon: 'invoice', label: 'ใบแจ้งหนี้' },
-  { to: '/payroll', icon: 'wallet', label: 'ค่าตอบแทนพนักงาน' },
+  { to: '/payroll', icon: 'wallet', label: 'ค่าตอบแทนพนักงาน', managerOnly: true },
   { to: '/customers', icon: 'users', label: 'ลูกค้า' },
   { to: '/patients', icon: 'heart', label: 'ผู้รับการดูแล' },
   { to: '/packages', icon: 'home', label: 'แพ็คเกจ Homecare' },
@@ -92,7 +93,8 @@ function Sidebar() {
   const navigate = useNavigate();
   const location = useLocation();
   const isAdmin = user.role === 'admin';
-  const items = isAdmin ? ADMIN_NAV : FIELD_NAV;
+  const isManager = user.position === 'manager';
+  const items = isAdmin ? ADMIN_NAV.filter((item) => !item.managerOnly || isManager) : FIELD_NAV;
 
   // เมนูพับได้เฉพาะจอแคบ (CSS ซ่อนปุ่มบนจอกว้าง) — บนจอกว้างค่านี้ไม่มีผลกับอะไรเลย
   const [menuOpen, setMenuOpen] = useState(false);
@@ -182,32 +184,52 @@ function Sidebar() {
   );
 }
 
-/** เตือนคนที่ยังใช้รหัสพนักงานเป็นรหัสผ่านอยู่ — รหัสนั้นโชว์ในตารางให้ทุกคนเห็น */
-function DefaultPasswordBanner() {
-  const { user } = useAuth();
-  if (!user.must_change_password) return null;
+/**
+ * ยังใช้รหัสชั่วคราวอยู่ = ใช้ระบบไม่ได้จนกว่าจะตั้งรหัสของตัวเอง
+ *
+ * เดิมเป็นแค่แถบเตือนที่ข้ามได้ ซึ่งแปลว่าบัญชีที่ผู้ออกรหัสให้ (HR/ผู้จัดการ) ยังรู้รหัสอยู่
+ * ถูกใช้งานต่อได้เรื่อยๆ — ตอนนี้ฝั่ง API กันไว้แล้ว (requirePasswordChanged) หน้าเว็บจึงต้องกันด้วย
+ * ไม่งั้นจะกดอะไรก็ขึ้น 403 ทุกปุ่มโดยไม่มีอะไรบอกว่าต้องทำอะไรก่อน
+ */
+function ForcePasswordChange() {
+  const { user, logout } = useAuth();
 
   return (
-    <div className="banner">
-      คุณยังใช้รหัสพนักงานเป็นรหัสผ่านอยู่ ซึ่งคนอื่นเดาได้ง่าย —{' '}
-      <Link to="/settings">ตั้งรหัสผ่านใหม่</Link>
+    <div className="login-page">
+      <section className="login-card">
+        <h1>ตั้งรหัสผ่านของคุณก่อนเริ่มใช้งาน</h1>
+        <p className="muted">
+          บัญชี <strong>{user.employee_id}</strong> ยังใช้รหัสผ่านชั่วคราวที่ผู้ดูแลตั้งให้อยู่ —
+          คนที่ออกรหัสให้ก็รู้รหัสนี้ด้วย จึงต้องเปลี่ยนเป็นรหัสของตัวเองก่อน
+        </p>
+        <ChangePasswordForm />
+        <button className="btn link-btn" type="button" onClick={logout}>ออกจากระบบ</button>
+      </section>
     </div>
   );
 }
 
 /** เนื้อในของเลย์เอาต์ — อยู่หลัง RequireAuth แล้ว จึงมั่นใจว่า user ไม่เป็น null */
-function LayoutInner({ children, admin }) {
+function LayoutInner({ children, admin, manager }) {
   const { user } = useAuth();
+
+  // หน้าการเงินของพนักงานแคบกว่า admin — HR กลับหน้า dashboard, field กลับหน้างานของตัวเอง
+  // ฝั่ง server ใช้ requireManager ซ้ำอีกชั้น จึงกัน API ตรงและกรณีตำแหน่งถูกลดระหว่าง session ด้วย
+  if (manager && user.position !== 'manager') {
+    return <Navigate to={user.role === 'admin' ? '/dashboard' : '/my-today'} replace />;
+  }
 
   // หน้าเฉพาะ admin (ผู้จัดการ/HR) — พนักงานภาคสนามเด้งไปหน้า "งานวันนี้" (หน้าหลักของ field)
   // เป็นแค่การกันฝั่งหน้าเว็บ ตัวจริงกันที่ API (requireAdmin) อีกชั้น
   if (admin && user.role !== 'admin') return <Navigate to="/my-today" replace />;
 
+  // ยังไม่ได้ตั้งรหัสของตัวเอง — API ปฏิเสธทุกเส้นอยู่แล้ว จึงไม่มีอะไรให้ทำในระบบนอกจากตั้งรหัส
+  if (user.must_change_password) return <ForcePasswordChange />;
+
   return (
     <div className="app">
       <Sidebar />
       <main className="content">
-        <DefaultPasswordBanner />
         {children}
       </main>
     </div>
@@ -215,11 +237,12 @@ function LayoutInner({ children, admin }) {
 }
 
 /** เลย์เอาต์ของหน้าที่ต้อง login (มี sidebar); หน้า login ใช้เลย์เอาต์ของตัวเอง
- *  admin=true = หน้านั้นเข้าได้เฉพาะผู้ดูแลระบบ */
-function AppLayout({ children, admin = false }) {
+ *  admin=true = หน้านั้นเข้าได้เฉพาะผู้ดูแลระบบ
+ *  manager=true = หน้าการเงินที่เข้าได้เฉพาะผู้จัดการ */
+function AppLayout({ children, admin = false, manager = false }) {
   return (
     <RequireAuth>
-      <LayoutInner admin={admin}>{children}</LayoutInner>
+      <LayoutInner admin={admin} manager={manager}>{children}</LayoutInner>
     </RequireAuth>
   );
 }
@@ -251,7 +274,7 @@ export default function App() {
             <Route path="/calendar" element={<AppLayout admin><CalendarPage /></AppLayout>} />
             <Route path="/attendance" element={<AppLayout admin><AttendancePage /></AppLayout>} />
             <Route path="/invoices" element={<AppLayout admin><InvoiceListPage /></AppLayout>} />
-            <Route path="/payroll" element={<AppLayout admin><PayrollPage /></AppLayout>} />
+            <Route path="/payroll" element={<AppLayout manager><PayrollPage /></AppLayout>} />
 
             {/* หน้าของพนักงานภาคสนาม — เข้าได้ทั้ง field และ admin (แสดงเฉพาะงานที่ตัวเองรับ) */}
             <Route path="/my-today" element={<AppLayout><MyTodayPage /></AppLayout>} />

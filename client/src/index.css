@@ -610,6 +610,15 @@ select option:checked {
    ยิ่งแถวไหนโดน … ตัดท้ายด้วยยิ่งดูขรุขระ (ต้องอยู่หลังกฎจัดกึ่งกลางด้านบน specificity เท่ากัน) */
 .table th.cell-text,
 .table td.cell-text { text-align: left; }
+
+/* ช่องปุ่มจัดการท้ายแถว — ต้องเห็นครบทุกปุ่มทุกความกว้างจอ
+   กฎรวมของช่องในตารางคือ nowrap + ตัดท้ายด้วย … ซึ่งเหมาะกับข้อความ (อ่านครึ่งเดียวยังเดาได้)
+   แต่กับปุ่มแปลว่าปุ่มที่สองเป็นต้นไปหายทั้งอัน — คำสั่งที่มองไม่เห็นเท่ากับกดไม่ได้
+   ช่องนี้จึงให้ปุ่มตกบรรทัดใหม่แทน แถวสูงขึ้นบ้างแลกกับปุ่มครบทุกอัน */
+.table td.row-actions { white-space: normal; }
+/* ชื่อปุ่มห้ามหักกลางคำ — "บันทึก / เวลาจริง" สองบรรทัดอ่านเป็นคนละคำสั่ง
+   margin แทน gap เพราะช่องยังเป็น table-cell (ทำเป็น flex แล้วความกว้างจาก colgroup จะเพี้ยน) */
+.table td.row-actions .btn { margin: 0.125rem; white-space: nowrap; }
 .table tbody tr:last-child td { border-bottom: none; }
 .table tbody tr:hover { background: var(--surface-2); }
 .empty { text-align: center; color: var(--muted); padding: 2rem; }
@@ -685,6 +694,18 @@ select option:checked {
 .badge.invoice-paid      { background: #e3f5ec; color: #1c7a4d; }
 .badge.invoice-overdue   { background: #fde8e8; color: #b3261e; }
 .badge.invoice-cancelled { background: #fbe4e4; color: #a83232; }
+
+/* สถานะเงินของเคสในคิวปล่อยค่าจ้าง — จงใจใช้สีชุดเดียวกับใบแจ้งหนี้
+   เพราะเป็นคำถามเดียวกันคนละฝั่งของเงิน: ใบแจ้งหนี้ = เก็บครบหรือยัง · คิวนี้ = จ่ายครบหรือยัง
+   เหลืองอำพัน = ยังไม่จบ ต้องกลับมาทำต่อ · เขียว = ปิดจบแล้ว ไม่ต้องทำอะไรอีก */
+.badge.payout-partial { background: #f3e2c0; color: #7a5a12; }
+.badge.payout-full    { background: #e3f5ec; color: #1c7a4d; }
+
+/* ป้ายสถานะเงินอยู่ใต้ยอดคงเหลือในช่องเดียวกัน — ห่อด้วยสแปนของตัวเอง ไม่ใช่ลูกตรงของ <td>
+   เพราะกฎโหมดการ์ด ("td ที่มี badge เป็นลูกตรง = สถานะของแถว") จะลากทั้งช่องรวมยอดเงิน
+   ขึ้นไปไว้มุมขวาบนของการ์ด ซึ่งไม่ใช่สิ่งที่ช่องนี้เป็น
+   และไม่ใช้ .cell-sub เพราะในการ์ดมันเติม " · " นำหน้าให้ทุกอัน — แถวที่มีแต่ป้ายจะขึ้นต้นด้วยจุดลอยๆ */
+.pay-state { display: block; margin-top: 0.1875rem; }
 
 /* สถานะแฟ้มผู้รับการดูแล (active ใช้สีเขียวร่วมกับด้านบน) */
 .badge.inactive { background: #eef0f2; color: #6b7280; }
@@ -883,8 +904,13 @@ select option:checked {
 .modal-nav .icon-btn { padding: 0.125rem 0.5rem; font-size: 1.125rem; line-height: 1.2; }
 
 /* หัวข้อในโมดัลที่มีปุ่มอยู่ขวา (เช่น "ติดต่อ" + แก้ด่วน) */
-.section-head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; }
+/* flex-wrap: หัวข้อที่มีปุ่มสองปุ่มท้ายบรรทัด (รายงานอาการ) — จอแคบให้ปุ่มตกลงมาบรรทัดใหม่
+   แทนที่จะบีบหัวข้อกับปุ่มจนคำในปุ่มหัก · หัวข้อที่มีปุ่มเดียวไม่ได้รับผลอะไร (ยังไม่ล้น จึงไม่ตก) */
+.section-head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; }
 .section-head h3 { margin-bottom: 0 !important; }
+/* กลุ่มปุ่มท้ายหัวข้อ — ไม่ใช้ .stack-actions เพราะอันนั้นบังคับปุ่มเต็มความกว้างบนมือถือ
+   (ทำมาสำหรับปุ่มท้ายใบรายงานที่อยู่บรรทัดของตัวเอง) ตรงนี้ปุ่มต้องอยู่คู่กันเสมอ */
+.head-actions { display: flex; flex-wrap: wrap; gap: 0.375rem; }
 
 /* ฟอร์มแก้ด่วนในโมดัล — คุมโทนให้ต่างจากส่วนอ่านอย่างเดียวรอบๆ ว่าตรงนี้กำลังแก้อยู่ */
 .quick-edit {
@@ -947,6 +973,26 @@ select option:checked {
   font-size: 0.8125rem;
 }
 .history-item:not(:last-child) { border-bottom: 1px dashed var(--divider); }
+
+/* แถวประวัติที่กดเข้าไปดูของจริงได้ (เคสของผู้รับการดูแล) — สีตัวอักษรคงเดิมทั้งแถบ
+   เปลี่ยนเฉพาะชื่อเคสตอนชี้/โฟกัส ให้รู้ว่าอันไหนคือสิ่งที่กำลังจะเปิด
+   ยืดพื้นที่กดออกไปทางข้างด้วย margin ติดลบ — ตัวหนังสือยังอยู่แนวเดิม แต่แถบที่ไฮไลต์
+   ดูเป็นกล่องที่ตั้งใจ ไม่ใช่สีที่จู่ๆ ก็ไปชนขอบการ์ดพอดี */
+a.history-item {
+  color: inherit;
+  text-decoration: none;
+  margin: 0 -0.5rem;
+  padding-left: 0.5rem;
+  padding-right: 0.5rem;
+  border-radius: var(--radius);
+}
+a.history-item:hover strong,
+a.history-item:focus-visible strong { color: var(--brand); }
+a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }
+/* เฉพาะเครื่องที่มีเมาส์ — จอสัมผัสจะค้างสีไว้บนแถวที่นิ้วเพิ่งแตะ (กติกาเดียวกับแถวตารางที่กดได้) */
+@media (hover: hover) {
+  a.history-item:hover { background: var(--surface-2); }
+}
 .history-item strong { font-weight: 600; }
 .history-item p { margin: 1px 0 0; font-size: 0.75rem; }
 .history-item .badge { flex-shrink: 0; }
@@ -1647,6 +1693,10 @@ select option:checked {
   /* ตารางแคบสุดที่ยังอ่านออก — แคบกว่านี้ให้ปัดแนวนอนเอาในกล่อง .table-wrap
      ต้องไม่แคบจนรหัส (CASE-0006 / EMP-0001) โดนตัดด้วย … เพราะเป็นตัวระบุหลักที่ต้องอ่านออกเสมอ */
   .table { min-width: 48.75rem; }
+  /* ตารางรายการต้องตรวจมีแค่ 5 คอลัมน์ ไม่ต้องใช้ความกว้างของตาราง 7 คอลัมน์
+     44rem คือจุดที่ทุกคอลัมน์ยังพอดี (วันที่เต็มบรรทัด · badge ปัญหาเต็มก้อน · รูปหลักฐานสองใบ
+     · ปุ่มยาวสุดทั้งคำ) — แคบลงเท่านี้ทำให้จอ 700–900px เห็นถึงคอลัมน์ปุ่มโดยไม่ต้องปัด */
+  .table.att-review { min-width: 44rem; }
 
   .danger-zone { grid-template-columns: 1fr; }
   .modal { max-height: 92vh; max-height: 92dvh; }
@@ -1947,6 +1997,7 @@ select option:checked {
      (การ์ดล้าง white-space: nowrap ของโหมดตารางไปแล้ว จึงต้องสั่งกลับเฉพาะที่ปุ่ม)
      flex-basis กว้างพอให้ปุ่มยาวสุดในหน้านี้อยู่ได้ทั้งคำ ที่เหลือให้ยืดแบ่งแถวกันเอง */
   .table-cards tbody td.row-actions .btn {
+    margin: 0;                 /* ระยะห่างมาจาก gap ของการ์ดแล้ว ไม่ใช่ margin ของโหมดตาราง */
     flex: 1 1 7.5rem;
     justify-content: center;
     padding: 0.4375rem 0.5rem;
@@ -2344,11 +2395,16 @@ select option:checked {
 
 .cal-chip:hover { filter: brightness(0.95); }
 .cal-chip-sub { display: block; opacity: 0.75; overflow: hidden; text-overflow: ellipsis; }
+/* ชื่อสถานะกะต่อท้ายบรรทัดรอง — ในตารางบนจอกว้างไม่มีที่ (ชิปสูงสองบรรทัดเต็มช่องอยู่แล้ว)
+   จึงเปิดเฉพาะโหมดรายการบนมือถือ ซึ่งชิปกว้างเต็มการ์ดและสูงตามเนื้อหา */
+.cal-chip-state { display: none; }
 /* เวลานัดนำหน้าชื่อ — ตารางงานที่ไม่บอกว่ากี่โมงใช้วางแผนวันไม่ได้ */
 .cal-chip-time { font-weight: 700; margin-right: 0.25rem; }
 .cal-note { margin-top: 0.75rem; font-size: 0.75rem; }
 
-/* หัววันเป็นปุ่ม — กดเพื่อดูงานทั้งวันแบบเต็ม (ช่องในปฏิทินเล็กเกินกว่าจะใส่รายละเอียดครบ) */
+/* หัววันของช่อง/การ์ด — ฝั่ง admin เป็นปุ่ม (กดดูงานทั้งวัน) ฝั่งพนักงานเป็นข้อความเฉยๆ
+   เพราะไม่มีหน้า "งานทั้งวัน" ให้เปิดต่อ · โครงเหมือนกันทุกอย่าง ต่างแค่กดได้/ไม่ได้ */
+.cal-day-head,
 .cal-date-btn {
   display: flex;
   align-items: center;
@@ -2359,8 +2415,8 @@ select option:checked {
   font: inherit;
   background: none;
   border: 0;
-  cursor: pointer;
 }
+.cal-date-btn { cursor: pointer; }
 .cal-date-btn:hover .cal-date { color: var(--brand); }
 /* จำนวนกะของวันนั้น — บอกได้ทันทีว่าวันไหนแน่นแม้ chip จะถูกเลื่อนซ่อนอยู่ */
 .cal-count {
@@ -2442,7 +2498,13 @@ select option:checked {
   /* งานหนึ่งชิ้น = เป้ากดหลักของทั้งหน้าสำหรับพนักงานภาคสนาม สูง 24px เตี้ยเกินกว่าจะกดแม่น */
   .cal-chip { font-size: 0.8125rem; white-space: normal; padding: 0.5625rem 0.5rem; }
   /* หัววันกดเพื่อดูงานทั้งวัน — เดิมสูงเท่าตัวอักษร 16px พอดี ไม่มีพื้นที่เผื่อนิ้วเลย */
+  .cal-day-head,
   .cal-date-btn { padding: 0.25rem 0 0.375rem; }
+  /* สีเดียวไม่พอให้เดาถูกว่า "ชมพู" คือขาดงานหรือรอเช็คอิน — ในโหมดการ์ดมีที่พอจะเขียนเป็นคำ */
+  .cal-chip-state { display: inline; }
+  /* เวลานัดขึ้นบรรทัดของตัวเอง — ในการ์ดกว้างๆ เวลากับชื่อผู้รับบริการต่อกันในบรรทัดเดียว
+     อ่านเป็นข้อความก้อนเดียว ("09:00–12:00Zeka HLE") แยกบรรทัดแล้วกวาดตาหาเวลาได้ทันที */
+  .cal-chip-time { display: block; margin-right: 0; }
 
   /* ---- หัวการ์ดของหนึ่งวันในโหมดรายการ: [พฤ. 13 ส.ค.] [วันนี้] ......... [จำนวนกะ] ----
      เลขวันเดี่ยวๆ ใช้ไม่ได้ที่นี่ ไม่มีหัวคอลัมน์วันในสัปดาห์และไม่มีวันข้างๆ ให้เทียบแล้ว */
@@ -2496,7 +2558,9 @@ select option:checked {
    ขนาด A4 เป็นเรื่องของตอนพิมพ์อย่างเดียว จัดการที่ @page ท้ายไฟล์
    (เคยลองตรึงเป็น 210mm บนจอด้วยเพื่อให้เห็นตรงกับที่พิมพ์ แต่กระดาษแนวตั้งย่อลงมาพอดีจอแล้ว
    เหลือที่ว่างซ้าย-ขวาเยอะกว่าตัวใบ ซึ่งเสียพื้นที่จอเปล่าๆ) */
-.invoice-doc {
+.invoice-doc,
+.payroll-doc,
+.report-doc {
   background: #fff;
   color: #000;
   font-size: 0.8125rem;
@@ -2506,7 +2570,9 @@ select option:checked {
      (ตอนสั่งพิมพ์ไม่เห็นปัญหาเพราะ @page เว้นขอบกระดาษให้เอง — บนจอไม่มีใครเว้นให้) */
   padding: 0 0.75rem 0.5rem;
 }
-.invoice-doc p { margin: 0; }
+.invoice-doc p,
+.payroll-doc p,
+.report-doc p { margin: 0; }
 
 .inv-printed { text-align: right; font-size: 0.6875rem; }
 .inv-header { text-align: center; }
@@ -2544,6 +2610,66 @@ select option:checked {
 .inv-sign-dots { letter-spacing: 0.02rem; }
 .inv-sign-name { grid-column: 2; text-align: center; }
 
+/* ---------- ใบสรุปค่าตอบแทนพนักงาน (พิมพ์อย่างเดียว) ----------
+   บนจอไม่ต้องเห็น — ตารางของแท็บบอกเรื่องเดียวกันและกดดูรายเคสต่อได้ ซึ่งกระดาษทำไม่ได้
+   แต่ห้าม display: none เพราะของที่ถูก display: none ไม่ถูกส่งไปเครื่องพิมพ์ด้วย
+   จึงซ่อนแบบ "ยังอยู่ในหน้า" (ย่อเหลือจุดเดียวแล้วครอบทิ้ง) แล้วคลายคืนในบล็อก @media print */
+.payroll-doc {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+/* ตารางกว้าง 10 คอลัมน์บน A4 แนวตั้ง — ตัวเลขต้องเล็กลงกว่าใบแจ้งหนี้ถึงจะไม่หักบรรทัด */
+.payroll-doc-table { font-size: 0.6875rem; }
+.payroll-doc-table th, .payroll-doc-table td { padding: 0.25rem 0.375rem; }
+.payroll-doc-table .pd-no { width: 6%; }
+.payroll-doc-table .pd-code { width: 10%; }
+.payroll-doc-table .pd-num { width: 6%; }
+.payroll-doc-table .pd-money { width: 11%; }
+/* ช่องเซ็นรับเงิน — ต้องกว้างพอให้เขียนชื่อด้วยมือได้จริง ไม่ใช่เส้นบางๆ พอเป็นพิธี */
+.payroll-doc-table .pd-sign { width: 16%; }
+
+/* ---------- แบบฟอร์มรายงานอาการผู้ป่วย (พิมพ์อย่างเดียว) ----------
+   ซ่อนบนจอด้วยกติกาเดียวกับใบสรุปค่าตอบแทน (ห้าม display: none — ของที่ถูกซ่อนแบบนั้นไม่ถูกพิมพ์) */
+.report-doc {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+/* หัวใบ: ตารางสองคู่ (ป้าย/ค่า) — ป้ายพื้นเทาอ่อนให้แยกจากค่าที่กรอก แบบฟอร์มกระดาษทั่วไป */
+.report-doc-head { margin-bottom: 0.75rem; font-size: 0.75rem; }
+.report-doc-head th { width: 15%; background: #f2f2f2; text-align: left; white-space: nowrap; }
+.report-doc-head td { width: 35%; }
+
+/* หนึ่งบันทึก = หนึ่งบล็อกมีกรอบ อ่านเป็นใบๆ ไม่ใช่ข้อความไหลต่อกันจนไม่รู้ว่าใบไหนจบตรงไหน */
+.report-doc-item {
+  margin-top: 0.625rem;
+  padding: 0.5rem 0.625rem;
+  border: 1px solid #000;
+  font-size: 0.75rem;
+}
+.report-doc-item-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin: 0 0 0.375rem;
+  padding-bottom: 0.25rem;
+  font-size: 0.8125rem;
+  border-bottom: 1px dashed #000;
+}
+.report-doc-by { font-weight: 400; white-space: nowrap; }
+.report-doc-vitals { display: flex; flex-wrap: wrap; gap: 0.25rem 1.25rem; margin: 0; padding: 0; list-style: none; }
+.report-doc-vitals li { display: flex; gap: 0.375rem; }
+.report-doc-text { margin-top: 0.25rem !important; }
+
 /* ---------- สั่งพิมพ์ / บันทึกเป็น PDF ----------
    ซ่อนทั้งหน้าแล้วโชว์เฉพาะ .invoice-doc โดยใช้ visibility (ไม่ใช้ display:none)
    เพราะ display:none กับ element แม่จะทำให้ลูกที่อยู่ข้างในหายไปด้วย เลยเอาเอกสารออกมาไม่ได้ */
@@ -2552,6 +2678,8 @@ select option:checked {
 
   body * { visibility: hidden; }
   .invoice-doc, .invoice-doc *,
+  .payroll-doc, .payroll-doc *,
+  .report-doc, .report-doc *,
   .cal-print, .cal-print *,
   .cal-title, .cal-title *,
   .cal-legend, .cal-legend * { visibility: visible; }
@@ -2565,6 +2693,35 @@ select option:checked {
     width: 100%;
     padding: 0;
   }
+
+  /* คลายการซ่อนของใบสรุปค่าตอบแทน แล้ววางที่หัวกระดาษเหมือนใบแจ้งหนี้
+     (ของที่เหลือบนหน้าถูกซ่อนด้วย visibility ซึ่งยังกินที่อยู่ — ใบจึงต้องลอยขึ้นไปทับ ไม่ใช่ต่อท้าย) */
+  .payroll-doc {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: auto;
+    overflow: visible;
+    clip-path: none;
+  }
+  .payroll-doc-table tr { break-inside: avoid; }
+
+  /* ใบรายงานอาการ — คลายการซ่อนแล้ววางที่หัวกระดาษ (เหตุผลเดียวกับใบสรุปค่าตอบแทน) */
+  .report-doc {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: auto;
+    overflow: visible;
+    clip-path: none;
+  }
+  /* หนึ่งบันทึกต้องไม่ถูกหั่นคาบหน้ากระดาษ — ครึ่งบนอยู่หน้าหนึ่ง ครึ่งล่างอยู่อีกหน้า
+     ทำให้อ่านเป็นคนละใบ ซึ่งกับบันทึกทางการแพทย์คือการอ่านผิดคนละครั้งที่ไปดูแล */
+  .report-doc-item { break-inside: avoid; }
+  /* บล็อกในใบ (DailyCareView) มีพื้น/สีของธีม — บนกระดาษเอาแค่โครง ไม่เอาสีพื้น */
+  .report-doc .care-view-block { background: none; border-color: #000; }
 
   /* ตารางงานลงกระดาษ — ตัดแถบเลื่อนในช่องออก ไม่งั้นกะที่เลื่อนซ่อนอยู่จะหายไปจากที่พิมพ์ */
   .cal-print { overflow: visible; }
@@ -3977,6 +4134,18 @@ select option:checked {
   .pay-agreement .pick-actions .btn,
   .pay-split-sum .pick-actions .btn { flex: 1; }
 
+  /* แผงที่กางออกมาต้องชิดซ้ายทั้งแผง — ในโหมดการ์ด ช่องข้อมูลถูกจัดชิดขวาโดยตั้งใจ
+     (ป้ายกำกับลอยซ้าย ค่าชิดขวา อ่านเป็นคู่ได้) แต่แถวที่กางออกมาไม่ใช่ "ช่องข้อมูล"
+     มันคือแผงเต็มใบที่มีฟอร์ม ปุ่ม และยอดสรุปของตัวเอง
+
+     กฎ .row-expand ที่สั่ง text-align: left ไว้ตั้งแต่โหมดตารางเอาไม่อยู่ เพราะแผงนี้เป็น
+     <td> ใบเดียวของแถว (colSpan) จึงเป็น :first-child พอดี แล้วโดนกฎการ์ด
+     ".table.table-cards.table-indexed tbody td:first-child" ซึ่ง specificity สูงกว่าทับไป
+     ผลบนมือถือคือป้ายกำกับ ช่องกรอก ปุ่ม และยอดสรุป ไปกองอยู่ขอบขวาหมดทั้งแผง
+     (กับดักตัวเดียวกับที่กฎ .row-expand ในโหมดตารางเขียนกันไว้ — แค่โผล่ซ้ำในโหมดการ์ด) */
+  .table.table-cards tbody tr.row-expand td,
+  .table.table-cards.table-indexed tbody tr.row-expand td:first-child { text-align: left; }
+
   /* รายเคสที่กางออกมาเป็น <tr> ของตัวเอง ซึ่งในโหมดการ์ดจะกลายเป็นการ์ดใบใหม่ —
      ดึงขึ้นไปเชื่อมกับการ์ดของคนนั้น ไม่งั้นอ่านเป็นเคสของคนถัดไป */
   .table-cards tbody tr.row-expand {
@@ -4046,6 +4215,12 @@ select option:checked {
 .payroll-bar { justify-content: space-between; }
 .payroll-bar .tab-hint { margin: 0; flex: 1; min-width: 14rem; }
 
+/* ยอดที่ปล่อยแล้วแต่ยังไม่เข้ารอบไหน — อยู่แถวเดียวกับปุ่มเปิดรอบ เพราะมันคือตัวเลขที่ทำให้
+   ตัดสินใจกดปุ่มนั้น ตัวเงินเน้นกว่าคำรอบข้าง เป็นสิ่งเดียวในบรรทัดที่ต้องอ่านให้ได้จริงๆ */
+.payroll-waiting strong { font-size: 1rem; color: var(--brand); }
+/* ไม่มียอดค้าง = ข้อความบอกทาง ไม่ใช่ตัวเลข — จางลงให้รู้ว่าไม่มีอะไรต้องทำที่แท็บนี้ */
+.payroll-waiting.is-empty { color: var(--muted); }
+
 @media (max-width: 600px) {
   /* จอแคบ: ปุ่มเปิดรอบเป็นการกระทำหลักของแท็บนี้ — ให้เต็มความกว้างแทนที่จะเบียดท้ายข้อความ */
   .payroll-bar .btn { width: 100%; justify-content: center; }
@@ -4067,4 +4242,22 @@ select option:checked {
   /* จอแคบ: ลิงก์ลงบรรทัดใหม่เต็มความกว้าง แทนที่จะบีบข้อความจนตกหลายบรรทัด */
   .payroll-alert { flex-wrap: wrap; }
   .payroll-alert > .link { margin-left: 0; }
+}
+
+/* ---------- รหัสผ่านชั่วคราวของพนักงานใหม่ ----------
+   ของที่เห็นได้ครั้งเดียว ต้องเด่นกว่าทุกอย่างในหน้าและอ่านผิดไม่ได้
+   ตัวใหญ่ + ระยะห่างระหว่างตัวอักษร เพราะรหัสสุ่มมีทั้ง l/I และ 0/O ปนกัน (แม้จะคัดออกแล้วบางส่วน) */
+.temp-password { border-color: var(--brand); }
+.temp-password-value {
+  margin: 0.75rem 0;
+  padding: 0.75rem 1rem;
+  font-size: 1.375rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-align: center;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  user-select: all;              /* แตะครั้งเดียวเลือกทั้งก้อน — ลากเลือกรหัสบนมือถือเป็นเรื่องยาก */
 }

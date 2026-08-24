@@ -1,8 +1,10 @@
 import { z } from 'zod';
+import { zodDate } from '../lib/dates.js';
 
 export const PAYROLL_STATUSES = ['draft', 'paid', 'cancelled'];
 
-const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'ต้องอยู่ในรูปแบบ YYYY-MM-DD');
+// วันที่ต้องมีอยู่จริงในปฏิทิน ไม่ใช่แค่รูปแบบถูก (2026-02-31 เคยผ่านได้ — ดู lib/dates.js)
+const date = zodDate(z);
 const month = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'เดือนต้องอยู่ในรูปแบบ YYYY-MM');
 const optionalText = z.string().trim().max(500).optional().nullable();
 

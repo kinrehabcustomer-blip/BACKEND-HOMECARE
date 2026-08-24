@@ -207,7 +207,11 @@ export async function hasFieldAccess(employeeId, caseId) {
      WHERE c.case_id = :cid
        AND (c.assigned_to = :eid
             OR EXISTS (SELECT 1 FROM case_team t WHERE t.case_id = c.case_id AND t.employee_id = :eid)
-            OR EXISTS (SELECT 1 FROM case_visits v WHERE v.case_id = c.case_id AND v.assigned_to = :eid))`,
+            /* กะที่ถูกยกเลิก = งานที่ไม่ได้เกิดขึ้น จึงไม่ควรเป็นใบเบิกทางให้อ่านประวัติการรักษา
+               ที่อยู่ และข้อมูลสุขภาพของผู้ป่วยรายนั้นต่อไปตลอดกาล (เคสถูกยกเลิกทั้งใบก็เข้าข่ายเดียวกัน) */
+            OR EXISTS (SELECT 1 FROM case_visits v
+                       WHERE v.case_id = c.case_id AND v.assigned_to = :eid
+                         AND v.status <> 'cancelled'))`,
     { cid: caseId, eid: employeeId },
   );
   return Boolean(row);
@@ -234,9 +238,9 @@ function clearUnusedKind(input) {
  * หาที่ server ไม่รอให้หน้าเว็บส่งมา เพราะเป็นตัวเลขที่กลายเป็นรายได้ของพนักงาน
  * ปล่อยให้ client เป็นคนคัดลอก แล้ววันหนึ่งหน้าเว็บเวอร์ชันเก่า/หน้าอื่นเรียก API ตรงๆ เคสจะไม่มีค่าจ้างเงียบๆ
  */
-async function payFromService(input) {
+async function payFromService(input, db = sql) {
   if (input.physio_package_id) {
-    const p = await sql.one(
+    const p = await db.one(
       'SELECT staff_pay FROM physio_packages WHERE physio_package_id = :id',
       { id: input.physio_package_id },
     );
@@ -244,7 +248,7 @@ async function payFromService(input) {
   }
 
   if (input.pkg_format_id && input.pkg_staff_tier) {
-    const r = await sql.one(
+    const r = await db.one(
       `SELECT staff_pay FROM pkg_rates
        WHERE format_id = :format_id
          AND grade_id IS NOT DISTINCT FROM :grade_id
@@ -259,6 +263,81 @@ async function payFromService(input) {
   }
 
   return null;
+}
+
+const PAY_SERVICE_FIELDS = [
+  'service_kind',
+  'pkg_grade_id',
+  'pkg_format_id',
+  'pkg_staff_tier',
+  'physio_package_id',
+];
+
+/**
+ * ตัดสินว่าตอน PATCH ต้องเก็บค่าจ้างเดิม ใช้ตัวเลขที่ manager ส่ง หรือดึงจากบริการใหม่
+ *
+ * หน้า HR ส่งฟอร์มเต็มแต่ไม่มี staff_pay จึงห้ามดูแค่ว่า payload มีคีย์บริการหรือไม่ —
+ * ต้องเทียบกับแถวปัจจุบันจริง ไม่งั้นแก้หมายเหตุอย่างเดียวก็ทับค่าจ้างพิเศษของ manager ได้
+ */
+export function staffPayUpdateMode(current, input) {
+  if (Object.prototype.hasOwnProperty.call(input, 'staff_pay')) {
+    return input.staff_pay == null ? 'service' : 'explicit';
+  }
+
+  const serviceChanged = PAY_SERVICE_FIELDS.some(
+    (field) =>
+      Object.prototype.hasOwnProperty.call(input, field) &&
+      String(current?.[field] ?? '') !== String(input[field] ?? ''),
+  );
+  return serviceChanged ? 'service' : 'preserve';
+}
+
+/**
+ * ยอดค่าจ้างใหม่ต้องไม่ต่ำกว่าเงินที่ปล่อยออกจากเคสไปแล้ว
+ * เทียบที่ความละเอียดสตางค์แบบเดียวกับ releasePay เพื่อไม่ให้ floating point ทำให้ยอดเท่ากันดูเหมือนต่ำกว่า
+ */
+export function assessStaffPayUpdate(targetStaffPay, releasedAmount) {
+  const money = (n) => Math.round(Number(n) * 100) / 100;
+  const released = money(releasedAmount ?? 0);
+  // คืนค่าที่ normalize แล้วไปเขียนด้วย ไม่ใช่ใช้ค่าปัดตอนเทียบแต่ปล่อยค่าดิบที่ต่ำกว่า released ลง DB
+  const staff_pay = targetStaffPay == null ? null : money(targetStaffPay);
+
+  if (released > 0 && (staff_pay == null || staff_pay < released)) {
+    return { reason: 'below_released', staff_pay, released };
+  }
+  return { staff_pay, released };
+}
+
+/**
+ * เตรียม staff_pay สำหรับ PATCH ภายใต้ transaction เดียวกับ UPDATE
+ *
+ * ล็อกแถว cases ก่อนเสมอให้ใช้ลำดับเดียวกับ releasePay; จากนั้น SUM จะเห็น payout ที่คำขอก่อนหน้า
+ * commit แล้ว และคำขอปล่อยเงินใหม่ของเคสเดียวกันต้องรอจน UPDATE นี้ commit/rollback ก่อน
+ */
+export async function staffPayUpdateForTransaction(tx, caseId, input) {
+  const current = await tx.one('SELECT * FROM cases WHERE case_id = :id FOR UPDATE', { id: caseId });
+  if (!current) throw new ApiError(404, `ไม่พบเคสรหัส ${caseId}`);
+
+  const mode = staffPayUpdateMode(current, input);
+  if (mode === 'preserve') return { current, mode, staff_pay: current.staff_pay };
+
+  const targetStaffPay =
+    mode === 'service'
+      ? await payFromService({ ...current, ...input }, tx)
+      : input.staff_pay;
+  const { released } = await tx.one(
+    'SELECT COALESCE(SUM(amount), 0) AS released FROM case_payouts WHERE case_id = :id',
+    { id: caseId },
+  );
+  const assessment = assessStaffPayUpdate(targetStaffPay, released);
+  if (assessment.reason === 'below_released') {
+    throw new ApiError(
+      409,
+      `กำหนดค่าจ้างต่ำกว่ายอดที่ปล่อยไปแล้วไม่ได้ — ปล่อยไปแล้ว ${assessment.released.toLocaleString('th-TH')} บาท`,
+    );
+  }
+
+  return { current, mode, ...assessment };
 }
 
 // ---------- ประวัติการทำรายการ (case_events) ----------
@@ -319,7 +398,7 @@ export function create(rawInput, actor) {
     for (const col of COLUMNS) values[col] = input[col] ?? null;
 
     // ไม่ได้ส่งค่าจ้างมา = ใช้ของแพ็คเกจ · ส่งตัวเลขมาเอง (รวม 0) = เคารพตามนั้น
-    if (values.staff_pay == null) values.staff_pay = await payFromService(input);
+    if (values.staff_pay == null) values.staff_pay = await payFromService(input, tx);
 
     // ไม่มีช่องกรอกชื่อเคสแล้ว — ปกติหน้าเว็บส่งชื่อที่ประกอบจากแพ็คเกจ+ผู้ป่วยมาให้
     // ถ้าเรียก API ตรงๆ โดยไม่ส่ง title มา ใช้ชื่อผู้ป่วยแทน เพื่อไม่ให้ชน NOT NULL
@@ -387,17 +466,19 @@ export async function update(caseId, rawInput, actor) {
   const values = { case_id: caseId };
   for (const col of fields) values[col] = input[col] ?? null;
 
-  const current = await findById(caseId);
-
-  // ส่งช่องค่าจ้างมาเป็นค่าว่างทั้งที่เลือกบริการไว้ = ให้ใช้ของแพ็คเกจ (เหมือนตอนสร้างเคส)
-  // ดูจากสิ่งที่เลือกไว้ "หลังแก้" เพราะ PATCH ส่งมาบางฟิลด์ได้ (เช่น แก้แค่หมายเหตุ)
-  if (fields.includes('staff_pay') && values.staff_pay == null) {
-    values.staff_pay = await payFromService({ ...current, ...input });
-  }
-
-  const changed = changedLabels(current, values, fields);
-
   await transaction(async (tx) => {
+    const payState = await staffPayUpdateForTransaction(tx, caseId, input);
+    const { current, mode: payMode } = payState;
+
+    // manager ส่ง null หรือมีการเปลี่ยนตัวเลือกบริการจริงโดยไม่ได้ส่งค่าจ้าง = ใช้ค่าจากบริการใหม่
+    // note-only PATCH / ฟอร์มเต็มของ HR ที่ตัวเลือกเดิมไม่เปลี่ยน = preserve ค่าพิเศษเดิม
+    if (payMode !== 'preserve') {
+      if (!fields.includes('staff_pay')) fields.push('staff_pay');
+      values.staff_pay = payState.staff_pay;
+    }
+
+    const changed = changedLabels(current, values, fields);
+
     await tx.run(
       `UPDATE cases
        SET ${fields.map((c) => `${c} = :${c}`).join(', ')}, updated_at = ${NOW}
@@ -483,7 +564,29 @@ export async function cancel(caseId, reason, actor) {
        WHERE case_id = :case_id`,
       { case_id: caseId, reason: reason ?? null },
     );
-    await logEvent(tx, caseId, 'cancelled', reason ? `ยกเลิกเคส — ${reason}` : 'ยกเลิกเคส', actor);
+    /* กะที่ยังไม่ได้ไปทำต้องถูกยกเลิกตามไปด้วย — ไม่งั้นมันค้างอยู่บนปฏิทินและในรายการงานของพนักงาน
+       ทั้งที่เคสถูกยกเลิกไปแล้ว คนที่เปิดตารางงานดูจะเดินทางไปบ้านลูกค้าที่ยกเลิกไปแล้วจริงๆ
+
+       ไม่แตะกะที่เช็คอินไปแล้ว: นั่นคือการทำงานที่เกิดขึ้นจริงและเป็นฐานค่าจ้าง ต้องคงไว้ตามเดิม */
+    const { n } = await tx.one(
+      `WITH cancelled AS (
+         UPDATE case_visits
+         SET status = 'cancelled', updated_at = ${NOW}
+         WHERE case_id = :case_id AND status <> 'cancelled' AND check_in_at IS NULL
+         RETURNING 1
+       )
+       SELECT COUNT(*) AS n FROM cancelled`,
+      { case_id: caseId },
+    );
+
+    const dropped = Number(n) > 0 ? ` — ยกเลิกกะที่ยังไม่ได้ไป ${Number(n)} กะด้วย` : '';
+    await logEvent(
+      tx,
+      caseId,
+      'cancelled',
+      (reason ? `ยกเลิกเคส — ${reason}` : 'ยกเลิกเคส') + dropped,
+      actor,
+    );
   });
 
   return findById(caseId);
@@ -1359,7 +1462,36 @@ export async function adjustVisit(caseId, visitId, input, admin) {
     );
   }
 
-  await transaction(async (tx) => {
+  /* ช่องที่เป็น "ฐานของค่าจ้าง" — เวลาเข้า/ออกและสถานะกะ คือสิ่งที่คิวอนุมัติเอาไปตัดสิน
+     ส่วนธงนอกพื้นที่เป็นเรื่องของการตรวจสอบ ไม่กระทบยอดเงิน จึงแก้ได้เสมอ */
+  const touchesPayBasis = ['check_in_at', 'check_out_at', 'status'].some((col) => col in input);
+
+  const outcome = await transaction(async (tx) => {
+    /* ล็อกกะไว้ก่อนอ่านสถานะค่าจ้าง — ไม่งั้นการอนุมัติที่กำลังวิ่งอยู่คนละคำขออาจแทรกกลาง
+       ระหว่าง "อ่านว่ายังไม่อนุมัติ" กับ "เขียนทับเวลา" แล้วกลายเป็นอนุมัติยอดที่ไม่มีใครเคยเห็น */
+    const before = await tx.one(
+      `SELECT v.pay_status,
+              (SELECT COALESCE(SUM(p.amount), 0) FROM case_payouts p WHERE p.case_id = v.case_id) AS released
+       FROM case_visits v
+       WHERE v.visit_id = :visit_id AND v.case_id = :case_id
+       FOR UPDATE OF v`,
+      { visit_id: visitId, case_id: caseId },
+    );
+    if (!before) return { reason: 'not_found' };
+
+    /* เงินออกไปแล้วห้ามขยับฐานที่ใช้คิดเงิน — ยอดที่ปล่อยไปถูกตรึงไว้ก็จริง แต่ตัวเลขชั่วโมง/กะ
+       ที่เป็น "ที่มาของยอด" ต้องยังตรงกับของจริง ไม่งั้นสลิปที่จ่ายไปแล้วอธิบายตัวเองไม่ได้อีก
+       (ถ้าลงเวลาผิดจริงและต้องแก้ ให้ถอนงวดที่ปล่อยคืนก่อน แล้วค่อยแก้เวลา) */
+    if (touchesPayBasis && Number(before.released) > 0) {
+      return { reason: 'pay_released', released: Number(before.released) };
+    }
+
+    /* อนุมัติไปแล้วแต่ยังไม่ปล่อยเงิน — แก้ได้ แต่การอนุมัติเดิมใช้ไม่ได้แล้ว
+       เพราะมันคือการอนุมัติ "ตัวเลขชุดก่อนแก้" ดึงกลับเป็นรออนุมัติให้คนตรวจเห็นอีกรอบ
+       (ปล่อยให้ค้างเป็น approved คือการอนุมัติย้อนหลังให้ตัวเองโดยไม่มีใครรู้) */
+    const reopenApproval = touchesPayBasis && before.pay_status === 'approved';
+    if (reopenApproval) sets.push(`pay_status = 'pending'`);
+
     await tx.run(
       `UPDATE case_visits SET ${sets.join(', ')} WHERE visit_id = :visit_id AND case_id = :case_id`,
       values,
@@ -1374,13 +1506,16 @@ export async function adjustVisit(caseId, visitId, input, admin) {
         tx,
         caseId,
         'visit_adjusted',
-        `แก้กะวันที่ ${visit.visit_date}${touched.length ? ` — ${touched.join(', ')}` : ''}`,
+        `แก้กะวันที่ ${visit.visit_date}${touched.length ? ` — ${touched.join(', ')}` : ''}` +
+          (reopenApproval ? ' (ดึงกลับเป็นรออนุมัติค่าจ้าง)' : ''),
         typeof admin === 'string' ? { employee_id: adminId, name: await staffName(tx, adminId) } : admin,
       );
     }
+    return { reopened: reopenApproval };
   });
 
-  return findVisit(visitId);
+  if (outcome?.reason) return outcome;
+  return { ...(await findVisit(visitId)), reopened_approval: outcome.reopened };
 }
 
 /**
@@ -1655,12 +1790,14 @@ export function payQueue() {
             ตัด unassigned ทิ้งเพราะยังไม่มีใครรับงาน จ่ายไปก็ไม่รู้จะจ่ายให้ใคร
             และตัด cancelled เพราะงานไม่ได้เกิดขึ้น */
          AND c.status IN ('assigned', 'in_progress', 'closed')
-       /* เรียงตามความเร่ง: ปิดเคสแล้วและยังค้างเงิน = ต้องทำก่อน · ปิดแล้วจ่ายครบ = ดูย้อนหลัง
-          เคสที่ยังไม่ปิดอยู่กลางๆ เพราะปล่อยงวดระหว่างทางได้ แต่ไม่ใช่ของที่ต้องรีบ */
-       ORDER BY (c.status = 'closed' AND (c.staff_pay - COALESCE(p.released, 0)) > 0) DESC,
-                (c.staff_pay - COALESCE(p.released, 0)) > 0 DESC,
-                COALESCE(c.closed_at, lv.last_visit_date) DESC NULLS LAST,
-                c.case_id DESC`,
+       /* เรียงเคสใหม่ไปเก่าตามวันที่สร้างเคส — ลำดับเดียวกับที่คนใช้งานคิดถึงรายการนี้
+          ("เคสที่เพิ่งทำไปเมื่อกี้อยู่ไหน") และเป็นลำดับที่เดาได้โดยไม่ต้องรู้กติกาอะไรเลย
+
+          ของเดิมเรียงตาม "ความเร่ง" (ปิดเคสแล้วยังค้างเงินขึ้นก่อน แล้วไล่ตามวันปิด/วันกะล่าสุด)
+          ซึ่งอ่านออกยากเวลาไล่ทีละสิบแถว เพราะลำดับขึ้นกับสามเงื่อนไขที่มองไม่เห็นจากหน้าจอ
+          และเคสที่เพิ่งสร้างจะไปโผล่กลางรายการ — สัญญาณความเร่งย้ายไปอยู่ที่ป้ายสถานะเงิน
+          (ตามจ่ายอยู่ / จ่ายครบแล้ว) กับสวิตช์ซ่อนเคสที่จ่ายครบแล้วแทน ซึ่งเห็นได้ทีละแถวจริงๆ */
+       ORDER BY c.created_at DESC, c.case_id DESC`,
     )
     .then((rows) =>
       rows.map((r) => {
@@ -2019,16 +2156,53 @@ function applyChosenShares(shares, chosen, amount) {
   return { rows: chosen.map((c) => ({ ...known.get(c.employee_id), amount: round(c.amount) })) };
 }
 
-export async function releasePay(caseId, { amount, note, due_date, shares: chosen }, actor) {
-  return transaction(async (tx) => {
-    /* จองแถวเคสไว้ก่อนนับงวด — ตัวนับงวดอ่านจาก case_payouts ซึ่งเป็น "แถวที่ยังไม่มี"
-       จะล็อกตรงๆ ไม่ได้ ต้องล็อกที่เคสซึ่งเป็นสิ่งที่ทุกคนที่ปล่อยเงินของเคสนี้ต้องผ่าน */
-    await tx.one('SELECT case_id FROM cases WHERE case_id = :id FOR UPDATE', { id: caseId });
+/**
+ * ตรวจยอดที่กำลังจะปล่อยกับ snapshot ล่าสุดภายใน transaction
+ *
+ * ต้องเรียกหลังล็อกแถว cases แล้วเท่านั้น: คำขอปล่อยเงินทุกคำขอของเคสเดียวกันจึงต่อคิวกัน
+ * และอ่าน SUM(case_payouts) หลังคำขอก่อนหน้า commit แล้ว ไม่ใช้ remaining เก่าจากหน้าเว็บ
+ */
+export function assessReleaseCapacity(staffPay, releasedAmount, requestedAmount) {
+  const released = round(Number(releasedAmount ?? 0));
+  if (staffPay == null) return { reason: 'staff_pay_not_set', staff_pay: null, released, remaining: null };
 
-    const { last } = await tx.one(
-      `SELECT COALESCE(MAX(installment_no), 0) AS last FROM case_payouts WHERE case_id = :id`,
+  const staff_pay = round(Number(staffPay));
+  const remaining = round(staff_pay - released);
+  if (remaining <= 0) return { reason: 'fully_released', staff_pay, released, remaining };
+
+  // ไม่ส่งยอดมา = ปล่อยยอดคงเหลือ "ล่าสุด" ที่เพิ่งอ่านภายใต้ lock ไม่ใช่ค่าจาก request ก่อนเข้า transaction
+  const amount = requestedAmount == null ? remaining : round(Number(requestedAmount));
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return { reason: 'invalid_amount', staff_pay, released, remaining, amount };
+  }
+  if (amount > remaining) {
+    return { reason: 'amount_exceeds_remaining', staff_pay, released, remaining, amount };
+  }
+
+  return { staff_pay, released, remaining, amount };
+}
+
+export async function releasePay(caseId, { amount: requestedAmount, note, due_date, shares: chosen }, actor) {
+  return transaction(async (tx) => {
+    /* จองแถวเคสก่อนอ่านทั้งยอดและเลขงวด — case_payouts เป็น "แถวที่ยังไม่มี" จึงล็อกตรงๆ ไม่ได้
+       คำขอของเคสเดียวกันทุกคำขอต้องผ่าน lock นี้ แล้ว statement ถัดไปจึงเห็น payout ที่คำขอก่อนหน้า commit */
+    const lockedCase = await tx.one(
+      'SELECT case_id, staff_pay FROM cases WHERE case_id = :id FOR UPDATE',
       { id: caseId },
     );
+    if (!lockedCase) return { released: [], reason: 'not_found' };
+
+    const { last, released: releasedAmount } = await tx.one(
+      `SELECT COALESCE(MAX(installment_no), 0) AS last,
+              COALESCE(SUM(amount), 0) AS released
+       FROM case_payouts WHERE case_id = :id`,
+      { id: caseId },
+    );
+
+    const capacity = assessReleaseCapacity(lockedCase.staff_pay, releasedAmount, requestedAmount);
+    if (capacity.reason) return { released: [], ...capacity };
+    const { amount } = capacity;
+
     const installment = Number(last) + 1;
     if (installment > MAX_INSTALLMENTS) {
       return { released: [], reason: 'installment_limit', installments_used: Number(last) };
@@ -2041,7 +2215,7 @@ export async function releasePay(caseId, { amount, note, due_date, shares: chose
     if (shares.length === 0) return { released: [], reason: 'no_one_in_case' };
 
     const split = chosen ? applyChosenShares(shares, chosen, amount) : { rows: allocateShares(shares, amount) };
-    if (split.reason) return { released: [], ...split };
+    if (split.reason) return { released: [], amount, ...split };
 
     /* ก้อน 0 บาทไม่ต้องบันทึก — คนที่ไม่ได้ส่วนแบ่งในงวดนี้ (ยังไม่มีกะ หรือได้ล่วงหน้าไปแล้ว)
        ไม่ใช่ "ได้ศูนย์บาท" แต่คือ "ไม่มีรายการในงวดนี้" ซึ่งอ่านต่างกันมากบนสลิปและในประวัติ */
@@ -2095,21 +2269,74 @@ export async function releasePay(caseId, { amount, note, due_date, shares: chose
  * ถอนยอดที่ปล่อยไปแล้วคืน — ได้เฉพาะก้อนที่ยังไม่เข้ารอบจ่ายที่ปิดแล้ว
  * (เข้ารอบร่างอยู่ก็ถอนได้ แถวใน payroll_payout_lines หายตาม CASCADE ยอดของรอบจึงลดลงเอง)
  */
+export async function payoutCancellationForUpdate(tx, caseId, payoutId) {
+  /* อ่านแค่ run_id เพื่อรู้ว่าจะต้องเข้าคิว lock แถวไหนก่อน — ยังไม่ใช้ status จาก snapshot นี้ตัดสิน */
+  const initial = await tx.one(
+    `SELECT p.payout_id, pi.run_id
+     FROM case_payouts p
+     LEFT JOIN payroll_payout_lines pl ON pl.payout_id = p.payout_id
+     LEFT JOIN payroll_items pi ON pi.item_id = pl.item_id
+     WHERE p.payout_id = :id AND p.case_id = :case_id`,
+    { id: payoutId, case_id: caseId },
+  );
+  if (!initial) return { reason: 'not_found' };
+
+  const expectedRunId = initial.run_id ?? null;
+  let lockedRun = null;
+  if (expectedRunId) {
+    // lock order เดียวกับ payroll repo: run ก่อน แล้วค่อย case/payout
+    lockedRun = await tx.one(
+      'SELECT run_id, status FROM payroll_runs WHERE run_id = :id FOR UPDATE',
+      { id: expectedRunId },
+    );
+  }
+
+  /* releasePay ล็อก cases ก่อนเพิ่ม payout งวดใหม่ — การถอนใช้ lock เดียวกันเพื่อให้ยอดรวมของเคสไม่ขยับครึ่งทาง */
+  await tx.one('SELECT case_id FROM cases WHERE case_id = :id FOR UPDATE', { id: caseId });
+
+  const row = await tx.one(
+    `SELECT payout_id, installment_no, employee_name, amount
+     FROM case_payouts
+     WHERE payout_id = :id AND case_id = :case_id
+     FOR UPDATE`,
+    { id: payoutId, case_id: caseId },
+  );
+  if (!row) return { reason: 'not_found' };
+
+  /* re-read หลังได้ lock ทั้งหมดแล้ว — rebuild/remove/cancel อาจเปลี่ยน binding ระหว่าง initial lookup กับตรงนี้ */
+  const linked = await tx.one(
+    `SELECT pi.run_id, pr.status AS run_status
+     FROM payroll_payout_lines pl
+     JOIN payroll_items pi ON pi.item_id = pl.item_id
+     JOIN payroll_runs pr ON pr.run_id = pi.run_id
+     WHERE pl.payout_id = :id`,
+    { id: payoutId },
+  );
+  const currentRunId = linked?.run_id ?? null;
+
+  // ห้ามไล่ไป lock รอบใหม่หลังจับ case/payout แล้ว เพราะจะกลับลำดับ lock และเสี่ยง deadlock — ให้ client retry
+  if (currentRunId !== expectedRunId || (expectedRunId && !lockedRun)) {
+    return { reason: 'state_changed' };
+  }
+  if (linked?.run_status === 'paid' || lockedRun?.status === 'paid') {
+    return { reason: 'already_paid' };
+  }
+  if (linked && linked.run_status !== 'draft') return { reason: 'state_changed' };
+
+  return { row };
+}
+
 export async function cancelPayout(caseId, payoutId, actor) {
   return transaction(async (tx) => {
-    const row = await tx.one(
-      `SELECT p.payout_id, p.installment_no, p.employee_name, p.amount, pr.status AS run_status
-       FROM case_payouts p
-       LEFT JOIN payroll_payout_lines pl ON pl.payout_id = p.payout_id
-       LEFT JOIN payroll_items pi ON pi.item_id = pl.item_id
-       LEFT JOIN payroll_runs  pr ON pr.run_id  = pi.run_id
-       WHERE p.payout_id = :id AND p.case_id = :case_id`,
+    const state = await payoutCancellationForUpdate(tx, caseId, payoutId);
+    if (state.reason) return { ok: false, reason: state.reason };
+    const { row } = state;
+
+    const removed = await tx.run(
+      'DELETE FROM case_payouts WHERE payout_id = :id AND case_id = :case_id',
       { id: payoutId, case_id: caseId },
     );
-    if (!row) return { ok: false, reason: 'not_found' };
-    if (row.run_status === 'paid') return { ok: false, reason: 'already_paid' };
-
-    await tx.run('DELETE FROM case_payouts WHERE payout_id = :id', { id: payoutId });
+    if (removed !== 1) throw new Error(`รายการค่าจ้าง ${payoutId} หายไปหลังได้ row lock`);
     await logEvent(
       tx,
       caseId,

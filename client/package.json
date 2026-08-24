@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "oxlint",
+    "test": "node --test test/logic.test.js",
     "preview": "vite preview"
   },
   "//": "vite และ @vitejs/plugin-react อยู่ใน dependencies ไม่ใช่ devDependencies โดยตั้งใจ — ตัว build ของ Vercel ลงเฉพาะ dependencies ทำให้ `vite build` ล้มด้วย 'vite: command not found' (เป็นเครื่องมือ build ไม่ได้ถูก bundle ลงหน้าเว็บ จึงไม่กระทบขนาดไฟล์ที่ผู้ใช้โหลด)",

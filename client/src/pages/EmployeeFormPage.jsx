@@ -39,6 +39,13 @@ export default function EmployeeFormPage() {
   const portfolio = useRef(null); // ส่วนผลงาน — เช่นเดียวกัน
   const photo = useRef(null); // รูปพนักงาน — เช่นเดียวกัน
   const formEl = useRef(null);
+  /* รหัสของพนักงานที่ "สร้างสำเร็จไปแล้ว" ในการกดบันทึกครั้งก่อน
+     ขั้นตอนหลังจากนั้น (รูป/ใบรับรอง/ผลงาน) ล้มได้เอง เช่น ไฟล์ใหญ่เกินหรือเน็ตหลุด
+     ถ้าไม่จำรหัสไว้ การกด "บันทึก" ซ้ำเพื่อลองใหม่จะสร้างพนักงานคนใหม่ขึ้นมาอีกคน
+     แล้วได้คนซ้ำสองแถวโดยที่คนกดไม่รู้ตัว (ของเดิมเป็นแบบนี้) */
+  const createdId = useRef(null);
+  // รหัสผ่านชั่วคราวที่ server สุ่มให้ — เห็นได้ครั้งเดียวตอนนี้เท่านั้น ฐานข้อมูลเก็บแต่ hash
+  const [tempPassword, setTempPassword] = useState(null);
 
   // ค่าตั้งต้นไว้เทียบว่าผู้ใช้แก้อะไรไปแล้วบ้าง (ใช้เตือนก่อนออกจากหน้า)
   const initial = useRef(JSON.stringify(BLANK));
@@ -106,7 +113,12 @@ export default function EmployeeFormPage() {
     setFieldErrors({});
     try {
       const payload = toPayload(form);
-      const saved = isEdit ? await api.updateEmployee(id, payload) : await api.createEmployee(payload);
+      // ครั้งก่อนสร้างคนไว้แล้วแต่ขั้นแนบไฟล์ล้ม — รอบนี้ต้อง "แก้คนเดิม" ไม่ใช่สร้างใหม่
+      const existingId = isEdit ? id : createdId.current;
+      const saved = existingId
+        ? await api.updateEmployee(existingId, payload)
+        : await api.createEmployee(payload);
+      if (!isEdit) createdId.current = saved.employee_id;
 
       // พนักงานใหม่เพิ่งได้รหัสตรงนี้ รูป/ใบรับรอง/ผลงานจึงต้องบันทึกหลังพนักงานเสมอ
       await photo.current?.save(saved.employee_id);
@@ -116,6 +128,14 @@ export default function EmployeeFormPage() {
       // ล้างสถานะ "ยังไม่บันทึก" ก่อนเปลี่ยนหน้า ไม่งั้น beforeunload จะเตือนทั้งที่บันทึกสำเร็จแล้ว
       initial.current = JSON.stringify(form);
       toast(isEdit ? 'บันทึกการแก้ไขแล้ว' : `เพิ่มพนักงาน ${saved.employee_id} แล้ว`);
+
+      /* รหัสผ่านชั่วคราวอ่านย้อนหลังไม่ได้ — ต้องหยุดให้คนกดจดก่อน ไม่ใช่เด้งหน้าไปเลย
+         (toast หายเองใน 3 วินาที ซึ่งไม่พอสำหรับของที่ถ้าพลาดแล้วต้องรีเซ็ตรหัสใหม่ทั้งรอบ) */
+      if (saved.temp_password) {
+        setTempPassword({ id: saved.employee_id, password: saved.temp_password });
+        setSaving(false);
+        return;
+      }
       navigate(`/employees/${saved.employee_id}`);
     } catch (err) {
       setError(err.message);
@@ -141,6 +161,39 @@ export default function EmployeeFormPage() {
       </header>
 
       {error && <pre className="error">{error}</pre>}
+
+      {tempPassword && (
+        <section className="card temp-password">
+          <h2>เพิ่มพนักงาน {tempPassword.id} แล้ว</h2>
+          <p>
+            รหัสผ่านชั่วคราวสำหรับเข้าสู่ระบบครั้งแรก — <strong>เห็นได้ครั้งเดียวตรงนี้เท่านั้น</strong>{' '}
+            ระบบเก็บไว้เป็นค่าที่อ่านย้อนกลับไม่ได้ ถ้าปิดหน้านี้ไปต้องให้เจ้าตัวกด “ลืมรหัสผ่าน” เอง
+          </p>
+          <p className="temp-password-value mono">{tempPassword.password}</p>
+          <p className="muted">
+            เจ้าตัวจะถูกบังคับให้ตั้งรหัสใหม่ก่อนใช้งานระบบ (ทั้งหน้าเว็บและ API)
+          </p>
+          <div className="quick-edit-actions">
+            <button
+              className="btn"
+              type="button"
+              onClick={() => navigator.clipboard?.writeText(tempPassword.password).then(
+                () => toast('คัดลอกรหัสแล้ว'),
+                () => toast('คัดลอกไม่สำเร็จ — จดด้วยมือแทน'),
+              )}
+            >
+              คัดลอกรหัส
+            </button>
+            <button
+              className="btn primary"
+              type="button"
+              onClick={() => navigate(`/employees/${tempPassword.id}`)}
+            >
+              จดแล้ว ไปที่หน้าพนักงาน
+            </button>
+          </div>
+        </section>
+      )}
 
       <form className="card form" ref={formEl} onSubmit={handleSubmit}>
         {/* สามช่องที่ระบบบังคับจริงๆ อยู่บนสุดและเปิดค้างไว้เสมอ — เพิ่มคนใหม่จึงจบได้ในหน้าจอเดียว */}

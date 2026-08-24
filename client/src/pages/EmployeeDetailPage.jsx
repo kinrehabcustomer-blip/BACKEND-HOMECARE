@@ -28,17 +28,22 @@ export default function EmployeeDetailPage() {
   const [error, setError] = useState(null);
 
   // มี reload() อยู่แล้ว (ปุ่มบันทึกลาออกก็เรียกตัวนี้) — ปุ่ม "ลองใหม่" ใช้ตัวเดียวกัน ไม่ต้องมีตัวนับซ้อน
-  const reload = () =>
+  /* isStale: กดสลับพนักงานเร็วๆ คำตอบของคนก่อนหน้าที่มาถึงทีหลังต้องถูกทิ้ง
+     ไม่งั้นหน้าจะขึ้นชื่อคนหนึ่งแต่ข้อมูล/ใบรับรองของอีกคน (ปุ่มลาออก/นำออกก็จะเล็งผิดคนตามไปด้วย) */
+  const reload = (isStale = () => false) =>
     api
       .getEmployee(id)
       .then((v) => {
+        if (isStale()) return;
         setEmployee(v);
         setError(null); // โหลดผ่านแล้ว error ของรอบก่อนต้องหายไปด้วย
       })
-      .catch((err) => setError(err.message));
+      .catch((err) => !isStale() && setError(err.message));
 
   useEffect(() => {
-    reload();
+    let cancelled = false;
+    reload(() => cancelled);
+    return () => { cancelled = true; };
   }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleResign() {

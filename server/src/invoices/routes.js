@@ -20,6 +20,16 @@ export const invoicesRouter = Router();
 // ใบที่เอกสารยังอยู่ในมือเรา — แก้/รีเฟรชได้ (ส่งมอบให้ลูกค้าครั้งเดียวตอนพิมพ์)
 const OPEN_STATUSES = ['draft', 'issued'];
 
+function throwIfInvoiceMoved(result) {
+  if (!result) {
+    throw new ApiError(409, 'ข้อมูลใบแจ้งหนี้เปลี่ยนไประหว่างทำรายการ กรุณาโหลดข้อมูลใหม่แล้วลองอีกครั้ง');
+  }
+  if (result.reason === 'not_found') throw notFound('ไม่พบใบแจ้งหนี้นี้');
+  if (result.reason === 'state_changed') {
+    throw new ApiError(409, 'ข้อมูลใบแจ้งหนี้เปลี่ยนไประหว่างทำรายการ กรุณาโหลดข้อมูลใหม่แล้วลองอีกครั้ง');
+  }
+}
+
 /**
  * หาผู้ว่าจ้าง (ผู้จ่าย) ของเคสสำหรับคัดลอกลงใบแจ้งหนี้
  * เคสมีผู้ว่าจ้างของตัวเองใช้อันนั้น — ไม่มีแต่แฟ้มผู้ป่วยผูกลูกค้าไว้ ให้ใช้ลูกค้าของผู้ป่วยแทน
@@ -140,20 +150,24 @@ invoicesRouter.get('/:id', (req, res) => res.json(req.invoice));
 invoicesRouter.patch(
   '/:id',
   asyncRoute(async (req, res) => {
-    if (!OPEN_STATUSES.includes(req.invoice.status)) {
+    const result = await repo.update(req.params.id, updateInvoiceSchema.parse(req.body ?? {}));
+    throwIfInvoiceMoved(result);
+    if (result.reason === 'invalid_status') {
       throw new ApiError(409, 'ใบที่ชำระ/ยกเลิกแล้วแก้ไม่ได้ — ต้องยกเลิกแล้วออกใบใหม่');
     }
-    /* ใบมัดจำ/ใบส่วนที่เหลือถือยอดของงวดตัวเอง สองใบต้องรวมกันได้เท่ายอดที่ตกลงไว้เสมอ
-       แก้ยอดทีละใบผลรวมจะเพี้ยนเงียบๆ (เก็บได้ไม่ครบ หรือเกินกว่าที่ตกลง)
-       — ใช้ /deposit ซึ่งขยับให้ทั้งคู่พร้อมกันแทน */
-    const body = req.body ?? {};
-    if (req.invoice.is_plan_part && ('amount' in body || 'discount' in body)) {
+    if (result.reason === 'plan_amount_locked') {
       throw new ApiError(
         409,
         'ใบนี้เป็นงวดหนึ่งของแผนมัดจำ — แก้ยอดที่ช่อง "ยอดมัดจำ" ของใบมัดจำ เพื่อให้ใบคู่ขยับตามกัน',
       );
     }
-    res.json(await repo.update(req.params.id, updateInvoiceSchema.parse(req.body)));
+    if (result.reason === 'amount_below_paid') {
+      throw new ApiError(
+        409,
+        `ใบนี้รับชำระมาแล้ว ${result.paid.toLocaleString('th-TH')} บาท จึงตั้งยอดสุทธิต่ำกว่านี้ไม่ได้`,
+      );
+    }
+    res.json(result);
   }),
 );
 
@@ -190,18 +204,28 @@ invoicesRouter.post(
 invoicesRouter.post(
   '/:id/billing-plan',
   asyncRoute(async (req, res) => {
-    if (req.invoice.status !== 'draft') throw new ApiError(409, 'ใบนี้ออกไปแล้ว เปลี่ยนวิธีเก็บเงินไม่ได้');
-    if (req.invoice.billing_kind) throw new ApiError(409, 'ใบนี้เลือกวิธีเก็บเงินไปแล้ว');
-
     const input = billingPlanSchema.parse(req.body ?? {});
-    if (input.mode === 'deposit' && input.deposit_amount >= req.invoice.total) {
-      throw new ApiError(400, 'ยอดมัดจำต้องน้อยกว่ายอดเต็ม — ถ้าเก็บทั้งหมดให้เลือก "เก็บเต็มจำนวน"');
+    const result = await repo.setBillingPlan(req.params.id, input, req.user);
+    throwIfInvoiceMoved(result);
+    if (result.reason === 'invalid_status') {
+      throw new ApiError(409, 'ใบนี้ออกไปแล้ว เปลี่ยนวิธีเก็บเงินไม่ได้');
     }
-    if (req.invoice.total <= 0) {
+    if (result.reason === 'billing_plan_already_set') {
+      throw new ApiError(409, 'ใบนี้เลือกวิธีเก็บเงินไปแล้ว');
+    }
+    if (result.reason === 'empty_total') {
       throw new ApiError(409, 'ใบนี้ยังไม่มียอด — ตั้งค่าบริการของเคสก่อนจึงจะแบ่งงวดได้');
     }
-
-    res.json(await repo.setBillingPlan(req.params.id, input, req.user));
+    if (result.reason === 'deposit_not_less_than_total') {
+      throw new ApiError(400, 'ยอดมัดจำต้องน้อยกว่ายอดเต็ม — ถ้าเก็บทั้งหมดให้เลือก "เก็บเต็มจำนวน"');
+    }
+    if (result.reason === 'has_payments') {
+      throw new ApiError(409, 'ใบนี้มีรายการรับชำระแล้ว จึงเปลี่ยนวิธีเก็บเงินไม่ได้');
+    }
+    if (result.reason === 'plan_invalid') {
+      throw new ApiError(409, 'ข้อมูลแผนวางบิลของใบนี้ไม่สมบูรณ์ กรุณาตรวจสอบก่อนแบ่งงวดใหม่');
+    }
+    res.json(result);
   }),
 );
 
@@ -217,63 +241,49 @@ invoicesRouter.post(
 invoicesRouter.patch(
   '/:id/deposit',
   asyncRoute(async (req, res) => {
-    const inv = req.invoice;
-    if (inv.billing_kind !== 'deposit') {
+    const { deposit_amount } = depositAmountSchema.parse(req.body ?? {});
+    const result = await repo.setDepositAmount(req.params.id, deposit_amount);
+    throwIfInvoiceMoved(result);
+
+    if (result.reason === 'not_deposit_invoice') {
       throw new ApiError(
         409,
-        inv.billing_kind === 'balance'
+        result.billing_kind === 'balance'
           ? 'ยอดของใบส่วนที่เหลือคิดมาจากยอดมัดจำ — แก้ที่ใบมัดจำแล้วใบนี้จะเปลี่ยนตามเอง'
           : 'ใบนี้ไม่ได้แบ่งเก็บมัดจำ จึงไม่มียอดมัดจำให้แก้',
       );
     }
-    if (!OPEN_STATUSES.includes(inv.status)) {
-      throw new ApiError(409, 'ใบมัดจำที่ชำระครบ/ยกเลิกแล้วแก้ยอดไม่ได้ — เงินที่รับมาแล้วเป็นข้อเท็จจริงไปแล้ว');
+    if (result.reason === 'plan_invalid') {
+      throw new ApiError(409, 'ไม่พบใบส่วนที่เหลือเพียงใบเดียวของแผนนี้ จึงแก้ยอดมัดจำไม่ได้');
     }
-
-    // ใบส่วนที่เหลือต้องยังแก้ได้ด้วย ไม่งั้นส่วนต่างไม่มีใบไหนรับไป แล้วสองใบรวมกันไม่เท่ายอดที่ตกลง
-    const [sibling] = await repo.listPlanSiblings(inv.invoice_id);
-    if (!sibling) {
-      throw new ApiError(409, 'ไม่พบใบส่วนที่เหลือของแผนนี้ — แก้ยอดมัดจำแล้วจะไม่มีใบไหนรับส่วนต่างไป');
-    }
-    const balance = await repo.findById(sibling.invoice_id);
-    if (!OPEN_STATUSES.includes(balance.status)) {
+    if (result.reason === 'invalid_status') {
       throw new ApiError(
         409,
-        `ใบส่วนที่เหลือ ${balance.invoice_id} ${balance.status === 'paid' ? 'ชำระครบแล้ว' : 'ถูกยกเลิกแล้ว'}` +
-          ' — แก้ยอดมัดจำไม่ได้ เพราะยอดของอีกใบต้องขยับตามกันเสมอ',
+        `ใบ ${result.invoice_id} ${result.status === 'paid' ? 'ชำระครบแล้ว' : 'ถูกยกเลิกแล้ว'}` +
+          ' — แก้ยอดมัดจำไม่ได้ เพราะใบทั้งคู่ต้องขยับตามกันเสมอ',
       );
     }
-
-    const { deposit_amount } = depositAmountSchema.parse(req.body ?? {});
-    const round = (n) => Math.round(n * 100) / 100;
-    const baht = (n) => n.toLocaleString('th-TH');
-    const planTotal = round(inv.total + balance.total);
-    const rest = round(planTotal - deposit_amount);
-
-    if (deposit_amount >= planTotal) {
+    if (result.reason === 'deposit_not_less_than_total') {
       throw new ApiError(
         400,
-        `ยอดมัดจำต้องน้อยกว่ายอดเต็มของแผน (${baht(planTotal)} บาท)` +
+        `ยอดมัดจำต้องน้อยกว่ายอดเต็มของแผน (${result.total.toLocaleString('th-TH')} บาท)` +
           ' — ถ้าจะเก็บทั้งหมดในใบเดียว ให้ลบใบส่วนที่เหลือแล้วออกใบใหม่',
       );
     }
-    /* รับเงินมาแล้วเท่าไหร่ ลดยอดลงต่ำกว่านั้นไม่ได้ทั้งสองใบ — ยอดคงเหลือจะติดลบ
-       ซึ่งอ่านไม่ออกว่าเป็นเงินที่ต้องทอนคืนหรือกรอกผิด (กติกาเดียวกับตอนรับชำระเกินยอด) */
-    if (deposit_amount < inv.paid_amount) {
+    if (result.reason === 'deposit_below_paid') {
       throw new ApiError(
-        400,
-        `ใบมัดจำนี้รับเงินมาแล้ว ${baht(inv.paid_amount)} บาท — ตั้งยอดมัดจำต่ำกว่านี้ไม่ได้`,
+        409,
+        `ใบมัดจำนี้รับเงินมาแล้ว ${result.paid.toLocaleString('th-TH')} บาท — ตั้งยอดมัดจำต่ำกว่านี้ไม่ได้`,
       );
     }
-    if (rest < balance.paid_amount) {
+    if (result.reason === 'balance_below_paid') {
       throw new ApiError(
-        400,
-        `ใบส่วนที่เหลือ ${balance.invoice_id} รับเงินมาแล้ว ${baht(balance.paid_amount)} บาท` +
-          ` — ยอดมัดจำจึงสูงได้ไม่เกิน ${baht(round(planTotal - balance.paid_amount))} บาท`,
+        409,
+        `ใบส่วนที่เหลือ ${result.invoice_id} รับเงินมาแล้ว ${result.paid.toLocaleString('th-TH')} บาท` +
+          ` — ยอดมัดจำจึงสูงได้ไม่เกิน ${result.max_deposit.toLocaleString('th-TH')} บาท`,
       );
     }
-
-    res.json(await repo.setDepositAmount(inv.invoice_id, deposit_amount));
+    res.json(result);
   }),
 );
 
@@ -286,8 +296,13 @@ invoicesRouter.get(
 invoicesRouter.post(
   '/:id/issue',
   asyncRoute(async (req, res) => {
-    if (req.invoice.status !== 'draft') throw new ApiError(409, 'ใบนี้ออกไปแล้ว');
-    res.json(await repo.issue(req.params.id));
+    const result = await repo.issue(req.params.id);
+    throwIfInvoiceMoved(result);
+    if (result.reason === 'invalid_status') throw new ApiError(409, 'ใบนี้ออกไปแล้ว');
+    if (result.reason === 'billing_plan_required') {
+      throw new ApiError(409, 'กรุณาเลือกว่าจะเก็บเต็มจำนวนหรือแบ่งมัดจำก่อนออกใบ');
+    }
+    res.json(result);
   }),
 );
 
@@ -298,22 +313,39 @@ invoicesRouter.post(
 invoicesRouter.post(
   '/:id/pay',
   asyncRoute(async (req, res) => {
-    if (req.invoice.status === 'paid') throw new ApiError(409, 'ใบนี้ชำระครบแล้ว');
-    if (req.invoice.status === 'cancelled') throw new ApiError(409, 'ใบนี้ถูกยกเลิกไปแล้ว');
     const input = paySchema.parse(req.body ?? {});
-    if (input.amount != null && input.amount > req.invoice.balance) {
-      throw new ApiError(400, `รับได้ไม่เกินยอดคงเหลือ (${req.invoice.balance.toLocaleString('th-TH')} บาท)`);
+    const result = await repo.pay(req.params.id, input, req.user);
+    throwIfInvoiceMoved(result);
+    if (result.reason === 'cancelled') throw new ApiError(409, 'ใบนี้ถูกยกเลิกไประหว่างทำรายการ');
+    if (result.reason === 'fully_paid') throw new ApiError(409, 'ใบนี้มีผู้รับชำระครบยอดไปแล้ว กรุณาโหลดข้อมูลใหม่');
+    if (result.reason === 'billing_plan_required') {
+      throw new ApiError(409, 'กรุณาเลือกว่าจะเก็บเต็มจำนวนหรือแบ่งมัดจำก่อนรับชำระ');
     }
+    if (result.reason === 'request_id_required') {
+      throw new ApiError(400, 'คำขอรับชำระไม่มีรหัสป้องกันการบันทึกซ้ำ');
+    }
+    if (result.reason === 'idempotency_conflict') {
+      throw new ApiError(409, 'คำขอรับชำระเดิมถูกส่งมาด้วยข้อมูลที่ต่างกัน กรุณาโหลดข้อมูลใหม่แล้วลองอีกครั้ง');
+    }
+    if (result.reason === 'amount_exceeds_balance') {
+      throw new ApiError(
+        409,
+        `ยอดคงเหลือเปลี่ยนไประหว่างทำรายการ ขณะนี้รับได้ไม่เกิน ${result.balance.toLocaleString('th-TH')} บาท`,
+      );
+    }
+    if (result.reason === 'invalid_amount') throw new ApiError(400, 'จำนวนเงินที่รับต้องมากกว่า 0');
 
-    res.json(await repo.pay(req.params.id, input, req.user));
+    res.json(result);
   }),
 );
 
 invoicesRouter.post(
   '/:id/cancel',
   asyncRoute(async (req, res) => {
-    if (req.invoice.status === 'cancelled') throw new ApiError(409, 'ใบนี้ถูกยกเลิกไปแล้ว');
-    res.json(await repo.cancel(req.params.id));
+    const result = await repo.cancel(req.params.id);
+    throwIfInvoiceMoved(result);
+    if (result.reason === 'invalid_status') throw new ApiError(409, 'ใบนี้ถูกยกเลิกไปแล้ว');
+    res.json(result);
   }),
 );
 
@@ -332,27 +364,16 @@ invoicesRouter.post(
 invoicesRouter.delete(
   '/:id',
   asyncRoute(async (req, res) => {
-    /* เทียบกับเงินที่รับมาแล้วจริง ไม่ใช่แค่สถานะ "ชำระแล้ว" — ใบที่รับมัดจำมาบางส่วนยังเป็น "ออกใบแล้ว"
-       อยู่จนกว่าจะรับครบ ถ้าดูแค่สถานะจะลบผ่านฉลุยแล้วรายการรับเงินหายตามไปด้วย (ON DELETE CASCADE) */
-    if (req.invoice.status === 'paid' || req.invoice.paid_amount > 0) {
-      throw new ApiError(409, 'ใบที่รับชำระแล้วลบทิ้งไม่ได้ — ให้กด "ยกเลิกใบนี้" แทน (ใบจะยังอยู่เป็นประวัติ)');
-    }
-
-    /* ใบในแผนเดียวกันถูกลบไปด้วยทั้งชุด (ดู repo.remove) — ใบไหนรับเงินมาแล้วก็ลบทั้งแผนไม่ได้
-       เหตุผลเดียวกับข้างบน ต่างกันแค่หลักฐานการเงินอยู่บนใบคู่ ไม่ใช่ใบที่กดลบ */
-    const plan = await repo.listPlanSiblings(req.params.id);
-    const settled = plan.find(
-      (s) => s.status !== 'cancelled' && (s.status === 'paid' || Number(s.paid_amount) > 0),
-    );
-    if (settled) {
+    const result = await repo.remove(req.params.id);
+    throwIfInvoiceMoved(result);
+    if (result.reason === 'has_payments') {
       throw new ApiError(
         409,
-        `ใบ ${settled.invoice_id} ในแผนเดียวกันรับชำระมาแล้ว — ลบใบนี้ต้องลบทั้งแผนจึงทำไม่ได้ ` +
+        `ใบ ${result.invoice_id} ในแผนเดียวกันรับชำระมาแล้ว — ลบใบนี้ต้องลบทั้งแผนจึงทำไม่ได้ ` +
           'ให้กด "ยกเลิกใบนี้" แทน (ใบจะยังอยู่เป็นประวัติ)',
       );
     }
-
     // คืนรายการที่ลบจริงกลับไป หน้าเว็บจะได้บอกได้ว่าลบไปกี่ใบ (ลบใบมัดจำ = ใบส่วนที่เหลือหายไปด้วย)
-    res.json({ deleted: await repo.remove(req.params.id) });
+    res.json({ deleted: result.deleted });
   }),
 );

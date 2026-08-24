@@ -1,10 +1,12 @@
 import { z } from 'zod';
+import { zodDate } from '../lib/dates.js';
 
 export const POSITIONS = ['caregiver', 'assistant_nurse', 'practical_nurse', 'nurse', 'therapist', 'manager', 'hr'];
 export const EMPLOYMENT_TYPES = ['fulltime', 'parttime', 'contract', 'daily'];
 export const STATUSES = ['active', 'probation', 'on_leave', 'suspended', 'resigned'];
 
-const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'ต้องอยู่ในรูปแบบ YYYY-MM-DD');
+// วันที่ต้องมีอยู่จริงในปฏิทิน ไม่ใช่แค่รูปแบบถูก (2026-02-31 เคยผ่านได้ — ดู lib/dates.js)
+const date = zodDate(z);
 const optionalText = z.string().trim().max(500).optional().nullable();
 const optionalLongText = z.string().trim().max(2000).optional().nullable(); // ประวัติการศึกษา เขียนยาวได้
 

@@ -5,6 +5,176 @@ const NOW = `to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')
    ของเดิมใช้ UTC ทำให้ทุกอย่างที่ทำระหว่างเที่ยงคืนถึงตีเจ็ดถูกลงวันที่เป็นเมื่อวาน
    (ออกใบตีสองของวันที่ 1 ได้ issue_date เป็นวันที่ 31 ของเดือนก่อน — ผิดทั้งเอกสารและรอบบัญชี) */
 const TODAY = () => new Date(Date.now() + 7 * 3.6e6).toISOString().slice(0, 10);
+const roundMoney = (n) => Math.round(Number(n) * 100) / 100;
+
+const ACTION_STATES = Object.freeze({
+  update: ['draft', 'issued'],
+  issue: ['draft'],
+  billing_plan: ['draft'],
+  cancel: ['draft', 'issued', 'paid'],
+});
+
+/** กติกาสถานะของทุกคำสั่งที่แก้ invoice — ต้องตัดสินจากแถวที่ล็อกแล้วเท่านั้น */
+export function assessInvoiceAction(action, status) {
+  const allowed = ACTION_STATES[action];
+  if (!allowed) throw new Error(`ไม่รู้จักคำสั่ง invoice action: ${action}`);
+  return allowed.includes(status) ? { status } : { reason: 'invalid_status', status };
+}
+
+/** ล็อก invoice เดี่ยว แล้วอ่านสถานะ/โครงสร้างล่าสุดสำหรับคำสั่งนั้น */
+export async function invoiceForUpdate(tx, invoiceId, action) {
+  const invoice = await tx.one(
+    `SELECT i.*,
+            EXISTS (SELECT 1 FROM invoice_items ii WHERE ii.invoice_id = i.invoice_id) AS has_items
+     FROM invoices i
+     WHERE i.invoice_id = :id
+     FOR UPDATE OF i`,
+    { id: invoiceId },
+  );
+  if (!invoice) return { reason: 'not_found' };
+
+  const state = assessInvoiceAction(action, invoice.status);
+  return state.reason ? { ...state, invoice } : { invoice };
+}
+
+/**
+ * ล็อกสมาชิกของแผนด้วยลำดับเดียวเสมอ: หา root แบบไม่ล็อก -> ล็อก root -> ล็อก children ตามรหัส
+ * ห้ามล็อก target ก่อน เพราะคำขอที่เริ่มจากใบ balance จะเกิดวงจร child -> root กับคำสั่งอื่นได้
+ */
+export async function invoicePlanForUpdate(tx, invoiceId) {
+  const initial = await tx.one(
+    `SELECT invoice_id, COALESCE(parent_invoice_id, invoice_id) AS root_id
+     FROM invoices WHERE invoice_id = :id`,
+    { id: invoiceId },
+  );
+  if (!initial) return { reason: 'not_found' };
+
+  const root = await tx.one(
+    `SELECT * FROM invoices WHERE invoice_id = :root_id FOR UPDATE`,
+    { root_id: initial.root_id },
+  );
+  if (!root || root.parent_invoice_id != null) return { reason: 'state_changed' };
+
+  /* เป็น statement ใหม่หลังได้ root lock เพื่อให้เห็น child ที่คำขอก่อนหน้าเพิ่งสร้างและ commit */
+  const children = await tx.all(
+    `SELECT * FROM invoices
+     WHERE parent_invoice_id = :root_id
+     ORDER BY invoice_id
+     FOR UPDATE`,
+    { root_id: initial.root_id },
+  );
+  const rows = [root, ...children];
+  const target = rows.find((row) => row.invoice_id === invoiceId);
+  if (!target || (target.invoice_id !== root.invoice_id && target.parent_invoice_id !== root.invoice_id)) {
+    return { reason: 'state_changed' };
+  }
+
+  return { root_id: root.invoice_id, root, target, rows };
+}
+
+/**
+ * ตรวจยอดรับชำระกับสถานะล่าสุดที่อ่านภายใน transaction
+ * ผู้เรียกต้องล็อกแถว invoices ก่อน แล้วอ่าน SUM(invoice_payments) ด้วย statement ถัดไป
+ * เพื่อให้คำขอที่รอ lock เห็น payment ที่คำขอก่อนหน้าเพิ่ง commit
+ */
+export function assessPaymentCapacity(status, totalAmount, paidAmount, requestedAmount) {
+  const total = roundMoney(totalAmount);
+  const paid = roundMoney(paidAmount ?? 0);
+  const balance = roundMoney(total - paid);
+
+  if (status === 'cancelled') return { reason: 'cancelled', total, paid, balance };
+  if (status === 'paid' || balance <= 0) return { reason: 'fully_paid', total, paid, balance };
+
+  // ไม่ส่งยอดมา = รับยอดคงเหลือ "ล่าสุด" หลังได้ row lock ไม่ใช่ balance เก่าจาก middleware
+  const amount = requestedAmount == null ? balance : roundMoney(requestedAmount);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return { reason: 'invalid_amount', total, paid, balance, amount };
+  }
+  if (amount > balance) {
+    return { reason: 'amount_exceeds_balance', total, paid, balance, amount };
+  }
+
+  return { total, paid, balance, amount };
+}
+
+async function paymentInvoiceForUpdate(tx, invoiceId) {
+  return tx.one(
+    `SELECT invoice_id, total, billing_kind, status
+     FROM invoices WHERE invoice_id = :id FOR UPDATE`,
+    { id: invoiceId },
+  );
+}
+
+async function capacityForLockedPayment(tx, invoice, requestedAmount) {
+  if (invoice.status === 'cancelled') return { reason: 'cancelled' };
+  if (invoice.status === 'paid') return { reason: 'fully_paid' };
+  if (invoice.billing_kind == null) return { reason: 'billing_plan_required' };
+
+  /* อ่านยอดที่รับมาแล้วของ "ใบที่เพิ่งล็อก" — ต้องใช้รหัสจากแถวที่ล็อกไว้ ไม่ใช่ตัวแปรนอกสโคป
+     (เคยเขียนเป็น invoiceId ซึ่งไม่มีในฟังก์ชันนี้ ทำให้การรับชำระทุกครั้งพังด้วย ReferenceError) */
+  const { paid } = await tx.one(
+    `SELECT COALESCE(SUM(amount), 0) AS paid
+     FROM invoice_payments WHERE invoice_id = :id`,
+    { id: invoice.invoice_id },
+  );
+
+  const capacity = assessPaymentCapacity(invoice.status, invoice.total, paid, requestedAmount);
+  return capacity.reason ? capacity : { invoice, ...capacity };
+}
+
+/** อ่านสถานะรับชำระตามลำดับที่ทำให้ row lock ป้องกัน stale balance ได้จริง */
+export async function paymentCapacityForUpdate(tx, invoiceId, requestedAmount) {
+  const invoice = await paymentInvoiceForUpdate(tx, invoiceId);
+  if (!invoice) return { reason: 'not_found' };
+  return capacityForLockedPayment(tx, invoice, requestedAmount);
+}
+
+/** key เดิมใช้ซ้ำได้เฉพาะเจตนารับเงินชุดเดิม ห้ามเปลี่ยน payload แล้วอาศัย key เก่าทับรายการ */
+export function assessPaymentReplay(payment, input, actor) {
+  const requested = {
+    amount: input.amount == null ? roundMoney(payment.amount) : roundMoney(input.amount),
+    paid_at: input.paid_at ?? payment.paid_at,
+    method: input.payment_method ?? null,
+    note: input.note ?? null,
+    received_by: actor?.employee_id ?? null,
+  };
+  const recorded = {
+    amount: roundMoney(payment.amount),
+    paid_at: payment.paid_at,
+    method: payment.method ?? null,
+    note: payment.note ?? null,
+    received_by: payment.received_by ?? null,
+  };
+
+  const changed_fields = Object.keys(recorded).filter((field) => requested[field] !== recorded[field]);
+  return changed_fields.length > 0
+    ? { reason: 'idempotency_conflict', changed_fields }
+    : { replayed: true, payment_id: payment.payment_id };
+}
+
+/**
+ * ล็อก invoice ก่อนค้น request_id — คำขอซ้ำที่ยิงพร้อมกันจึงรอคำขอแรก commit แล้วเห็น payment เดิม
+ * ต้องค้น key ก่อนเช็คสถานะ paid/cancelled เพราะ retry หลังคำขอแรกปิดยอดแล้วต้อง replay สำเร็จ
+ */
+export async function paymentRequestForUpdate(tx, invoiceId, input, actor) {
+  if (!input.request_id) return { reason: 'request_id_required' };
+
+  const invoice = await paymentInvoiceForUpdate(tx, invoiceId);
+  if (!invoice) return { reason: 'not_found' };
+
+  const existing = await tx.one(
+    `SELECT payment_id, amount, paid_at, method, note, received_by
+     FROM invoice_payments
+     WHERE invoice_id = :invoice_id AND request_id = :request_id`,
+    { invoice_id: invoiceId, request_id: input.request_id },
+  );
+  if (existing) {
+    const replay = assessPaymentReplay(existing, input, actor);
+    return replay.reason ? replay : { invoice, payment: existing, ...replay };
+  }
+
+  return capacityForLockedPayment(tx, invoice, input.amount);
+}
 
 // ช่องที่แก้ได้ตอนยังเป็นร่าง (สถานะ/ยอดรวมไม่อยู่ในนี้ — total คิดจาก amount-discount เสมอ)
 const EDITABLE = [
@@ -171,6 +341,12 @@ export const findById = async (id) => {
   const [items, payments] = await Promise.all([listItems(id), listPayments(id)]);
   return withComputed({ ...row, items, payments });
 };
+
+/** หลัง commit อาจมีคำขออื่นลบใบก่อน SELECT ตอบกลับ — แปลงเป็น conflict แทนการคืน null/เกิด TypeError ที่ route */
+export async function invoiceMutationResult(result, loadInvoice = findById) {
+  if (result.reason) return result;
+  return (await loadInvoice(result.invoice_id)) ?? { reason: 'state_changed' };
+}
 
 // ใบแจ้งหนี้ของลูกค้ารายหนึ่งดึงผ่าน list({ customer_id }) ซึ่งมีตัวกรอง/แบ่งหน้าครบอยู่แล้ว
 // เคยมี listForCustomer แยกไว้ที่นี่แต่ไม่มีใครเรียก — ลบทิ้งแล้ว
@@ -423,35 +599,83 @@ function describeService(c) {
     .join(' — ');
 }
 
-export async function update(invoiceId, input) {
+export async function updateInvoiceForTransaction(tx, invoiceId, input) {
   const fields = EDITABLE.filter((c) => c in input);
-  if (fields.length === 0) return findById(invoiceId);
+  const locked = await invoiceForUpdate(tx, invoiceId, 'update');
+  if (locked.reason) return locked;
+  const invoice = locked.invoice;
+
+  if (fields.length === 0) return { invoice_id: invoiceId };
+
+  const changesAmount = 'amount' in input || 'discount' in input;
+  if (
+    changesAmount &&
+    (invoice.parent_invoice_id != null || invoice.billing_kind === 'deposit' || invoice.billing_kind === 'balance')
+  ) {
+    return { reason: 'plan_amount_locked', invoice_id: invoiceId };
+  }
 
   const values = { invoice_id: invoiceId };
   for (const c of fields) values[c] = input[c] ?? null;
 
   // ยอดสุทธิคิดใหม่ทุกครั้งที่ยอด/ส่วนลดถูกแตะ — ไม่ให้หน้าเว็บส่ง total มาเอง จะได้ไม่มีทางขัดกัน
   const sets = fields.map((c) => `${c} = :${c}`);
-  if ('amount' in input || 'discount' in input) {
-    sets.push('total = GREATEST(0, COALESCE(:amount_f, amount) - COALESCE(:discount_f, discount))');
-    values.amount_f = input.amount ?? null;
-    values.discount_f = input.discount ?? null;
+  if (changesAmount) {
+    const nextAmount = 'amount' in input ? input.amount : invoice.amount;
+    const nextDiscount = 'discount' in input ? input.discount : invoice.discount;
+    const nextTotal = roundMoney(Math.max(0, Number(nextAmount) - Number(nextDiscount)));
+    const payment = await tx.one(
+      `SELECT COALESCE(SUM(amount), 0) AS paid, MAX(paid_at) AS last_paid_at
+       FROM invoice_payments WHERE invoice_id = :invoice_id`,
+      { invoice_id: invoiceId },
+    );
+    const paid = roundMoney(payment.paid);
+    if (nextTotal < paid) {
+      return { reason: 'amount_below_paid', invoice_id: invoiceId, total: nextTotal, paid };
+    }
+
+    /* total ที่ตรวจเพดานกับ total ที่บันทึกต้องเป็นเลขเดียวกัน ไม่อย่างนั้นเศษเกินสตางค์
+       อาจผ่านการตรวจด้วยค่าที่ปัดแล้ว แต่ถูกเขียนเป็น DOUBLE PRECISION ดิบคนละค่า */
+    sets.push('total = :next_total');
+    sets.push(`status = CASE WHEN :settled THEN 'paid' ELSE status END`);
+    sets.push('paid_at = CASE WHEN :settled THEN COALESCE(paid_at, :last_paid_at) ELSE paid_at END');
+    values.next_total = nextTotal;
+    values.settled = paid > 0 && nextTotal === paid;
+    values.last_paid_at = payment.last_paid_at;
   }
 
-  await sql.run(
-    `UPDATE invoices SET ${sets.join(', ')}, updated_at = ${NOW} WHERE invoice_id = :invoice_id`,
+  const changed = await tx.run(
+    `UPDATE invoices
+     SET ${sets.join(', ')}, updated_at = ${NOW}
+     WHERE invoice_id = :invoice_id AND status IN ('draft', 'issued')`,
     values,
   );
-  return findById(invoiceId);
+  return changed === 1 ? { invoice_id: invoiceId } : { reason: 'state_changed' };
+}
+
+export async function update(invoiceId, input) {
+  const result = await transaction((tx) => updateInvoiceForTransaction(tx, invoiceId, input));
+  return invoiceMutationResult(result);
 }
 
 /** ออกใบ (ร่าง -> ออกแล้ว) — หลังจากนี้แก้ไม่ได้ เพราะถือว่าส่งให้ลูกค้าไปแล้ว */
-export async function issue(invoiceId) {
-  await sql.run(
-    `UPDATE invoices SET status = 'issued', updated_at = ${NOW} WHERE invoice_id = :id`,
+export async function issueInvoiceForTransaction(tx, invoiceId) {
+  const locked = await invoiceForUpdate(tx, invoiceId, 'issue');
+  if (locked.reason) return locked;
+  if (locked.invoice.billing_kind == null) return { reason: 'billing_plan_required' };
+
+  const changed = await tx.run(
+    `UPDATE invoices
+     SET status = 'issued', updated_at = ${NOW}
+     WHERE invoice_id = :id AND status = 'draft'`,
     { id: invoiceId },
   );
-  return findById(invoiceId);
+  return changed === 1 ? { invoice_id: invoiceId } : { reason: 'state_changed' };
+}
+
+export async function issue(invoiceId) {
+  const result = await transaction((tx) => issueInvoiceForTransaction(tx, invoiceId));
+  return invoiceMutationResult(result);
 }
 
 /**
@@ -463,61 +687,72 @@ export async function issue(invoiceId) {
  *
  * เก็บชื่อพนักงานที่รับเงินไว้ทั้งบนงวดและบนใบ — บนใบใช้เป็นผู้ลงนามใบเสร็จ (คนรับงวดสุดท้าย)
  */
-export async function pay(invoiceId, { amount, paid_at, payment_method, note }, actor) {
-  return transaction(async (tx) => {
-    const inv = await tx.one(
-      `SELECT i.total, i.billing_kind,
-              COALESCE((SELECT SUM(p.amount) FROM invoice_payments p WHERE p.invoice_id = i.invoice_id), 0) AS paid
-       FROM invoices i WHERE i.invoice_id = :id`,
-      { id: invoiceId },
-    );
+export async function payInvoiceForTransaction(tx, invoiceId, input, actor) {
+  const request = await paymentRequestForUpdate(tx, invoiceId, input, actor);
+  if (request.reason) return request;
+  if (request.replayed) return { invoice_id: invoiceId, replayed: true };
 
-    const round = (n) => Math.round(Number(n) * 100) / 100;
-    const balance = round(Number(inv.total) - Number(inv.paid));
-    const received = round(amount ?? balance);
+  const inv = request.invoice;
+  const received = request.amount;
+  const paidAt = input.paid_at ?? TODAY();
 
-    // ใบมัดจำทั้งใบคือเงินมัดจำ — ธงนี้ใช้แยกในใบเสร็จและรายงาน
-    const isDeposit = inv.billing_kind === 'deposit';
+  // ใบมัดจำทั้งใบคือเงินมัดจำ — ธงนี้ใช้แยกในใบเสร็จและรายงาน
+  const isDeposit = inv.billing_kind === 'deposit';
 
-    await tx.run(
-      `INSERT INTO invoice_payments
-         (invoice_id, amount, paid_at, is_deposit, method, note, received_by, received_by_name)
-       VALUES (:id, :amount, :paid_at, :is_deposit, :method, :note, :by, :by_name)`,
-      {
-        id: invoiceId,
-        amount: received,
-        paid_at: paid_at ?? TODAY(),
-        is_deposit: isDeposit,
-        method: payment_method ?? null,
-        note: note ?? null,
-        by: actor?.employee_id ?? null,
-        by_name: actor?.name ?? null,
-      },
-    );
+  await tx.run(
+    `INSERT INTO invoice_payments
+       (invoice_id, request_id, amount, paid_at, is_deposit, method, note, received_by, received_by_name)
+     VALUES (:id, :request_id, :amount, :paid_at, :is_deposit, :method, :note, :by, :by_name)`,
+    {
+      id: invoiceId,
+      request_id: input.request_id,
+      amount: received,
+      paid_at: paidAt,
+      is_deposit: isDeposit,
+      method: input.payment_method ?? null,
+      note: input.note ?? null,
+      by: actor?.employee_id ?? null,
+      by_name: actor?.name ?? null,
+    },
+  );
 
-    const settled = round(Number(inv.paid) + received) >= round(Number(inv.total));
+  const settled = received >= request.balance;
 
-    await tx.run(
-      `UPDATE invoices
-       SET status = CASE WHEN :settled THEN 'paid' ELSE status END,
-           paid_at = CASE WHEN :settled THEN :paid_at ELSE paid_at END,
-           payment_method = COALESCE(:payment_method, payment_method),
-           paid_by = :paid_by,
-           paid_by_name = :paid_by_name,
-           updated_at = ${NOW}
-       WHERE invoice_id = :id`,
-      {
-        id: invoiceId,
-        settled,
-        paid_at: paid_at ?? TODAY(),
-        payment_method: payment_method ?? null,
-        paid_by: actor?.employee_id ?? null,
-        paid_by_name: actor?.name ?? null,
-      },
-    );
+  /* รับเงินเข้าใบร่าง = ใบนั้นถูก "ออก" ไปแล้วโดยพฤตินัย — ยกสถานะให้ตรงกับความจริงทันที
+     ปล่อยไว้เป็นร่างแปลว่ายอดยังถูกแก้ได้ (update อนุญาต draft) ทั้งที่มีเงินผูกอยู่แล้ว
+     และเอกสารที่ลูกค้าถืออยู่จะเป็น "ร่าง" ตลอดไป — หน้าจอยอมให้กดรับชำระจากใบร่างโดยตั้งใจ
+     (ลูกค้าโอนมาก่อนออกใบเป็นเรื่องปกติ) จึงแก้ที่ผลลัพธ์ ไม่ใช่ปิดทางนั้นทิ้ง */
+  const issuedNow = inv.status === 'draft';
 
-    return invoiceId;
-  }).then(findById);
+  await tx.run(
+    `UPDATE invoices
+     SET status = CASE WHEN :settled THEN 'paid'
+                       WHEN :issued_now THEN 'issued'
+                       ELSE status END,
+         paid_at = CASE WHEN :settled THEN :paid_at ELSE paid_at END,
+         payment_method = COALESCE(:payment_method, payment_method),
+         paid_by = :paid_by,
+         paid_by_name = :paid_by_name,
+         updated_at = ${NOW}
+     WHERE invoice_id = :id`,
+    {
+      id: invoiceId,
+      settled,
+      issued_now: issuedNow,
+      paid_at: paidAt,
+      payment_method: input.payment_method ?? null,
+      paid_by: actor?.employee_id ?? null,
+      paid_by_name: actor?.name ?? null,
+    },
+  );
+
+  return { invoice_id: invoiceId, replayed: false, issued_now: issuedNow };
+}
+
+export async function pay(invoiceId, input, actor) {
+  const result = await transaction((tx) => payInvoiceForTransaction(tx, invoiceId, input, actor));
+
+  return invoiceMutationResult(result);
 }
 
 /**
@@ -530,65 +765,97 @@ export async function pay(invoiceId, { amount, paid_at, payment_method, note }, 
  * ทำใน transaction เดียว เพราะครึ่งทาง (ใบมัดจำถูกแก้แล้วแต่ใบส่วนที่เหลือยังไม่เกิด)
  * แปลว่าลูกค้าจะได้บิลที่น้อยกว่าที่ตกลงไว้โดยไม่มีอะไรตามเก็บส่วนที่เหลือ
  */
-export async function setBillingPlan(invoiceId, { mode, deposit_amount }, actor) {
-  return transaction(async (tx) => {
-    const inv = await tx.one('SELECT * FROM invoices WHERE invoice_id = :id', { id: invoiceId });
+export async function setBillingPlanForTransaction(tx, invoiceId, { mode, deposit_amount }, actor) {
+  const locked = await invoiceForUpdate(tx, invoiceId, 'billing_plan');
+  if (locked.reason) return locked;
+  const inv = locked.invoice;
 
-    if (mode === 'full') {
-      await tx.run(
-        `UPDATE invoices SET billing_kind = 'full', updated_at = ${NOW} WHERE invoice_id = :id`,
-        { id: invoiceId },
-      );
-      return invoiceId;
-    }
+  if (inv.billing_kind != null) return { reason: 'billing_plan_already_set' };
+  if (inv.parent_invoice_id != null) return { reason: 'plan_invalid' };
 
-    const deposit = Math.round(Number(deposit_amount) * 100) / 100;
-    const rest = Math.round((Number(inv.total) - deposit) * 100) / 100;
+  /* root ที่ยังไม่เคยแบ่งต้องไม่มี child อยู่แล้ว หากมีแปลว่าข้อมูลแผนไม่สมบูรณ์ ห้ามสร้างซ้ำทับลงไป */
+  const children = await tx.all(
+    `SELECT invoice_id FROM invoices
+     WHERE parent_invoice_id = :id
+     ORDER BY invoice_id
+     FOR UPDATE`,
+    { id: invoiceId },
+  );
+  if (children.length > 0) return { reason: 'plan_invalid' };
 
-    // ใบแรกกลายเป็นใบมัดจำ — ส่วนลดถูกคิดไปแล้วในยอดเต็ม จึงไม่ยกมาที่งวด (ไม่งั้นลดซ้ำสองรอบ)
-    await tx.run(
+  const { paid } = await tx.one(
+    `SELECT COALESCE(SUM(amount), 0) AS paid
+     FROM invoice_payments WHERE invoice_id = :id`,
+    { id: invoiceId },
+  );
+  if (roundMoney(paid) > 0) return { reason: 'has_payments', invoice_id: invoiceId };
+  if (roundMoney(inv.total) <= 0) return { reason: 'empty_total' };
+
+  if (mode === 'full') {
+    const changed = await tx.run(
       `UPDATE invoices
-       SET billing_kind = 'deposit',
-           service_description = :description,
-           amount = :amount, discount = 0, total = :amount,
-           updated_at = ${NOW}
-       WHERE invoice_id = :id`,
-      { id: invoiceId, amount: deposit, description: `เงินมัดจำ — ${inv.service_description}` },
+       SET billing_kind = 'full', updated_at = ${NOW}
+       WHERE invoice_id = :id AND status = 'draft' AND billing_kind IS NULL`,
+      { id: invoiceId },
     );
+    return changed === 1 ? { invoice_id: invoiceId } : { reason: 'state_changed' };
+  }
 
-    const nextId = await nextInvoiceId(tx);
-    await tx.run(
-      `INSERT INTO invoices
-         (invoice_id, case_id, customer_id, issue_date, due_date,
-          bill_to_name, bill_to_tax_id, bill_to_address,
-          service_description, amount, discount, total, payment_method, note,
-          issued_by, issued_by_name, billing_kind, parent_invoice_id)
-       VALUES
-         (:invoice_id, :case_id, :customer_id, :issue_date, :due_date,
-          :bill_to_name, :bill_to_tax_id, :bill_to_address,
-          :description, :amount, 0, :amount, :payment_method, :note,
-          :issued_by, :issued_by_name, 'balance', :parent)`,
-      {
-        invoice_id: nextId,
-        case_id: inv.case_id,
-        customer_id: inv.customer_id,
-        issue_date: inv.issue_date,
-        due_date: inv.due_date,
-        bill_to_name: inv.bill_to_name,
-        bill_to_tax_id: inv.bill_to_tax_id,
-        bill_to_address: inv.bill_to_address,
-        description: `ยอดคงเหลือหลังหักมัดจำ — ${inv.service_description}`,
-        amount: rest,
-        payment_method: inv.payment_method,
-        note: inv.note,
-        issued_by: actor?.employee_id ?? null,
-        issued_by_name: actor?.name ?? null,
-        parent: invoiceId,
-      },
-    );
+  const deposit = roundMoney(deposit_amount);
+  const rest = roundMoney(Number(inv.total) - deposit);
+  if (!Number.isFinite(deposit) || deposit <= 0 || rest <= 0) {
+    return { reason: 'deposit_not_less_than_total', total: roundMoney(inv.total) };
+  }
 
-    return invoiceId;
-  }).then(findById);
+  // ใบแรกกลายเป็นใบมัดจำ — ส่วนลดถูกคิดไปแล้วในยอดเต็ม จึงไม่ยกมาที่งวด (ไม่งั้นลดซ้ำสองรอบ)
+  const changed = await tx.run(
+    `UPDATE invoices
+     SET billing_kind = 'deposit',
+         service_description = :description,
+         amount = :amount, discount = 0, total = :amount,
+         updated_at = ${NOW}
+     WHERE invoice_id = :id AND status = 'draft' AND billing_kind IS NULL`,
+    { id: invoiceId, amount: deposit, description: `เงินมัดจำ — ${inv.service_description}` },
+  );
+  if (changed !== 1) return { reason: 'state_changed' };
+
+  const nextId = await nextInvoiceId(tx);
+  await tx.run(
+    `INSERT INTO invoices
+       (invoice_id, case_id, customer_id, issue_date, due_date,
+        bill_to_name, bill_to_tax_id, bill_to_address,
+        service_description, amount, discount, total, payment_method, note,
+        issued_by, issued_by_name, billing_kind, parent_invoice_id)
+     VALUES
+       (:invoice_id, :case_id, :customer_id, :issue_date, :due_date,
+        :bill_to_name, :bill_to_tax_id, :bill_to_address,
+        :description, :amount, 0, :amount, :payment_method, :note,
+        :issued_by, :issued_by_name, 'balance', :parent)`,
+    {
+      invoice_id: nextId,
+      case_id: inv.case_id,
+      customer_id: inv.customer_id,
+      issue_date: inv.issue_date,
+      due_date: inv.due_date,
+      bill_to_name: inv.bill_to_name,
+      bill_to_tax_id: inv.bill_to_tax_id,
+      bill_to_address: inv.bill_to_address,
+      description: `ยอดคงเหลือหลังหักมัดจำ — ${inv.service_description}`,
+      amount: rest,
+      payment_method: inv.payment_method,
+      note: inv.note,
+      issued_by: actor?.employee_id ?? null,
+      issued_by_name: actor?.name ?? null,
+      parent: invoiceId,
+    },
+  );
+
+  return { invoice_id: invoiceId };
+}
+
+export async function setBillingPlan(invoiceId, input, actor) {
+  const result = await transaction((tx) => setBillingPlanForTransaction(tx, invoiceId, input, actor));
+  return invoiceMutationResult(result);
 }
 
 /** ใบอื่นที่อยู่ในแผนเดียวกัน (คู่มัดจำ–ส่วนที่เหลือ) — ให้หน้าเว็บลิงก์ถึงกันได้ */
@@ -617,51 +884,103 @@ export const listPlanSiblings = (invoiceId) =>
  * ยอดใหม่ของใบไหนเท่ากับเงินที่รับมาแล้วพอดี = ใบนั้นปิดยอดทันที ไม่ต้องให้ไปกดรับชำระ 0 บาท
  * (เกิดตอนลดยอดมัดจำลงมาเท่ากับที่ลูกค้าโอนมาแล้ว — ใบจะค้างอยู่ทั้งที่ไม่เหลืออะไรให้เก็บ)
  */
-export async function setDepositAmount(depositId, deposit) {
-  return transaction(async (tx) => {
-    const rows = await tx.all(
-      `SELECT i.invoice_id, i.total,
-              COALESCE((SELECT SUM(p.amount) FROM invoice_payments p WHERE p.invoice_id = i.invoice_id), 0) AS paid,
-              (SELECT MAX(p.paid_at) FROM invoice_payments p WHERE p.invoice_id = i.invoice_id) AS last_paid_at
-       FROM invoices i
-       WHERE i.invoice_id = :id OR i.parent_invoice_id = :id`,
-      { id: depositId },
-    );
+export async function setDepositAmountForTransaction(tx, depositId, deposit) {
+  const plan = await invoicePlanForUpdate(tx, depositId);
+  if (plan.reason) return plan;
+  if (plan.target.invoice_id !== plan.root_id || plan.root.billing_kind !== 'deposit') {
+    return { reason: 'not_deposit_invoice', billing_kind: plan.target.billing_kind };
+  }
 
-    const round = (n) => Math.round(Number(n) * 100) / 100;
-    const planTotal = round(rows.reduce((sum, r) => sum + Number(r.total), 0));
-    const depositNew = round(deposit);
-    const restNew = round(planTotal - depositNew);
+  const balances = plan.rows.filter((row) => row.billing_kind === 'balance');
+  const unexpected = plan.rows.filter(
+    (row) => row.invoice_id !== plan.root_id && row.billing_kind !== 'balance',
+  );
+  if (balances.length !== 1 || unexpected.length > 0) return { reason: 'plan_invalid' };
+  const balance = balances[0];
 
-    for (const row of rows) {
-      const amount = row.invoice_id === depositId ? depositNew : restNew;
-      const paid = round(row.paid);
-      const settled = paid > 0 && amount <= paid;
-
-      await tx.run(
-        `UPDATE invoices
-         SET amount   = :amount,
-             discount = 0,
-             total    = :amount,
-             status   = CASE WHEN :settled THEN 'paid' ELSE status END,
-             paid_at  = CASE WHEN :settled THEN COALESCE(paid_at, :last_paid) ELSE paid_at END,
-             updated_at = ${NOW}
-         WHERE invoice_id = :invoice_id`,
-        { invoice_id: row.invoice_id, amount, settled, last_paid: row.last_paid_at },
-      );
+  for (const row of [plan.root, balance]) {
+    if (!['draft', 'issued'].includes(row.status)) {
+      return { reason: 'invalid_status', invoice_id: row.invoice_id, status: row.status };
     }
+  }
 
-    return depositId;
-  }).then(findById);
+  /* อ่านเงินหลังล็อกทั้งคู่แล้วเป็น statement ใหม่ เพื่อเห็น payment ที่เพิ่ง commit ครบ */
+  const paymentRows = await tx.all(
+    `SELECT invoice_id, COALESCE(SUM(amount), 0) AS paid, MAX(paid_at) AS last_paid_at
+     FROM invoice_payments
+     WHERE invoice_id = ANY(:ids::text[])
+     GROUP BY invoice_id`,
+    { ids: [plan.root_id, balance.invoice_id] },
+  );
+  const payments = new Map(paymentRows.map((row) => [row.invoice_id, row]));
+  const paymentFor = (id) => payments.get(id) ?? { paid: 0, last_paid_at: null };
+
+  const planTotal = roundMoney(Number(plan.root.total) + Number(balance.total));
+  const depositNew = roundMoney(deposit);
+  const restNew = roundMoney(planTotal - depositNew);
+  if (!Number.isFinite(depositNew) || depositNew <= 0 || restNew <= 0) {
+    return { reason: 'deposit_not_less_than_total', total: planTotal };
+  }
+
+  const depositPaid = roundMoney(paymentFor(plan.root_id).paid);
+  if (depositNew < depositPaid) {
+    return { reason: 'deposit_below_paid', paid: depositPaid, total: planTotal };
+  }
+  const balancePaid = roundMoney(paymentFor(balance.invoice_id).paid);
+  if (restNew < balancePaid) {
+    return {
+      reason: 'balance_below_paid',
+      invoice_id: balance.invoice_id,
+      paid: balancePaid,
+      max_deposit: roundMoney(planTotal - balancePaid),
+    };
+  }
+
+  for (const row of [plan.root, balance]) {
+    const amount = row.invoice_id === plan.root_id ? depositNew : restNew;
+    const payment = paymentFor(row.invoice_id);
+    const paid = roundMoney(payment.paid);
+    const settled = paid > 0 && amount === paid;
+    const changed = await tx.run(
+      `UPDATE invoices
+       SET amount   = :amount,
+           discount = 0,
+           total    = :amount,
+           status   = CASE WHEN :settled THEN 'paid' ELSE status END,
+           paid_at  = CASE WHEN :settled THEN COALESCE(paid_at, :last_paid) ELSE paid_at END,
+           updated_at = ${NOW}
+       WHERE invoice_id = :invoice_id AND status IN ('draft', 'issued')`,
+      { invoice_id: row.invoice_id, amount, settled, last_paid: payment.last_paid_at },
+    );
+    /* หลังถือ row lock อยู่ rowCount ต้องเป็น 1 เสมอ หาก schema/trigger ภายนอกทำให้ไม่ใช่
+       ต้อง throw เพื่อ rollback ทั้งคู่ ห้ามคืน reason แล้ว commit ใบแรกไว้ครึ่งทาง */
+    if (changed !== 1) throw new Error(`ปรับยอดแผนวางบิลไม่ครบที่ invoice ${row.invoice_id}`);
+  }
+
+  return { invoice_id: depositId };
+}
+
+export async function setDepositAmount(depositId, deposit) {
+  const result = await transaction((tx) => setDepositAmountForTransaction(tx, depositId, deposit));
+  return invoiceMutationResult(result);
 }
 
 /** ยกเลิก — ไม่ลบทิ้ง เพราะเลขที่เอกสารต้องเรียงต่อเนื่อง ห้ามข้าม */
-export async function cancel(invoiceId) {
-  await sql.run(
-    `UPDATE invoices SET status = 'cancelled', updated_at = ${NOW} WHERE invoice_id = :id`,
+export async function cancelInvoiceForTransaction(tx, invoiceId) {
+  const locked = await invoiceForUpdate(tx, invoiceId, 'cancel');
+  if (locked.reason) return locked;
+  const changed = await tx.run(
+    `UPDATE invoices
+     SET status = 'cancelled', updated_at = ${NOW}
+     WHERE invoice_id = :id AND status <> 'cancelled'`,
     { id: invoiceId },
   );
-  return findById(invoiceId);
+  return changed === 1 ? { invoice_id: invoiceId } : { reason: 'state_changed' };
+}
+
+export async function cancel(invoiceId) {
+  const result = await transaction((tx) => cancelInvoiceForTransaction(tx, invoiceId));
+  return invoiceMutationResult(result);
 }
 
 /**
@@ -678,17 +997,50 @@ export async function cancel(invoiceId) {
  * รากของแผน = COALESCE(parent_invoice_id, invoice_id): ใบมัดจำเป็นรากของตัวเอง ใบส่วนที่เหลือชี้กลับไปหามัน
  * ใบที่ไม่ได้แบ่งงวดจึงเป็นแผนที่มีสมาชิกใบเดียวคือตัวมันเอง — คำสั่งเดียวใช้ได้กับทั้งสองแบบ
  */
-export const remove = (invoiceId) =>
-  sql
-    .all(
-      `DELETE FROM invoices
-       WHERE COALESCE(parent_invoice_id, invoice_id) =
-             (SELECT COALESCE(parent_invoice_id, invoice_id) FROM invoices WHERE invoice_id = :id)
-         AND (invoice_id = :id OR status <> 'cancelled')
-       RETURNING invoice_id`,
-      { id: invoiceId },
-    )
-    .then((rows) => rows.map((r) => r.invoice_id));
+export async function removeInvoiceForTransaction(tx, invoiceId) {
+  const plan = await invoicePlanForUpdate(tx, invoiceId);
+  if (plan.reason) return plan;
+
+  const candidates = plan.rows
+    .filter((row) => row.invoice_id === invoiceId || row.status !== 'cancelled')
+    .sort((a, b) => a.invoice_id.localeCompare(b.invoice_id));
+  const ids = candidates.map((row) => row.invoice_id);
+
+  /* ห้ามใช้ paid_amount จาก middleware: payment อาจ commit ระหว่างโหลดหน้ากับได้ lock */
+  const paymentRows = await tx.all(
+    `SELECT invoice_id, COALESCE(SUM(amount), 0) AS paid
+     FROM invoice_payments
+     WHERE invoice_id = ANY(:ids::text[])
+     GROUP BY invoice_id`,
+    { ids },
+  );
+  const paidById = new Map(paymentRows.map((row) => [row.invoice_id, roundMoney(row.paid)]));
+  const blocker = candidates.find(
+    (row) => row.status === 'paid' || (paidById.get(row.invoice_id) ?? 0) > 0,
+  );
+  if (blocker) {
+    return {
+      reason: 'has_payments',
+      invoice_id: blocker.invoice_id,
+      paid: paidById.get(blocker.invoice_id) ?? 0,
+    };
+  }
+
+  const deleted = await tx.all(
+    `DELETE FROM invoices
+     WHERE invoice_id = ANY(:ids::text[])
+     RETURNING invoice_id`,
+    { ids },
+  );
+  if (deleted.length !== ids.length) {
+    throw new Error('ลบสมาชิกแผนวางบิลได้ไม่ครบ แม้ถือ row lock แล้ว');
+  }
+  return { deleted: deleted.map((row) => row.invoice_id).sort() };
+}
+
+export async function remove(invoiceId) {
+  return transaction((tx) => removeInvoiceForTransaction(tx, invoiceId));
+}
 
 /**
  * ยอดสรุปแยกตามสถานะ — รับตัวกรองชุดเดียวกับ list() เพื่อให้ตัวเลขด้านบนตรงกับรายการที่เห็น

@@ -9,6 +9,7 @@ import { formatBaht, formatDate, openDatePicker, todayTH } from '../labels.js';
 import PageRefresh from '../components/PageRefresh.jsx';
 import ConfirmButton from '../components/ConfirmButton.jsx';
 import LineIcon from '../components/LineIcon.jsx';
+import { firstAvailablePayrollRound, MAX_PAYROLL_ROUNDS } from '../lib/payrollUi.js';
 
 /** ป้ายสถานะรอบ — ใช้สีชุดเดียวกับใบแจ้งหนี้ (ร่าง/จ่ายแล้ว/ยกเลิก มีความหมายเดียวกัน) */
 const STATUS = {
@@ -20,9 +21,6 @@ const STATUS = {
 /** 'สิงหาคม 2569' — ใช้ในป้ายชื่อรอบที่ระบบตั้งให้ */
 const monthLabel = (ym) =>
   new Date(`${ym}-01T00:00:00`).toLocaleDateString('th-TH', { month: 'long', year: 'numeric' });
-
-/** เดือนหนึ่งแบ่งจ่ายได้กี่รอบ — ตรงกับกติกาฝั่ง server */
-const MAX_ROUNDS = 3;
 
 const total = (rows, field) => rows.reduce((sum, r) => sum + Number(r[field] ?? 0), 0);
 
@@ -38,6 +36,10 @@ function Runs({ reloadKey }) {
   const [runs, setRuns] = useState(null);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
+
+  /* ยอดที่กดปล่อยจากแท็บแรกแล้วแต่ยังไม่มีรอบไหนกวาดไป — ตัวเลขเดียวกับพรีวิวตอนเปิดรอบ
+     ต่างกันแค่ตรึงวันตัดรอบเป็น "วันนี้" คือทุกบาทที่ปล่อยไปแล้ว ณ ตอนที่เปิดหน้ามาดู */
+  const [pending, setPending] = useState(null);
 
   // ฟอร์มเปิดรอบ — เปิดค้างไว้ไม่ได้รบกวนใคร เพราะพรีวิวคือข้อมูลที่อยากรู้อยู่แล้ว
   const [opening, setOpening] = useState(false);
@@ -63,7 +65,10 @@ function Runs({ reloadKey }) {
       api
         .listPayrollRuns()
         .then((v) => { setRuns(v); setError(null); })
-        .catch((e) => setError(e.message)),
+        .catch((e) => setError(e.message))
+        /* ต่อท้ายแทนที่จะยิงคู่กันด้วย Promise.all — รายการรอบคือของหลักของแท็บนี้
+           ต้องขึ้นให้ได้เสมอ ถึงยอดค้างจะโหลดไม่สำเร็จ (ล้มแล้วแค่ไม่มีบรรทัดยอดค้างให้ดู) */
+        .then(() => api.payrollPreview(todayTH()).then(setPending).catch(() => setPending(null))),
     [],
   );
 
@@ -89,9 +94,11 @@ function Runs({ reloadKey }) {
   /* ชื่อรอบที่ระบบจะตั้งให้ — คิดจากรอบที่มีอยู่แล้วในเดือนของวันตัดรอบ
      คิดฝั่งนี้ด้วยเพื่อให้เห็นทันทีตอนเลือกวัน (server คิดซ้ำอีกทีตอนสร้างจริง เป็นตัวตัดสิน) */
   const cutMonth = cutoff.slice(0, 7);
-  const usedRounds = runs?.filter((r) => r.period_month === cutMonth && r.status !== 'cancelled').length ?? 0;
-  const nextRound = usedRounds + 1;
-  const roundsFull = nextRound > MAX_ROUNDS;
+  const activeRounds =
+    runs?.filter((r) => r.period_month === cutMonth && r.status !== 'cancelled').map((r) => r.round_no) ?? [];
+  const usedRounds = activeRounds.length;
+  const nextRound = firstAvailablePayrollRound(activeRounds);
+  const roundsFull = nextRound == null;
 
   async function run(action) {
     setBusy(true);
@@ -148,16 +155,34 @@ function Runs({ reloadKey }) {
     <>
       {error && <p className="error">{error}</p>}
 
-      {/* แถบสรุป (ยอดพร้อมจ่าย · ร่างค้าง · จ่ายแล้วเดือนนี้ · รอบที่เปิดไปแล้ว) ถูกตัดออก
-          ทุกตัวอ่านได้จากตารางรอบข้างล่างอยู่แล้ว — สถานะของแต่ละรอบ ยอดของแต่ละรอบ และจำนวนแถว
-          ส่วนยอด "พร้อมจ่าย ยังไม่เข้ารอบ" เห็นเต็มๆ ตอนกดเปิดรอบ ซึ่งเป็นจังหวะที่ต้องใช้จริง
-          แถบสูงๆ ที่คั่นระหว่างแท็บกับตารางมีแต่ดันของจริงตกจอ */}
+      {/* แถบสรุป (ร่างค้าง · จ่ายแล้วเดือนนี้ · รอบที่เปิดไปแล้ว) ถูกตัดออก — ทุกตัวอ่านได้
+          จากตารางรอบข้างล่างอยู่แล้ว และแถบสูงๆ ที่คั่นระหว่างแท็บกับตารางมีแต่ดันของจริงตกจอ
+          เหลือไว้ตัวเดียวคือ "ปล่อยแล้วรอเข้ารอบ" ในแถบปุ่มด้านล่าง ซึ่งเป็นตัวเดียวที่หาจาก
+          ตารางรอบไม่ได้เลย (เงินที่ยังไม่มีรอบไหนกวาดไป ตามนิยามคือเงินที่ไม่อยู่ในตารางนั้น) */}
 
       {/* แถบเตือน "N เคสยังไม่ได้ปล่อยค่าจ้าง" ถูกตัดออก — แท็บ "ปล่อยค่าจ้าง" บอกเรื่องเดียวกัน
           แต่บอกได้ละเอียดกว่า (ใบไหนบ้าง ใบละเท่าไหร่) และกดทำต่อได้ตรงนั้นเลย
           แถบเตือนที่บอกแค่จำนวนแล้วให้ไปหาต่อเองคือขั้นตอนที่เพิ่มมาโดยไม่ได้ช่วยอะไร */}
 
       <div className="att-filter payroll-bar">
+        {/* ยอดที่ปล่อยจากแท็บแรกไว้แล้วแต่ยังไม่เข้ารอบไหน — เดิมเห็นได้ต่อเมื่อกดเปิดฟอร์มรอบก่อน
+            แท็บนี้จึงดูเหมือน "เงินที่ปล่อยไปแล้วหายไปไหน" ทั้งที่รออยู่ครบทุกบาท
+            รอบที่ยกเลิกยิ่งทำให้เข้าใจผิดหนักขึ้น (ก้อนถูกปลดคืนกองรอจ่ายแล้ว แต่บนจอไม่มีอะไรบอก) */}
+        {pending && (
+          <p className={`tab-hint payroll-waiting ${pending.rows.length === 0 ? 'is-empty' : ''}`}>
+            {pending.rows.length === 0 ? (
+              'ยังไม่มีค่าจ้างที่ปล่อยแล้วรออยู่ — ปล่อยค่าจ้างของเคสที่แท็บ “ปล่อยค่าจ้าง” ก่อน'
+            ) : (
+              <>
+                ปล่อยค่าจ้างแล้วรอเข้ารอบ{' '}
+                <strong>{formatBaht(total(pending.rows, 'total_pay'))}</strong>
+                {' · '}{pending.rows.length} คน · {total(pending.rows, 'payouts')} งวด
+                {/* บอกต่อว่าจะทำให้มันเข้ารอบยังไง ไม่งั้นเป็นตัวเลขที่ไม่รู้ว่าต้องทำอะไรต่อ */}
+                <span className="cell-sub">กด “เปิดรอบจ่าย” เพื่อกวาดยอดทั้งหมดนี้เข้ารอบ</span>
+              </>
+            )}
+          </p>
+        )}
         {!opening && <button className="btn primary" onClick={openForm}>+ เปิดรอบจ่าย</button>}
       </div>
 
@@ -182,7 +207,7 @@ function Runs({ reloadKey }) {
               {roundsFull ? (
                 <>
                   <LineIcon name="alert" className="text-ico" />
-                  {monthLabel(cutMonth)} เปิดครบ {MAX_ROUNDS} รอบแล้ว — เลือกวันในเดือนอื่น หรือยกเลิกรอบเดิมก่อน
+                  {monthLabel(cutMonth)} เปิดครบ {MAX_PAYROLL_ROUNDS} รอบแล้ว — เลือกวันในเดือนอื่น หรือยกเลิกรอบเดิมก่อน
                 </>
               ) : (
                 <>

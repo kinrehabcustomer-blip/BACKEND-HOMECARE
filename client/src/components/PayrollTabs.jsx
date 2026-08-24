@@ -5,7 +5,8 @@ import { useToast } from '../toast.jsx';
 import { formatBaht, formatDate, timeText, durationText } from '../labels.js';
 import LineIcon from './LineIcon.jsx';
 import MonthPicker from './MonthPicker.jsx';
-import { downloadCsv, LATE_MINUTES } from '../lib/attendanceUi.js';
+import PayrollSummaryDoc from './PayrollSummaryDoc.jsx';
+import { LATE_MINUTES } from '../lib/attendanceUi.js';
 
 /**
  * สองแท็บของหน้า "รอบจ่ายค่าตอบแทน" ที่ย้ายมาจากหน้า "การมาทำงาน"
@@ -304,21 +305,6 @@ export function PayoutSummary({ month, employeeId, patch, employeePicker, reload
     return () => { cancelled = true; };
   }, [month, employeeId, reloadKey]);
 
-  function exportCsv() {
-    downloadCsv(
-      // ใส่รหัสพนักงานในชื่อไฟล์ตอนกรองคนเดียว — ไม่งั้นไฟล์ของคนละคนทับกันในโฟลเดอร์ดาวน์โหลด
-      `payroll-${month}${employeeId ? `-${employeeId}` : ''}.csv`,
-      ['รหัสพนักงาน', 'ชื่อ', 'จำนวนกะ', 'ชั่วโมงรวม', 'เคสที่ทำ', 'ค่าจ้างที่ปล่อยแล้ว (บาท)',
-        'จ่ายไปแล้ว (บาท)', 'ยังไม่ได้จ่าย (บาท)', 'เคสที่ปล่อยค่าจ้าง',
-        'กะที่อนุมัติแล้ว', 'กะที่รออนุมัติ', 'กะที่ไม่อนุมัติ'],
-      rows.map((r) => [
-        r.employee_id, r.employee_name, r.shifts, (r.minutes / 60).toFixed(1), r.cases_worked, r.pay,
-        r.paid_pay ?? 0, r.unpaid_pay ?? 0, r.cases_paid ?? 0,
-        r.approved_shifts, r.pending_shifts, r.rejected_shifts,
-      ]),
-    );
-  }
-
   const totalShifts = rows?.reduce((s, r) => s + r.shifts, 0) ?? 0;
   const totalMinutes = rows?.reduce((s, r) => s + r.minutes, 0) ?? 0;
   const totalPay = rows?.reduce((s, r) => s + r.pay, 0) ?? 0;
@@ -329,10 +315,19 @@ export function PayoutSummary({ month, employeeId, patch, employeePicker, reload
     <>
       <MonthPicker month={month} onChange={(m) => patch({ month: m })}>
         {employeePicker}
-        {rows?.length > 0 && <button className="btn" onClick={exportCsv}><LineIcon name="download" />ดาวน์โหลด CSV</button>}
+        {/* ทางออกของแท็บนี้เหลือทางเดียวคือใบที่พิมพ์ — CSV ถูกตัดออกเพราะไม่มีใครเอาไปใช้ต่อจริง
+            (ปุ่ม CSV ของแท็บ "ประวัติเช็คอิน" เป็นคนละชุดข้อมูล ยังอยู่ตามเดิม) */}
+        {rows?.length > 0 && (
+          <button className="btn" onClick={() => window.print()}>
+            <LineIcon name="printer" />พิมพ์ / บันทึก PDF
+          </button>
+        )}
       </MonthPicker>
 
-      <p className="muted tab-hint"><strong>แตะชื่อพนักงานเพื่อดูรายเคส</strong></p>
+      {/* ใบที่จะถูกพิมพ์ — ซ่อนอยู่บนจอ โผล่เฉพาะตอนสั่งพิมพ์ (ดู .payroll-doc ใน index.css) */}
+      <PayrollSummaryDoc month={month} rows={rows} />
+
+      <p className="muted tab-hint no-print"><strong>แตะชื่อพนักงานเพื่อดูรายเคส</strong></p>
 
       {error && <p className="error">{error}</p>}
 
@@ -344,7 +339,9 @@ export function PayoutSummary({ month, employeeId, patch, employeePicker, reload
           <p>{employeeId ? 'เดือนนี้พนักงานคนนี้ยังไม่มีการเช็คอิน' : 'เดือนนี้ยังไม่มีการเช็คอิน'}</p>
         </section>
       ) : rows?.length > 0 ? (
-        <div className="table-wrap">
+        /* no-print: ใบสรุปด้านบนแทนตารางนี้บนกระดาษแล้ว ปล่อยไว้จะได้กระดาษเปล่าตามมาอีกหลายหน้า
+           (ของที่ถูกซ่อนตอนพิมพ์ยังกินพื้นที่หน้ากระดาษอยู่ ถ้าไม่สั่ง display: none) */
+        <div className="table-wrap no-print">
           <table className="table table-cards">
             <thead>
               <tr><th>พนักงาน</th><th>จำนวนกะ</th><th>ชั่วโมงรวม</th><th>รออนุมัติ</th><th>ค่าจ้างรวม</th></tr>

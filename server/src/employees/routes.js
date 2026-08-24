@@ -155,6 +155,21 @@ employeesRouter.delete(
     await ensureRemovable(req.employee);
 
     if (req.query.hard === 'true') {
+      /* ลบถาวรได้เฉพาะคนที่ยังไม่มีอะไรผูกอยู่ (เช่น เพิ่งกดสร้างผิด) — คนที่เคยทำงานหรือมีเงินค้าง
+         ต้องใช้ "บันทึกลาออก" แทน ซึ่งปิดบัญชีได้เหมือนกันแต่ประวัติยังอยู่ครบ */
+      const blockers = await repo.removalBlockers(req.params.id);
+      if (blockers.unpaid_payouts > 0) {
+        throw new ApiError(
+          409,
+          `คนนี้มีค่าจ้างที่ปล่อยแล้วแต่ยังไม่ได้จ่าย ${blockers.unpaid_payouts} ก้อน — ลบถาวรแล้วเงินก้อนนั้นจะหลุดจากรอบจ่ายทุกรอบอย่างถาวร (จ่ายให้ครบก่อน หรือใช้ "บันทึกลาออก" แทน)`,
+        );
+      }
+      if (blockers.worked_visits > 0) {
+        throw new ApiError(
+          409,
+          `คนนี้มีกะที่เช็คอินไปแล้ว ${blockers.worked_visits} กะ — ลบถาวรแล้วกะเหล่านั้นจะไม่มีเจ้าของและหายไปจากสรุปค่าตอบแทน (ใช้ "บันทึกลาออก" แทน)`,
+        );
+      }
       await repo.remove(req.params.id);
       return res.status(204).end();
     }

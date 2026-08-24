@@ -84,6 +84,9 @@ CREATE INDEX IF NOT EXISTS idx_portfolio_employee ON employee_portfolio (employe
 ALTER TABLE employees ADD COLUMN IF NOT EXISTS password_hash        TEXT;
 ALTER TABLE employees ADD COLUMN IF NOT EXISTS role                 TEXT NOT NULL DEFAULT 'staff' CHECK (role IN ('admin', 'staff'));
 ALTER TABLE employees ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT TRUE;
+-- เวลาที่รหัสผ่านถูกเปลี่ยนล่าสุด — token ที่ออกก่อนหน้านี้ถือว่าใช้ไม่ได้แล้ว (ดู requireAuth)
+-- ไม่มีค่า = ยังไม่เคยเปลี่ยนตั้งแต่มีคอลัมน์นี้ ซึ่งแปลว่าไม่มีอะไรต้องเพิกถอน
+ALTER TABLE employees ADD COLUMN IF NOT EXISTS password_changed_at TIMESTAMPTZ;
 ALTER TABLE employees ADD COLUMN IF NOT EXISTS last_login_at        TEXT;
 
 -- อีเมลคือ username จึงต้องไม่ซ้ำ — เทียบแบบไม่สนตัวพิมพ์ใหญ่เล็ก
@@ -136,13 +139,8 @@ ALTER TABLE customers ADD COLUMN IF NOT EXISTS subdistrict      TEXT;
 ALTER TABLE customers ADD COLUMN IF NOT EXISTS postal_code      TEXT;
 
 -- ข้อมูลสุขภาพ "ไม่เก็บที่ลูกค้า (ผู้ว่าจ้าง)" — ย้ายไปอยู่ที่แฟ้มผู้รับการดูแล (patients) เท่านั้น
--- ลบคอลัมน์ทั้ง 6 ทิ้งถาวร (รวมของเดิมใน CREATE TABLE ด้วย) — DROP ... IF EXISTS จึงเงียบบนฐานใหม่ที่ไม่เคยมี
-ALTER TABLE customers DROP COLUMN IF EXISTS weight_kg;
-ALTER TABLE customers DROP COLUMN IF EXISTS height_cm;
-ALTER TABLE customers DROP COLUMN IF EXISTS medical_history;
-ALTER TABLE customers DROP COLUMN IF EXISTS allergies;
-ALTER TABLE customers DROP COLUMN IF EXISTS blood_type;
-ALTER TABLE customers DROP COLUMN IF EXISTS medical_rights;
+-- การลบคอลัมน์ทั้ง 6 ย้ายไปอยู่ท้ายไฟล์ หลังขั้นตอนย้ายข้อมูลเข้า patients (ตาราง patients
+-- ถูกสร้างหลังบล็อกนี้ ถ้าลบตรงนี้จะไม่มีที่ให้ย้ายข้อมูลไปก่อน — ดูหัวข้อ "ย้ายข้อมูลก่อนลบ" ท้ายไฟล์)
 
 -- ผู้ดูแล/ญาติที่ติดต่อได้ — แยกชื่อกับเบอร์เหมือนตาราง employees เพื่อให้กดโทรจากเบอร์ตรงๆ ได้
 ALTER TABLE customers ADD COLUMN IF NOT EXISTS emergency_contact_name  TEXT;
@@ -426,10 +424,10 @@ CREATE TABLE IF NOT EXISTS password_reset_otps (
 CREATE INDEX IF NOT EXISTS idx_otps_employee ON password_reset_otps (employee_id, used_at);
 
 -- ---------- แพ็คเกจบริการ (โมเดลตารางเรท: เกรด × รูปแบบบริการ × ระดับพนักงาน CG/NA/PN) ----------
--- เลิกใช้โมเดลเดิม (packages: ชื่อ+ราคา+ส่วนลด) แล้ว — ลบทิ้งพร้อมคอลัมน์อ้างอิงในตาราง cases
--- DROP ตรงนี้ทำงานเฉพาะฐานข้อมูลเดิมที่เคยมีของเก่า (ฐานใหม่ไม่มีอยู่แล้ว IF EXISTS จึงเงียบ)
-ALTER TABLE cases DROP COLUMN IF EXISTS package_id;
-DROP TABLE IF EXISTS packages;
+-- เลิกใช้โมเดลเดิม (packages: ชื่อ+ราคา+ส่วนลด) แล้ว — แต่ไม่ลบทิ้ง
+-- การเก็บเข้ากรุ (เปลี่ยนชื่อเป็น packages_archived) ให้ผลเท่ากันกับโค้ดที่ไม่ได้ใช้มันแล้ว
+-- ต่างกันตรงที่ถ้าวันหนึ่งต้องย้อนดูว่าเคสเก่าผูกกับแพ็คเกจอะไร ยังมีของให้ดู (ดูท้ายไฟล์)
+-- cases.package_id ก็คงไว้ด้วยเหตุผลเดียวกัน — เป็นตัวเชื่อมเดียวที่เหลือของข้อมูลชุดนั้น
 
 -- เกรดการดูแล (ระดับความยากของเคส) — เช่น เกรด 1 ผู้สูงอายุทั่วไป, เกรด 2 NG tube/ดูดเสมหะ, เกรด 3 ติดเตียง
 CREATE TABLE IF NOT EXISTS pkg_grades (
@@ -1124,7 +1122,14 @@ CREATE TABLE IF NOT EXISTS invoice_payments (
   created_at   TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')
 );
 
+-- รหัส+payload ของคำขอรับเงินจาก client: retry หลัง response timeout ต้องชี้กลับ payment เดิม
+-- NULL ยอมไว้เฉพาะข้อมูลเก่า/ข้อมูล migration ก่อนมีระบบ idempotency
+ALTER TABLE invoice_payments ADD COLUMN IF NOT EXISTS request_id UUID;
+ALTER TABLE invoice_payments ADD COLUMN IF NOT EXISTS request_payload JSONB;
+
 CREATE INDEX IF NOT EXISTS idx_invoice_payments_invoice ON invoice_payments (invoice_id, payment_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_invoice_payments_request_id
+  ON invoice_payments (request_id);
 
 -- ใบที่ชำระครบไปแล้วก่อนมีระบบงวด — ย้ายเข้าเป็นรายการรับเงินหนึ่งงวด ให้ยอดที่รับแล้วตรงกับความจริง
 -- (ไม่งั้นใบเก่าทุกใบจะกลายเป็น "รับแล้ว 0 บาท" ทั้งที่ปิดยอดไปแล้ว)
@@ -1374,3 +1379,58 @@ CREATE INDEX IF NOT EXISTS idx_payroll_payout_lines_item ON payroll_payout_lines
 -- ---------- payroll_lines (รายกะ) = ของเดิม เก็บไว้อ่านอย่างเดียว ----------
 -- รอบที่จ่ายไปแล้วก่อนเปลี่ยนวิธีคิด ยังต้องกางดูได้ว่ายอดมาจากกะไหนบ้าง จึงไม่ลบตารางทิ้ง
 -- แต่จะไม่มีแถวใหม่เกิดขึ้นอีก — เส้นทางเงินทั้งหมดย้ายไป case_payouts แล้ว
+
+-- ==========================================================================
+-- ย้ายข้อมูลก่อนลบ (ต้องอยู่ท้ายไฟล์เสมอ — ตารางปลายทางถูกสร้างไปแล้วถึงตรงนี้)
+--
+-- เดิม migration ลบคอลัมน์ข้อมูลสุขภาพของ customers และ DROP TABLE packages ทิ้งตรงๆ
+-- โดยไม่มีขั้นย้ายข้อมูล ฐานที่ยังมีของเก่าอยู่จริงจะเสียข้อมูลถาวรตั้งแต่รัน migrate ครั้งแรก
+-- และเงียบสนิทเพราะ IF EXISTS ไม่ได้แปลว่า "ไม่มีข้อมูล" แต่แปลว่า "ไม่มีคอลัมน์"
+--
+-- ใช้ DO + EXECUTE เพราะอ้างชื่อคอลัมน์ที่อาจไม่มีอยู่แล้วตรงๆ ไม่ได้ (SQL parse ไม่ผ่าน)
+-- ทั้งบล็อกรันซ้ำได้: รอบสองคอลัมน์หายไปแล้ว เงื่อนไข IF จึงเป็นเท็จและข้ามทั้งก้อน
+-- ==========================================================================
+DO $migrate_customer_health$
+DECLARE
+  col TEXT;
+  moved INTEGER;
+BEGIN
+  FOREACH col IN ARRAY ARRAY['weight_kg', 'height_cm', 'medical_history', 'allergies', 'blood_type', 'medical_rights']
+  LOOP
+    IF EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'customers' AND column_name = col
+    ) THEN
+      /* เติมเฉพาะช่องที่แฟ้มผู้ป่วยยังว่าง — ของที่กรอกใหม่ในแฟ้มถือว่าใหม่กว่าและถูกกว่าเสมอ
+         ผู้ว่าจ้างหนึ่งคนมีผู้ป่วยได้หลายคน (พ่อ+แม่) ข้อมูลชุดเดิมจึงถูกก๊อปให้ทุกแฟ้มที่ผูกอยู่
+         ซึ่งถูกกว่าการเดาว่าเป็นของใครคนเดียวแล้วทิ้งของที่เหลือ */
+      EXECUTE format(
+        'UPDATE patients p SET %1$I = c.%1$I
+         FROM customers c
+         WHERE p.customer_id = c.customer_id AND p.%1$I IS NULL AND c.%1$I IS NOT NULL',
+        col
+      );
+      GET DIAGNOSTICS moved = ROW_COUNT;
+      IF moved > 0 THEN
+        RAISE NOTICE 'ย้าย customers.% เข้าแฟ้มผู้ป่วย % แถว', col, moved;
+      END IF;
+
+      EXECUTE format('ALTER TABLE customers DROP COLUMN %I', col);
+    END IF;
+  END LOOP;
+END
+$migrate_customer_health$;
+
+-- แพ็คเกจโมเดลเดิม: เก็บเข้ากรุแทนการลบ (FK จาก cases.package_id ตามไปเองตอนเปลี่ยนชื่อ)
+DO $archive_packages$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables
+             WHERE table_schema = 'public' AND table_name = 'packages')
+     AND NOT EXISTS (SELECT 1 FROM information_schema.tables
+                     WHERE table_schema = 'public' AND table_name = 'packages_archived')
+  THEN
+    ALTER TABLE packages RENAME TO packages_archived;
+    RAISE NOTICE 'เก็บตาราง packages เข้ากรุเป็น packages_archived แล้ว (ไม่ได้ลบทิ้ง)';
+  END IF;
+END
+$archive_packages$;

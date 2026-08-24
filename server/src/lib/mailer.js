@@ -2,6 +2,10 @@ import nodemailer from 'nodemailer';
 
 const { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM } = process.env;
 const configured = Boolean(SMTP_HOST && SMTP_USER && SMTP_PASS);
+/* บนเครื่องจริงห้ามพิมพ์ OTP ลง log เด็ดขาด — log ของ production อ่านได้จากคอนโซลผู้ให้บริการ
+   และมักถูกส่งต่อเข้าเครื่องมือรวม log อีกทอด ใครที่เห็น log ก็รีเซ็ตรหัสผ่านของคนอื่นได้ทันที
+   โหมด dev ยังพิมพ์ให้เหมือนเดิม เพราะเป็นทางเดียวที่ทดสอบการลืมรหัสผ่านได้โดยไม่ต้องตั้ง SMTP */
+const devFallback = process.env.NODE_ENV !== 'production';
 
 const transporter = configured
   ? nodemailer.createTransport({
@@ -14,7 +18,9 @@ const transporter = configured
 
 if (!configured) {
   console.warn(
-    '⚠  ยังไม่ได้ตั้งค่า SMTP ใน .env — OTP จะถูกพิมพ์ลง console แทนการส่งอีเมล (ใช้ได้เฉพาะตอน dev)',
+    devFallback
+      ? '⚠  ยังไม่ได้ตั้งค่า SMTP ใน .env — OTP จะถูกพิมพ์ลง console แทนการส่งอีเมล (ใช้ได้เฉพาะตอน dev)'
+      : '⚠  ยังไม่ได้ตั้งค่า SMTP — ระบบลืมรหัสผ่านจะใช้ไม่ได้ (และจะไม่พิมพ์ OTP ลง log)',
   );
 }
 
@@ -96,8 +102,12 @@ export async function sendOtpEmail({ to, name, code, minutes }) {
     </div>`;
 
   if (!transporter) {
-    console.log(`\n📧 [DEV] OTP สำหรับ ${to} คือ ${code} (หมดอายุใน ${minutes} นาที)\n`);
-    return;
+    if (devFallback) {
+      console.log(`\n📧 [DEV] OTP สำหรับ ${to} คือ ${code} (หมดอายุใน ${minutes} นาที)\n`);
+      return;
+    }
+    // ตั้ง SMTP ไม่ครบบนเครื่องจริง = ส่งไม่ได้จริงๆ ต้องดังพอให้คนแก้ ไม่ใช่เงียบแล้วปล่อยรหัสหลุด
+    throw new Error('ยังไม่ได้ตั้งค่า SMTP บนเซิร์ฟเวอร์ — ส่งรหัสยืนยันไม่ได้ (ติดต่อผู้ดูแลระบบ)');
   }
 
   await transporter.sendMail({

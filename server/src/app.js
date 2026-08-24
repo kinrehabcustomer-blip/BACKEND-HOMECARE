@@ -13,7 +13,7 @@ import { payrollRouter } from './payroll/routes.js';
 import { myRouter } from './my/routes.js';
 import { notifyRouter } from './notify/routes.js';
 import { errorHandler } from './lib/errors.js';
-import { requireAuth, requireAdmin } from './lib/auth.js';
+import { requireAuth, requireAdmin, requireManager, requirePasswordChanged } from './lib/auth.js';
 
 export function createApp() {
   const app = express();
@@ -25,21 +25,28 @@ export function createApp() {
   app.use(cookieParser());
 
   app.get('/api/health', (req, res) => res.json({ ok: true }));
+  // /api/auth ไม่ผ่านด่านบังคับเปลี่ยนรหัส — ไม่งั้นคนที่ต้องเปลี่ยนรหัสจะเรียก /auth/change-password ไม่ได้
   app.use('/api/auth', authRouter);
+
+  /* ทุกเส้นที่ต้อง login ต้องผ่านสามด่านตามลำดับ: มีเซสชัน → ตั้งรหัสของตัวเองแล้ว → มีสิทธิ์พอ
+     รวมเป็นชุดเดียวเพื่อไม่ให้ router ใหม่ในอนาคตลืมด่านกลางไป (ซึ่งจะเงียบสนิท ไม่มีอะไรฟ้อง) */
+  const signedIn = [requireAuth, requirePasswordChanged];
 
   // ส่วนจัดการหลังบ้านทั้งหมด — ต้อง login + เป็น admin (ผู้จัดการ/HR) เท่านั้น
   // พนักงานภาคสนาม (field) เข้าไม่ได้ทุกเส้นในกลุ่มนี้ (ยังไม่มีฟีเจอร์ฝั่ง field — จะเพิ่มพร้อมระบบเช็คอิน)
-  app.use('/api/employees', requireAuth, requireAdmin, employeesRouter);
-  app.use('/api/cases', requireAuth, requireAdmin, casesRouter);
-  app.use('/api/customers', requireAuth, requireAdmin, customersRouter);
-  app.use('/api/patients', requireAuth, requireAdmin, patientsRouter);
-  app.use('/api/packages', requireAuth, requireAdmin, packagesRouter);
-  app.use('/api/physio', requireAuth, requireAdmin, physioRouter);
-  app.use('/api/invoices', requireAuth, requireAdmin, invoicesRouter);
-  app.use('/api/payroll', requireAuth, requireAdmin, payrollRouter);
+  app.use('/api/employees', signedIn, requireAdmin, employeesRouter);
+  app.use('/api/cases', signedIn, requireAdmin, casesRouter);
+  app.use('/api/customers', signedIn, requireAdmin, customersRouter);
+  app.use('/api/patients', signedIn, requireAdmin, patientsRouter);
+  app.use('/api/packages', signedIn, requireAdmin, packagesRouter);
+  app.use('/api/physio', signedIn, requireAdmin, physioRouter);
+  app.use('/api/invoices', signedIn, requireAdmin, invoicesRouter);
+  // ค่าตอบแทนและการปิดรอบทำให้เงินจริงออกจากบริษัท — HR เป็น admin แต่ไม่ใช่ผู้มีสิทธิ์ด้านการเงิน
+  // วาง requireManager ก่อน router เพื่อกันก่อนแม้แต่ param loader จะอ่าน/บอกใบ้รหัสรอบที่มีอยู่
+  app.use('/api/payroll', signedIn, requireManager, payrollRouter);
 
   // ส่วนของพนักงานภาคสนาม — เห็นเฉพาะเคสของตัวเอง (กรองด้วย employee_id ในเส้น) จึงไม่ต้อง requireAdmin
-  app.use('/api/my', requireAuth, myRouter);
+  app.use('/api/my', signedIn, myRouter);
 
   // แจ้งเตือนอัตโนมัติ — ตรวจสิทธิ์เองในเส้น เพราะ Vercel Cron ยิงเข้ามาโดยไม่มีคุกกี้ session
   app.use('/api/notify', notifyRouter);

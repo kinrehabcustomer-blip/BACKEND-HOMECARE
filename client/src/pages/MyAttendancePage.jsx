@@ -21,20 +21,29 @@ export default function MyAttendancePage() {
   /* แยกเป็นฟังก์ชันเพื่อให้ทั้ง effect ตอนเปลี่ยนเดือน และการดึงหน้าลงรีเฟรช เรียกตัวเดียวกัน
      ไม่ล้าง report/rows ทิ้งก่อนโหลดเหมือนเดิม — รีเฟรชแล้วตัวเลขวูบหายไปทั้งหน้า
      แล้วค่อยกลับมาเป็นภาพกระพริบที่ไม่มีใครสั่ง ของเดิมที่อ่านอยู่ควรค้างไว้จนกว่าของใหม่จะมา */
-  const load = useCallback(() => {
+  const load = useCallback((staleCheck) => {
+    // ปุ่มรีเฟรชส่ง event ของการคลิกมาเป็นอาร์กิวเมนต์แรก — ใช้เฉพาะตอนที่เป็นฟังก์ชันจริง
+    const isStale = typeof staleCheck === 'function' ? staleCheck : () => false;
     setLoading(true);
     return Promise.all([api.myAttendanceReport(month), api.myAttendance(month), api.myPayslips()])
       .then(([r, list, slips]) => {
+        if (isStale()) return; // เปลี่ยนเดือนไปแล้วระหว่างรอ — ของชุดนี้เป็นของเดือนเก่า ทิ้งไป
         setReport(r);
         setRows(list);
         setPayslips(slips);
         setError(null); // เปลี่ยนเดือนแล้วโหลดผ่าน error ของเดือนก่อนต้องหายไปด้วย
       })
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
+      .catch((e) => !isStale() && setError(e.message))
+      .finally(() => !isStale() && setLoading(false));
   }, [month]);
 
-  useEffect(() => { load(); }, [load]);
+  /* ธง cancelled: เปลี่ยนเดือนเร็วๆ แล้วคำตอบของเดือนก่อนหน้ามาถึงทีหลัง จะทับตัวเลขของเดือนที่เลือกอยู่
+     ค่าจ้างของเดือนผิดที่ดูเหมือนถูกต้องทุกอย่างคือของที่คนอ่านไม่มีทางจับได้ด้วยตาเปล่า */
+  useEffect(() => {
+    let cancelled = false;
+    load(() => cancelled);
+    return () => { cancelled = true; };
+  }, [load]);
 
   // เวลาที่ข้อมูลชุดที่เห็นอยู่ถูกดึงมา — จับจากจังหวะที่ loading ลงจาก true เป็น false
   const updatedAt = useUpdatedAt(loading);

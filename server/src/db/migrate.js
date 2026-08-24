@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { pool, sql } from './index.js';
-import { hashPassword } from '../lib/auth.js';
+import { hashPassword, generateTempPassword } from '../lib/auth.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const schema = readFileSync(join(here, 'schema.sql'), 'utf8');
@@ -14,12 +14,15 @@ console.log('สร้าง/อัปเดต schema บน Postgres เรี
 // พนักงานที่มีอยู่ก่อนระบบ login เกิด ยังไม่มีรหัสผ่าน — ตั้งค่าเริ่มต้นเป็นรหัสพนักงานของตัวเอง
 const pending = await sql.all('SELECT employee_id FROM employees WHERE password_hash IS NULL');
 
+/* สุ่มรหัสชั่วคราวให้คนละใบ — เดิมตั้งเป็น "รหัสพนักงานของตัวเอง" ซึ่งเดาได้ทันทีจากภายนอก
+   (รหัสเรียงเลขและโผล่อยู่ทุกหน้าจอ) รหัสที่สุ่มนี้ต้องจดไว้ตอนรัน เพราะฐานข้อมูลเก็บแต่ hash */
 for (const { employee_id } of pending) {
+  const temp = generateTempPassword();
   await sql.run('UPDATE employees SET password_hash = :hash WHERE employee_id = :id', {
-    hash: await hashPassword(employee_id),
+    hash: await hashPassword(temp),
     id: employee_id,
   });
-  console.log(`ตั้งรหัสผ่านเริ่มต้นให้ ${employee_id}`);
+  console.log(`ตั้งรหัสผ่านชั่วคราวให้ ${employee_id} : ${temp}   <-- จดไว้แล้วส่งให้เจ้าตัว`);
 }
 
 console.log(pending.length ? `ตั้งรหัสผ่านให้ ${pending.length} คน` : 'ทุกคนมีรหัสผ่านแล้ว');

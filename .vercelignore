@@ -1,3 +1,24 @@
 # ชุดทดสอบไม่ถูก import จากที่ไหนใน production (จุดเข้าคือ api/index.js -> server/src/app.js)
 # ตัดออกตั้งแต่ตอนอัปโหลด จะได้ไม่มีไฟล์ที่ไม่ได้ใช้ปนอยู่ใน deployment
-server/test
+server/test/
+
+# Environment files ต้องตั้งผ่าน Vercel Environment Variables เท่านั้น
+# กันทุกระดับ/ทุก suffix เช่น .env, .envrc, client/.env.local และ server/.env-backup
+.env*
+**/.env*
+
+# ข้อมูลจริง/backup ในเครื่อง — อาจมีข้อมูลส่วนบุคคลและข้อมูลสุขภาพ
+server/data/
+**/*.db*
+**/*.sqlite*
+**/backup-*.json
+
+# การตั้งค่าเฉพาะเครื่องและ output ที่สร้างใหม่ได้ตอน build
+.claude/
+.codex/
+.agents/
+.vercel/
+client/dist/
+dist/
+coverage/
+node_modules/

@@ -103,6 +103,21 @@ if (process.env.RUN_DB_TESTS !== '1') {
   describe('ค่าจ้าง/ต้นทุน เห็นเฉพาะผู้จัดการ', () => {
     const PAY = ['staff_pay', 'rate_staff_pay', 'physio_staff_pay'];
 
+    test('HR เข้า payroll ไม่ได้ทุกเส้น แม้เส้นรายละเอียดที่ไม่มีรหัสจริงก็ถูกกันก่อนค้น DB', async () => {
+      for (const path of ['/api/payroll/meta', '/api/payroll', '/api/payroll/preview', '/api/payroll/PAY-NOT-REAL']) {
+        assert.equal((await get(path, HR)).status, 403, path);
+      }
+      assert.equal((await get('/api/payroll/meta', FIELD)).status, 403);
+      assert.equal((await get('/api/payroll/meta', MANAGER)).status, 200);
+    });
+
+    test('รายงานค่าตอบแทนรวมเป็น manager-only แต่รายงานของตัวเองยังเปิดตามเดิม', async () => {
+      assert.equal((await get('/api/cases/attendance/report?month=2026-08', HR)).status, 403);
+      assert.equal((await get('/api/cases/attendance/report?month=2026-08', MANAGER)).status, 200);
+      assert.equal((await get('/api/my/attendance/report?month=2026-08', HR)).status, 200);
+      assert.equal((await get('/api/my/attendance/report?month=2026-08', FIELD)).status, 200);
+    });
+
     test('GET /api/cases — manager เห็นค่าจ้าง, HR ไม่เห็น', async () => {
       const m = await get('/api/cases?per_page=50', MANAGER);
       const h = await get('/api/cases?per_page=50', HR);

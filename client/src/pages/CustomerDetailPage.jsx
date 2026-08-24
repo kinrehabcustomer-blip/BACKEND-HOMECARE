@@ -27,13 +27,19 @@ export default function CustomerDetailPage() {
   const [reloadKey, setReloadKey] = useState(0); // เด้งค่าเพื่อสั่งโหลดใหม่จากปุ่ม "ลองใหม่"
 
   useEffect(() => {
+    /* ธง cancelled: กดจากแฟ้มหนึ่งไปอีกแฟ้มเร็วๆ (หรือกดปุ่มก่อนหน้า/ถัดไปรัวๆ)
+       คำตอบของแฟ้มเก่าที่มาถึงทีหลังจะทับแฟ้มที่เปิดอยู่ — ได้หน้าที่ขึ้นชื่อคนหนึ่ง
+       แต่ข้อมูลสุขภาพของอีกคน ซึ่งมองด้วยตาไม่มีทางรู้ว่าผิด */
+    let cancelled = false;
     api
       .getCustomer(id)
       .then((v) => {
+        if (cancelled) return;
         setCustomer(v);
         setError(null); // โหลดผ่านแล้ว error ของรอบก่อนต้องหายไปด้วย
       })
-      .catch((err) => setError(err.message));
+      .catch((err) => !cancelled && setError(err.message));
+    return () => { cancelled = true; };
   }, [id, reloadKey]);
 
   async function handleDelete() {

@@ -1,5 +1,6 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import { randomBytes } from 'node:crypto';
 import { ApiError } from './errors.js';
 import { sql } from '../db/index.js';
 
@@ -37,6 +38,26 @@ if (!SECRET || SECRET.length < 32) {
 }
 
 export const hashPassword = (plain) => bcrypt.hash(plain, 10);
+
+/* ตัวอักษรของรหัสชั่วคราว — ตัด 0/O/1/I/l ออก เพราะรหัสนี้ถูกอ่านออกเสียง/จดใส่กระดาษส่งต่อกัน
+   สลับตัวผิดแล้วจะกลายเป็น "เข้าไม่ได้" ที่หาสาเหตุไม่เจอ */
+const TEMP_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+
+/**
+ * รหัสผ่านชั่วคราวของพนักงานใหม่ — สุ่มจาก CSPRNG ทุกครั้ง
+ *
+ * เดิมใช้ "รหัสพนักงานของตัวเอง" (EMP-0007) ซึ่งเดาได้ทันทีจากภายนอก: รหัสเรียงเลข
+ * และโผล่อยู่ในทุกหน้าจอ/ทุกไฟล์ที่ส่งออก ใครก็ตามที่รู้อีเมลของพนักงานคนหนึ่ง
+ * จึงลองเดาได้ในครั้งเดียวถ้าคนนั้นยังไม่ได้เปลี่ยนรหัส (ซึ่งเป็นสถานะปริยายของทุกคน)
+ *
+ * คืนค่าเป็น plain text ครั้งเดียวให้คนที่กดสร้างเอาไปส่งต่อ — ในฐานข้อมูลเก็บแต่ hash
+ */
+export function generateTempPassword(length = 12) {
+  const bytes = randomBytes(length);
+  let out = '';
+  for (const b of bytes) out += TEMP_ALPHABET[b % TEMP_ALPHABET.length];
+  return out;
+}
 export const verifyPassword = (plain, hash) => bcrypt.compare(plain, hash ?? '');
 
 export function signToken(employee) {
@@ -93,8 +114,25 @@ export function requireAuth(req, res, next) {
   }
 
   sql
-    .one('SELECT position, status FROM employees WHERE employee_id = :id', { id: payload.sub })
+    .one(
+      `SELECT position, status, must_change_password,
+              EXTRACT(EPOCH FROM password_changed_at) AS password_changed_epoch
+       FROM employees WHERE employee_id = :id`,
+      { id: payload.sub },
+    )
     .then((emp) => {
+      /* เปลี่ยนรหัสผ่านแล้ว = เซสชันเก่าทุกตัวต้องตาย ไม่ใช่รอหมดอายุอีก 8 ชม.
+         เหตุผลที่คนกดเปลี่ยนรหัสส่วนใหญ่คือ "สงสัยว่ามีคนอื่นเข้าถึงบัญชีอยู่" —
+         ถ้าเซสชันของคนนั้นยังใช้ได้ต่อ การเปลี่ยนรหัสก็ไม่ได้แก้อะไรเลยในช่วงเวลาที่อันตรายที่สุด
+
+         เทียบที่ความละเอียดวินาที เพราะ iat ของ JWT เป็นวินาทีถ้วน — token ที่ออกในวินาทีเดียว
+         กับที่เปลี่ยนรหัส (เช่น login ใหม่ทันทีหลังเปลี่ยน) จึงต้องผ่าน ไม่ใช่โดนตัดทิ้ง */
+      const changedAt = emp?.password_changed_epoch;
+      if (changedAt != null && payload.iat != null && payload.iat < Math.floor(Number(changedAt))) {
+        res.clearCookie(COOKIE_NAME, clearCookieOptions);
+        return next(new ApiError(401, 'รหัสผ่านถูกเปลี่ยนแล้ว กรุณาเข้าสู่ระบบใหม่'));
+      }
+
       if (!emp || BLOCKED_STATUSES[emp.status]) {
         res.clearCookie(COOKIE_NAME, clearCookieOptions);
         return next(new ApiError(401, emp ? `${BLOCKED_STATUSES[emp.status]} — ติดต่อผู้ดูแลระบบ` : 'บัญชีนี้ใช้งานไม่ได้แล้ว'));
@@ -106,6 +144,7 @@ export function requireAuth(req, res, next) {
         // ตำแหน่ง/สิทธิ์อ่านสดจาก DB ไม่ใช่จาก token — เลื่อนหรือลดตำแหน่งแล้วมีผลทันที
         position: emp.position,
         role: roleForPosition(emp.position),
+        must_change_password: emp.must_change_password,
       };
       next();
     })
@@ -120,6 +159,35 @@ export function requireAdmin(req, res, next) {
   if (!req.user) return next(new ApiError(401, 'กรุณาเข้าสู่ระบบ'));
   if (roleForPosition(req.user.position) !== 'admin') {
     return next(new ApiError(403, 'เฉพาะผู้จัดการหรือ HR เท่านั้นที่เข้าถึงส่วนนี้ได้'));
+  }
+  next();
+}
+
+/**
+ * บัญชีที่ยังใช้รหัสผ่านชั่วคราวอยู่ ทำอะไรในระบบไม่ได้จนกว่าจะตั้งรหัสของตัวเอง
+ *
+ * เดิมบังคับที่หน้าเว็บอย่างเดียว (must_change_password ถูกส่งไปกับ /auth/me แล้วให้หน้าเว็บเด้งเอง)
+ * ซึ่งกันได้เฉพาะคนที่ใช้ผ่านหน้าเว็บ — ยิง API ตรงด้วยคุกกี้เดียวกันก็ข้ามด่านไปได้ทั้งหมด
+ * และรหัสชั่วคราวคือรหัสที่ผู้ออกให้ (HR/ผู้จัดการ) รู้ด้วย จึงไม่ควรใช้ทำอะไรได้นอกจากตั้งรหัสใหม่
+ */
+export function requirePasswordChanged(req, res, next) {
+  if (!req.user) return next(new ApiError(401, 'กรุณาเข้าสู่ระบบ'));
+  if (req.user.must_change_password) {
+    return next(new ApiError(403, 'กรุณาตั้งรหัสผ่านใหม่ก่อนใช้งานระบบ'));
+  }
+  next();
+}
+
+/**
+ * เฉพาะผู้จัดการ — ใช้กับข้อมูลค่าจ้าง/กำไรและคำสั่งที่ทำให้เงินออกจากบริษัท
+ *
+ * จงใจแคบกว่า requireAdmin ซึ่งรวม HR ด้วย และอ่านตำแหน่งสดที่ requireAuth ใส่ไว้ใน req.user
+ * จึงลดสิทธิ์พนักงานระหว่างที่ session ยังไม่หมดอายุได้ทันทีเหมือนด่านอื่นในระบบ
+ */
+export function requireManager(req, res, next) {
+  if (!req.user) return next(new ApiError(401, 'กรุณาเข้าสู่ระบบ'));
+  if (!canSeeStaffPay(req.user.position)) {
+    return next(new ApiError(403, 'เฉพาะผู้จัดการเท่านั้นที่เข้าถึงข้อมูลค่าตอบแทนพนักงานได้'));
   }
   next();
 }

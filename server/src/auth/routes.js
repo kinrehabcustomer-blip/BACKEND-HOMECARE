@@ -185,9 +185,11 @@ authRouter.post(
       throw new ApiError(400, 'ห้ามใช้รหัสพนักงานเป็นรหัสผ่าน เพราะเป็นค่าที่คนอื่นเดาได้');
     }
 
+    /* password_changed_at = ตัวตัดเซสชันเก่าทั้งหมด (ดู requireAuth) — ตั้งรหัสใหม่ด้วย OTP
+       มักเกิดตอน "เข้าไม่ได้เพราะมีคนอื่นเข้าไปแล้ว" เซสชันของคนนั้นต้องตายพร้อมกัน */
     await sql.run(
       `UPDATE employees
-       SET password_hash = :hash, must_change_password = FALSE
+       SET password_hash = :hash, must_change_password = FALSE, password_changed_at = now()
        WHERE employee_id = :id`,
       { hash: await hashPassword(new_password), id: employee.employee_id },
     );
@@ -220,10 +222,16 @@ authRouter.post(
     }
 
     await sql.run(
-      `UPDATE employees SET password_hash = :hash, must_change_password = FALSE WHERE employee_id = :id`,
+      `UPDATE employees
+       SET password_hash = :hash, must_change_password = FALSE, password_changed_at = now()
+       WHERE employee_id = :id`,
       { hash: await hashPassword(new_password), id },
     );
 
+    /* เซสชันเก่าถูกเพิกถอนไปแล้วรวมถึงใบที่กำลังใช้อยู่นี้ — ออกใบใหม่ให้ทันที
+       ไม่งั้นคนที่เพิ่งเปลี่ยนรหัสจะโดนเด้งออกจากระบบทั้งที่ทำถูกทุกอย่าง */
+    const updated = await sql.one('SELECT * FROM employees WHERE employee_id = :id', { id });
+    res.cookie(COOKIE_NAME, signToken(updated), cookieOptions);
     res.json({ message: 'เปลี่ยนรหัสผ่านเรียบร้อย' });
   }),
 );

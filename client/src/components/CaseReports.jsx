@@ -31,7 +31,9 @@ const VITALS = [
   { key: 'pain_score', label: 'ระดับความเจ็บปวด', unit: '0–10', min: 0, max: 10 },
 ];
 
-const TEXTS = [
+/* ส่งออกให้ใบที่พิมพ์ (CaseReportDoc) ใช้นิยามชุดเดียวกับบนจอ — ถ้าก๊อปไปอีกชุด
+   วันที่เพิ่ม/แก้ช่อง กระดาษจะตกหล่นหรือเขียนป้ายไม่ตรงกับหน้าจอโดยไม่มีอะไรฟ้อง */
+export const TEXTS = [
   { key: 'symptoms', label: 'อาการที่พบ', placeholder: 'เช่น มีไข้ต่ำๆ ไอมีเสมหะ บ่นปวดเข่าขวา' },
   { key: 'care_given', label: 'การดูแลที่ให้', placeholder: 'เช่น เช็ดตัวลดไข้ ทำแผลกดทับ พลิกตะแคงทุก 2 ชม.' },
   { key: 'intake_output', label: 'อาหาร / ขับถ่าย / การนอน', placeholder: 'เช่น ทานข้าวต้ม 1 ถ้วย ปัสสาวะปกติ นอนหลับดี' },
@@ -71,7 +73,7 @@ const isBlank = (form) =>
   ![...VITALS, ...TEXTS].some(({ key }) => String(form[key] ?? '').trim() !== '');
 
 /** ความดันอ่านเป็นคู่เสมอ (120/80) — วัดมาข้างเดียวก็ยังต้องแสดงได้ ไม่ใช่ซ่อนทั้งคู่ */
-function vitalChips(r) {
+export function vitalChips(r) {
   const chips = [];
   if (r.bp_systolic != null || r.bp_diastolic != null) {
     chips.push(['ความดัน', `${r.bp_systolic ?? '—'}/${r.bp_diastolic ?? '—'}`, 'mmHg']);

@@ -36,7 +36,7 @@ import {
 } from './schema.js';
 import { geocode, reverseGeocode, searchPlaces } from '../lib/geocode.js';
 import { resolveMapLink } from '../lib/maplink.js';
-import { canSeeStaffPay } from '../lib/auth.js';
+import { canSeeStaffPay, requireManager } from '../lib/auth.js';
 import { ApiError, asyncRoute, notFound } from '../lib/errors.js';
 
 export const casesRouter = Router();
@@ -68,6 +68,13 @@ function visible(req, caseRow) {
 }
 
 const visibleList = (req, rows) => rows.map((row) => visible(req, row));
+
+/** มีเพียง manager ที่ส่งต้นทุนพนักงานเข้ามาได้; HR ยังเปิด/แก้เคสได้และให้ server เติมจากแพ็คเกจ */
+export function ensureCanSetStaffPay(req, body) {
+  if (Object.prototype.hasOwnProperty.call(body ?? {}, 'staff_pay') && !canSeeStaffPay(req.user?.position)) {
+    throw new ApiError(403, 'เฉพาะผู้จัดการเท่านั้นที่กำหนดค่าจ้างพนักงานได้');
+  }
+}
 
 /* กะไม่มีตัวเลขค่าจ้างติดมาแล้ว — ค่าจ้างเป็นก้อนเดียวต่อเคส (ดู PAY_FIELDS ด้านบน + releasePay)
    จึงไม่ต้องกรองรายการกะ และไม่ต้องกันค่าจ้างรายกะที่ส่งเข้ามา เพราะไม่มีช่องนั้นให้เขียนอีกแล้ว */
@@ -171,6 +178,7 @@ casesRouter.post(
 /** สรุปค่าตอบแทนรายเดือนต่อพนักงาน (payroll) — ไม่ส่งเดือน = เดือนปัจจุบัน (โซนไทย), ไม่ส่งพนักงาน = ทุกคน */
 casesRouter.get(
   '/attendance/report',
+  requireManager,
   asyncRoute(async (req, res) => {
     const { month, employee_id } = attendanceQuerySchema.parse({
       month: req.query.month || undefined,
@@ -232,6 +240,7 @@ casesRouter.get(
 casesRouter.post(
   '/',
   asyncRoute(async (req, res) => {
+    ensureCanSetStaffPay(req, req.body);
     const input = createCaseSchema.parse(req.body);
     if (input.assigned_to) await ensureAssignable(input.assigned_to);
 
@@ -374,11 +383,11 @@ casesRouter.post(
       );
     }
 
-    const amount = input.amount ?? status.remaining;
-    if (amount <= 0) {
+    const previewAmount = input.amount ?? status.remaining;
+    if (previewAmount <= 0) {
       throw new ApiError(409, `เคสนี้ปล่อยค่าจ้างครบ ${baht(status.staff_pay)} บาทแล้ว ไม่เหลือยอดให้ปล่อย`);
     }
-    if (amount > status.remaining) {
+    if (previewAmount > status.remaining) {
       throw new ApiError(
         400,
         `ปล่อยได้ไม่เกินยอดคงเหลือของเคส (${baht(status.remaining)} บาท จากยอดเหมา ${baht(status.staff_pay)})` +
@@ -387,13 +396,34 @@ casesRouter.post(
     }
 
     /* ชั้นนี้กันกรณีที่สองหน้าจอกดพร้อมกันจนงวดเกินเพดาน — status ที่อ่านไว้ข้างบนเก่าไปแล้ว
-       ตอนที่ repo นับจริงในทรานแซกชัน (ดูเหตุผลเต็มใน releasePay) */
+       ตอนที่ repo นับยอดและงวดจริงในทรานแซกชัน (ดูเหตุผลเต็มใน releasePay)
+       ส่ง input.amount ตรงๆ เพื่อให้กรณีไม่ระบุยอดคำนวณ remaining ใหม่หลังได้ row lock */
     const result = await repo.releasePay(
       req.params.id,
-      { amount, note: input.note, due_date: input.due_date, shares: input.shares },
+      { amount: input.amount, note: input.note, due_date: input.due_date, shares: input.shares },
       req.user,
     );
 
+    if (result.reason === 'not_found') throw notFound('ไม่พบเคสนี้');
+    if (result.reason === 'staff_pay_not_set') {
+      throw new ApiError(409, 'ค่าจ้างของเคสถูกล้างหรือเปลี่ยนระหว่างทำรายการ กรุณาโหลดข้อมูลใหม่');
+    }
+    if (result.reason === 'fully_released') {
+      throw new ApiError(
+        409,
+        `เคสนี้ปล่อยค่าจ้างครบแล้ว — ปล่อยไปรวม ${baht(result.released)} บาท จากยอดเหมา ${baht(result.staff_pay)}`,
+      );
+    }
+    if (result.reason === 'amount_exceeds_remaining') {
+      throw new ApiError(
+        409,
+        `ยอดคงเหลือเปลี่ยนไประหว่างทำรายการ ขณะนี้ปล่อยได้ไม่เกิน ${baht(result.remaining)} บาท` +
+          ` จากยอดเหมา ${baht(result.staff_pay)} บาท กรุณาตรวจสอบแล้วลองใหม่`,
+      );
+    }
+    if (result.reason === 'invalid_amount') {
+      throw new ApiError(400, 'ยอดที่ปล่อยต้องมากกว่า 0');
+    }
     if (result.reason === 'installment_limit') {
       throw new ApiError(409, `เคสนี้แบ่งจ่ายครบ ${repo.MAX_INSTALLMENTS} งวดแล้ว — มีคนปล่อยงวดสุดท้ายไปพร้อมกันพอดี`);
     }
@@ -410,7 +440,7 @@ casesRouter.post(
     if (result.reason === 'share_sum_mismatch') {
       throw new ApiError(
         400,
-        `ผลรวมของส่วนแบ่งคือ ${baht(result.sum)} บาท แต่ยอดของงวดนี้คือ ${baht(amount)} บาท — ` +
+        `ผลรวมของส่วนแบ่งคือ ${baht(result.sum)} บาท แต่ยอดของงวดนี้คือ ${baht(result.amount ?? previewAmount)} บาท — ` +
           'ต้องเท่ากันพอดี ไม่งั้นยอดเหมาของเคสจะไม่ลงตัว',
       );
     }
@@ -436,6 +466,9 @@ casesRouter.delete(
     if (result.reason === 'already_paid') {
       throw new ApiError(409, 'ก้อนนี้จ่ายออกไปแล้ว ถอนคืนไม่ได้ — ต้องยกเลิกรอบจ่ายนั้นก่อน');
     }
+    if (result.reason === 'state_changed') {
+      throw new ApiError(409, 'สถานะรอบจ่ายเปลี่ยนระหว่างทำรายการ กรุณาโหลดข้อมูลใหม่แล้วลองอีกครั้ง');
+    }
     res.json(await repo.payStatus(req.params.id));
   }),
 );
@@ -455,6 +488,7 @@ casesRouter.post(
 casesRouter.patch(
   '/:id',
   asyncRoute(async (req, res) => {
+    ensureCanSetStaffPay(req, req.body);
     const input = updateCaseSchema.parse(req.body);
     const updated = await repo.update(req.params.id, input, req.user);
 
@@ -736,7 +770,17 @@ casesRouter.patch(
       throw new ApiError(400, 'เวลาออกต้องมาหลังเวลาเข้า');
     }
 
-    res.json(await repo.adjustVisit(req.params.id, visitId, input, req.user));
+    const adjusted = await repo.adjustVisit(req.params.id, visitId, input, req.user);
+    if (adjusted?.reason === 'not_found') throw notFound('ไม่พบกะนี้');
+    /* เงินของเคสนี้ถูกปล่อยไปแล้ว — ตัวเลขชั่วโมง/กะคือที่มาของยอดบนสลิป ขยับทีหลังไม่ได้
+       บอกทางออกไปด้วย ไม่งั้นคนที่ลงเวลาผิดจริงๆ จะไม่รู้ว่าต้องทำยังไงต่อ */
+    if (adjusted?.reason === 'pay_released') {
+      throw new ApiError(
+        409,
+        'เคสนี้ปล่อยค่าจ้างไปแล้ว แก้เวลา/สถานะของกะไม่ได้ — ถอนงวดที่ปล่อยคืนที่แท็บ "ปล่อยค่าจ้าง" ก่อน แล้วค่อยแก้',
+      );
+    }
+    res.json(adjusted);
   }),
 );
 

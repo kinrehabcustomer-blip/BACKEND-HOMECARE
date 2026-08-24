@@ -17,7 +17,7 @@
     "build": "npm run build --workspace client",
     "migrate": "npm run migrate --workspace server",
     "reset:data": "npm run reset:data --workspace server",
-    "test": "npm run test --workspace server",
+    "test": "npm run test --workspace server && npm run test --workspace client",
     "test:api": "npm run test:api --workspace server"
   },
   "devDependencies": {

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { zodDate } from '../lib/dates.js';
 // ตัวตรวจรูปแบบ data URL — ตัวเดียวกับรูปพนักงาน/ใบรับรอง/เซลฟี่เช็คอิน (รูปแผลในรายงานใช้ร่วม)
 import { imageSchema } from '../employees/schema.js';
 
@@ -15,7 +16,8 @@ export const CASE_TYPES = [
 
 export const CASE_STATUSES = ['unassigned', 'assigned', 'in_progress', 'closed', 'cancelled'];
 
-const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'ต้องอยู่ในรูปแบบ YYYY-MM-DD');
+// วันที่ต้องมีอยู่จริงในปฏิทิน ไม่ใช่แค่รูปแบบถูก (2026-02-31 เคยผ่านได้ — ดู lib/dates.js)
+const date = zodDate(z);
 const optionalText = z.string().trim().max(500).optional().nullable();
 const optionalLongText = z.string().trim().max(2000).optional().nullable(); // อาการ/โรคประจำตัว เขียนยาวได้
 
@@ -72,6 +74,9 @@ export const createCaseSchema = z.object({
   start_date: date.optional().nullable(),
   end_date: date.optional().nullable(),
   fee: z.number().nonnegative('ค่าจ้างต้องไม่ติดลบ').optional().nullable(),
+  // ต้นทุนพนักงานของเคส — รับจาก manager ได้; null = กลับไปใช้ค่าจากบริการที่เลือก
+  // สิทธิ์ manager-only บังคับที่ route เพราะ schema ไม่รู้ว่าใครเป็นผู้เรียก
+  staff_pay: z.number().nonnegative('ค่าจ้างพนักงานต้องไม่ติดลบ').optional().nullable(),
 
   // พิกัดสถานที่ดูแล (สำหรับ geofence ตอนเช็คอิน) — ตั้งจาก geocode ที่อยู่ หรือกรอกมือ
   geo_lat: z.number().min(-90).max(90).optional().nullable(),

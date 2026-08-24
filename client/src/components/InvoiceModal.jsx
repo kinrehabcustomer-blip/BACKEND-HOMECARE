@@ -5,6 +5,7 @@ import { useToast } from '../toast.jsx';
 import { useSheetSwipe } from '../lib/sheetSwipe.js';
 import { useScrollLock } from '../lib/scrollLock.js';
 import { INVOICE_STATUS_LABELS, amountText, bahtText, docDate, todayTH } from '../labels.js';
+import { ISSUER, printStamp } from '../lib/issuer.js';
 import LineIcon from './LineIcon.jsx';
 import ConfirmButton from './ConfirmButton.jsx';
 
@@ -14,32 +15,39 @@ const FOCUSABLE = 'a[href], button:not(:disabled), input, select, textarea, [tab
    ไม่งั้น run() จะไปดึงใบที่เพิ่งลบแล้วได้ 404 มาขึ้นเป็นข้อความแดงทับสิ่งที่เพิ่งบอกไป */
 const GONE = Symbol('gone');
 
-/** ข้อมูลผู้ออกเอกสาร — แก้ที่เดียวตรงนี้ เปลี่ยนทุกใบ */
-const ISSUER = {
-  // ไฟล์เดียวกับที่ใช้บนแถบเมนู/หน้าเข้าสู่ระบบ (client/public/) — เปลี่ยนไฟล์ทีเดียวเปลี่ยนทุกที่
-  logo: '/logo-navbar.webp',
-  name: 'ศูนย์ฟื้นฟูโรคหลอดเลือดสมองคิน',
-  address: '6 ซอยนาคนิวาส 18 ถนนนาคนิวาส แขวงลาดพร้าว เขตลาดพร้าว กรุงเทพมหานคร 10230',
-  tel: '020201171',
-};
-
-/** วันเวลาที่สั่งพิมพ์ มุมขวาบนของเอกสาร (พ.ศ. อัตโนมัติจาก locale ไทย) */
-const printStamp = () =>
-  new Date().toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' });
+/** ช่องทางชำระเก็บเป็นข้อความอิสระ (คนกรอกพิมพ์เอง) — เดาจากคำที่พิมพ์มา ไม่เข้าอันไหนถือเป็นเงินสด */
+function channelOf(method) {
+  const m = (method ?? '').toLowerCase();
+  if (m.includes('โอน') || m.includes('transfer')) return 'transfer';
+  if (m.includes('บัตร') || m.includes('credit')) return 'credit';
+  return 'cash';
+}
 
 /**
- * จับคู่ช่องทางชำระเงินกับช่องบนเอกสาร — เก็บเป็นข้อความอิสระ จึงเดาจากคำที่พิมพ์มา
- * ไม่เข้าเงื่อนไขไหนถือเป็นเงินสด (ช่องทางที่ใช้บ่อยสุด)
+ * ยอดแยกตามช่องทางบนใบเสร็จ — บวกจาก "รายการรับชำระทุกใบ" ของใบนี้
+ *
+ * ของเดิมอ่าน invoices.payment_method (ซึ่งถูกทับด้วยช่องทางของการรับชำระครั้งล่าสุด)
+ * แล้วยัดยอดเต็มลงช่องนั้นช่องเดียว — ใบที่มัดจำด้วยเงินสดแล้วโอนส่วนที่เหลือ จึงพิมพ์ออกมาว่า
+ * "โอนทั้งจำนวน" ซึ่งไม่ตรงกับเงินที่รับมาจริง และเป็นเอกสารที่ลูกค้าถือไว้เป็นหลักฐาน
+ *
+ * ยังคงรวมเป็นก้อนต่อช่องทาง ไม่ใช่รายบรรทัด เพราะฟอร์มมีช่องละหนึ่งบรรทัดเท่านั้น
  */
-function paidBy(method, total, status) {
+function paidBy(payments, method, total, status) {
   const blank = { cash: '', credit: '', transfer: '' };
   if (status !== 'paid') return blank;
 
-  const m = (method ?? '').toLowerCase();
-  const value = amountText(total);
-  if (m.includes('โอน') || m.includes('transfer')) return { ...blank, transfer: value };
-  if (m.includes('บัตร') || m.includes('credit')) return { ...blank, credit: value };
-  return { ...blank, cash: value };
+  const sums = { cash: 0, credit: 0, transfer: 0 };
+  for (const pmt of payments ?? []) sums[channelOf(pmt.method)] += Number(pmt.amount ?? 0);
+
+  // ใบเก่าที่รับเงินไว้ก่อนระบบเก็บรายการรับชำระแยกใบ — ไม่มีรายการให้บวก ใช้ของเดิมเป็นทางสำรอง
+  const recorded = Object.values(sums).reduce((a, b) => a + b, 0);
+  if (recorded <= 0) return { ...blank, [channelOf(method)]: amountText(total) };
+
+  return {
+    cash: sums.cash > 0 ? amountText(sums.cash) : '',
+    credit: sums.credit > 0 ? amountText(sums.credit) : '',
+    transfer: sums.transfer > 0 ? amountText(sums.transfer) : '',
+  };
 }
 
 /**
@@ -226,7 +234,7 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
   const depositValue = Number(depositEdit);
   const depositValid = depositValue > 0 && depositValue < planTotal;
 
-  const pay = item ? paidBy(item.payment_method, item.total, item.status) : {};
+  const pay = item ? paidBy(item.payments, item.payment_method, item.total, item.status) : {};
 
   return (
     <div className="modal-backdrop" onClick={onClose}>

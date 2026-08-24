@@ -8,6 +8,7 @@ import {
   CASE_TYPE_LABELS, MONTH_LABELS, POSITION_LABELS, SERVICE_KIND_LABELS, VISIT_STATE_LABELS,
   formatDate, toBuddhistYear,
 } from '../labels.js';
+import { CAL_STATES, dayLabel, timeRange } from '../lib/calendarUi.js';
 import LineIcon from '../components/LineIcon.jsx';
 import PageRefresh from '../components/PageRefresh.jsx';
 
@@ -23,9 +24,6 @@ const WEEKDAYS = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
  */
 const MONTH_VISIBLE = 2;
 
-// สถานะกะที่ขึ้นบนปฏิทินได้จริง (ยกเลิกถูกตัดออกตั้งแต่ฝั่ง server)
-const CAL_STATES = ['scheduled', 'working', 'done', 'stale', 'missed'];
-
 /**
  * สายบริการของเคส — เคสที่เปิดก่อนมีระบบสองสายยังมี service_kind เป็น null
  * จึงดูจากแพ็คเกจกายภาพที่ผูกไว้จริงด้วย (กติกาเดียวกับ CaseModal/MyCaseModal)
@@ -37,19 +35,6 @@ const kindOf = (c) => (c.service_kind === 'physio' || c.physio_package_id != nul
 const iso = (y, m, d) => `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
 const isoOf = (date) => iso(date.getFullYear(), date.getMonth() + 1, date.getDate());
 const todayISO = () => isoOf(new Date());
-
-/**
- * ป้ายวันแบบอ่านออกได้ด้วยตัวเอง — 'พฤ. 13 ส.ค.'
- *
- * ใช้ในโหมดรายการบนมือถือ ซึ่งไม่มีหัวคอลัมน์วันในสัปดาห์และไม่มีวันข้างๆ ให้เทียบแล้ว
- * เห็นเลข "13" ลอยอยู่ในกล่องจึงบอกอะไรไม่ได้เลยว่าเป็นวันอะไร
- */
-const dayLabel = (key) =>
-  new Date(`${key}T00:00:00`).toLocaleDateString('th-TH', { weekday: 'short', day: 'numeric', month: 'short' });
-
-/** ช่วงเวลานัดของกะ — เก็บเป็น 'HH:MM' อยู่แล้ว ไม่ต้องแปลงโซนเวลา */
-const timeRange = (v) =>
-  v.planned_start ? `${v.planned_start}${v.planned_end ? `–${v.planned_end}` : ''}` : null;
 
 export default function CalendarPage() {
   const [params, setParams] = useSearchParams();

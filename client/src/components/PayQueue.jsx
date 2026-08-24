@@ -147,11 +147,28 @@ export default function PayQueue({ reloadKey, openCase, onOpenCase }) {
                             {c.installments_used > 0 ? `${c.installments_used} งวด` : 'ยังไม่ปล่อย'}
                           </span>
                         </td>
+                        {/* ป้ายสถานะเงิน — ตัวเลขสามคอลัมน์บอกครบอยู่แล้วว่าเคสนี้อยู่ตรงไหน
+                            แต่ต้องเอาสองยอดมาลบกันในหัวก่อนถึงจะรู้ ซึ่งเมื่อไล่ทีละสิบแถว
+                            (บางใบปิดเคสแล้ว บางใบยังไม่ปิด บางใบซ่อนอยู่หลังสวิตช์) คนอ่านจะเริ่มมึน
+                            ป้ายเดียวตอบคำถามที่ถามจริงทันที: จ่ายครบหรือยัง / ยังตามจ่ายอยู่ไหม
+
+                            เคสที่ยังไม่ปล่อยสักบาทไม่มีป้าย — ช่อง "ปล่อยแล้ว" เขียนว่า "ยังไม่ปล่อย"
+                            อยู่แล้ว ติดป้ายซ้ำอีกอันคือทำให้สิ่งที่ต้องอ่านเยอะขึ้นโดยไม่ได้บอกอะไรใหม่
+                            มีป้าย = มีเงินออกไปแล้ว จึงเป็นสัญญาณที่กวาดตาหาได้จริง */}
                         <td data-label="คงเหลือ">
                           {c.remaining > 0 ? (
-                            <strong>{formatBaht(c.remaining)}</strong>
+                            <>
+                              <strong>{formatBaht(c.remaining)}</strong>
+                              {c.released > 0 && (
+                                <span className="pay-state">
+                                  <span className="badge payout-partial">ตามจ่ายอยู่</span>
+                                </span>
+                              )}
+                            </>
                           ) : (
-                            <span className="muted">ครบแล้ว</span>
+                            <span className="pay-state">
+                              <span className="badge payout-full">จ่ายครบแล้ว</span>
+                            </span>
                           )}
                         </td>
                       </tr>

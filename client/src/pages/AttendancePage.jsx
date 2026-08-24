@@ -12,6 +12,7 @@ import { Approvals } from '../components/PayrollTabs.jsx';
 import { downloadCsv, thisMonth, LATE_MINUTES } from '../lib/attendanceUi.js';
 import { useSheetSwipe } from '../lib/sheetSwipe.js';
 import { useScrollLock } from '../lib/scrollLock.js';
+import { useCanSeeStaffPay } from '../auth.jsx';
 
 /* หน้านี้คือเรื่อง "เข้า–ออกงาน" ทั้งหมด — รวมการยืนยันกะกลับมาด้วย
 
@@ -39,6 +40,7 @@ function daysAgo(dateStr) {
 /** หน้าติดตามการมาทำงานของพนักงานภาคสนาม (admin) */
 export default function AttendancePage() {
   const [params, setParams] = useSearchParams();
+  const canSeePayroll = useCanSeeStaffPay();
 
   // รายการต้องตรวจโหลดที่นี่ ไม่ใช่ในแท็บ — ตัวเลขบนแท็บต้องเห็นได้โดยไม่ต้องกดเข้าไปก่อน
   const [exceptions, setExceptions] = useState(null);
@@ -105,9 +107,12 @@ export default function AttendancePage() {
         <div>
           <h1>การมาทำงาน</h1>
           <p className="muted">
-            ติดตามการเช็คอิน–เอาท์ของพนักงานภาคสนาม และแก้เวลาที่ลงผิด ·
-            {' '}เรื่องค่าจ้าง (อนุมัติ/สรุป/จ่าย) อยู่ที่{' '}
-            <Link className="link" to="/payroll">ค่าตอบแทนพนักงาน</Link>
+            ติดตามการเช็คอิน–เอาท์ของพนักงานภาคสนาม และแก้เวลาที่ลงผิด
+            {canSeePayroll && (
+              <> · เรื่องค่าจ้าง (สรุป/จ่าย) อยู่ที่{' '}
+                <Link className="link" to="/payroll">ค่าตอบแทนพนักงาน</Link>
+              </>
+            )}
           </p>
         </div>
       </header>
@@ -443,7 +448,18 @@ function Exceptions({ rows, error, onReload, filters }) {
         </section>
       ) : (
         <div className="table-wrap">
-          <table className="table table-cards table-2line">
+          <table className="table table-cards table-2line att-review">
+            {/* คอลัมน์ปุ่มจัดการต้องกว้างพอให้ปุ่มยาวสุด ("บันทึกเวลาจริง") อยู่ได้ทั้งคำ
+                ปล่อยให้ห้าคอลัมน์แบ่งเท่ากันตาม table-layout: fixed แล้วปุ่มที่สองเป็นต้นไป
+                จะโดน … ตัดหายทั้งปุ่ม — คำสั่งที่มองไม่เห็นเท่ากับกดไม่ได้
+                ที่ยืมมาคือชื่อ/เคส ซึ่งเป็นข้อความอิสระ ตัดท้ายแล้วยังเดาความได้ */}
+            <colgroup>
+              <col style={{ width: '17%' }} />
+              <col style={{ width: '22%' }} />
+              <col style={{ width: '18%' }} />
+              <col style={{ width: '22%' }} />
+              <col style={{ width: '21%' }} />
+            </colgroup>
             <thead>
               <tr><th>วันที่</th><th>พนักงาน / เคส</th><th>ปัญหา</th><th>หลักฐาน</th><th></th></tr>
             </thead>

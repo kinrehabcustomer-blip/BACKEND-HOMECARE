@@ -1,8 +1,13 @@
+import { Link } from 'react-router-dom';
 import { CASE_TYPE_LABELS, CASE_STATUS_LABELS, formatBaht, formatDate } from '../labels.js';
 
 /**
  * เคสที่ผูกกับผู้รับการดูแลรายนี้ — มุมของผู้ป่วย จึงโชว์ "พนักงานที่รับ" ไม่ใช่ชื่อผู้ป่วยซ้ำ
  * (เคสจะขึ้นที่นี่เมื่อเปิดเคสจากหน้าผู้ป่วย ซึ่งผูก patient_id ให้อัตโนมัติ)
+ *
+ * แต่ละเคสกดเข้าไปดูตัวเคสได้ (ตารางกะที่ไปดูแลจริง · รายงานอาการรายครั้ง · ค่าใช้จ่าย) —
+ * หน้าผู้ป่วยตอบว่า "คนนี้เคยใช้บริการอะไรบ้าง" ส่วนคำถามถัดมาเสมอคือ "แล้วเคสนั้นเป็นยังไง"
+ * ซึ่งเดิมต้องจำรหัสเคสแล้วไปหาเองที่หน้าเคส · เปิดเป็น popup บนหน้าเคส ปิดแล้วกดถอยกลับมาที่นี่ได้
  *
  * limit: โชว์กี่เคสก่อน — ไม่ส่ง = โชว์ทั้งหมด (หน้าเต็ม); popup ส่ง limit แล้วบอกว่าเหลืออีกกี่เคส
  */
@@ -22,10 +27,15 @@ export default function PatientCases({ cases = [], limit }) {
       <p className="muted history-summary">
         ทั้งหมด {cases.length} เคส · ปิดแล้ว {closed.length} เคส
         {spent > 0 && ` · ยอดจากเคสที่ปิดแล้ว ${formatBaht(spent)}`}
+        {/* จอสัมผัสไม่มี hover ให้บอกว่ากดได้ — ต้องเขียนบอกตรงๆ ไม่งั้นรายการนี้อ่านเป็นข้อความตาย */}
+        <span className="cell-sub">แตะที่เคสเพื่อดูตารางกะและรายงานอาการ</span>
       </p>
 
       {shown.map((c) => (
-        <div className="history-item" key={c.case_id}>
+        /* ทั้งแถบเป็นลิงก์ ไม่ใช่แค่ชื่อเคส — เป้าเล็กๆ บนมือถือคือเป้าที่กดพลาด
+           และไม่ทำตัวหนังสือทั้งแถบเป็นสีลิงก์ ไม่งั้นทั้งบล็อกกลายเป็นทะเลสีน้ำเงิน
+           (กติกาเดียวกับ .linkish ในหน้าค่าตอบแทน: บอกว่ากดได้ตอนชี้/โฟกัส) */
+        <Link className="history-item" to={`/cases?open=${c.case_id}`} key={c.case_id}>
           <div>
             <strong>{c.title}</strong>
             <p className="muted">
@@ -39,7 +49,7 @@ export default function PatientCases({ cases = [], limit }) {
             </p>
           </div>
           <span className={`badge case-${c.status}`}>{CASE_STATUS_LABELS[c.status]}</span>
-        </div>
+        </Link>
       ))}
 
       {hidden > 0 && (
