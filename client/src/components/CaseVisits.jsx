@@ -9,6 +9,22 @@ import TimeSelect from './TimeSelect.jsx';
 
 const WEEKDAYS = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
 
+/**
+ * ปุ่มเลือกเร็วกวาดกี่วัน — "หนึ่งเดือนของสัญญา" คือ 30 วันติดต่อกัน ไม่ใช่ถึงสิ้นเดือนตามปฏิทิน
+ *
+ * ของเดิมกวาดแค่ในเดือนที่เปิดดูอยู่ กดวันที่ 24 จึงได้แค่ 8 วันแล้วจบ ทั้งที่งานรายเดือน
+ * ต้องลงต่อไปถึงเดือนหน้าให้ครบเดือน — คนใช้ต้องกดลูกศรไปเดือนถัดไปแล้วกดซ้ำอีกครั้งทุกครั้ง
+ * และต้องนับเองว่าเดือนหน้าต้องหยุดวันไหนถึงจะไม่เกิน
+ */
+const SPAN_DAYS = 30;
+
+/** เดินวันถัดไปจาก 'YYYY-MM-DD' — ใช้ UTC ล้วนเพื่อไม่ให้โซนเวลาของเครื่องทำให้วันเลื่อน */
+const nextDay = (key) => {
+  const d = new Date(`${key}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+};
+
 /** 'YYYY-MM-DD' ประกอบเอง — ไม่ใช้ toISOString เพราะแปลงเป็น UTC แล้ววันเพี้ยน */
 const iso = (y, m, d) => `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
 const todayISO = () => {
@@ -64,9 +80,13 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
   const toast = useToast();
   // ค่าจ้างรายกะเห็น/แก้ได้เฉพาะผู้จัดการ เหมือนค่าจ้างของเคส (server ตัดฟิลด์ให้อยู่แล้ว)
   const isAppt = mode === 'appointment';
-  const now = new Date();
-  const [year, setYear] = useState(now.getFullYear());
-  const [month, setMonth] = useState(now.getMonth() + 1);
+  /* เปิดปฏิทินที่เดือนของ "วันแรกที่ลงนัดได้จริง" ไม่ใช่เดือนปัจจุบันเสมอไป
+     เคสที่เริ่มเดือนหน้า ถ้าเปิดมาเจอเดือนนี้ กดเลือกเร็วจะไม่ได้อะไรเลยและไม่รู้ว่าทำไม
+     ต้องเดาเองว่าต้องกดลูกศรไปข้างหน้าก่อน — ค่าตั้งต้นควรพาไปที่เดือนที่ทำงานได้ทันที */
+  const firstBookable =
+    caseItem?.start_date && caseItem.start_date > todayISO() ? caseItem.start_date : todayISO();
+  const [year, setYear] = useState(Number(firstBookable.slice(0, 4)));
+  const [month, setMonth] = useState(Number(firstBookable.slice(5, 7)));
   const [visits, setVisits] = useState([]);
   const [staff, setStaff] = useState([]);
 
@@ -82,6 +102,17 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
 
   const mm = String(month).padStart(2, '0');
   const today = todayISO();
+
+  /**
+   * วันแรกที่ "เลือกเร็ว" จะเริ่มนับ — ไม่มีทางย้อนไปวันที่ผ่านมาแล้ว
+   *
+   * ของเดิมกวาดทั้งเดือนที่กำลังดูอยู่ กด "ทั้งเดือน" วันที่ 24 จึงได้วันที่ 1–23 ติดมาด้วย
+   * ซึ่งเป็นวันที่ผ่านไปแล้ว ลงนัดไม่ได้จริง ต้องมานั่งแตะออกทีละวันก่อนกดบันทึกทุกครั้ง
+   *
+   * เคสที่ระบุ "วันเริ่ม" ไว้และเป็นวันในอนาคต ให้ยึดวันนั้นแทน — สัญญายังไม่เริ่ม ลงนัดก่อนไม่ได้
+   * ส่วนเคสที่วันเริ่มผ่านมาแล้ว วันนี้คือวันแรกที่ลงได้จริง (เทียบข้อความ YYYY-MM-DD ตรงๆ ได้เลย)
+   */
+  const startFrom = caseItem?.start_date && caseItem.start_date > today ? caseItem.start_date : today;
 
   const unit = isAppt ? 'นัด' : 'กะ'; // คำเรียกของหนึ่งรายการ ใช้ในข้อความทุกที่ของโหมดนั้น
   const presets = isAppt ? APPOINTMENT_TIME_PRESETS : TIME_PRESETS;
@@ -198,17 +229,62 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
     });
   }
 
-  /** เลือกทั้งเดือนที่กำลังดูอยู่ตามวันในสัปดาห์ (ยังไม่บันทึก — ทบทวนบนปฏิทินได้ก่อน) */
+  /**
+   * เลือกเร็ว 30 วันติดต่อกันตามวันในสัปดาห์ที่ระบุ — ข้ามไปเดือนถัดไปได้
+   *
+   * จุดตั้งต้นคือวันแรกที่ลงได้จริงของเดือนที่กำลังเปิดดู: เปิดเดือนนี้อยู่ก็เริ่มที่วันนี้
+   * เปิดเดือนหน้าก็เริ่มวันที่ 1 ของเดือนนั้น — คนกดจึงได้ช่วงที่ตรงกับสิ่งที่เห็นตรงหน้าเสมอ
+   */
   function pickPattern(weekdays) {
-    const days = new Date(year, month, 0).getDate();
+    const monthStart = iso(year, month, 1);
+    const monthEnd = iso(year, month, new Date(year, month, 0).getDate());
+
+    // ทั้งเดือนที่เปิดดูอยู่ผ่านไปแล้ว — ไม่มีอะไรให้เลือก บอกเหตุผลแทนการเงียบ
+    if (monthEnd < startFrom) {
+      toast(`เดือนนี้ผ่านไปแล้ว — เลือกได้ตั้งแต่ ${formatDate(startFrom)} เป็นต้นไป`);
+      return;
+    }
+
+    const anchor = monthStart > startFrom ? monthStart : startFrom;
+
+    /* คอร์สกายภาพมีจำนวนครั้งจำกัด — กวาด 30 วันรวดจะเกินแพ็คเกจทันที (แพ็ค 20 ครั้ง)
+       จึงหยุดให้พอดีโควตาที่เหลือ ส่วนกะ Homecare ไม่มีเพดาน ลงได้เท่าที่ตกลงกัน */
+    const room = isAppt && target ? Math.max(0, target - booked - picked.size) : Infinity;
+
+    const keys = [];
+    let cursor = anchor;
+    for (let i = 0; i < SPAN_DAYS && keys.length < room; i += 1) {
+      if (!weekdays || weekdays.includes(new Date(`${cursor}T00:00:00Z`).getUTCDay())) keys.push(cursor);
+      cursor = nextDay(cursor);
+    }
+
+    let added = 0;
     setPicked((prev) => {
       const next = new Set(prev);
-      for (let d = 1; d <= days; d += 1) {
-        const key = iso(year, month, d);
-        if (!weekdays || weekdays.includes(new Date(`${key}T00:00:00Z`).getUTCDay())) next.add(key);
+      for (const key of keys) {
+        if (!next.has(key)) added += 1;
+        next.add(key);
       }
       return next;
     });
+
+    if (added === 0) {
+      toast(
+        room === 0
+          ? `ครบจำนวนครั้งของแพ็คเกจแล้ว (${target} ครั้ง)`
+          : 'วันที่ตรงกับแบบนี้ถูกเลือกไว้ครบแล้ว',
+      );
+      return;
+    }
+
+    /* บอกช่วงที่ได้จริงทุกครั้ง — ปุ่มเดียวเลือกได้ 30 วันข้ามเดือน ถ้าไม่บอกว่าถึงวันไหน
+       คนกดต้องไล่ดูปฏิทินทีละเดือนเองเพื่อตรวจว่าระบบเลือกให้ถูกหรือเปล่า */
+    const last = keys[keys.length - 1];
+    toast(
+      room !== Infinity && keys.length >= room
+        ? `เลือกให้ ${added} วัน (${formatDate(anchor)} – ${formatDate(last)}) — พอดีจำนวนครั้งที่เหลือของแพ็คเกจ`
+        : `เลือกให้ ${added} วัน: ${formatDate(anchor)} – ${formatDate(last)}`,
+    );
   }
 
   function save() {
@@ -316,7 +392,7 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
           <span className="muted">เลือกเร็ว:</span>
           <button type="button" className="btn tiny" disabled={busy} onClick={() => pickPattern([1, 2, 3, 4, 5])}>จ–ศ</button>
           <button type="button" className="btn tiny" disabled={busy} onClick={() => pickPattern([0, 6])}>ส–อา</button>
-          <button type="button" className="btn tiny" disabled={busy} onClick={() => pickPattern(null)}>ทั้งเดือน</button>
+          <button type="button" className="btn tiny" disabled={busy} onClick={() => pickPattern(null)}>ทุกวัน 30 วัน</button>
           {picked.size > 0 && (
             <button type="button" className="btn tiny" disabled={busy} onClick={() => setPicked(new Set())}>ล้าง</button>
           )}
@@ -328,6 +404,14 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
           {isAppt
             ? 'แตะวันบนปฏิทินเพื่อเลือกวันนัด (แตะซ้ำเพื่อยกเลิก) แล้วเลือกเวลานัดแล้วกดบันทึก'
             : 'แตะวันบนปฏิทินเพื่อเลือก (แตะซ้ำเพื่อยกเลิก) แล้วตั้งคน/เวลาแล้วกดบันทึก'}
+          {/* บอกจุดตั้งต้นของปุ่มเลือกเร็วไว้ตรงนี้ ไม่งั้นคนกดแล้วสงสัยว่าทำไมต้นเดือนไม่ถูกเลือก */}
+          <span className="cell-sub">
+            ปุ่มเลือกเร็วกวาด <strong>{SPAN_DAYS} วันติดต่อกัน</strong> (ข้ามไปเดือนถัดไปให้เอง) เริ่มจาก{' '}
+            <strong>
+              {startFrom === today ? `วันนี้ (${formatDate(today)})` : `วันเริ่มของเคส (${formatDate(startFrom)})`}
+            </strong>{' '}
+            ไม่ย้อนวันที่ผ่านมาแล้ว
+          </span>
         </p>
       )}
 

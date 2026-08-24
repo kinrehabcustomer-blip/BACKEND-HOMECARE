@@ -19,7 +19,7 @@ export default function CaseVisitsModal({ caseItem, readOnly = false, mode = 'sh
 
   return (
     <div className="modal-backdrop modal-stacked" onClick={onClose}>
-      <div className="modal modal-narrow" ref={sheetRef} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+      <div className="modal modal-narrow is-subsheet" ref={sheetRef} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
         <header className="modal-head">
           <div>
             <p className="mono muted">{caseItem.case_id}</p>

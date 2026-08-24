@@ -24,7 +24,7 @@ export default function ReportArchiveModal({ caseId, caseInfo, title, scope, cur
 
   return (
     <div className="modal-backdrop modal-stacked" onClick={onClose}>
-      <div className="modal modal-wide" ref={sheetRef} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+      <div className="modal modal-wide is-subsheet" ref={sheetRef} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
         <header className="modal-head">
           <div>
             <p className="mono muted">{caseId}</p>
