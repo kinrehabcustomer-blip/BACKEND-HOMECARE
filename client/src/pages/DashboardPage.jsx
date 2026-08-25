@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api.js';
+import { useCanSeeRevenue } from '../auth.jsx';
 import RevenueChart from '../components/RevenueChart.jsx';
 import CaseTypeChart from '../components/CaseTypeChart.jsx';
 import ErrorBar from '../components/ErrorBar.jsx';
@@ -41,6 +42,7 @@ export default function DashboardPage() {
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
   const [reloadKey, setReloadKey] = useState(0); // เด้งค่าเพื่อสั่งโหลดใหม่จากปุ่ม "ลองใหม่"
+  const canSeeRevenue = useCanSeeRevenue(); // รายได้รวมของบริษัท = เฉพาะผู้จัดการ (HR ไม่เห็น)
 
   // ปี/เดือนที่มีข้อมูลจริง โหลดครั้งเดียว — ไม่ต้องดึงใหม่ทุกครั้งที่เปลี่ยนช่วงเวลา
   useEffect(() => {
@@ -230,8 +232,12 @@ export default function DashboardPage() {
           </div>
 
           {/* อยู่ใต้ทุกอย่างที่ตัวกรองด้านบนควบคุม เพราะการ์ดนี้มีช่วงเวลาของตัวเอง (บอกไว้ในหัวการ์ด)
-              ไม่ได้ขึ้นกับปี/เดือนที่เลือก — วางแทรกกลางจะอ่านเหมือนถูกกรองไปด้วย */}
-          <RevenueChart />
+              ไม่ได้ขึ้นกับปี/เดือนที่เลือก — วางแทรกกลางจะอ่านเหมือนถูกกรองไปด้วย
+
+              ไม่ขึ้นสำหรับคนที่ไม่ใช่ผู้จัดการ ไม่ใช่ขึ้นแล้วโชว์ error — เส้น API ตอบ 403 อยู่แล้ว
+              (ดู requireManager ที่ /api/invoices/revenue) การ์ดที่ขึ้นมาเพื่อบอกว่า "คุณดูไม่ได้"
+              ไม่ได้ช่วยใครทำงาน มีแต่บอกว่ามีตัวเลขที่ตัวเองไม่มีสิทธิ์อยู่ */}
+          {canSeeRevenue && <RevenueChart />}
         </>
       )}
     </PageRefresh>

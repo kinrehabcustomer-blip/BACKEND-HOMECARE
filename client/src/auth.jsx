@@ -77,6 +77,17 @@ export const useAuth = () => useContext(AuthContext);
  */
 export const useCanSeeStaffPay = () => useAuth()?.user?.position === 'manager';
 
+/**
+ * เห็นรายได้รวมของบริษัทได้ไหม (กราฟรายได้หน้าภาพรวม) — เฉพาะตำแหน่งผู้จัดการเช่นกัน
+ *
+ * ถามแยกจาก useCanSeeStaffPay ทั้งที่ตอนนี้ตอบเหมือนกัน เพราะเป็นคนละคำถาม —
+ * ค่าจ้างพนักงานกับรายได้บริษัทเปิดให้ตำแหน่งอื่นเห็นทีละอย่างได้ในอนาคต
+ * โดยไม่ต้องไล่ดูว่าจุดที่เรียก useCanSeeStaffPay อยู่หมายถึงอันไหน (กติกาเดียวกับฝั่ง server)
+ *
+ * ตัวจริงที่กันคือ requireManager หน้าเส้น /api/invoices/revenue — อันนี้แค่ไม่วาดการ์ดที่ยังไงก็โหลดไม่ได้
+ */
+export const useCanSeeRevenue = () => useAuth()?.user?.position === 'manager';
+
 /** ครอบหน้าที่ต้อง login — ยังไม่ login ให้เด้งไปหน้า login */
 export function RequireAuth({ children }) {
   const { user, loading, intentionalLogout, kickedOut } = useAuth();

@@ -14,6 +14,7 @@ import {
   INVOICE_STATUSES,
 } from './schema.js';
 import { ApiError, asyncRoute, notFound } from '../lib/errors.js';
+import { requireManager } from '../lib/auth.js';
 
 export const invoicesRouter = Router();
 
@@ -84,9 +85,16 @@ invoicesRouter.get(
   asyncRoute(async (req, res) => res.json(await repo.summary(listQuerySchema.parse(req.query)))),
 );
 
-/** รายได้ตามช่วงเวลาสำหรับกราฟหน้าภาพรวม — ต้องอยู่เหนือ '/:id' ไม่งั้นโดนจับเป็นรหัสใบแจ้งหนี้ */
+/**
+ * รายได้ตามช่วงเวลาสำหรับกราฟหน้าภาพรวม — ต้องอยู่เหนือ '/:id' ไม่งั้นโดนจับเป็นรหัสใบแจ้งหนี้
+ *
+ * เฉพาะผู้จัดการ (แคบกว่าทั้ง router ที่เป็น requireAdmin ซึ่งรวม HR ด้วย) — ตัวเลขนี้คือรายได้รวม
+ * ของบริษัท ไม่ใช่ข้อมูลที่ต้องใช้ทำงานประจำวัน กันที่เส้น API ไม่ใช่แค่ซ่อนการ์ดบนหน้าจอ
+ * ไม่งั้นยิง /api/invoices/revenue ตรงด้วยคุกกี้เดิมก็ได้ตัวเลขครบ
+ */
 invoicesRouter.get(
   '/revenue',
+  requireManager,
   asyncRoute(async (req, res) => res.json(await repo.revenue(revenueQuerySchema.parse(req.query)))),
 );
 

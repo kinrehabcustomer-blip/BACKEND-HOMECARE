@@ -179,7 +179,8 @@ export function requirePasswordChanged(req, res, next) {
 }
 
 /**
- * เฉพาะผู้จัดการ — ใช้กับข้อมูลค่าจ้าง/กำไรและคำสั่งที่ทำให้เงินออกจากบริษัท
+ * เฉพาะผู้จัดการ — ใช้กับข้อมูลเงินที่ไม่ใช่เรื่องของทุกคนในทีม:
+ * ค่าจ้าง/กำไร, คำสั่งที่ทำให้เงินออกจากบริษัท, และรายได้รวมของบริษัท
  *
  * จงใจแคบกว่า requireAdmin ซึ่งรวม HR ด้วย และอ่านตำแหน่งสดที่ requireAuth ใส่ไว้ใน req.user
  * จึงลดสิทธิ์พนักงานระหว่างที่ session ยังไม่หมดอายุได้ทันทีเหมือนด่านอื่นในระบบ
@@ -187,7 +188,7 @@ export function requirePasswordChanged(req, res, next) {
 export function requireManager(req, res, next) {
   if (!req.user) return next(new ApiError(401, 'กรุณาเข้าสู่ระบบ'));
   if (!canSeeStaffPay(req.user.position)) {
-    return next(new ApiError(403, 'เฉพาะผู้จัดการเท่านั้นที่เข้าถึงข้อมูลค่าตอบแทนพนักงานได้'));
+    return next(new ApiError(403, 'เฉพาะผู้จัดการเท่านั้นที่เข้าถึงข้อมูลส่วนนี้ได้'));
   }
   next();
 }
