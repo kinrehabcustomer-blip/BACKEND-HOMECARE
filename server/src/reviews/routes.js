@@ -62,7 +62,7 @@ publicReviewsRouter.post(
     const ipHash = fingerprint(req);
 
     if (await repo.recentDuplicate(employee.employee_id, ipHash, DUPLICATE_WINDOW_MIN)) {
-      throw new ApiError(409, 'ระบบได้รับแบบประเมินจากเครื่องนี้แล้ว ขอบคุณมากค่ะ 🤍');
+      throw new ApiError(409, 'ระบบได้รับแบบประเมินจากเครื่องนี้แล้ว ขอบคุณมากค่ะ');
     }
     if ((await repo.countRecent(employee.employee_id)) >= DAILY_CAP) {
       throw new ApiError(429, 'วันนี้ระบบรับแบบประเมินของพนักงานท่านนี้ครบแล้ว — กรุณาลองใหม่พรุ่งนี้');

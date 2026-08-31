@@ -245,7 +245,9 @@ export default function ReviewDetailPage() {
                     onConfirm={() => removeReview(r.review_id)}
                     aria-label="ลบแบบประเมินใบนี้"
                   >
-                    ✕
+                    {/* ไอคอนจากชุดกลาง ไม่ใช่อักขระ ✕ — Anuphan ไม่มีอักขระตัวนั้น
+                        บางเครื่องจึงขึ้นเป็นกล่องสี่เหลี่ยม (เหตุผลเดียวกับหัวไฟล์ LineIcon.jsx) */}
+                    <LineIcon name="close" />
                   </ConfirmButton>
                 </div>
 

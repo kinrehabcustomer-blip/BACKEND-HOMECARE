@@ -54,18 +54,19 @@ export default function ReviewsPage() {
 
       {error && <p className="error">{error}</p>}
 
-      <div className="tiles">
-        <div className="tile">
+      {/* is-static — ช่องตัวเลขพวกนี้กดไม่ได้ ต้องไม่เปลี่ยนสีตอนเอาเมาส์ชี้ ไม่งั้นหลอกว่ากดได้ */}
+      <div className="tiles review-tiles">
+        <div className="tile is-static">
           <span className="tile-label">คะแนนเฉลี่ยทั้งทีม</span>
           <span className="tile-value">{scoreText(teamAvg)}</span>
           <Stars value={teamAvg} size="sm" />
         </div>
-        <div className="tile">
+        <div className="tile is-static">
           <span className="tile-label">แบบประเมินทั้งหมด</span>
           <span className="tile-value">{totalReviews}</span>
           <span className="tile-frac">ใบ</span>
         </div>
-        <div className="tile">
+        <div className="tile is-static">
           <span className="tile-label">มีคะแนนแล้ว</span>
           <span className="tile-value">{rated.length}</span>
           <span className="tile-frac">จาก {rows.length} คน</span>

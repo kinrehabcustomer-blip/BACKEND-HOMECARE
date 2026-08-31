@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { api } from '../api.js';
 import { openDatePicker, todayTH } from '../labels.js';
+import LineIcon from '../components/LineIcon.jsx';
 import { StarPicker } from '../components/Stars.jsx';
 import {
   REVIEW_QUESTIONS,
@@ -113,7 +114,12 @@ export default function ReviewFormPage() {
       <div className="review-page">
         <section className="review-card review-msg">
           <img className="review-logo" src="/logo-navbar.webp" alt="KIN Home Care" />
-          <h1>ขอบพระคุณสำหรับความคิดเห็นของท่าน 🤍</h1>
+          {/* เหรียญหัวใจแทนอีโมจิท้ายหัวข้อ — เป็นภาพของหน้านี้ ไม่ใช่ตัวอักษรที่บังเอิญเป็นรูป
+              จึงคุมขนาด/สี/ตำแหน่งได้ และตามธีมมืด-สว่างเหมือนไอคอนอื่นทั้งระบบ */}
+          <span className="review-done-mark">
+            <LineIcon name="heart" className="review-done-ico" />
+          </span>
+          <h1>ขอบพระคุณสำหรับความคิดเห็นของท่าน</h1>
           <p className="muted">
             ทุกความคิดเห็นของท่านคือส่วนสำคัญในการพัฒนาคุณภาพการดูแลของ KIN
           </p>
@@ -184,7 +190,7 @@ export default function ReviewFormPage() {
         </section>
 
         <section className="review-section">
-          <h2>💬 ความคิดเห็นจากคุณญาติ</h2>
+          <h2>ความคิดเห็นจากคุณญาติ</h2>
           <label className="review-text">
             สิ่งที่ท่านประทับใจในการดูแลของนักกายภาพบำบัดท่านนี้
             <textarea rows="3" value={form.impressed} onChange={set('impressed')} />
@@ -196,7 +202,7 @@ export default function ReviewFormPage() {
         </section>
 
         <section className="review-section">
-          <h2>⭐ คำถามสำหรับประเมินคุณภาพโดยรวม</h2>
+          <h2>คำถามสำหรับประเมินคุณภาพโดยรวม</h2>
 
           <p className="review-ask">หากมีโอกาส ท่านต้องการให้นักกายภาพบำบัดท่านนี้กลับมาดูแลผู้ป่วยต่อหรือไม่?</p>
           <ChoiceGroup
