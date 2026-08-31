@@ -4262,6 +4262,196 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
   user-select: all;              /* แตะครั้งเดียวเลือกทั้งก้อน — ลากเลือกรหัสบนมือถือเป็นเรื่องยาก */
 }
 
+/* ==========================================================================
+   แบบประเมินความพึงพอใจจากญาติ — ดาว, หน้าฟอร์มสาธารณะ, หน้ารายงานหลังบ้าน
+   ========================================================================== */
+
+/* ข้อความที่มีไว้ให้โปรแกรมอ่านหน้าจอเท่านั้น — ไม่ใช้ display: none เพราะแบบนั้น
+   โปรแกรมอ่านหน้าจอจะข้ามไปด้วย ซึ่งตรงข้ามกับที่ต้องการพอดี */
+.sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  margin: -1px; padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* ---------- ดาว ---------- */
+.stars { display: inline-flex; align-items: center; gap: 0.375rem; vertical-align: middle; }
+.stars-figure { position: relative; display: inline-block; line-height: 0; }
+.stars-track, .stars-fill { display: flex; gap: 0.0625rem; }
+/* ชั้นที่เติมสีทับอยู่บนชั้นโปร่ง แล้วถูกครอบความกว้างไว้ — ดาวจึงเติมเป็นเศษส่วนได้ */
+.stars-fill { position: absolute; top: 0; left: 0; bottom: 0; overflow: hidden; }
+.stars svg { width: 1em; height: 1em; flex: none; display: block; }
+.stars-track svg { fill: var(--border); }
+.stars-fill svg { fill: var(--brand); }
+.stars-sm { font-size: 0.8125rem; }
+.stars-md { font-size: 1.125rem; }
+.stars-lg { font-size: 1.75rem; }
+.stars-value { font-size: 0.8125rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* ดาวแบบกดเลือก — radio จริงที่ซ่อนไว้ ปุ่มกดกว้าง 2.75rem ตามขนาดนิ้วขั้นต่ำที่กดไม่พลาด */
+.star-pick { display: inline-flex; gap: 0.125rem; }
+.star-pick-item {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 2.75rem; height: 2.75rem;
+  cursor: pointer;
+  color: var(--border);
+  transition: color 0.12s, transform 0.12s;
+}
+.star-pick-item svg { width: 1.875rem; height: 1.875rem; fill: currentColor; }
+.star-pick-item.is-on { color: var(--brand); }
+.star-pick-item:active { transform: scale(0.92); }
+/* opacity แทน display: none — ต้องยังรับโฟกัสจากแป้นพิมพ์และเลื่อนด้วยลูกศรได้ */
+.star-pick-item input { position: absolute; inset: 0; opacity: 0; cursor: pointer; margin: 0; }
+.star-pick-item:focus-within { outline: 2px solid var(--brand); outline-offset: -2px; border-radius: 0.375rem; }
+
+/* ---------- หน้าฟอร์มสาธารณะ (/review/:token) ---------- */
+.review-page {
+  min-height: 100vh;
+  min-height: 100dvh;
+  background: var(--bg);
+  padding: 1.5rem 1rem 3rem;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+}
+.review-card {
+  width: 100%;
+  max-width: 40rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  padding: 1.75rem;
+}
+.review-msg { text-align: center; padding: 3rem 1.75rem; }
+.review-head { text-align: center; }
+.review-logo { height: 2.75rem; width: auto; }
+.review-head h1 { font-size: 1.375rem; margin: 0.875rem 0 0.5rem; }
+.review-intro { color: var(--muted); font-size: 0.875rem; line-height: 1.7; margin: 0; }
+
+.review-who {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  margin: 1.5rem 0;
+  padding: 0.875rem 1rem;
+  background: var(--brand-soft);
+  border-radius: var(--radius);
+}
+.review-who strong { font-size: 1.125rem; }
+.review-who .muted { font-size: 0.75rem; }
+
+.review-fields { display: grid; gap: 0.875rem; grid-template-columns: 1fr 1fr; }
+.review-fields label { display: flex; flex-direction: column; gap: 0.3125rem; font-size: 0.8125rem; color: var(--muted); }
+
+.review-section { margin-top: 2rem; }
+.review-section h2 { font-size: 1rem; margin: 0 0 0.5rem; }
+.review-legend {
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin: 0 0 0.75rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px dashed var(--divider);
+}
+
+.review-questions { list-style: none; counter-reset: rq; margin: 0; padding: 0; }
+.review-q { counter-increment: rq; padding: 0.75rem 0; border-bottom: 1px dashed var(--divider); }
+.review-q:last-child { border-bottom: none; }
+/* เลขข้อมาจาก counter ไม่ใช่พิมพ์มือ — สลับ/เพิ่มข้อใน reviewQuestions.js แล้วเลขเรียงตามเอง */
+.review-q-label::before { content: counter(rq) '. '; color: var(--muted); }
+.review-q-label { display: block; font-size: 0.9375rem; line-height: 1.55; }
+.review-q-input { display: flex; align-items: center; gap: 0.625rem; margin-top: 0.25rem; }
+.review-q-score { font-size: 0.8125rem; color: var(--brand); font-weight: 600; }
+
+.review-text { display: block; font-size: 0.875rem; margin-bottom: 1rem; }
+.review-text textarea { width: 100%; margin-top: 0.375rem; resize: vertical; }
+.review-ask { font-size: 0.9375rem; margin: 1.25rem 0 0.5rem; }
+
+.review-choices { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.review-choice {
+  position: relative;
+  padding: 0.5rem 0.875rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+.review-choice.is-on { border-color: var(--brand); background: var(--brand-soft); color: var(--brand); font-weight: 600; }
+.review-choice input { position: absolute; inset: 0; opacity: 0; cursor: pointer; margin: 0; }
+.review-choice:focus-within { outline: 2px solid var(--brand); outline-offset: 2px; }
+
+/* .error ตั้ง margin: 0 ไว้ให้แต่ละที่เว้นระยะเอง (หน้าหลังบ้านใช้ `.content .error`,
+   การ์ด login ใช้ gap ของ flex) — การ์ดนี้ไม่ได้เป็น flex จึงต้องบอกระยะตรงนี้
+   ไม่งั้นกล่องแดงจะไปแปะติดกับกลุ่มปุ่มตัวเลือกด้านบนจนดูเป็นก้อนเดียวกัน */
+.review-card > .error { margin-top: 1.5rem; }
+
+.review-submit { width: 100%; margin-top: 1.75rem; padding: 0.875rem; font-size: 1rem; }
+.review-note { text-align: center; font-size: 0.75rem; margin: 0.75rem 0 0; }
+
+/* ---------- หน้ารายงานหลังบ้าน ---------- */
+.review-score-cell { display: flex; align-items: center; gap: 0.5rem; }
+.review-score-cell strong { font-variant-numeric: tabular-nums; }
+
+.review-hero { display: flex; flex-wrap: wrap; align-items: center; gap: 2rem; }
+.review-hero-score { display: flex; flex-direction: column; gap: 0.375rem; }
+.review-hero-value { font-size: 3rem; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
+.review-hero-score .muted { font-size: 0.8125rem; }
+.review-stars-dist { flex: 1; min-width: 15rem; }
+
+/* ป้ายของกราฟรายหัวข้อยาวกว่าที่ .bar-label เผื่อไว้ และค่าเป็นทศนิยม ("4.6") ไม่ใช่จำนวนเต็ม */
+.review-bar-label { width: 10rem; }
+.review-bar-value { width: 2.5rem; }
+
+.review-link-card h2, .review-hero + .card h2, .review-link-card + .card h2 { font-size: 1rem; margin: 0 0 0.375rem; }
+.review-link-body { display: flex; flex-wrap: wrap; gap: 1.25rem; align-items: flex-start; margin-top: 1rem; }
+.review-qr {
+  width: 9.5rem; height: 9.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #fff;   /* QR ต้องอยู่บนพื้นขาวเสมอ กล้องอ่านโค้ดบนพื้นเข้มไม่ออก */
+  padding: 0.375rem;
+}
+.review-link-actions { flex: 1; min-width: 16rem; display: flex; flex-direction: column; gap: 0.625rem; }
+.review-link-input { width: 100%; font-size: 0.8125rem; }
+
+.review-list { list-style: none; margin: 0.75rem 0 0; padding: 0; }
+.review-item { padding: 1rem 0; border-bottom: 1px dashed var(--divider); }
+.review-item:last-child { border-bottom: none; }
+.review-item-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.625rem; }
+.review-item-head .muted { flex: 1; min-width: 12rem; font-size: 0.75rem; }
+.review-item-text { margin: 0.5rem 0 0; font-size: 0.875rem; line-height: 1.6; }
+.review-item-tag {
+  display: inline-block;
+  font-size: 0.6875rem;
+  color: var(--muted);
+  background: var(--surface-2);
+  border-radius: 0.375rem;
+  padding: 0.0625rem 0.375rem;
+  margin-right: 0.25rem;
+}
+.review-item-choices { font-size: 0.75rem; margin: 0.5rem 0 0; }
+.review-item-detail { margin-top: 0.5rem; }
+.review-item-detail summary { font-size: 0.75rem; color: var(--muted); cursor: pointer; }
+.review-item-scores { list-style: none; margin: 0.5rem 0 0; padding: 0; display: grid; gap: 0.25rem 1.25rem; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); }
+.review-item-scores li { display: flex; justify-content: space-between; gap: 0.75rem; font-size: 0.8125rem; padding: 0.1875rem 0; border-bottom: 1px solid var(--divider); }
+
+@media (max-width: 600px) {
+  .review-card { padding: 1.25rem; border: none; border-radius: 0; }
+  .review-page { padding: 0 0 2rem; }
+  .review-fields { grid-template-columns: 1fr; }
+  /* ดาว 5 ใบ × 2.75rem = 13.75rem ซึ่งกว้างกว่าจอ 360px เมื่อรวมขอบ — ย่อลงพอให้อยู่ในบรรทัดเดียว
+     ยังกด/แตะได้อยู่ (2.375rem ≈ 38px ใกล้เคียงขั้นต่ำที่นิ้วกดไม่พลาด) */
+  .star-pick-item { width: 2.375rem; height: 2.375rem; }
+  .star-pick-item svg { width: 1.625rem; height: 1.625rem; }
+  .review-q-input { flex-wrap: wrap; }
+  .review-bar-label { width: 7rem; font-size: 0.75rem; }
+  .review-hero { gap: 1.25rem; }
+}
+
 /* ---------- จอแคบ: popup ที่ซ้อนบน popup อีกชั้น ต้องกินเต็มจอ ----------
 
    ต้องอยู่ท้ายไฟล์ เพราะกฎฐานของ .modal-backdrop.modal-stacked (ฉากหลังโปร่ง 28%)

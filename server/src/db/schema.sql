@@ -1380,6 +1380,64 @@ CREATE INDEX IF NOT EXISTS idx_payroll_payout_lines_item ON payroll_payout_lines
 -- รอบที่จ่ายไปแล้วก่อนเปลี่ยนวิธีคิด ยังต้องกางดูได้ว่ายอดมาจากกะไหนบ้าง จึงไม่ลบตารางทิ้ง
 -- แต่จะไม่มีแถวใหม่เกิดขึ้นอีก — เส้นทางเงินทั้งหมดย้ายไป case_payouts แล้ว
 
+-- ---------- แบบประเมินความพึงพอใจจากญาติผู้รับบริการ ----------
+--
+-- ญาติกรอกจากหน้าสาธารณะ (ไม่ต้อง login) ที่เปิดจากลิงก์เฉพาะตัวของพนักงานคนนั้น
+-- ลิงก์ชี้ด้วย review_token ที่สุ่มมา ไม่ใช่ employee_id เพราะ EMP-0001, EMP-0002 เรียงเป็นลำดับ
+-- และโผล่อยู่ทุกหน้าจอ — ใครก็ไล่ยิงคะแนนใส่พนักงานทีละคนได้ครบทั้งบริษัทในคำสั่งเดียว
+-- token ยังเพิกถอนได้ด้วย (ออกใบใหม่ = ลิงก์เดิมตาย) ต่างจากรหัสพนักงานที่ห้ามแก้ตลอดอายุบัญชี
+ALTER TABLE employees ADD COLUMN IF NOT EXISTS review_token TEXT;
+
+-- partial index เพราะคนที่ยังไม่เคยออกลิงก์มีได้หลายคน (NULL ไม่ชนกัน) — เขาแค่ยังไม่มีลิงก์
+CREATE UNIQUE INDEX IF NOT EXISTS idx_employees_review_token
+  ON employees (review_token) WHERE review_token IS NOT NULL;
+
+-- 1 แถว = แบบประเมิน 1 ใบ ที่ญาติกรอกให้พนักงาน 1 คน
+--
+-- คะแนน 10 ข้อแยกเป็นคอลัมน์ละข้อ ไม่ใช่ JSON ก้อนเดียว — ทั้งหน้ารายงานคิดค่าเฉลี่ย
+-- รายหัวข้อด้วย AVG() ตรงๆ และ CHECK ระดับฐานข้อมูลกันคะแนนนอกช่วง 1–5 ให้ทุกข้อเท่ากันหมด
+--
+-- ไม่ผูกกับเคส/กะ โดยตั้งใจ: ญาติที่กรอกไม่รู้จักรหัสเคส และแบบประเมินเป็นความเห็นต่อ "คน"
+-- ไม่ใช่ต่อ "งานชิ้นนั้น" — ชื่อผู้ป่วย/วันที่รับบริการจึงเป็นข้อความอิสระไว้อ้างอิงเท่านั้น
+CREATE TABLE IF NOT EXISTS staff_reviews (
+  review_id    INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+
+  -- ลบพนักงานถาวรแล้วแบบประเมินหายตาม — เป็นความเห็นที่มีความหมายเฉพาะเมื่อผูกกับคนคนนั้น
+  employee_id  TEXT NOT NULL REFERENCES employees (employee_id) ON DELETE CASCADE ON UPDATE CASCADE,
+
+  patient_name TEXT,
+  service_date TEXT,  -- 'YYYY-MM-DD'
+
+  -- คะแนน 5 = ดีมาก ถึง 1 = ควรปรับปรุงมาก (บังคับกรอกครบทุกข้อ)
+  q_punctual      SMALLINT NOT NULL CHECK (q_punctual      BETWEEN 1 AND 5),  -- ตรงต่อเวลา/รักษาตามนัด
+  q_manner        SMALLINT NOT NULL CHECK (q_manner        BETWEEN 1 AND 5),  -- สุภาพ/บุคลิกภาพ
+  q_attentive     SMALLINT NOT NULL CHECK (q_attentive     BETWEEN 1 AND 5),  -- เอาใจใส่ผู้ป่วย
+  q_safety        SMALLINT NOT NULL CHECK (q_safety        BETWEEN 1 AND 5),  -- ปลอดภัย/ระมัดระวัง
+  q_professional  SMALLINT NOT NULL CHECK (q_professional  BETWEEN 1 AND 5),  -- ตั้งใจ/เป็นมืออาชีพ
+  q_communication SMALLINT NOT NULL CHECK (q_communication BETWEEN 1 AND 5),  -- สื่อสาร/อธิบายให้เข้าใจ
+  q_adapt         SMALLINT NOT NULL CHECK (q_adapt         BETWEEN 1 AND 5),  -- ปรับการรักษาให้เหมาะกับผู้ป่วย
+  q_home_advice   SMALLINT NOT NULL CHECK (q_home_advice   BETWEEN 1 AND 5),  -- แนะนำการดูแล/ฝึกต่อที่บ้าน
+  q_progress      SMALLINT NOT NULL CHECK (q_progress      BETWEEN 1 AND 5),  -- ผู้ป่วยมีพัฒนาการเหมาะสม
+  q_overall       SMALLINT NOT NULL CHECK (q_overall       BETWEEN 1 AND 5),  -- พึงพอใจโดยรวม
+
+  impressed  TEXT,  -- สิ่งที่ประทับใจ
+  improve    TEXT,  -- สิ่งที่อยากให้ปรับปรุง
+
+  want_again TEXT CHECK (want_again IN ('strongly', 'yes', 'unsure', 'no')),
+  recommend  TEXT CHECK (recommend  IN ('definitely', 'yes', 'unsure', 'no')),
+
+  /* ลายนิ้วมือของผู้กรอก — เก็บเป็น hash ไม่ใช่ IP ดิบ เพราะไม่มีใครในระบบต้องใช้ IP จริง
+     มีไว้อย่างเดียวคือกันกดส่งซ้ำรัวๆ จากเครื่องเดิม (ดู recentDuplicate ใน reviews/repo.js) */
+  ip_hash      TEXT,
+
+  submitted_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')
+);
+
+CREATE INDEX IF NOT EXISTS idx_staff_reviews_employee  ON staff_reviews (employee_id);
+CREATE INDEX IF NOT EXISTS idx_staff_reviews_submitted ON staff_reviews (submitted_at);
+-- คู่ (พนักงาน, ลายนิ้วมือ) เรียงตามเวลา — ใช้ตรวจว่าเครื่องนี้เพิ่งส่งใบให้คนนี้ไปเมื่อกี้หรือเปล่า
+CREATE INDEX IF NOT EXISTS idx_staff_reviews_dedupe    ON staff_reviews (employee_id, ip_hash, submitted_at);
+
 -- ==========================================================================
 -- ย้ายข้อมูลก่อนลบ (ต้องอยู่ท้ายไฟล์เสมอ — ตารางปลายทางถูกสร้างไปแล้วถึงตรงนี้)
 --

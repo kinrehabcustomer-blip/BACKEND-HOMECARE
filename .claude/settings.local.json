@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run *)",
+      "Bash(cat)",
+      "Bash(node _verify.mjs)",
+      "Bash(rm -f _verify.mjs)",
+      "Bash(node -e ' *)"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\user\\.claude\\projects\\c--Users-user-Desktop-BACKEND-HOMECARE\\memory"
+    ]
+  }
+}

@@ -328,6 +328,24 @@ export const api = {
    */
   sendDailyDigest: () => request('/notify/daily-digest', { method: 'POST' }),
 
+  // ---------- แบบประเมินความพึงพอใจจากญาติผู้รับบริการ ----------
+  /* สองเส้นแรกเป็นของหน้าสาธารณะ (/review/:token) — ไม่ต้อง login และห้ามต้อง
+     คนกรอกคือญาติผู้ป่วย ไม่ใช่พนักงาน จึงไม่มีบัญชีในระบบให้ใช้ตั้งแต่ต้น */
+  /** ชื่อพนักงานเจ้าของลิงก์ — ใช้โชว์บนหัวฟอร์มว่ากำลังประเมินใครอยู่ */
+  reviewForm: (token) => request(`/reviews/form/${encodeURIComponent(token)}`),
+  submitReview: (token, body) =>
+    request(`/reviews/form/${encodeURIComponent(token)}`, { method: 'POST', body }),
+
+  /** คะแนนรวมของทุกคนที่เปิดรับประเมิน — คนที่ยังไม่มีใบอยู่ในรายการด้วย (review_count = 0) */
+  reviewSummary: () => request('/reviews/summary'),
+  /** รายบุคคล: คะแนนรวม · ค่าเฉลี่ยรายหัวข้อ · การแจกแจงดาว · ความเห็นทุกใบ */
+  employeeReviews: (id) => request(`/reviews/employees/${id}`),
+  /** ลิงก์ประเมินของพนักงานคนนี้ — ยังไม่เคยมีก็ออกให้ตอนเรียกครั้งแรก */
+  reviewLink: (id) => request(`/reviews/employees/${id}/link`),
+  /** ออกลิงก์ใหม่ — ลิงก์/QR เดิมที่แจกไปแล้วใช้ไม่ได้ทันที */
+  rotateReviewLink: (id) => request(`/reviews/employees/${id}/link`, { method: 'POST' }),
+  deleteReview: (reviewId) => request(`/reviews/entries/${reviewId}`, { method: 'DELETE' }),
+
   // ---------- ใบแจ้งหนี้ ----------
   listInvoices: (params = {}) => request(`/invoices?${new URLSearchParams(params)}`),
   /** ยอดสรุปใบแจ้งหนี้ — ส่งตัวกรองชุดเดียวกับ listInvoices เพื่อให้ตัวเลขตรงกับรายการที่แสดงอยู่ */

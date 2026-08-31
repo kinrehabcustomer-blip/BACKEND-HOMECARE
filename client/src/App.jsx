@@ -16,6 +16,11 @@ import ChangePasswordForm from './components/ChangePasswordForm.jsx';
  * ทำให้ lazy ก็แค่เพิ่มการรอไปอีกรอบโดยไม่ได้ลดอะไร
  */
 const ForgotPasswordPage = lazy(() => import('./pages/ForgotPasswordPage.jsx'));
+/* หน้าแบบประเมินของญาติ — lazy เหมือนหน้าอื่น และสำคัญกว่าหน้าอื่นด้วย
+   คนที่เปิดคือญาติผู้ป่วยจากลิงก์ในไลน์ บนมือถือ ครั้งเดียวจบ ไม่ควรต้องโหลดระบบหลังบ้านทั้งก้อน */
+const ReviewFormPage = lazy(() => import('./pages/ReviewFormPage.jsx'));
+const ReviewsPage = lazy(() => import('./pages/ReviewsPage.jsx'));
+const ReviewDetailPage = lazy(() => import('./pages/ReviewDetailPage.jsx'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage.jsx'));
 const EmployeeListPage = lazy(() => import('./pages/EmployeeListPage.jsx'));
 const EmployeeFormPage = lazy(() => import('./pages/EmployeeFormPage.jsx'));
@@ -54,6 +59,7 @@ const NAV_ICONS = {
   user: (<><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></>),
   today: (<><rect x="3" y="4" width="18" height="18" rx="2" /><path d="M3 10h18M8 2v4M16 2v4" /><path d="M9 15l2 2 4-4" /></>),
   wallet: (<><path d="M3 7a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><path d="M3 9h18" /><path d="M16 13.5h2.5" /></>),
+  star: (<path d="M12 2.6l2.9 5.9 6.5.9-4.7 4.6 1.1 6.5-5.8-3.1-5.8 3.1 1.1-6.5L2.6 9.4l6.5-.9z" />),
 };
 
 function NavIcon({ name }) {
@@ -79,6 +85,7 @@ const ADMIN_NAV = [
   { to: '/packages', icon: 'home', label: 'แพ็คเกจ Homecare' },
   { to: '/physio-packages', icon: 'activity', label: 'แพ็คเกจกายภาพบำบัด' },
   { to: '/employees', icon: 'user', label: 'พนักงาน' },
+  { to: '/reviews', icon: 'star', label: 'คะแนนประเมินจากญาติ' },
 ];
 
 const FIELD_NAV = [
@@ -257,6 +264,10 @@ export default function App() {
           <Routes>
             <Route path="/login" element={<LoginPage />} />
             <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+
+            {/* แบบประเมินที่ญาติกรอก — ไม่มี AppLayout เพราะไม่มี login ไม่มีเมนู ไม่มีสิทธิ์อะไรให้ตรวจ
+                คนที่เปิดหน้านี้ไม่ใช่ผู้ใช้ของระบบ ความปลอดภัยอยู่ที่ token ในลิงก์ (ดู reviews/routes.js) */}
+            <Route path="/review/:token" element={<ReviewFormPage />} />
             <Route path="/settings" element={<AppLayout><SettingsPage /></AppLayout>} />
             {/* ลิงก์เดิมที่อาจถูก bookmark ไว้ ให้เด้งไปหน้าตั้งค่าแทน */}
             <Route path="/change-password" element={<Navigate to="/settings" replace />} />
@@ -291,6 +302,9 @@ export default function App() {
             <Route path="/patients/new" element={<AppLayout admin><PatientFormPage /></AppLayout>} />
             <Route path="/patients/:id" element={<AppLayout admin><PatientDetailPage /></AppLayout>} />
             <Route path="/patients/:id/edit" element={<AppLayout admin><PatientFormPage /></AppLayout>} />
+
+            <Route path="/reviews" element={<AppLayout admin><ReviewsPage /></AppLayout>} />
+            <Route path="/reviews/:id" element={<AppLayout admin><ReviewDetailPage /></AppLayout>} />
 
             <Route path="/packages" element={<AppLayout admin><PackagesPage /></AppLayout>} />
             <Route path="/physio-packages" element={<AppLayout admin><PhysioPackagesPage /></AppLayout>} />

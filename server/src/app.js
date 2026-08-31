@@ -12,6 +12,7 @@ import { invoicesRouter } from './invoices/routes.js';
 import { payrollRouter } from './payroll/routes.js';
 import { myRouter } from './my/routes.js';
 import { notifyRouter } from './notify/routes.js';
+import { publicReviewsRouter, reviewsRouter } from './reviews/routes.js';
 import { errorHandler } from './lib/errors.js';
 import { requireAuth, requireAdmin, requireManager, requirePasswordChanged } from './lib/auth.js';
 
@@ -28,6 +29,14 @@ export function createApp() {
   // /api/auth ไม่ผ่านด่านบังคับเปลี่ยนรหัส — ไม่งั้นคนที่ต้องเปลี่ยนรหัสจะเรียก /auth/change-password ไม่ได้
   app.use('/api/auth', authRouter);
 
+  /* แบบประเมินความพึงพอใจที่ญาติผู้รับบริการกรอก — เป็นหน้าสาธารณะโดยตั้งใจ ไม่มี login
+     ญาติไม่ใช่ผู้ใช้ของระบบ จะออกบัญชีให้ทุกบ้านก็ไม่มีใครกรอก · สิ่งที่ใช้แทนคือลิงก์ที่เดาไม่ได้
+     (review_token สุ่มจาก CSPRNG) บวกเพดานกันยิงซ้ำในตัว router เอง
+
+     ต้องมาก่อน /api/reviews ที่มีด่าน admin — express จับ prefix ตามลำดับที่ประกาศ
+     ถ้าสลับกัน เส้นสาธารณะจะถูกด่าน admin กินไปด้วย แล้วญาติจะเปิดฟอร์มไม่ได้เลย */
+  app.use('/api/reviews/form', publicReviewsRouter);
+
   /* ทุกเส้นที่ต้อง login ต้องผ่านสามด่านตามลำดับ: มีเซสชัน → ตั้งรหัสของตัวเองแล้ว → มีสิทธิ์พอ
      รวมเป็นชุดเดียวเพื่อไม่ให้ router ใหม่ในอนาคตลืมด่านกลางไป (ซึ่งจะเงียบสนิท ไม่มีอะไรฟ้อง) */
   const signedIn = [requireAuth, requirePasswordChanged];
@@ -41,6 +50,8 @@ export function createApp() {
   app.use('/api/packages', signedIn, requireAdmin, packagesRouter);
   app.use('/api/physio', signedIn, requireAdmin, physioRouter);
   app.use('/api/invoices', signedIn, requireAdmin, invoicesRouter);
+  // คะแนนประเมินจากญาติ — ผู้จัดการและ HR เปิดดูได้ (HR เป็นคนดูแลเรื่องประเมินผลงานอยู่แล้ว)
+  app.use('/api/reviews', signedIn, requireAdmin, reviewsRouter);
   // ค่าตอบแทนและการปิดรอบทำให้เงินจริงออกจากบริษัท — HR เป็น admin แต่ไม่ใช่ผู้มีสิทธิ์ด้านการเงิน
   // วาง requireManager ก่อน router เพื่อกันก่อนแม้แต่ param loader จะอ่าน/บอกใบ้รหัสรอบที่มีอยู่
   app.use('/api/payroll', signedIn, requireManager, payrollRouter);
