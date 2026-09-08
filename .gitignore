@@ -8,3 +8,8 @@ server/data/
 
 .vercel
 .env*
+
+# ไฟล์ที่ dump ออกมาจากฐานข้อมูล (npm run dump:packages)
+# มี staff_pay = ต้นทุนค่าจ้างพนักงาน ซึ่งในระบบเปิดให้เห็นเฉพาะผู้จัดการ — ไม่ควรอยู่ใน git
+homecare-packages-data.sql
+*-packages-data.sql

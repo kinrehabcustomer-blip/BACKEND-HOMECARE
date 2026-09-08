@@ -9,9 +9,13 @@ const TOKEN_TTL = '8h'; // ประมาณหนึ่งกะทำงา�
 export const COOKIE_NAME = 'kin_session';
 
 // ---------- สิทธิ์การเข้าถึง (คิดจาก "ตำแหน่ง" ไม่ใช่คอลัมน์ role) ----------
-// ผู้จัดการ/HR = admin (เห็น/แก้ได้ทุกอย่าง) · ตำแหน่งที่เหลือ = field (พนักงานภาคสนาม สิทธิ์จำกัด)
-// ผูกกับตำแหน่งเพื่อไม่ต้องมาตั้ง role แยกทีละคน — เปลี่ยนตำแหน่งเป็นผู้จัดการ/HR ก็ได้สิทธิ์ทันที
-export const ADMIN_POSITIONS = ['manager', 'hr'];
+// ผู้จัดการ/HR/แอดมิน = admin (เห็น/แก้ได้ทุกอย่าง) · ตำแหน่งที่เหลือ = field (พนักงานภาคสนาม สิทธิ์จำกัด)
+// ผูกกับตำแหน่งเพื่อไม่ต้องมาตั้ง role แยกทีละคน — เปลี่ยนตำแหน่งเป็นสามตำแหน่งนี้ก็ได้สิทธิ์ทันที
+//
+// ระวังคำว่า admin ที่ซ้ำกันสองความหมาย: 'admin' ในรายการนี้คือ "ตำแหน่งงาน" (คอลัมน์ position)
+// ส่วน 'admin' ที่ roleForPosition คืนออกไปคือ "ระดับสิทธิ์" ซึ่งผู้จัดการกับ HR ก็ได้เหมือนกัน
+// — เช็ค req.user.role === 'admin' กับ req.user.position === 'admin' จึงไม่ใช่คำถามเดียวกัน
+export const ADMIN_POSITIONS = ['manager', 'hr', 'admin'];
 export const roleForPosition = (position) => (ADMIN_POSITIONS.includes(position) ? 'admin' : 'field');
 
 /**

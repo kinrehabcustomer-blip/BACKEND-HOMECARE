@@ -11,6 +11,7 @@
     "start": "node src/index.js",
     "migrate": "node src/db/migrate.js",
     "seed:packages": "node src/db/seed-packages.js",
+    "dump:packages": "node src/db/dump-packages.js",
     "reset:data": "node src/db/reset.js",
     "test": "node --test test/logic.test.js",
     "test:api": "node --env-file=test/db-tests.env --test test/api.test.js"

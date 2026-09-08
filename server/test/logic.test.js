@@ -58,6 +58,9 @@ const {
   payrollRunForUpdate,
 } = await import('../src/payroll/repo.js');
 const { firstAvailablePayrollRound: firstAvailablePayrollRoundOnClient } = await import('../../client/src/lib/payrollUi.js');
+const { reviewSubmitSchema, REVIEW_QUESTIONS, WANT_AGAIN_OPTIONS, RECOMMEND_OPTIONS } = await import('../src/reviews/schema.js');
+const { REVIEW_POSITIONS, perReviewAvg } = await import('../src/reviews/repo.js');
+const { THERAPY_POSITIONS } = await import('../src/employees/schema.js');
 const { distanceMeters, DEFAULT_GEOFENCE_M } = await import('../src/lib/geo.js');
 const { roleForPosition, canSeeStaffPay, requireManager, stripPayFields, BLOCKED_STATUSES } = await import('../src/lib/auth.js');
 const { errorHandler, ApiError } = await import('../src/lib/errors.js');
@@ -1608,5 +1611,164 @@ describe('รหัสผ่านชั่วคราวของพนัก�
 
   test('ไม่ใช่รหัสพนักงาน — ของเดิมตั้งเป็น employee_id ซึ่งเดาได้ทันที', () => {
     assert.notEqual(generateTempPassword(), 'EMP-0007');
+  });
+});
+
+/* ---------- แบบประเมินความพึงพอใจจากญาติ (reviews) ----------
+
+   โมดูลนี้รับข้อมูลจาก "หน้าสาธารณะที่ไม่ต้อง login" ซึ่งเป็นทางเข้าเดียวในระบบที่คนนอกยิงเข้ามาได้
+   schema จึงเป็นด่านเดียวที่กันของเสียก่อนถึงฐานข้อมูล — ทุกกฎในนั้นต้องมีเทสคุม */
+
+/** ใบที่กรอกครบถูกต้อง ใช้เป็นฐานแล้วแก้ทีละช่องในแต่ละเทส */
+const validReview = (extra = {}) => ({
+  ...Object.fromEntries(REVIEW_QUESTIONS.map((q) => [q, 5])),
+  ...extra,
+});
+
+describe('แบบประเมิน — schema ที่ญาติกรอกจากหน้าสาธารณะ', () => {
+  test('ใบที่ให้คะแนนครบทุกข้อผ่าน และช่องไม่บังคับที่เว้นว่างกลายเป็น null', () => {
+    const parsed = reviewSubmitSchema.parse(
+      validReview({ patient_name: '', service_date: '', impressed: '', improve: '', want_again: '', recommend: '' }),
+    );
+
+    for (const q of REVIEW_QUESTIONS) assert.equal(parsed[q], 5);
+    // '' จากฟอร์ม HTML ต้องกลายเป็น null ไม่ใช่สตริงว่างลงฐาน (ไม่งั้น "ไม่มีความเห็น" มีสองความหมาย)
+    for (const f of ['patient_name', 'service_date', 'impressed', 'improve', 'want_again', 'recommend']) {
+      assert.equal(parsed[f], null, `ช่อง ${f} ที่เว้นว่างต้องเป็น null`);
+    }
+  });
+
+  test('ขาดคะแนนแม้ข้อเดียวต้องไม่ผ่าน — ใบครึ่งใบทำให้ค่าเฉลี่ยรายหัวข้อเทียบกันไม่ได้', () => {
+    for (const missing of REVIEW_QUESTIONS) {
+      const body = validReview();
+      delete body[missing];
+      assert.equal(reviewSubmitSchema.safeParse(body).success, false, `ขาดข้อ ${missing} แต่ยังผ่าน`);
+    }
+  });
+
+  test('คะแนนต้องเป็นจำนวนเต็ม 1–5 เท่านั้น', () => {
+    for (const bad of [0, 6, -1, 3.5, '5', null, true]) {
+      assert.equal(
+        reviewSubmitSchema.safeParse(validReview({ q_overall: bad })).success,
+        false,
+        `คะแนน ${JSON.stringify(bad)} ไม่ควรผ่าน`,
+      );
+    }
+    for (const ok of [1, 2, 3, 4, 5]) {
+      assert.equal(reviewSubmitSchema.safeParse(validReview({ q_overall: ok })).success, true);
+    }
+  });
+
+  /* คอลัมน์วันที่ในฐานนี้เป็น TEXT ทั้งหมด Postgres จึงไม่ช่วยตรวจให้อีกชั้น
+     เคยใช้ regex สี่หลัก-สองหลัก-สองหลัก ซึ่งปล่อยวันที่ที่ไม่มีอยู่จริงลงฐานได้ */
+  test('วันที่รับบริการต้องมีอยู่จริงในปฏิทิน ไม่ใช่แค่รูปแบบถูก', () => {
+    for (const bad of ['2026-02-31', '2026-13-01', '2026-00-10', '2026-1-1', '31-01-2026', 'เมื่อวาน']) {
+      assert.equal(
+        reviewSubmitSchema.safeParse(validReview({ service_date: bad })).success,
+        false,
+        `วันที่ ${bad} ไม่ควรผ่าน`,
+      );
+    }
+    assert.equal(reviewSubmitSchema.safeParse(validReview({ service_date: '2026-02-28' })).success, true);
+    assert.equal(reviewSubmitSchema.safeParse(validReview({ service_date: '2028-02-29' })).success, true); // ปีอธิกสุรทิน
+  });
+
+  test('ตัวเลือกปลายปิดรับเฉพาะค่าที่ CHECK ของฐานข้อมูลยอมรับ', () => {
+    for (const v of WANT_AGAIN_OPTIONS) {
+      assert.equal(reviewSubmitSchema.safeParse(validReview({ want_again: v })).success, true);
+    }
+    for (const v of RECOMMEND_OPTIONS) {
+      assert.equal(reviewSubmitSchema.safeParse(validReview({ recommend: v })).success, true);
+    }
+    assert.equal(reviewSubmitSchema.safeParse(validReview({ want_again: 'maybe' })).success, false);
+    // ค่าของอีกช่องหนึ่งต้องใช้ข้ามช่องไม่ได้ — สองชุดนี้ตั้งใจตั้งชื่อไม่ให้ซ้ำกัน
+    assert.equal(reviewSubmitSchema.safeParse(validReview({ want_again: 'definitely' })).success, false);
+  });
+
+  test('ข้อความยาวเกินเพดานไม่ผ่าน และช่องเว้นวรรคล้วนถือว่าไม่ได้กรอก', () => {
+    assert.equal(reviewSubmitSchema.safeParse(validReview({ impressed: 'ก'.repeat(2001) })).success, false);
+    assert.equal(reviewSubmitSchema.safeParse(validReview({ patient_name: 'ก'.repeat(101) })).success, false);
+    assert.equal(reviewSubmitSchema.parse(validReview({ impressed: '   ' })).impressed, null);
+  });
+
+  /* หน้าสาธารณะ = ใครก็ยิง body อะไรมาก็ได้ · ชั้นที่เขียนฐานประกอบคำสั่งจากรายชื่อคอลัมน์ของตัวเอง
+     แต่ schema ต้องไม่ปล่อยของแปลกปลอมผ่านมาให้ตั้งแต่แรก (กันชั้นเดียวคือกันไม่พอ) */
+  test('คีย์แปลกปลอมที่ส่งแนบมาถูกตัดทิ้ง ไม่ไหลต่อไปถึงชั้นที่เขียนฐานข้อมูล', () => {
+    const parsed = reviewSubmitSchema.parse(
+      validReview({ employee_id: 'EMP-0001', ip_hash: 'x', review_id: 99, submitted_at: '2020-01-01 00:00:00' }),
+    );
+    for (const k of ['employee_id', 'ip_hash', 'review_id', 'submitted_at']) {
+      assert.equal(k in parsed, false, `คีย์ ${k} ไม่ควรผ่าน schema มาได้`);
+    }
+  });
+});
+
+describe('แบบประเมิน — ตัวหารของคะแนนเฉลี่ย', () => {
+  /* เคยเขียน "/ 10.0" ไว้ตายตัวตอนที่แบบประเมินมีสิบข้อ
+     วันที่ย่อเหลือห้าข้อ คะแนนทุกคนจะหล่นครึ่งหนึ่งเงียบๆ โดยไม่มีอะไรฟ้อง */
+  test('หารด้วยจำนวนข้อจริง ไม่ใช่เลขที่เขียนไว้ตายตัว', () => {
+    assert.ok(
+      perReviewAvg().endsWith(`/ ${REVIEW_QUESTIONS.length}.0)`),
+      `ตัวหารไม่ตรงกับจำนวนข้อ: ${perReviewAvg()}`,
+    );
+  });
+
+  test('ให้ดาวเท่ากันทุกข้อต้องได้ค่าเฉลี่ยเท่ากับดาวที่ให้', () => {
+    // แทนชื่อคอลัมน์ด้วยตัวเลข แล้วคิดนิพจน์เดียวกับที่ Postgres จะคิด
+    const evaluate = (score) => eval(perReviewAvg().replace(/q_\w+/g, String(score)));
+    assert.equal(evaluate(5), 5);
+    assert.equal(evaluate(3), 3);
+    assert.equal(evaluate(1), 1);
+  });
+
+  test('prefix ของตารางถูกเติมให้ครบทุกคอลัมน์ (ใช้ตอน JOIN กับ employees)', () => {
+    const sql = perReviewAvg('r.');
+    for (const q of REVIEW_QUESTIONS) assert.ok(sql.includes(`r.${q}`), `ขาด r.${q}`);
+  });
+});
+
+describe('แบบประเมิน — ตำแหน่งที่เปิดใช้', () => {
+  test('เปิดให้สายบำบัดทั้งชุด โดยอ้างรายการกลาง ไม่ประกาศชื่อซ้ำ', () => {
+    assert.deepEqual(REVIEW_POSITIONS, THERAPY_POSITIONS);
+    assert.deepEqual([...THERAPY_POSITIONS].sort(), ['occupational_therapist', 'speech_therapist', 'therapist']);
+  });
+
+  test('สายบำบัดเป็นพนักงานภาคสนาม ไม่ใช่ admin และไม่เห็นค่าจ้าง/กำไร', () => {
+    for (const p of REVIEW_POSITIONS) {
+      assert.equal(roleForPosition(p), 'field', `${p} ต้องไม่ได้สิทธิ์ระดับ admin`);
+      assert.equal(canSeeStaffPay(p), false, `${p} ต้องไม่เห็นค่าจ้าง/กำไร`);
+    }
+  });
+
+  test('ตำแหน่งสำนักงานและสายดูแลยังไม่เปิดให้ออกลิงก์ประเมิน', () => {
+    for (const p of ['manager', 'hr', 'admin', 'caregiver', 'assistant_nurse', 'practical_nurse', 'nurse']) {
+      assert.equal(REVIEW_POSITIONS.includes(p), false, `${p} ไม่ควรออกลิงก์ประเมินได้`);
+    }
+  });
+});
+
+describe('แบบประเมิน — นิยามฝั่งหน้าเว็บต้องตรงกับ schema ฝั่ง server', () => {
+  test('คำถามในฟอร์มตรงกับคอลัมน์ที่ server รับ ทั้งชุดและลำดับ', async () => {
+    const { REVIEW_QUESTIONS: CLIENT_QUESTIONS } = await import('../../client/src/lib/reviewQuestions.js');
+    assert.deepEqual(CLIENT_QUESTIONS.map((q) => q.key), REVIEW_QUESTIONS);
+  });
+
+  test('ทุกคำถามมีทั้งป้ายเต็มและป้ายสั้น (ป้ายสั้นใช้ในกราฟที่มีที่จำกัด)', async () => {
+    const { REVIEW_QUESTIONS: CLIENT_QUESTIONS } = await import('../../client/src/lib/reviewQuestions.js');
+    for (const q of CLIENT_QUESTIONS) {
+      assert.ok(q.label?.length > 0, `${q.key} ไม่มี label`);
+      assert.ok(q.short?.length > 0, `${q.key} ไม่มี short`);
+    }
+  });
+
+  test('ป้ายของตัวเลือกปลายปิดครอบค่าที่ server ยอมรับครบทุกค่า', async () => {
+    const { WANT_AGAIN_LABELS, RECOMMEND_LABELS } = await import('../../client/src/lib/reviewQuestions.js');
+    assert.deepEqual(Object.keys(WANT_AGAIN_LABELS), WANT_AGAIN_OPTIONS);
+    assert.deepEqual(Object.keys(RECOMMEND_LABELS), RECOMMEND_OPTIONS);
+  });
+
+  test('SCORE_LABELS ครอบคะแนน 1–5 ครบ — ไม่งั้นกดดาวแล้วไม่มีคำขึ้นข้างๆ', async () => {
+    const { SCORE_LABELS } = await import('../../client/src/lib/reviewQuestions.js');
+    for (const n of [1, 2, 3, 4, 5]) assert.ok(SCORE_LABELS[n], `ขาดป้ายของ ${n} ดาว`);
   });
 });

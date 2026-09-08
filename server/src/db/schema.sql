@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS employees (
   birth_date              TEXT,
   address                 TEXT,
 
-  position                TEXT NOT NULL CHECK (position IN ('caregiver', 'assistant_nurse', 'practical_nurse', 'nurse', 'therapist', 'manager', 'hr')),
+  position                TEXT NOT NULL CHECK (position IN ('caregiver', 'assistant_nurse', 'practical_nurse', 'nurse', 'therapist', 'occupational_therapist', 'speech_therapist', 'manager', 'hr', 'admin')),
   employment_type         TEXT NOT NULL DEFAULT 'fulltime' CHECK (employment_type IN ('fulltime', 'parttime', 'contract', 'daily')),
   status                  TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'probation', 'on_leave', 'suspended', 'resigned')),
 
@@ -33,11 +33,18 @@ CREATE INDEX IF NOT EXISTS idx_employees_status   ON employees (status);
 CREATE INDEX IF NOT EXISTS idx_employees_position ON employees (position);
 CREATE INDEX IF NOT EXISTS idx_employees_name     ON employees (first_name, last_name);
 
--- รายการตำแหน่ง: สายดูแล (CG, NA, PN, RN, นักกายภาพบำบัด) + สายสำนักงาน (ผู้จัดการ, HR)
+-- รายการตำแหน่ง: สายดูแล (CG, NA, PN, RN) + สายบำบัด (กายภาพ, กิจกรรมบำบัด, แก้ไขการพูด)
+--                 + สายสำนักงาน (ผู้จัดการ, HR, แอดมิน)
 -- ตาราง employees ถูกสร้างไปแล้วในฐานข้อมูลเดิม (CHECK ด้านบนไม่ถูกแตะ) จึงต้อง drop/add constraint ตรงนี้
+--
+-- สามตำแหน่งสายบำบัดใช้กติกาชุดเดียวกันทุกข้อ: รับเคสกายภาพได้, ไม่มีระดับในตารางราคา,
+-- และเปิดรับแบบประเมินจากญาติ — ดู THERAPY_POSITIONS ใน server/src/employees/schema.js
+-- ที่เป็นรายการต้นทางของทั้งสามที่ (ตัวกรองตอนจับคู่เคส และ REVIEW_POSITIONS)
 ALTER TABLE employees DROP CONSTRAINT IF EXISTS employees_position_check;
 ALTER TABLE employees ADD CONSTRAINT employees_position_check
-  CHECK (position IN ('caregiver', 'assistant_nurse', 'practical_nurse', 'nurse', 'therapist', 'manager', 'hr'));
+  CHECK (position IN ('caregiver', 'assistant_nurse', 'practical_nurse', 'nurse',
+                      'therapist', 'occupational_therapist', 'speech_therapist',
+                      'manager', 'hr', 'admin'));
 
 -- ใบรับรอง / ใบประกอบวิชาชีพ ผูกกับพนักงานผ่าน employee_id
 CREATE TABLE IF NOT EXISTS employee_certificates (
@@ -1394,7 +1401,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_employees_review_token
 
 -- 1 แถว = แบบประเมิน 1 ใบ ที่ญาติกรอกให้พนักงาน 1 คน
 --
--- คะแนน 10 ข้อแยกเป็นคอลัมน์ละข้อ ไม่ใช่ JSON ก้อนเดียว — ทั้งหน้ารายงานคิดค่าเฉลี่ย
+-- คะแนนแยกเป็นคอลัมน์ละข้อ ไม่ใช่ JSON ก้อนเดียว — ทั้งหน้ารายงานคิดค่าเฉลี่ย
 -- รายหัวข้อด้วย AVG() ตรงๆ และ CHECK ระดับฐานข้อมูลกันคะแนนนอกช่วง 1–5 ให้ทุกข้อเท่ากันหมด
 --
 -- ไม่ผูกกับเคส/กะ โดยตั้งใจ: ญาติที่กรอกไม่รู้จักรหัสเคส และแบบประเมินเป็นความเห็นต่อ "คน"
@@ -1408,17 +1415,19 @@ CREATE TABLE IF NOT EXISTS staff_reviews (
   patient_name TEXT,
   service_date TEXT,  -- 'YYYY-MM-DD'
 
-  -- คะแนน 5 = ดีมาก ถึง 1 = ควรปรับปรุงมาก (บังคับกรอกครบทุกข้อ)
+  /* คะแนน 5 = ดีมาก ถึง 1 = ควรปรับปรุงมาก
+     ห้าข้อที่ยังใช้อยู่บังคับกรอกครบ ส่วนที่ทำเครื่องหมาย [เลิกใช้] เหลือไว้เก็บใบเก่าเท่านั้น
+     (NOT NULL ของกลุ่มหลังถูกปลดในบล็อกใต้ตาราง — ฐานใหม่ที่เพิ่งสร้างก็ต้องปลดเหมือนกัน) */
   q_punctual      SMALLINT NOT NULL CHECK (q_punctual      BETWEEN 1 AND 5),  -- ตรงต่อเวลา/รักษาตามนัด
-  q_manner        SMALLINT NOT NULL CHECK (q_manner        BETWEEN 1 AND 5),  -- สุภาพ/บุคลิกภาพ
-  q_attentive     SMALLINT NOT NULL CHECK (q_attentive     BETWEEN 1 AND 5),  -- เอาใจใส่ผู้ป่วย
-  q_safety        SMALLINT NOT NULL CHECK (q_safety        BETWEEN 1 AND 5),  -- ปลอดภัย/ระมัดระวัง
-  q_professional  SMALLINT NOT NULL CHECK (q_professional  BETWEEN 1 AND 5),  -- ตั้งใจ/เป็นมืออาชีพ
-  q_communication SMALLINT NOT NULL CHECK (q_communication BETWEEN 1 AND 5),  -- สื่อสาร/อธิบายให้เข้าใจ
-  q_adapt         SMALLINT NOT NULL CHECK (q_adapt         BETWEEN 1 AND 5),  -- ปรับการรักษาให้เหมาะกับผู้ป่วย
-  q_home_advice   SMALLINT NOT NULL CHECK (q_home_advice   BETWEEN 1 AND 5),  -- แนะนำการดูแล/ฝึกต่อที่บ้าน
-  q_progress      SMALLINT NOT NULL CHECK (q_progress      BETWEEN 1 AND 5),  -- ผู้ป่วยมีพัฒนาการเหมาะสม
-  q_overall       SMALLINT NOT NULL CHECK (q_overall       BETWEEN 1 AND 5),  -- พึงพอใจโดยรวม
+  q_manner        SMALLINT NOT NULL CHECK (q_manner        BETWEEN 1 AND 5),  -- สุภาพ/บุคลิกภาพ/เอาใจใส่
+  q_attentive     SMALLINT NOT NULL CHECK (q_attentive     BETWEEN 1 AND 5),  -- [เลิกใช้] ยุบเข้า q_manner
+  q_safety        SMALLINT NOT NULL CHECK (q_safety        BETWEEN 1 AND 5),  -- [เลิกใช้] ยุบเข้า q_professional
+  q_professional  SMALLINT NOT NULL CHECK (q_professional  BETWEEN 1 AND 5),  -- มืออาชีพ/ปลอดภัย/ปรับการรักษา
+  q_communication SMALLINT NOT NULL CHECK (q_communication BETWEEN 1 AND 5),  -- สื่อสาร + แนะนำการฝึกที่บ้าน
+  q_adapt         SMALLINT NOT NULL CHECK (q_adapt         BETWEEN 1 AND 5),  -- [เลิกใช้] ยุบเข้า q_professional
+  q_home_advice   SMALLINT NOT NULL CHECK (q_home_advice   BETWEEN 1 AND 5),  -- [เลิกใช้] ยุบเข้า q_communication
+  q_progress      SMALLINT NOT NULL CHECK (q_progress      BETWEEN 1 AND 5),  -- [เลิกใช้] ยุบเข้า q_overall
+  q_overall       SMALLINT NOT NULL CHECK (q_overall       BETWEEN 1 AND 5),  -- พึงพอใจโดยรวม + พัฒนาการผู้ป่วย
 
   impressed  TEXT,  -- สิ่งที่ประทับใจ
   improve    TEXT,  -- สิ่งที่อยากให้ปรับปรุง
@@ -1432,6 +1441,22 @@ CREATE TABLE IF NOT EXISTS staff_reviews (
 
   submitted_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')
 );
+
+-- ---------- เลิกใช้ห้าข้อ (แบบประเมินย่อจาก 10 ข้อเหลือ 5) ----------
+--
+-- q_attentive, q_safety, q_adapt, q_home_advice, q_progress ถูกยุบเข้าไปในข้อที่เหลือ
+-- (ดูเหตุผลที่ REVIEW_QUESTIONS ใน server/src/reviews/schema.js)
+--
+-- ปลด NOT NULL แทนการ DROP COLUMN — ใบที่ญาติกรอกไปแล้วต้องไม่หายไปเพราะเราเปลี่ยนแบบฟอร์ม
+-- ความเห็นของคนที่สละเวลากรอกให้เป็นของที่ลบแล้วเอาคืนไม่ได้ ต่างจากคอลัมน์ที่แค่ปล่อยว่างไว้
+-- แถวใหม่จะมีเฉพาะห้าข้อที่ใช้อยู่ ส่วนคะแนนรวมคิดจากห้าข้อนั้นทั้งแถวเก่าและแถวใหม่ จึงเทียบกันได้
+--
+-- รันซ้ำได้: DROP NOT NULL บนคอลัมน์ที่ปลดไปแล้วไม่ทำอะไรและไม่ error
+ALTER TABLE staff_reviews ALTER COLUMN q_attentive   DROP NOT NULL;
+ALTER TABLE staff_reviews ALTER COLUMN q_safety      DROP NOT NULL;
+ALTER TABLE staff_reviews ALTER COLUMN q_adapt       DROP NOT NULL;
+ALTER TABLE staff_reviews ALTER COLUMN q_home_advice DROP NOT NULL;
+ALTER TABLE staff_reviews ALTER COLUMN q_progress    DROP NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_staff_reviews_employee  ON staff_reviews (employee_id);
 CREATE INDEX IF NOT EXISTS idx_staff_reviews_submitted ON staff_reviews (submitted_at);

@@ -270,7 +270,7 @@ export default function ReviewDetailPage() {
 
                 {/* คะแนนรายข้อของใบนี้ — กางไว้ให้ดูได้ว่าคะแนนรวมมาจากตรงไหน โดยไม่ต้องเปิดหน้าใหม่ */}
                 <details className="review-item-detail">
-                  <summary>ดูคะแนนทั้ง 10 ข้อของใบนี้</summary>
+                  <summary>ดูคะแนนรายข้อของใบนี้</summary>
                   <ul className="review-item-scores">
                     {REVIEW_QUESTIONS.map((q) => (
                       <li key={q.key}>

@@ -70,7 +70,7 @@ export default function ReviewFormPage() {
   async function handleSubmit(e) {
     e.preventDefault();
 
-    /* บอกให้ครบทีเดียวว่าเหลือข้อไหน ไม่ใช่ทีละข้อ — ฟอร์มยาว 10 ข้อ
+    /* บอกให้ครบทีเดียวว่าเหลือข้อไหน ไม่ใช่ทีละข้อ — ฟอร์มมีหลายข้อเรียงกัน
        ถ้าฟ้องทีละข้อ คนกรอกต้องเลื่อนขึ้นลงหาซ้ำหลายรอบกว่าจะส่งได้ */
     const missing = REVIEW_QUESTIONS.filter((q) => !scores[q.key]);
     if (missing.length) {
@@ -165,7 +165,7 @@ export default function ReviewFormPage() {
         <section className="review-section">
           <h2>กรุณาให้คะแนนความพึงพอใจ</h2>
           {/* คำอธิบายคะแนนอยู่ตรงนี้จุดเดียว ไม่ซ้ำใต้ทุกข้อ — id ผูกเข้ากับทุกแถวด้วย aria-describedby
-              คนที่ใช้โปรแกรมอ่านหน้าจอจึงได้ยินความหมายของดาวโดยไม่ต้องฟังซ้ำ 10 รอบ */}
+              คนที่ใช้โปรแกรมอ่านหน้าจอจึงได้ยินความหมายของดาวโดยไม่ต้องฟังซ้ำทุกข้อ */}
           <p className="review-legend" id="review-scale">
             5 = ดีมาก · 4 = ดี · 3 = ปานกลาง · 2 = ควรปรับปรุง · 1 = ควรปรับปรุงมาก
           </p>

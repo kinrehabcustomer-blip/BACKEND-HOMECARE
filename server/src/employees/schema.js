@@ -1,7 +1,25 @@
 import { z } from 'zod';
 import { zodDate } from '../lib/dates.js';
 
-export const POSITIONS = ['caregiver', 'assistant_nurse', 'practical_nurse', 'nurse', 'therapist', 'manager', 'hr'];
+/**
+ * สายบำบัด — กายภาพบำบัด, กิจกรรมบำบัด, แก้ไขการพูด
+ *
+ * สามตำแหน่งนี้ทำงานเหมือนกันทุกข้อในระบบ: รับเคสกายภาพได้, ไม่มีระดับ (CG/NA/PN/RN)
+ * ในตารางราคาเหมือนสายดูแล และเปิดรับแบบประเมินความพึงพอใจจากญาติ
+ *
+ * ประกาศเป็นรายการเดียวเพราะมีหลายที่ที่ต้องถามคำถามเดียวกันว่า "เป็นสายบำบัดหรือเปล่า"
+ * (REVIEW_POSITIONS ของแบบประเมิน · positionsForCase ฝั่งหน้าเว็บ · CHECK ใน schema.sql)
+ * — เขียนแยกกันไว้ วันหนึ่งจะมีที่ที่เพิ่มตำแหน่งใหม่แล้วอีกที่ไม่ได้เพิ่มตาม
+ */
+export const THERAPY_POSITIONS = ['therapist', 'occupational_therapist', 'speech_therapist'];
+
+export const POSITIONS = [
+  'caregiver', 'assistant_nurse', 'practical_nurse', 'nurse',
+  ...THERAPY_POSITIONS,
+  // สายสำนักงาน — ทั้งสามได้สิทธิ์ระดับ admin, ต่างกันแค่ผู้จัดการเท่านั้นที่แตะเรื่องเงินได้
+  // (ดู ADMIN_POSITIONS กับ canSeeStaffPay ใน lib/auth.js)
+  'manager', 'hr', 'admin',
+];
 export const EMPLOYMENT_TYPES = ['fulltime', 'parttime', 'contract', 'daily'];
 export const STATUSES = ['active', 'probation', 'on_leave', 'suspended', 'resigned'];
 

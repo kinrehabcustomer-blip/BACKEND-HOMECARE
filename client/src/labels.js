@@ -4,13 +4,25 @@ export const POSITION_LABELS = {
   practical_nurse: 'PN',
   nurse: 'RN',   // พยาบาลวิชาชีพ — ใช้ตัวย่อ RN ให้ตรงกับระดับพนักงานในตารางราคาแพ็คเกจ
   therapist: 'นักกายภาพบำบัด',
+  occupational_therapist: 'นักกิจกรรมบำบัด',
+  speech_therapist: 'นักแก้ไขการพูด',
   manager: 'ผู้จัดการ',
   hr: 'HR',
+  // แอดมิน = สิทธิ์เท่าผู้จัดการทุกอย่าง ยกเว้นเรื่องเงิน (ค่าจ้าง/กำไร/รอบจ่าย/รายได้บริษัท)
+  // ป้ายเขียนว่า "แอดมิน" ไม่ใช่ "ผู้ดูแลระบบ" เพราะคำหลังชวนให้เข้าใจว่าสิทธิ์สูงกว่าผู้จัดการ
+  admin: 'แอดมิน',
 };
 
 /**
+ * สายบำบัด — ทั้งสามตำแหน่งทำงานเหมือนกันทุกข้อ (รับเคสกายภาพได้ · ไม่มีระดับในตารางราคา ·
+ * เปิดรับแบบประเมินจากญาติ) · ต้องตรงกับ THERAPY_POSITIONS ใน server/src/employees/schema.js
+ * ซึ่งเป็นตัวคุมทั้ง CHECK ของฐานข้อมูลและตำแหน่งที่ออกลิงก์ประเมินได้
+ */
+export const THERAPY_POSITIONS = ['therapist', 'occupational_therapist', 'speech_therapist'];
+
+/**
  * ระดับพนักงานในตารางราคา -> ตำแหน่งของพนักงานที่ตรงกับระดับนั้น
- * (สายกายภาพบำบัดไม่มีระดับ ใช้ตำแหน่งนักกายภาพบำบัดเป็นเกณฑ์แทน — ดู positionsForCase)
+ * (สายบำบัดไม่มีระดับ ใช้ตำแหน่งสายบำบัดทั้งชุดเป็นเกณฑ์แทน — ดู positionsForCase)
  */
 export const TIER_POSITIONS = {
   CG: ['caregiver'],
@@ -25,7 +37,7 @@ export const TIER_POSITIONS = {
  * หน้าเว็บจึงต้องเปิดทางให้ดูทุกตำแหน่งได้เสมอ
  */
 export function positionsForCase({ service_kind, physio_package_id, pkg_staff_tier }) {
-  if (service_kind === 'physio' || physio_package_id) return ['therapist'];
+  if (service_kind === 'physio' || physio_package_id) return THERAPY_POSITIONS;
   return TIER_POSITIONS[pkg_staff_tier] ?? null;
 }
 

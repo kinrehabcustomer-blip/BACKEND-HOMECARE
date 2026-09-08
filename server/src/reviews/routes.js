@@ -94,15 +94,28 @@ reviewsRouter.get(
   }),
 );
 
+/**
+ * ด่านเดียวกันของทั้งสองเส้นที่ออกลิงก์ — ต้องมีตัวตนจริง และต้องเป็นตำแหน่งที่เปิดใช้แบบประเมิน
+ *
+ * เขียนรวมเป็นตัวเดียวเพราะเดิม GET เช็คตำแหน่งแต่ POST (ออกลิงก์ใหม่) ไม่เช็ค —
+ * ยิง POST ตรงจึงออกลิงก์ให้ตำแหน่งไหนก็ได้ แล้วได้ลิงก์ที่ญาติกรอกได้จริง
+ * แต่คะแนนจะไม่โผล่ที่ไหนเลย เพราะหน้ารายงานกรองด้วย REVIEW_POSITIONS อีกชั้น
+ * — กลายเป็นใบประเมินที่หายเข้ากลีบเมฆโดยไม่มีอะไรฟ้อง
+ */
+async function requireReviewablePosition(employeeId) {
+  const employee = await repo.findEmployee(employeeId);
+  if (!employee) throw notFound(`ไม่พบพนักงานรหัส ${employeeId}`);
+  if (!repo.REVIEW_POSITIONS.includes(employee.position)) {
+    throw new ApiError(400, 'ตำแหน่งนี้ยังไม่เปิดใช้แบบประเมินความพึงพอใจ');
+  }
+  return employee;
+}
+
 /** ลิงก์ปัจจุบัน — ยังไม่เคยออกก็ออกให้ตอนกดดูครั้งแรก จึงไม่มีขั้นตอน "สร้างลิงก์" แยก */
 reviewsRouter.get(
   '/employees/:id/link',
   asyncRoute(async (req, res) => {
-    const employee = await repo.findEmployee(req.params.id);
-    if (!employee) throw notFound(`ไม่พบพนักงานรหัส ${req.params.id}`);
-    if (!repo.REVIEW_POSITIONS.includes(employee.position)) {
-      throw new ApiError(400, 'ตำแหน่งนี้ยังไม่เปิดใช้แบบประเมินความพึงพอใจ');
-    }
+    await requireReviewablePosition(req.params.id);
     res.json({ token: await repo.ensureToken(req.params.id) });
   }),
 );
@@ -111,16 +124,20 @@ reviewsRouter.get(
 reviewsRouter.post(
   '/employees/:id/link',
   asyncRoute(async (req, res) => {
-    const token = await repo.rotateToken(req.params.id);
-    if (!token) throw notFound(`ไม่พบพนักงานรหัส ${req.params.id}`);
-    res.json({ token });
+    await requireReviewablePosition(req.params.id);
+    res.json({ token: await repo.rotateToken(req.params.id) });
   }),
 );
 
 reviewsRouter.delete(
   '/entries/:reviewId',
   asyncRoute(async (req, res) => {
-    const removed = await repo.removeReview(Number(req.params.reviewId));
+    /* กรองรหัสที่ไม่ใช่จำนวนเต็มออกก่อนถึง SQL — ปล่อยไปจะได้ NaN ที่ Postgres ปฏิเสธ
+       แล้วเด้งเป็น 409 "รูปแบบข้อมูลไม่ถูกต้อง" ซึ่งเป็นคนละเรื่องกับที่เกิดขึ้นจริง (หาใบไม่เจอ) */
+    const reviewId = Number(req.params.reviewId);
+    if (!Number.isInteger(reviewId)) throw notFound('ไม่พบแบบประเมินใบนี้');
+
+    const removed = await repo.removeReview(reviewId);
     if (!removed) throw notFound('ไม่พบแบบประเมินใบนี้');
     res.status(204).end();
   }),
