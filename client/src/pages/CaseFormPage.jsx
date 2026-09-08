@@ -596,7 +596,6 @@ export default function CaseFormPage() {
               <label className="customer-search">
                 ผู้ว่าจ้าง (ลูกค้าผู้จ่าย) — ไม่บังคับ
                 <input
-                  placeholder="ค้นหาลูกค้า — เว้นว่างได้ถ้ายังไม่รู้ว่าใครจ่าย"
                   value={payerQuery}
                   onChange={(e) => setPayerQuery(e.target.value)}
                 />
@@ -723,7 +722,7 @@ export default function CaseFormPage() {
           <label>วันเริ่ม<input type="date" {...field('start_date')} />{fieldError('start_date')}</label>
           <label>วันสิ้นสุด (ถ้ามี)<input type="date" {...field('end_date')} />{fieldError('end_date')}</label>
           <label>ค่าบริการที่ได้รับ (บาท)
-            <input type="number" min="0" step="0.01" placeholder="เช่น 15000" {...field('fee')} />
+            <input type="number" min="0" step="0.01" {...field('fee')} />
             {fieldError('fee')}
           </label>
           {/* ยอดที่พนักงานจะเห็นเป็นรายได้ของตัวเองเมื่อปิดเคส — ดึงจากแพ็คเกจให้ แก้ทับได้
@@ -788,7 +787,7 @@ export default function CaseFormPage() {
               </label>
               <label>อายุ (ปี)<input type="number" min="0" max="130" {...field('patient_age')} />{fieldError('patient_age')}</label>
               <label className="span-2">โรคประจำตัว
-                <textarea rows={2} placeholder="เช่น เบาหวาน ความดันโลหิตสูง" {...field('medical_history')} />
+                <textarea rows={2} {...field('medical_history')} />
                 {fieldError('medical_history')}
               </label>
             </div>
@@ -825,7 +824,6 @@ export default function CaseFormPage() {
               <label className="customer-search">
                 ค้นหาผู้รับการดูแล (รหัส / ชื่อ / เลขบัตร)
                 <input
-                  placeholder="พิมพ์เพื่อค้นหา — ถ้ายังไม่มีในระบบ กรอกด้านล่างเพื่อสร้างแฟ้มใหม่"
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                 />
@@ -894,21 +892,21 @@ export default function CaseFormPage() {
               <label>อายุ (ปี)<input type="number" min="0" max="130" {...field('patient_age')} />{fieldError('patient_age')}</label>
 
               <label>ความสัมพันธ์กับผู้ว่าจ้าง
-                <input placeholder="เช่น บิดา มารดา" {...field('relation_to_customer')} />
+                <input {...field('relation_to_customer')} />
                 {fieldError('relation_to_customer')}
               </label>
               <label>น้ำหนัก (กก.)<input type="number" min="0" step="0.1" {...field('weight_kg')} />{fieldError('weight_kg')}</label>
               <label>ส่วนสูง (ซม.)<input type="number" min="0" step="0.1" {...field('height_cm')} />{fieldError('height_cm')}</label>
               <label className="span-2">โรคประจำตัว
-                <textarea rows={2} placeholder="เช่น เบาหวาน ความดันโลหิตสูง" {...field('medical_history')} />
+                <textarea rows={2} {...field('medical_history')} />
                 {fieldError('medical_history')}
               </label>
               <label className="span-2">แพ้ยา
-                <textarea rows={2} placeholder="เช่น เพนิซิลลิน แอสไพริน — ไม่มีให้เว้นว่าง" {...field('allergies')} />
+                <textarea rows={2} {...field('allergies')} />
                 {fieldError('allergies')}
               </label>
               <label className="span-2">แพ้อาหาร
-                <textarea rows={2} placeholder="เช่น อาหารทะเล ถั่ว นมวัว — ไม่มีให้เว้นว่าง" {...field('food_allergies')} />
+                <textarea rows={2} {...field('food_allergies')} />
                 {fieldError('food_allergies')}
               </label>
             </div>
@@ -919,15 +917,15 @@ export default function CaseFormPage() {
         <h2>การประเมิน / อาการครั้งนี้</h2>
         <div className="grid">
           <label className="span-2">อาการปัจจุบัน
-            <textarea rows={2} placeholder="เช่น ติดเตียง ช่วยเหลือตัวเองไม่ได้ กลืนลำบาก" {...field('current_symptoms')} />
+            <textarea rows={2} {...field('current_symptoms')} />
             {fieldError('current_symptoms')}
           </label>
           <label className="span-2">อุปกรณ์ / สายต่างๆ
-            <textarea rows={2} placeholder="เช่น สายให้อาหารทางจมูก สายสวนปัสสาวะ ถังออกซิเจน" {...field('medical_devices')} />
+            <textarea rows={2} {...field('medical_devices')} />
             {fieldError('medical_devices')}
           </label>
           <label className="span-2">จุดประสงค์ของญาติในการดูแล
-            <textarea rows={2} placeholder="เช่น ต้องการให้ฟื้นฟูให้ลุกนั่งได้ / ดูแลประคับประคอง" {...field('care_goal')} />
+            <textarea rows={2} {...field('care_goal')} />
             {fieldError('care_goal')}
           </label>
         </div>
@@ -935,7 +933,7 @@ export default function CaseFormPage() {
         <h2>รายละเอียดการใช้บริการ</h2>
         <div className="grid">
           <label className="span-2">วัน / เวลาที่สะดวกเริ่มใช้บริการ
-            <input placeholder="เช่น เริ่มได้ 20 ก.ค. เป็นต้นไป ช่วงเช้า" {...field('service_start_preference')} />
+            <input {...field('service_start_preference')} />
             {fieldError('service_start_preference')}
           </label>
           <label>เบอร์ติดต่อคุณญาติ<input {...field('client_phone')} />{fieldError('client_phone')}</label>
@@ -945,7 +943,7 @@ export default function CaseFormPage() {
             {fieldError('address')}
           </label>
           <label>วัน / เวลาที่สะดวกให้พยาบาลโทรประเมินและรับเคส
-            <input placeholder="เช่น จันทร์-ศุกร์ หลัง 18.00 น." {...field('nurse_call_preference')} />
+            <input {...field('nurse_call_preference')} />
             {fieldError('nurse_call_preference')}
           </label>
         </div>
@@ -959,7 +957,6 @@ export default function CaseFormPage() {
 
           <label className="geo-label">ค้นหาสถานที่ หรือวางลิงก์ Google Maps
             <input
-              placeholder='เช่น "โรงพยาบาลบำรุงราษฎร์" หรือวางลิงก์ https://maps.app.goo.gl/...'
               value={locQuery}
               onChange={(e) => setLocQuery(e.target.value)}
               onKeyDown={(e) => {
