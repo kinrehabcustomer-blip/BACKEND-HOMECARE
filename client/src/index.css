@@ -485,7 +485,12 @@ body { overflow-x: clip; }
 
 /* flex-wrap — หน้าเคสมีตัวกรอง 6 อัน พอจอไม่กว้างพอต้องตกบรรทัดใหม่ ไม่ใช่บีบกันจนอ่านไม่ออก */
 .toolbar { display: flex; flex-wrap: wrap; gap: 0.625rem; margin-bottom: 1rem; }
-.toolbar .search { flex: 1; min-width: 0; }
+/* ช่องค้นหายืดกินที่ว่างที่เหลือ แต่ห้ามหดต่ำกว่า 14rem
+   เดิมเป็น min-width: 0 ซึ่งแปลว่า "หดได้ถึงศูนย์" — หน้าเคสมี dropdown 6 ตัวที่ตรึงความกว้าง
+   ไว้ตัวละ 9.375rem รวมกันเกือบเต็มบรรทัดพอดี ช่องค้นหาที่อยู่หัวแถวจึงถูกบีบเหลือตัวอักษรเดียว
+   ทั้งที่ flex-wrap เปิดอยู่ (ตัวที่หดได้จะถูกบีบก่อน ไม่ตกบรรทัดให้)
+   ตั้งขั้นต่ำไว้ = พอที่จะพิมพ์ได้จริง และถ้าไม่พอ dropdown ตัวท้ายจะตกบรรทัดไปเอง */
+.toolbar .search { flex: 1 1 16rem; min-width: 14rem; }
 /* ตรึงให้กว้างเท่ากัน ไม่ยืดหดตามความยาวตัวเลือกที่เลือกอยู่ */
 .toolbar select { width: 9.375rem; flex-shrink: 0; }
 
@@ -3155,6 +3160,13 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
   overflow: visible;
 }
 
+/* แผงที่กางออกมาไม่ใช่ "แถวที่เลือกได้" จึงไม่ต้องเปลี่ยนสีตอนเอาเมาส์ชี้/แตะ
+   กฎ `.table tbody tr:hover` จับทุกแถวในตาราง รวมแถวนี้ด้วย ผลคือทั้งแผง
+   (ฟอร์มปล่อยเงิน ปุ่ม ประวัติงวด) เปลี่ยนพื้นทั้งก้อนเวลาเมาส์ผ่าน — อ่านเหมือนกดได้
+   ทั้งที่สิ่งที่กดได้จริงคือปุ่มข้างใน · บนจอสัมผัส :hover ยังค้างต่อหลังแตะด้วย
+   background: none = คงพื้นเดิมของมันไว้ ไม่ใช่ทับด้วยสีใหม่ */
+.table tbody tr.row-expand:hover { background: none; }
+
 /* วันที่จ่ายของรอบ — เหลือช่องเดียวแล้ว ไม่ต้องเป็นกริดอีก */
 .payroll-pay { margin: 0.75rem 0; }
 .payroll-pay label {
@@ -3472,22 +3484,56 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
 /* แถบแท็บ: สี่อันไม่พอดีจอ 430px — ให้ปัดในแถบของตัวเองแทนที่จะให้คำในแท็บหักบรรทัด
    ("รออนุมัติค่า / จ้าง" สองบรรทัดอ่านเป็นคนละคำ และทำให้แถบสูงเป็นสองเท่าโดยเปล่าประโยชน์)
    ชื่อแท็บย่อไม่ได้มากกว่านี้ — มันคือชื่อขั้นตอนของสายพานเงินซึ่งต้องแยกออกจากกันให้ชัด */
+/* ---------- แท็บของหน้า (การมาทำงาน · ค่าตอบแทนพนักงาน) ----------
+   ขีดใต้เหมือนเดิม แต่แก้สามอย่างที่ทำให้อ่านยาก:
+     1. แท็บที่ไม่ได้เลือกจางเกินไปจนดูเหมือนข้อความประกอบ ไม่ใช่ของที่กดได้
+     2. ไม่มีสถานะ hover เลย — รู้ว่ากดได้ตอนกดแล้ว
+     3. ขีดใต้เป็น border 2px ปลายตัด บางจนไม่นำสายตา */
 .att-tabs {
   display: flex;
-  gap: 0.5rem;
-  margin-bottom: 1rem;
+  gap: 0.125rem;                 /* ชิดกันเพื่อให้พื้น hover ของแต่ละแท็บอ่านเป็นแถบเดียวกัน */
+  margin-bottom: 1.25rem;
   border-bottom: 1px solid var(--border);
   overflow-x: auto;
   scrollbar-width: none;
 }
 .att-tabs::-webkit-scrollbar { display: none; }
-.att-tab { flex-shrink: 0; white-space: nowrap; }
+
 .att-tab {
-  padding: 0.5rem 0.875rem; border: none; background: none; cursor: pointer;
-  color: var(--muted); font-size: 0.875rem; font-weight: 600;
-  border-bottom: 2px solid transparent; margin-bottom: -1px;
+  position: relative;
+  flex-shrink: 0;
+  white-space: nowrap;
+  padding: 0.625rem 1rem 0.6875rem;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--muted);
+  /* มนแค่มุมบน — มุมล่างต้องเหลี่ยมเพื่อให้ต่อกับเส้นใต้แถบเป็นเนื้อเดียวกัน */
+  border-radius: var(--radius) var(--radius) 0 0;
+  transition: color 0.12s, background 0.12s;
 }
-.att-tab.is-active { color: var(--brand); border-bottom-color: var(--brand); }
+
+/* พื้นทองจางตอนชี้ = บอกว่ากดได้ก่อนกด · ที่เลือกอยู่ไม่ต้องขยับ (ไม่มีอะไรให้ไปต่อ) */
+.att-tab:hover { color: var(--text); background: var(--brand-soft); }
+.att-tab.is-active:hover { background: none; }
+
+/* ขีดใต้เป็น ::after ไม่ใช่ border-bottom — คุมความหนา/ปลายมน/ระยะร่นซ้ายขวาได้
+   และวางทับเส้น 1px ของแถบพอดีด้วย bottom: -1px แทนการเล่น margin-bottom ติดลบ */
+.att-tab::after {
+  content: '';
+  position: absolute;
+  left: 0.75rem;
+  right: 0.75rem;
+  bottom: -1px;
+  height: 3px;
+  border-radius: 3px 3px 0 0;
+  background: transparent;
+}
+.att-tab.is-active { color: var(--brand); font-weight: 700; }
+.att-tab.is-active::after { background: var(--brand); }
 
 /* ปุ่มทางไปต่อในกล่องว่าง — กล่องว่างที่บอกแค่ "ไม่มีอะไร" คือทางตัน
    ทุกกล่องว่างในสายพานนี้ควรบอกได้ว่าของที่ค้างอยู่ที่ไหน และขั้นถัดไปคืออะไร */
@@ -4171,6 +4217,8 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
   /* การ์ดตัวเลือกวิธีเก็บเงินยกตัวขึ้นตอนเอาเมาส์วาง — คงไว้แค่การเปลี่ยนสีเส้นขอบ */
   .plan-option { transition: none; }
   .plan-option:hover, .plan-option:focus-within { transform: none; }
+  /* แท็บเปลี่ยนสี/พื้นทันที ไม่ต้องไล่สี — สถานะยังเห็นครบเหมือนเดิม */
+  .att-tab { transition: none; }
 }
 
 /* ไอคอนที่อยู่ "ในบรรทัดข้อความ" (เช่น ⚠ หน้าคำเตือน, หมุดหน้าที่อยู่)
