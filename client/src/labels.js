@@ -333,6 +333,10 @@ export const MONTH_LABELS = {
 export const toBuddhistYear = (year) => String(Number(year) + 543);
 
 /** ข้อความบอกช่วงเวลาที่กำลังดูอยู่ */
+/** 'YYYY-MM' -> 'ส.ค. 2569' — รับสตริงเดือนแบบที่ฐานข้อมูลกับ <input type="month"> ใช้ */
+export const monthText = (ym) =>
+  new Date(`${ym}-01T00:00:00`).toLocaleDateString('th-TH', { month: 'short', year: 'numeric' });
+
 export function formatPeriod(year, month) {
   if (!year) return 'ทุกช่วงเวลา';
   if (!month) return `ปี ${toBuddhistYear(year)}`;

@@ -51,7 +51,7 @@ export default function CasePayPanel({ caseId, busy, run, toast }) {
 
   const {
     staff_pay: total,
-    fee,
+    // company_share ยังใช้อยู่ — เฉพาะตอนติดลบ (จ่ายพนักงานมากกว่าที่เก็บลูกค้า = เคสขาดทุน)
     company_share: companyShare,
     released,
     remaining,
@@ -160,16 +160,10 @@ export default function CasePayPanel({ caseId, busy, run, toast }) {
         </div>
       ) : (
         <>
-          {/* ค่าบริการ → ส่วนบริษัท → ค่าจ้างพนักงาน เรียงตามทางเดินของเงินจริง
-              คนตั้งยอดคิดเป็น "เคส 20,000 บริษัทเอา 5,000 พนักงานได้ 15,000" ไม่ใช่ตัวเลขลอยๆ ตัวเดียว */}
+          {/* แผงนี้พูดเรื่องค่าจ้างพนักงานเท่านั้น — ค่าบริการที่เก็บลูกค้ากับส่วนของบริษัท
+              เป็นตัวเลขฝั่งรายได้ ดูได้ที่หน้าเคส/ใบแจ้งหนี้ ไม่ต้องมาซ้ำในขั้นตอนจ่ายเงิน */}
           <div className="pay-block">
             <p className="muted">
-              {fee != null && (
-                <span className="cell-sub">
-                  ค่าบริการทั้งเคส {formatBaht(fee)}
-                  {companyShare != null && ` · ส่วนของบริษัท ${formatBaht(companyShare)}`}
-                </span>
-              )}
               <strong>ค่าจ้างพนักงาน {formatBaht(total)}</strong>
               <span className="cell-sub">
                 ปล่อยแล้ว {formatBaht(released)} · เหลือ {formatBaht(remaining)}

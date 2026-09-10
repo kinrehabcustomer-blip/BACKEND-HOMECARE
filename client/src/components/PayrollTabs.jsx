@@ -327,7 +327,7 @@ export function PayoutSummary({ month, employeeId, patch, employeePicker, reload
       {/* ใบที่จะถูกพิมพ์ — ซ่อนอยู่บนจอ โผล่เฉพาะตอนสั่งพิมพ์ (ดู .payroll-doc ใน index.css) */}
       <PayrollSummaryDoc month={month} rows={rows} />
 
-      <p className="muted tab-hint no-print"><strong>แตะชื่อพนักงานเพื่อดูรายเคส</strong></p>
+      <p className="muted tab-hint no-print"><strong>แตะที่แถวเพื่อดูรายเคส</strong></p>
 
       {error && <p className="error">{error}</p>}
 
@@ -349,14 +349,25 @@ export function PayoutSummary({ month, employeeId, patch, employeePicker, reload
             <tbody>
               {rows.map((r) => (
                 <Fragment key={r.employee_id}>
-                <tr>
+                {/* กดได้ทั้งแถว ไม่ใช่เฉพาะชื่อ — ท่าเดียวกับคิวอนุมัติกะด้านบนในไฟล์นี้
+                    tabIndex + onKeyDown เพราะชื่อพนักงานเลิกเป็น <button> แล้ว ถ้าไม่ใส่
+                    คนที่ใช้แป้นพิมพ์จะกางดูรายเคสไม่ได้เลย (is-tappable มีกรอบโฟกัสรออยู่แล้ว) */}
+                <tr
+                  className={`is-tappable ${openId === r.employee_id ? 'is-picked' : ''}`}
+                  tabIndex={0}
+                  onClick={() => toggleCases(r.employee_id)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      toggleCases(r.employee_id);
+                    }
+                  }}
+                >
                   <td data-label="พนักงาน">
-                    <button className="linkish" onClick={() => toggleCases(r.employee_id)}>
-                      {r.employee_name}
-                    </button>
+                    <span className="linkish">{r.employee_name}</span>
                     <span className="cell-sub mono">{r.employee_id}</span>
                     <span className="cell-sub">
-                      {openId === r.employee_id ? 'แตะเพื่อย่อ' : 'แตะชื่อเพื่อดูรายเคส'}
+                      {openId === r.employee_id ? 'แตะเพื่อย่อ' : 'แตะเพื่อดูรายเคส'}
                     </span>
                   </td>
                   <td data-label="จำนวนกะ">
@@ -367,7 +378,12 @@ export function PayoutSummary({ month, employeeId, patch, employeePicker, reload
                   {/* เงินที่ค้างอยู่ที่โต๊ะผู้จัดการเอง ไม่ใช่ปัญหาของพนักงาน — กดไปที่คิวอนุมัติได้เลย */}
                   <td data-label="รออนุมัติ">
                     {r.pending_shifts > 0 ? (
-                      <Link className="link" to={`/attendance?tab=approvals&month=${month}&employee_id=${r.employee_id}`}>
+                      /* stopPropagation กันไม่ให้การกดลิงก์กางแถวตามไปด้วย (แถวทั้งแถวกดได้แล้ว) */
+                      <Link
+                        className="link"
+                        to={`/attendance?tab=approvals&month=${month}&employee_id=${r.employee_id}`}
+                        onClick={(e) => e.stopPropagation()}
+                      >
                         {r.pending_shifts} กะ
                         <span className="cell-sub">ยืนยันกะก่อนจึงจะแบ่งค่าจ้างได้ →</span>
                       </Link>
@@ -388,7 +404,11 @@ export function PayoutSummary({ month, employeeId, patch, employeePicker, reload
                     {/* ทำงานแล้วแต่ยังไม่มีใครกดปล่อยค่าจ้าง — กดไปหาเคสของคนนี้ได้เลย */}
                     {r.pay === 0 && r.approved_shifts > 0 && (
                       <span className="cell-sub">
-                        <Link className="link flag-text" to={`/cases?assigned_to=${r.employee_id}`}>
+                        <Link
+                          className="link flag-text"
+                          to={`/cases?assigned_to=${r.employee_id}`}
+                          onClick={(e) => e.stopPropagation()}
+                        >
                           ยังไม่ได้ปล่อยค่าจ้าง →
                         </Link>
                       </span>

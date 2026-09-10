@@ -1737,16 +1737,54 @@ export function payoutCases(month, employeeId) {
  * pending = ยังปล่อยไม่ครบยอด · ส่งมาทั้งสองกลุ่มเพื่อให้ฝั่งหน้าจอสลับดู "ที่จ่ายครบแล้ว" ได้
  * โดยไม่ต้องยิงใหม่ (เคสทั้งระบบมีหลักร้อย ไม่ใช่หลักแสน — แบ่งหน้ายังไม่คุ้มความซับซ้อน)
  */
+/**
+ * ลำดับความสำคัญของคิวปล่อยค่าจ้าง — เลขน้อย = ต้องทำก่อน
+ *
+ *   1 ปิดเคสแล้วยังไม่จ่ายสักบาท   4 กำลังให้บริการ ยังไม่จ่าย
+ *   2 ปิดเคสแล้วจ่ายไปบางส่วน      5 จับคู่แล้วรอเริ่ม (ยังไม่มีอะไรค้าง)
+ *   3 ยังไม่ปิดเคสแต่เริ่มจ่ายแล้ว  6 จ่ายครบแล้ว
+ *
+ * เดิมเคยเรียงตามความเร่งแล้วเลิกไปเพราะอ่านไม่ออกว่าทำไมแถวนี้อยู่บนแถวนั้น —
+ * รอบนี้จึงส่ง pay_priority กับ waiting_days กลับไปให้หน้าเว็บแสดงเหตุผลบนแถวด้วย
+ */
+const PAY_PRIORITY = `
+  CASE
+    WHEN ROUND((q.staff_pay - q.released)::numeric, 2) <= 0 THEN 6
+    WHEN q.status = 'closed' AND q.released = 0             THEN 1
+    WHEN q.status = 'closed'                                THEN 2
+    WHEN q.released > 0                                     THEN 3
+    WHEN q.status = 'in_progress'                            THEN 4
+    ELSE 5
+  END`;
+
+/**
+ * วันที่เริ่มนับว่า "ค้าง" — ปิดเคสแล้วนับจากวันปิด ยังไม่ปิดนับจากวันกะแรก
+ *
+ * ไม่ใช้วันกะล่าสุดกับเคสที่ยังไม่ปิด — เคสที่ลากมาสามเดือนโดยไม่จ่ายอะไรเลยแต่เพิ่งมีกะเมื่อวาน
+ * จะดูเหมือนเคสใหม่ ทั้งที่ค้างเงินนานที่สุดในรายการ
+ *
+ * LEFT(x, 10) เพราะคอลัมน์เวลาเป็น TEXT ปนสองรูปแบบ ('YYYY-MM-DD HH:MM:SS' กับ 'YYYY-MM-DD')
+ */
+const WAITING_SINCE = `
+  CASE
+    WHEN q.status = 'closed'
+      THEN COALESCE(LEFT(q.closed_at, 10), LEFT(q.end_date, 10))
+    ELSE COALESCE(LEFT(q.first_visit_date, 10), LEFT(q.start_date, 10), LEFT(q.created_at, 10))
+  END`;
+
 export function payQueue() {
   return sql
     .all(
-      `SELECT c.case_id, c.title, c.client_name, c.status, c.staff_pay, c.fee,
+      `WITH q AS (
+        SELECT c.case_id, c.title, c.client_name, c.status, c.staff_pay, c.fee,
               c.case_type, c.service_kind, c.closed_at, c.end_date,
+              c.start_date, c.created_at,
               COALESCE(p.released, 0)     AS released,
               COALESCE(p.installments, 0) AS installments_used,
               COALESCE(w.workers, 0)      AS workers,
               w.worker_names,
-              lv.last_visit_date
+              lv.last_visit_date,
+              lv.first_visit_date
        FROM cases c
        LEFT JOIN (
          SELECT case_id, SUM(amount) AS released, MAX(installment_no) AS installments
@@ -1779,8 +1817,11 @@ export function payQueue() {
          GROUP BY u.case_id
        ) w ON w.case_id = c.case_id
 
+       /* กะแรก = จุดเริ่มนับว่าค้างมานานแค่ไหน · กะล่าสุดยังใช้ที่อื่น ดึงมาพร้อมกันในซับคิวรีเดียว */
        LEFT JOIN (
-         SELECT v.case_id, MAX(v.visit_date) AS last_visit_date
+         SELECT v.case_id,
+                MAX(v.visit_date) AS last_visit_date,
+                MIN(v.visit_date) AS first_visit_date
          FROM case_visits v WHERE ${NOT_CANCELLED}
          GROUP BY v.case_id
        ) lv ON lv.case_id = c.case_id
@@ -1790,14 +1831,23 @@ export function payQueue() {
             ตัด unassigned ทิ้งเพราะยังไม่มีใครรับงาน จ่ายไปก็ไม่รู้จะจ่ายให้ใคร
             และตัด cancelled เพราะงานไม่ได้เกิดขึ้น */
          AND c.status IN ('assigned', 'in_progress', 'closed')
-       /* เรียงเคสใหม่ไปเก่าตามวันที่สร้างเคส — ลำดับเดียวกับที่คนใช้งานคิดถึงรายการนี้
-          ("เคสที่เพิ่งทำไปเมื่อกี้อยู่ไหน") และเป็นลำดับที่เดาได้โดยไม่ต้องรู้กติกาอะไรเลย
-
-          ของเดิมเรียงตาม "ความเร่ง" (ปิดเคสแล้วยังค้างเงินขึ้นก่อน แล้วไล่ตามวันปิด/วันกะล่าสุด)
-          ซึ่งอ่านออกยากเวลาไล่ทีละสิบแถว เพราะลำดับขึ้นกับสามเงื่อนไขที่มองไม่เห็นจากหน้าจอ
-          และเคสที่เพิ่งสร้างจะไปโผล่กลางรายการ — สัญญาณความเร่งย้ายไปอยู่ที่ป้ายสถานะเงิน
-          (ตามจ่ายอยู่ / จ่ายครบแล้ว) กับสวิตช์ซ่อนเคสที่จ่ายครบแล้วแทน ซึ่งเห็นได้ทีละแถวจริงๆ */
-       ORDER BY c.created_at DESC, c.case_id DESC`,
+      )
+      SELECT r.*,
+             /* คิดฝั่ง server ด้วยวันที่ไทย — นาฬิกาเครื่องผู้ใช้ตั้งผิดแล้วตัวเลขนี้เพี้ยนทันที */
+             CASE
+               WHEN r.waiting_since IS NULL THEN NULL
+               ELSE ((now() AT TIME ZONE 'Asia/Bangkok')::date - r.waiting_since::date)
+             END AS waiting_days
+      FROM (
+        SELECT q.*, ${PAY_PRIORITY} AS pay_priority, ${WAITING_SINCE} AS waiting_since
+        FROM q
+      ) r
+      /* ในกลุ่มเดียวกันเอาค้างนานที่สุดขึ้นก่อน · NULLS LAST = ยังไม่มีอะไรค้างให้เร่ง
+         created_at ปิดท้ายให้ลำดับคงที่ ไม่สลับไปมาระหว่างการโหลดสองครั้ง */
+      ORDER BY r.pay_priority,
+               r.waiting_since ASC NULLS LAST,
+               r.created_at DESC,
+               r.case_id DESC`,
     )
     .then((rows) =>
       rows.map((r) => {

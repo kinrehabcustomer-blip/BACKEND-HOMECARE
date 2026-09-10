@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { Fragment, useCallback, useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../api.js';
 import { useToast } from '../toast.jsx';
@@ -151,6 +151,203 @@ function Runs({ reloadKey }) {
   const refreshDetail = async (runId) => setDetail(await api.getPayrollRun(runId));
 
 
+  /* แผงรายละเอียดของรอบที่กางอยู่ — ประกอบเป็นก้อนเดียวแล้วเอาไปวางเป็นแถวใต้แถวที่กด
+     กางได้รอบเดียวในเวลาหนึ่ง จึงไม่ต้องประกอบใหม่ทีละแถว */
+  const detailPanel = detail && (
+      /* ไม่ครอบกล่องและไม่ทวนหัวข้อ — แถวที่กดกางอยู่ข้างบนบอก รหัสรอบ/วันตัดรอบ/คน/กะ/ยอด ครบแล้ว
+         กล่องซ้อนกล่องที่พูดเรื่องเดิมซ้ำสองรอบคือสิ่งที่ทำให้หน้านี้ดูแน่น ทั้งที่ข้อมูลจริงมีนิดเดียว
+         ปุ่ม "ย่อ" ก็ไม่ต้องมี เพราะแตะแถวเดิมซ้ำก็ย่อได้อยู่แล้ว */
+      <section className="payroll-detail">
+        {/* ต่างกันคนละเรื่อง: ร่างยังขยับตามข้อมูลได้ · จ่ายแล้วคือตัวเลขที่เงินออกไปจริง
+            ไม่บอกไว้ คนอ่านจะไม่รู้ว่าเลขที่เห็นเป็นของ "ตอนนี้" หรือ "ตอนที่จ่าย" */}
+        <p className={`muted payroll-freshness ${detail.status === 'draft' ? 'is-live' : ''}`}>
+          {detail.status === 'draft'
+            ? 'ร่าง — ยังเอาคนออก/ดึงยอดเพิ่มได้ ตัวเลขจะถูกตรึงตอนกดบันทึกการจ่าย'
+            : `ยอดถูกตรึงไว้แล้ว${detail.pay_date ? ` เมื่อ ${formatDate(detail.pay_date)}` : ''} — แก้ค่าจ้างย้อนหลังไม่ทำให้ตัวเลขนี้เปลี่ยน`}
+        </p>
+
+        {/* คำถามที่ตามมาทันทีเมื่อเห็นยอดรายคนคือ "ถ้าคนนี้ควรได้ไม่เท่านี้ แก้ตรงไหน"
+            ถ้าไม่ตอบไว้ตรงนี้ คนอ่านจะพยายามแก้ที่รอบ (ซึ่งแก้ไม่ได้) แล้วสรุปว่าระบบทำไม่ได้ */}
+        {detail.status === 'draft' && (
+          <p className="muted payroll-freshness">
+            ยอดของแต่ละคนตั้งตอนปล่อยค่าจ้าง — แตะชื่อคนเพื่อกางดูว่ามาจากเคสไหน
+            แล้วกดชื่อเคสเพื่อไปที่แท็บ “ปล่อยค่าจ้าง” สำหรับปรับส่วนแบ่งหรือถอนงวดที่ปล่อยผิดคืน
+          </p>
+        )}
+
+        {detail.items.length === 0 ? (
+          <p className="muted">ไม่มีใครอยู่ในรอบนี้แล้ว</p>
+        ) : (
+          <div className="payroll-people">
+            {/* แถวคน (ชื่อ | ยอด+ปุ่ม) กับที่มารายเคส เป็นคนละชั้นกัน — ที่มาเป็นของทั้งแถว
+                ไม่ใช่ของคอลัมน์ซ้าย ถ้ายัดไว้ในคอลัมน์ซ้าย พอจอแคบแล้วบล็อกซ้ายสูงขึ้น
+                ยอดเงินจะถูกดันลงไปอยู่ท้ายรายการเคส ห่างจากชื่อที่มันเป็นยอดของ */}
+            {detail.items.map((i) => (
+              <div className="payroll-person" key={i.item_id}>
+                <div className="history-item">
+                <div>
+                  {/* ทั้งบล็อกซ้ายกดได้ ไม่ใช่ปุ่มเล็กๆ ท้ายแถว — ที่มาของยอดคือสิ่งที่คนกดหาจริง
+                      และแถวนี้ก็ไม่มีการกระทำอื่นที่การกดจะไปชนได้ */}
+                  <button className="linkish" onClick={() => toggleItem(i.item_id)}>
+                    <strong>{i.employee_name}</strong>
+                  </button>
+                  <p className="muted">
+                    {i.cases} เคส · {i.payouts} งวด
+                    <span className="cell-sub">
+                      {openItemId === i.item_id ? 'แตะเพื่อย่อ' : 'แตะชื่อเพื่อดูว่ามาจากเคสไหน งวดไหน'}
+                    </span>
+                  </p>
+                </div>
+                <div className="payroll-people-end">
+                  <strong>{formatBaht(i.total_pay)}</strong>
+                  {detail.status === 'draft' && (
+                    <ConfirmButton
+                      className="btn tiny danger-ghost"
+                      disabled={busy}
+                      title={`เอา ${i.employee_name} ออกจากรอบนี้?`}
+                      detail="ค่าจ้างของเขาจะกลับเข้ากองรอจ่าย แล้วไปโผล่ในรอบถัดไปเอง — ไม่ใช่การตัดสิทธิ์"
+                      confirmLabel="เอาออกจากรอบ"
+                      onConfirm={() =>
+                        run(async () => {
+                          await api.removePayrollItem(detail.run_id, i.item_id);
+                          await refreshDetail(detail.run_id);
+                        })
+                      }
+                    >
+                      เอาออก
+                    </ConfirmButton>
+                  )}
+                </div>
+                </div>
+
+                {/* รวมทุกเคสเป็นยอดเดียวด้านขวา แต่กางแล้วต้องบอกได้ว่ามาจากเคสไหน เท่าไหร่
+                    และเป็นงวดที่เท่าไหร่ของเคสนั้น — ตัวเลขที่ตรวจสอบไม่ได้คือตัวเลขที่ต้องมาถามคน */}
+                {openItemId === i.item_id &&
+                  (itemCases === null ? (
+                    <p className="muted">กำลังโหลด…</p>
+                  ) : (
+                    <ul className="plain-list payroll-item-cases">
+                      {itemCases.map((c) => (
+                        <li key={c.payout_id}>
+                          {/* ชื่อเคสเป็นลิงก์ = ทางไปแก้ยอดของคนนี้เคสนี้ (ปรับส่วนแบ่ง/ถอนงวดคืน)
+                              ยอดในรอบเป็นแค่ภาพสะท้อนของสิ่งที่ตกลงไว้ที่เคส แก้ที่นี่ไม่ได้โดยตั้งใจ —
+                              ถ้าแก้ได้สองที่ ตัวเลขบนเคสกับตัวเลขที่โอนจริงจะเดินคนละทางทันที */}
+                          <span>
+                            <Link className="link" to={`/payroll?tab=release&open=${c.case_id}`}>
+                              {c.client_name ?? c.case_title ?? 'เคสที่ถูกลบแล้ว'}
+                            </Link>
+                            <span className="cell-sub mono">{c.case_id}</span>
+                          </span>
+                          <span>
+                            {formatBaht(c.amount)}
+                            {/* งวดไหนของเคสไหน และนัดจ่ายไว้วันไหน — สามอย่างนี้คือสิ่งที่ต้องเห็น
+                                ก่อนกดอนุมัติจ่าย ไม่ใช่แค่ยอดรวมที่ตรวจกับอะไรไม่ได้ */}
+                            <span className="cell-sub">
+                              งวดที่ {c.installment_no}
+                              {c.case_installments > 1 ? `/${c.case_installments}` : ''}
+                              {c.due_date && ` · นัดจ่าย ${formatDate(c.due_date)}`}
+                            </span>
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  ))}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* วันที่จ่ายโชว์ค้างไว้เลยตอนเป็นร่าง ไม่ต้องกดปุ่มเพื่อให้ฟอร์มโผล่มาก่อน —
+            ปกติคือวันนี้ซึ่งถูกอยู่แล้ว คนที่ต้องแก้คือคนที่ลงย้อนหลัง ซึ่งเป็นส่วนน้อย
+            ช่อง "ช่องทาง" ถูกตัดออก: ไม่มีหน้าไหนเอาไปใช้ตัดสินใจอะไรต่อ เป็นแค่ช่องให้กรอกเพิ่ม
+            ตอนที่คนกำลังอยากกดจบ (ประวัติการโอนจริงอยู่ที่สลิปธนาคาร ไม่ใช่ที่นี่) */}
+        {detail.status === 'draft' && (
+          <div className="payroll-pay">
+            <label>วันที่จ่าย
+              <input
+                type="date"
+                value={payForm?.pay_date ?? todayTH()}
+                onClick={openDatePicker}
+                onChange={(e) => setPayForm({ pay_date: e.target.value })}
+              />
+            </label>
+          </div>
+        )}
+
+        {/* เรียงเป็นคู่: แถวบน = ทำต่อกับรอบ · แถวล่าง = เลิกกับรอบ
+            ปุ่มทำลายอยู่ท้ายสุดเสมอ ห่างจากปุ่มที่กดกันจริงที่สุดเท่าที่กริดจะทำได้ */}
+        <div className="payroll-actions">
+          {detail.status === 'draft' && (
+            <>
+              {/* ใช้ตอนปล่อยค่าจ้างเพิ่มหลังเปิดรอบไปแล้ว — ยอดที่ปล่อยใหม่ไม่ไหลเข้ารอบที่เปิดค้างไว้เอง */}
+              <ConfirmButton
+                className="btn"
+                disabled={busy}
+                title="ดึงค่าจ้างที่ปล่อยเพิ่มเข้ารอบนี้?"
+                detail="ระบบจะกวาดรายชื่อใหม่ทั้งรอบ — คนที่เคยเอาออกจากรอบไปจะกลับเข้ามาด้วย"
+                confirmLabel="ดึงยอดเพิ่ม"
+                onConfirm={() =>
+                  run(async () => {
+                    const v = await api.rebuildPayrollRun(detail.run_id);
+                    setDetail(v);
+                    toast('ดึงยอดที่ปล่อยเพิ่มแล้ว');
+                  })
+                }
+              >
+                ดึงยอดเพิ่ม
+              </ConfirmButton>
+
+              <ConfirmButton
+                className="btn primary"
+                disabled={busy || detail.employees === 0}
+                danger={false}
+                title={`บันทึกการจ่ายรอบ ${detail.run_id}?`}
+                detail={`${detail.employees} คน · ${formatBaht(detail.total_pay)} — หลังจากนี้ตัวเลขทั้งรอบถูกตรึง แก้ได้ทางเดียวคือยกเลิกรอบ`}
+                confirmLabel="บันทึกการจ่าย"
+                onConfirm={() =>
+                  run(async () => {
+                    const v = await api.payPayrollRun(detail.run_id, {
+                      pay_date: payForm?.pay_date ?? todayTH(),
+                    });
+                    setDetail(v);
+                    setPayForm(null);
+                    toast(`จ่ายรอบ ${v.run_id} แล้ว`);
+                  })
+                }
+              >
+                บันทึกการจ่าย
+              </ConfirmButton>
+            </>
+          )}
+
+          {detail.status !== 'cancelled' && (
+            <ConfirmButton
+              className="btn"
+              disabled={busy}
+              title={`ยกเลิกรอบ ${detail.run_id}?`}
+              detail="รอบยังอยู่เป็นประวัติ แต่ค่าจ้างทุกก้อนจะกลับเข้ากองรอจ่าย แล้วไปโผล่ในรอบถัดไป"
+              confirmLabel="ยกเลิกรอบ"
+              cancelLabel="ไม่ยกเลิกแล้ว"
+              onConfirm={() =>
+                run(async () => {
+                  const v = await api.cancelPayrollRun(detail.run_id);
+                  setDetail(v);
+                  toast(`ยกเลิกรอบ ${v.run_id} แล้ว`);
+                })
+              }
+            >
+              ยกเลิกรอบ
+            </ConfirmButton>
+          )}
+
+          {/* ปุ่ม "ลบรอบนี้" ถูกตัดออก — สำหรับรอบร่าง มันให้ผลเหมือน "ยกเลิกรอบ" แทบทุกอย่าง
+              (ค่าจ้างกลับเข้ากองรอจ่ายเหมือนกัน) ต่างแค่ลบประวัติทิ้ง ซึ่งไม่ใช่สิ่งที่ใครต้องการจริง
+              ปุ่มทำลายสองปุ่มติดกันที่ผลลัพธ์เกือบเหมือนกัน มีแต่ทำให้ต้องหยุดคิดว่าจะกดอันไหน
+              (เส้นฝั่ง server ยังอยู่ เผื่อวันหนึ่งต้องล้างรอบร่างที่สร้างผิดจริงๆ) */}
+        </div>
+      </section>
+  );
+
   return (
     <>
       {error && <p className="error">{error}</p>}
@@ -168,19 +365,15 @@ function Runs({ reloadKey }) {
         {/* ยอดที่ปล่อยจากแท็บแรกไว้แล้วแต่ยังไม่เข้ารอบไหน — เดิมเห็นได้ต่อเมื่อกดเปิดฟอร์มรอบก่อน
             แท็บนี้จึงดูเหมือน "เงินที่ปล่อยไปแล้วหายไปไหน" ทั้งที่รออยู่ครบทุกบาท
             รอบที่ยกเลิกยิ่งทำให้เข้าใจผิดหนักขึ้น (ก้อนถูกปลดคืนกองรอจ่ายแล้ว แต่บนจอไม่มีอะไรบอก) */}
-        {pending && (
-          <p className={`tab-hint payroll-waiting ${pending.rows.length === 0 ? 'is-empty' : ''}`}>
-            {pending.rows.length === 0 ? (
-              'ยังไม่มีค่าจ้างที่ปล่อยแล้วรออยู่ — ปล่อยค่าจ้างของเคสที่แท็บ “ปล่อยค่าจ้าง” ก่อน'
-            ) : (
-              <>
-                ปล่อยค่าจ้างแล้วรอเข้ารอบ{' '}
-                <strong>{formatBaht(total(pending.rows, 'total_pay'))}</strong>
-                {' · '}{pending.rows.length} คน · {total(pending.rows, 'payouts')} งวด
-                {/* บอกต่อว่าจะทำให้มันเข้ารอบยังไง ไม่งั้นเป็นตัวเลขที่ไม่รู้ว่าต้องทำอะไรต่อ */}
-                <span className="cell-sub">กด “เปิดรอบจ่าย” เพื่อกวาดยอดทั้งหมดนี้เข้ารอบ</span>
-              </>
-            )}
+        {/* ไม่มียอดรออยู่ = ไม่ต้องขึ้นอะไร — บรรทัดที่บอกว่า "ยังไม่มี" กินที่ทุกครั้งที่เปิดแท็บ
+            โดยไม่ได้บอกอะไรที่ต้องทำต่อ · มีบรรทัดนี้เมื่อไหร่แปลว่ามีเงินรออยู่จริง */}
+        {pending && pending.rows.length > 0 && (
+          <p className="tab-hint payroll-waiting">
+            ปล่อยค่าจ้างแล้วรอเข้ารอบ{' '}
+            <strong>{formatBaht(total(pending.rows, 'total_pay'))}</strong>
+            {' · '}{pending.rows.length} คน · {total(pending.rows, 'payouts')} งวด
+            {/* บอกต่อว่าจะทำให้มันเข้ารอบยังไง ไม่งั้นเป็นตัวเลขที่ไม่รู้ว่าต้องทำอะไรต่อ */}
+            <span className="cell-sub">กด “เปิดรอบจ่าย” เพื่อกวาดยอดทั้งหมดนี้เข้ารอบ</span>
           </p>
         )}
         {!opening && <button className="btn primary" onClick={openForm}>+ เปิดรอบจ่าย</button>}
@@ -340,8 +533,8 @@ function Runs({ reloadKey }) {
             </thead>
             <tbody>
               {runs.map((r) => (
+                <Fragment key={r.run_id}>
                 <tr
-                  key={r.run_id}
                   className={`is-tappable ${openRunId === r.run_id ? 'is-picked' : ''}`}
                   onClick={() => toggleDetail(r.run_id)}
                 >
@@ -364,219 +557,33 @@ function Runs({ reloadKey }) {
                   </td>
                   <td data-label="วันที่จ่าย">{r.pay_date ? formatDate(r.pay_date) : '—'}</td>
                 </tr>
+
+                {/* รายละเอียดกางเป็นแถวของตัวเองใต้แถวที่กด กินเต็มความกว้าง — ท่าเดียวกับ
+                    คิวปล่อยค่าจ้าง · เดิมแผงนี้อยู่ท้ายตาราง ซึ่งเวลารอบเยอะแล้วเลื่อนลงไปดู
+                    จะไม่เห็นแถวที่กดค้างอยู่ แล้วอ่านไม่ออกว่ายอดที่กำลังดูเป็นของรอบไหน */}
+                {openRunId === r.run_id && detailPanel && (
+                  <tr className="row-expand">
+                    <td colSpan={4}>{detailPanel}</td>
+                  </tr>
+                )}
+                </Fragment>
               ))}
             </tbody>
           </table>
         </div>
       )}
 
-      {/* ---------- รายละเอียดรอบที่เลือก ---------- */}
-      {detail && openRunId === detail.run_id && (
-        /* ไม่ครอบกล่องและไม่ทวนหัวข้อ — แถวที่กดกางอยู่ข้างบนบอก รหัสรอบ/วันตัดรอบ/คน/กะ/ยอด ครบแล้ว
-           กล่องซ้อนกล่องที่พูดเรื่องเดิมซ้ำสองรอบคือสิ่งที่ทำให้หน้านี้ดูแน่น ทั้งที่ข้อมูลจริงมีนิดเดียว
-           ปุ่ม "ย่อ" ก็ไม่ต้องมี เพราะแตะแถวเดิมซ้ำก็ย่อได้อยู่แล้ว */
-        <section className="payroll-detail">
-          {/* ต่างกันคนละเรื่อง: ร่างยังขยับตามข้อมูลได้ · จ่ายแล้วคือตัวเลขที่เงินออกไปจริง
-              ไม่บอกไว้ คนอ่านจะไม่รู้ว่าเลขที่เห็นเป็นของ "ตอนนี้" หรือ "ตอนที่จ่าย" */}
-          <p className={`muted payroll-freshness ${detail.status === 'draft' ? 'is-live' : ''}`}>
-            {detail.status === 'draft'
-              ? 'ร่าง — ยังเอาคนออก/ดึงยอดเพิ่มได้ ตัวเลขจะถูกตรึงตอนกดบันทึกการจ่าย'
-              : `ยอดถูกตรึงไว้แล้ว${detail.pay_date ? ` เมื่อ ${formatDate(detail.pay_date)}` : ''} — แก้ค่าจ้างย้อนหลังไม่ทำให้ตัวเลขนี้เปลี่ยน`}
-          </p>
-
-          {/* คำถามที่ตามมาทันทีเมื่อเห็นยอดรายคนคือ "ถ้าคนนี้ควรได้ไม่เท่านี้ แก้ตรงไหน"
-              ถ้าไม่ตอบไว้ตรงนี้ คนอ่านจะพยายามแก้ที่รอบ (ซึ่งแก้ไม่ได้) แล้วสรุปว่าระบบทำไม่ได้ */}
-          {detail.status === 'draft' && (
-            <p className="muted payroll-freshness">
-              ยอดของแต่ละคนตั้งตอนปล่อยค่าจ้าง — แตะชื่อคนเพื่อกางดูว่ามาจากเคสไหน
-              แล้วกดชื่อเคสเพื่อไปที่แท็บ “ปล่อยค่าจ้าง” สำหรับปรับส่วนแบ่งหรือถอนงวดที่ปล่อยผิดคืน
-            </p>
-          )}
-
-          {detail.items.length === 0 ? (
-            <p className="muted">ไม่มีใครอยู่ในรอบนี้แล้ว</p>
-          ) : (
-            <div className="payroll-people">
-              {/* แถวคน (ชื่อ | ยอด+ปุ่ม) กับที่มารายเคส เป็นคนละชั้นกัน — ที่มาเป็นของทั้งแถว
-                  ไม่ใช่ของคอลัมน์ซ้าย ถ้ายัดไว้ในคอลัมน์ซ้าย พอจอแคบแล้วบล็อกซ้ายสูงขึ้น
-                  ยอดเงินจะถูกดันลงไปอยู่ท้ายรายการเคส ห่างจากชื่อที่มันเป็นยอดของ */}
-              {detail.items.map((i) => (
-                <div className="payroll-person" key={i.item_id}>
-                  <div className="history-item">
-                  <div>
-                    {/* ทั้งบล็อกซ้ายกดได้ ไม่ใช่ปุ่มเล็กๆ ท้ายแถว — ที่มาของยอดคือสิ่งที่คนกดหาจริง
-                        และแถวนี้ก็ไม่มีการกระทำอื่นที่การกดจะไปชนได้ */}
-                    <button className="linkish" onClick={() => toggleItem(i.item_id)}>
-                      <strong>{i.employee_name}</strong>
-                    </button>
-                    <p className="muted">
-                      {i.cases} เคส · {i.payouts} งวด
-                      <span className="cell-sub">
-                        {openItemId === i.item_id ? 'แตะเพื่อย่อ' : 'แตะชื่อเพื่อดูว่ามาจากเคสไหน งวดไหน'}
-                      </span>
-                    </p>
-                  </div>
-                  <div className="payroll-people-end">
-                    <strong>{formatBaht(i.total_pay)}</strong>
-                    {detail.status === 'draft' && (
-                      <ConfirmButton
-                        className="btn tiny danger-ghost"
-                        disabled={busy}
-                        title={`เอา ${i.employee_name} ออกจากรอบนี้?`}
-                        detail="ค่าจ้างของเขาจะกลับเข้ากองรอจ่าย แล้วไปโผล่ในรอบถัดไปเอง — ไม่ใช่การตัดสิทธิ์"
-                        confirmLabel="เอาออกจากรอบ"
-                        onConfirm={() =>
-                          run(async () => {
-                            await api.removePayrollItem(detail.run_id, i.item_id);
-                            await refreshDetail(detail.run_id);
-                          })
-                        }
-                      >
-                        เอาออก
-                      </ConfirmButton>
-                    )}
-                  </div>
-                  </div>
-
-                  {/* รวมทุกเคสเป็นยอดเดียวด้านขวา แต่กางแล้วต้องบอกได้ว่ามาจากเคสไหน เท่าไหร่
-                      และเป็นงวดที่เท่าไหร่ของเคสนั้น — ตัวเลขที่ตรวจสอบไม่ได้คือตัวเลขที่ต้องมาถามคน */}
-                  {openItemId === i.item_id &&
-                    (itemCases === null ? (
-                      <p className="muted">กำลังโหลด…</p>
-                    ) : (
-                      <ul className="plain-list payroll-item-cases">
-                        {itemCases.map((c) => (
-                          <li key={c.payout_id}>
-                            {/* ชื่อเคสเป็นลิงก์ = ทางไปแก้ยอดของคนนี้เคสนี้ (ปรับส่วนแบ่ง/ถอนงวดคืน)
-                                ยอดในรอบเป็นแค่ภาพสะท้อนของสิ่งที่ตกลงไว้ที่เคส แก้ที่นี่ไม่ได้โดยตั้งใจ —
-                                ถ้าแก้ได้สองที่ ตัวเลขบนเคสกับตัวเลขที่โอนจริงจะเดินคนละทางทันที */}
-                            <span>
-                              <Link className="link" to={`/payroll?tab=release&open=${c.case_id}`}>
-                                {c.client_name ?? c.case_title ?? 'เคสที่ถูกลบแล้ว'}
-                              </Link>
-                              <span className="cell-sub mono">{c.case_id}</span>
-                            </span>
-                            <span>
-                              {formatBaht(c.amount)}
-                              {/* งวดไหนของเคสไหน และนัดจ่ายไว้วันไหน — สามอย่างนี้คือสิ่งที่ต้องเห็น
-                                  ก่อนกดอนุมัติจ่าย ไม่ใช่แค่ยอดรวมที่ตรวจกับอะไรไม่ได้ */}
-                              <span className="cell-sub">
-                                งวดที่ {c.installment_no}
-                                {c.case_installments > 1 ? `/${c.case_installments}` : ''}
-                                {c.due_date && ` · นัดจ่าย ${formatDate(c.due_date)}`}
-                              </span>
-                            </span>
-                          </li>
-                        ))}
-                      </ul>
-                    ))}
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* วันที่จ่ายโชว์ค้างไว้เลยตอนเป็นร่าง ไม่ต้องกดปุ่มเพื่อให้ฟอร์มโผล่มาก่อน —
-              ปกติคือวันนี้ซึ่งถูกอยู่แล้ว คนที่ต้องแก้คือคนที่ลงย้อนหลัง ซึ่งเป็นส่วนน้อย
-              ช่อง "ช่องทาง" ถูกตัดออก: ไม่มีหน้าไหนเอาไปใช้ตัดสินใจอะไรต่อ เป็นแค่ช่องให้กรอกเพิ่ม
-              ตอนที่คนกำลังอยากกดจบ (ประวัติการโอนจริงอยู่ที่สลิปธนาคาร ไม่ใช่ที่นี่) */}
-          {detail.status === 'draft' && (
-            <div className="payroll-pay">
-              <label>วันที่จ่าย
-                <input
-                  type="date"
-                  value={payForm?.pay_date ?? todayTH()}
-                  onClick={openDatePicker}
-                  onChange={(e) => setPayForm({ pay_date: e.target.value })}
-                />
-              </label>
-            </div>
-          )}
-
-          {/* เรียงเป็นคู่: แถวบน = ทำต่อกับรอบ · แถวล่าง = เลิกกับรอบ
-              ปุ่มทำลายอยู่ท้ายสุดเสมอ ห่างจากปุ่มที่กดกันจริงที่สุดเท่าที่กริดจะทำได้ */}
-          <div className="payroll-actions">
-            {detail.status === 'draft' && (
-              <>
-                {/* ใช้ตอนปล่อยค่าจ้างเพิ่มหลังเปิดรอบไปแล้ว — ยอดที่ปล่อยใหม่ไม่ไหลเข้ารอบที่เปิดค้างไว้เอง */}
-                <ConfirmButton
-                  className="btn"
-                  disabled={busy}
-                  title="ดึงค่าจ้างที่ปล่อยเพิ่มเข้ารอบนี้?"
-                  detail="ระบบจะกวาดรายชื่อใหม่ทั้งรอบ — คนที่เคยเอาออกจากรอบไปจะกลับเข้ามาด้วย"
-                  confirmLabel="ดึงยอดเพิ่ม"
-                  onConfirm={() =>
-                    run(async () => {
-                      const v = await api.rebuildPayrollRun(detail.run_id);
-                      setDetail(v);
-                      toast('ดึงยอดที่ปล่อยเพิ่มแล้ว');
-                    })
-                  }
-                >
-                  ดึงยอดเพิ่ม
-                </ConfirmButton>
-
-                <ConfirmButton
-                  className="btn primary"
-                  disabled={busy || detail.employees === 0}
-                  danger={false}
-                  title={`บันทึกการจ่ายรอบ ${detail.run_id}?`}
-                  detail={`${detail.employees} คน · ${formatBaht(detail.total_pay)} — หลังจากนี้ตัวเลขทั้งรอบถูกตรึง แก้ได้ทางเดียวคือยกเลิกรอบ`}
-                  confirmLabel="บันทึกการจ่าย"
-                  onConfirm={() =>
-                    run(async () => {
-                      const v = await api.payPayrollRun(detail.run_id, {
-                        pay_date: payForm?.pay_date ?? todayTH(),
-                      });
-                      setDetail(v);
-                      setPayForm(null);
-                      toast(`จ่ายรอบ ${v.run_id} แล้ว`);
-                    })
-                  }
-                >
-                  บันทึกการจ่าย
-                </ConfirmButton>
-              </>
-            )}
-
-            {detail.status !== 'cancelled' && (
-              <ConfirmButton
-                className="btn"
-                disabled={busy}
-                title={`ยกเลิกรอบ ${detail.run_id}?`}
-                detail="รอบยังอยู่เป็นประวัติ แต่ค่าจ้างทุกก้อนจะกลับเข้ากองรอจ่าย แล้วไปโผล่ในรอบถัดไป"
-                confirmLabel="ยกเลิกรอบ"
-                cancelLabel="ไม่ยกเลิกแล้ว"
-                onConfirm={() =>
-                  run(async () => {
-                    const v = await api.cancelPayrollRun(detail.run_id);
-                    setDetail(v);
-                    toast(`ยกเลิกรอบ ${v.run_id} แล้ว`);
-                  })
-                }
-              >
-                ยกเลิกรอบ
-              </ConfirmButton>
-            )}
-
-            {/* ปุ่ม "ลบรอบนี้" ถูกตัดออก — สำหรับรอบร่าง มันให้ผลเหมือน "ยกเลิกรอบ" แทบทุกอย่าง
-                (ค่าจ้างกลับเข้ากองรอจ่ายเหมือนกัน) ต่างแค่ลบประวัติทิ้ง ซึ่งไม่ใช่สิ่งที่ใครต้องการจริง
-                ปุ่มทำลายสองปุ่มติดกันที่ผลลัพธ์เกือบเหมือนกัน มีแต่ทำให้ต้องหยุดคิดว่าจะกดอันไหน
-                (เส้นฝั่ง server ยังอยู่ เผื่อวันหนึ่งต้องล้างรอบร่างที่สร้างผิดจริงๆ) */}
-          </div>
-        </section>
-      )}
     </>
   );
 }
 
 /* สามแท็บคือสายพานของ "เงินที่ต้องจ่ายพนักงาน" เรียงซ้ายไปขวาตามลำดับที่ทำจริง:
 
-     1 ปล่อยค่าจ้าง → หักส่วนบริษัทแล้วแบ่งค่าจ้างของเคสเป็นงวด ใครได้เท่าไหร่ นัดจ่ายวันไหน
-     2 อนุมัติจ่าย  → ตรวจว่ารอบนี้จะจ่ายใครเท่าไหร่จากเคสไหน แล้วโอนออกจริง
-     3 สรุปเงินได้  → ใครได้ไปเท่าไหร่ จากเคสอะไรบ้าง ไว้ตรวจย้อนหลัง/ส่งบัญชี
+     ปล่อยค่าจ้าง → หักส่วนบริษัทแล้วแบ่งค่าจ้างของเคสเป็นงวด ใครได้เท่าไหร่ นัดจ่ายวันไหน
+     อนุมัติจ่าย  → ตรวจว่ารอบนี้จะจ่ายใครเท่าไหร่จากเคสไหน แล้วโอนออกจริง
+     สรุปเงินได้  → ใครได้ไปเท่าไหร่ จากเคสอะไรบ้าง ไว้ตรวจย้อนหลัง/ส่งบัญชี
 
-   ติดเลขลำดับไว้บนแท็บเพราะสามชื่อนี้อ่านแยกกันแล้วไม่บอกว่าอะไรมาก่อนอะไร — โดยเฉพาะ
-   "ปล่อยค่าจ้าง" กับ "อนุมัติจ่าย" ที่ฟังดูเหมือนเป็นเรื่องเดียวกันทั้งที่เป็นคนละขั้น
+   ลำดับของ TABS คือลำดับที่แท็บถูกวาด — สลับคีย์ในนี้แล้วแท็บสลับตามทันที
 
    เคยมีแท็บ "ยืนยันกะ" นำหน้าอยู่ ตอนที่กะเป็นประตูของเงิน — ย้ายกลับไปหน้า "การมาทำงาน" แล้ว
    เพราะประตูของเงินคือการปิดเคส ไม่ใช่ตารางกะ การมีขั้นที่ไม่กระทบเงินปนอยู่ในสายพานนี้
@@ -634,14 +641,11 @@ export default function PayrollPage() {
       <header className="page-head">
         <div>
           <h1>ค่าตอบแทนพนักงาน</h1>
-          {/* คำโปรยต้องเป็นชื่อแท็บเรียงตามลำดับเป๊ะๆ ไม่ใช่คำอธิบายคนละชุด —
-              ไม่งั้นมันกลายเป็นข้อมูลที่ต้องจับคู่กับแท็บเอาอีกที */}
-          <p className="muted">ปล่อยค่าจ้าง → อนุมัติจ่าย → สรุปเงินได้</p>
         </div>
       </header>
 
       <div className="att-tabs" role="tablist" aria-label="มุมมองค่าตอบแทน">
-        {Object.entries(TABS).map(([key, label], i) => (
+        {Object.entries(TABS).map(([key, label]) => (
           <button
             key={key}
             role="tab"
@@ -649,7 +653,6 @@ export default function PayrollPage() {
             className={`att-tab ${tab === key ? 'is-active' : ''}`}
             onClick={() => patch({ tab: key === TAB_ORDER[0] ? '' : key })}
           >
-            <span className="tab-step">{i + 1}</span>
             {label}
           </button>
         ))}

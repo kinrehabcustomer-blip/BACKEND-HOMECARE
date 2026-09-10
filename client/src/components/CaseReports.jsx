@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { useToast } from '../toast.jsx';
-import { formatDate, todayTH } from '../labels.js';
+import { formatDate, monthText, todayTH } from '../labels.js';
 import ConfirmButton from './ConfirmButton.jsx';
 import ReportArchiveModal from './ReportArchiveModal.jsx';
 import DailyCareForm from './DailyCareForm.jsx';
@@ -181,10 +181,6 @@ function simpleBrief(r) {
  * (ขีด "—" ทำให้ดูเหมือนใบนั้นไม่มีเวลาและไม่รู้ว่าทำไมถึงอยู่ตำแหน่งนั้น)
  */
 const rowTime = (r) => r.report_time ?? r.created_at?.slice(11, 16) ?? '—';
-
-/** 'YYYY-MM' -> 'ส.ค. 2569' สำหรับตัวเลือกเดือน */
-const monthText = (ym) =>
-  new Date(`${ym}-01T00:00:00`).toLocaleDateString('th-TH', { month: 'short', year: 'numeric' });
 
 /**
  * รายงานอาการผู้ป่วย — คลังบันทึกของเคสหนึ่งใบ

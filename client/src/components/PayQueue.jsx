@@ -1,9 +1,10 @@
 import { Fragment, useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { useToast } from '../toast.jsx';
-import { CASE_STATUS_LABELS, formatBaht, formatDate } from '../labels.js';
+import { CASE_STATUS_LABELS, formatBaht, formatDate, monthText } from '../labels.js';
 import CasePayPanel from './CasePay.jsx';
 import LineIcon from './LineIcon.jsx';
+import MonthPicker from './MonthPicker.jsx';
 
 /**
  * แท็บ "ปล่อยค่าจ้าง" — เคสทุกใบที่มีเงินให้จัดการ อยู่รวมกันในหน้าเดียว
@@ -17,12 +18,26 @@ import LineIcon from './LineIcon.jsx';
  * ไม่เหมือนใครบังคับให้หยุดอ่านใหม่ทุกครั้งว่าตัวเลขไหนคืออะไร · บนจอแคบมันยุบเป็นการ์ดให้เอง
  * ตามกติกาเดียวกับทุกตาราง แตะแถวไหนก็กางแผงจัดการของเคสนั้นใต้แถวนั้นเลย
  */
+/* ป้าย "ค้าง N วัน" ขึ้นเฉพาะลำดับ 1–3 — ลำดับ 4–5 ปกติรอปิดเคสก่อนจ่าย ติดป้ายไปก็เร่งผิดที่ */
+const URGENT_TIERS = [1, 2, 3];
+
+/* เกินหนึ่งเดือน = ค้างข้ามรอบเงินเดือนไปแล้ว เปลี่ยนเป็นสีเตือน */
+const LATE_DAYS = 30;
+
+/* เดือนของเคส — ใช้ waiting_since ตัวเดียวกับที่ใช้เรียงลำดับ (วันปิดเคส / วันกะแรก)
+   ถ้าใช้คนละวันกับที่เรียง เคสจะย้ายเดือนโดยที่ลำดับไม่ขยับ แล้วเชื่อทั้งสองอย่างไม่ได้ */
+const monthOf = (c) => (c.waiting_since ?? c.created_at ?? '').slice(0, 7);
+
 export default function PayQueue({ reloadKey, openCase, onOpenCase }) {
   const toast = useToast();
   const [rows, setRows] = useState(null);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
   const [showDone, setShowDone] = useState(false);
+  /* '' = ทุกเดือน และเป็นค่าปริยายของแท็บนี้ — ต่างจากแท็บอื่นที่เปิดมาเป็นเดือนใดเดือนหนึ่ง
+     คิวนี้คือ "เงินที่ยังค้างพนักงาน" ซึ่งส่วนใหญ่ค้างมาจากเดือนก่อน เปิดมาที่เดือนปัจจุบัน
+     แล้วรายการจะว่างทั้งที่ยังค้างอยู่จริง — ตัวกรองเดือนมีไว้ให้เจาะดู ไม่ใช่ซ่อนของค้าง */
+  const [month, setMonth] = useState('');
 
   const load = useCallback(
     () =>
@@ -57,7 +72,15 @@ export default function PayQueue({ reloadKey, openCase, onOpenCase }) {
 
   const pending = rows?.filter((r) => r.remaining > 0) ?? [];
   const done = rows?.filter((r) => r.remaining <= 0) ?? [];
-  const shown = showDone ? [...pending, ...done] : pending;
+  const inScope = showDone ? [...pending, ...done] : pending;
+
+  /* เดือนที่มีเคสอยู่จริง — ใช้ในหน้าจอตอนรายการว่าง เพื่อบอกว่าของไปกองอยู่เดือนไหน
+     (ปฏิทินของเบราว์เซอร์กดไปเดือนที่ไม่มีของได้ และไม่มีอะไรบอกล่วงหน้า) */
+  const counts = new Map();
+  for (const c of inScope) counts.set(monthOf(c), (counts.get(monthOf(c)) ?? 0) + 1);
+  const months = [...counts.entries()].sort(([a], [b]) => b.localeCompare(a));
+
+  const shown = month ? inScope.filter((c) => monthOf(c) === month) : inScope;
 
   return (
     <>
@@ -74,24 +97,82 @@ export default function PayQueue({ reloadKey, openCase, onOpenCase }) {
         </section>
       ) : (
         <>
-          {/* เคสที่จ่ายครบแล้วไม่ใช่ของที่ต้องทำ แต่ต้องยังเปิดดูย้อนได้ (ถอนงวดที่ปล่อยผิดคืน)
-              จึงซ่อนไว้หลังสวิตช์ ไม่ใช่ตัดทิ้งหรือปนอยู่ในรายการที่ต้องไล่ทำ */}
-          {done.length > 0 && (
-            <div className="att-filter">
-              <label className="check-inline">
-                <input
-                  type="checkbox"
-                  checked={showDone}
-                  onChange={(e) => setShowDone(e.target.checked)}
-                />
-                แสดงเคสที่ปล่อยครบแล้วด้วย ({done.length})
-              </label>
-            </div>
-          )}
+          {/* ตัวเลือกเดือนตัวเดียวกับแท็บ "อนุมัติจ่าย"/"สรุปเงินได้" — สามแท็บของหน้าเดียวกัน
+              ต้องเลือกเดือนด้วยท่าเดียวกัน · เคสที่จ่ายครบซ่อนหลังสวิตช์ ไม่ตัดทิ้ง
+              เพราะยังต้องเปิดดูย้อนได้ตอนถอนงวดที่ปล่อยผิดคืน */}
+          <MonthPicker month={month} onChange={setMonth}>
+            {/* ทางกลับไป "ไม่กรองเดือน" — โผล่เฉพาะตอนกรองเดือนอยู่จริง
+                ค่าปริยายของแท็บนี้คือทุกเดือน ชิปนี้จึงเป็นปุ่มล้างตัวกรอง ไม่ใช่ตัวเลือกมุมมอง
+                โชว์ค้างไว้ตอนไม่ได้กรองก็เป็นปุ่มที่กดแล้วไม่เกิดอะไร และไปนั่งข้างปุ่ม
+                "รวมที่จ่ายครบ" จนอ่านเหมือนสองปุ่มนี้เป็นตัวเลือกคู่กัน ทั้งที่คุมคนละมิติ
+                (เดือน vs สถานะการจ่าย) แล้วตัวเลขในสองปุ่มก็ไม่เท่ากันด้วย */}
+            {month !== '' && (
+              <button
+                type="button"
+                className="chip"
+                onClick={() => setMonth('')}
+                title="เลิกกรองเดือน แสดงทุกเดือน"
+              >
+                ล้างตัวกรองเดือน
+              </button>
+            )}
+
+            {/* สองมุมมองที่เลือกได้ทีเดียวอันเดียว — เดิมเป็นช่องติ๊ก "แสดงเคสที่ปล่อยครบแล้วด้วย"
+                ซึ่งบอกได้แค่สถานะของตัวเอง คนอ่านต้องเดาว่าถ้าไม่ติ๊กแล้วเห็นอะไร
+                ปุ่มคู่บอกทั้งสองทางพร้อมจำนวน จึงเลือกได้โดยไม่ต้องลองกดดูก่อน */}
+            {done.length > 0 && (
+              <div className="seg" role="group" aria-label="ขอบเขตของรายการ">
+                <button
+                  type="button"
+                  className={showDone ? '' : 'on'}
+                  aria-pressed={!showDone}
+                  onClick={() => setShowDone(false)}
+                >
+                  ค้างจ่าย ({pending.length})
+                </button>
+                {/* ไม่ใช้คำว่า "ทั้งหมด" — มันอ่านว่า "ทุกเคส" ซึ่งชนกับการเลิกกรองเดือน
+                    ชื่อต้องบอกว่ามันเพิ่มอะไรเข้ามา ไม่ใช่บอกว่ามันครอบคลุมแค่ไหน */}
+                <button
+                  type="button"
+                  className={showDone ? 'on' : ''}
+                  aria-pressed={showDone}
+                  onClick={() => setShowDone(true)}
+                >
+                  รวมที่จ่ายครบ ({rows.length})
+                </button>
+              </div>
+            )}
+          </MonthPicker>
 
           {shown.length === 0 ? (
             <section className="card empty-state">
-              <p><LineIcon name="check" className="text-ico" />ไม่มีเคสที่ค้างปล่อยค่าจ้าง</p>
+              {/* ว่างเพราะกรองเดือน กับว่างเพราะไม่มีงานค้างจริง ต้องเขียนคนละแบบ */}
+              {month ? (
+                <>
+                  <p>ไม่มีเคสที่ค้างปล่อยค่าจ้างใน{monthText(month)}</p>
+                  {/* "ว่าง" ที่ไม่บอกอะไรต่อคือสาเหตุที่เงินค้างเดือนก่อนถูกลืม */}
+                  {inScope.length > 0 && (
+                    <p className="muted">
+                      ยังมีเคสค้างอยู่ที่{' '}
+                      {months.map(([ym, n], i) => (
+                        <span key={ym}>
+                          {i > 0 && ' · '}
+                          <button type="button" className="inline-link" onClick={() => setMonth(ym)}>
+                            {monthText(ym)} ({n})
+                          </button>
+                        </span>
+                      ))}
+                    </p>
+                  )}
+                  <div className="empty-actions">
+                    <button type="button" className="btn" onClick={() => setMonth('')}>
+                      ดูทุกเดือน ({inScope.length})
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <p><LineIcon name="check" className="text-ico" />ไม่มีเคสที่ค้างปล่อยค่าจ้าง</p>
+              )}
             </section>
           ) : (
             <div className="table-wrap">
@@ -131,6 +212,12 @@ export default function PayQueue({ reloadKey, openCase, onOpenCase }) {
                             <span className={`badge case-${c.status}`}>
                               {CASE_STATUS_LABELS[c.status] ?? c.status}
                             </span>
+                            {/* ตัวเลขเดียวกับที่ใช้เรียงลำดับ — ไม่โชว์ ลำดับก็กลายเป็นกติกาที่มองไม่เห็น */}
+                            {URGENT_TIERS.includes(c.pay_priority) && c.waiting_days > 0 && (
+                              <span className={`badge pay-wait ${c.waiting_days >= LATE_DAYS ? 'is-late' : ''}`}>
+                                ค้าง {c.waiting_days} วัน
+                              </span>
+                            )}
                           </span>
                           <span className="cell-sub">
                             <span className="mono">{c.case_id}</span>

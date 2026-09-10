@@ -1614,6 +1614,183 @@ describe('รหัสผ่านชั่วคราวของพนัก�
   });
 });
 
+/* ==========================================================================
+   Workflow เต็มเส้น: เปิดเคส → ออกใบแจ้งหนี้ → นัดกะ → เช็คอิน → ปล่อยค่าจ้าง 2 งวด → เงินได้พนักงาน
+
+   เดินทีละขั้นด้วยฟังก์ชันตัวจริงของแต่ละโมดูล ไม่ใช่เขียนสูตรซ้ำในเทส — ตัวเลขที่ออกมาจึงเป็น
+   ตัวเลขเดียวกับที่ระบบจะใช้จริง และถ้าใครแก้กติกาการแบ่งเงินทีหลัง เทสนี้จะแดงทันที
+
+   ไม่แตะฐานข้อมูล: ทุกด่านที่ตัดสิน "ทำได้/ไม่ได้" กับ "ใครได้เท่าไหร่" ถูกแยกเป็นฟังก์ชันบริสุทธิ์
+   ไว้แล้วโดยตั้งใจ (assess* / allocateShares / withVisitState) ส่วนที่เหลือคือ INSERT/UPDATE
+   ที่ทำงานใน transaction — ซึ่งเทสด้วยฐาน production ไม่ได้ (ดู README ท้ายไฟล์)
+   ========================================================================== */
+describe('Workflow — เปิดเคสถึงเงินเข้าพนักงาน (จ่าย 2 งวด)', () => {
+  /* เคสตัวอย่าง: เก็บลูกค้า 30,000 · ค่าจ้างพนักงานเหมา 20,000 · พนักงานสองคนหารเท่ากัน
+     ตัวเลขเลือกให้หารไม่ลงตัวในงวดแรกโดยตั้งใจ (12,000 / 2 คน แล้วงวดสองเหลือ 8,000) */
+  const CASE_FEE = 30_000;
+  const CASE_STAFF_PAY = 20_000;
+  const TEAM = ['EMP-0002', 'EMP-0005'];
+
+  test('1. เปิดเคส — ชื่อผู้ป่วยกับประเภทเคสเป็นสองช่องที่ขาดไม่ได้', () => {
+    const base = {
+      case_type: 'elderly_care',
+      client_name: 'ผู้ป่วยทดสอบ workflow',
+      service_kind: 'homecare',
+      fee: CASE_FEE,
+      staff_pay: CASE_STAFF_PAY,
+      start_date: '2026-09-01',
+    };
+    assert.equal(createCaseSchema.safeParse(base).success, true);
+
+    // ขาดชื่อผู้ป่วย = เปิดเคสไม่ได้ (เคสไม่มีชื่อคนไข้ก็ไม่รู้ว่าไปดูแลใคร)
+    assert.equal(createCaseSchema.safeParse({ ...base, client_name: '' }).success, false);
+    // ประเภทเคสต้องเป็นค่าใน enum ไม่ใช่ข้อความอิสระ — ไม่งั้นหลุดไปชน CHECK ของฐานข้อมูล
+    assert.equal(createCaseSchema.safeParse({ ...base, case_type: 'อื่นๆ' }).success, false);
+  });
+
+  test('2. ออกใบแจ้งหนี้ — ออกได้จากร่างเท่านั้น แล้วรับชำระเกินยอดไม่ได้', () => {
+    // ออกใบ: draft -> issued ได้ · ออกซ้ำจากใบที่ออกแล้วไม่ได้
+    assert.deepEqual(assessInvoiceAction('issue', 'draft'), { status: 'draft' });
+    assert.equal(assessInvoiceAction('issue', 'issued').reason, 'invalid_status');
+    assert.equal(assessInvoiceAction('issue', 'cancelled').reason, 'invalid_status');
+
+    // รับชำระบางส่วน 10,000 จาก 30,000
+    const first = assessPaymentCapacity('issued', CASE_FEE, 0, 10_000);
+    assert.equal(first.amount, 10_000);
+    assert.equal(first.balance, CASE_FEE);
+
+    // ที่เหลือ 20,000 — ไม่ส่งยอดมา = รับยอดคงเหลือทั้งหมด
+    const rest = assessPaymentCapacity('issued', CASE_FEE, 10_000, null);
+    assert.equal(rest.amount, 20_000);
+
+    // เกินยอดคงเหลือ / ใบที่ชำระครบแล้ว / ใบที่ยกเลิก — ต้องถูกปฏิเสธคนละเหตุผล
+    assert.equal(assessPaymentCapacity('issued', CASE_FEE, 10_000, 25_000).reason, 'amount_exceeds_balance');
+    assert.equal(assessPaymentCapacity('issued', CASE_FEE, CASE_FEE, null).reason, 'fully_paid');
+    assert.equal(assessPaymentCapacity('cancelled', CASE_FEE, 0, 100).reason, 'cancelled');
+  });
+
+  test('3. นัดกะ — ลงยาวด้วยช่วงวัน + วันในสัปดาห์ ต้องระบุอย่างน้อยทางใดทางหนึ่ง', () => {
+    const ok = bulkVisitSchema.safeParse({
+      from: '2026-09-01',
+      to: '2026-09-30',
+      weekdays: [1, 3, 5],
+      assigned_to: TEAM[0],
+      planned_start: '08:00',
+      planned_end: '17:00',
+    });
+    assert.equal(ok.success, true);
+
+    // ลงเป็นรายวันก็ได้
+    assert.equal(bulkVisitSchema.safeParse({ dates: ['2026-09-01', '2026-09-02'] }).success, true);
+    // ไม่บอกทั้งวันที่และช่วงวัน = ไม่รู้จะลงกะวันไหน
+    assert.equal(bulkVisitSchema.safeParse({ assigned_to: TEAM[0] }).success, false);
+    // วันที่ไม่มีอยู่จริงในปฏิทินต้องไม่ผ่าน (คอลัมน์วันที่เป็น TEXT ฐานข้อมูลไม่ช่วยตรวจ)
+    assert.equal(bulkVisitSchema.safeParse({ dates: ['2026-02-31'] }).success, false);
+  });
+
+  test('4. พนักงานเช็คอิน — สถานะกะเดินตามเวลาจริง และคิดชั่วโมงจากเวลาเข้า–ออก', () => {
+    const photo = 'data:image/jpeg;base64,/9j/4AAQSkZJRg=';
+    assert.equal(checkInSchema.safeParse({ lat: 13.7, lng: 100.5, photo }).success, true);
+    // ไม่มีรูป = เช็คอินไม่ได้ (รูปคือหลักฐานชิ้นเดียวที่ปลอมยากกว่าพิกัด)
+    assert.equal(checkInSchema.safeParse({ lat: 13.7, lng: 100.5 }).success, false);
+
+    const now = new Date('2026-09-10T18:00:00+07:00');
+    const visit = { visit_date: '2026-09-10', status: 'scheduled' };
+
+    // ยังไม่เช็คอิน + ยังไม่เลยวัน = รอเช็คอิน
+    assert.equal(withVisitState({ ...visit, visit_date: '2026-09-30' }, now).state, 'scheduled');
+    // เช็คอินแล้วยังไม่ออก = กำลังทำงาน
+    assert.equal(
+      withVisitState({ ...visit, check_in_at: '2026-09-10T08:00:00+07:00' }, now).state,
+      'working',
+    );
+    // เลยวันแล้วไม่มีการเช็คอิน = ขาดงาน
+    assert.equal(withVisitState({ ...visit, visit_date: '2026-09-01' }, now).state, 'missed');
+
+    // เช็คเอาท์แล้ว = เสร็จ + ชั่วโมงทำงานคิดจากผลต่างเวลาจริง (8 ชม. = 480 นาที)
+    const done = withVisitState(
+      {
+        ...visit,
+        check_in_at: '2026-09-10T08:00:00+07:00',
+        check_out_at: '2026-09-10T16:00:00+07:00',
+      },
+      now,
+    );
+    assert.equal(done.state, 'done');
+    assert.equal(done.worked_minutes, 480);
+
+    // ค้างเช็คเอาท์เกิน 16 ชม. ต้องขึ้นเป็น stale ไม่ใช่ working ตลอดกาล
+    assert.equal(
+      withVisitState({ ...visit, visit_date: '2026-09-09', check_in_at: '2026-09-09T08:00:00+07:00' }, now).state,
+      'stale',
+    );
+  });
+
+  test('5. ปล่อยค่าจ้างงวดที่ 1 — 12,000 จาก 20,000 แบ่งสองคนเท่ากัน', () => {
+    const gate = assessReleaseCapacity(CASE_STAFF_PAY, 0, 12_000);
+    assert.equal(gate.reason, undefined);
+    assert.equal(gate.remaining, CASE_STAFF_PAY);
+    assert.equal(gate.amount, 12_000);
+
+    const split = allocateShares(TEAM.map((employee_id) => ({ employee_id, paid: 0 })), gate.amount);
+    assert.deepEqual(split.map((r) => r.amount), [6_000, 6_000]);
+    assert.equal(split.reduce((s, r) => s + r.amount, 0), 12_000);
+  });
+
+  test('6. ปล่อยค่าจ้างงวดที่ 2 — ไม่ส่งยอดมา = ปิดยอดคงเหลือ 8,000 พอดี', () => {
+    const gate = assessReleaseCapacity(CASE_STAFF_PAY, 12_000, null);
+    assert.equal(gate.reason, undefined);
+    assert.equal(gate.remaining, 8_000);
+    assert.equal(gate.amount, 8_000, 'ไม่ส่งยอด = ปล่อยยอดคงเหลือทั้งหมด');
+
+    const split = allocateShares(TEAM.map((employee_id) => ({ employee_id, paid: 6_000 })), gate.amount);
+    assert.deepEqual(split.map((r) => r.amount), [4_000, 4_000]);
+
+    // รวมสองงวดต้องเท่ายอดเหมาของเคสเป๊ะ ไม่ขาดไม่เกินแม้เศษสตางค์
+    const perPerson = split.map((r) => r.paid + r.amount);
+    assert.deepEqual(perPerson, [10_000, 10_000]);
+    assert.equal(perPerson.reduce((s, n) => s + n, 0), CASE_STAFF_PAY);
+  });
+
+  test('7. ปล่อยงวดที่ 3 ไม่ได้ และปล่อยเกินยอดคงเหลือก็ไม่ได้', () => {
+    // จ่ายครบแล้ว = ไม่มีอะไรให้ปล่อยอีก
+    assert.equal(assessReleaseCapacity(CASE_STAFF_PAY, CASE_STAFF_PAY, null).reason, 'fully_released');
+    // ขอเกินยอดคงเหลือ (เหลือ 8,000 แต่ขอ 9,000)
+    assert.equal(assessReleaseCapacity(CASE_STAFF_PAY, 12_000, 9_000).reason, 'amount_exceeds_remaining');
+    // เคสที่ยังไม่ตั้งค่าจ้าง = ปล่อยไม่ได้เลย (ไม่ใช่ปล่อย 0 บาท)
+    assert.equal(assessReleaseCapacity(null, 0, 5_000).reason, 'staff_pay_not_set');
+    // เพดานงวดต่อเคสยังอยู่ที่เดิม — เปลี่ยนแล้วหน้าเว็บที่โชว์ "งวดที่ n/N" จะเพี้ยนตาม
+    assert.equal(MAX_INSTALLMENTS, 5);
+  });
+
+  test('8. งวดที่คนรับไม่เท่ากัน — งวดถัดไปต้องเกลี่ยให้ไล่ทันข้อตกลง', () => {
+    /* งวดแรกปล่อยตอนที่คนที่สองยังไม่พร้อมรับ (กะยังไม่ถูกยืนยัน) คนแรกจึงได้ไปคนเดียว
+       งวดสองต้องไม่หารครึ่งเฉพาะเงินก้อนนั้น ไม่งั้นยอดรวมทั้งเคสจะผิดข้อตกลงถาวร */
+    const split = allocateShares(
+      [{ employee_id: TEAM[0], paid: 12_000 }, { employee_id: TEAM[1], paid: 0 }],
+      8_000,
+    );
+    assert.deepEqual(split.map((r) => r.amount), [0, 8_000], 'คนที่ยังไม่ได้เงินต้องได้ก่อน');
+
+    const perPerson = split.map((r) => r.paid + r.amount);
+    assert.deepEqual(perPerson, [12_000, 8_000]);
+    assert.equal(perPerson.reduce((s, n) => s + n, 0), CASE_STAFF_PAY, 'ยอดรวมยังเท่าค่าจ้างเหมา');
+  });
+
+  test('9. แสดงเงินได้พนักงาน — เปิดรอบจ่ายแล้วบันทึกจ่ายได้ครั้งเดียว', () => {
+    // เดือนแรกยังไม่มีรอบ = ได้รอบที่ 1 · มีรอบ 1 แล้ว = ได้รอบที่ 2
+    assert.equal(firstAvailablePayrollRound([]), 1);
+    assert.equal(firstAvailablePayrollRound([1]), 2);
+
+    // บันทึกการจ่ายทำได้จากร่างเท่านั้น — กดซ้ำจากรอบที่จ่ายแล้วต้องไม่ผ่าน
+    assert.deepEqual(assessPayrollRunAction('pay', 'draft'), { status: 'draft' });
+    assert.equal(assessPayrollRunAction('pay', 'paid').reason, 'invalid_status');
+    // ยกเลิกได้ทั้งร่างและรอบที่จ่ายแล้ว (เงินกลับเข้ากองรอจ่าย) แต่ยกเลิกซ้ำไม่ได้
+    assert.deepEqual(assessPayrollRunAction('cancel', 'paid'), { status: 'paid' });
+    assert.equal(assessPayrollRunAction('cancel', 'cancelled').reason, 'invalid_status');
+  });
+});
+
 /* ---------- แบบประเมินความพึงพอใจจากญาติ (reviews) ----------
 
    โมดูลนี้รับข้อมูลจาก "หน้าสาธารณะที่ไม่ต้อง login" ซึ่งเป็นทางเข้าเดียวในระบบที่คนนอกยิงเข้ามาได้

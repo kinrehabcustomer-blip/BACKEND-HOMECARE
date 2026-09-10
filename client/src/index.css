@@ -701,6 +701,11 @@ select option:checked {
 .badge.payout-partial { background: #f3e2c0; color: #7a5a12; }
 .badge.payout-full    { background: #e3f5ec; color: #1c7a4d; }
 
+/* "ค้าง N วัน" ในคิวปล่อยค่าจ้าง — สองสีเท่านั้น ไม่ไล่เฉดตามจำนวนวัน
+   ตัวเลขวันเขียนอยู่ในป้ายแล้ว สีจึงมีหน้าที่เดียว: บอกว่าเลยเส้นหรือยัง (LATE_DAYS) */
+.badge.pay-wait         { background: var(--surface-2); color: var(--muted); font-variant-numeric: tabular-nums; }
+.badge.pay-wait.is-late { background: #fdecea; color: var(--danger); font-weight: 700; }
+
 /* ป้ายสถานะเงินอยู่ใต้ยอดคงเหลือในช่องเดียวกัน — ห่อด้วยสแปนของตัวเอง ไม่ใช่ลูกตรงของ <td>
    เพราะกฎโหมดการ์ด ("td ที่มี badge เป็นลูกตรง = สถานะของแถว") จะลากทั้งช่องรวมยอดเงิน
    ขึ้นไปไว้มุมขวาบนของการ์ด ซึ่งไม่ใช่สิ่งที่ช่องนี้เป็น
@@ -3494,17 +3499,6 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
   margin-top: 0.875rem;
 }
 
-/* เลขลำดับขั้นบนแท็บ — จางกว่าชื่อแท็บเพราะมันคือข้อมูลกำกับ ไม่ใช่ชื่อ
-   แต่ต้องมี ไม่งั้นสี่ชื่อที่เรียงกันอยู่ไม่ได้บอกว่าอะไรมาก่อนอะไร */
-.tab-step {
-  margin-right: 0.375rem;
-  font-size: 0.75rem;
-  font-weight: 700;
-  color: var(--muted);
-  opacity: 0.75;
-}
-.att-tab.is-active .tab-step { color: var(--brand); opacity: 1; }
-
 /* ตัวเลขงานค้างบนแท็บ — เห็นได้จากแท็บอื่นโดยไม่ต้องกดเข้าไปเช็ค */
 .tab-count {
   display: inline-block;
@@ -4222,12 +4216,13 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
    สองอย่างนี้จะลอยอยู่กลางแถบโดยไม่มีแนวอะไรร่วมกัน */
 .payroll-bar { justify-content: space-between; }
 .payroll-bar .tab-hint { margin: 0; flex: 1; min-width: 14rem; }
+/* ปุ่มเปิดรอบชิดขวาเสมอ ไม่ว่าจะมีบรรทัดยอดค้างอยู่หรือไม่
+   space-between อย่างเดียวไม่พอ — ตอนไม่มียอดค้าง ปุ่มเป็นลูกตัวเดียวในแถบแล้วไปกองซ้าย */
+.payroll-bar > .btn { margin-left: auto; }
 
 /* ยอดที่ปล่อยแล้วแต่ยังไม่เข้ารอบไหน — อยู่แถวเดียวกับปุ่มเปิดรอบ เพราะมันคือตัวเลขที่ทำให้
    ตัดสินใจกดปุ่มนั้น ตัวเงินเน้นกว่าคำรอบข้าง เป็นสิ่งเดียวในบรรทัดที่ต้องอ่านให้ได้จริงๆ */
 .payroll-waiting strong { font-size: 1rem; color: var(--brand); }
-/* ไม่มียอดค้าง = ข้อความบอกทาง ไม่ใช่ตัวเลข — จางลงให้รู้ว่าไม่มีอะไรต้องทำที่แท็บนี้ */
-.payroll-waiting.is-empty { color: var(--muted); }
 
 @media (max-width: 600px) {
   /* จอแคบ: ปุ่มเปิดรอบเป็นการกระทำหลักของแท็บนี้ — ให้เต็มความกว้างแทนที่จะเบียดท้ายข้อความ */
@@ -4421,6 +4416,16 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
    (แดชบอร์ด/ค่าตอบแทนของฉัน ใช้ .hero-card ครอบ) หน้านี้วางลอยระหว่างหัวข้อกับตาราง
    จึงต้องบอกระยะเอง ไม่งั้นการ์ดตัวเลขไปแปะติดขอบตารางด้านล่างพอดี */
 .review-tiles { margin-bottom: 1.75rem; }
+/* พื้นขาวเหมือนการ์ดอื่นในระบบ — .tile ไม่มีพื้นของตัวเองเพราะที่อื่นมันวางอยู่ใน .hero-card
+   ที่เป็นพื้นขาวอยู่แล้ว (แดชบอร์ด/ค่าตอบแทนของฉัน) หน้านี้วางลอยบนพื้นหน้าเว็บ
+   จึงต้องบอกพื้นเอง ไม่งั้นเห็นเป็นแค่กรอบเปล่าบนพื้นครีมของหน้า
+   ใช้ตัวแปร --surface ไม่ใช่ #fff เพื่อให้โหมดกลางคืนได้การ์ดสีเข้มตามธีม ไม่ใช่ขาวโพลน
+
+   ต้องเขียนคลุมสถานะ hover ด้วย เพราะ `.tile.is-static:hover { background: none }`
+   (กฎที่บอกว่าช่องกดไม่ได้ไม่ต้องเปลี่ยนสีตอนชี้) มี specificity สูงกว่า —
+   ไม่คลุมไว้ พื้นขาวจะหายวับตอนเอาเมาส์ผ่าน แล้วดูเหมือนการ์ดกระพริบ */
+.review-tiles .tile,
+.review-tiles .tile.is-static:hover { background: var(--surface); }
 /* gap 0.1875rem ของ .tile ตั้งมาสำหรับข้อความบรรทัดเล็กใต้ตัวเลข — แถวดาวเป็นภาพ
    ไม่มีระยะเผื่อในบรรทัดเหมือนตัวหนังสือ วางระยะเท่ากันจึงดูติดตัวเลขกว่าที่อื่น */
 .review-tiles .stars { margin-top: 0.3125rem; }
