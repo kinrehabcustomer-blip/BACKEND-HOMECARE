@@ -3237,6 +3237,10 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
   margin-bottom: 1rem;
 }
 
+/* แถบบอกว่าเคสนี้ผูกกับแฟ้มผู้ป่วยไหน — .notice ตั้ง margin: 0 ไว้ ปริยายจึงชนป้ายช่องกรอกด้านล่าง
+   ใช้ระยะเท่าแถบแพ้ยาที่อยู่ในส่วนเดียวกัน */
+.snapshot-note { margin-bottom: 1rem; }
+
 /* ---------- แพ็คเกจกายภาพบำบัด: ตารางเหมาจำนวนครั้ง ---------- */
 /* ไม่มี colgroup เหมือน .rate-table — ให้ความกว้างมาจากเนื้อหา จะได้ไม่ตัดชื่อแพ็คเกจทิ้ง */
 .physio-table { table-layout: auto; width: auto; min-width: 100%; }
@@ -3878,9 +3882,11 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
 /* ---------- เงินมัดจำ / การรับชำระเป็นงวด ---------- */
 
 /* สรุปเงินของใบ — เครื่องมือของคนเก็บเงิน อยู่นอกตัวเอกสารที่พิมพ์ */
-.pay-summary {
+/* อยู่ใน .modal-body ซึ่งมีกฎ section { padding: 1rem 0 } ที่เจาะจงกว่า .pay-summary เดี่ยวๆ
+   — ต้องผูกกับ .modal-body ด้วย ไม่งั้นระยะซ้ายขวาโดนลบเหลือ 0 เนื้อหาชิดกรอบ */
+.modal-body .pay-summary {
   margin: 0.75rem 0 1rem;
-  padding: 0.875rem;
+  padding: 1rem 1.25rem;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg);
@@ -3905,6 +3911,7 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
 
 /* ฟอร์มรับเงินมีสามช่องแล้ว (จำนวน/วันที่/ช่องทาง) — บนจอแคบให้เรียงลงมาแทนการบีบให้อยู่แถวเดียว */
 @media (max-width: 600px) {
+  .modal-body .pay-summary { padding: 0.875rem 1rem; }
   .pay-figures { gap: 0.75rem 1.25rem; }
 }
 

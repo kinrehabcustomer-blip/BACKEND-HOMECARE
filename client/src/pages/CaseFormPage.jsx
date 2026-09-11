@@ -771,7 +771,7 @@ export default function CaseFormPage() {
           /* แก้ไขเคส: ข้อมูลผู้ป่วยในเคยคือ snapshot ณ วันให้บริการ — แก้ตรงนี้ไม่กระทบแฟ้มผู้ป่วย */
           <>
             {form.patient_id && (
-              <p className="notice">
+              <p className="notice snapshot-note">
                 ผูกกับแฟ้มผู้ป่วย <Link className="link" to={`/patients/${form.patient_id}`}>{form.patient_id}</Link>
                 {' '}· การแก้ด้านล่างแก้เฉพาะข้อมูลในเคสนี้ (snapshot) ไม่กระทบแฟ้มผู้ป่วย
               </p>
