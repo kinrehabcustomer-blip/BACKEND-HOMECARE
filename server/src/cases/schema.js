@@ -607,10 +607,14 @@ export const listQuerySchema = z.object({
   status: z.enum(CASE_STATUSES).optional(),
   case_type: z.enum(CASE_TYPES).optional(),
   assigned_to: z.string().trim().optional(),
-  /* "มีกะแล้วแต่ยังไม่ตั้งค่าจ้าง" — ตัวกรองของกระดิ่งแจ้งเตือน (ดู notify/alerts.js)
+  /* ตัวกรอง "ของค้าง" — ปลายทางของแถวในกระดิ่งแจ้งเตือน (ดู notify/alerts.js)
+     ทั้งสามตัวไม่ใช่สถานะใน DB แต่คิดจากข้อมูลอื่นของเคส เกณฑ์อยู่ใน cases/repo.js ที่เดียว
+
      รับเฉพาะ 'yes' ไม่ใช่ boolean ทั่วไป เพราะมันมาจาก query string ซึ่ง '0'/'false'
      เป็นสตริงที่ truthy ทั้งคู่ — ตัวกรองที่เปิดเองเมื่อส่งค่าอะไรมาก็ได้คือกับดัก */
   no_staff_pay: z.literal('yes').optional(),
+  overdue_close: z.literal('yes').optional(),
+  closed_no_invoice: z.literal('yes').optional(),
   year: z.string().regex(/^\d{4}$/).optional(),
   month: z.string().regex(/^(0[1-9]|1[0-2])$/).optional(),
   page: z.coerce.number().int().min(1).default(1),

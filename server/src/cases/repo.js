@@ -122,7 +122,34 @@ function periodFilter({ year, month } = {}, where, params) {
   params.period = month ? `${year}-${month}%` : `${year}-%`;
 }
 
-export async function list({ q, status, case_type, assigned_to, no_staff_pay, year, month, page, per_page, sort, order }) {
+/* ---------- เกณฑ์ "ของค้าง" ที่กระดิ่งนับ และหน้าเคสใช้เป็นตัวกรอง ----------
+   เขียนที่เดียวแล้วใช้ทั้งใน list() และ alertCounts() ท้ายไฟล์ — สองที่นี้ต้องตรงกันเสมอ
+   ไม่งั้นกระดิ่งบอก 1 เคส แต่กดเข้ามาเจอ 7 เคส แล้วคนจะเลิกเชื่อตัวเลขบนกระดิ่ง
+   (เคยเป็นแบบนั้นจริง: overdue_close กับ closed_no_invoice ลิงก์ไปตัวกรองสถานะเฉยๆ
+    ซึ่งกว้างกว่าเกณฑ์ที่นับ — วัดกับฐานจริงได้ 0→6 และ 1→7)
+
+   ทุกก้อนอ้างตาราง cases ด้วยชื่อย่อ c จึงต้องใช้ในบริบทที่มี FROM cases c เท่านั้น */
+
+/** เลยวันสิ้นสุดสัญญาแล้วแต่ยังไม่ปิดเคส — ยอดค่าจ้างยังไม่ถูกตรึง
+    และออกใบแจ้งหนี้ตามกะที่ไปจริงไม่ได้จนกว่าจะปิด · ต้องส่งพารามิเตอร์ :today มาด้วย */
+const OVERDUE_CLOSE_SQL = `
+  c.status IN ('assigned', 'in_progress')
+  AND c.end_date IS NOT NULL AND c.end_date < :today`;
+
+/** มีกะลงไว้แล้วแต่ยังไม่ตั้งค่าจ้างพนักงาน — ปล่อยค่าจ้างของเคสนี้ไม่ได้เลย
+    เกณฑ์คือ "มีกะแล้ว" ไม่ใช่ทุกเคสที่ยังไม่ตั้ง เพราะเคสที่เพิ่งเปิดยังไม่ถึงเวลาต้องตั้ง */
+const NO_STAFF_PAY_SQL = `
+  c.staff_pay IS NULL
+  AND c.status IN ('assigned', 'in_progress', 'closed')
+  AND EXISTS (SELECT 1 FROM case_visits v WHERE v.case_id = c.case_id AND v.status <> 'cancelled')`;
+
+/** ปิดเคสแล้วแต่ไม่มีใบแจ้งหนี้ที่ยังใช้งานอยู่ — งานเสร็จแล้วแต่ยังไม่ได้เก็บเงิน
+    ไม่นับใบที่ยกเลิกไปแล้ว เพราะใบที่ยกเลิกเท่ากับยังไม่มีใบ */
+const CLOSED_NO_INVOICE_SQL = `
+  c.status = 'closed'
+  AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.case_id = c.case_id AND i.status <> 'cancelled')`;
+
+export async function list({ q, status, case_type, assigned_to, no_staff_pay, overdue_close, closed_no_invoice, year, month, page, per_page, sort, order }) {
   const where = [];
   const params = {};
 
@@ -146,13 +173,17 @@ export async function list({ q, status, case_type, assigned_to, no_staff_pay, ye
     where.push('c.assigned_to = :assigned_to');
     params.assigned_to = assigned_to;
   }
-  /* เคสที่ลงกะไว้แล้วแต่ยังไม่ได้ตั้งค่าจ้างพนักงาน — ปล่อยค่าจ้างของเคสนี้ไม่ได้เลย
-     เกณฑ์ต้องตรงกับ no_staff_pay ใน alertCounts() ท้ายไฟล์นี้ ไม่งั้นกระดิ่งบอก 3 เคส
-     แต่กดเข้ามาเจอ 5 เคส แล้วคนจะเลิกเชื่อตัวเลขบนกระดิ่ง */
+  /* ตัวกรอง "ของค้าง" — ปลายทางของแถวในกระดิ่ง ใช้ก้อนเกณฑ์เดียวกับที่ alertCounts() นับ
+     ครอบวงเล็บทุกก้อน เพราะมันถูกต่อกันด้วย AND กับเงื่อนไขอื่นในรายการเดียวกัน */
   if (no_staff_pay) {
-    where.push(`c.staff_pay IS NULL
-      AND c.status IN ('assigned', 'in_progress', 'closed')
-      AND EXISTS (SELECT 1 FROM case_visits v WHERE v.case_id = c.case_id AND v.status <> 'cancelled')`);
+    where.push(`(${NO_STAFF_PAY_SQL})`);
+  }
+  if (overdue_close) {
+    where.push(`(${OVERDUE_CLOSE_SQL})`);
+    params.today = isoDateTH(new Date());
+  }
+  if (closed_no_invoice) {
+    where.push(`(${CLOSED_NO_INVOICE_SQL})`);
   }
 
   const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
@@ -1336,26 +1367,11 @@ export async function alertCounts() {
        /* รับงานมาแล้วยังไม่มีใครทำ — ยิ่งค้างนาน ยิ่งหาคนว่างยาก */
        (SELECT COUNT(*) FROM cases WHERE status = 'unassigned') AS unassigned,
 
-       /* เลยวันสิ้นสุดสัญญาแล้วแต่ยังไม่ปิดเคส — ยอดค่าจ้างยังไม่ถูกตรึง
-          และออกใบแจ้งหนี้ตามกะที่ไปจริงไม่ได้จนกว่าจะปิด */
-       (SELECT COUNT(*) FROM cases
-        WHERE status IN ('assigned', 'in_progress')
-          AND end_date IS NOT NULL AND end_date < :today) AS overdue_close,
-
-       /* มีกะลงไว้แล้วแต่ยังไม่ตั้งค่าจ้างพนักงาน — ปล่อยค่าจ้างไม่ได้เลย
-          (เกณฑ์คือ "มีกะแล้ว" ไม่ใช่ทุกเคสที่ยังไม่ตั้ง เพราะเคสที่เพิ่งเปิดยังไม่ถึงเวลาต้องตั้ง) */
-       (SELECT COUNT(*) FROM cases c
-        WHERE c.staff_pay IS NULL
-          AND c.status IN ('assigned', 'in_progress', 'closed')
-          AND EXISTS (SELECT 1 FROM case_visits v
-                      WHERE v.case_id = c.case_id AND v.status <> 'cancelled')) AS no_staff_pay,
-
-       /* ปิดเคสแล้วแต่ไม่มีใบแจ้งหนี้ที่ยังใช้งานอยู่ — งานเสร็จแล้วแต่ยังไม่ได้เก็บเงิน
-          ไม่นับใบที่ยกเลิกไปแล้ว เพราะใบที่ยกเลิกเท่ากับยังไม่มีใบ */
-       (SELECT COUNT(*) FROM cases c
-        WHERE c.status = 'closed'
-          AND NOT EXISTS (SELECT 1 FROM invoices i
-                          WHERE i.case_id = c.case_id AND i.status <> 'cancelled')) AS closed_no_invoice`,
+       /* สามตัวนี้ใช้ก้อนเกณฑ์เดียวกับตัวกรองใน list() (ดูหัวไฟล์ส่วน "ของค้าง")
+          คำอธิบายของแต่ละเกณฑ์อยู่ที่ก้อนนั้น ไม่เขียนซ้ำที่นี่ */
+       (SELECT COUNT(*) FROM cases c WHERE ${OVERDUE_CLOSE_SQL})     AS overdue_close,
+       (SELECT COUNT(*) FROM cases c WHERE ${NO_STAFF_PAY_SQL})      AS no_staff_pay,
+       (SELECT COUNT(*) FROM cases c WHERE ${CLOSED_NO_INVOICE_SQL}) AS closed_no_invoice`,
     { today },
   );
 

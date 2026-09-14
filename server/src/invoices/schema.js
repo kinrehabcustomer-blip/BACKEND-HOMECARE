@@ -120,6 +120,8 @@ export const listQuerySchema = z.object({
   overdue: z.enum(['yes']).optional(),
   // 'yes' = เฉพาะใบที่ยอด/ชื่อผู้จ่ายไม่ตรงกับเคสแล้ว (ตัวกรองของกระดิ่งแจ้งเตือน)
   stale: z.enum(['yes']).optional(),
+  // 'yes' = เฉพาะใบร่างที่ค้างเกินเกณฑ์วัน (ตัวกรองของกระดิ่ง — เกณฑ์อยู่ใน invoices/repo.js)
+  draft_stale: z.enum(['yes']).optional(),
   page: z.coerce.number().int().min(1).default(1),
   per_page: z.coerce.number().int().min(1).max(100).default(20),
   sort: z.enum(['invoice_id', 'issue_date', 'total', 'created_at']).default('invoice_id'),

@@ -1817,6 +1817,51 @@ describe('กระดิ่งแจ้งเตือน — สัญญา�
       }
     }
   });
+
+  /* เคยพลาดจริง: สามแถวลิงก์ไปช่องสถานะเฉยๆ ซึ่งกว้างกว่าเกณฑ์ที่นับ
+     (overdue_close ชี้ ?status=in_progress · closed_no_invoice ชี้ ?status=closed ·
+      draft_stale ชี้ ?status=draft) กระดิ่งบอก 1 เคส แต่กดเข้ามาเจอ 7 เคส
+
+     เทสนี้คุมสองชั้น:
+     1. พารามิเตอร์ในลิงก์ต้องเป็นตัวที่ schema ของหน้านั้นรับจริง ไม่ใช่ค่าที่ถูกทิ้งเงียบๆ
+     2. แถวจะชี้ไปช่อง status ได้ "เฉพาะเมื่อแถวนั้นคือสถานะนั้นเอง" — เกณฑ์ที่แคบกว่าสถานะ
+        (เลยกำหนด · ไม่มีใบแจ้งหนี้ · ค้างเกิน 7 วัน) ต้องมีตัวกรองของตัวเองฝั่ง server
+        ซึ่งใช้ก้อนเกณฑ์เดียวกับที่ alertCounts() นับ */
+  test('ลิงก์ของทุกแถวพาไปถึงเฉพาะของที่นับ ไม่ใช่หน้าที่กว้างกว่า', async () => {
+    const { ALERT_GROUPS } = await import('../../client/src/lib/alertDefs.js');
+    const { listQuerySchema: caseQuery } = await import('../src/cases/schema.js');
+    const { listQuerySchema: invoiceQuery } = await import('../src/invoices/schema.js');
+    const schemaFor = { '/cases': caseQuery, '/invoices': invoiceQuery };
+
+    for (const g of ALERT_GROUPS) {
+      for (const i of g.items) {
+        const [path, query] = i.to.split('?');
+        const schema = schemaFor[path];
+        if (!schema || !query) continue;
+
+        const sent = Object.fromEntries(new URLSearchParams(query));
+        const parsed = schema.parse(sent);
+        for (const [key, value] of Object.entries(sent)) {
+          assert.equal(parsed[key], value, `${g.key}.${i.key}: ${path} ไม่รับพารามิเตอร์ ${key}`);
+        }
+        if (sent.status !== undefined) {
+          assert.equal(
+            sent.status,
+            i.key,
+            `${g.key}.${i.key} ชี้ไป ?status=${sent.status} ซึ่งกว้างกว่าที่นับ — ต้องมีตัวกรองของตัวเอง`,
+          );
+        }
+      }
+    }
+  });
+
+  /* กะที่ไม่มีใครเช็คอินอยู่ใน exceptions แล้ว เคยนับแยกอีกแถวจึงบวกซ้ำ
+     (วัดกับฐานจริงตอนนั้น: exceptions 50 · missed 14 · ซ้ำกัน 14 จาก 14)
+     เทสนี้กันการเผลอเพิ่มแถวนั้นกลับมา — ยอดบนกระดิ่งคือผลบวกตรงๆ ของทุกคีย์ */
+  test('กลุ่มการมาทำงานไม่มีคีย์ที่นับกะชุดเดียวกันซ้ำ', async () => {
+    const { ALERT_KEYS } = await import('../src/notify/alerts.js');
+    assert.deepEqual(ALERT_KEYS.attendance, ['exceptions', 'unstaffed_today']);
+  });
 });
 
 /* ---------- แบบประเมินความพึงพอใจจากญาติ (reviews) ----------

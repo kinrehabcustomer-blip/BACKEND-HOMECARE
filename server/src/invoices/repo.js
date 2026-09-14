@@ -312,16 +312,24 @@ const STALE_SQL = `
 /** ใบร่างที่ออกไม่ทันกี่วันถือว่า "ลืม" — หนึ่งสัปดาห์คือรอบการทำงานของฝ่ายบัญชี */
 const DRAFT_STALE_DAYS = 7;
 
+/* เกณฑ์ "ใบร่างค้างนานเกินไป" — ใช้ทั้งใน alertCounts() และตัวกรอง ?draft_stale=yes
+   เขียนที่เดียวเหมือน STALE_SQL ข้างบน ไม่งั้นกระดิ่งกับหน้าที่มันลิงก์ไปบอกไม่ตรงกัน
+   (เคยลิงก์ไป ?status=draft เฉยๆ ซึ่งไม่มีเงื่อนไขอายุ จึงนับ 7 แต่แสดงใบร่างทั้งหมด —
+    บังเอิญตรงกันเพราะใบร่างทุกใบเก่ากว่า 7 วันพอดี ระบบเตรียมใบร่างให้เองตอนเปิดเคส
+    เปิดเคสใหม่ทีเดียวก็เพี้ยนทันที) */
+const DRAFT_STALE_SQL = `
+  i.status = 'draft' AND i.issue_date IS NOT NULL AND i.issue_date < :draft_cutoff`;
+
+/** เส้นแบ่ง "ค้างเกินหนึ่งสัปดาห์" — คิดฝั่ง JS ด้วยเวลาไทยเหมือน TODAY() ที่ไฟล์นี้ใช้ทุกที่ */
+const draftStaleCutoff = () =>
+  new Date(Date.now() + 7 * 3.6e6 - DRAFT_STALE_DAYS * 86_400_000).toISOString().slice(0, 10);
+
 /**
  * ของค้างของหน้าใบแจ้งหนี้ — ตัวเลขสำหรับกระดิ่งแจ้งเตือน (ดู notify/alerts.js)
  * overdue ใช้เกณฑ์เดียวกับ is_overdue ของแถวและกับอีเมลสรุปประจำวัน (notify/repo.js)
  */
 export async function alertCounts() {
   const today = TODAY();
-  // คิดเส้นแบ่ง "ค้างเกินหนึ่งสัปดาห์" ฝั่ง JS ด้วยเวลาไทยเหมือน TODAY() ที่ไฟล์นี้ใช้ทุกที่
-  const draftCutoff = new Date(Date.now() + 7 * 3.6e6 - DRAFT_STALE_DAYS * 86_400_000)
-    .toISOString()
-    .slice(0, 10);
 
   const row = await sql.one(
     `SELECT
@@ -330,13 +338,11 @@ export async function alertCounts() {
 
        /* ใบร่างที่ค้างเกินหนึ่งสัปดาห์ — ระบบเตรียมใบไว้ตอนเปิดเคส ถ้าไม่มีใครออก
           ลูกค้าก็ไม่เคยได้รับบิล และไม่มีอะไรบนหน้าจอฟ้องว่ามันค้าง */
-       (SELECT COUNT(*) FROM invoices
-        WHERE status = 'draft'
-          AND issue_date IS NOT NULL AND issue_date < :draft_cutoff) AS draft_stale,
+       (SELECT COUNT(*) FROM invoices i WHERE ${DRAFT_STALE_SQL}) AS draft_stale,
 
        (SELECT COUNT(*) FROM invoices i
         WHERE i.status <> 'cancelled' AND (${STALE_SQL})) AS data_stale`,
-    { today, draft_cutoff: draftCutoff },
+    { today, draft_cutoff: draftStaleCutoff() },
   );
 
   return {
@@ -350,7 +356,7 @@ export async function alertCounts() {
  * เงื่อนไขกรองที่ใช้ร่วมกันระหว่างรายการกับยอดสรุป — ต้องเป็นก้อนเดียวกันจริงๆ
  * ไม่งั้นตัวเลขสรุปด้านบนจะไม่ตรงกับรายการที่เห็นข้างล่าง (เช่น กรอง "ชำระแล้ว" แต่ยังขึ้น "รอชำระ 5 ใบ")
  */
-function buildWhere({ q, status, customer_id, case_id, overdue, stale }) {
+function buildWhere({ q, status, customer_id, case_id, overdue, stale, draft_stale }) {
   const where = [];
   const params = {};
 
@@ -380,12 +386,18 @@ function buildWhere({ q, status, customer_id, case_id, overdue, stale }) {
   if (stale === 'yes') {
     where.push(`i.status <> 'cancelled' AND (${STALE_SQL})`);
   }
+  /* ใบร่างที่ลืมออก — ใช้เกณฑ์ก้อนเดียวกับที่กระดิ่งนับ (DRAFT_STALE_SQL)
+     ไม่ต้องเช็คสถานะเพิ่ม เพราะก้อนนั้นบังคับ status = 'draft' อยู่แล้ว */
+  if (draft_stale === 'yes') {
+    where.push(`(${DRAFT_STALE_SQL})`);
+    params.draft_cutoff = draftStaleCutoff();
+  }
 
   return { clause: where.length ? `WHERE ${where.join(' AND ')}` : '', params };
 }
 
-export async function list({ q, status, customer_id, case_id, overdue, stale, page, per_page, sort, order }) {
-  const { clause, params } = buildWhere({ q, status, customer_id, case_id, overdue, stale });
+export async function list({ q, status, customer_id, case_id, overdue, stale, draft_stale, page, per_page, sort, order }) {
+  const { clause, params } = buildWhere({ q, status, customer_id, case_id, overdue, stale, draft_stale });
   const { total } = await sql.one(`SELECT COUNT(*) AS total FROM invoices i ${clause}`, params);
 
   // NULLS LAST — due_date/paid_at ว่างได้ ถ้าไม่ใส่ การเรียงจากมากไปน้อยจะเอาใบที่ยังไม่ได้ระบุขึ้นก่อน
