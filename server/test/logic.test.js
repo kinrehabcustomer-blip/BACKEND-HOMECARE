@@ -1791,6 +1791,34 @@ describe('Workflow — เปิดเคสถึงเงินเข้าพ
   });
 });
 
+describe('กระดิ่งแจ้งเตือน — สัญญาคีย์ระหว่าง server กับหน้าเว็บ', () => {
+  test('ทุกกลุ่ม/ทุกคีย์ที่ server ส่งมา มีป้ายภาษาไทยฝั่งหน้าเว็บครบ', async () => {
+    const { ALERT_KEYS } = await import('../src/notify/alerts.js');
+    const { ALERT_GROUPS } = await import('../../client/src/lib/alertDefs.js');
+
+    const onClient = Object.fromEntries(
+      ALERT_GROUPS.map((g) => [g.key, g.items.map((i) => i.key)]),
+    );
+    assert.deepEqual(Object.keys(onClient).sort(), Object.keys(ALERT_KEYS).sort());
+    for (const [group, keys] of Object.entries(ALERT_KEYS)) {
+      assert.deepEqual([...onClient[group]].sort(), [...keys].sort(), `กลุ่ม ${group} ไม่ตรงกัน`);
+    }
+  });
+
+  /* กระดิ่งที่กดแล้วไม่ไปไหน (หรือไปหน้าเปล่าให้ไปกรองเอง) คือขั้นตอนที่เพิ่มมาโดยไม่ช่วยอะไร */
+  test('ทุกแถวมีป้าย คำอธิบาย และลิงก์ที่เป็น path จริง', async () => {
+    const { ALERT_GROUPS } = await import('../../client/src/lib/alertDefs.js');
+    for (const g of ALERT_GROUPS) {
+      assert.ok(g.label?.length > 0, `กลุ่ม ${g.key} ไม่มีชื่อ`);
+      for (const i of g.items) {
+        assert.ok(i.label?.length > 0, `${g.key}.${i.key} ไม่มีป้าย`);
+        assert.ok(i.hint?.length > 0, `${g.key}.${i.key} ไม่มีคำอธิบาย`);
+        assert.match(i.to, /^\/[a-z-]+(\?[\w=&-]*)?$/, `${g.key}.${i.key} ลิงก์ไม่ใช่ path`);
+      }
+    }
+  });
+});
+
 /* ---------- แบบประเมินความพึงพอใจจากญาติ (reviews) ----------
 
    โมดูลนี้รับข้อมูลจาก "หน้าสาธารณะที่ไม่ต้อง login" ซึ่งเป็นทางเข้าเดียวในระบบที่คนนอกยิงเข้ามาได้

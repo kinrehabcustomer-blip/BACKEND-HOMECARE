@@ -45,13 +45,15 @@ export default function InvoiceListPage() {
   const q = get('q');
   const status = INVOICE_STATUS_LABELS[get('status')] ? get('status') : '';
   const overdue = get('overdue') === 'yes' ? 'yes' : '';
+  // ไม่ใช่สถานะใน DB — ใบที่ยอด/ชื่อผู้จ่ายไม่ตรงกับเคสแล้ว (ปลายทางของกระดิ่งแจ้งเตือน)
+  const stale = get('stale') === 'yes' ? 'yes' : '';
   const sort = SORTABLE[get('sort')] ? get('sort') : DEFAULTS.sort;
   const order = get('order') === 'asc' ? 'asc' : 'desc';
   const perPage = PER_PAGE_OPTIONS.includes(Number(get('per_page'))) ? get('per_page') : DEFAULTS.per_page;
   const page = Math.max(1, Number(get('page')) || 1);
   const openId = params.get('open');
 
-  const filtered = Boolean(q || status || overdue);
+  const filtered = Boolean(q || status || overdue || stale);
 
   /** เขียนค่าลง URL — ปริยาย replace เพื่อไม่ให้ทุกตัวอักษรที่พิมพ์กลายเป็นประวัติหนึ่งชั้น */
   const patch = (changes, { push = false } = {}) => {
@@ -66,15 +68,17 @@ export default function InvoiceListPage() {
   // เปลี่ยนตัวกรอง/การเรียง/จำนวนแถว แล้วต้องกลับไปหน้าแรกเสมอ ไม่งั้นอาจค้างอยู่หน้าที่ไม่มีข้อมูล
   const setFilter = (key, value) => patch({ [key]: value, page: '1' });
   const sortBy = (s, o) => patch({ sort: s, order: o, page: '1' });
-  const clearFilters = () => patch({ q: '', status: '', overdue: '', page: '1' });
+  const clearFilters = () => patch({ q: '', status: '', overdue: '', stale: '', page: '1' });
 
   /* สถานะกับเกินกำหนดเป็นคนละแกนกัน แต่เลือกพร้อมกันแล้วสับสน (เกินกำหนด = ออกใบแล้วเสมอ)
      จึงยุบเป็น dropdown เดียว — ค่า 'overdue' ไม่ใช่สถานะใน DB ต้องแปลงเป็นพารามิเตอร์คนละตัว */
-  const statusValue = overdue ? 'overdue' : status;
+  const PSEUDO = ['overdue', 'stale'];
+  const statusValue = overdue ? 'overdue' : stale ? 'stale' : status;
   const setStatusFilter = (value) =>
     patch({
-      status: value === 'overdue' ? '' : value,
+      status: PSEUDO.includes(value) ? '' : value,
       overdue: value === 'overdue' ? 'yes' : '',
+      stale: value === 'stale' ? 'yes' : '',
       page: '1',
     });
 
@@ -83,7 +87,7 @@ export default function InvoiceListPage() {
     setLoading(true);
 
     const query = Object.fromEntries(
-      Object.entries({ q, status, overdue, page, per_page: perPage, sort, order })
+      Object.entries({ q, status, overdue, stale, page, per_page: perPage, sort, order })
         .filter(([, v]) => v !== '' && v != null),
     );
 
@@ -108,7 +112,7 @@ export default function InvoiceListPage() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [q, status, overdue, page, perPage, sort, order, reloadKey]);
+  }, [q, status, overdue, stale, page, perPage, sort, order, reloadKey]);
 
   // popup ถูกปิดด้วยปุ่มย้อนกลับของเบราว์เซอร์ — ประวัติที่เรา push ไว้ถูกใช้ไปแล้ว ต้องล้างธงทิ้ง
   useEffect(() => {
@@ -168,6 +172,8 @@ export default function InvoiceListPage() {
           ))}
           {/* ไม่ใช่สถานะใน DB — คิดสดจากวันครบกำหนดที่ผ่านมาแล้ว แต่คนใช้มองเป็นสถานะหนึ่ง */}
           <option value="overdue">เกินกำหนดชำระ</option>
+          {/* ยอดหรือชื่อผู้จ่ายในใบไม่ตรงกับเคสแล้ว — ต้องตรวจก่อนเก็บเงิน */}
+          <option value="stale">ข้อมูลไม่ตรงกับเคส</option>
         </select>
         {/* โผล่เฉพาะตอนมีอะไรกรองอยู่ — ปุ่มที่กดแล้วไม่เกิดอะไรขึ้นไม่ควรมีให้เห็น */}
         {filtered && <button className="btn" onClick={clearFilters}>ล้างตัวกรอง</button>}

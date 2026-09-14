@@ -122,7 +122,7 @@ function periodFilter({ year, month } = {}, where, params) {
   params.period = month ? `${year}-${month}%` : `${year}-%`;
 }
 
-export async function list({ q, status, case_type, assigned_to, year, month, page, per_page, sort, order }) {
+export async function list({ q, status, case_type, assigned_to, no_staff_pay, year, month, page, per_page, sort, order }) {
   const where = [];
   const params = {};
 
@@ -145,6 +145,14 @@ export async function list({ q, status, case_type, assigned_to, year, month, pag
   if (assigned_to) {
     where.push('c.assigned_to = :assigned_to');
     params.assigned_to = assigned_to;
+  }
+  /* เคสที่ลงกะไว้แล้วแต่ยังไม่ได้ตั้งค่าจ้างพนักงาน — ปล่อยค่าจ้างของเคสนี้ไม่ได้เลย
+     เกณฑ์ต้องตรงกับ no_staff_pay ใน alertCounts() ท้ายไฟล์นี้ ไม่งั้นกระดิ่งบอก 3 เคส
+     แต่กดเข้ามาเจอ 5 เคส แล้วคนจะเลิกเชื่อตัวเลขบนกระดิ่ง */
+  if (no_staff_pay) {
+    where.push(`c.staff_pay IS NULL
+      AND c.status IN ('assigned', 'in_progress', 'closed')
+      AND EXISTS (SELECT 1 FROM case_visits v WHERE v.case_id = c.case_id AND v.status <> 'cancelled')`);
   }
 
   const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
@@ -1310,6 +1318,53 @@ export function attendanceExceptions() {
             v.check_in_late_minutes > LATE_THRESHOLD_MINUTES,
         ),
     );
+}
+
+/**
+ * ของค้างของหน้าเคส — ตัวเลขสำหรับกระดิ่งแจ้งเตือน (ดู notify/alerts.js)
+ *
+ * ทั้งสี่ตัวคือ "งานที่ค้างอยู่แบบเงียบๆ" — ไม่มีอะไรบนหน้าจอฟ้องจนกว่าจะมีคนเปิดไปดูเอง
+ * และทุกตัวมีตัวกรองบนหน้าเคสรออยู่แล้ว กระดิ่งจึงลิงก์ไปถึงของจริงได้ทันที
+ *
+ * นับด้วย COUNT ไม่ดึงแถว — กระดิ่งถามทุกครั้งที่เปิดหน้า ไม่ใช่ตอนกดเข้าไปดู
+ */
+export async function alertCounts() {
+  const today = isoDateTH(new Date());
+
+  const row = await sql.one(
+    `SELECT
+       /* รับงานมาแล้วยังไม่มีใครทำ — ยิ่งค้างนาน ยิ่งหาคนว่างยาก */
+       (SELECT COUNT(*) FROM cases WHERE status = 'unassigned') AS unassigned,
+
+       /* เลยวันสิ้นสุดสัญญาแล้วแต่ยังไม่ปิดเคส — ยอดค่าจ้างยังไม่ถูกตรึง
+          และออกใบแจ้งหนี้ตามกะที่ไปจริงไม่ได้จนกว่าจะปิด */
+       (SELECT COUNT(*) FROM cases
+        WHERE status IN ('assigned', 'in_progress')
+          AND end_date IS NOT NULL AND end_date < :today) AS overdue_close,
+
+       /* มีกะลงไว้แล้วแต่ยังไม่ตั้งค่าจ้างพนักงาน — ปล่อยค่าจ้างไม่ได้เลย
+          (เกณฑ์คือ "มีกะแล้ว" ไม่ใช่ทุกเคสที่ยังไม่ตั้ง เพราะเคสที่เพิ่งเปิดยังไม่ถึงเวลาต้องตั้ง) */
+       (SELECT COUNT(*) FROM cases c
+        WHERE c.staff_pay IS NULL
+          AND c.status IN ('assigned', 'in_progress', 'closed')
+          AND EXISTS (SELECT 1 FROM case_visits v
+                      WHERE v.case_id = c.case_id AND v.status <> 'cancelled')) AS no_staff_pay,
+
+       /* ปิดเคสแล้วแต่ไม่มีใบแจ้งหนี้ที่ยังใช้งานอยู่ — งานเสร็จแล้วแต่ยังไม่ได้เก็บเงิน
+          ไม่นับใบที่ยกเลิกไปแล้ว เพราะใบที่ยกเลิกเท่ากับยังไม่มีใบ */
+       (SELECT COUNT(*) FROM cases c
+        WHERE c.status = 'closed'
+          AND NOT EXISTS (SELECT 1 FROM invoices i
+                          WHERE i.case_id = c.case_id AND i.status <> 'cancelled')) AS closed_no_invoice`,
+    { today },
+  );
+
+  return {
+    unassigned: Number(row.unassigned),
+    overdue_close: Number(row.overdue_close),
+    no_staff_pay: Number(row.no_staff_pay),
+    closed_no_invoice: Number(row.closed_no_invoice),
+  };
 }
 
 // ---------- อนุมัติค่าจ้างรายกะ ----------

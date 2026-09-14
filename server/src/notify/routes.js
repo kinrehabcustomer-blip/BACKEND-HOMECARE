@@ -2,7 +2,8 @@ import { Router } from 'express';
 import * as repo from './repo.js';
 import { sendDigestEmail, mailerReady } from '../lib/mailer.js';
 import { ApiError, asyncRoute } from '../lib/errors.js';
-import { requireAuth, requireAdmin } from '../lib/auth.js';
+import { requireAuth, requireAdmin, requirePasswordChanged } from '../lib/auth.js';
+import { collectAlerts } from './alerts.js';
 
 /**
  * แจ้งเตือนเชิงรุก — ของค้างที่ต้องรีบรู้ ถูกส่งไปหาคน แทนที่จะรอให้คนมาเปิดหน้าเว็บเจอ
@@ -115,6 +116,21 @@ notifyRouter.get('/daily-digest', cronOnly, sendDigest);
 
 /** ทางของคน — ผู้จัดการ/HR กดจากหน้าเว็บเพื่อทดสอบว่าอีเมลออกจริงไหม หรือส่งซ้ำ */
 notifyRouter.post('/daily-digest', requireAuth, requireAdmin, sendDigest);
+
+/**
+ * ของค้างทั้งระบบสำหรับกระดิ่งบนแถบเมนู — เรียกทุกครั้งที่เปิดหน้าเว็บ
+ *
+ * ใส่ requirePasswordChanged ด้วย ต่างจาก /digest-preview ที่ไม่มี เพราะเส้นนี้ถูกเรียก
+ * อัตโนมัติจากทุกหน้า ไม่ใช่ตอนคนกดปุ่ม — บัญชีที่ยังใช้รหัสชั่วคราวจะได้ 403 รัวๆ
+ * ทุกครั้งที่เปิดหน้า ทั้งที่หน้าจอบังคับให้ตั้งรหัสอยู่แล้ว
+ */
+notifyRouter.get(
+  '/alerts',
+  requireAuth,
+  requirePasswordChanged,
+  requireAdmin,
+  asyncRoute(async (req, res) => res.json(await collectAlerts(req.user))),
+);
 
 /** ดูว่าตอนนี้มีอะไรค้างบ้างโดยไม่ส่งอีเมล — ให้หน้าเว็บเรียกดูได้ */
 notifyRouter.get(

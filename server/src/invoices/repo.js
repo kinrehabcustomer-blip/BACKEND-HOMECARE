@@ -279,11 +279,78 @@ const withComputed = (row) => {
   };
 };
 
+/* ค่าจ้างและชื่อผู้จ่าย "ปัจจุบัน" ของเคสที่ใบใบนี้ผูกอยู่ — เขียนเป็นซับคิวรีที่อ้าง i ตรงๆ
+   ไม่ใช่คอลัมน์จาก SELECT_INVOICE เพราะต้องใช้ได้ทั้งใน WHERE ของ COUNT (FROM invoices i)
+   และใน WHERE ของรายการ ซึ่งทั้งสองที่ไม่มี JOIN ชุดนั้นให้ใช้ */
+const CASE_FEE_SQL = `(SELECT c.fee FROM cases c WHERE c.case_id = i.case_id)`;
+const CASE_PAYER_SQL = `(
+  SELECT COALESCE(ccu.name, pcu.name, c.client_name)
+  FROM cases c
+  LEFT JOIN customers ccu ON ccu.customer_id = c.customer_id
+  LEFT JOIN patients pp   ON pp.patient_id   = c.patient_id
+  LEFT JOIN customers pcu ON pcu.customer_id = pp.customer_id
+  WHERE c.case_id = i.case_id
+)`;
+
+/* เกณฑ์ "ใบไม่ตรงกับเคสแล้ว" ฉบับ SQL — ต้องตรงกับ feeStale/payerStale ใน withComputed ข้างบนเป๊ะ
+   อยู่ติดกันโดยตั้งใจ: แก้กฎที่หนึ่งแล้วอีกที่ต้องแก้ตาม ถ้าวางแยกไฟล์กันวันหนึ่งจะบอกไม่ตรงกัน
+   (ต้องมีฉบับ SQL เพราะทั้งกระดิ่งและตัวกรอง ?stale=yes ต้องการเงื่อนไขนี้ใน WHERE
+    ดึงใบทั้งหมดมา map ผ่าน withComputed แล้วนับ/กรองฝั่ง JS จะพังทันทีที่ข้อมูลโต)
+
+   i.case_id IS NOT NULL ยกขึ้นมาข้างนอก เพราะทั้งสองสาขาต้องการเหมือนกัน */
+const STALE_SQL = `
+  i.case_id IS NOT NULL AND (
+    (NOT EXISTS (SELECT 1 FROM invoice_items ii WHERE ii.invoice_id = i.invoice_id)
+       AND i.billing_kind IS DISTINCT FROM 'deposit'
+       AND i.billing_kind IS DISTINCT FROM 'balance'
+       AND ${CASE_FEE_SQL} IS NOT NULL
+       AND ${CASE_FEE_SQL} <> i.total)
+    OR (${CASE_PAYER_SQL} IS NOT NULL AND ${CASE_PAYER_SQL} <> i.bill_to_name)
+  )
+`;
+
+/** ใบร่างที่ออกไม่ทันกี่วันถือว่า "ลืม" — หนึ่งสัปดาห์คือรอบการทำงานของฝ่ายบัญชี */
+const DRAFT_STALE_DAYS = 7;
+
+/**
+ * ของค้างของหน้าใบแจ้งหนี้ — ตัวเลขสำหรับกระดิ่งแจ้งเตือน (ดู notify/alerts.js)
+ * overdue ใช้เกณฑ์เดียวกับ is_overdue ของแถวและกับอีเมลสรุปประจำวัน (notify/repo.js)
+ */
+export async function alertCounts() {
+  const today = TODAY();
+  // คิดเส้นแบ่ง "ค้างเกินหนึ่งสัปดาห์" ฝั่ง JS ด้วยเวลาไทยเหมือน TODAY() ที่ไฟล์นี้ใช้ทุกที่
+  const draftCutoff = new Date(Date.now() + 7 * 3.6e6 - DRAFT_STALE_DAYS * 86_400_000)
+    .toISOString()
+    .slice(0, 10);
+
+  const row = await sql.one(
+    `SELECT
+       (SELECT COUNT(*) FROM invoices
+        WHERE status = 'issued' AND due_date IS NOT NULL AND due_date < :today) AS overdue,
+
+       /* ใบร่างที่ค้างเกินหนึ่งสัปดาห์ — ระบบเตรียมใบไว้ตอนเปิดเคส ถ้าไม่มีใครออก
+          ลูกค้าก็ไม่เคยได้รับบิล และไม่มีอะไรบนหน้าจอฟ้องว่ามันค้าง */
+       (SELECT COUNT(*) FROM invoices
+        WHERE status = 'draft'
+          AND issue_date IS NOT NULL AND issue_date < :draft_cutoff) AS draft_stale,
+
+       (SELECT COUNT(*) FROM invoices i
+        WHERE i.status <> 'cancelled' AND (${STALE_SQL})) AS data_stale`,
+    { today, draft_cutoff: draftCutoff },
+  );
+
+  return {
+    overdue: Number(row.overdue),
+    draft_stale: Number(row.draft_stale),
+    data_stale: Number(row.data_stale),
+  };
+}
+
 /**
  * เงื่อนไขกรองที่ใช้ร่วมกันระหว่างรายการกับยอดสรุป — ต้องเป็นก้อนเดียวกันจริงๆ
  * ไม่งั้นตัวเลขสรุปด้านบนจะไม่ตรงกับรายการที่เห็นข้างล่าง (เช่น กรอง "ชำระแล้ว" แต่ยังขึ้น "รอชำระ 5 ใบ")
  */
-function buildWhere({ q, status, customer_id, case_id, overdue }) {
+function buildWhere({ q, status, customer_id, case_id, overdue, stale }) {
   const where = [];
   const params = {};
 
@@ -308,12 +375,17 @@ function buildWhere({ q, status, customer_id, case_id, overdue }) {
     where.push("i.status = 'issued' AND i.due_date IS NOT NULL AND i.due_date < :today");
     params.today = TODAY();
   }
+  /* ใบที่ยอด/ผู้จ่ายไม่ตรงกับเคสแล้ว — ใช้เกณฑ์ก้อนเดียวกับที่กระดิ่งนับ (STALE_SQL)
+     ใบที่ยกเลิกไม่นับ เพราะไม่มีใครต้องไปแก้ใบที่ยกเลิกไปแล้ว */
+  if (stale === 'yes') {
+    where.push(`i.status <> 'cancelled' AND (${STALE_SQL})`);
+  }
 
   return { clause: where.length ? `WHERE ${where.join(' AND ')}` : '', params };
 }
 
-export async function list({ q, status, customer_id, case_id, overdue, page, per_page, sort, order }) {
-  const { clause, params } = buildWhere({ q, status, customer_id, case_id, overdue });
+export async function list({ q, status, customer_id, case_id, overdue, stale, page, per_page, sort, order }) {
+  const { clause, params } = buildWhere({ q, status, customer_id, case_id, overdue, stale });
   const { total } = await sql.one(`SELECT COUNT(*) AS total FROM invoices i ${clause}`, params);
 
   // NULLS LAST — due_date/paid_at ว่างได้ ถ้าไม่ใส่ การเรียงจากมากไปน้อยจะเอาใบที่ยังไม่ได้ระบุขึ้นก่อน

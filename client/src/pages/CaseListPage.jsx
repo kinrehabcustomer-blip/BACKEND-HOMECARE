@@ -42,6 +42,8 @@ export default function CaseListPage() {
   const get = (key) => params.get(key) ?? DEFAULTS[key] ?? '';
   const q = get('q');
   const status = CASE_STATUS_LABELS[get('status')] ? get('status') : '';
+  // ไม่ใช่สถานะใน DB — เคสที่ลงกะแล้วแต่ยังไม่ตั้งค่าจ้าง (ปลายทางของกระดิ่งแจ้งเตือน)
+  const noStaffPay = get('no_staff_pay') === 'yes' ? 'yes' : '';
   const caseType = CASE_TYPE_LABELS[get('case_type')] ? get('case_type') : '';
   const assignedTo = get('assigned_to');
   const year = /^\d{4}$/.test(get('year')) ? get('year') : '';
@@ -53,7 +55,7 @@ export default function CaseListPage() {
   const page = Math.max(1, Number(get('page')) || 1);
   const openId = params.get('open');
 
-  const filtered = Boolean(q || status || caseType || assignedTo || year);
+  const filtered = Boolean(q || status || caseType || assignedTo || year || noStaffPay);
 
   /** เขียนค่าลง URL — ปริยาย replace เพื่อไม่ให้ทุกตัวอักษรที่พิมพ์กลายเป็นประวัติหนึ่งชั้น */
   const patch = (changes, { push = false } = {}) => {
@@ -71,7 +73,18 @@ export default function CaseListPage() {
     patch({ [key]: value, page: '1', ...(key === 'year' ? { month: '' } : null) });
   const sortBy = (s, o) => patch({ sort: s, order: o, page: '1' });
   const clearFilters = () =>
-    patch({ q: '', status: '', case_type: '', assigned_to: '', year: '', month: '', page: '1' });
+    patch({ q: '', status: '', case_type: '', assigned_to: '', year: '', month: '', no_staff_pay: '', page: '1' });
+
+  /* สถานะกับ "ยังไม่ตั้งค่าจ้าง" เป็นคนละแกน แต่ยุบเป็น dropdown เดียวเหมือนหน้าใบแจ้งหนี้
+     (ที่ยุบ "เกินกำหนดชำระ" เข้าไปในช่องสถานะ) — เลือกพร้อมกันได้แต่ไม่มีใครต้องการ
+     และเพิ่มช่องที่หกในแถวตัวกรองที่แน่นอยู่แล้วแลกกับการรวมที่ไม่เสียอะไรไม่คุ้ม */
+  const statusValue = noStaffPay ? 'no_staff_pay' : status;
+  const setStatusFilter = (value) =>
+    patch({
+      status: value === 'no_staff_pay' ? '' : value,
+      no_staff_pay: value === 'no_staff_pay' ? 'yes' : '',
+      page: '1',
+    });
 
   useEffect(() => {
     api.casePeriods().then(setPeriods).catch(() => {});
@@ -87,6 +100,7 @@ export default function CaseListPage() {
       const query = Object.fromEntries(
         Object.entries({
           q, status, case_type: caseType, assigned_to: assignedTo, year, month,
+          no_staff_pay: noStaffPay,
           page, per_page: perPage, sort, order,
         }).filter(([, v]) => v !== '' && v != null),
       );
@@ -106,7 +120,7 @@ export default function CaseListPage() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [q, status, caseType, assignedTo, year, month, page, perPage, sort, order, reloadKey]);
+  }, [q, status, caseType, assignedTo, noStaffPay, year, month, page, perPage, sort, order, reloadKey]);
 
   // ยอดสรุปด้านบนต้องนับเฉพาะช่วงเวลาที่กรองอยู่ ไม่งั้นตัวเลขจะไม่ตรงกับรายการที่เห็น
   useEffect(() => {
@@ -186,11 +200,13 @@ export default function CaseListPage() {
             <option key={value} value={value}>{label}</option>
           ))}
         </select>
-        <select value={status} onChange={(e) => setFilter('status', e.target.value)} aria-label="สถานะ">
+        <select value={statusValue} onChange={(e) => setStatusFilter(e.target.value)} aria-label="สถานะ">
           <option value="">ทุกสถานะ</option>
           {Object.entries(CASE_STATUS_LABELS).map(([value, label]) => (
             <option key={value} value={value}>{label}</option>
           ))}
+          {/* ไม่ใช่สถานะใน DB — เคสที่มีกะแล้วแต่ยังไม่ตั้งค่าจ้าง จึงปล่อยค่าจ้างไม่ได้ */}
+          <option value="no_staff_pay">ยังไม่ตั้งค่าจ้าง</option>
         </select>
         {/* "เคสของคนนี้" เป็นคำถามที่ถามบ่อย — server รองรับ assigned_to อยู่แล้ว แค่ไม่เคยมีช่องให้เลือก */}
         <select value={assignedTo} onChange={(e) => setFilter('assigned_to', e.target.value)} aria-label="พนักงานที่รับ">

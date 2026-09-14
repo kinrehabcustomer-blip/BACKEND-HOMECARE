@@ -77,6 +77,13 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
   const [plan, setPlan] = useState([]);                 // ใบคู่ในแผนเดียวกัน (มัดจำ ↔ ส่วนที่เหลือ)
   const [payDate, setPayDate] = useState(todayTH);
   const [payMethod, setPayMethod] = useState(PAYMENT_METHODS[0]);
+  /* รหัสกันบันทึกซ้ำของคำขอรับชำระ (server บังคับ — ดู paySchema)
+     ออกรหัสตอนเปิดฟอร์ม แล้วใช้รหัสเดิมทุกครั้งที่กดยืนยันจนกว่าจะสำเร็จ
+     กรณีที่มันมีไว้กัน: คำขอถึง server แล้วบันทึกเงินสำเร็จ แต่คำตอบหายกลางทาง
+     (พนักงานอยู่จุดอับสัญญาณ) คนกดจะเห็นว่า error แล้วกดซ้ำ — รหัสเดิมทำให้
+     server รู้ว่าเป็นคำขอเดิม จึงคืนรายการรับเงินใบเดิมแทนที่จะรับเงินซ้ำสองรอบ
+     ออกรหัสใหม่ทุกครั้งที่เปิดฟอร์ม = การรับเงินรอบใหม่คือคำขอใหม่จริงๆ */
+  const [payRequestId, setPayRequestId] = useState(null);
 
   const load = () =>
     Promise.all([api.getInvoice(invoiceId), api.invoicePlan(invoiceId)]).then(([v, sib]) => {
@@ -317,18 +324,23 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                     <button
                       className="btn primary"
                       disabled={
-                        busy || !payDate || Number(payAmount) <= 0 || Number(payAmount) > item.balance
+                        // ไม่มีรหัสกันบันทึกซ้ำ = ยิงไปก็โดน 400 อยู่ดี กันที่ปุ่มดีกว่าให้ไปเจอ error
+                        busy || !payRequestId || !payDate ||
+                        Number(payAmount) <= 0 || Number(payAmount) > item.balance
                       }
                       onClick={() =>
                         run(async () => {
                           const received = payAmount === '' ? item.balance : Number(payAmount);
                           await api.payInvoice(item.invoice_id, {
+                            request_id: payRequestId,
                             amount: received,
                             paid_at: payDate,
                             payment_method: payMethod,
                           });
                           toast(`รับชำระ ${amountText(received)} บาท แล้ว`);
                           setPayOpen(false);
+                          // สำเร็จแล้ว = คำขอนี้จบ · รอบหน้าต้องเป็นรหัสใหม่ ไม่ใช่ replay ของรอบนี้
+                          setPayRequestId(null);
                         })
                       }
                     >
@@ -810,7 +822,11 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
     /* เติมยอดที่ค้างของใบนี้ให้เลย — เงินมัดจำเป็น "ใบของตัวเอง" แล้ว ยอดค้างจึงคือยอดที่ควรรับ
                        แก้ตัวเลขเองได้เสมอ (ลูกค้าโอนมาไม่ครบตามที่ตกลงก็มี) */
                     setPayAmount(String(item.balance));
-                    setPayOpen((v) => !v);
+                    setPayOpen((v) => {
+                      // เปิดฟอร์ม = เริ่มคำขอรับชำระใหม่ จึงออกรหัสกันบันทึกซ้ำใบใหม่
+                      if (!v) setPayRequestId(crypto.randomUUID());
+                      return !v;
+                    });
                   }}
                 >
                   บันทึกการชำระเงิน

@@ -4,6 +4,7 @@ import { AuthProvider, RequireAuth, useAuth } from './auth.jsx';
 import LoginPage from './pages/LoginPage.jsx';
 import LineIcon from './components/LineIcon.jsx';
 import ChangePasswordForm from './components/ChangePasswordForm.jsx';
+import NotificationBell from './components/NotificationBell.jsx';
 
 /*
  * ทุกหน้ายกเว้นหน้า login ถูกโหลดตอนกดเข้าไปดูจริง ไม่ใช่ตอนเปิดเว็บ
@@ -124,8 +125,15 @@ function Sidebar() {
 
   return (
     <aside className={`sidebar ${menuOpen ? 'is-open' : ''}`}>
+      {/* แถวบนสุด: โลโก้ซ้าย · กระดิ่งขวา — ของค้างเป็นสิ่งแรกที่ควรเห็นตอนเปิดระบบ
+          ไม่ใช่ต้องกวาดตาลงไปหาที่ท้ายแถบเมนูรวมกับปุ่มตั้งค่า/ออกจากระบบ
+
+          กระดิ่งเฉพาะฝั่งหลังบ้าน — ของค้างทั้ง 4 กลุ่มเป็นงานของผู้จัดการ/HR
+          พนักงานภาคสนามเข้าหน้าพวกนั้นไม่ได้เลย (และ /api/notify/alerts เป็น requireAdmin)
+          ใส่ให้เขาก็ได้กระดิ่งที่กดแล้วเจอ 403 ทุกบรรทัด */}
       <div className="brand">
         <img className="brand-logo" src="/logo-navbar.webp" alt="KIN Home Care" />
+        {isAdmin && <NotificationBell />}
       </div>
 
       {/* ปุ่มพับ/กางเมนู — โผล่เฉพาะจอแคบ (ดู @media ใน index.css)
