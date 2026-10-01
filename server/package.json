@@ -14,7 +14,7 @@
     "dump:packages": "node src/db/dump-packages.js",
     "reset:data": "node src/db/reset.js",
     "test": "node --test test/logic.test.js",
-    "test:api": "node --env-file=test/db-tests.env --test test/api.test.js"
+    "test:api": "node test/run-api-tests.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
@@ -26,5 +26,8 @@
     "nodemailer": "^9.0.3",
     "pg": "^8.22.0",
     "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "embedded-postgres": "18.4.0-beta.17"
   }
 }

@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useState } from 'react';
+import { Fragment, Suspense, lazy, useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, NavLink, Navigate, Link, useNavigate, useLocation } from 'react-router-dom';
 import { AuthProvider, RequireAuth, useAuth } from './auth.jsx';
 import LoginPage from './pages/LoginPage.jsx';
@@ -162,9 +162,13 @@ function Sidebar() {
           ยังเป็นลูกโดยตรงของ sidebar เหมือนเดิมเป๊ะ · บนจอแคบมันกลายเป็นแผงเดียวที่กางลงมา
           ทำให้ปุ่มตั้งค่า/ออกจากระบบย้ายเข้าไปอยู่ในเมนู แทนที่จะแย่งที่บนแถบบน */}
       <div className="sidebar-panel">
-        <nav id="main-nav">
+        <nav id="main-nav" aria-label="เมนูหลัก">
           {items.map((i) => (
-            <NavLink key={i.to} to={i.to}><NavIcon name={i.icon} />{i.label}</NavLink>
+            <Fragment key={i.to}>
+              {i.to === items[0].to && <span className="nav-section-label">{isAdmin ? 'การดำเนินงาน' : 'พื้นที่ทำงาน'}</span>}
+              {i.to === '/customers' && <span className="nav-section-label">ข้อมูลและบริการ</span>}
+              <NavLink to={i.to}><NavIcon name={i.icon} />{i.label}</NavLink>
+            </Fragment>
           ))}
         </nav>
 

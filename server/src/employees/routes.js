@@ -94,6 +94,18 @@ export function ensureCanGrantManager(req, nextPosition) {
   }
 }
 
+/**
+ * บัญชีผู้จัดการแก้/ลดตำแหน่ง/พักงาน/ลบ ได้เฉพาะผู้จัดการด้วยกัน
+ *
+ * ถ้าไม่กัน HR เปลี่ยนอีเมลของผู้จัดการเป็นอีเมลตัวเอง แล้วกด "ลืมรหัสผ่าน" รับ OTP ไปตั้งรหัสใหม่
+ * ก็ได้บัญชีผู้จัดการทั้งบัญชี — เป็นทางอ้อมของการเลื่อนสิทธิ์ที่ ensureCanGrantManager ปิดไว้
+ */
+export function ensureCanManageTarget(req, target) {
+  if (target.position === 'manager' && !canSeeStaffPay(req.user.position)) {
+    throw new ApiError(403, 'เฉพาะผู้จัดการเท่านั้นที่แก้ไขหรือนำบัญชีผู้จัดการออกได้');
+  }
+}
+
 /** กันเลื่อนตำแหน่งตัวเอง และกันลดผู้จัดการคนสุดท้ายจนไม่เหลือใครดูแลระบบ */
 export async function ensurePositionChangeAllowed(req, target, nextPosition) {
   if (nextPosition == null || nextPosition === target.position) return;
@@ -124,6 +136,7 @@ employeesRouter.patch(
   '/:id',
   asyncRoute(async (req, res) => {
     const input = updateEmployeeSchema.parse(req.body);
+    ensureCanManageTarget(req, req.employee);
     await ensurePositionChangeAllowed(req, req.employee, input.position);
 
     const statusChanged = input.status && input.status !== req.employee.status;
@@ -152,6 +165,7 @@ employeesRouter.delete(
     if (req.employee.employee_id === req.user.employee_id) {
       throw new ApiError(403, 'นำบัญชีของตัวเองออกจากระบบไม่ได้');
     }
+    ensureCanManageTarget(req, req.employee);
     await ensureRemovable(req.employee);
 
     if (req.query.hard === 'true') {

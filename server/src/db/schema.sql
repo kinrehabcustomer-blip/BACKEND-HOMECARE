@@ -430,6 +430,17 @@ CREATE TABLE IF NOT EXISTS password_reset_otps (
 
 CREATE INDEX IF NOT EXISTS idx_otps_employee ON password_reset_otps (employee_id, used_at);
 
+-- login ที่ผิดล่าสุด — ใช้ล็อกการเดารหัสผ่านต่ออีเมล (ดู auth/routes.js) เก็บอีเมลตัวพิมพ์เล็กตามที่ผู้ใช้พิมพ์
+-- ไม่ผูก FK กับ employees: อีเมลที่ไม่มีบัญชีก็ต้องถูกนับเหมือนกัน ไม่งั้นบอกใบ้ได้ว่าอีเมลไหนมีจริง
+CREATE TABLE IF NOT EXISTS login_failures (
+  failure_id  INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  email_key   TEXT NOT NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_login_failures_email ON login_failures (email_key, created_at);
+CREATE INDEX IF NOT EXISTS idx_login_failures_created ON login_failures (created_at);
+
 -- ---------- แพ็คเกจบริการ (โมเดลตารางเรท: เกรด × รูปแบบบริการ × ระดับพนักงาน CG/NA/PN) ----------
 -- เลิกใช้โมเดลเดิม (packages: ชื่อ+ราคา+ส่วนลด) แล้ว — แต่ไม่ลบทิ้ง
 -- การเก็บเข้ากรุ (เปลี่ยนชื่อเป็น packages_archived) ให้ผลเท่ากันกับโค้ดที่ไม่ได้ใช้มันแล้ว

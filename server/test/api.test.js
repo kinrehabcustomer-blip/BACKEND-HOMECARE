@@ -1,29 +1,25 @@
-/**
- * เทสระดับ API — สตาร์ทแอปจริง ยิง HTTP จริง อ่านจากฐานข้อมูลที่ .env ชี้อยู่
- *
- * ⚠️ ต้องสั่งเปิดเอง: `npm run test:api` (ตั้ง RUN_DB_TESTS=1 ให้แล้ว)
- *    ไม่ได้ตั้ง = ข้ามทั้งไฟล์ · `npm test` ปกติจึงไม่มีทางแตะฐานข้อมูล
- *
- * ⚠️ .env ของโปรเจคชี้ไปที่ Neon ตัวจริง — ไฟล์นี้จึงยิงเฉพาะ GET เท่านั้น
- *    helper `get()` ด้านล่างฮาร์ดโค้ด method: 'GET' ไว้ ไม่มีทางส่งเมธอดอื่นออกไป
- *    ถ้าจะเพิ่มเทสที่เขียนข้อมูล ต้องชี้ DATABASE_URL ไปฐานอื่นก่อนเสมอ
- */
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 
-await import('../src/lib/env.js');
+// Reject direct execution against any inherited/shared database before importing the app.
+if (process.env.RUN_DB_TESTS === '1') {
+  const target = new URL(process.env.DATABASE_URL ?? 'postgresql://invalid/invalid');
+  assert.equal(process.env.NODE_ENV, 'test');
+  assert.equal(target.hostname, '127.0.0.1');
+  assert.equal(target.pathname, '/kin_api_test');
+}
+
 
 if (process.env.RUN_DB_TESTS !== '1') {
-  const why = 'ต้องสั่ง `npm run test:api` (ตั้ง RUN_DB_TESTS=1) — ชุดนี้ต่อฐานข้อมูลจริง';
+  const why = 'ใช้ npm run test:api เพื่อสร้างฐาน PostgreSQL ชั่วคราวและข้อมูลทดสอบ';
   test('เทสที่ต้องใช้ฐานข้อมูล', { skip: why }, () => {});
 } else {
-  const host = (process.env.DATABASE_URL ?? '').split('@')[1]?.split('/')[0] ?? 'ไม่ทราบ';
-  console.log(`\n  ⚠  กำลังอ่านจากฐานข้อมูล: ${host} (GET อย่างเดียว ไม่มีคำสั่งเขียน)\n`);
-
   const { createApp } = await import('../src/app.js');
-  const { signToken, COOKIE_NAME } = await import('../src/lib/auth.js');
+  const { signToken, COOKIE_NAME, hashPassword } = await import('../src/lib/auth.js');
   const { sql, pool } = await import('../src/db/index.js');
+  const casesRepo = await import('../src/cases/repo.js');
+  const { seedFixtures } = await import('./fixtures.js');
 
   const emp = (id, position) => ({ employee_id: id, position, first_name: 'T', last_name: 'T' });
   const MANAGER = emp('EMP-0001', 'manager');
@@ -35,17 +31,20 @@ if (process.env.RUN_DB_TESTS !== '1') {
   let server;
 
   before(async () => {
+    const existing = await pool.query("SELECT count(*)::int AS n FROM pg_tables WHERE schemaname = 'public'");
+    assert.equal(existing.rows[0].n, 0, 'fixtures require an empty disposable database');
+    await seedFixtures(pool, hashPassword);
     server = createServer(createApp());
     await new Promise((r) => server.listen(0, '127.0.0.1', r));
     base = `http://127.0.0.1:${server.address().port}`;
   });
 
   after(async () => {
-    await new Promise((r) => server.close(r));
+    if (server) await new Promise((r) => server.close(r));
     await pool.end();
   });
 
-  /** GET เท่านั้น — เมธอดอื่นเรียกจากไฟล์นี้ไม่ได้เลย */
+  /** Read endpoints use the same real authentication middleware as mutations. */
   async function get(path, who) {
     const res = await fetch(`${base}${path}`, {
       method: 'GET',
@@ -140,14 +139,14 @@ if (process.env.RUN_DB_TESTS !== '1') {
       for (const f of PAY) assert.equal(f in h, false, `HR ต้องไม่ได้ ${f}`);
     });
 
-    test('GET /api/cases/:id/visits — ค่าจ้างรายกะก็ต้องตัด', async () => {
+    test('GET /api/cases/:id/visits — attendance is separate from case payouts', async () => {
       const cases = (await get('/api/cases?per_page=50', MANAGER)).body.data;
       let checked = 0;
       for (const c of cases) {
         const m = (await get(`/api/cases/${c.case_id}/visits`, MANAGER)).body;
         if (!m.length) continue;
         const h = (await get(`/api/cases/${c.case_id}/visits`, HR)).body;
-        assert.ok('staff_pay' in m[0] && 'effective_pay' in m[0], 'manager ต้องเห็นค่าจ้างรายกะ');
+        assert.ok(m.every((v) => !('staff_pay' in v) && !('effective_pay' in v)), 'visits no longer allocate case wages');
         for (const v of h) {
           assert.equal('staff_pay' in v, false, 'HR ต้องไม่ได้ staff_pay รายกะ');
           assert.equal('effective_pay' in v, false, 'HR ต้องไม่ได้ effective_pay');
@@ -185,88 +184,138 @@ if (process.env.RUN_DB_TESTS !== '1') {
     });
   });
 
-  // ---------- เงื่อนไขของสูตรค่าตอบแทน (จำลองด้วย CTE ไม่แตะข้อมูลจริง) ----------
-  describe('สรุปค่าตอบแทน — เงื่อนไขที่ต้องคงไว้', () => {
-    test('กะที่ถูกยกเลิกต้องไม่ถูกนับเป็นเงิน และไม่ทำให้กะอื่นได้เพิ่ม', async () => {
-      /* จำลองว่ากะที่ทำเสร็จแล้วกะหนึ่งถูก admin เปลี่ยนสถานะเป็น 'cancelled'
-         แล้วเทียบสูตรเก่า (ตัวเศษไม่กรอง) กับสูตรใหม่ (กรอง) — ของเก่าต้องจ่ายมากกว่าเสมอ */
-      const r = await sql.one(
-        `WITH sim AS (
-           SELECT v.*, CASE WHEN v.visit_id = (SELECT MIN(visit_id) FROM case_visits WHERE check_out_at IS NOT NULL)
-                            THEN 'cancelled' ELSE v.status END AS sim_status
-           FROM case_visits v
-         ),
-         booked AS (SELECT case_id, COUNT(*) AS n FROM sim WHERE sim_status <> 'cancelled' GROUP BY case_id)
-         SELECT COALESCE(SUM(COALESCE(s.staff_pay, c.staff_pay / NULLIF(b.n,0))), 0) AS old_total,
-                COALESCE(SUM(COALESCE(s.staff_pay, c.staff_pay / NULLIF(b.n,0)))
-                         FILTER (WHERE s.sim_status <> 'cancelled'), 0) AS new_total
-         FROM sim s
-         JOIN cases c ON c.case_id = s.case_id
-         LEFT JOIN booked b ON b.case_id = s.case_id
-         WHERE s.check_out_at IS NOT NULL`,
-      );
-      const oldT = Number(r.old_total);
-      const newT = Number(r.new_total);
-      console.log(`      สูตรเก่า(ไม่กรอง)=${oldT.toFixed(2)} · สูตรใหม่(กรอง)=${newT.toFixed(2)}`);
-      assert.ok(newT <= oldT, 'สูตรใหม่ต้องไม่จ่ายมากกว่าสูตรเก่า');
-    });
 
-    test('ลบพนักงานถาวรแล้วกะที่เขาทำต้องไม่หายจากรายงาน', async () => {
-      // จำลอง checked_in_by = NULL (ผลของ ON DELETE SET NULL) แล้วเทียบ INNER JOIN กับ LEFT JOIN
-      const r = await sql.one(
-        `WITH sim AS (SELECT v.visit_id, NULL::text AS checked_in_by FROM case_visits v WHERE v.check_in_at IS NOT NULL)
-         SELECT (SELECT COUNT(*) FROM sim s JOIN employees e ON e.employee_id = s.checked_in_by)      AS inner_join,
-                (SELECT COUNT(*) FROM sim s LEFT JOIN employees e ON e.employee_id = s.checked_in_by) AS left_join,
-                (SELECT COUNT(*) FROM sim) AS total`,
-      );
-      console.log(`      กะที่เช็คอินแล้ว=${r.total} · INNER JOIN เหลือ=${r.inner_join} · LEFT JOIN เหลือ=${r.left_join}`);
-      assert.equal(Number(r.inner_join), 0, 'INNER JOIN เดิมทำให้หายหมด');
-      assert.equal(Number(r.left_join), Number(r.total), 'LEFT JOIN ต้องเก็บครบ');
+  async function post(path, body, who = MANAGER, expected = 200) {
+    const res = await fetch(`${base}${path}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie: `${COOKIE_NAME}=${signToken(who)}` },
+      body: JSON.stringify(body),
     });
+    const data = await res.json();
+    assert.equal(res.status, expected, `${path}: ${JSON.stringify(data)}`);
+    return data;
+  }
 
-    test('ชื่อพนักงานที่ถูกลบไปแล้ว มีข้อความแทน ไม่เป็น null (กัน localeCompare ล้ม)', async () => {
-      const r = await sql.one(
-        `SELECT COALESCE(e.first_name || ' ' || e.last_name, '(พนักงานที่ถูกลบแล้ว)') AS name
-         FROM (SELECT NULL::text AS checked_in_by) s
-         LEFT JOIN employees e ON e.employee_id = s.checked_in_by`,
-      );
-      assert.equal(r.name, '(พนักงานที่ถูกลบแล้ว)');
-      assert.doesNotThrow(() => (r.name ?? '').localeCompare('x', 'th'));
+  async function newCase() {
+    return post('/api/cases', { case_type: 'other', client_name: 'Workflow patient', fee: 2000, staff_pay: 1200 }, MANAGER, 201);
+  }
+
+  describe('Authentication fixture states', () => {
+    test('fresh employee must change password; suspended employee cannot access work', async () => {
+      const fresh = await get('/api/my/today', emp('EMP-0004', 'caregiver'));
+      assert.equal(fresh.status, 403);
+      assert.match(fresh.body.error, /รหัสผ่าน/);
+      assert.equal((await get('/api/my/today', emp('EMP-0005', 'caregiver'))).status, 401);
+    });
+    test('login succeeds with fixture credentials, wrong password returns 401', async () => {
+      await post('/api/auth/login', { email: 'EMP-0001@example.invalid', password: 'wrong' }, MANAGER, 401);
+      const user = await post('/api/auth/login', { email: 'EMP-0001@example.invalid', password: 'Fixture-password-123!' });
+      assert.equal(user.employee_id, MANAGER.employee_id);
     });
   });
 
-  // ---------- ลำดับการตรึงค่าจ้างตอนปิดเคส ----------
-  describe('ปิดเคส — ตัวหารของการเกลี่ยค่าจ้าง', () => {
-    test('ตรึงก่อนยกเลิก ให้ตัวเลขเท่ากับที่แสดงอยู่ก่อนปิด', async () => {
-      const rows = await sql.all(
-        `SELECT c.case_id, c.staff_pay,
-                COUNT(*) FILTER (WHERE v.status <> 'cancelled') AS n_before,
-                COUNT(*) FILTER (WHERE v.status <> 'cancelled'
-                  AND NOT (v.check_in_at IS NULL
-                           AND v.visit_date >= to_char(now() AT TIME ZONE 'Asia/Bangkok','YYYY-MM-DD'))) AS n_after
-         FROM cases c JOIN case_visits v ON v.case_id = c.case_id
-         WHERE c.status NOT IN ('closed','cancelled') AND c.staff_pay IS NOT NULL
-         GROUP BY c.case_id, c.staff_pay
-         HAVING COUNT(*) FILTER (WHERE v.check_in_at IS NOT NULL) > 0`,
-      );
+  describe('Case lifecycle and payout workflow', () => {
+    test('create → assign → start → close → reopen; invalid transitions return 409', async () => {
+      const c = await newCase();
+      assert.equal(c.status, 'unassigned');
+      await post(`/api/cases/${c.case_id}/start`, {}, MANAGER, 409);
+      assert.equal((await post(`/api/cases/${c.case_id}/assign`, { employee_id: FIELD.employee_id })).status, 'assigned');
+      assert.equal((await post(`/api/cases/${c.case_id}/start`, {})).status, 'in_progress');
+      assert.equal((await post(`/api/cases/${c.case_id}/close`, {})).status, 'closed');
+      await post(`/api/cases/${c.case_id}/assign`, { employee_id: FIELD.employee_id }, MANAGER, 409);
+      await post(`/api/cases/${c.case_id}/start`, {}, MANAGER, 409);
+      assert.equal((await post(`/api/cases/${c.case_id}/reopen`, {})).status, 'assigned');
+      assert.equal((await post(`/api/cases/${c.case_id}/cancel`, { reason: 'Fixture cancellation' })).status, 'cancelled');
+    });
 
-      for (const r of rows) {
-        const fixed = r.staff_pay / Number(r.n_before);   // ตรึงก่อน: ตัวหาร = กะที่นัดไว้ทั้งหมด
-        const buggy = r.staff_pay / Number(r.n_after);    // ยกเลิกก่อน: ตัวหารหด ยอดพอง
-        console.log(`      ${r.case_id}: ยอด ${r.staff_pay} · กะ ${r.n_before}→${r.n_after} · ใหม่ ฿${fixed.toFixed(2)} vs เก่า ฿${buggy.toFixed(2)}`);
-        assert.ok(fixed <= buggy, 'ค่าที่ตรึงต้องไม่มากกว่าของเดิม');
+    test('case wages require release; attendance approval and closing do not create payouts', async () => {
+      const c = await newCase();
+      await post(`/api/cases/${c.case_id}/assign`, { employee_id: FIELD.employee_id });
+      const { today } = await sql.one(`SELECT to_char(now() AT TIME ZONE 'Asia/Bangkok','YYYY-MM-DD') AS today`);
+      const schedule = await post(`/api/cases/${c.case_id}/visits/bulk`, { dates: [today], assigned_to: FIELD.employee_id }, MANAGER, 201);
+      const visit = schedule.visits[0];
+      await post(`/api/my/visits/${visit.visit_id}/check-in`, {}, FIELD, 400);
+      const photo = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aA1cAAAAASUVORK5CYII=';
+      await post(`/api/my/visits/${visit.visit_id}/check-in`, { photo }, FIELD);
+      assert.equal((await casesRepo.findById(c.case_id)).status, 'in_progress');
+      await post(`/api/my/visits/${visit.visit_id}/check-in`, {}, FIELD, 409);
+      await post(`/api/my/visits/${visit.visit_id}/check-out`, {}, FIELD);
+      await post('/api/cases/attendance/decide', { visit_ids: [visit.visit_id], approve: true });
+      assert.equal((await casesRepo.payStatus(c.case_id)).released, 0);
+      await post(`/api/cases/${c.case_id}/close`, {});
+      assert.equal((await casesRepo.payStatus(c.case_id)).released, 0);
+      await post(`/api/cases/${c.case_id}/pay/release`, { amount: 1200 }, HR, 403);
+      await post(`/api/cases/${c.case_id}/pay/release`, { amount: 1200 }, MANAGER, 201);
+      assert.equal((await casesRepo.payStatus(c.case_id)).released, 1200);
+      await post(`/api/cases/${c.case_id}/pay/release`, { amount: 1 }, MANAGER, 400);
+      const run = await post('/api/payroll', { period_to: today }, MANAGER, 201);
+      assert.equal(Number(run.total_pay), 1200);
+      assert.equal((await post(`/api/payroll/${run.run_id}/pay`, {})).status, 'paid');
+      await post(`/api/payroll/${run.run_id}/pay`, {}, MANAGER, 409);
+      const next = await post('/api/payroll', { period_to: today }, MANAGER, 201);
+      assert.equal(Number(next.total_pay), 0, 'paid wages must not be picked up twice');
+    });
+  });
 
-        // ยอดที่จะตรึงต้องตรงกับที่รายงานแสดงอยู่ตอนนี้ — นั่นคือความหมายของคำว่า "ตรึง"
-        const live = await sql.one(
-          `SELECT COALESCE(v.staff_pay, c.staff_pay / NULLIF(b.n,0)) AS pay
-           FROM case_visits v JOIN cases c ON c.case_id = v.case_id
-           LEFT JOIN (SELECT case_id, COUNT(*) AS n FROM case_visits WHERE status <> 'cancelled' GROUP BY case_id) b
-                  ON b.case_id = v.case_id
-           WHERE v.case_id = :id AND v.check_in_at IS NOT NULL LIMIT 1`,
-          { id: r.case_id },
-        );
-        assert.equal(Number(live.pay).toFixed(2), fixed.toFixed(2), 'ยอดที่จะตรึง = ยอดที่เห็นอยู่ก่อนปิด');
-      }
+  describe('Concurrent case transitions use the state after acquiring the lock', () => {
+    for (const [name, initial, committed, action] of [
+      ['start', 'assigned', 'closed', (id) => casesRepo.start(id, MANAGER)],
+      ['assign', 'assigned', 'closed', (id) => casesRepo.assign(id, FIELD.employee_id, MANAGER)],
+      ['unassign', 'assigned', 'cancelled', (id) => casesRepo.unassign(id, MANAGER)],
+      ['close', 'assigned', 'cancelled', (id) => casesRepo.close(id, null, MANAGER)],
+      ['cancel', 'assigned', 'closed', (id) => casesRepo.cancel(id, 'test', MANAGER)],
+      ['reopen', 'closed', 'assigned', (id) => casesRepo.reopen(id, MANAGER)],
+      ['add team member', 'assigned', 'closed', (id) => casesRepo.addTeamMember(id, 'EMP-0004', MANAGER)],
+      ['check-in', 'assigned', 'closed', async (id) => {
+        const v = await sql.one('SELECT visit_id FROM case_visits WHERE case_id = :id', { id });
+        return casesRepo.checkInVisit(v.visit_id, { employee_id: FIELD.employee_id, lat: null, lng: null,
+          accuracy: null, distance: null, flagged: true, photo: null });
+      }],
+    ]) {
+      test(`${name} rejects stale state and creates no history entry`, { timeout: 10000 }, async () => {
+        const c = await newCase();
+        await sql.run('UPDATE cases SET assigned_to = :emp, status = :status WHERE case_id = :id',
+          { id: c.case_id, emp: FIELD.employee_id, status: initial });
+        await sql.run(`INSERT INTO case_visits (case_id,visit_date,assigned_to)
+          VALUES (:id,to_char(now() AT TIME ZONE 'Asia/Bangkok','YYYY-MM-DD'),:emp)`, { id: c.case_id, emp: FIELD.employee_id });
+        const before = await sql.one('SELECT count(*)::int AS n FROM case_events WHERE case_id = :id', { id: c.case_id });
+        const blocker = await pool.connect();
+        let result;
+        try {
+          await blocker.query('BEGIN');
+          await blocker.query('UPDATE cases SET status = $1 WHERE case_id = $2', [committed, c.case_id]);
+          result = action(c.case_id).then((value) => ({ value }), (error) => ({ error }));
+          // Wait for a real PostgreSQL lock wait, not an assumed timing delay.
+          const deadline = Date.now() + 3000;
+          let waiting = false;
+          while (Date.now() < deadline) {
+            const row = await sql.one(`SELECT EXISTS (SELECT 1 FROM pg_stat_activity
+              WHERE datname = current_database() AND wait_event_type = 'Lock') AS waiting`);
+            if (row.waiting) { waiting = true; break; }
+            await new Promise((r) => setTimeout(r, 10));
+          }
+          assert.ok(waiting, 'operation must wait for the concurrent transaction');
+          await blocker.query('COMMIT');
+          const outcome = await result;
+          assert.equal(outcome.error?.status, 409, JSON.stringify(outcome));
+          assert.equal((await casesRepo.findById(c.case_id)).status, committed);
+          assert.equal((await sql.one('SELECT count(*)::int AS n FROM case_events WHERE case_id = :id', { id: c.case_id })).n, before.n);
+        } finally {
+          await blocker.query('ROLLBACK');
+          blocker.release();
+          if (result) await result;
+        }
+      });
+    }
+
+    test('two starts produce one success and one started event', async () => {
+      const c = await newCase();
+      await casesRepo.assign(c.case_id, FIELD.employee_id, MANAGER);
+      const results = await Promise.allSettled([casesRepo.start(c.case_id, MANAGER), casesRepo.start(c.case_id, MANAGER)]);
+      assert.equal(results.filter((r) => r.status === 'fulfilled').length, 1);
+      assert.equal(results.find((r) => r.status === 'rejected').reason.status, 409);
+      const row = await sql.one(`SELECT count(*)::int AS n FROM case_events WHERE case_id = :id AND event = 'started'`, { id: c.case_id });
+      assert.equal(row.n, 1);
     });
   });
 }

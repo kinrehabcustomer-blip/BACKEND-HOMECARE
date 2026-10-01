@@ -646,7 +646,11 @@ export async function syncOpenFromCase(caseRow, customer) {
           (ผู้จ่าย/ที่อยู่ก็ไม่ทับด้วย เพราะคำสั่งเดียวกัน — แก้ที่ใบเองหรือลบแล้วแบ่งใหม่) */
        AND billing_kind IS DISTINCT FROM 'deposit'
        AND billing_kind IS DISTINCT FROM 'balance'
-       AND NOT EXISTS (SELECT 1 FROM invoice_items ii WHERE ii.invoice_id = invoices.invoice_id)`,
+       AND NOT EXISTS (SELECT 1 FROM invoice_items ii WHERE ii.invoice_id = invoices.invoice_id)
+       /* ใบที่รับเงินมาแล้วบางส่วน ยอดของมันกลายเป็นข้อตกลงกับลูกค้าไปแล้ว — ซิงก์ทับอาจลดยอดให้ต่ำกว่า
+          ที่จ่ายมา (ยอดค้างติดลบแต่สถานะยังเป็น issued) ซึ่ง update() กันไว้ด้วย amount_below_paid
+          ทางนี้ต้องไม่เป็นประตูหลังให้เลี่ยงด่านนั้น — ถ้าต้องปรับยอดจริงให้แก้ที่ใบเอง */
+       AND NOT EXISTS (SELECT 1 FROM invoice_payments ip WHERE ip.invoice_id = invoices.invoice_id)`,
     {
       case_id: caseRow.case_id,
       customer_id: customer?.customer_id ?? caseRow.customer_id ?? null,

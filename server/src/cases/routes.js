@@ -652,7 +652,14 @@ casesRouter.delete(
       }
     }
 
-    await repo.remove(req.params.id);
+    const result = await repo.remove(req.params.id);
+    if (result.reason === 'has_payouts') {
+      throw new ApiError(
+        409,
+        `เคสนี้ปล่อยค่าจ้างไปแล้ว ${result.payouts} ก้อน — ลบเคสแล้วประวัติการจ่ายจะหายไปด้วย ให้ "ยกเลิกเคส" แทน หรือยกเลิกค่าจ้างที่ปล่อยไว้ก่อน`,
+        { payouts: result.payouts },
+      );
+    }
     res.status(204).end();
   }),
 );

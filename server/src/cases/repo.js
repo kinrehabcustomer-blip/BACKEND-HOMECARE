@@ -540,9 +540,21 @@ export async function update(caseId, rawInput, actor) {
  * จับคู่พนักงาน — เคสที่ปิด/ยกเลิกแล้วต้องเปิดใหม่ก่อนถึงจะจับคู่ได้ (เช็คที่ชั้น route)
  * ถ้าเคสกำลังให้บริการอยู่แล้ว (in_progress) การเปลี่ยนพนักงานไม่ควรดึงสถานะถอยกลับไป 'assigned'
  */
+// Every lifecycle operation locks the same case before checking its state or
+// touching visits/team members. Route prechecks can be stale by this point.
+const ACTIVE_CASE_STATES = ['unassigned', 'assigned', 'in_progress'];
+async function caseForTransition(tx, caseId, allowed) {
+  const row = await tx.one('SELECT status, assigned_to FROM cases WHERE case_id = :id FOR UPDATE', { id: caseId });
+  if (!row) throw new ApiError(404, 'ไม่พบเคสนี้');
+  if (!allowed.includes(row.status)) {
+    throw new ApiError(409, 'สถานะเคสเปลี่ยนแล้ว หรือไม่รองรับการทำรายการนี้ กรุณาโหลดข้อมูลใหม่');
+  }
+  return row;
+}
+
 export async function assign(caseId, employeeId, actor) {
   await transaction(async (tx) => {
-    const previous = await tx.one('SELECT assigned_to FROM cases WHERE case_id = :id', { id: caseId });
+    const previous = await caseForTransition(tx, caseId, ACTIVE_CASE_STATES);
 
     await tx.run(
       `UPDATE cases
@@ -571,11 +583,12 @@ export async function assign(caseId, employeeId, actor) {
 }
 
 /**
- * เริ่มให้บริการ — เคสต้องอยู่สถานะ 'assigned' (มีพนักงานแล้ว) เท่านั้น (เช็คที่ชั้น route)
+ * เริ่มให้บริการ — ตรวจสถานะ 'assigned' ซ้ำหลังล็อกเคสใน transaction
  * บันทึกเวลาเริ่มจริง และเติม start_date เป็นวันนี้ถ้ายังไม่เคยกรอกไว้
  */
 export async function start(caseId, actor) {
   await transaction(async (tx) => {
+    await caseForTransition(tx, caseId, ['assigned']);
     await tx.run(
       `UPDATE cases
        SET status = 'in_progress',
@@ -594,6 +607,7 @@ export async function start(caseId, actor) {
 /** ยกเลิกเคส — เก็บพนักงานที่เคยรับและเหตุผลไว้เป็นประวัติ ไม่ล้างทิ้ง */
 export async function cancel(caseId, reason, actor) {
   await transaction(async (tx) => {
+    await caseForTransition(tx, caseId, ACTIVE_CASE_STATES);
     await tx.run(
       `UPDATE cases
        SET status = 'cancelled',
@@ -653,7 +667,7 @@ export function listTeam(caseId) {
  */
 export async function addTeamMember(caseId, employeeId, actor) {
   return transaction(async (tx) => {
-    const row = await tx.one('SELECT assigned_to FROM cases WHERE case_id = :id', { id: caseId });
+    const row = await caseForTransition(tx, caseId, ACTIVE_CASE_STATES);
     if (row?.assigned_to === employeeId) return false;
 
     const added = await tx.run(
@@ -672,6 +686,8 @@ export async function addTeamMember(caseId, employeeId, actor) {
 /** นำคนออกจากทีม — ไม่แตะผู้รับผิดชอบหลัก (คนหลักถอดด้วย unassign เท่านั้น) */
 export async function removeTeamMember(caseId, employeeId, actor) {
   return transaction(async (tx) => {
+    // Serialize with unassign, which may promote this member to lead worker.
+    await caseForTransition(tx, caseId, [...ACTIVE_CASE_STATES, 'closed', 'cancelled']);
     const removed = await tx.run(
       'DELETE FROM case_team WHERE case_id = :case_id AND employee_id = :employee_id',
       { case_id: caseId, employee_id: employeeId },
@@ -685,7 +701,7 @@ export async function removeTeamMember(caseId, employeeId, actor) {
 
 export async function unassign(caseId, actor) {
   await transaction(async (tx) => {
-    const previous = await tx.one('SELECT assigned_to FROM cases WHERE case_id = :id', { id: caseId });
+    const previous = await caseForTransition(tx, caseId, ACTIVE_CASE_STATES);
 
     /* ยังมีคนในทีมอยู่ = เคสนี้ยังมีคนดูแล ไม่ใช่เคสไร้คน — เลื่อนคนที่อยู่มานานที่สุดขึ้นเป็นหลัก
        ถ้าปล่อยให้ assigned_to ว่างทั้งที่ทีมยังอยู่ สถานะจะกลายเป็น "ยังไม่จับคู่พนักงาน"
@@ -726,13 +742,6 @@ export async function unassign(caseId, actor) {
 }
 
 /**
- * ปิดเคส — เก็บพนักงานที่เคยรับไว้เป็นประวัติ ไม่ล้างทิ้ง
- *
- * ตรึงค่าจ้างของกะที่ทำไปแล้วลงในแถวกะด้วย: ตอนเคสยังเปิด ยอดต่อกะเป็นการเกลี่ยสดจากยอดเคส
- * (เพิ่ม/ลบกะแล้วตัวหารขยับ ยอดเดือนที่ปิดงบไปแล้วก็ขยับตาม) ปิดเคส = ยืนยันยอด จึงเขียนตัวเลขค้างไว้
- * แตะเฉพาะกะที่เช็คอินแล้วและยังไม่เคยตั้งค่าจ้างเอง — กะที่ admin ระบุยอดไว้เองไม่ถูกทับ
- */
-/**
  * ของค้างที่ต้องเตือนก่อนปิดเคส
  * upcoming = กะที่นัดไว้ตั้งแต่วันนี้เป็นต้นไปแต่ยังไม่มีใครไป (ปิดเคสแล้วกะพวกนี้จะถูกยกเลิก)
  * open_shifts = กะที่เช็คอินแล้วแต่ยังไม่เช็คเอาท์ (ชั่วโมงและค่าจ้างของกะนั้นจะหายไปจากรายงาน)
@@ -750,6 +759,7 @@ export async function pendingShifts(caseId) {
 
 export async function close(caseId, endDate, actor) {
   await transaction(async (tx) => {
+    await caseForTransition(tx, caseId, ACTIVE_CASE_STATES);
     /* เดิมตรงนี้ "ตรึงค่าจ้าง" ลงทุกกะที่เช็คอินแล้ว (staff_pay / จำนวนกะที่นัดไว้) เพราะยอดต่อกะ
        เป็นการเกลี่ยสดที่ขยับตามตัวหารได้ตลอด การปิดเคสจึงต้องล็อกตัวเลขไว้ก่อนที่ตัวหารจะเปลี่ยน
        ตอนนี้ไม่มีการเกลี่ยแล้ว — ค่าจ้างเป็นก้อนเดียวที่ผู้จัดการกดปล่อยเอง และยอดที่ปล่อยแล้ว
@@ -789,6 +799,7 @@ export async function close(caseId, endDate, actor) {
  */
 export async function reopen(caseId, actor) {
   await transaction(async (tx) => {
+    await caseForTransition(tx, caseId, ['closed', 'cancelled']);
     await tx.run(
       `UPDATE cases
        SET status = CASE WHEN assigned_to IS NULL THEN 'unassigned' ELSE 'assigned' END,
@@ -817,9 +828,27 @@ export async function attendedVisitCount(caseId) {
   return Number(row.n);
 }
 
-export async function remove(caseId) {
-  const changes = await sql.run('DELETE FROM cases WHERE case_id = :id', { id: caseId });
-  return changes > 0;
+/**
+ * ลบเคส — ยกเว้นเคสที่ปล่อยค่าจ้างไปแล้ว ซึ่ง ?force=true ก็ข้ามไม่ได้
+ *
+ * case_payouts เป็น ON DELETE CASCADE และ payroll_payout_lines ก็ cascade ต่อจากมันอีกชั้น
+ * ลบเคสจึงลบหลักฐานว่าจ่ายใครไปเท่าไหร่ รวมถึงบรรทัดในรอบจ่ายที่จ่ายเงินออกไปแล้วจริง —
+ * สลิปกับยอดในรอบจะไม่ตรงกันอีกเลย ต้องยกเลิกค่าจ้างก้อนนั้นก่อน (ซึ่ง cancelPayout กันก้อนที่จ่ายแล้วไว้เอง)
+ *
+ * ตรวจกับลบใน transaction เดียวโดยล็อกแถวเคสไว้ — releasePay ล็อกแถวเดียวกัน (FOR UPDATE)
+ * จึงไม่มีจังหวะที่ปล่อยค่าจ้างแทรกเข้ามาระหว่างตรวจกับลบ
+ */
+export function remove(caseId) {
+  return transaction(async (tx) => {
+    const found = await tx.one('SELECT case_id FROM cases WHERE case_id = :id FOR UPDATE', { id: caseId });
+    if (!found) return { removed: false };
+
+    const { n } = await tx.one('SELECT count(*)::int AS n FROM case_payouts WHERE case_id = :id', { id: caseId });
+    if (n > 0) return { removed: false, reason: 'has_payouts', payouts: n };
+
+    await tx.run('DELETE FROM cases WHERE case_id = :id', { id: caseId });
+    return { removed: true };
+  });
 }
 
 // ---------- วันนัดให้บริการ (case_visits) ----------
@@ -1206,6 +1235,11 @@ export function checkInVisit(
   { employee_id, lat, lng, accuracy, distance, flagged, photo, late_minutes, off_schedule },
 ) {
   return transaction(async (tx) => {
+    // Same lock order as close/cancel: case first, then visit. Otherwise a
+    // check-in could hold the visit while close holds the case (deadlock).
+    const visit = await tx.one('SELECT case_id FROM case_visits WHERE visit_id = :id', { id: visitId });
+    if (!visit) return false;
+    await caseForTransition(tx, visit.case_id, ACTIVE_CASE_STATES);
     const updated = await tx.run(
       `UPDATE case_visits
        SET check_in_at = now(), checked_in_by = :emp,
@@ -1214,7 +1248,7 @@ export function checkInVisit(
            check_in_late_minutes = :late, off_schedule = :off,
            check_in_photo_data = :pdata, check_in_photo_mime = :pmime, check_in_photo_size = :psize,
            updated_at = ${NOW}
-       WHERE visit_id = :id AND check_in_at IS NULL`,
+       WHERE visit_id = :id AND check_in_at IS NULL AND status <> 'cancelled'`,
       {
         id: visitId, emp: employee_id, lat, lng, acc: accuracy,
         dist: distance, flag: flagged,
@@ -1222,7 +1256,7 @@ export function checkInVisit(
         pdata: photo?.data ?? null, pmime: photo?.mime ?? null, psize: photo?.size ?? null,
       },
     );
-    if (updated === 0) return false; // เช็คอินไปแล้ว
+    if (updated === 0) return false; // เช็คอินไปแล้ว หรือกะถูกยกเลิกระหว่างนั้น
 
     // เช็คอินขณะเคสยัง 'assigned' = เริ่มให้บริการ (mirror start(): เติม start_date ถ้ายังว่าง)
     // เงื่อนไข status='assigned' รับประกันว่า cases.assigned_to ไม่เป็น null อยู่แล้ว (ตาม CHECK) จึงเข้า in_progress ได้ไม่ชน constraint
@@ -1254,7 +1288,10 @@ export const checkOutVisit = (visitId, { lat, lng }) =>
     .run(
       `UPDATE case_visits
        SET check_out_at = now(), check_out_lat = :lat, check_out_lng = :lng,
-           status = 'done', updated_at = ${NOW}
+           -- กะที่ admin ยกเลิกระหว่างที่พนักงานอยู่หน้างาน ยังบันทึกเวลาออกได้ แต่ห้ามพลิกกลับเป็น done
+           -- ไม่งั้นกะที่ยกเลิกแล้วจะกลับมานับชั่วโมงและสัดส่วนค่าจ้างเงียบๆ
+           status = CASE WHEN status = 'cancelled' THEN status ELSE 'done' END,
+           updated_at = ${NOW}
        WHERE visit_id = :id AND check_in_at IS NOT NULL AND check_out_at IS NULL`,
       { id: visitId, lat, lng },
     )

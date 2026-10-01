@@ -275,6 +275,7 @@ export default function CaseListPage() {
                 tabIndex={0}
                 onClick={() => openCase(c.case_id)}
                 onKeyDown={(e) => {
+                  if (e.target !== e.currentTarget) return;
                   if (e.key === 'Enter' || e.key === ' ') {
                     e.preventDefault();
                     openCase(c.case_id);

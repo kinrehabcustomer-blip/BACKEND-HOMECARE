@@ -1,4 +1,4 @@
-import { randomInt } from 'node:crypto';
+import { randomInt, randomUUID } from 'node:crypto';
 import { Router } from 'express';
 import { z } from 'zod';
 import { sql } from '../db/index.js';
@@ -21,6 +21,26 @@ export const authRouter = Router();
 const OTP_TTL_MINUTES = 10;
 const OTP_MAX_ATTEMPTS = 5; // เดารหัสผิดเกินนี้ OTP ใบนั้นตายทันที กัน brute-force 6 หลัก
 const OTP_COOLDOWN_SECONDS = 60; // กันกดขอ OTP รัวๆ จนอีเมลถูกถล่ม
+
+/* กันเดารหัสผ่านออนไลน์ — เก็บในฐานข้อมูล ไม่ใช่หน่วยความจำ เพราะบน Vercel แต่ละคำขออาจไปคนละ instance
+   ตัวเลขตั้งให้คนพิมพ์ผิดจริงไม่โดน (10 ครั้งใน 15 นาที) แต่คนยิงเดาได้แค่ ~1,000 ครั้งต่อวันต่อบัญชี */
+const LOGIN_MAX_FAILURES = 10;
+const LOGIN_LOCK_MINUTES = 15;
+
+// hash ของค่าสุ่มที่ไม่มีใครรู้ — ใช้เทียบตอนไม่พบอีเมล ให้เวลาตอบเท่ากับกรณีรหัสผิด
+const DUMMY_HASH = await hashPassword(randomUUID());
+
+const recentLoginFailures = async (email) =>
+  (
+    await sql.one(
+      `SELECT count(*)::int AS n FROM login_failures
+       WHERE email_key = lower(:email) AND created_at > now() - make_interval(mins => :mins)`,
+      { email, mins: LOGIN_LOCK_MINUTES },
+    )
+  ).n;
+
+const clearLoginFailures = (email) =>
+  sql.run('DELETE FROM login_failures WHERE email_key = lower(:email)', { email });
 
 const loginSchema = z.object({
   email: z.string().trim().min(1, 'กรุณากรอกอีเมล'),
@@ -54,14 +74,26 @@ authRouter.post(
   asyncRoute(async (req, res) => {
     const { email, password } = loginSchema.parse(req.body);
 
+    // นับตามอีเมล ไม่ใช่ว่าอีเมลนั้นมีบัญชีไหม — อีเมลที่ไม่มีอยู่จริงก็โดนล็อกเหมือนกัน ไม่บอกใบ้อะไร
+    if ((await recentLoginFailures(email)) >= LOGIN_MAX_FAILURES) {
+      throw new ApiError(429, `กรอกรหัสผ่านผิดหลายครั้งเกินไป กรุณารอ ${LOGIN_LOCK_MINUTES} นาทีแล้วลองใหม่ หรือใช้ "ลืมรหัสผ่าน"`);
+    }
+
     const employee = await sql.one(
       'SELECT * FROM employees WHERE lower(email) = lower(:email)',
       { email },
     );
 
-    // ตอบข้อความเดียวกันทั้งกรณีไม่มีอีเมลนี้และรหัสผ่านผิด — ไม่บอกใบ้ว่าอีเมลไหนมีอยู่จริง
-    const ok = employee && (await verifyPassword(password, employee.password_hash));
-    if (!ok) throw new ApiError(401, 'อีเมลหรือรหัสผ่านไม่ถูกต้อง');
+    /* ตอบข้อความเดียวกันทั้งกรณีไม่มีอีเมลนี้และรหัสผ่านผิด — ไม่บอกใบ้ว่าอีเมลไหนมีอยู่จริง
+       และต้องเสียเวลา bcrypt เท่ากันด้วย ไม่งั้นอีเมลที่ไม่มีอยู่จริงตอบเร็วกว่า ~60ms จนแยกออกได้ */
+    const ok = await verifyPassword(password, employee?.password_hash ?? DUMMY_HASH);
+    if (!employee || !ok) {
+      // ล้างแถวเก่าไปด้วย — อีเมลที่ไม่มีบัญชีไม่เคย login สำเร็จ แถวของมันจะไม่ถูกลบทางอื่น
+      await sql.run(`DELETE FROM login_failures WHERE created_at < now() - interval '1 day'`);
+      await sql.run('INSERT INTO login_failures (email_key) VALUES (lower(:email))', { email });
+      throw new ApiError(401, 'อีเมลหรือรหัสผ่านไม่ถูกต้อง');
+    }
+    await clearLoginFailures(email);
 
     const blocked = BLOCKED_STATUSES[employee.status];
     if (blocked) throw new ApiError(403, `${blocked} — ติดต่อผู้ดูแลระบบ`);
@@ -170,20 +202,34 @@ authRouter.post(
     );
     if (!otp) throw invalid;
 
-    if (otp.attempts >= OTP_MAX_ATTEMPTS) {
-      await sql.run('UPDATE password_reset_otps SET used_at = now() WHERE otp_id = :otp', { otp: otp.otp_id });
+    /* จองสิทธิ์เดาหนึ่งครั้งแบบ atomic "ก่อน" เทียบรหัส — เดิมอ่าน attempts แล้วค่อยบวกหลัง bcrypt (~60ms)
+       ยิงคำขอพร้อมกันหลายร้อยตัว ทุกตัวเห็น attempts = 0 แล้วได้เดาหมด เพดาน 5 ครั้งจึงไม่มีผล
+       เงื่อนไข attempts < MAX อยู่ใน UPDATE เดียวกัน Postgres ล็อกแถวให้ จึงผ่านได้ไม่เกิน MAX ตัวเสมอ */
+    const claimed = await sql.one(
+      `UPDATE password_reset_otps SET attempts = attempts + 1
+       WHERE otp_id = :otp AND used_at IS NULL AND attempts < :max
+       RETURNING attempts`,
+      { otp: otp.otp_id, max: OTP_MAX_ATTEMPTS },
+    );
+    if (!claimed) {
+      await sql.run('UPDATE password_reset_otps SET used_at = now() WHERE otp_id = :otp AND used_at IS NULL', {
+        otp: otp.otp_id,
+      });
       throw new ApiError(429, 'กรอกรหัสผิดหลายครั้งเกินไป กรุณาขอรหัสใหม่');
     }
 
-    if (!(await verifyPassword(code, otp.code_hash))) {
-      // นับครั้งที่ผิดก่อนตอบกลับ ไม่งั้นยิงเดา 6 หลักรัวๆ ได้ไม่จำกัด
-      await sql.run('UPDATE password_reset_otps SET attempts = attempts + 1 WHERE otp_id = :otp', { otp: otp.otp_id });
-      throw invalid;
-    }
+    if (!(await verifyPassword(code, otp.code_hash))) throw invalid;
 
     if (new_password === employee.employee_id) {
       throw new ApiError(400, 'ห้ามใช้รหัสพนักงานเป็นรหัสผ่าน เพราะเป็นค่าที่คนอื่นเดาได้');
     }
+
+    // ปิด OTP ใบนี้ก่อนเขียนรหัสใหม่ — สองคำขอที่ถือรหัสถูกพร้อมกันจะผ่านได้ตัวเดียว
+    const consumed = await sql.run(
+      'UPDATE password_reset_otps SET used_at = now() WHERE otp_id = :otp AND used_at IS NULL',
+      { otp: otp.otp_id },
+    );
+    if (!consumed) throw invalid;
 
     /* password_changed_at = ตัวตัดเซสชันเก่าทั้งหมด (ดู requireAuth) — ตั้งรหัสใหม่ด้วย OTP
        มักเกิดตอน "เข้าไม่ได้เพราะมีคนอื่นเข้าไปแล้ว" เซสชันของคนนั้นต้องตายพร้อมกัน */
@@ -193,7 +239,7 @@ authRouter.post(
        WHERE employee_id = :id`,
       { hash: await hashPassword(new_password), id: employee.employee_id },
     );
-    await sql.run('UPDATE password_reset_otps SET used_at = now() WHERE otp_id = :otp', { otp: otp.otp_id });
+    await clearLoginFailures(email);
 
     // ตั้งรหัสใหม่แล้วให้ login ใหม่เอง — เซสชันเก่าที่ค้างอยู่ (ถ้ามี) จะไม่ถูกใช้ต่อ
     res.clearCookie(COOKIE_NAME, clearCookieOptions);

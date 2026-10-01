@@ -73,14 +73,19 @@ export default function NotificationBell() {
       if (btnRef.current?.contains(e.target) || panelRef.current?.contains(e.target)) return;
       setOpen(false);
     };
-    const close = () => setOpen(false);
+    const close = (e) => {
+      if (e?.type === 'scroll' && panelRef.current?.contains(e.target)) return;
+      setOpen(false);
+    };
     document.addEventListener('keydown', onKeyDown, true);
     document.addEventListener('mousedown', onClickAway);
     window.addEventListener('resize', close);
+    window.addEventListener('scroll', close, true);
     return () => {
       document.removeEventListener('keydown', onKeyDown, true);
       document.removeEventListener('mousedown', onClickAway);
       window.removeEventListener('resize', close);
+      window.removeEventListener('scroll', close, true);
     };
   }, [open]);
 
@@ -114,14 +119,22 @@ export default function NotificationBell() {
        เดาเอาอีกที เพราะตัวหนีบ left ต้องใช้ "ความกว้างจริง" ของกล่อง
        เคยแยกกันแล้วพลาด: CSS ย่อกล่องเป็น 100vw−1rem บนจอแคบ แต่ JS ยังหนีบด้วย 21rem
        กล่องจึงล้นขอบขวาไปครึ่งนิ้ว แล้วตัวเลขฝั่งขวาถูกเฉือนหายทั้งคอลัมน์ */
-    const width = Math.min(PANEL_W, window.innerWidth - GAP * 2);
-    const left = Math.max(GAP, Math.min(r.left, window.innerWidth - width - GAP));
+    const sidebar = btnRef.current.closest('.sidebar')?.getBoundingClientRect();
+    const desktop = window.matchMedia('(min-width: 901px)').matches && sidebar;
+    const leftEdge = desktop ? sidebar.right + GAP : GAP;
+    const availableWidth = window.innerWidth - leftEdge - GAP;
+    const width = Math.min(groups.length === 0 ? 224 : PANEL_W, availableWidth);
+    const left = desktop
+      ? leftEdge
+      : Math.max(GAP, Math.min(r.right - width, window.innerWidth - width - GAP));
     const below = window.innerHeight - r.bottom;
 
     setPos(
-      below >= r.top || below > 320
-        ? { width, left, top: r.bottom + GAP }
-        : { width, left, bottom: window.innerHeight - r.top + GAP },
+      desktop
+        ? { width, left, top: Math.max(GAP, r.top), maxHeight: window.innerHeight - Math.max(GAP, r.top) - GAP }
+        : below >= r.top || below > 320
+          ? { width, left, top: r.bottom + GAP, maxHeight: below - GAP * 2 }
+          : { width, left, bottom: window.innerHeight - r.top + GAP, maxHeight: r.top - GAP * 2 },
     );
     return setOpen(true);
   };
@@ -154,8 +167,9 @@ export default function NotificationBell() {
           role="dialog"
           aria-label="ของค้างในระบบ"
           ref={panelRef}
-          style={{ width: pos.width, left: pos.left, top: pos.top, bottom: pos.bottom }}
+          style={{ width: pos.width, left: pos.left, top: pos.top, bottom: pos.bottom, maxHeight: pos.maxHeight }}
         >
+          <h2 id="notification-heading" className="bell-panel-title">การแจ้งเตือน</h2>
           {groups.length === 0 ? (
             <p className="bell-empty">
               <LineIcon name="check" className="text-ico" />

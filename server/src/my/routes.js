@@ -203,6 +203,7 @@ myRouter.post(
     const visit = await myVisit(req);
     if (!visit) return next(notFound('ไม่พบกะนี้ หรือไม่ใช่กะที่คุณรับผิดชอบ'));
     if (CLOSED_CASE.includes(visit.case_status)) throw new ApiError(409, 'เคสนี้จบไปแล้ว เช็คอินไม่ได้');
+    if (visit.visit_status === 'cancelled') throw new ApiError(409, 'กะนี้ถูกยกเลิกแล้ว เช็คอินไม่ได้');
     if (visit.check_in_at) throw new ApiError(409, 'คุณเช็คอินกะนี้ไปแล้ว');
 
     // เทียบกับนาฬิกาของฐานข้อมูล = ตัวเดียวกับที่จะถูกบันทึกเป็น check_in_at

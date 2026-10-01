@@ -44,7 +44,10 @@ export default function LoginPage() {
           <img className="brand-logo login-logo" src="/logo-navbar.webp" alt="KIN Home Care" />
         </div>
 
-        <h1>เข้าสู่ระบบ</h1>
+        <div className="login-heading">
+          <h1>เข้าสู่ระบบ</h1>
+          <p className="login-description">ระบบบริหารจัดการงานดูแลที่บ้าน<br />สำหรับเจ้าหน้าที่และบุคลากร KIN Home Care</p>
+        </div>
 
         {/* ข้อความส่งต่อมาจากหน้าตั้งรหัสผ่านใหม่ */}
         {location.state?.notice && <p className="notice">{location.state.notice}</p>}
@@ -87,6 +90,7 @@ export default function LoginPage() {
           เข้าครั้งแรกใช้รหัสที่ฝ่ายบุคคลแจ้งไว้ · <Link to="/forgot-password">ลืมรหัสผ่าน?</Link>
         </p>
       </form>
+      <p className="login-footer">KIN HOME CARE · STAFF PORTAL</p>
     </div>
   );
 }
