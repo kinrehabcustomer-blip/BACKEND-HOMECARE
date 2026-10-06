@@ -121,20 +121,24 @@ export default function NotificationBell() {
        กล่องจึงล้นขอบขวาไปครึ่งนิ้ว แล้วตัวเลขฝั่งขวาถูกเฉือนหายทั้งคอลัมน์ */
     const sidebar = btnRef.current.closest('.sidebar')?.getBoundingClientRect();
     const desktop = window.matchMedia('(min-width: 901px)').matches && sidebar;
+    const mobile = window.matchMedia('(max-width: 600px)').matches;
     const leftEdge = desktop ? sidebar.right + GAP : GAP;
     const availableWidth = window.innerWidth - leftEdge - GAP;
-    const width = Math.min(groups.length === 0 ? 224 : PANEL_W, availableWidth);
+    const width = Math.min(groups.length === 0 ? 224 : mobile ? 272 : PANEL_W, availableWidth);
+    const heightLimit = mobile ? Math.min(280, window.innerHeight * 0.4) : window.innerHeight * 0.7;
     const left = desktop
       ? leftEdge
+      : mobile
+        ? Math.max(GAP, window.innerWidth - width - GAP)
       : Math.max(GAP, Math.min(r.right - width, window.innerWidth - width - GAP));
     const below = window.innerHeight - r.bottom;
 
     setPos(
       desktop
-        ? { width, left, top: Math.max(GAP, r.top), maxHeight: window.innerHeight - Math.max(GAP, r.top) - GAP }
+        ? { width, left, top: Math.max(GAP, r.top), maxHeight: Math.min(heightLimit, window.innerHeight - Math.max(GAP, r.top) - GAP) }
         : below >= r.top || below > 320
-          ? { width, left, top: r.bottom + GAP, maxHeight: below - GAP * 2 }
-          : { width, left, bottom: window.innerHeight - r.top + GAP, maxHeight: r.top - GAP * 2 },
+          ? { width, left, top: r.bottom + GAP, maxHeight: Math.min(heightLimit, below - GAP * 2) }
+          : { width, left, bottom: window.innerHeight - r.top + GAP, maxHeight: Math.min(heightLimit, r.top - GAP * 2) },
     );
     return setOpen(true);
   };
