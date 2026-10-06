@@ -177,6 +177,17 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
 
   // ชำระแล้วถือเป็น "ใบเสร็จรับเงิน" ตามธรรมเนียมเอกสารไทย · ยังไม่ชำระคือ "ใบแจ้งหนี้"
   const isReceipt = item?.status === 'paid';
+  const printTitle = item?.invoice_id
+    ? `${isReceipt ? 'ใบเสร็จรับเงิน' : 'ใบแจ้งหนี้'}_${item.invoice_id}`.replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_')
+    : null;
+
+  // Save as PDF ใช้ชื่อเอกสารเป็นชื่อไฟล์เริ่มต้น และคืนชื่อหน้าเดิมเมื่อปิดเอกสาร
+  useEffect(() => {
+    if (!printTitle) return;
+    const previousTitle = document.title;
+    document.title = printTitle;
+    return () => { document.title = previousTitle; };
+  }, [printTitle]);
   // เอกสารยังอยู่ในมือเรา (ส่งมอบให้ลูกค้าครั้งเดียวตอนพิมพ์) จึงยังรีเฟรช/แก้ได้
   const canEdit = item?.status === 'draft' || item?.status === 'issued';
 

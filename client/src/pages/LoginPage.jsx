@@ -54,17 +54,21 @@ export default function LoginPage() {
         {error && <p className="error login-error">{error}</p>}
 
         <label>
-          อีเมล
+          อีเมล / รหัสพนักงาน
           <input
-            type="email"
+            type="text"
             autoComplete="username"
             autoFocus
             required
-            placeholder="you@kin.co.th"
+            autoCapitalize="none"
+            spellCheck={false}
+            placeholder="you@kin.co.th หรือ EMP-0006"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
           />
         </label>
+
+        <p className="muted">หากยังไม่มีอีเมลในประวัติ ให้ใช้รหัสพนักงานเป็น Username ชั่วคราว</p>
 
         {/* ป้ายเคยเขียนว่า "รหัสผ่าน (รหัสพนักงาน)" และ placeholder เป็น EMP-0001
             ซึ่งเท่ากับประกาศบนหน้าที่ใครก็เปิดได้ว่ารหัสผ่านตั้งต้นคือรหัสพนักงาน

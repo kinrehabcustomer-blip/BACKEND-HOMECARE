@@ -91,13 +91,14 @@ CREATE INDEX IF NOT EXISTS idx_portfolio_employee ON employee_portfolio (employe
 ALTER TABLE employees ADD COLUMN IF NOT EXISTS password_hash        TEXT;
 ALTER TABLE employees ADD COLUMN IF NOT EXISTS role                 TEXT NOT NULL DEFAULT 'staff' CHECK (role IN ('admin', 'staff'));
 ALTER TABLE employees ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE employees ADD COLUMN IF NOT EXISTS temp_password_encrypted TEXT;
 -- เวลาที่รหัสผ่านถูกเปลี่ยนล่าสุด — token ที่ออกก่อนหน้านี้ถือว่าใช้ไม่ได้แล้ว (ดู requireAuth)
 -- ไม่มีค่า = ยังไม่เคยเปลี่ยนตั้งแต่มีคอลัมน์นี้ ซึ่งแปลว่าไม่มีอะไรต้องเพิกถอน
 ALTER TABLE employees ADD COLUMN IF NOT EXISTS password_changed_at TIMESTAMPTZ;
 ALTER TABLE employees ADD COLUMN IF NOT EXISTS last_login_at        TEXT;
 
 -- อีเมลคือ username จึงต้องไม่ซ้ำ — เทียบแบบไม่สนตัวพิมพ์ใหญ่เล็ก
--- ใช้ partial index เพราะพนักงานที่ยังไม่มีอีเมลมีได้หลายคน (NULL ไม่ชนกัน) เขาแค่ยัง login ไม่ได้
+-- ใช้ partial index เพราะพนักงานที่ยังไม่มีอีเมลมีได้หลายคน (NULL ไม่ชนกัน) เขาใช้รหัสพนักงาน login ชั่วคราวได้
 CREATE UNIQUE INDEX IF NOT EXISTS idx_employees_email_unique
   ON employees (lower(email))
   WHERE email IS NOT NULL;

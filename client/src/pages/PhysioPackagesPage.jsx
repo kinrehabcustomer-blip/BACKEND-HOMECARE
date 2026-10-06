@@ -104,6 +104,7 @@ export default function PhysioPackagesPage() {
       <header className="page-head">
         <div>
           <h1>แพ็คเกจกายภาพบำบัด</h1>
+          <p className="muted">ส่วนลดหักจากรายได้ส่วนของบริษัท ค่าจ้างพนักงานคงเดิม</p>
           <p className="muted">
             แพ็คเกจเหมาจำนวนครั้ง · ตกเฉลี่ย (บาท/ครั้ง) คำนวณให้อัตโนมัติจากราคาพิเศษ ÷ จำนวนครั้ง
           </p>

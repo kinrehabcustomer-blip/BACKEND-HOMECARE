@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { useAuth } from '../auth.jsx';
 import CaseReports from './CaseReports.jsx';
+import CaseLocationLink from './CaseLocationLink.jsx';
 import { useSheetSwipe } from '../lib/sheetSwipe.js';
 import { useScrollLock } from '../lib/scrollLock.js';
 import {
@@ -111,6 +112,7 @@ export default function MyCaseModal({ caseId, onClose }) {
               <section>
                 <h3>สถานที่ / ติดต่อ</h3>
                 <Field label="ที่อยู่สถานที่ดูแล" value={item.address} />
+                <CaseLocationLink key={`${item.geo_lat},${item.geo_lng}`} item={item} />
                 <Field label="เบอร์ติดต่อญาติ" value={item.client_phone} />
               </section>
 

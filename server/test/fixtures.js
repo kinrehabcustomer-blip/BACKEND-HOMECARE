@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 export async function seedFixtures(pool, hashPassword) {
   await pool.query(await readFile(new URL('../src/db/schema.sql', import.meta.url), 'utf8'));
   const password = await hashPassword('Fixture-password-123!');
+  await pool.query("INSERT INTO id_counters (name, value) VALUES ('employee', 7)");
   for (const [id, position, mustChange, status] of [
     ['EMP-0001', 'manager', false, 'active'],
     ['EMP-0007', 'hr', false, 'active'],

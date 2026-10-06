@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { api } from '../api.js';
+import { useAuth } from '../auth.jsx';
 import WorkHistory from '../components/WorkHistory.jsx';
 import Avatar from '../components/Avatar.jsx';
 import ErrorBar from '../components/ErrorBar.jsx';
@@ -23,6 +24,8 @@ function Row({ label, children }) {
 export default function EmployeeDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const canSeeTempPassword = ['manager', 'admin', 'hr'].includes(user?.position);
 
   const [employee, setEmployee] = useState(null);
   const [error, setError] = useState(null);
@@ -80,15 +83,14 @@ export default function EmployeeDetailPage() {
         </div>
       </header>
 
-      {/* คนนี้ยังไม่เคยตั้งรหัสผ่านของตัวเอง = ยังใช้รหัสตั้งต้นซึ่งคือรหัสพนักงาน
-          ที่เดียวในระบบที่บอกเรื่องนี้ ต้องอยู่ตรงนี้ ไม่ใช่บนหน้า login ซึ่งใครก็เปิดได้
-          เดิมหน้า login เขียนไว้ให้ทุกคนอ่าน ส่วนฝ่ายบุคคลที่ต้องแจ้งพนักงานใหม่กลับไม่มีอะไรบอกเลย
-          ป้ายนี้หายไปเองเมื่อเจ้าตัวเปลี่ยนรหัสแล้ว (must_change_password) จึงใช้เช็คได้ด้วยว่าใครยังค้าง */}
-      {employee.must_change_password && (
+      {canSeeTempPassword && employee.must_change_password && (
         <p className="notice">
           <LineIcon name="alert" className="text-ico" />
-          ยังใช้รหัสผ่านตั้งต้นอยู่ — รหัสคือ <strong className="mono">{employee.employee_id}</strong>{' '}
-          แจ้งให้เจ้าตัวเข้าระบบแล้วเปลี่ยนรหัสทันที เพราะรหัสพนักงานเป็นเลขที่คนอื่นเห็นได้
+          ยังใช้รหัสผ่านชั่วคราวอยู่ —{' '}
+          {employee.temp_password
+            ? <>รหัสคือ <strong className="mono">{employee.temp_password}</strong>{' '}</>
+            : <>ไม่มีรหัสชั่วคราวที่บันทึกไว้สำหรับบัญชีนี้{' '}</>}
+          แจ้งให้เจ้าตัวเข้าระบบแล้วเปลี่ยนรหัสผ่าน การแจ้งเตือนนี้จะหายไปเมื่อเปลี่ยนรหัสแล้ว
         </p>
       )}
 

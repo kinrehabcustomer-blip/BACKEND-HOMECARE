@@ -166,8 +166,8 @@ export default function EmployeeFormPage() {
         <section className="card temp-password">
           <h2>เพิ่มพนักงาน {tempPassword.id} แล้ว</h2>
           <p>
-            รหัสผ่านชั่วคราวสำหรับเข้าสู่ระบบครั้งแรก — <strong>เห็นได้ครั้งเดียวตรงนี้เท่านั้น</strong>{' '}
-            ระบบเก็บไว้เป็นค่าที่อ่านย้อนกลับไม่ได้ ถ้าปิดหน้านี้ไปต้องให้เจ้าตัวกด “ลืมรหัสผ่าน” เอง
+            รหัสผ่านชั่วคราวสำหรับเข้าสู่ระบบครั้งแรก — ผู้จัดการ แอดมิน และ HR
+            ดูได้ในประวัติพนักงานจนกว่าเจ้าตัวจะเปลี่ยนรหัสผ่าน
           </p>
           <p className="temp-password-value mono">{tempPassword.password}</p>
           <p className="muted">

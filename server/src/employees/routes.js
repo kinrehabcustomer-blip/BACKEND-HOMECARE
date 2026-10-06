@@ -15,7 +15,7 @@ import {
   STATUSES,
 } from './schema.js';
 import { ApiError, asyncRoute, notFound } from '../lib/errors.js';
-import { canSeeStaffPay, BLOCKED_STATUSES } from '../lib/auth.js';
+import { canSeeStaffPay, BLOCKED_STATUSES, ADMIN_POSITIONS } from '../lib/auth.js';
 
 export const employeesRouter = Router();
 
@@ -67,6 +67,7 @@ employeesRouter.post(
     const input = createEmployeeSchema.parse(req.body);
     ensureCanGrantManager(req, input.position);
     const employee = await repo.create(input);
+    res.set('Cache-Control', 'no-store');
     res.status(201).json(employee);
   }),
 );
@@ -74,7 +75,8 @@ employeesRouter.post(
 employeesRouter.get(
   '/:id',
   asyncRoute(async (req, res) => {
-    res.json(await repo.findDetailById(req.params.id));
+    res.set('Cache-Control', 'no-store');
+    res.json(await repo.findDetailById(req.params.id, ADMIN_POSITIONS.includes(req.user.position)));
   }),
 );
 

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { allocateShares, entitlements, round } from '../lib/payShare.js';
 import { formatBaht, formatDate, openDatePicker } from '../labels.js';
+import ConfirmButton from './ConfirmButton.jsx';
 
 /**
  * แผงจัดการค่าจ้างของเคสหนึ่งใบ — ใช้ที่แท็บ "ปล่อยค่าจ้าง" ของหน้ารอบจ่าย
@@ -102,9 +103,6 @@ export default function CasePayPanel({ caseId, busy, run, toast }) {
   }
   rounds.sort((a, b) => a.no - b.no);
 
-  async function release() {
-    if (!validAmount || !sumOk) return;
-
     /* เหลือค้างเท่าไหร่หลังงวดนี้ ต้องเห็นก่อนกดยืนยัน —
        "ปล่อย 7,000 เหลืออีก 8,000 จ่ายได้อีก 2 งวด" อ่านจบในบรรทัดเดียว */
     const after = round(remaining - value);
@@ -121,11 +119,11 @@ export default function CasePayPanel({ caseId, busy, run, toast }) {
       .filter((r) => Number(r.text) > 0)
       .map((r) => `  ${r.employee_name} ${formatBaht(Number(r.text))}`)
       .join('\n');
-    const ok = confirm(
-      `ปล่อยค่าจ้างงวดที่ ${nextRound} จำนวน ${formatBaht(value)}\n${who}\n\n` +
-        `${due ? `นัดจ่ายวันที่ ${formatDate(due)}` : 'ยังไม่ได้นัดวันจ่าย'}\n${tail}`,
-    );
-    if (!ok) return;
+    const releaseDetail = `ปล่อยค่าจ้างงวดที่ ${nextRound} จำนวน ${formatBaht(value)}\n${who}\n\n` +
+      `${due ? `นัดจ่ายวันที่ ${formatDate(due)}` : 'ยังไม่ได้นัดวันจ่าย'}\n${tail}`;
+
+  async function release() {
+    if (!validAmount || !sumOk) return;
 
     /* เคสคนเดียวส่งแค่ยอดไป ให้ฝั่ง server เป็นคนแบ่ง (ไม่มีอะไรให้แบ่งอยู่แล้ว)
        เคสหลายคนส่งส่วนแบ่งไปด้วยเสมอ แม้ไม่ได้แก้เอง — ตัวเลขที่เห็นบนจอตอนกด
@@ -140,7 +138,7 @@ export default function CasePayPanel({ caseId, busy, run, toast }) {
         : { amount: value };
     if (due) body.due_date = due;
 
-    run(async () => {
+    return run(async () => {
       setPay(await api.releaseCasePay(caseId, body));
       setAmount('');
       setSplit(null);
@@ -363,9 +361,18 @@ export default function CasePayPanel({ caseId, busy, run, toast }) {
                   )}
 
                   <div className="approve-row">
-                    <button className="btn primary" disabled={busy || !validAmount || !sumOk} onClick={release}>
+                    <ConfirmButton
+                      className="btn primary"
+                      disabled={busy || !validAmount || !sumOk}
+                      title="ยืนยันปล่อยค่าจ้าง"
+                      detail={<span style={{ whiteSpace: 'pre-line' }}>{releaseDetail}</span>}
+                      confirmLabel="ยืนยันปล่อยค่าจ้าง"
+                      cancelLabel="ยกเลิก"
+                      danger={false}
+                      onConfirm={release}
+                    >
                       ปล่อยงวดที่ {nextRound}
-                    </button>
+                    </ConfirmButton>
                   </div>
                 </>
               )}
@@ -402,23 +409,21 @@ export default function CasePayPanel({ caseId, busy, run, toast }) {
                     </p>
                     {/* จ่ายออกไปแล้วถอนคืนไม่ได้ — ต้องยกเลิกรอบจ่ายนั้นก่อน (server กันไว้อีกชั้น) */}
                     {item.run_status !== 'paid' && (
-                      <button
+                      <ConfirmButton
                         className="btn tiny danger-ghost"
                         disabled={busy}
-                        onClick={() => {
-                          const ok = confirm(
-                            `ถอนค่าจ้างงวดที่ ${r.no} ของ ${item.employee_name} จำนวน ${formatBaht(item.amount)} คืน?`,
-                          );
-                          if (!ok) return;
-                          run(async () => {
+                        title="ยืนยันถอนค่าจ้างคืน"
+                        detail={<>งวดที่ <strong>{r.no}</strong> ของ <strong>{item.employee_name}</strong><br />จำนวน <strong>{formatBaht(item.amount)}</strong></>}
+                        confirmLabel="ยืนยันถอนคืน"
+                        cancelLabel="ยกเลิก"
+                        onConfirm={() => run(async () => {
                             setPay(await api.cancelCasePayout(caseId, item.payout_id));
                             setSplit(null);
                             toast('ถอนคืนแล้ว');
-                          });
-                        }}
+                          })}
                       >
                         ถอนคืน
-                      </button>
+                      </ConfirmButton>
                     )}
                   </li>
                 ))}

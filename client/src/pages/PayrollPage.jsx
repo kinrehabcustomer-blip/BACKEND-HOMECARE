@@ -349,7 +349,7 @@ function Runs({ reloadKey }) {
   );
 
   return (
-    <>
+    <div className="card payroll-approval-card">
       {error && <p className="error">{error}</p>}
 
       {/* แถบสรุป (ร่างค้าง · จ่ายแล้วเดือนนี้ · รอบที่เปิดไปแล้ว) ถูกตัดออก — ทุกตัวอ่านได้
@@ -573,7 +573,7 @@ function Runs({ reloadKey }) {
         </div>
       )}
 
-    </>
+    </div>
   );
 }
 

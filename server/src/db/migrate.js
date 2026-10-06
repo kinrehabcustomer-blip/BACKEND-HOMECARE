@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { pool, sql } from './index.js';
 import { hashPassword, generateTempPassword } from '../lib/auth.js';
+import { encryptTempPassword } from '../lib/tempPassword.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const schema = readFileSync(join(here, 'schema.sql'), 'utf8');
@@ -11,15 +12,16 @@ const schema = readFileSync(join(here, 'schema.sql'), 'utf8');
 await pool.query(schema);
 console.log('สร้าง/อัปเดต schema บน Postgres เรียบร้อย');
 
-// พนักงานที่มีอยู่ก่อนระบบ login เกิด ยังไม่มีรหัสผ่าน — ตั้งค่าเริ่มต้นเป็นรหัสพนักงานของตัวเอง
+// พนักงานที่ยังไม่มีรหัสผ่าน — สุ่มรหัสชั่วคราวให้
 const pending = await sql.all('SELECT employee_id FROM employees WHERE password_hash IS NULL');
 
 /* สุ่มรหัสชั่วคราวให้คนละใบ — เดิมตั้งเป็น "รหัสพนักงานของตัวเอง" ซึ่งเดาได้ทันทีจากภายนอก
-   (รหัสเรียงเลขและโผล่อยู่ทุกหน้าจอ) รหัสที่สุ่มนี้ต้องจดไว้ตอนรัน เพราะฐานข้อมูลเก็บแต่ hash */
+   (รหัสเรียงเลขและโผล่อยู่ทุกหน้าจอ) สำเนารหัสชั่วคราวเก็บแบบเข้ารหัสจนกว่าเจ้าตัวจะเปลี่ยน */
 for (const { employee_id } of pending) {
   const temp = generateTempPassword();
-  await sql.run('UPDATE employees SET password_hash = :hash WHERE employee_id = :id', {
+  await sql.run('UPDATE employees SET password_hash = :hash, temp_password_encrypted = :encrypted WHERE employee_id = :id', {
     hash: await hashPassword(temp),
+    encrypted: encryptTempPassword(temp, employee_id),
     id: employee_id,
   });
   console.log(`ตั้งรหัสผ่านชั่วคราวให้ ${employee_id} : ${temp}   <-- จดไว้แล้วส่งให้เจ้าตัว`);

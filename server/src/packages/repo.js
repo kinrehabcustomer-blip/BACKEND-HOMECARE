@@ -7,14 +7,16 @@ const NOW = `to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')
 //   staff_share = สัดส่วนค่าตอบแทนพนักงาน = ค่าตอบแทน / ค่าบริการ * 100      (margin + staff_share = 100)
 // staff_share เตรียมไว้ใช้คำนวณรายได้ของพนักงานในอนาคต (ฐานคือ staff_pay ที่เก็บจริงในตาราง)
 const withComputed = (r) => {
-  const computable = r.customer_price != null && r.customer_price > 0 && r.staff_pay != null;
   const discount = discountOf(r.customer_price, r.discount_percent, r.discount_amount);
+  const net = r.customer_price != null ? r.customer_price - discount : null;
+  const computable = net != null && net > 0 && r.staff_pay != null;
   return {
     ...r,
-    margin: computable ? Math.round(((r.customer_price - r.staff_pay) / r.customer_price) * 100) : null,
-    staff_share: computable ? Math.round((r.staff_pay / r.customer_price) * 100) : null,
+    // ส่วนลดทั้งหมดหักจากส่วนบริษัท ค่าจ้างพนักงานใช้ยอดเดิมเสมอ
+    margin: computable ? Math.round(((net - r.staff_pay) / net) * 100) : null,
+    staff_share: computable ? Math.round((r.staff_pay / net) * 100) : null,
     discount_value: discount,                                        // ส่วนลดที่คิดได้จริง (บาท)
-    net_price: r.customer_price != null ? r.customer_price - discount : null, // ราคาหลังหักส่วนลด
+    net_price: net, // ราคาหลังหักส่วนลด
   };
 };
 

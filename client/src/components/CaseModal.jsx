@@ -7,6 +7,7 @@ import { useSheetSwipe } from '../lib/sheetSwipe.js';
 import { useScrollLock } from '../lib/scrollLock.js';
 import CaseVisitsModal from './CaseVisitsModal.jsx';
 import CaseReports from './CaseReports.jsx';
+import CaseLocationLink from './CaseLocationLink.jsx';
 import CaseReportDoc from './CaseReportDoc.jsx';
 import ReportArchiveModal from './ReportArchiveModal.jsx';
 import InvoiceModal from './InvoiceModal.jsx';
@@ -456,6 +457,7 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                   <Field label="เบอร์ติดต่อคุณญาติ" value={item.client_phone} />
                 </div>
                 <Field label="ที่อยู่สถานที่ดูแล" value={item.address} />
+                <CaseLocationLink key={`${item.geo_lat},${item.geo_lng}`} item={item} />
                 <Field
                   label="วัน/เวลาที่สะดวกให้พยาบาลโทรประเมินและรับเคส"
                   value={item.nurse_call_preference}

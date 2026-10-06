@@ -54,8 +54,7 @@ export default function ForgotPasswordPage() {
     <div className="login-page">
       <form className="login-card" onSubmit={step === 'email' ? requestOtp : submitReset}>
         <div className="login-brand">
-          <span className="brand-mark">KIN</span>
-          <span className="brand-sub">Homecare · ระบบหลังบ้าน</span>
+          <img className="brand-logo login-logo" src="/logo-navbar.webp" alt="KIN Home Care" />
         </div>
 
         <h1>ลืมรหัสผ่าน</h1>

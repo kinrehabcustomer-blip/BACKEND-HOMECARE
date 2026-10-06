@@ -201,6 +201,34 @@ if (process.env.RUN_DB_TESTS !== '1') {
   }
 
   describe('Authentication fixture states', () => {
+    test('temporary password is visible only to office roles and erased after password change', async () => {
+      const created = await post('/api/employees', { first_name: 'Temporary', last_name: 'Employee', position: 'caregiver' }, MANAGER, 201);
+      const id = created.employee_id;
+      assert.ok(created.temp_password);
+      const stored = await sql.one('SELECT temp_password_encrypted FROM employees WHERE employee_id = :id', { id });
+      assert.ok(stored.temp_password_encrypted);
+      assert.notEqual(stored.temp_password_encrypted, created.temp_password);
+      for (const who of [MANAGER, HR]) {
+        const detail = await get(`/api/employees/${id}`, who);
+        assert.equal(detail.status, 200);
+        assert.equal(detail.body.temp_password, created.temp_password);
+        assert.equal('temp_password_encrypted' in detail.body, false);
+      }
+      await sql.run(`INSERT INTO employees (employee_id, first_name, last_name, position, must_change_password)
+                     VALUES ('EMP-9000', 'Test', 'Admin', 'admin', FALSE)`);
+      const admin = emp('EMP-9000', 'admin');
+      assert.equal((await get(`/api/employees/${id}`, admin)).body.temp_password, created.temp_password);
+      assert.equal((await get(`/api/employees/${id}`, FIELD)).status, 403);
+      const list = (await get('/api/employees', MANAGER)).body;
+      assert.ok(list.data.every((row) => !('temp_password' in row) && !('temp_password_encrypted' in row)));
+      await post('/api/auth/change-password', {
+        current_password: created.temp_password, new_password: 'Changed-password-456!',
+      }, emp(id, 'caregiver'));
+      const detail = (await get(`/api/employees/${id}`, MANAGER)).body;
+      assert.equal(detail.must_change_password, false);
+      assert.equal('temp_password' in detail, false);
+      assert.equal((await sql.one('SELECT temp_password_encrypted FROM employees WHERE employee_id = :id', { id })).temp_password_encrypted, null);
+    });
     test('fresh employee must change password; suspended employee cannot access work', async () => {
       const fresh = await get('/api/my/today', emp('EMP-0004', 'caregiver'));
       assert.equal(fresh.status, 403);
@@ -212,9 +240,56 @@ if (process.env.RUN_DB_TESTS !== '1') {
       const user = await post('/api/auth/login', { email: 'EMP-0001@example.invalid', password: 'Fixture-password-123!' });
       assert.equal(user.employee_id, MANAGER.employee_id);
     });
+    test('employee ID is a temporary username only while email is missing', async () => {
+      const password = 'Fixture-password-123!';
+      const original = await sql.one('SELECT email FROM employees WHERE employee_id = :id', { id: FIELD.employee_id });
+      try {
+        for (const email of [null, '', '   ']) {
+          await sql.run('UPDATE employees SET email = :email WHERE employee_id = :id', { email, id: FIELD.employee_id });
+          const user = await post('/api/auth/login', { email: ' emp-0003 ', password });
+          assert.equal(user.employee_id, FIELD.employee_id);
+        }
+        await post('/api/auth/login', { email: FIELD.employee_id, password: 'wrong' }, MANAGER, 401);
+        await post('/api/auth/login', { email: 'EMP-9999', password }, MANAGER, 401);
+        await sql.run('UPDATE employees SET email = :email WHERE employee_id = :id', { email: original.email, id: FIELD.employee_id });
+        await post('/api/auth/login', { email: FIELD.employee_id, password }, MANAGER, 401);
+        const user = await post('/api/auth/login', { email: original.email, password });
+        assert.equal(user.employee_id, FIELD.employee_id);
+      } finally {
+        await sql.run('UPDATE employees SET email = :email WHERE employee_id = :id', { email: original.email, id: FIELD.employee_id });
+      }
+    });
   });
 
   describe('Case lifecycle and payout workflow', () => {
+    test('package discounts reduce company income while employee pay stays fixed', async () => {
+      const packages = await import('../src/packages/repo.js');
+      const physio = await import('../src/physio/repo.js');
+      const format = await packages.createFormat({ name: 'Discount test', category: 'daily', graded: false });
+      const rate = { format_id: format.format_id, staff_tier: 'CG', customer_price: 2000, staff_pay: 1200 };
+      await packages.upsertRates([rate]);
+      const p = await physio.createPackage({ name: 'Discount test', sessions: 10, original_price: 18000, special_price: 18000, staff_pay: 12000 });
+      for (const discount of [{ discount_percent: 10, discount_amount: null }, { discount_percent: null, discount_amount: 500 }]) {
+        const { staff_pay, ...unchangedRate } = rate;
+        const matrix = await packages.upsertRates([{ ...unchangedRate, ...discount }]);
+        const r = matrix.rates.find((row) => row.format_id === format.format_id);
+        const cut = discount.discount_percent ? 200 : 500;
+        assert.equal(r.staff_pay, 1200);
+        assert.equal(r.net_price, 2000 - cut);
+        assert.equal(r.margin, Math.round((800 - cut) / (2000 - cut) * 100));
+        const c = await post('/api/cases', { case_type: 'other', client_name: 'Discount patient', fee: r.net_price,
+          pkg_format_id: format.format_id, pkg_staff_tier: 'CG' }, HR, 201);
+        assert.equal((await casesRepo.findById(c.case_id)).staff_pay, 1200);
+        const updated = await physio.updatePackage(p.physio_package_id, discount);
+        const physioCut = discount.discount_percent ? 1800 : 500;
+        assert.equal(updated.staff_pay, 12000);
+        assert.equal(updated.special_price, 18000 - physioCut);
+        assert.equal(updated.margin, Math.round((6000 - physioCut) / (18000 - physioCut) * 100));
+        const pc = await post('/api/cases', { case_type: 'other', client_name: 'Physio discount patient', service_kind: 'physio',
+          physio_package_id: p.physio_package_id, fee: updated.special_price }, HR, 201);
+        assert.equal((await casesRepo.findById(pc.case_id)).staff_pay, 12000);
+      }
+    });
     test('create → assign → start → close → reopen; invalid transitions return 409', async () => {
       const c = await newCase();
       assert.equal(c.status, 'unassigned');

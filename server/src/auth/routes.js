@@ -43,7 +43,7 @@ const clearLoginFailures = (email) =>
   sql.run('DELETE FROM login_failures WHERE email_key = lower(:email)', { email });
 
 const loginSchema = z.object({
-  email: z.string().trim().min(1, 'กรุณากรอกอีเมล'),
+  email: z.string().trim().min(1, 'กรุณากรอกอีเมลหรือรหัสพนักงาน'),
   password: z.string().min(1, 'กรุณากรอกรหัสผ่าน'),
 });
 
@@ -74,13 +74,15 @@ authRouter.post(
   asyncRoute(async (req, res) => {
     const { email, password } = loginSchema.parse(req.body);
 
-    // นับตามอีเมล ไม่ใช่ว่าอีเมลนั้นมีบัญชีไหม — อีเมลที่ไม่มีอยู่จริงก็โดนล็อกเหมือนกัน ไม่บอกใบ้อะไร
+    // นับตามชื่อที่ใช้เข้าสู่ระบบ แม้ไม่มีบัญชีนี้อยู่จริงก็โดนล็อกเหมือนกัน
     if ((await recentLoginFailures(email)) >= LOGIN_MAX_FAILURES) {
       throw new ApiError(429, `กรอกรหัสผ่านผิดหลายครั้งเกินไป กรุณารอ ${LOGIN_LOCK_MINUTES} นาทีแล้วลองใหม่ หรือใช้ "ลืมรหัสผ่าน"`);
     }
 
     const employee = await sql.one(
-      'SELECT * FROM employees WHERE lower(email) = lower(:email)',
+      `SELECT * FROM employees
+       WHERE lower(email) = lower(:email)
+          OR (NULLIF(btrim(email), '') IS NULL AND lower(employee_id) = lower(:email))`,
       { email },
     );
 
@@ -91,7 +93,7 @@ authRouter.post(
       // ล้างแถวเก่าไปด้วย — อีเมลที่ไม่มีบัญชีไม่เคย login สำเร็จ แถวของมันจะไม่ถูกลบทางอื่น
       await sql.run(`DELETE FROM login_failures WHERE created_at < now() - interval '1 day'`);
       await sql.run('INSERT INTO login_failures (email_key) VALUES (lower(:email))', { email });
-      throw new ApiError(401, 'อีเมลหรือรหัสผ่านไม่ถูกต้อง');
+      throw new ApiError(401, 'อีเมล รหัสพนักงาน หรือรหัสผ่านไม่ถูกต้อง');
     }
     await clearLoginFailures(email);
 
@@ -235,7 +237,7 @@ authRouter.post(
        มักเกิดตอน "เข้าไม่ได้เพราะมีคนอื่นเข้าไปแล้ว" เซสชันของคนนั้นต้องตายพร้อมกัน */
     await sql.run(
       `UPDATE employees
-       SET password_hash = :hash, must_change_password = FALSE, password_changed_at = now()
+       SET password_hash = :hash, must_change_password = FALSE, temp_password_encrypted = NULL, password_changed_at = now()
        WHERE employee_id = :id`,
       { hash: await hashPassword(new_password), id: employee.employee_id },
     );
@@ -269,7 +271,7 @@ authRouter.post(
 
     await sql.run(
       `UPDATE employees
-       SET password_hash = :hash, must_change_password = FALSE, password_changed_at = now()
+       SET password_hash = :hash, must_change_password = FALSE, temp_password_encrypted = NULL, password_changed_at = now()
        WHERE employee_id = :id`,
       { hash: await hashPassword(new_password), id },
     );

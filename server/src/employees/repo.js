@@ -1,5 +1,6 @@
 import { sql, nextEmployeeId, transaction } from '../db/index.js';
 import { hashPassword, generateTempPassword } from '../lib/auth.js';
+import { encryptTempPassword, decryptTempPassword } from '../lib/tempPassword.js';
 
 const COLUMNS = [
   'first_name',
@@ -93,7 +94,7 @@ export function findById(employeeId) {
 }
 
 /** ดึงพนักงานพร้อมข้อมูลที่ผูกกับ employee_id จากโมดูลอื่น (ใบรับรอง + ผลงาน + เคสที่รับผิดชอบ) */
-export async function findDetailById(employeeId) {
+export async function findDetailById(employeeId, includeTempPassword = false) {
   const employee = await findById(employeeId);
   if (!employee) return null;
 
@@ -111,7 +112,17 @@ export async function findDetailById(employeeId) {
     ),
   ]);
 
-  return { ...employee, certificates, portfolio, cases };
+  const result = { ...employee, certificates, portfolio, cases };
+  if (includeTempPassword) {
+    const credential = await sql.one(
+      `SELECT temp_password_encrypted FROM employees
+       WHERE employee_id = :id AND must_change_password = TRUE`, { id: employeeId },
+    );
+    if (credential?.temp_password_encrypted) {
+      result.temp_password = decryptTempPassword(credential.temp_password_encrypted, employeeId);
+    }
+  }
+  return result;
 }
 
 export function create(input) {
@@ -120,14 +131,15 @@ export function create(input) {
     const values = { employee_id: employeeId };
     for (const col of COLUMNS) values[col] = input[col] ?? null;
 
-    /* รหัสผ่านชั่วคราวสุ่มใหม่ทุกคน — เก็บเฉพาะ hash และคืน plain กลับไปครั้งเดียวเท่านั้น
+    /* รหัสผ่านชั่วคราวสุ่มใหม่ทุกคน — เก็บ hash สำหรับ login และสำเนาเข้ารหัสสำหรับฝ่ายบุคคล
        (must_change_password เป็น TRUE ตั้งแต่ default ของตาราง และมีด่านบังคับที่ API แล้ว) */
     const tempPassword = generateTempPassword();
     values.password_hash = await hashPassword(tempPassword);
+    values.temp_password_encrypted = encryptTempPassword(tempPassword, employeeId);
 
     const created = await tx.one(
-      `INSERT INTO employees (employee_id, password_hash, ${COLUMNS.join(', ')})
-       VALUES (:employee_id, :password_hash, ${COLUMNS.map((c) => `:${c}`).join(', ')})
+      `INSERT INTO employees (employee_id, password_hash, temp_password_encrypted, ${COLUMNS.join(', ')})
+       VALUES (:employee_id, :password_hash, :temp_password_encrypted, ${COLUMNS.map((c) => `:${c}`).join(', ')})
        RETURNING ${PUBLIC}`,
       values,
     );
