@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { api } from '../api.js';
 import { useAuth } from '../auth.jsx';
 import { useToast } from '../toast.jsx';
@@ -75,6 +76,9 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
   const [depositDraft, setDepositDraft] = useState(''); // ยอดมัดจำที่กรอกในตัวเลือกแบ่งจ่าย
   const [depositEdit, setDepositEdit] = useState('');   // ยอดมัดจำในช่องแก้ไขของใบมัดจำที่แบ่งงวดไปแล้ว
   const [plan, setPlan] = useState([]);                 // ใบคู่ในแผนเดียวกัน (มัดจำ ↔ ส่วนที่เหลือ)
+  /* ลบใบแล้วเคสไม่เหลือใบร่าง — ถามต่อว่าจะออกใบใหม่ไหม (เก็บรหัสที่เพิ่งลบไว้บอกในกล่อง)
+     เป็นกล่องในหน้าแทน confirm() ของเบราว์เซอร์ ซึ่งถูกบล็อกได้แล้วคืน false เงียบๆ */
+  const [reissue, setReissue] = useState(null);         // { caseId, deleted: [...] }
   const [payDate, setPayDate] = useState(todayTH);
   const [payMethod, setPayMethod] = useState(PAYMENT_METHODS[0]);
   /* รหัสกันบันทึกซ้ำของคำขอรับชำระ (server บังคับ — ดู paySchema)
@@ -190,6 +194,10 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
   }, [printTitle]);
   // เอกสารยังอยู่ในมือเรา (ส่งมอบให้ลูกค้าครั้งเดียวตอนพิมพ์) จึงยังรีเฟรช/แก้ได้
   const canEdit = item?.status === 'draft' || item?.status === 'issued';
+  /* ดึงข้อมูลจากเคสมาทับได้จริงไหม — ต้องตรงกับเงื่อนไขใน syncOpenFromCase ฝั่ง server
+     ใบงวด/ใบรายครั้ง/ใบที่รับเงินแล้วถูกข้าม ปุ่มรีเฟรชจะกดแล้วไม่เกิดอะไร (หรือ error) จึงไม่โชว์ */
+  const refreshable =
+    canEdit && !item?.has_items && !item?.is_plan_part && Number(item?.paid_amount ?? 0) === 0;
 
   /**
    * ยกเลิกใบ — ใบยังอยู่ในระบบ เปลี่ยนสถานะเป็น "ยกเลิก" เก็บไว้เป็นประวัติ
@@ -228,15 +236,32 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
         return GONE;
       }
 
-      if (confirm('ลบแล้ว — ออกใบร่างใหม่ให้เลือกวิธีเก็บเงินอีกครั้งเลยไหม?')) {
-        const created = await api.createInvoice({ case_id: item.case_id });
-        toast(`ออกใบใหม่ ${created.invoice_id} แล้ว`);
-        onReissued?.(created.invoice_id);
-      } else {
-        onClose(); // ใบที่เปิดอยู่ถูกลบไปแล้ว ค้างหน้าไว้ไม่ได้
-      }
+      setReissue({ caseId: item.case_id, deleted });
       return GONE;
     });
+  }
+
+  /** ตอบกล่องถามออกใบใหม่ — ไม่ออก = ปิด popup เพราะใบที่เปิดอยู่ถูกลบไปแล้ว ค้างหน้าไว้ไม่ได้ */
+  async function answerReissue(yes) {
+    if (!yes) {
+      setReissue(null);
+      onClose();
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const created = await api.createInvoice({ case_id: reissue.caseId });
+      toast(`ออกใบใหม่ ${created.invoice_id} แล้ว`);
+      setReissue(null);
+      onReissued?.(created.invoice_id);
+    } catch (e) {
+      // ออกใบไม่สำเร็จ — ปิดกล่องให้เห็นข้อความแดงในใบ (ใบเดิมถูกลบแล้ว ปุ่มอื่นในใบจะใช้ไม่ได้)
+      setReissue(null);
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
   }
 
   // ชื่อผู้ลงนาม = คนที่กำลังสั่งพิมพ์ — session ส่ง first_name/last_name แยกกันมา ไม่มีฟิลด์ name รวม
@@ -377,13 +402,31 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                       {' '}แต่ยอดสุทธิของใบนี้เป็น <strong>{amountText(item.total)}</strong> — ยังไม่ตรงกัน
                     </p>
                   )}
+                  {item.service_stale && (
+                    <p>
+                      <LineIcon name="alert" className="text-ico" />เคสนี้เปลี่ยนแพ็คเกจ/บริการหลังออกใบนี้ —
+                      {' '}รายการและยอดในใบยังเป็นของบริการเดิม
+                    </p>
+                  )}
                   <p>
-                    {canEdit
+                    {refreshable
                       ? 'กดรีเฟรชเพื่อดึงข้อมูลล่าสุดจากเคสมาใส่ใบนี้'
-                      : 'ใบที่ชำระแล้วแก้ไม่ได้ ต้องยกเลิกแล้วออกใบใหม่'}
+                      : canEdit
+                        ? 'ใบนี้แบ่งงวด แตกรายครั้ง หรือรับเงินมาแล้ว ระบบจึงปรับให้ตามเคสเองไม่ได้ — ตรวจยอดแล้วแก้ที่ใบ หรือลบแล้วออกใหม่'
+                        : 'ใบที่ชำระแล้วแก้ไม่ได้ ต้องยกเลิกแล้วออกใบใหม่'}
+                    {item.service_stale && ' · ถ้ายอดเดิมยังถูกต้อง (เช่น ส่วนต่างออกใบแยก) กด "รับทราบ" เพื่อปิดคำเตือนเรื่องแพ็คเกจ'}
                   </p>
                   <div className="stale-actions">
-                    {canEdit ? (
+                    {item.service_stale && (
+                      <button
+                        className="btn"
+                        disabled={busy}
+                        onClick={() => run(() => api.acknowledgeInvoiceService(item.invoice_id))}
+                      >
+                        รับทราบ ใบนี้ถูกต้องแล้ว
+                      </button>
+                    )}
+                    {refreshable ? (
                       <button
                         className="btn primary"
                         disabled={busy}
@@ -391,7 +434,7 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                       >
                         รีเฟรชจากเคส
                       </button>
-                    ) : (
+                    ) : canEdit ? null : (
                       <ConfirmButton
                         className="btn danger-ghost"
                         disabled={busy}
@@ -847,6 +890,38 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
           </>
         )}
       </div>
+
+      {/* portal ออกไปที่ body เหมือน ConfirmButton — บนจอแคบ .modal มี transform กล่องจะโผล่ผิดที่
+          Esc ระหว่างนี้ = ปิด popup ทั้งชุด ซึ่งเท่ากับตอบ "ไม่ออกใบใหม่" อยู่แล้ว */}
+      {reissue &&
+        createPortal(
+          <div className="modal-backdrop modal-stacked" onClick={(e) => e.stopPropagation()}>
+            <div
+              className="modal modal-narrow confirm-box"
+              role="alertdialog"
+              aria-modal="true"
+              aria-label="ออกใบร่างใหม่"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="modal-body confirm-body">
+                <h2>ลบ {reissue.deleted.join(' และ ')} แล้ว</h2>
+                <p className="muted">
+                  ออกใบร่างใหม่ตามข้อมูลปัจจุบันของเคส {reissue.caseId} เลยไหม? ระบบจะดึงยอดจากค่าบริการของเคส
+                  แล้วให้เลือกวิธีเก็บเงิน (เต็มจำนวน / แบ่งมัดจำ) อีกครั้ง
+                </p>
+              </div>
+              <footer className="modal-foot">
+                <button type="button" className="btn" disabled={busy} onClick={() => answerReissue(false)}>
+                  ไม่ต้อง
+                </button>
+                <button type="button" className="btn primary" autoFocus disabled={busy} onClick={() => answerReissue(true)}>
+                  {busy ? 'กำลังออกใบ…' : 'ออกใบร่างใหม่'}
+                </button>
+              </footer>
+            </div>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }

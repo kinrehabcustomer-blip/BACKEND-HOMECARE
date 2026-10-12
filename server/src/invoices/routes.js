@@ -103,6 +103,12 @@ invoicesRouter.get(
   asyncRoute(async (req, res) => res.json(await repo.list(listQuerySchema.parse(req.query)))),
 );
 
+/** เคสที่ยังไม่มีใบแจ้งหนี้ — หน้ารายการใบใช้เสนอปุ่มออกใบ (อยู่เหนือ '/:id' ไม่งั้นโดนจับเป็นรหัสใบ) */
+invoicesRouter.get(
+  '/cases-without-invoice',
+  asyncRoute(async (req, res) => res.json(await repo.casesWithoutInvoice())),
+);
+
 /**
  * ออกใบแจ้งหนี้จากเคส — server คัดลอกชื่อผู้จ่าย/ที่อยู่/ค่าบริการ ณ ตอนนี้มาเก็บไว้ในใบ
  * เคสที่ยกเลิกไปแล้วออกบิลไม่ได้ (ไม่ได้ให้บริการจริง)
@@ -201,6 +207,20 @@ invoicesRouter.post(
     await repo.syncOpenFromCase(caseRow, customer);
 
     res.json(await repo.findById(req.params.id));
+  }),
+);
+
+/**
+ * รับทราบว่าเคสเปลี่ยนแพ็คเกจหลังออกใบนี้ (ปิดป้าย "แพ็คเกจไม่ตรง") — ใช้กับใบที่รีเฟรชจากเคสไม่ได้
+ * (ใบงวด/ใบรายครั้ง/ใบที่รับเงินแล้ว) เมื่อตรวจแล้วว่ายอดในใบยังถูกต้อง ดู acknowledgeService
+ */
+invoicesRouter.post(
+  '/:id/acknowledge-service',
+  asyncRoute(async (req, res) => {
+    if (!req.invoice.case_id) throw new ApiError(409, 'ใบนี้ไม่ได้ผูกกับเคส');
+    const updated = await repo.acknowledgeService(req.params.id);
+    throwIfInvoiceMoved(updated);
+    res.json(updated);
   }),
 );
 

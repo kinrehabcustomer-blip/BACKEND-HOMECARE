@@ -624,14 +624,39 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
               {/* ออกใบแจ้งหนี้จากเคสนี้ — ระบบคัดลอกผู้จ่าย/ที่อยู่/ค่าจ้างไปให้เอง */}
               <section>
                 <h3>ใบแจ้งหนี้</h3>
-                {invoices.length === 0 ? (
-                  /* ระบบออกใบร่างให้เองตั้งแต่เปิดเคสแล้ว หน้านี้จึงเป็นที่ "ดู" ไม่ใช่ที่ "ออกใบ"
-                     เคสที่ไม่มีใบคือเคสเก่าที่เปิดก่อนมีระบบออกอัตโนมัติ หรือใบถูกลบไป
-                     — ออกใบใหม่ได้ที่หน้าใบแจ้งหนี้ ไม่ปนอยู่ในหน้าเคสให้กดพลาดจนได้ใบซ้ำ */
-                  <p className="muted">
-                    ยังไม่มีใบแจ้งหนี้ของเคสนี้ (ปกติระบบออกใบร่างให้ตั้งแต่เปิดเคส)
-                  </p>
-                ) : (
+                {/* ไม่มีใบเหลืออยู่ (ใบถูกลบ หรือยกเลิกหมดแล้ว / เคสเก่าก่อนมีระบบออกอัตโนมัติ) — ออกใบได้ตรงนี้
+                    ปุ่มโผล่เฉพาะตอนไม่มีใบที่ใช้งานอยู่เลย จึงกดพลาดจนได้ใบซ้ำไม่ได้
+                    และ server ยังปฏิเสธใบร่างซ้ำให้อีกชั้น (ตอบรหัสใบเดิมกลับมา — เปิดใบนั้นให้แทน) */}
+                {!invoices.some((v) => v.status !== 'cancelled') && item.status !== 'cancelled' && (
+                  <div className="history-item">
+                    <p className="muted">
+                      {invoices.length === 0
+                        ? 'ยังไม่มีใบแจ้งหนี้ของเคสนี้'
+                        : 'ใบแจ้งหนี้ของเคสนี้ถูกยกเลิกหมดแล้ว'}
+                    </p>
+                    <div className="invoice-row-actions">
+                      <button
+                        className="btn tiny primary"
+                        disabled={busy}
+                        onClick={() =>
+                          run(async () => {
+                            try {
+                              const created = await api.createInvoice({ case_id: item.case_id });
+                              toast(`ออกใบ ${created.invoice_id} แล้ว — เลือกวิธีเก็บเงินต่อได้เลย`);
+                              setOpenInvoiceId(created.invoice_id);
+                            } catch (err) {
+                              if (!err.details?.existing_invoice_id) throw err;
+                              setOpenInvoiceId(err.details.existing_invoice_id);
+                            }
+                          })
+                        }
+                      >
+                        ออกใบแจ้งหนี้
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {invoices.length > 0 && (
                   invoices.map((v) => (
                     <div className="history-item" key={v.invoice_id}>
                       <div>
@@ -644,7 +669,11 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                         {/* ข้อมูลในใบไม่ตรงกับเคสแล้ว (ค่าจ้าง และ/หรือ ชื่อผู้จ่าย) — เปิดใบเพื่อรีเฟรช/ออกใหม่ */}
                         {v.is_stale && v.status !== 'cancelled' && (
                           <p className="stale-tag">
-                            <><LineIcon name="alert" className="text-ico" />{v.payer_stale ? 'ผู้จ่ายในใบไม่ตรงกับเคส' : `ไม่ตรงกับค่าจ้างเคส (${formatBaht(v.case_fee)})`}</>
+                            <><LineIcon name="alert" className="text-ico" />{v.payer_stale
+                              ? 'ผู้จ่ายในใบไม่ตรงกับเคส'
+                              : v.fee_stale
+                                ? `ไม่ตรงกับค่าจ้างเคส (${formatBaht(v.case_fee)})`
+                                : 'เคสเปลี่ยนแพ็คเกจหลังออกใบนี้'}</>
                           </p>
                         )}
                       </div>

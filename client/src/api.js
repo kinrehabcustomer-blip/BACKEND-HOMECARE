@@ -111,7 +111,10 @@ async function request(path, { empty = false, credentialCheck = false, ...option
     }
 
     // รวม error ของแต่ละ field จาก zod ให้เป็นข้อความเดียวที่อ่านรู้เรื่อง
-    const fields = data?.details?.map((d) => `${d.field}: ${d.message}`).join('\n');
+    /* details มีสองแบบ: รายช่องจาก zod (array) หรือข้อมูลประกอบของ 409 (object เช่น existing_invoice_id)
+       เรียก .map กับ object ตรงๆ จะโยน TypeError ทับข้อความจริงของ server จนหน้าเว็บอ่านไม่ออก */
+    const fieldList = Array.isArray(data?.details) ? data.details : null;
+    const fields = fieldList?.map((d) => `${d.field}: ${d.message}`).join('\n');
     const head = fields ? `${data.error}\n${fields}` : (data?.error ?? `เรียก API ไม่สำเร็จ (HTTP ${res.status})`);
     /* technical = ตัวจริงของ error ฝั่ง server (ส่งมาเฉพาะกรณี 500 ที่ไม่รู้จัก)
        ต่อท้ายให้เห็นบนหน้าจอเลย คนหน้างานจะได้ก๊อป/แคปส่งต่อได้โดยไม่ต้องไปเปิด log ของ server */
@@ -119,7 +122,8 @@ async function request(path, { empty = false, credentialCheck = false, ...option
 
     // แนบรายละเอียดรายช่องไว้ด้วย ให้ฟอร์มเอาไปแปะข้อความใต้ช่องที่ผิดได้ตรงจุด
     // (ยังคงข้อความรวมไว้เหมือนเดิม — หน้าที่ยังไม่ได้ใช้ fields จะไม่เปลี่ยนพฤติกรรม)
-    if (data?.details) error.fields = data.details;
+    if (fieldList) error.fields = fieldList;
+    else if (data?.details) error.details = data.details;
     throw error;
   }
 
@@ -366,8 +370,12 @@ export const api = {
   },
   getInvoice: (id) => request(`/invoices/${id}`),
   createInvoice: (body) => request('/invoices', { method: 'POST', body }),
+  /** เคสที่ไม่มีใบแจ้งหนี้เหลืออยู่ (ไม่นับใบที่ยกเลิก) — ไว้เสนอปุ่มออกใบ */
+  casesWithoutInvoice: () => request('/invoices/cases-without-invoice'),
   updateInvoice: (id, body) => request(`/invoices/${id}`, { method: 'PATCH', body }),
   refreshInvoice: (id) => request(`/invoices/${id}/refresh`, { method: 'POST' }),
+  /** รับทราบว่าเคสเปลี่ยนแพ็คเกจหลังออกใบ และใบยังใช้ได้ตามเดิม (ปิดป้าย service_stale) */
+  acknowledgeInvoiceService: (id) => request(`/invoices/${id}/acknowledge-service`, { method: 'POST' }),
   /**
    * เลือกวิธีเก็บเงินของใบ (ทำครั้งเดียวตอนยังเป็นร่าง)
    * { mode: 'full' } = เก็บเต็มจำนวนในใบเดียว

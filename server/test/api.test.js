@@ -303,6 +303,71 @@ if (process.env.RUN_DB_TESTS !== '1') {
       assert.equal((await post(`/api/cases/${c.case_id}/cancel`, { reason: 'Fixture cancellation' })).status, 'cancelled');
     });
 
+    test('changing package: history keeps old → new, split invoices get flagged, closed cases are locked', async () => {
+      const patchCase = async (id, body, expected = 200) => {
+        const res = await fetch(`${base}/api/cases/${id}`, {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json', cookie: `${COOKIE_NAME}=${signToken(MANAGER)}` },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        assert.equal(res.status, expected, JSON.stringify(data));
+        return data;
+      };
+      const pkg = async (name, price) => (await sql.one(
+        `INSERT INTO physio_packages (name, sessions, special_price, staff_pay)
+         VALUES (:name, 10, :price, 500) RETURNING physio_package_id`, { name, price })).physio_package_id;
+      const oldPkg = await pkg('Pack old', 5000);
+      const newPkg = await pkg('Pack new', 8000);
+
+      const c = await post('/api/cases', { case_type: 'other', client_name: 'Package switch', service_kind: 'physio',
+        physio_package_id: oldPkg, fee: 5000 }, MANAGER, 201);
+      const draft = (await get(`/api/invoices?case_id=${c.case_id}`, MANAGER)).body.data[0];
+      await post(`/api/invoices/${draft.invoice_id}/billing-plan`, { mode: 'deposit', deposit_amount: 1000 });
+
+      await patchCase(c.case_id, { service_kind: 'physio', physio_package_id: newPkg, fee: 8000 });
+
+      const events = (await get(`/api/cases/${c.case_id}/events`, MANAGER)).body;
+      const edited = events.find((e) => e.event === 'edited');
+      assert.match(edited.detail, /Pack old \(10 ครั้ง\) → Pack new \(10 ครั้ง\)/);
+      assert.match(edited.detail, /5,000 บาท → 8,000 บาท/);
+      assert.doesNotMatch(edited.detail, /500/, 'staff pay figures must not leak into history HR can read');
+
+      const invoices = (await get(`/api/invoices?case_id=${c.case_id}`, MANAGER)).body.data;
+      assert.equal(invoices.length, 2);
+      assert.ok(invoices.every((v) => v.service_stale && v.is_stale), 'deposit and balance must both be flagged');
+      const flagged = (await get(`/api/invoices?case_id=${c.case_id}&stale=yes`, MANAGER)).body.data;
+      assert.equal(flagged.length, 2, 'SQL stale filter must agree with the row flag');
+
+      const ack = await post(`/api/invoices/${invoices[0].invoice_id}/acknowledge-service`, {});
+      assert.equal(ack.service_stale, false);
+
+      await sql.run(`UPDATE cases SET status = 'closed' WHERE case_id = :id`, { id: c.case_id });
+      await patchCase(c.case_id, { service_kind: 'physio', physio_package_id: oldPkg }, 409);
+      await patchCase(c.case_id, { service_kind: 'physio', physio_package_id: newPkg, note: 'still editable' });
+    });
+
+    test('deleted invoice: case shows up as missing an invoice and can be reissued', async () => {
+      const c = await newCase();
+      const draft = (await get(`/api/invoices?case_id=${c.case_id}`, MANAGER)).body.data[0];
+      const missingIds = async () =>
+        (await get('/api/invoices/cases-without-invoice', MANAGER)).body.map((r) => r.case_id);
+      assert.ok(!(await missingIds()).includes(c.case_id));
+
+      const res = await fetch(`${base}/api/invoices/${draft.invoice_id}`, {
+        method: 'DELETE', headers: { cookie: `${COOKIE_NAME}=${signToken(MANAGER)}` },
+      });
+      assert.equal(res.status, 200);
+      assert.ok((await missingIds()).includes(c.case_id));
+
+      const created = await post('/api/invoices', { case_id: c.case_id }, MANAGER, 201);
+      assert.equal(created.total, 2000);
+      assert.ok(!(await missingIds()).includes(c.case_id));
+      // กดซ้ำ = server ส่งรหัสใบร่างเดิมกลับมาให้หน้าเว็บเปิดแทน
+      const dup = await post('/api/invoices', { case_id: c.case_id }, MANAGER, 409);
+      assert.equal(dup.details.existing_invoice_id, created.invoice_id);
+    });
+
     test('case wages require release; attendance approval and closing do not create payouts', async () => {
       const c = await newCase();
       await post(`/api/cases/${c.case_id}/assign`, { employee_id: FIELD.employee_id });

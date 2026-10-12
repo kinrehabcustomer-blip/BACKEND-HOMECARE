@@ -5,7 +5,7 @@ import SortHead from '../components/SortHead.jsx';
 import ErrorBar from '../components/ErrorBar.jsx';
 import PageRefresh from '../components/PageRefresh.jsx';
 import { api } from '../api.js';
-import { INVOICE_STATUS_LABELS, formatBaht, formatDate } from '../labels.js';
+import { CASE_STATUS_LABELS, INVOICE_STATUS_LABELS, formatBaht, formatDate } from '../labels.js';
 
 const PER_PAGE_OPTIONS = [20, 50, 100];
 
@@ -45,6 +45,10 @@ export default function InvoiceListPage() {
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
   const [reloadKey, setReloadKey] = useState(0);
+  /* เคสที่ไม่มีใบแจ้งหนี้เหลืออยู่ (เผลอลบ / เคสเก่า) — ออกใบได้ตรงนี้เลย
+     เดิมหน้านี้บอกให้ไปหน้าเคส ส่วนหน้าเคสบอกให้มาหน้านี้ วนกันโดยไม่มีปุ่มให้กดสักที่ */
+  const [missing, setMissing] = useState([]);
+  const [issuing, setIssuing] = useState(null); // รหัสเคสที่กำลังออกใบ
 
   // เราเป็นคนเปิด popup เองหรือเปล่า — ใช้ตัดสินว่าตอนปิดควรถอยประวัติ (back) หรือลบพารามิเตอร์ทิ้ง
   const pushedOpen = useRef(false);
@@ -124,6 +128,29 @@ export default function InvoiceListPage() {
     };
   }, [q, status, pseudo, page, perPage, sort, order, reloadKey]);
 
+  // โหลดใหม่พร้อมรายการทุกครั้ง (reloadKey) — ลบใบใน popup แล้วเคสต้องโผล่ที่นี่ทันที
+  useEffect(() => {
+    api.casesWithoutInvoice().then(setMissing).catch(() => setMissing([]));
+  }, [reloadKey]);
+
+  /** ออกใบร่างจากเคส แล้วเปิดใบให้เลือกวิธีเก็บเงินต่อ · มีใบร่างอยู่แล้ว (server ตอบ 409) = เปิดใบนั้นแทน */
+  async function issueFor(caseId) {
+    setIssuing(caseId);
+    setError(null);
+    try {
+      const created = await api.createInvoice({ case_id: caseId });
+      setReloadKey((k) => k + 1);
+      openInvoice(created.invoice_id);
+    } catch (err) {
+      const existing = err.details?.existing_invoice_id;
+      if (existing) openInvoice(existing);
+      else setError(err.message);
+      setReloadKey((k) => k + 1);
+    } finally {
+      setIssuing(null);
+    }
+  }
+
   // popup ถูกปิดด้วยปุ่มย้อนกลับของเบราว์เซอร์ — ประวัติที่เรา push ไว้ถูกใช้ไปแล้ว ต้องล้างธงทิ้ง
   useEffect(() => {
     if (!openId) pushedOpen.current = false;
@@ -192,6 +219,34 @@ export default function InvoiceListPage() {
       {/* error เป็นแถบเหนือตาราง ไม่ทับทั้งหน้า — คำค้นที่พิมพ์ไว้ต้องไม่หายไปเพราะเน็ตสะดุด */}
       <ErrorBar message={error} onRetry={() => setReloadKey((k) => k + 1)} busy={loading} />
 
+      {/* เคสที่ไม่มีใบเหลืออยู่ — ซ่อนตอนกรองอยู่ เพราะกำลังหาใบที่มีอยู่แล้ว ไม่ได้มาออกใบใหม่ */}
+      {!filtered && missing.length > 0 && (
+        <section className="card">
+          <h2>เคสที่ยังไม่มีใบแจ้งหนี้ ({missing.length})</h2>
+          {missing.map((c) => (
+            <div className="history-item" key={c.case_id}>
+              <div>
+                <strong>{c.client_name ?? c.title}</strong>
+                <p className="muted">
+                  <Link className="link mono" to={`/cases?open=${c.case_id}`}>{c.case_id}</Link>
+                  {' · '}{CASE_STATUS_LABELS[c.status] ?? c.status}
+                  {' · '}ค่าบริการ {c.fee != null ? formatBaht(c.fee) : 'ยังไม่ระบุ'}
+                </p>
+              </div>
+              <div className="invoice-row-actions">
+                <button
+                  className="btn tiny primary"
+                  disabled={issuing != null}
+                  onClick={() => issueFor(c.case_id)}
+                >
+                  {issuing === c.case_id ? 'กำลังออกใบ…' : 'ออกใบแจ้งหนี้'}
+                </button>
+              </div>
+            </div>
+          ))}
+        </section>
+      )}
+
       <div className="table-wrap">
         <table className="table table-cards table-2line table-indexed">
           <colgroup>
@@ -243,9 +298,11 @@ export default function InvoiceListPage() {
                       ใบที่ยกเลิกแล้วไม่ต้องเตือน ไม่มีใครต้องไปรีเฟรชมัน (เกณฑ์เดียวกับอีกสองที่) */}
                   {v.is_stale && v.status !== 'cancelled' && (
                     <span className="stale-flag" title="ข้อมูลในใบไม่ตรงกับเคสแล้ว — เปิดใบแล้วกด “รีเฟรชจากเคส”">
-                      {v.fee_stale && v.payer_stale
-                        ? 'ยอด/ผู้จ่ายไม่ตรง'
-                        : v.payer_stale ? 'ผู้จ่ายไม่ตรง' : 'ยอดไม่ตรง'}
+                      {[
+                        v.service_stale && 'แพ็คเกจ',
+                        v.fee_stale && 'ยอด',
+                        v.payer_stale && 'ผู้จ่าย',
+                      ].filter(Boolean).join('/')}ไม่ตรง
                     </span>
                   )}
                 </td>
@@ -303,8 +360,10 @@ export default function InvoiceListPage() {
                     </>
                   ) : (
                     <>
-                      ยังไม่มีใบแจ้งหนี้ —{' '}
-                      <Link className="link" to="/cases">ออกใบได้จากปุ่มในหน้าเคส →</Link>
+                      ยังไม่มีใบแจ้งหนี้
+                      {missing.length > 0
+                        ? ' — กด "ออกใบแจ้งหนี้" ที่เคสด้านบน'
+                        : ' — ระบบออกใบร่างให้เองเมื่อเปิดเคส'}
                     </>
                   )}
                 </td>

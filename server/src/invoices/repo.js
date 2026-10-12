@@ -182,6 +182,13 @@ const EDITABLE = [
   'service_description', 'amount', 'discount', 'payment_method', 'note',
 ];
 
+/* บริการที่เคสเลือกอยู่ ย่อเป็นข้อความเดียว — จดไว้ในใบ (service_key) ตอนออก/ซิงก์ แล้วเทียบตอนอ่าน
+   เพื่อจับว่าเคสเปลี่ยนแพ็คเกจหลังออกใบ (ดู withComputed.service_stale)
+   สูตรต้องตรงกับที่เติมของเก่าใน schema.sql · ไม่รวม service_kind ด้วยเหตุผลที่เขียนไว้ที่นั่น */
+const serviceKeySql = (c) => `concat_ws('|',
+  COALESCE(${c}.physio_package_id::text, ''), COALESCE(${c}.pkg_format_id::text, ''),
+  COALESCE(${c}.pkg_grade_id::text, ''), COALESCE(${c}.pkg_staff_tier, ''))`;
+
 // case_payer_name = ชื่อผู้จ่าย "ที่ควรจะเป็น" ของเคสตอนนี้ ไล่ตามลำดับ:
 //   ผู้ว่าจ้างของเคส -> ผู้ว่าจ้างของแฟ้มผู้ป่วย (เผื่อเพิ่งผูกทีหลัง เคสยังไม่มี) -> ชื่อผู้ป่วยในเคส
 // ใช้เทียบกับ bill_to_name ในใบ เพื่อรู้ว่าใบยังตรงกับผู้จ่ายปัจจุบันไหม (ดู withComputed.payer_stale)
@@ -194,6 +201,7 @@ const SELECT_INVOICE = `
          c.title       AS case_title,
          c.status      AS case_status,
          c.fee         AS case_fee,
+         CASE WHEN c.case_id IS NOT NULL THEN ${serviceKeySql('c')} END AS case_service_key,
          cu.name       AS customer_name,
          cu.phone      AS customer_phone,
          COALESCE(ccu.name, pcu.name, c.client_name) AS case_payer_name
@@ -256,6 +264,11 @@ const withComputed = (row) => {
     row.case_id != null && row.case_fee != null && Number(row.case_fee) !== Number(row.total);
   const payerStale =
     row.case_id != null && row.case_payer_name != null && row.case_payer_name !== row.bill_to_name;
+  /* เคสเปลี่ยนแพ็คเกจ/เรทหลังออกใบนี้ — เช็คทุกแบบใบ รวมใบงวดและใบรายครั้งที่ fee_stale ไม่ครอบ
+     ใบที่ซิงก์ตามเคสได้จะได้ service_key ใหม่ไปพร้อมยอด จึงไม่ขึ้นป้ายนี้ค้าง */
+  const serviceStale =
+    row.case_id != null && row.service_key != null && row.case_service_key != null &&
+    row.service_key !== row.case_service_key;
 
   /* ยอดคงเหลือและ "ยังไม่ครบ" คิดที่นี่ที่เดียว หน้าเว็บจะได้ไม่คำนวณเงินเอง
      ปัดสองตำแหน่งกันเศษทศนิยมลอย (0.1 + 0.2 ของ float) ที่ทำให้ใบจ่ายครบแล้วเหลือค้าง 0.0000001 บาท */
@@ -275,7 +288,8 @@ const withComputed = (row) => {
     is_overdue: row.status === 'issued' && row.due_date != null && row.due_date < TODAY(),
     fee_stale: feeStale,
     payer_stale: payerStale,
-    is_stale: feeStale || payerStale,
+    service_stale: serviceStale,
+    is_stale: feeStale || payerStale || serviceStale,
   };
 };
 
@@ -291,6 +305,7 @@ const CASE_PAYER_SQL = `(
   LEFT JOIN customers pcu ON pcu.customer_id = pp.customer_id
   WHERE c.case_id = i.case_id
 )`;
+const CASE_SERVICE_KEY_SQL = `(SELECT ${serviceKeySql('c')} FROM cases c WHERE c.case_id = i.case_id)`;
 
 /* เกณฑ์ "ใบไม่ตรงกับเคสแล้ว" ฉบับ SQL — ต้องตรงกับ feeStale/payerStale ใน withComputed ข้างบนเป๊ะ
    อยู่ติดกันโดยตั้งใจ: แก้กฎที่หนึ่งแล้วอีกที่ต้องแก้ตาม ถ้าวางแยกไฟล์กันวันหนึ่งจะบอกไม่ตรงกัน
@@ -306,6 +321,7 @@ const STALE_SQL = `
        AND ${CASE_FEE_SQL} IS NOT NULL
        AND ${CASE_FEE_SQL} <> i.total)
     OR (${CASE_PAYER_SQL} IS NOT NULL AND ${CASE_PAYER_SQL} <> i.bill_to_name)
+    OR (i.service_key IS NOT NULL AND ${CASE_SERVICE_KEY_SQL} <> i.service_key)
   )
 `;
 
@@ -434,6 +450,21 @@ export async function invoiceMutationResult(result, loadInvoice = findById) {
 
 // ใบแจ้งหนี้ของลูกค้ารายหนึ่งดึงผ่าน list({ customer_id }) ซึ่งมีตัวกรอง/แบ่งหน้าครบอยู่แล้ว
 // เคยมี listForCustomer แยกไว้ที่นี่แต่ไม่มีใครเรียก — ลบทิ้งแล้ว
+
+/**
+ * เคสที่ไม่มีใบแจ้งหนี้เหลืออยู่เลย (ไม่นับใบที่ยกเลิก) — ปกติระบบออกใบร่างให้ตั้งแต่เปิดเคส
+ * ที่ตกมาอยู่ตรงนี้คือใบถูกลบไป (เช่น กด "ไม่ต้อง" หลังลบ) หรือเคสเก่าก่อนมีระบบออกอัตโนมัติ
+ * เคสที่ยกเลิกไม่นับ เพราะ POST /api/invoices ไม่ให้ออกใบให้เคสที่ยกเลิกอยู่แล้ว
+ */
+export const casesWithoutInvoice = () =>
+  sql.all(
+    `SELECT c.case_id, c.title, c.client_name, c.status, c.fee
+     FROM cases c
+     WHERE c.status <> 'cancelled'
+       AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.case_id = c.case_id AND i.status <> 'cancelled')
+     ORDER BY c.case_id DESC
+     LIMIT 50`,
+  );
 
 /** ใบแจ้งหนี้ของเคสหนึ่งใบ — เคสหนึ่งออกได้ใบเดียว แต่ถ้ายกเลิกแล้วออกใหม่ได้ จึงคืนเป็นรายการ */
 export const listForCase = (caseId) =>
@@ -583,12 +614,13 @@ export function createFromCase(caseRow, input, actor, items = []) {
          (invoice_id, case_id, customer_id, issue_date, due_date,
           bill_to_name, bill_to_tax_id, bill_to_address,
           service_description, amount, discount, total, payment_method, note,
-          issued_by, issued_by_name)
+          issued_by, issued_by_name, service_key)
        VALUES
          (:invoice_id, :case_id, :customer_id, :issue_date, :due_date,
           :bill_to_name, :bill_to_tax_id, :bill_to_address,
           :service_description, :amount, :discount, :total, :payment_method, :note,
-          :issued_by, :issued_by_name)
+          :issued_by, :issued_by_name,
+          (SELECT ${serviceKeySql('c')} FROM cases c WHERE c.case_id = :case_id))
        RETURNING invoice_id`,
       { ...values, invoice_id: invoiceId },
     );
@@ -640,6 +672,7 @@ export async function syncOpenFromCase(caseRow, customer) {
          amount              = :amount,
          discount            = :discount,
          total               = GREATEST(0, :amount::double precision - :discount::double precision),
+         service_key         = (SELECT ${serviceKeySql('c')} FROM cases c WHERE c.case_id = invoices.case_id),
          updated_at          = ${NOW}
      WHERE case_id = :case_id AND status IN ${OPEN_STATUSES}
        /* ใบมัดจำ/ใบส่วนที่เหลือมียอดของงวดนั้นโดยเฉพาะ ซิงก์ทับจะกลายเป็นยอดเต็มทั้งสองใบ
@@ -664,6 +697,24 @@ export async function syncOpenFromCase(caseRow, customer) {
     },
   );
   return changed;
+}
+
+/**
+ * รับทราบว่าเคสเปลี่ยนแพ็คเกจหลังออกใบนี้ และตรวจแล้วว่าใบยังใช้ได้ตามเดิม — ปิดป้าย service_stale
+ *
+ * ใบงวด/ใบรายครั้ง/ใบที่รับเงินแล้วซิงก์ทับไม่ได้ ถ้าไม่มีทางรับทราบ ป้ายจะค้างตลอดไป
+ * แม้คนดูแลจะตัดสินใจแล้วว่าเก็บตามแพ็คเกจเดิม (เช่น ลูกค้าจ่ายแพ็คเดิมไปแล้ว ส่วนเพิ่มออกใบแยก)
+ * ไม่แตะยอด/รายการในใบ — แค่จดว่าใบนี้ถูกตรวจกับบริการชุดปัจจุบันของเคสแล้ว
+ */
+export async function acknowledgeService(invoiceId) {
+  const changed = await sql.run(
+    `UPDATE invoices
+     SET service_key = (SELECT ${serviceKeySql('c')} FROM cases c WHERE c.case_id = invoices.case_id),
+         updated_at  = ${NOW}
+     WHERE invoice_id = :id AND case_id IS NOT NULL AND status <> 'cancelled'`,
+    { id: invoiceId },
+  );
+  return changed === 1 ? findById(invoiceId) : null;
 }
 
 /** ข้อความรายการบริการบนใบ — ประกอบจากสิ่งที่เคสเลือกไว้ */
@@ -913,12 +964,12 @@ export async function setBillingPlanForTransaction(tx, invoiceId, { mode, deposi
        (invoice_id, case_id, customer_id, issue_date, due_date,
         bill_to_name, bill_to_tax_id, bill_to_address,
         service_description, amount, discount, total, payment_method, note,
-        issued_by, issued_by_name, billing_kind, parent_invoice_id)
+        issued_by, issued_by_name, billing_kind, parent_invoice_id, service_key)
      VALUES
        (:invoice_id, :case_id, :customer_id, :issue_date, :due_date,
         :bill_to_name, :bill_to_tax_id, :bill_to_address,
         :description, :amount, 0, :amount, :payment_method, :note,
-        :issued_by, :issued_by_name, 'balance', :parent)`,
+        :issued_by, :issued_by_name, 'balance', :parent, :service_key)`,
     {
       invoice_id: nextId,
       case_id: inv.case_id,
@@ -935,6 +986,8 @@ export async function setBillingPlanForTransaction(tx, invoiceId, { mode, deposi
       issued_by: actor?.employee_id ?? null,
       issued_by_name: actor?.name ?? null,
       parent: invoiceId,
+      // งวดที่เหลือออกตามบริการชุดเดียวกับใบมัดจำ ไม่ใช่ของเคสตอนนี้ — ถ้าเคสเปลี่ยนไปแล้วต้องขึ้นป้ายทั้งคู่
+      service_key: inv.service_key ?? null,
     },
   );
 

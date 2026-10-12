@@ -496,6 +496,51 @@ function changedLabels(current, values, fields) {
   return labels;
 }
 
+/* ตัวเลือกบริการที่ระบุตัวแพ็คเกจ/เรทจริง — ไม่รวม service_kind เพราะเคสเก่าที่ยังว่าง
+   ถูกเติมให้ตอนเปิดฟอร์มแก้ ทั้งที่แพ็คเกจไม่ได้เปลี่ยน (นับรวมแล้วจะเหมือนเปลี่ยนบริการทุกครั้ง) */
+const SERVICE_ID_FIELDS = ['physio_package_id', 'pkg_format_id', 'pkg_grade_id', 'pkg_staff_tier'];
+
+const serviceChanged = (current, values) =>
+  SERVICE_ID_FIELDS.some((f) => f in values && String(current?.[f] ?? '') !== String(values[f] ?? ''));
+
+/** ชื่อบริการที่อ่านรู้เรื่อง ไว้เขียนลงประวัติ — ตารางแพ็คเกจถูกแก้/ลบทีหลังได้ จึงเก็บเป็นข้อความ ณ ตอนนั้น */
+async function serviceLabel(tx, s) {
+  if (s.physio_package_id) {
+    const p = await tx.one(
+      'SELECT name, sessions FROM physio_packages WHERE physio_package_id = :id',
+      { id: s.physio_package_id },
+    );
+    return p ? `${p.name} (${p.sessions} ครั้ง)` : `แพ็คเกจกายภาพ #${s.physio_package_id}`;
+  }
+  if (s.pkg_format_id) {
+    const f = await tx.one('SELECT name FROM pkg_service_formats WHERE format_id = :id', { id: s.pkg_format_id });
+    const g = s.pkg_grade_id
+      ? await tx.one('SELECT name FROM pkg_grades WHERE grade_id = :id', { id: s.pkg_grade_id })
+      : null;
+    return [f?.name ?? `รูปแบบ #${s.pkg_format_id}`, g?.name, s.pkg_staff_tier].filter(Boolean).join(' · ');
+  }
+  return 'ไม่ระบุบริการ';
+}
+
+const bahtText = (n) => (n == null ? 'ไม่ระบุ' : `${Number(n).toLocaleString('th-TH')} บาท`);
+
+/**
+ * ค่าเดิม → ค่าใหม่ ของบริการและค่าบริการ — สองอย่างที่ต้องไล่ย้อนได้ว่าเคยขายอะไรในราคาเท่าไร
+ * ค่าจ้างพนักงานไม่ใส่ตัวเลข: ประวัติเคสเปิดให้ HR อ่านด้วย ซึ่งไม่ควรเห็นตัวเลขฝั่งต้นทุน
+ */
+async function valueChanges(tx, current, values) {
+  const out = [];
+  if (serviceChanged(current, values)) {
+    const before = await serviceLabel(tx, current);
+    const after = await serviceLabel(tx, { ...current, ...values });
+    if (before !== after) out.push(`บริการ: ${before} → ${after}`);
+  }
+  if ('fee' in values && String(current?.fee ?? '') !== String(values.fee ?? '')) {
+    out.push(`ค่าบริการ: ${bahtText(current?.fee)} → ${bahtText(values.fee)}`);
+  }
+  return out;
+}
+
 export async function update(caseId, rawInput, actor) {
   // สลับสายบริการตอนแก้เคส ต้องล้างของสายเดิมด้วย ไม่งั้นค้างเป็นเคสที่มีทั้งเรท Homecare และแพ็คเกจกายภาพบำบัด
   const input = clearUnusedKind(rawInput);
@@ -509,6 +554,12 @@ export async function update(caseId, rawInput, actor) {
     const payState = await staffPayUpdateForTransaction(tx, caseId, input);
     const { current, mode: payMode } = payState;
 
+    /* เคสที่จบแล้วเปลี่ยนแพ็คเกจย้อนหลังไม่ได้ — ค่าบริการ/ชื่อเคส/ใบแจ้งหนี้จะเปลี่ยนตาม
+       ทั้งที่งานเกิดขึ้นไปแล้วตามแพ็คเกจเดิม ต้องเปิดเคสใหม่ก่อน (กติกาเดียวกับการจับคู่/เริ่มงาน) */
+    if (['closed', 'cancelled'].includes(current.status) && serviceChanged(current, values)) {
+      throw new ApiError(409, 'เคสนี้ปิดหรือยกเลิกไปแล้ว จึงเปลี่ยนแพ็คเกจไม่ได้ — ต้องเปิดเคสใหม่ก่อน');
+    }
+
     // manager ส่ง null หรือมีการเปลี่ยนตัวเลือกบริการจริงโดยไม่ได้ส่งค่าจ้าง = ใช้ค่าจากบริการใหม่
     // note-only PATCH / ฟอร์มเต็มของ HR ที่ตัวเลือกเดิมไม่เปลี่ยน = preserve ค่าพิเศษเดิม
     if (payMode !== 'preserve') {
@@ -517,6 +568,7 @@ export async function update(caseId, rawInput, actor) {
     }
 
     const changed = changedLabels(current, values, fields);
+    const details = await valueChanges(tx, current, values);
 
     await tx.run(
       `UPDATE cases
@@ -529,7 +581,8 @@ export async function update(caseId, rawInput, actor) {
     if (changed.length > 0) {
       const shown = changed.slice(0, 8).join(', ');
       const more = changed.length > 8 ? ` และอีก ${changed.length - 8} ช่อง` : '';
-      await logEvent(tx, caseId, 'edited', `แก้ ${shown}${more}`, actor);
+      const extra = details.length > 0 ? ` — ${details.join(' · ')}` : '';
+      await logEvent(tx, caseId, 'edited', `แก้ ${shown}${more}${extra}`, actor);
     }
   });
 

@@ -9,6 +9,7 @@ import {
 } from '../labels.js';
 import LineIcon from '../components/LineIcon.jsx';
 import { useCanSeeStaffPay } from '../auth.jsx';
+import { useScrollLock } from '../lib/scrollLock.js';
 
 const TIERS = ['CG', 'NA', 'PN', 'RN'];
 const CATEGORY_LABELS = { daily: 'รายวัน', weekly: 'รายสัปดาห์', monthly: 'รายเดือน' };
@@ -39,6 +40,11 @@ const BLANK = {
   start_date: '', end_date: '', fee: '', staff_pay: '', note: '',
   assigned_to: '',
 };
+
+/* ตัวเลือกที่ระบุแพ็คเกจ/เรทจริง — ไม่รวม service_kind เพราะเคสเก่าที่ยังว่างถูกเดาให้ตอนโหลด
+   (ต้องตรงกับ SERVICE_ID_FIELDS ใน server/src/cases/repo.js) */
+const SERVICE_ID_FIELDS = ['physio_package_id', 'pkg_format_id', 'pkg_grade_id', 'pkg_staff_tier'];
+const TERMINAL_STATUSES = ['closed', 'cancelled'];
 
 // ช่องตัวเลขต้องส่งเป็น number ไม่ใช่ string ไม่งั้น zod ปฏิเสธ
 const NUMERIC = ['fee', 'staff_pay', 'patient_age', 'weight_kg', 'height_cm', 'pkg_format_id', 'pkg_grade_id',
@@ -76,6 +82,14 @@ export default function CaseFormPage() {
   // เปิดดูพนักงานทุกตำแหน่ง แทนที่จะเห็นเฉพาะระดับที่เคสนี้ต้องการ
   const [allStaff, setAllStaff] = useState(false);
   const formEl = useRef(null);
+
+  /* โหมดแก้ไข: เคสตามที่โหลดมา (ไว้เทียบว่าเปลี่ยนบริการไหม) + ใบแจ้งหนี้ของเคส (ไว้บอกว่าจะกระทบใบไหน)
+     แยกจาก initial ด้านล่าง เพราะ initial ถูกตั้งใหม่ตอนกดบันทึก ส่วนอันนี้ต้องเป็นของเดิมจริงเสมอ */
+  const [original, setOriginal] = useState(null);
+  const [caseInvoices, setCaseInvoices] = useState([]);
+  // กล่องยืนยันก่อนบันทึกการเปลี่ยนแพ็คเกจ
+  const [confirmingService, setConfirmingService] = useState(false);
+  useScrollLock(confirmingService);
 
   // ค่าตั้งต้นไว้เทียบว่าผู้ใช้แก้อะไรไปแล้วบ้าง (ใช้เตือนก่อนออกจากหน้า)
   const initial = useRef(JSON.stringify(BLANK));
@@ -188,6 +202,42 @@ export default function CaseFormPage() {
       ? currentRate.staff_pay ?? null
       : null;
   const pickedService = isPhysio ? Boolean(selectedPhysio) : Boolean(currentRate);
+
+  /* ---------- แก้เคส: เปลี่ยนแพ็คเกจจากของเดิมไหม และจะกระทบอะไรบ้าง ---------- */
+  const serviceLocked = isEdit && TERMINAL_STATUSES.includes(original?.status);
+  const serviceChanged =
+    isEdit && original != null &&
+    SERVICE_ID_FIELDS.some((f) => String(original[f] ?? '') !== String(form[f] ?? ''));
+
+  /** ชื่อบริการจากชุดตัวเลือก — ใช้ทั้งของเดิมและของใหม่ในกล่องยืนยัน */
+  function serviceText(s) {
+    if (s.physio_package_id !== '' && s.physio_package_id != null) {
+      const p = physio.find((x) => x.physio_package_id === Number(s.physio_package_id));
+      return p ? `${p.name} (${p.sessions} ครั้ง)` : `แพ็คเกจกายภาพ #${s.physio_package_id}`;
+    }
+    if (s.pkg_format_id !== '' && s.pkg_format_id != null) {
+      const f = matrix?.formats.find((x) => x.format_id === Number(s.pkg_format_id));
+      const g = matrix?.grades.find((x) => x.grade_id === Number(s.pkg_grade_id));
+      return [f?.name ?? `รูปแบบ #${s.pkg_format_id}`, s.pkg_grade_id !== '' && g?.name, s.pkg_staff_tier]
+        .filter(Boolean).join(' · ');
+    }
+    return 'ไม่ระบุบริการ';
+  }
+
+  const moneyText = (v) => (v === '' || v == null ? 'ไม่ระบุ' : formatBaht(Number(v)));
+
+  /* ใบที่ระบบจะปรับยอดให้ตามเคส — ต้องตรงกับเงื่อนไขของ syncOpenFromCase ฝั่ง server
+     ที่เหลือ (แบ่งงวด/แตกรายครั้ง/รับเงินแล้ว/ชำระแล้ว) จะไม่ถูกแตะ แต่ขึ้นป้าย "แพ็คเกจไม่ตรง" ให้ไปตรวจเอง */
+  const syncedInvoices = caseInvoices.filter(
+    (v) => (v.status === 'draft' || v.status === 'issued') && !v.has_items && !v.is_plan_part && v.paid_amount === 0,
+  );
+  const untouchedInvoices = caseInvoices.filter((v) => !syncedInvoices.includes(v));
+
+  /* ผู้รับผิดชอบหลักตำแหน่งไม่ตรงกับบริการใหม่ (เช่น CG ค้างอยู่ในเคสที่เปลี่ยนเป็นกายภาพ)
+     ไม่บล็อก — คนระดับสูงกว่าทำงานระดับต่ำกว่าได้จริง แต่ต้องบอกให้รู้ก่อนบันทึก */
+  const assignee = form.assigned_to ? staff.find((e) => e.employee_id === form.assigned_to) : null;
+  const assigneeMismatch =
+    serviceChanged && assignee && wantedPositions && !wantedPositions.includes(assignee.position);
 
   /**
    * ช่องค่าจ้างว่างอยู่ + แพ็คเกจที่เลือกมีค่าตอบแทนกำหนดไว้ -> เติมให้เอง
@@ -350,12 +400,19 @@ export default function CaseFormPage() {
         }
         setForm(filled);
         initial.current = JSON.stringify(filled);
+        setOriginal({ ...filled, status: c.status });
 
         // มีผู้ว่าจ้างผูกไว้แล้ว — โชว์เป็นลูกค้าที่เลือกอยู่ (ใช้ชื่อจาก SELECT ของเคส ไม่ต้องยิงซ้ำ)
         // ยังไม่มี = ปล่อย payer เป็น null ส่วนผู้ว่าจ้างจะโชว์ช่องค้นหาให้เพิ่มลูกค้าเจ้าของเคส
         if (c.customer_id) setPayer({ customer_id: c.customer_id, name: c.customer_name });
       })
       .catch((err) => setError(err.message));
+
+    // ไม่ได้ใบ = แค่กล่องยืนยันบอกผลกระทบต่อใบไม่ได้ ไม่ควรกันการแก้เคส
+    api
+      .listInvoices({ case_id: id, per_page: 100 })
+      .then((r) => setCaseInvoices(r.data.filter((v) => v.status !== 'cancelled')))
+      .catch(() => setCaseInvoices([]));
   }, [id, isEdit]);
 
   const isDirty = () => JSON.stringify(form) !== initial.current;
@@ -504,8 +561,19 @@ export default function CaseFormPage() {
     return patient.patient_id;
   }
 
-  async function handleSubmit(e) {
+  /* เปลี่ยนแพ็คเกจของเคสที่มีอยู่แล้ว = ค่าบริการ/ค่าจ้าง/ใบแจ้งหนี้เปลี่ยนตามทั้งชุด
+     ต้องให้เห็นก่อนว่าอะไรจะเปลี่ยนเป็นเท่าไร ไม่ใช่รู้ทีหลังจากใบที่ลูกค้าถืออยู่ */
+  function handleSubmit(e) {
     e.preventDefault();
+    if (serviceChanged) {
+      setConfirmingService(true);
+      return;
+    }
+    save();
+  }
+
+  async function save() {
+    setConfirmingService(false);
     setSaving(true);
     setError(null);
     try {
@@ -627,8 +695,14 @@ export default function CaseFormPage() {
             </select>
           {fieldError('case_type')}
           </label>
+          {serviceLocked && (
+            <p className="form-hint muted span-2">
+              <LineIcon name="alert" className="text-ico" />เคสนี้ปิดหรือยกเลิกไปแล้ว จึงเปลี่ยนแพ็คเกจไม่ได้
+              — ต้องเปิดเคสใหม่ก่อน (แก้ข้อมูลอื่นได้ตามปกติ)
+            </p>
+          )}
           <label>ประเภทบริการ
-            <select value={form.service_kind} onChange={(e) => changeKind(e.target.value)}>
+            <select value={form.service_kind} disabled={serviceLocked} onChange={(e) => changeKind(e.target.value)}>
               <option value="">— ไม่ระบุ —</option>
               {Object.entries(SERVICE_KIND_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
             </select>
@@ -636,7 +710,7 @@ export default function CaseFormPage() {
 
           {isHomecare && (
           <label>รูปแบบบริการ
-            <select value={form.pkg_format_id} onChange={(e) => applySelection({ pkg_format_id: e.target.value })}>
+            <select value={form.pkg_format_id} disabled={serviceLocked} onChange={(e) => applySelection({ pkg_format_id: e.target.value })}>
               <option value="">— ไม่ระบุ —</option>
               {['daily', 'weekly', 'monthly'].map((cat) => {
                 const opts = matrix?.formats.filter((f) => f.category === cat) ?? [];
@@ -653,7 +727,7 @@ export default function CaseFormPage() {
 
           {isPhysio && (
             <label>แพ็คเกจกายภาพบำบัด
-              <select value={form.physio_package_id} onChange={(e) => applyPhysio(e.target.value)}>
+              <select value={form.physio_package_id} disabled={serviceLocked} onChange={(e) => applyPhysio(e.target.value)}>
                 <option value="">— เลือกแพ็คเกจ —</option>
                 {physioOptions.map((p) => (
                   <option key={p.physio_package_id} value={p.physio_package_id}>
@@ -669,7 +743,7 @@ export default function CaseFormPage() {
 
           {isHomecare && needGrade && (
             <label>เกรด
-              <select value={form.pkg_grade_id} onChange={(e) => applySelection({ pkg_grade_id: e.target.value })}>
+              <select value={form.pkg_grade_id} disabled={serviceLocked} onChange={(e) => applySelection({ pkg_grade_id: e.target.value })}>
                 <option value="">— เลือกเกรด —</option>
                 {matrix.grades.map((g) => <option key={g.grade_id} value={g.grade_id}>{g.name}</option>)}
               </select>
@@ -680,7 +754,7 @@ export default function CaseFormPage() {
             <select
               value={form.pkg_staff_tier}
               onChange={(e) => applySelection({ pkg_staff_tier: e.target.value })}
-              disabled={!selectedFormat || (needGrade && !selGradeId)}
+              disabled={serviceLocked || !selectedFormat || (needGrade && !selGradeId)}
             >
               <option value="">— เลือกระดับ —</option>
               {TIERS.map((t) => {
@@ -717,6 +791,20 @@ export default function CaseFormPage() {
               {seePay && selectedPhysio.staff_pay != null && ` · ค่าตอบแทนพนักงาน ${formatBaht(selectedPhysio.staff_pay)}`}
               {seePay && selectedPhysio.margin != null && ` · ส่วนต่าง ${selectedPhysio.margin}%`}
               {' '}— เติมลงช่องด้านล่างให้แล้ว แก้ทับได้
+            </p>
+          )}
+          {serviceChanged && (
+            <p className="notice span-2">
+              <LineIcon name="alert" className="text-ico" />เปลี่ยนบริการจาก <strong>{serviceText(original)}</strong>
+              {' '}เป็น <strong>{serviceText(form)}</strong> — ค่าบริการ{seePay ? ' ค่าจ้างพนักงาน' : ''}และใบแจ้งหนี้จะเปลี่ยนตาม
+              {' '}(จะให้ตรวจอีกครั้งก่อนบันทึก)
+              {assigneeMismatch && (
+                <>
+                  <br />ผู้รับผิดชอบปัจจุบัน <strong>{assignee.first_name} {assignee.last_name}</strong>
+                  {' '}({POSITION_LABELS[assignee.position]}) ไม่ตรงกับตำแหน่งที่บริการใหม่ต้องการ
+                  {' '}({wantedPositions.map((p) => POSITION_LABELS[p]).join('/')}) — เปลี่ยนผู้รับผิดชอบได้ที่หน้าเคสหลังบันทึก
+                </>
+              )}
             </p>
           )}
           <label>วันเริ่ม<input type="date" {...field('start_date')} />{fieldError('start_date')}</label>
@@ -1082,6 +1170,57 @@ export default function CaseFormPage() {
           <Link className="btn" to="/cases" onClick={confirmLeave}>ยกเลิก</Link>
         </div>
       </form>
+
+      {confirmingService && original && (
+        <div className="modal-backdrop modal-stacked" onClick={() => setConfirmingService(false)}>
+          <div
+            className="modal modal-narrow confirm-box"
+            role="alertdialog"
+            aria-modal="true"
+            aria-label="ยืนยันการเปลี่ยนแพ็คเกจ"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="modal-body confirm-body">
+              <h2>เปลี่ยนแพ็คเกจของเคส {id}?</h2>
+              <ul className="change-list">
+                <li>บริการ: {serviceText(original)} → <strong>{serviceText(form)}</strong></li>
+                <li>ค่าบริการ: {moneyText(original.fee)} → <strong>{moneyText(form.fee)}</strong></li>
+                {seePay && (
+                  <li>ค่าจ้างพนักงาน: {moneyText(original.staff_pay)} → <strong>{moneyText(form.staff_pay)}</strong></li>
+                )}
+              </ul>
+              {syncedInvoices.length > 0 && (
+                <p className="muted">
+                  ใบแจ้งหนี้ {syncedInvoices.map((v) => v.invoice_id).join(', ')} จะถูกปรับยอดตามค่าบริการใหม่
+                  {syncedInvoices.some((v) => v.status === 'issued') &&
+                    ' — มีใบที่ออกให้ลูกค้าไปแล้ว ต้องส่งใบใหม่ให้ลูกค้าด้วย'}
+                </p>
+              )}
+              {untouchedInvoices.length > 0 && (
+                <p className="muted">
+                  ใบ {untouchedInvoices.map((v) => v.invoice_id).join(', ')} (แบ่งงวด/รายครั้ง/รับเงินแล้ว)
+                  ระบบจะไม่แก้ยอดให้ แต่จะขึ้นป้าย "แพ็คเกจไม่ตรง" ให้ไปตรวจเอง
+                </p>
+              )}
+              {assigneeMismatch && (
+                <p className="muted">
+                  ผู้รับผิดชอบ {assignee.first_name} {assignee.last_name} ({POSITION_LABELS[assignee.position]})
+                  ไม่ตรงกับตำแหน่งที่บริการใหม่ต้องการ
+                </p>
+              )}
+              <p className="muted">กะที่นัดไว้แล้วไม่เปลี่ยนตาม — ถ้าจำนวนครั้งของแพ็คเกจใหม่ต่างจากเดิม ให้เพิ่ม/ยกเลิกกะเองที่หน้าเคส</p>
+            </div>
+            <footer className="modal-foot">
+              <button type="button" className="btn" autoFocus onClick={() => setConfirmingService(false)}>
+                กลับไปแก้
+              </button>
+              <button type="button" className="btn primary" disabled={saving} onClick={save}>
+                ยืนยันเปลี่ยนแพ็คเกจ
+              </button>
+            </footer>
+          </div>
+        </div>
+      )}
     </>
   );
 }
