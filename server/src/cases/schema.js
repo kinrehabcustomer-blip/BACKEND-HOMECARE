@@ -40,6 +40,8 @@ export const createCaseSchema = z.object({
   pkg_grade_id: z.number().int().optional().nullable(), // ว่างได้ถ้ารูปแบบไม่อิงเกรด
   pkg_format_id: z.number().int().optional().nullable(),
   pkg_staff_tier: z.enum(['CG', 'NA', 'PN', 'RN']).optional().nullable(),
+  // ขอพนักงานที่สื่อสารภาษาอังกฤษได้ — ค่าภาษาถูกบวกเข้า fee ที่หน้าเว็บแล้ว ธงนี้บอกว่า fee รวมค่าภาษาไว้
+  pkg_english: z.boolean().optional(),
 
   // [physio] แพ็คเกจกายภาพบำบัดที่ซื้อ — ระบบเติมค่าจ้างจากราคาพิเศษให้
   physio_package_id: z.number().int().optional().nullable(),

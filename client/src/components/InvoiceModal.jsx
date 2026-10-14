@@ -9,6 +9,7 @@ import { INVOICE_STATUS_LABELS, amountText, bahtText, docDate, todayTH } from '.
 import { ISSUER, printStamp } from '../lib/issuer.js';
 import LineIcon from './LineIcon.jsx';
 import ConfirmButton from './ConfirmButton.jsx';
+import { ACCEPTED, compressImage, formatFileSize } from '../lib/image.js';
 
 const FOCUSABLE = 'a[href], button:not(:disabled), input, select, textarea, [tabindex]:not([tabindex="-1"])';
 
@@ -278,6 +279,183 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
   const depositValid = depositValue > 0 && depositValue < planTotal;
 
   const pay = item ? paidBy(item.payments, item.payment_method, item.total, item.status) : {};
+
+  /* เนื้อในของเอกสาร — ใช้สองที่: ตัวที่เห็นในกล่องบนจอ กับสำเนาที่พิมพ์ (.print-sheet)
+     สร้างครั้งเดียวแล้วใช้ซ้ำ สองที่จึงไม่มีวันพิมพ์ออกมาไม่ตรงกับที่เห็น */
+  const docBody = item && (
+    <>
+      <p className="inv-printed">วันที่พิมพ์: {printStamp()}</p>
+
+      <div className="inv-header">
+        <div className="inv-logo">
+          <img src={ISSUER.logo} alt={ISSUER.name} />
+        </div>
+
+        <h3 className="inv-title">
+          {isReceipt ? 'ใบเสร็จรับเงิน /Receipt' : 'ใบแจ้งหนี้ /Invoice'}
+        </h3>
+        <p className="inv-copy">สำเนา</p>
+
+        <p className="inv-org">{ISSUER.name}</p>
+        <p className="inv-org-line">{ISSUER.address}</p>
+        <p className="inv-org-line">Tel. {ISSUER.tel}</p>
+        <hr className="inv-rule" />
+      </div>
+
+      <div className="inv-parties">
+        <div>
+          <p>รหัสลูกค้า : <span className="mono">{item.customer_id ?? '—'}</span></p>
+          <p>คุณ {item.bill_to_name}</p>
+          {item.bill_to_tax_id && (
+            <p>เลขผู้เสียภาษี : <span className="mono">{item.bill_to_tax_id}</span></p>
+          )}
+        </div>
+        <div className="inv-parties-right">
+          <p>Bill No: <strong className="mono">{item.invoice_id}</strong></p>
+          <p>วันที่ /Date : {docDate(item.issue_date)}</p>
+          {item.due_date && <p>ครบกำหนด /Due : {docDate(item.due_date)}</p>}
+        </div>
+      </div>
+
+      <table className="inv-table">
+        <colgroup>
+          <col style={{ width: '8%' }} />
+          <col />
+          <col style={{ width: '14%' }} />
+          <col style={{ width: '20%' }} />
+        </colgroup>
+        <thead>
+          <tr>
+            <th>No.</th>
+            <th>รายการ (Description)</th>
+            <th>จำนวน (Qty)</th>
+            <th>จำนวนเงิน (Amount)</th>
+          </tr>
+        </thead>
+        {/* ใบที่แตกเป็นรายครั้ง (ออกตามกะที่ไปจริง) พิมพ์ทีละบรรทัด
+            ใบแพ็คเกจปกติไม่มี items จึงยังเป็นบรรทัดเดียวเหมือนเดิม */}
+        <tbody>
+          {item.items?.length > 0 ? (
+            item.items.map((line) => (
+              <tr key={line.seq}>
+                <td className="inv-c">{line.seq}</td>
+                <td>{line.description}</td>
+                <td className="inv-c">{line.quantity}</td>
+                <td className="inv-r">{amountText(line.amount)}</td>
+              </tr>
+            ))
+          ) : (
+            <tr>
+              <td className="inv-c">1</td>
+              <td>{item.service_description}</td>
+              <td className="inv-c">1</td>
+              <td className="inv-r">{amountText(item.amount)}</td>
+            </tr>
+          )}
+        </tbody>
+        <tfoot>
+          <tr>
+            <td colSpan={3} className="inv-r">ยอดรวมทั้งสิ้น/Total</td>
+            <td className="inv-r">{amountText(item.amount)}</td>
+          </tr>
+          <tr>
+            <td colSpan={3} className="inv-r">ส่วนลดที่ได้รับ/Discount</td>
+            <td className="inv-r">{amountText(item.discount)}</td>
+          </tr>
+          <tr>
+            <td colSpan={3} className="inv-r">รวมเงิน(หลังหักส่วนลด)/Sub Total</td>
+            <td className="inv-r">{amountText(item.total)}</td>
+          </tr>
+          <tr>
+            <td colSpan={3} className="inv-r">
+              {isReceipt ? 'จ่ายชำระทั้งสิ้น/Paid' : 'ยอดที่ต้องชำระ/Amount Due'}
+            </td>
+            <td className="inv-r"><strong>{amountText(item.total)}</strong></td>
+          </tr>
+          {/* ใบที่รับเงินมาบางส่วนแล้ว ต้องอ่านออกจากตัวเอกสารว่ารับไปเท่าไหร่และค้างเท่าไหร่
+              ไม่งั้นลูกค้าถือใบที่เขียนยอดเต็มไว้ ทั้งที่จ่ายมัดจำไปแล้ว */}
+          {item.paid_amount > 0 && item.balance > 0 && (
+            <>
+              <tr>
+                <td colSpan={3} className="inv-r">รับชำระแล้ว/Paid</td>
+                <td className="inv-r">{amountText(item.paid_amount)}</td>
+              </tr>
+              <tr>
+                <td colSpan={3} className="inv-r">คงเหลือ/Balance</td>
+                <td className="inv-r"><strong>{amountText(item.balance)}</strong></td>
+              </tr>
+            </>
+          )}
+          <tr>
+            <td colSpan={4} className="inv-r inv-words">
+              ( {bahtText(item.balance > 0 && item.paid_amount > 0 ? item.balance : item.total)} )
+            </td>
+          </tr>
+        </tfoot>
+      </table>
+
+      <p className="inv-methods">
+        <span>เงินสด Cash={pay.cash}</span>
+        <span>บัตรเครดิต/Credit Card={pay.credit}</span>
+        <span>โอน/Transfer={pay.transfer}</span>
+      </p>
+
+      {isReceipt && <p className="inv-line">ได้รับเงินจาก (Received from) คุณ {item.bill_to_name}</p>}
+      <p className="inv-line">หมายเหตุ : {item.note ?? ''}</p>
+
+      <div className="inv-signs">
+        <div className="inv-sign">
+          <span className="inv-sign-role">ผู้จ่ายเงิน</span>
+          <span className="inv-sign-dots">(...................................................)</span>
+          <span className="inv-sign-name">( คุณ {item.bill_to_name} )</span>
+        </div>
+        {/* ผู้ลงนาม = คนที่กำลังสั่งพิมพ์ (บัญชีที่ล็อกอินอยู่) เพราะเป็นคนยื่นเอกสารให้ลูกค้าจริง
+            ส่วนคนที่ออกใบ/รับเงินยังถูกบันทึกไว้ใน DB (issued_by/paid_by) สำหรับทำรายงาน */}
+        <div className="inv-sign">
+          <span className="inv-sign-role">ผู้ออกเอกสาร / ผู้รับชำระเงิน</span>
+          <span className="inv-sign-dots">(...................................................)</span>
+          <span className="inv-sign-name">( {printerName} )</span>
+        </div>
+      </div>
+    </>
+  );
+
+  /*
+   * สำเนาสำหรับพิมพ์ — portal ไปเป็นลูกตรงของ <body> แล้ว CSS ตอนพิมพ์ซ่อนทั้งแอป (display: none) เหลือแต่ตัวนี้
+   *
+   * ทำไมไม่พิมพ์ตัวในกล่องตรงๆ: ตัวในกล่องต้องถูกยกขึ้นหัวกระดาษด้วย position: absolute
+   * (ของที่เหลือในหน้าถูกซ่อนด้วย visibility ซึ่งยังกินที่) แล้วเบราว์เซอร์ไม่ตัดหน้าให้ของที่ลอยอยู่แบบนั้น
+   * ใบหนึ่งหน้าพอไหว แต่พอมีสลิปแนบต่อท้าย สลิปถูกอัดลงหน้าเดียวกับลายเซ็นแล้วโดนตัดขาดที่ขอบกระดาษ
+   * ตัวนี้อยู่ใน flow ปกติของหน้า จึงขึ้นแผ่นใหม่ได้จริงทุกเบราว์เซอร์
+   */
+  const printSheet =
+    item && !item.needs_plan &&
+    createPortal(
+      <div className="print-sheet" aria-hidden="true">
+        <div className="invoice-doc">
+          {docBody}
+
+          {/* สลิปโอนเงินแนบท้ายเอกสาร — มีเฉพาะในสำเนาที่พิมพ์ แต่ละใบขึ้นแผ่นใหม่ต่อจากตัวใบ
+              บนจอไม่ต้องเห็นซ้ำ ส่วน "สลิปโอนเงิน" ด้านบนโชว์อยู่แล้ว (รูปเป็น URL เดียวกัน จึงโหลดค้างไว้แล้วตอนกดพิมพ์) */}
+          {item.slips?.length > 0 && (
+            <div className="inv-slips">
+              {/* หนึ่งสลิปต่อหนึ่งแผ่น — หัวข้ออยู่ในแต่ละแผ่น หยิบแผ่นไหนขึ้นมาก็รู้ว่าเป็นของใบไหน */}
+              {item.slips.map((slip, i) => (
+                <figure className="inv-slip" key={slip.slip_id}>
+                  <p className="inv-slips-title">
+                    เอกสารแนบ: หลักฐานการโอนเงิน (Payment slip) — {item.invoice_id}
+                    {item.slips.length > 1 && ` · ${i + 1}/${item.slips.length}`}
+                  </p>
+                  <img src={api.invoiceSlipUrl(item.invoice_id, slip.slip_id)} alt={`สลิป ${i + 1}`} />
+                  <figcaption>แนบเมื่อ {docDate(slip.created_at.slice(0, 10))}</figcaption>
+                </figure>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>,
+      document.body,
+    );
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -561,6 +739,61 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                       ))}
                     </ul>
                   )}
+
+                  {/* สลิปโอนเงินของลูกค้า — หลักฐานของเงินที่รับ จึงแนบได้เมื่อใบรับเงินมาแล้วเท่านั้น */}
+                  {Number(item.paid_amount) > 0 && (
+                    <div className="slip-block">
+                      <span className="field-label">สลิปโอนเงิน</span>
+                      <div className="slip-list">
+                        {item.slips?.map((slip) => (
+                          <figure className="slip" key={slip.slip_id}>
+                            <a
+                              className="slip-thumb"
+                              href={api.invoiceSlipUrl(item.invoice_id, slip.slip_id)}
+                              target="_blank"
+                              rel="noreferrer"
+                              title="กดเพื่อดูรูปเต็ม"
+                            >
+                              <img src={api.invoiceSlipUrl(item.invoice_id, slip.slip_id)} alt={`สลิป #${slip.slip_id}`} />
+                            </a>
+                            <figcaption className="muted">
+                              {docDate(slip.created_at.slice(0, 10))} · {formatFileSize(slip.image_size)}
+                              {slip.uploaded_by_name && <><br />แนบโดย {slip.uploaded_by_name}</>}
+                              <br />
+                              <ConfirmButton
+                                className="inline-link"
+                                disabled={busy}
+                                title="ลบสลิปนี้?"
+                                detail="ลบแล้วกู้คืนไม่ได้ — ยอดรับชำระของใบไม่เปลี่ยน"
+                                confirmLabel="ลบสลิป"
+                                onConfirm={() => run(() => api.deleteInvoiceSlip(item.invoice_id, slip.slip_id))}
+                              >
+                                ลบ
+                              </ConfirmButton>
+                            </figcaption>
+                          </figure>
+                        ))}
+                        <label className={`slip-thumb empty${busy ? ' is-busy' : ''}`} title="แนบรูปสลิปโอนเงิน">
+                          <span>{busy ? 'กำลังแนบ…' : '+ แนบสลิป'}</span>
+                          <input
+                            type="file"
+                            accept={ACCEPTED}
+                            hidden
+                            disabled={busy}
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              e.target.value = ''; // ล้างไว้ เลือกไฟล์เดิมซ้ำได้ (เช่น แนบพลาดแล้วลองใหม่)
+                              if (!file) return;
+                              run(async () => {
+                                await api.addInvoiceSlip(item.invoice_id, await compressImage(file));
+                                toast('แนบสลิปแล้ว');
+                              });
+                            }}
+                          />
+                        </label>
+                      </div>
+                    </div>
+                  )}
                 </section>
               )}
 
@@ -642,141 +875,9 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                 </section>
               )}
 
-              {/* เอกสารจริงที่จะถูกพิมพ์ — ตอนสั่งพิมพ์ CSS จะซ่อนทุกอย่างนอกกล่องนี้ */}
+              {/* ตัวเอกสารบนจอ (ดูก่อนพิมพ์) — ตอนสั่งพิมพ์ใช้สำเนาใน .print-sheet ด้านล่างแทน */}
               <div className={`invoice-doc ${item.needs_plan ? 'is-hidden' : ''}`}>
-                <p className="inv-printed">วันที่พิมพ์: {printStamp()}</p>
-
-                <div className="inv-header">
-                  <div className="inv-logo">
-                    <img src={ISSUER.logo} alt={ISSUER.name} />
-                  </div>
-
-                  <h3 className="inv-title">
-                    {isReceipt ? 'ใบเสร็จรับเงิน /Receipt' : 'ใบแจ้งหนี้ /Invoice'}
-                  </h3>
-                  <p className="inv-copy">สำเนา</p>
-
-                  <p className="inv-org">{ISSUER.name}</p>
-                  <p className="inv-org-line">{ISSUER.address}</p>
-                  <p className="inv-org-line">Tel. {ISSUER.tel}</p>
-                  <hr className="inv-rule" />
-                </div>
-
-                <div className="inv-parties">
-                  <div>
-                    <p>รหัสลูกค้า : <span className="mono">{item.customer_id ?? '—'}</span></p>
-                    <p>คุณ {item.bill_to_name}</p>
-                    {item.bill_to_tax_id && (
-                      <p>เลขผู้เสียภาษี : <span className="mono">{item.bill_to_tax_id}</span></p>
-                    )}
-                  </div>
-                  <div className="inv-parties-right">
-                    <p>Bill No: <strong className="mono">{item.invoice_id}</strong></p>
-                    <p>วันที่ /Date : {docDate(item.issue_date)}</p>
-                    {item.due_date && <p>ครบกำหนด /Due : {docDate(item.due_date)}</p>}
-                  </div>
-                </div>
-
-                <table className="inv-table">
-                  <colgroup>
-                    <col style={{ width: '8%' }} />
-                    <col />
-                    <col style={{ width: '14%' }} />
-                    <col style={{ width: '20%' }} />
-                  </colgroup>
-                  <thead>
-                    <tr>
-                      <th>No.</th>
-                      <th>รายการ (Description)</th>
-                      <th>จำนวน (Qty)</th>
-                      <th>จำนวนเงิน (Amount)</th>
-                    </tr>
-                  </thead>
-                  {/* ใบที่แตกเป็นรายครั้ง (ออกตามกะที่ไปจริง) พิมพ์ทีละบรรทัด
-                      ใบแพ็คเกจปกติไม่มี items จึงยังเป็นบรรทัดเดียวเหมือนเดิม */}
-                  <tbody>
-                    {item.items?.length > 0 ? (
-                      item.items.map((line) => (
-                        <tr key={line.seq}>
-                          <td className="inv-c">{line.seq}</td>
-                          <td>{line.description}</td>
-                          <td className="inv-c">{line.quantity}</td>
-                          <td className="inv-r">{amountText(line.amount)}</td>
-                        </tr>
-                      ))
-                    ) : (
-                      <tr>
-                        <td className="inv-c">1</td>
-                        <td>{item.service_description}</td>
-                        <td className="inv-c">1</td>
-                        <td className="inv-r">{amountText(item.amount)}</td>
-                      </tr>
-                    )}
-                  </tbody>
-                  <tfoot>
-                    <tr>
-                      <td colSpan={3} className="inv-r">ยอดรวมทั้งสิ้น/Total</td>
-                      <td className="inv-r">{amountText(item.amount)}</td>
-                    </tr>
-                    <tr>
-                      <td colSpan={3} className="inv-r">ส่วนลดที่ได้รับ/Discount</td>
-                      <td className="inv-r">{amountText(item.discount)}</td>
-                    </tr>
-                    <tr>
-                      <td colSpan={3} className="inv-r">รวมเงิน(หลังหักส่วนลด)/Sub Total</td>
-                      <td className="inv-r">{amountText(item.total)}</td>
-                    </tr>
-                    <tr>
-                      <td colSpan={3} className="inv-r">
-                        {isReceipt ? 'จ่ายชำระทั้งสิ้น/Paid' : 'ยอดที่ต้องชำระ/Amount Due'}
-                      </td>
-                      <td className="inv-r"><strong>{amountText(item.total)}</strong></td>
-                    </tr>
-                    {/* ใบที่รับเงินมาบางส่วนแล้ว ต้องอ่านออกจากตัวเอกสารว่ารับไปเท่าไหร่และค้างเท่าไหร่
-                        ไม่งั้นลูกค้าถือใบที่เขียนยอดเต็มไว้ ทั้งที่จ่ายมัดจำไปแล้ว */}
-                    {item.paid_amount > 0 && item.balance > 0 && (
-                      <>
-                        <tr>
-                          <td colSpan={3} className="inv-r">รับชำระแล้ว/Paid</td>
-                          <td className="inv-r">{amountText(item.paid_amount)}</td>
-                        </tr>
-                        <tr>
-                          <td colSpan={3} className="inv-r">คงเหลือ/Balance</td>
-                          <td className="inv-r"><strong>{amountText(item.balance)}</strong></td>
-                        </tr>
-                      </>
-                    )}
-                    <tr>
-                      <td colSpan={4} className="inv-r inv-words">
-                        ( {bahtText(item.balance > 0 && item.paid_amount > 0 ? item.balance : item.total)} )
-                      </td>
-                    </tr>
-                  </tfoot>
-                </table>
-
-                <p className="inv-methods">
-                  <span>เงินสด Cash={pay.cash}</span>
-                  <span>บัตรเครดิต/Credit Card={pay.credit}</span>
-                  <span>โอน/Transfer={pay.transfer}</span>
-                </p>
-
-                {isReceipt && <p className="inv-line">ได้รับเงินจาก (Received from) คุณ {item.bill_to_name}</p>}
-                <p className="inv-line">หมายเหตุ : {item.note ?? ''}</p>
-
-                <div className="inv-signs">
-                  <div className="inv-sign">
-                    <span className="inv-sign-role">ผู้จ่ายเงิน</span>
-                    <span className="inv-sign-dots">(...................................................)</span>
-                    <span className="inv-sign-name">( คุณ {item.bill_to_name} )</span>
-                  </div>
-                  {/* ผู้ลงนาม = คนที่กำลังสั่งพิมพ์ (บัญชีที่ล็อกอินอยู่) เพราะเป็นคนยื่นเอกสารให้ลูกค้าจริง
-                      ส่วนคนที่ออกใบ/รับเงินยังถูกบันทึกไว้ใน DB (issued_by/paid_by) สำหรับทำรายงาน */}
-                  <div className="inv-sign">
-                    <span className="inv-sign-role">ผู้ออกเอกสาร / ผู้รับชำระเงิน</span>
-                    <span className="inv-sign-dots">(...................................................)</span>
-                    <span className="inv-sign-name">( {printerName} )</span>
-                  </div>
-                </div>
+                {docBody}
               </div>
             </div>
 
@@ -890,6 +991,8 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
           </>
         )}
       </div>
+
+      {printSheet}
 
       {/* portal ออกไปที่ body เหมือน ConfirmButton — บนจอแคบ .modal มี transform กล่องจะโผล่ผิดที่
           Esc ระหว่างนี้ = ปิด popup ทั้งชุด ซึ่งเท่ากับตอบ "ไม่ออกใบใหม่" อยู่แล้ว */}

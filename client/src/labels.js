@@ -113,6 +113,12 @@ export const SERVICE_KIND_LABELS = {
   physio: 'กายภาพบำบัด',
 };
 
+/**
+ * ค่าภาษา (อังกฤษ) ของ Homecare — บวกเพิ่มจากราคาในตารางเรท ทุกแพ็คเกจ ตามหมวดของรูปแบบบริการ
+ * หมวดที่ไม่มีในนี้ (รายสัปดาห์) = ไม่มีตัวเลือกค่าภาษา
+ */
+export const ENGLISH_SURCHARGE = { daily: 500, monthly: 10000 };
+
 /** สถานะกะของพนักงานภาคสนาม (คำนวณตอนอ่านจากฝั่ง server — ดู withVisitState) */
 export const VISIT_STATE_LABELS = {
   scheduled: 'รอเช็คอิน',

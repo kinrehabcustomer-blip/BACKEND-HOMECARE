@@ -12,7 +12,9 @@ import {
   listQuerySchema,
   revenueQuerySchema,
   INVOICE_STATUSES,
+  slipSchema,
 } from './schema.js';
+import { decodeImage } from '../employees/schema.js';
 import { ApiError, asyncRoute, notFound } from '../lib/errors.js';
 import { requireManager } from '../lib/auth.js';
 
@@ -364,6 +366,53 @@ invoicesRouter.post(
     if (result.reason === 'invalid_amount') throw new ApiError(400, 'จำนวนเงินที่รับต้องมากกว่า 0');
 
     res.json(result);
+  }),
+);
+
+/**
+ * แนบสลิปโอนเงินของลูกค้า — แนบได้เฉพาะใบที่รับเงินมาแล้ว (ชำระครบหรือรับไปบางงวด)
+ * สลิปคือหลักฐานของเงินที่รับ ใบที่ยังไม่มีเงินเข้าเลยไม่มีอะไรให้เป็นหลักฐาน
+ * ใบที่ยกเลิกไปทีหลังยังแนบได้ — เงินที่รับมาแล้วยังเป็นเรื่องจริง ต้องมีหลักฐานไว้ตอนคืนเงิน
+ */
+invoicesRouter.post(
+  '/:id/slips',
+  asyncRoute(async (req, res) => {
+    if (!(Number(req.invoice.paid_amount) > 0)) {
+      throw new ApiError(409, 'ใบนี้ยังไม่ได้รับชำระ — บันทึกรับชำระก่อนแล้วค่อยแนบสลิป');
+    }
+    const { image } = slipSchema.parse(req.body ?? {});
+    let decoded;
+    try {
+      decoded = decodeImage(image);
+    } catch (err) {
+      throw new ApiError(400, err.message);
+    }
+    await repo.addSlip(req.params.id, decoded, req.user);
+    res.status(201).json(await repo.findById(req.params.id));
+  }),
+);
+
+/** ส่งรูปสลิปออกไปตรงๆ — แท็ก <img> เรียกเส้นนี้ (คุกกี้ session ถูกส่งไปด้วยอัตโนมัติ) */
+invoicesRouter.get(
+  '/:id/slips/:slipId/image',
+  asyncRoute(async (req, res, next) => {
+    const slipId = Number(req.params.slipId);
+    const row = Number.isInteger(slipId) ? await repo.findSlipImage(req.params.id, slipId) : null;
+    if (!row) return next(notFound('ไม่พบสลิปนี้'));
+    res.setHeader('Content-Type', row.image_mime);
+    // ข้อมูลการเงินของลูกค้า — แคชได้เฉพาะเครื่องผู้ใช้ (private) · สลิปไม่ถูกแก้ทับ มีแต่ลบ
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    res.send(row.image_data);
+  }),
+);
+
+invoicesRouter.delete(
+  '/:id/slips/:slipId',
+  asyncRoute(async (req, res, next) => {
+    const slipId = Number(req.params.slipId);
+    const removed = Number.isInteger(slipId) && (await repo.removeSlip(req.params.id, slipId));
+    if (!removed) return next(notFound('ไม่พบสลิปนี้'));
+    res.json(await repo.findById(req.params.id));
   }),
 );
 

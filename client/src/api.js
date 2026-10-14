@@ -393,6 +393,11 @@ export const api = {
   payInvoice: (id, body) => request(`/invoices/${id}/pay`, { method: 'POST', body }),
   cancelInvoice: (id) => request(`/invoices/${id}/cancel`, { method: 'POST' }),
   deleteInvoice: (id) => request(`/invoices/${id}`, { method: 'DELETE' }),
+  /** สลิปโอนเงินของลูกค้า — image เป็น data URL ที่ย่อแล้ว (compressImage) · คืนใบที่อัปเดตแล้ว */
+  addInvoiceSlip: (id, image) => request(`/invoices/${id}/slips`, { method: 'POST', body: { image } }),
+  deleteInvoiceSlip: (id, slipId) => request(`/invoices/${id}/slips/${slipId}`, { method: 'DELETE' }),
+  /** URL รูปสลิป — ใส่ตรงๆ ใน <img src> ได้ (เบราว์เซอร์แนบคุกกี้ session ไปเอง) */
+  invoiceSlipUrl: (id, slipId) => `/api/invoices/${id}/slips/${slipId}/image`,
 
   // ---------- รอบจ่ายค่าตอบแทนพนักงาน ----------
   /** ใครจะได้เท่าไหร่ถ้าปิดรอบที่วันนี้ — ดูก่อนกดเปิดรอบจริง */

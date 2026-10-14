@@ -17,6 +17,7 @@ const COLUMNS = [
   'pkg_grade_id',   // [homecare] เกรดการดูแล (ว่างได้ถ้ารูปแบบไม่อิงเกรด เช่น รายวัน/สัปดาห์)
   'pkg_format_id',  // [homecare] รูปแบบบริการ
   'pkg_staff_tier', // [homecare] ระดับพนักงาน CG/NA/PN
+  'pkg_english',    // [homecare] พนักงานสื่อสารภาษาอังกฤษ (fee รวมค่าภาษาแล้ว)
   'physio_package_id', // [physio] แพ็คเกจกายภาพบำบัดที่ซื้อ
 
   // รายละเอียดผู้ป่วย
@@ -265,7 +266,7 @@ export async function hasFieldAccess(employeeId, caseId) {
 function clearUnusedKind(input) {
   if (!('service_kind' in input)) return input;
 
-  const HOMECARE = { pkg_grade_id: null, pkg_format_id: null, pkg_staff_tier: null };
+  const HOMECARE = { pkg_grade_id: null, pkg_format_id: null, pkg_staff_tier: null, pkg_english: false };
   if (input.service_kind === 'physio') return { ...input, ...HOMECARE };
   if (input.service_kind === 'homecare') return { ...input, physio_package_id: null };
   return { ...input, ...HOMECARE, physio_package_id: null }; // ไม่ระบุสาย = ล้างทั้งคู่
@@ -435,6 +436,7 @@ export function create(rawInput, actor) {
     const caseId = await nextCaseId(tx);
     const values = { case_id: caseId };
     for (const col of COLUMNS) values[col] = input[col] ?? null;
+    values.pkg_english = input.pkg_english ?? false; // คอลัมน์ NOT NULL — ไม่ส่งมา = ไม่ได้ขอภาษาอังกฤษ
 
     // ไม่ได้ส่งค่าจ้างมา = ใช้ของแพ็คเกจ · ส่งตัวเลขมาเอง (รวม 0) = เคารพตามนั้น
     if (values.staff_pay == null) values.staff_pay = await payFromService(input, tx);
@@ -471,7 +473,7 @@ export function create(rawInput, actor) {
 const FIELD_LABELS = {
   title: 'ชื่อเคส', case_type: 'ประเภทเคส', customer_id: 'ผู้ว่าจ้าง', patient_id: 'ผู้รับการดูแล',
   service_kind: 'สายบริการ', pkg_grade_id: 'เกรด', pkg_format_id: 'รูปแบบบริการ',
-  pkg_staff_tier: 'ระดับพนักงาน', physio_package_id: 'แพ็คเกจกายภาพบำบัด',
+  pkg_staff_tier: 'ระดับพนักงาน', pkg_english: 'ค่าภาษาอังกฤษ', physio_package_id: 'แพ็คเกจกายภาพบำบัด',
   client_name: 'ชื่อผู้ป่วย', patient_gender: 'เพศ', patient_age: 'อายุ',
   weight_kg: 'น้ำหนัก', height_cm: 'ส่วนสูง', medical_history: 'โรคประจำตัว',
   current_symptoms: 'อาการปัจจุบัน', medical_devices: 'อุปกรณ์การแพทย์', care_goal: 'เป้าหมายการดูแล',

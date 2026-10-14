@@ -509,6 +509,10 @@ ALTER TABLE cases DROP CONSTRAINT IF EXISTS cases_pkg_staff_tier_check;
 ALTER TABLE cases ADD CONSTRAINT cases_pkg_staff_tier_check
   CHECK (pkg_staff_tier IN ('CG', 'NA', 'PN', 'RN'));
 
+-- [homecare] ลูกค้าขอพนักงานที่สื่อสารภาษาอังกฤษได้ — บวกค่าภาษาเข้า fee (รายวัน +500 / รายเดือน +10,000)
+-- เก็บเป็นธงไว้ ไม่ใช่แค่บวกเลขเข้า fee เฉยๆ — เปิดแก้เคสทีหลังต้องรู้ว่าตัวเลขนั้นรวมค่าภาษาไว้แล้ว
+ALTER TABLE cases ADD COLUMN IF NOT EXISTS pkg_english BOOLEAN NOT NULL DEFAULT false;
+
 -- ---------- แพ็คเกจกายภาพบำบัด (โมเดลคนละแบบกับ Homecare) ----------
 -- Homecare = ตารางเรท (เกรด × รูปแบบ × ระดับพนักงาน) คิดเป็นรายวัน/เดือน
 -- กายภาพ  = แพ็คเกจเหมาจำนวนครั้ง ซื้อยกแพ็ค มีราคาเดิมขีดฆ่า + ราคาโปรโมชัน
@@ -1147,6 +1151,21 @@ ALTER TABLE invoice_payments ADD COLUMN IF NOT EXISTS request_id UUID;
 ALTER TABLE invoice_payments ADD COLUMN IF NOT EXISTS request_payload JSONB;
 
 CREATE INDEX IF NOT EXISTS idx_invoice_payments_invoice ON invoice_payments (invoice_id, payment_id);
+
+-- ---------- สลิปโอนเงินของลูกค้า (หลักฐานการรับชำระ) ----------
+-- ผูกกับใบ ไม่ใช่กับงวดรับเงิน — ลูกค้ามักส่งสลิปมาทีหลัง และใบหนึ่งรับเงินได้หลายงวดหลายสลิป
+-- เก็บรูปในฐานข้อมูล (BYTEA) แบบเดียวกับรูปใบรับรอง/รูปเช็คอิน — ย่อในเบราว์เซอร์มาแล้วใบละราว 100-300 KB
+CREATE TABLE IF NOT EXISTS invoice_slips (
+  slip_id      INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  invoice_id   TEXT NOT NULL REFERENCES invoices (invoice_id) ON DELETE CASCADE ON UPDATE CASCADE,
+  image_data   BYTEA NOT NULL,
+  image_mime   TEXT NOT NULL,
+  image_size   INTEGER NOT NULL,
+  uploaded_by      TEXT REFERENCES employees (employee_id) ON DELETE SET NULL ON UPDATE CASCADE,
+  uploaded_by_name TEXT,
+  created_at   TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')
+);
+CREATE INDEX IF NOT EXISTS idx_invoice_slips_invoice ON invoice_slips (invoice_id, slip_id);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_invoice_payments_request_id
   ON invoice_payments (request_id);
 

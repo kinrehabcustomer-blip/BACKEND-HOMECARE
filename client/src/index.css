@@ -2634,6 +2634,17 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
 .inv-sign-dots { letter-spacing: 0.02rem; }
 .inv-sign-name { grid-column: 2; text-align: center; }
 
+/* ---------- สำเนาใบแจ้งหนี้/ใบเสร็จสำหรับพิมพ์ (InvoiceModal → printSheet) ----------
+   ลูกตรงของ <body> — บนจอไม่แสดง ตอนพิมพ์แสดงตัวนี้ตัวเดียวแล้วซ่อนทั้งแอป (ดูใน @media print)
+   display: none บนจอได้ เพราะตอนพิมพ์มันถูกเปิดกลับเป็น block เอง (ต่างจาก .payroll-doc ที่พิมพ์จากในหน้า) */
+.print-sheet { display: none; }
+.inv-slips-title { margin: 0 0 0.75rem; font-weight: 700; }
+/* หนึ่งสลิปต่อหนึ่งแผ่น — ไม่ใช้ grid/flex เพราะ Chrome ไม่ตัดหน้าตาม break-before ให้ของที่อยู่ใน grid
+   ความสูงรูป: A4 297mm − ขอบ @page 30mm − หัวข้อ/คำบรรยาย ≈ 230mm */
+.inv-slip { margin: 0; text-align: center; }
+.inv-slip img { display: block; max-width: 100%; max-height: 230mm; margin: 0 auto; border: 1px solid #ccc; object-fit: contain; }
+.inv-slip figcaption { margin-top: 0.25rem; font-size: 0.75rem; }
+
 /* ---------- ใบสรุปค่าตอบแทนพนักงาน (พิมพ์อย่างเดียว) ----------
    บนจอไม่ต้องเห็น — ตารางของแท็บบอกเรื่องเดียวกันและกดดูรายเคสต่อได้ ซึ่งกระดาษทำไม่ได้
    แต่ห้าม display: none เพราะของที่ถูก display: none ไม่ถูกส่งไปเครื่องพิมพ์ด้วย
@@ -2760,6 +2771,19 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
   /* กันตารางถูกตัดครึ่งคาบหน้ากระดาษ */
   .inv-table tr { break-inside: avoid; }
   .inv-signs { break-inside: avoid; }
+
+  /* ใบแจ้งหนี้เปิดอยู่ = มีสำเนาพิมพ์ใต้ <body> → ซ่อนทั้งแอปออกจาก layout (display ไม่ใช่ visibility)
+     สำเนาจึงเริ่มที่หัวกระดาษแผ่นแรกใน flow ปกติ และตัดขึ้นแผ่นใหม่ได้ (ของที่ลอยด้วย absolute ตัดหน้าไม่ได้)
+     หน้าอื่นที่ไม่มีสำเนานี้ (ใบสรุปค่าตอบแทน/รายงานอาการ/ตารางงาน) ไม่โดนกฎนี้ ใช้วิธีเดิมตามด้านบน */
+  body:has(> .print-sheet) > :not(.print-sheet) { display: none !important; }
+  .print-sheet { display: block; }
+  .print-sheet .invoice-doc { position: static; }
+  /* popup เปิดอยู่ = body ถูกล็อก overflow: hidden (useScrollLock) — ปลดตอนพิมพ์ ไม่ให้เอกสารถูกตัดเหลือแผ่นเดียว */
+  html:has(> body > .print-sheet),
+  body:has(> .print-sheet) { overflow: visible !important; height: auto !important; }
+
+  /* สลิปแนบ: แต่ละใบขึ้นแผ่นใหม่ของตัวเอง — ไม่ปนกับตัวใบ/ลายเซ็น */
+  .inv-slip { break-before: page; break-inside: avoid; }
 }
 
 /* ---------- ปฏิทินย่อสำหรับลงวันนัดในเคส ---------- */
@@ -4037,6 +4061,16 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
 .pay-history li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.5rem; padding: 0.1875rem 0; font-size: 0.875rem; }
 .pay-history-date { min-width: 6.5rem; color: var(--muted); font-size: 0.8125rem; }
 .pay-history-amount { min-width: 6rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.slip-block { margin-top: 0.875rem; padding-top: 0.75rem; border-top: 1px solid var(--divider); }
+.slip-list { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-top: 0.5rem; }
+.slip { margin: 0; width: 7.5rem; }
+.slip figcaption { margin-top: 0.25rem; font-size: 0.75rem; line-height: 1.4; }
+.slip-thumb { display: flex; align-items: center; justify-content: center; width: 7.5rem; height: 10rem;
+  border: 1px solid var(--divider); border-radius: 0.5rem; overflow: hidden; background: var(--surface, #fff); }
+.slip-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.slip-thumb.empty { border-style: dashed; cursor: pointer; color: var(--muted); font-size: 0.875rem; }
+.slip-thumb.empty:hover { border-color: currentColor; }
+.slip-thumb.is-busy { cursor: progress; opacity: 0.6; }
 
 /* ป้ายบอกว่างวดนั้นคือเงินมัดจำ */
 .badge.deposit-tag { margin-right: 0.35rem; background: var(--divider); color: var(--muted); }

@@ -438,8 +438,8 @@ export async function list({ q, status, customer_id, case_id, overdue, stale, dr
 export const findById = async (id) => {
   const row = await sql.one(`${SELECT_INVOICE} WHERE i.invoice_id = :id`, { id });
   if (!row) return null;
-  const [items, payments] = await Promise.all([listItems(id), listPayments(id)]);
-  return withComputed({ ...row, items, payments });
+  const [items, payments, slips] = await Promise.all([listItems(id), listPayments(id), listSlips(id)]);
+  return withComputed({ ...row, items, payments, slips });
 };
 
 /** หลัง commit อาจมีคำขออื่นลบใบก่อน SELECT ตอบกลับ — แปลงเป็น conflict แทนการคืน null/เกิด TypeError ที่ route */
@@ -494,6 +494,40 @@ export const listPayments = (invoiceId) =>
      FROM invoice_payments WHERE invoice_id = :id ORDER BY payment_id`,
     { id: invoiceId },
   );
+
+/** สลิปโอนเงินของใบ — เฉพาะข้อมูลประกอบ ตัวรูปดึงแยกทีละใบผ่าน findSlipImage (ใส่ใน <img src>) */
+export const listSlips = (invoiceId) =>
+  sql.all(
+    `SELECT slip_id, image_size, uploaded_by_name, created_at
+     FROM invoice_slips WHERE invoice_id = :id ORDER BY slip_id`,
+    { id: invoiceId },
+  );
+
+export const findSlipImage = (invoiceId, slipId) =>
+  sql.one(
+    'SELECT image_data, image_mime FROM invoice_slips WHERE invoice_id = :id AND slip_id = :slip_id',
+    { id: invoiceId, slip_id: slipId },
+  );
+
+export const addSlip = (invoiceId, image, actor) =>
+  sql.one(
+    `INSERT INTO invoice_slips (invoice_id, image_data, image_mime, image_size, uploaded_by, uploaded_by_name)
+     VALUES (:id, :data, :mime, :size, :by, :by_name)
+     RETURNING slip_id`,
+    {
+      id: invoiceId,
+      data: image.data,
+      mime: image.mime,
+      size: image.size,
+      by: actor?.employee_id ?? null,
+      by_name: actor?.name ?? null,
+    },
+  );
+
+export const removeSlip = (invoiceId, slipId) =>
+  sql
+    .run('DELETE FROM invoice_slips WHERE invoice_id = :id AND slip_id = :slip_id', { id: invoiceId, slip_id: slipId })
+    .then((n) => n > 0);
 
 /** รายการย่อยของใบ (ว่าง = ใบแบบแพ็คเกจบรรทัดเดียวตามปกติ) */
 export const listItems = (invoiceId) =>
@@ -730,7 +764,7 @@ function describeService(c) {
   const parts =
     c.service_kind === 'physio'
       ? [c.physio_package_name, sessions]
-      : [c.format_name, c.grade_name, c.pkg_staff_tier];
+      : [c.format_name, c.grade_name, c.pkg_staff_tier, c.pkg_english && 'ภาษาอังกฤษ'];
 
   const service = parts.filter(Boolean).join(' · ');
   return [service || c.title, c.client_name && `ผู้รับบริการ: ${c.client_name}`]

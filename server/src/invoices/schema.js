@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { zodDate } from '../lib/dates.js';
+import { imageSchema } from '../employees/schema.js';
 
 export const INVOICE_STATUSES = ['draft', 'issued', 'paid', 'cancelled'];
 
@@ -127,3 +128,6 @@ export const listQuerySchema = z.object({
   sort: z.enum(['invoice_id', 'issue_date', 'total', 'created_at']).default('invoice_id'),
   order: z.enum(['asc', 'desc']).default('desc'),
 });
+
+// ---------- สลิปโอนเงิน ----------
+export const slipSchema = z.object({ image: imageSchema });

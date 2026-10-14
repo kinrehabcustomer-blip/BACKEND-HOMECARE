@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
-import { formatBaht } from '../labels.js';
+import { formatBaht, ENGLISH_SURCHARGE } from '../labels.js';
 import LineIcon from '../components/LineIcon.jsx';
 import ErrorBar from '../components/ErrorBar.jsx';
 import ConfirmButton from '../components/ConfirmButton.jsx';
@@ -413,6 +413,11 @@ export default function PackagesPage() {
         <div>
           <h1>แพ็คเกจบริการ (พนักงานพาร์ทไทม์)</h1>
           <p className="muted">ส่วนลดหักจากรายได้ส่วนของบริษัท ค่าจ้างพนักงานคงเดิม</p>
+          {/* ค่าภาษาไม่ได้อยู่ในตาราง — บวกเพิ่มตอนเปิดเคส (ติ๊ก "ภาษาอังกฤษ" ในฟอร์มเคส) ทุกแพ็คเกจ */}
+          <p className="muted">
+            ค่าภาษา (อังกฤษ) บวกเพิ่มทุกแพ็คเกจ: รายวัน +{formatBaht(ENGLISH_SURCHARGE.daily)}
+            {' · '}รายเดือน +{formatBaht(ENGLISH_SURCHARGE.monthly)}
+          </p>
           <p className="muted">
             ตารางเรทตามเกรด × รูปแบบบริการ × ระดับพนักงาน (CG / NA / PN / RN)
             {/* บอกจำนวนที่ค้างไว้ตลอดเวลาที่แก้อยู่ — ตารางยาวกว่าหนึ่งหน้าจอ เลื่อนลงไปแก้ล่างสุด

@@ -4,7 +4,7 @@ import { api } from '../api.js';
 import { useToast } from '../toast.jsx';
 import MapPicker from '../components/MapPicker.jsx';
 import {
-  CASE_TYPE_LABELS, POSITION_LABELS, GENDER_LABELS, SERVICE_KIND_LABELS,
+  CASE_TYPE_LABELS, POSITION_LABELS, GENDER_LABELS, SERVICE_KIND_LABELS, ENGLISH_SURCHARGE,
   formatBaht, ageFromBirthDate, positionsForCase,
 } from '../labels.js';
 import LineIcon from '../components/LineIcon.jsx';
@@ -20,6 +20,7 @@ const BLANK = {
   patient_id: '',
   service_kind: '',
   pkg_format_id: '', pkg_grade_id: '', pkg_staff_tier: '', // [Homecare]
+  pkg_english: false, // [Homecare] พนักงานสื่อสารภาษาอังกฤษ — บวกค่าภาษาเข้า fee
   physio_package_id: '', // [กายภาพ]
 
   // ตัวตนผู้ป่วย (มาจากแฟ้ม patient / หรือกรอกเพื่อสร้างแฟ้มใหม่) — client_name/gender/age/medical_history คัดลอกเป็น snapshot ในเคส
@@ -135,6 +136,8 @@ export default function CaseFormPage() {
     ) ?? null;
 
   const effectiveGrade = needGrade ? selGradeId : null;
+  // ค่าภาษาของรูปแบบที่เลือก — 0 = หมวดนี้ไม่มีตัวเลือกค่าภาษา (รายสัปดาห์)
+  const englishFee = ENGLISH_SURCHARGE[selectedFormat?.category] ?? 0;
   const currentRate =
     selectedFormat && form.pkg_staff_tier && (!needGrade || selGradeId)
       ? lookupRate(selectedFormat.format_id, effectiveGrade, form.pkg_staff_tier)
@@ -172,14 +175,30 @@ export default function CaseFormPage() {
       merged.staff_pay = '';
       const fmt = matrix?.formats.find((f) => f.format_id === Number(merged.pkg_format_id));
       if (fmt && !fmt.graded) merged.pkg_grade_id = ''; // รูปแบบไม่อิงเกรด ล้างเกรดทิ้ง
+      const surcharge = ENGLISH_SURCHARGE[fmt?.category] ?? 0;
+      if (!surcharge) merged.pkg_english = false; // ย้ายไปหมวดที่ไม่มีค่าภาษา ธงต้องไม่ค้าง
       const gid = fmt?.graded ? (merged.pkg_grade_id === '' ? null : Number(merged.pkg_grade_id)) : null;
       if (fmt && merged.pkg_staff_tier && (!fmt.graded || gid)) {
         const r = lookupRate(fmt.format_id, gid, merged.pkg_staff_tier);
         if (r && r.available && r.customer_price != null) {
-          merged.fee = String(r.net_price ?? r.customer_price);
+          merged.fee = String((r.net_price ?? r.customer_price) + (merged.pkg_english ? surcharge : 0));
           // ค่าจ้างพนักงานคัดลอกมาคู่กันเสมอ — เป็นตัวตั้งของยอดที่พนักงานจะเห็นตอนปิดเคส
           if (r.staff_pay != null) merged.staff_pay = String(r.staff_pay);
         }
+      }
+      return merged;
+    });
+  }
+
+  /**
+   * ติ๊ก/เอาติ๊กค่าภาษาอังกฤษออก -> บวก/ลบค่าภาษาจาก fee ที่อยู่ในช่องตอนนี้
+   * บวกลบจากตัวเลขปัจจุบัน ไม่ใช่ตั้งใหม่จากตารางเรท — เคสที่ตกลงราคาพิเศษไว้ต้องไม่ถูกทับ
+   */
+  function toggleEnglish(on) {
+    setForm((prev) => {
+      const merged = { ...prev, pkg_english: on };
+      if (prev.fee !== '' && englishFee) {
+        merged.fee = String(Math.max(Number(prev.fee) + (on ? englishFee : -englishFee), 0));
       }
       return merged;
     });
@@ -262,7 +281,7 @@ export default function CaseFormPage() {
       ...prev,
       service_kind: kind,
       staff_pay: '',
-      ...(kind !== 'homecare' ? { pkg_format_id: '', pkg_grade_id: '', pkg_staff_tier: '' } : null),
+      ...(kind !== 'homecare' ? { pkg_format_id: '', pkg_grade_id: '', pkg_staff_tier: '', pkg_english: false } : null),
       ...(kind !== 'physio' ? { physio_package_id: '' } : null),
     }));
   }
@@ -773,11 +792,25 @@ export default function CaseFormPage() {
             </select>
           </label>
           )}
+          {isHomecare && englishFee > 0 && (
+            <label className="checkbox-row">
+              <input
+                type="checkbox"
+                checked={Boolean(form.pkg_english)}
+                disabled={serviceLocked}
+                onChange={(e) => toggleEnglish(e.target.checked)}
+              />
+              ภาษาอังกฤษ (+{formatBaht(englishFee)}{selectedFormat.category === 'monthly' ? '/เดือน' : '/วัน'})
+            </label>
+          )}
           {isHomecare && currentRate && currentRate.available && currentRate.customer_price != null && (
             <p className="form-hint muted">
-              ค่าบริการ <strong>{formatBaht(currentRate.net_price ?? currentRate.customer_price)}</strong>
+              ค่าบริการ <strong>
+                {formatBaht((currentRate.net_price ?? currentRate.customer_price) + (form.pkg_english ? englishFee : 0))}
+              </strong>
               {currentRate.discount_value > 0 &&
                 ` (จากราคาเต็ม ${formatBaht(currentRate.customer_price)} − ส่วนลด ${formatBaht(currentRate.discount_value)})`}
+              {form.pkg_english && englishFee > 0 && ` · รวมค่าภาษาอังกฤษ ${formatBaht(englishFee)}`}
               {seePay && currentRate.staff_pay != null && ` · ค่าตอบแทนพนักงาน ${formatBaht(currentRate.staff_pay)}`}
               {seePay && currentRate.margin != null && ` · ส่วนต่าง ${currentRate.margin}%`}
               {' '}— เติมลงช่องด้านล่างให้แล้ว แก้ทับได้
