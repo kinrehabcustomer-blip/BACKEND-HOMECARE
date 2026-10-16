@@ -1978,20 +1978,33 @@ describe('แบบประเมิน — ตัวหารของคะ�
 });
 
 describe('แบบประเมิน — ตำแหน่งที่เปิดใช้', () => {
-  test('เปิดให้สายบำบัดทั้งชุด โดยอ้างรายการกลาง ไม่ประกาศชื่อซ้ำ', () => {
-    assert.deepEqual(REVIEW_POSITIONS, THERAPY_POSITIONS);
-    assert.deepEqual([...THERAPY_POSITIONS].sort(), ['occupational_therapist', 'speech_therapist', 'therapist']);
+  test('เปิดให้พนักงานกลุ่ม front ทั้งหมด (สายดูแล + สายบำบัด) โดยอ้างรายการกลาง', async () => {
+    const { FRONT_POSITIONS, BACK_POSITIONS, POSITIONS } = await import('../src/employees/schema.js');
+    assert.deepEqual(REVIEW_POSITIONS, FRONT_POSITIONS);
+    assert.deepEqual([...FRONT_POSITIONS].sort(), [
+      'assistant_nurse', 'caregiver', 'nurse', 'occupational_therapist', 'practical_nurse', 'speech_therapist', 'therapist',
+    ]);
+    for (const p of THERAPY_POSITIONS) assert.ok(FRONT_POSITIONS.includes(p), `${p} ต้องอยู่กลุ่ม front`);
+    // สองกลุ่มรวมกันได้ทุกตำแหน่งพอดี ไม่ซ้อนกัน
+    assert.deepEqual([...FRONT_POSITIONS, ...BACK_POSITIONS].sort(), [...POSITIONS].sort());
   });
 
-  test('สายบำบัดเป็นพนักงานภาคสนาม ไม่ใช่ admin และไม่เห็นค่าจ้าง/กำไร', () => {
+  test('กลุ่มพนักงานฝั่งหน้าเว็บตรงกับ server', async () => {
+    const { FRONT_POSITIONS, BACK_POSITIONS } = await import('../src/employees/schema.js');
+    const client = await import('../../client/src/labels.js');
+    assert.deepEqual([...client.FRONT_POSITIONS].sort(), [...FRONT_POSITIONS].sort());
+    assert.deepEqual([...client.BACK_POSITIONS].sort(), [...BACK_POSITIONS].sort());
+  });
+
+  test('กลุ่ม front เป็นพนักงานภาคสนาม ไม่ใช่ admin และไม่เห็นค่าจ้าง/กำไร', () => {
     for (const p of REVIEW_POSITIONS) {
       assert.equal(roleForPosition(p), 'field', `${p} ต้องไม่ได้สิทธิ์ระดับ admin`);
       assert.equal(canSeeStaffPay(p), false, `${p} ต้องไม่เห็นค่าจ้าง/กำไร`);
     }
   });
 
-  test('ตำแหน่งสำนักงานและสายดูแลยังไม่เปิดให้ออกลิงก์ประเมิน', () => {
-    for (const p of ['manager', 'hr', 'admin', 'caregiver', 'assistant_nurse', 'practical_nurse', 'nurse']) {
+  test('กลุ่ม back (สายสำนักงาน) ไม่เปิดให้ออกลิงก์ประเมิน', () => {
+    for (const p of ['manager', 'hr', 'admin']) {
       assert.equal(REVIEW_POSITIONS.includes(p), false, `${p} ไม่ควรออกลิงก์ประเมินได้`);
     }
   });

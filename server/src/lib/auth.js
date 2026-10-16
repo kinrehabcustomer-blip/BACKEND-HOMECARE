@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import { randomBytes } from 'node:crypto';
 import { ApiError } from './errors.js';
 import { sql } from '../db/index.js';
+import { BACK_POSITIONS } from '../employees/schema.js';
 
 const SECRET = process.env.JWT_SECRET;
 const TOKEN_TTL = '8h'; // ประมาณหนึ่งกะทำงาน — หมดกะแล้วต้อง login ใหม่
@@ -15,7 +16,8 @@ export const COOKIE_NAME = 'kin_session';
 // ระวังคำว่า admin ที่ซ้ำกันสองความหมาย: 'admin' ในรายการนี้คือ "ตำแหน่งงาน" (คอลัมน์ position)
 // ส่วน 'admin' ที่ roleForPosition คืนออกไปคือ "ระดับสิทธิ์" ซึ่งผู้จัดการกับ HR ก็ได้เหมือนกัน
 // — เช็ค req.user.role === 'admin' กับ req.user.position === 'admin' จึงไม่ใช่คำถามเดียวกัน
-export const ADMIN_POSITIONS = ['manager', 'hr', 'admin'];
+// = พนักงานกลุ่ม back (ประกาศที่ employees/schema.js ที่เดียว คู่กับกลุ่ม front)
+export const ADMIN_POSITIONS = BACK_POSITIONS;
 export const roleForPosition = (position) => (ADMIN_POSITIONS.includes(position) ? 'admin' : 'field');
 
 /**

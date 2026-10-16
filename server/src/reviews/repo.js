@@ -1,10 +1,13 @@
 import { randomBytes } from 'node:crypto';
 import { sql } from '../db/index.js';
-import { THERAPY_POSITIONS } from '../employees/schema.js';
+import { FRONT_POSITIONS } from '../employees/schema.js';
 import { REVIEW_QUESTIONS } from './schema.js';
 
 /**
- * ตำแหน่งที่เปิดให้ออกลิงก์ประเมินได้ = สายบำบัดทั้งหมด
+ * ตำแหน่งที่เปิดให้ออกลิงก์ประเมินได้ = พนักงานกลุ่ม front ทั้งหมด (สายดูแล + สายบำบัด)
+ * ใช้หัวข้อประเมินชุดเดียวกันทุกตำแหน่ง ตามที่ตกลงกันไว้ — ประวัติเดิมที่เปิดเฉพาะสายบำบัดอยู่ด้านล่าง
+ *
+ * (เดิม) ตำแหน่งที่เปิดให้ออกลิงก์ประเมินได้ = สายบำบัดทั้งหมด
  *
  * หัวข้อในแบบประเมินเขียนด้วยคำของงานบำบัด ("การรักษา" / "ฝึกต่อเนื่องที่บ้าน")
  * ซึ่งใช้ได้กับทั้งกายภาพบำบัด กิจกรรมบำบัด และแก้ไขการพูด แต่จะอ่านเพี้ยน
@@ -13,7 +16,7 @@ import { REVIEW_QUESTIONS } from './schema.js';
  * อ้างรายการกลางจาก employees/schema.js ไม่ประกาศชื่อตำแหน่งซ้ำที่นี่ —
  * เพิ่มตำแหน่งสายบำบัดใหม่ที่เดียวแล้วแบบประเมินตามมาเอง
  */
-export const REVIEW_POSITIONS = THERAPY_POSITIONS;
+export const REVIEW_POSITIONS = FRONT_POSITIONS;
 
 /** ผลรวมคะแนนทุกข้อของหนึ่งใบ — ใช้ทั้งค่าเฉลี่ยรวมและการแจกแจงจำนวนดาว */
 const scoreSum = (prefix = '') => REVIEW_QUESTIONS.map((q) => `${prefix}${q}`).join(' + ');

@@ -20,6 +20,11 @@ export const POSITION_LABELS = {
  */
 export const THERAPY_POSITIONS = ['therapist', 'occupational_therapist', 'speech_therapist'];
 
+/** กลุ่มพนักงาน — back = สายสำนักงาน · front = ที่เหลือทั้งหมด (ออกไปดูแลผู้ป่วยจริง)
+    ต้องตรงกับ BACK_POSITIONS / FRONT_POSITIONS ใน server/src/employees/schema.js */
+export const BACK_POSITIONS = ['manager', 'hr', 'admin'];
+export const FRONT_POSITIONS = Object.keys(POSITION_LABELS).filter((p) => !BACK_POSITIONS.includes(p));
+
 /**
  * ระดับพนักงานในตารางราคา -> ตำแหน่งของพนักงานที่ตรงกับระดับนั้น
  * (สายบำบัดไม่มีระดับ ใช้ตำแหน่งสายบำบัดทั้งชุดเป็นเกณฑ์แทน — ดู positionsForCase)

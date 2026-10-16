@@ -37,6 +37,7 @@ import {
 import { geocode, reverseGeocode, searchPlaces } from '../lib/geocode.js';
 import { resolveMapLink } from '../lib/maplink.js';
 import { canSeeStaffPay, requireManager } from '../lib/auth.js';
+import { FRONT_POSITIONS } from '../employees/schema.js';
 import { ApiError, asyncRoute, notFound } from '../lib/errors.js';
 
 export const casesRouter = Router();
@@ -683,6 +684,7 @@ casesRouter.post(
   asyncRoute(async (req, res) => {
     ensureSchedulable(req.case);
     const input = createVisitSchema.parse(req.body);
+    if (input.assigned_to) await ensureAssignable(input.assigned_to);
     res.status(201).json(await repo.addVisit(req.params.id, input));
   }),
 );
@@ -693,6 +695,7 @@ casesRouter.post(
   asyncRoute(async (req, res) => {
     ensureSchedulable(req.case);
     const input = bulkVisitSchema.parse(req.body);
+    if (input.assigned_to) await ensureAssignable(input.assigned_to);
     res.status(201).json(await repo.addVisits(req.params.id, input.dates, input));
   }),
 );
@@ -726,6 +729,12 @@ casesRouter.patch(
   '/:id/visits/:visitId',
   asyncRoute(async (req, res) => {
     const input = updateVisitSchema.parse(req.body);
+    /* ตรวจเฉพาะตอน "เปลี่ยนคน" — กะเก่าที่ลงให้คนที่ตอนนี้รับงานไม่ได้แล้ว (ลาออก/สายสำนักงาน)
+       ยังต้องแก้หมายเหตุ/สถานะได้ หน้าเว็บส่งทั้งฟอร์มมา ถ้าเช็คทุกครั้งกะพวกนั้นจะแก้อะไรไม่ได้เลย */
+    if (input.assigned_to) {
+      const visit = await repo.findVisit(Number(req.params.visitId));
+      if (visit && visit.assigned_to !== input.assigned_to) await ensureAssignable(input.assigned_to);
+    }
     res.json(await repo.updateVisit(req.params.id, Number(req.params.visitId), input));
   }),
 );
@@ -901,6 +910,13 @@ async function ensureAssignable(employeeId) {
     throw new ApiError(
       409,
       `${employee.first_name} ${employee.last_name} รับเคสไม่ได้ เพราะสถานะปัจจุบันคือ "${employee.status}"`,
+    );
+  }
+  // กันที่ server ด้วย ไม่ใช่แค่ซ่อนใน dropdown — endpoint เรียกตรงได้
+  if (!FRONT_POSITIONS.includes(employee.position)) {
+    throw new ApiError(
+      409,
+      `${employee.first_name} ${employee.last_name} เป็นพนักงานสายสำนักงาน — รับเคส/ลงกะได้เฉพาะ CG, NA, PN, RN และสายบำบัด`,
     );
   }
 }

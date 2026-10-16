@@ -152,7 +152,6 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
   const [openInvoiceId, setOpenInvoiceId] = useState(null);
   const [events, setEvents] = useState([]);      // ประวัติการทำรายการ (audit log) — ใหม่สุดอยู่บน
   const [eventsOpen, setEventsOpen] = useState(false);
-  const [allStaff, setAllStaff] = useState(false); // เลิกกรองรายชื่อตามระดับที่เคสเลือกไว้
 
   // ดึงเคส รายชื่อพนักงาน และวันนัดพร้อมกัน — จำนวนเคสที่แต่ละคนถืออยู่เปลี่ยนทุกครั้งที่จับคู่/ยกเลิก
   const load = () =>
@@ -357,9 +356,12 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
   const alreadyInCase = Boolean(pick) && caseStaff.some((m) => m.employee_id === pick);
 
   const wantedPositions = item ? positionsForCase(item) : null;
-  const matchingStaff = wantedPositions ? staff.filter((e) => wantedPositions.includes(e.position)) : staff;
-  const filtering = Boolean(wantedPositions) && !allStaff && matchingStaff.length > 0;
-  const baseStaff = filtering ? matchingStaff : staff;
+  /* เลือกได้เฉพาะสายดูแล/สายบำบัด (server ส่ง can_take_cases มา และกันซ้ำตอนบันทึก)
+     staff ยังเก็บทุกคนไว้ — เคสเก่าที่ผู้รับผิดชอบเป็นสายสำนักงานยังต้องโชว์ชื่อเดิมได้ */
+  const fieldStaff = staff.filter((e) => e.can_take_cases);
+  const matchingStaff = wantedPositions ? fieldStaff.filter((e) => wantedPositions.includes(e.position)) : fieldStaff;
+  // แสดงเฉพาะตำแหน่งที่เคสต้องการเท่านั้น — ไม่มีปุ่มดูทุกตำแหน่ง และไม่ถอยไปแสดงทุกคนเมื่อไม่มีใครตรง
+  const baseStaff = matchingStaff;
   const shownStaff =
     item?.assigned_to && !baseStaff.some((e) => e.employee_id === item.assigned_to)
       ? [...baseStaff, ...staff.filter((e) => e.employee_id === item.assigned_to)]
@@ -764,8 +766,7 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
 
                 {!terminal && (
                   <div className="assign-form">
-                    {/* กรองตามระดับที่เคสเลือกไว้ (กติกาเดียวกับหน้าเปิดเคส — ดู positionsForCase)
-                        กดดูทุกตำแหน่งได้ และถ้าไม่มีใครตรงเลยก็แสดงทั้งหมดแทนช่องว่างเปล่า */}
+                    {/* แสดงเฉพาะตำแหน่งที่เคสต้องการ (กติกาเดียวกับหน้าเปิดเคส — ดู positionsForCase) */}
                     <select value={pick} onChange={(e) => setPick(e.target.value)}>
                       <option value="">— เลือกพนักงาน —</option>
                       {shownStaff.map((e) => (
@@ -795,18 +796,10 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                 )}
                 {!terminal && wantedPositions && (
                   <p className="muted assign-hint">
-                    {filtering ? (
-                      <>
-                        แสดงเฉพาะ{wantedPositions.map((p) => POSITION_LABELS[p]).join('/')} ({matchingStaff.length} คน){' · '}
-                        <button type="button" className="btn link-btn" onClick={() => setAllStaff(true)}>ดูทุกตำแหน่ง</button>
-                      </>
-                    ) : matchingStaff.length === 0 ? (
-                      <>ยังไม่มีพนักงานตำแหน่ง{wantedPositions.map((p) => POSITION_LABELS[p]).join('/')} — แสดงทุกคนแทน</>
+                    {matchingStaff.length > 0 ? (
+                      <>แสดงเฉพาะ{wantedPositions.map((p) => POSITION_LABELS[p]).join('/')} ({matchingStaff.length} คน)</>
                     ) : (
-                      <>
-                        แสดงทุกตำแหน่ง ·{' '}
-                        <button type="button" className="btn link-btn" onClick={() => setAllStaff(false)}>กรองตามระดับ</button>
-                      </>
+                      <>ยังไม่มีพนักงานตำแหน่ง{wantedPositions.map((p) => POSITION_LABELS[p]).join('/')}ในระบบ — เพิ่มพนักงานตำแหน่งนี้ก่อนจึงจะจับคู่ได้</>
                     )}
                   </p>
                 )}

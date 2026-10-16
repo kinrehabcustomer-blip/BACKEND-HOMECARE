@@ -45,7 +45,8 @@ publicReviewsRouter.get(
     if (employee.status === 'resigned') {
       throw notFound('ลิงก์แบบประเมินนี้ปิดรับแล้ว — กรุณาสอบถามเจ้าหน้าที่');
     }
-    res.json({ first_name: employee.first_name, last_name: employee.last_name });
+    // ตำแหน่งไว้ให้ฟอร์มเรียกชื่อให้ถูก ("นักกายภาพบำบัด" / "พยาบาลวิชาชีพ" ฯลฯ) — ไม่ใช่ข้อมูลลับ
+    res.json({ first_name: employee.first_name, last_name: employee.last_name, position: employee.position });
   }),
 );
 

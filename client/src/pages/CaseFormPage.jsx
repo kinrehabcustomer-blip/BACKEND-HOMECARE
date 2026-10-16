@@ -103,7 +103,6 @@ export default function CaseFormPage() {
   const [fieldErrors, setFieldErrors] = useState({});
   const [saving, setSaving] = useState(false);
   // เปิดดูพนักงานทุกตำแหน่ง แทนที่จะเห็นเฉพาะระดับที่เคสนี้ต้องการ
-  const [allStaff, setAllStaff] = useState(false);
   const formEl = useRef(null);
 
   /* โหมดแก้ไข: เคสตามที่โหลดมา (ไว้เทียบว่าเปลี่ยนบริการไหม) + ใบแจ้งหนี้ของเคส (ไว้บอกว่าจะกระทบใบไหน)
@@ -172,14 +171,17 @@ export default function CaseFormPage() {
      เลือกระดับ "RN" ไว้แล้วยังต้องไล่หาพยาบาลเองในรายชื่อทั้งบริษัทไม่มีเหตุผล
      — กรองให้เหลือเฉพาะตำแหน่งที่ตรงกับระดับ (สายกายภาพ = นักกายภาพบำบัด)
 
-     ไม่ทำเป็นกฎบังคับ เพราะของจริงคนระดับสูงกว่าลงไปทำงานระดับต่ำกว่าได้:
-       · กดดู "ทุกตำแหน่ง" ได้ตลอด
-       · ไม่มีใครตรงระดับเลย = แสดงทั้งหมดแทน ไม่ปล่อยให้เจอ dropdown ว่าง
+     แสดงเฉพาะตำแหน่งที่ตรงเท่านั้น (ผู้ใช้ขอ 2026-10-16 — เดิมมีปุ่ม "ดูทุกตำแหน่ง" และถอยไปแสดงทุกคน)
+       · ยังไม่เลือกบริการ = ยังไม่รู้ว่าต้องการใคร → แสดงพนักงาน front ทุกคน
+       · ไม่มีใครตรง = dropdown ว่าง พร้อมบอกว่าขาดตำแหน่งไหน
        · คนที่เลือกไว้แล้วยังอยู่ในรายการเสมอ แม้จะเปลี่ยนระดับทีหลังจนไม่ตรง (ติดป้ายบอกว่าไม่ตรงระดับ) */
   const wantedPositions = positionsForCase(form);
-  const matchingStaff = wantedPositions ? staff.filter((e) => wantedPositions.includes(e.position)) : staff;
-  const filtering = Boolean(wantedPositions) && !allStaff && matchingStaff.length > 0;
-  const baseStaff = filtering ? matchingStaff : staff;
+  /* เลือกได้เฉพาะสายดูแล/สายบำบัด (server ส่ง can_take_cases มา และกันซ้ำตอนบันทึก)
+     staff ยังเก็บทุกคนไว้ — เคสเก่าที่ผู้รับผิดชอบเป็นสายสำนักงานยังต้องโชว์ชื่อเดิมได้ */
+  const fieldStaff = staff.filter((e) => e.can_take_cases);
+  const matchingStaff = wantedPositions ? fieldStaff.filter((e) => wantedPositions.includes(e.position)) : fieldStaff;
+  // แสดงเฉพาะตำแหน่งที่เคสต้องการเท่านั้น — ไม่มีปุ่มดูทุกตำแหน่ง และไม่ถอยไปแสดงทุกคนเมื่อไม่มีใครตรง
+  const baseStaff = matchingStaff;
   const shownStaff =
     form.assigned_to && !baseStaff.some((e) => e.employee_id === form.assigned_to)
       ? [...baseStaff, ...staff.filter((e) => e.employee_id === form.assigned_to)]
@@ -1335,25 +1337,16 @@ export default function CaseFormPage() {
           {/* บอกให้รู้ว่ารายชื่อถูกกรองอยู่ ไม่ใช่ปล่อยให้สงสัยว่าทำไมคนที่หาไม่โผล่ */}
           {!isEdit && wantedPositions && (
             <p className="form-hint muted">
-              {filtering ? (
+              {matchingStaff.length > 0 ? (
                 <>
                   แสดงเฉพาะ<strong>{wantedPositions.map((p) => POSITION_LABELS[p]).join('/')}</strong>
-                  {' '}ที่ตรงกับบริการที่เลือก ({matchingStaff.length} คน){' · '}
-                  <button type="button" className="btn link-btn" onClick={() => setAllStaff(true)}>
-                    ดูทุกตำแหน่ง
-                  </button>
-                </>
-              ) : matchingStaff.length === 0 ? (
-                <>
-                  ยังไม่มีพนักงานตำแหน่ง<strong>{wantedPositions.map((p) => POSITION_LABELS[p]).join('/')}</strong>
-                  {' '}ในระบบ — แสดงทุกคนแทน
+                  {' '}ที่ตรงกับบริการที่เลือก ({matchingStaff.length} คน)
                 </>
               ) : (
                 <>
-                  แสดงทุกตำแหน่ง ·{' '}
-                  <button type="button" className="btn link-btn" onClick={() => setAllStaff(false)}>
-                    กรองตามระดับที่เลือก
-                  </button>
+                  ยังไม่มีพนักงานตำแหน่ง<strong>{wantedPositions.map((p) => POSITION_LABELS[p]).join('/')}</strong>ในระบบ
+                  {' '}— เปิดเคสไว้ก่อนแล้วจับคู่ทีหลังได้ หรือเพิ่มพนักงานที่หน้า
+                  <Link className="link" to="/employees"> พนักงาน</Link>
                 </>
               )}
             </p>

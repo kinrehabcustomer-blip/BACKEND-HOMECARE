@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { api } from '../api.js';
-import { openDatePicker, todayTH } from '../labels.js';
+import { openDatePicker, todayTH, THERAPY_POSITIONS } from '../labels.js';
 import LineIcon from '../components/LineIcon.jsx';
 import { StarPicker } from '../components/Stars.jsx';
 import {
@@ -9,6 +9,7 @@ import {
   SCORE_LABELS,
   WANT_AGAIN_LABELS,
   RECOMMEND_LABELS,
+  REVIEW_ROLE_TITLES,
 } from '../lib/reviewQuestions.js';
 
 const BLANK = {
@@ -128,21 +129,26 @@ export default function ReviewFormPage() {
     );
   }
 
+  /* เรียกตามตำแหน่งจริงของคนที่ถูกประเมิน — เปิดให้ทุกพนักงานกลุ่ม front แล้ว ไม่ใช่แค่นักกายภาพ
+     ลิงก์จาก server รุ่นเก่าไม่มี position มาด้วย = ใช้คำกลางๆ แทน */
+  const role = REVIEW_ROLE_TITLES[therapist.position] ?? 'พนักงาน';
+  const isTherapy = THERAPY_POSITIONS.includes(therapist.position);
+
   return (
     <div className="review-page">
       <form className="review-card" onSubmit={handleSubmit}>
         <header className="review-head">
           <img className="review-logo" src="/logo-navbar.webp" alt="KIN Home Care" />
-          <h1>แบบประเมินความพึงพอใจนักกายภาพบำบัด KIN</h1>
+          <h1>แบบประเมินความพึงพอใจ{role} KIN</h1>
           <p className="review-intro">
             เรียน คุณญาติผู้รับบริการ<br />
-            KIN ขอขอบพระคุณสำหรับความไว้วางใจในการใช้บริการกายภาพบำบัดที่บ้าน
+            KIN ขอขอบพระคุณสำหรับความไว้วางใจในการใช้บริการ{isTherapy ? 'กายภาพบำบัด' : 'ดูแลผู้ป่วย'}ที่บ้าน
             ความคิดเห็นของท่านมีความสำคัญต่อการพัฒนาคุณภาพการให้บริการและการดูแลผู้ป่วยของเรา
           </p>
         </header>
 
         <div className="review-who">
-          <span className="muted">นักกายภาพบำบัด</span>
+          <span className="muted">{role}</span>
           <strong>{therapist.first_name} {therapist.last_name}</strong>
         </div>
 
@@ -192,7 +198,7 @@ export default function ReviewFormPage() {
         <section className="review-section">
           <h2>ความคิดเห็นจากคุณญาติ</h2>
           <label className="review-text">
-            สิ่งที่ท่านประทับใจในการดูแลของนักกายภาพบำบัดท่านนี้
+            สิ่งที่ท่านประทับใจในการดูแลของ{role}ท่านนี้
             <textarea rows="3" value={form.impressed} onChange={set('impressed')} />
           </label>
           <label className="review-text">
@@ -204,7 +210,7 @@ export default function ReviewFormPage() {
         <section className="review-section">
           <h2>คำถามสำหรับประเมินคุณภาพโดยรวม</h2>
 
-          <p className="review-ask">หากมีโอกาส ท่านต้องการให้นักกายภาพบำบัดท่านนี้กลับมาดูแลผู้ป่วยต่อหรือไม่?</p>
+          <p className="review-ask">หากมีโอกาส ท่านต้องการให้{role}ท่านนี้กลับมาดูแลผู้ป่วยต่อหรือไม่?</p>
           <ChoiceGroup
             name="want_again"
             labels={WANT_AGAIN_LABELS}

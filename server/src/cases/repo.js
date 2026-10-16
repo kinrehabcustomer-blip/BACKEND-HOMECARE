@@ -3,7 +3,7 @@ import { sql, nextCaseId, nextPatientId, transaction } from '../db/index.js';
    แปลว่าวันหนึ่งจะมีช่องที่ผ่าน validation แล้วแต่ไม่ถูกเขียนลงตาราง (บันทึกสำเร็จแต่ข้อมูลหาย)
    ต่างจากตาราง cases ที่ยังประกาศ COLUMNS เอง เพราะช่องน้อยและมีคอลัมน์ที่ระบบเติมเองปนอยู่ */
 import { REPORT_CONTENT_FIELDS, PATIENT_PENDING } from './schema.js';
-import { decodeImage } from '../employees/schema.js';
+import { decodeImage, FRONT_POSITIONS } from '../employees/schema.js';
 import { ApiError } from '../lib/errors.js';
 import { normalizeAddons, addonsTotal } from '../lib/addons.js';
 
@@ -2743,13 +2743,17 @@ export async function periods() {
 /** พนักงานที่รับเคสได้ (ยังทำงานอยู่) พร้อมจำนวนเคสที่ถืออยู่ ไว้ให้ dropdown จับคู่ */
 export function assignableEmployees() {
   return sql.all(
+    /* คืนทุกคนที่ยังทำงานอยู่ (หน้าเข้างาน/ปฏิทิน/ค่าจ้างใช้เป็นตัวกรองย้อนหลังด้วย — สายสำนักงานบางคนเคยมีกะ)
+       ส่วน dropdown จับคู่เคส/ลงกะกรองด้วย can_take_cases */
     `SELECT e.employee_id, e.first_name, e.last_name, e.nickname, e.position, e.status,
+            e.position = ANY(:field::text[]) AS can_take_cases,
             COUNT(c.case_id) FILTER (WHERE c.status = 'assigned') AS active_cases
      FROM employees e
      LEFT JOIN cases c ON c.assigned_to = e.employee_id
      WHERE e.status IN ('active', 'probation')
      GROUP BY e.employee_id
      ORDER BY e.employee_id`,
+    { field: FRONT_POSITIONS },
   ).then((rows) => rows.map((r) => ({ ...r, active_cases: Number(r.active_cases) })));
 }
 

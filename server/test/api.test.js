@@ -368,6 +368,24 @@ if (process.env.RUN_DB_TESTS !== '1') {
       assert.equal(dup.details.existing_invoice_id, created.invoice_id);
     });
 
+    test('จับคู่เคส/เพิ่มทีม/ลงกะได้เฉพาะสายดูแลและสายบำบัด — สายสำนักงานถูกปฏิเสธ', async () => {
+      const list = (await get('/api/cases/assignable-employees', MANAGER)).body;
+      const office = list.find((e) => ['manager', 'hr', 'admin'].includes(e.position));
+      const field = list.find((e) => e.employee_id === FIELD.employee_id);
+      assert.ok(office, 'fixture ต้องมีพนักงานสายสำนักงานที่ยังทำงานอยู่');
+      assert.equal(office.can_take_cases, false, 'ยังคืนสายสำนักงานมา (ใช้เป็นตัวกรองย้อนหลัง) แต่ติดธงว่าจับคู่ไม่ได้');
+      assert.equal(field.can_take_cases, true);
+
+      const c = await newCase();
+      const assign = await post(`/api/cases/${c.case_id}/assign`, { employee_id: office.employee_id }, MANAGER, 409);
+      assert.match(assign.error, /สายสำนักงาน/);
+      await post(`/api/cases/${c.case_id}/team`, { employee_id: office.employee_id }, MANAGER, 409);
+      await post(`/api/cases/${c.case_id}/visits/bulk`, { dates: ['2026-03-01'], assigned_to: office.employee_id }, MANAGER, 409);
+      await post('/api/cases', { case_type: 'other', client_name: 'x', assigned_to: office.employee_id }, MANAGER, 409);
+
+      await post(`/api/cases/${c.case_id}/assign`, { employee_id: FIELD.employee_id });
+    });
+
     test('เปิดเคสด้วยผู้ว่าจ้างอย่างเดียว (ยังไม่รู้ชื่อผู้ป่วย) ได้ — ไม่มีทั้งคู่ไม่ได้', async () => {
       const customer = await post('/api/customers', { name: 'ญาติโทรมาจอง', phone: '0812345678' }, MANAGER, 201);
       const c = await post('/api/cases', { case_type: 'other', customer_id: customer.customer_id, fee: 1500 }, MANAGER, 201);

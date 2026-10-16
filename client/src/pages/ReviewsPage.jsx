@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api.js';
-import { STATUS_LABELS, stampText } from '../labels.js';
+import { STATUS_LABELS, POSITION_LABELS, stampText } from '../labels.js';
 import Stars from '../components/Stars.jsx';
 import PageRefresh from '../components/PageRefresh.jsx';
 import { scoreText } from '../lib/reviewQuestions.js';
@@ -75,9 +75,9 @@ export default function ReviewsPage() {
 
       {rows.length === 0 ? (
         <div className="empty-state">
-          <p>ยังไม่มีพนักงานสายบำบัดในระบบ</p>
+          <p>ยังไม่มีพนักงานกลุ่ม front ในระบบ</p>
           <p className="muted">
-            แบบประเมินนี้เปิดใช้กับนักกายภาพบำบัด นักกิจกรรมบำบัด และนักแก้ไขการพูด
+            แบบประเมินนี้เปิดใช้กับพนักงานที่ออกไปดูแลผู้ป่วย — CG, NA, PN, RN และสายบำบัด
           </p>
         </div>
       ) : (
@@ -112,7 +112,8 @@ export default function ReviewsPage() {
                   <td data-label="พนักงาน">
                     <span className="name-cell">
                       <span className="link">{r.first_name} {r.last_name}</span>
-                      <span className="cell-sub mono">{r.employee_id}</span>
+                      {/* ทุกตำแหน่งหน้างานอยู่ตารางเดียวกันแล้ว — บอกตำแหน่งให้แยกออกว่าใครเป็นใคร */}
+                      <span className="cell-sub"><span className="mono">{r.employee_id}</span> · {POSITION_LABELS[r.position] ?? r.position}</span>
                       {r.status !== 'active' && (
                         <span className="badge muted-badge">{STATUS_LABELS[r.status] ?? r.status}</span>
                       )}

@@ -131,7 +131,8 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
         setVisits(v);
 
         const inCase = new Set([caseItem?.assigned_to, ...team.map((m) => m.employee_id)].filter(Boolean));
-        setStaff(all.filter((e) => inCase.has(e.employee_id)));
+        // ลงกะได้เฉพาะสายดูแล/สายบำบัด — server กันซ้ำตอนบันทึก (ดู ensureAssignable)
+        setStaff(all.filter((e) => inCase.has(e.employee_id) && e.can_take_cases));
       })
       .catch((e) => !cancelled && setError(e.message));
     return () => {
