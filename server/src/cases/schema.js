@@ -23,7 +23,12 @@ const optionalLongText = z.string().trim().max(2000).optional().nullable(); // �
 
 export const SERVICE_KINDS = ['homecare', 'physio'];
 
-export const createCaseSchema = z.object({
+/* ชื่อที่เก็บแทนเมื่อเปิดเคสโดยรู้แค่ผู้ว่าจ้าง (ญาติโทรมาจองก่อน ยังไม่บอกชื่อผู้ป่วย)
+   คอลัมน์ client_name เป็น NOT NULL และถูกใช้ทั่วระบบ (ชื่อเคส/ค้นหา/ใบแจ้งหนี้) — เติมคำนี้แทนการปล่อยว่าง
+   หน้าแก้เคสแปลงกลับเป็นช่องว่างให้กรอกชื่อจริงทีหลัง */
+export const PATIENT_PENDING = 'ยังไม่ระบุผู้ป่วย';
+
+const caseFields = z.object({
   // ชื่อเคสถูกสร้างอัตโนมัติจากแพ็คเกจ + ชื่อผู้ป่วย (ไม่มีช่องให้กรอกแล้ว) — รับค่าที่ส่งมาได้แต่ไม่บังคับ
   title: z.string().trim().max(200).optional().nullable(),
   case_type: z.enum(CASE_TYPES, { errorMap: () => ({ message: 'ประเภทเคสไม่ถูกต้อง' }) }),
@@ -47,7 +52,8 @@ export const createCaseSchema = z.object({
   physio_package_id: z.number().int().optional().nullable(),
 
   // ---------- รายละเอียดผู้ป่วย ----------
-  client_name: z.string().trim().min(1, 'กรุณากรอกชื่อผู้ป่วย').max(200),
+  // ว่างได้เมื่อระบุผู้ว่าจ้าง (เช็คใน createCaseSchema ด้านล่าง) — repo เติม PATIENT_PENDING ให้
+  client_name: z.string().trim().max(200).optional().nullable(),
   patient_gender: z.enum(['male', 'female', 'other']).optional().nullable(),
   patient_age: z
     .number()
@@ -107,7 +113,17 @@ export const createCaseSchema = z.object({
 
 // สถานะเปลี่ยนผ่าน endpoint เฉพาะ (assign/unassign/close/reopen) เท่านั้น ไม่ให้แก้ตรงๆ
 // เพื่อไม่ให้เกิดกรณี 'จับคู่แล้ว' แต่ไม่มีพนักงาน
-export const updateCaseSchema = createCaseSchema.omit({ assigned_to: true }).partial();
+export const createCaseSchema = caseFields.superRefine((v, ctx) => {
+  if (!v.client_name && !v.customer_id) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['client_name'],
+      message: 'กรุณากรอกชื่อผู้ป่วย หรือระบุผู้ว่าจ้าง',
+    });
+  }
+});
+
+export const updateCaseSchema = caseFields.omit({ assigned_to: true }).partial();
 
 export const assignSchema = z.object({
   employee_id: z.string().trim().min(1, 'กรุณาเลือกพนักงาน'),

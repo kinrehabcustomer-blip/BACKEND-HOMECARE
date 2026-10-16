@@ -2,7 +2,7 @@ import { sql, nextCaseId, transaction } from '../db/index.js';
 /* รายการช่องของรายงานมาจาก schema.js ที่เดียว — ฟอร์มมี 80 กว่าช่อง การก๊อปรายชื่อมาไว้สองที่
    แปลว่าวันหนึ่งจะมีช่องที่ผ่าน validation แล้วแต่ไม่ถูกเขียนลงตาราง (บันทึกสำเร็จแต่ข้อมูลหาย)
    ต่างจากตาราง cases ที่ยังประกาศ COLUMNS เอง เพราะช่องน้อยและมีคอลัมน์ที่ระบบเติมเองปนอยู่ */
-import { REPORT_CONTENT_FIELDS } from './schema.js';
+import { REPORT_CONTENT_FIELDS, PATIENT_PENDING } from './schema.js';
 import { decodeImage } from '../employees/schema.js';
 import { ApiError } from '../lib/errors.js';
 import { normalizeAddons, addonsTotal } from '../lib/addons.js';
@@ -438,6 +438,8 @@ export function create(rawInput, actor) {
     const caseId = await nextCaseId(tx);
     const values = { case_id: caseId };
     for (const col of COLUMNS) values[col] = input[col] ?? null;
+    // รู้แค่ผู้ว่าจ้าง ยังไม่รู้ชื่อผู้ป่วย (schema บังคับให้มีอย่างใดอย่างหนึ่งแล้ว)
+    if (!values.client_name) values.client_name = PATIENT_PENDING;
     values.pkg_english = input.pkg_english ?? false; // คอลัมน์ NOT NULL — ไม่ส่งมา = ไม่ได้ขอภาษาอังกฤษ
     // node-postgres แปลง array เป็น array ของ Postgres ไม่ใช่ JSON — ต้อง stringify เองก่อนลงคอลัมน์ JSONB
     values.addons = JSON.stringify(normalizeAddons(input.addons));
@@ -447,7 +449,13 @@ export function create(rawInput, actor) {
 
     // ไม่มีช่องกรอกชื่อเคสแล้ว — ปกติหน้าเว็บส่งชื่อที่ประกอบจากแพ็คเกจ+ผู้ป่วยมาให้
     // ถ้าเรียก API ตรงๆ โดยไม่ส่ง title มา ใช้ชื่อผู้ป่วยแทน เพื่อไม่ให้ชน NOT NULL
-    if (!values.title) values.title = values.client_name;
+    if (!values.title) {
+      // ยังไม่รู้ชื่อผู้ป่วย = ตั้งชื่อเคสตามผู้ว่าจ้างแทน (ชื่อเคสไปขึ้นในใบแจ้งหนี้ด้วย ห้ามเป็นคำแทนชื่อ)
+      const payer = values.client_name === PATIENT_PENDING && values.customer_id
+        ? await tx.one('SELECT name FROM customers WHERE customer_id = :id', { id: values.customer_id })
+        : null;
+      values.title = payer?.name ?? values.client_name;
+    }
 
     // จับคู่พนักงานมาตั้งแต่ต้นก็ได้ — สถานะต้องตรงกับความจริงเสมอ
     values.assigned_to = input.assigned_to || null;
@@ -563,6 +571,8 @@ export async function update(caseId, rawInput, actor) {
 
   const values = { case_id: caseId };
   for (const col of fields) values[col] = input[col] ?? null;
+  // ล้างชื่อผู้ป่วยในหน้าแก้ = กลับไปเป็น "ยังไม่ระบุ" (คอลัมน์ NOT NULL)
+  if ('client_name' in values && !values.client_name) values.client_name = PATIENT_PENDING;
   if ('addons' in values) values.addons = JSON.stringify(normalizeAddons(values.addons));
 
   await transaction(async (tx) => {

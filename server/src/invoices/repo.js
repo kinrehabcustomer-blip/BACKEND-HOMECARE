@@ -1,4 +1,5 @@
 import { sql, nextInvoiceId, transaction } from '../db/index.js';
+import { PATIENT_PENDING } from '../cases/schema.js';
 import { normalizeAddons, addonAmount, addonsTotal, addonsTotalSql } from '../lib/addons.js';
 
 const NOW = `to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')`;
@@ -812,7 +813,9 @@ function describeService(c) {
       : [c.format_name, c.grade_name, c.pkg_staff_tier, c.pkg_english && 'ภาษาอังกฤษ'];
 
   const service = parts.filter(Boolean).join(' · ');
-  return [service || c.title, c.client_name && `ผู้รับบริการ: ${c.client_name}`]
+  // เคสที่ยังไม่รู้ชื่อผู้ป่วย ไม่พิมพ์ "ผู้รับบริการ: ยังไม่ระบุผู้ป่วย" ลงเอกสารที่ส่งลูกค้า
+  const patient = c.client_name && c.client_name !== PATIENT_PENDING ? c.client_name : null;
+  return [service || c.title, patient && `ผู้รับบริการ: ${patient}`]
     .filter(Boolean)
     .join(' — ');
 }

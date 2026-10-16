@@ -44,6 +44,10 @@ const BLANK = {
   assigned_to: '',
 };
 
+/* ชื่อแทนของเคสที่เปิดโดยรู้แค่ผู้ว่าจ้าง — ต้องตรงกับ PATIENT_PENDING ใน server/src/cases/schema.js
+   โหลดเคสมาแก้แล้วแปลงกลับเป็นช่องว่าง ให้กรอกชื่อจริงทับได้เลย ไม่ต้องลบคำนี้ออกเอง */
+const PATIENT_PENDING = 'ยังไม่ระบุผู้ป่วย';
+
 const BLANK_ADDON = { name: '', quantity: '1', unit_price: '' };
 
 /** ยอดของบรรทัด — ปัดสองตำแหน่งแบบเดียวกับ server/src/lib/addons.js ตัวเลขบนฟอร์มจะได้ตรงกับใบ */
@@ -133,6 +137,9 @@ export default function CaseFormPage() {
   const [payer, setPayer] = useState(null);
   const [payerQuery, setPayerQuery] = useState('');
   const [payerMatches, setPayerMatches] = useState([]);
+  // ผู้ว่าจ้างรายใหม่ที่ยังไม่มีในระบบ { name, phone } — บันทึกเข้าตารางลูกค้าตอนกดบันทึกเคส
+  // (ไม่สร้างทันทีที่กดเพิ่ม เพราะถ้าเปลี่ยนใจไม่เปิดเคส จะเหลือลูกค้าค้างในระบบโดยไม่มีใครรู้)
+  const [newPayer, setNewPayer] = useState(null);
 
   useEffect(() => {
     api.assignableEmployees().then(setStaff).catch(() => {});
@@ -428,6 +435,7 @@ export default function CaseFormPage() {
       .then((c) => {
         const filled = { ...BLANK };
         for (const key of Object.keys(BLANK)) filled[key] = c[key] ?? '';
+        if (filled.client_name === PATIENT_PENDING) filled.client_name = '';
         filled.addons = (c.addons ?? []).map((a) => ({
           name: a.name, quantity: String(a.quantity), unit_price: String(a.unit_price),
         }));
@@ -486,6 +494,9 @@ export default function CaseFormPage() {
       setFieldErrors((prev) => (prev[key] ? { ...prev, [key]: undefined } : prev));
     },
   });
+
+  // มีผู้ว่าจ้างแล้ว (เลือกจากระบบ หรือเพิ่มใหม่) = เปิดเคสได้โดยยังไม่ต้องรู้ชื่อผู้ป่วย
+  const payerKnown = Boolean(form.customer_id || newPayer);
 
   /* ---------- อุปกรณ์เสริม: เพิ่ม/แก้/ลบทีละแถว ---------- */
   const setAddon = (i, key, value) => {
@@ -599,6 +610,8 @@ export default function CaseFormPage() {
    */
   async function ensurePatient(payload) {
     if (payload.patient_id) return payload.patient_id;
+    // รู้แค่ผู้ว่าจ้าง — ยังไม่มีชื่อให้สร้างแฟ้ม (server เติม "ยังไม่ระบุผู้ป่วย" ให้เคส)
+    if (!payload.client_name) return null;
 
     const patient = await api.createPatient({
       name: payload.client_name,
@@ -629,12 +642,37 @@ export default function CaseFormPage() {
     save();
   }
 
+  /** บันทึกผู้ว่าจ้างรายใหม่เข้าตารางลูกค้า แล้วสลับเป็น "เลือกแล้ว" ทันที
+      ถ้าขั้นต่อไปล้ม (เช่น เปิดเคสไม่ผ่าน) กดบันทึกซ้ำจะใช้ลูกค้าเดิม ไม่สร้างซ้ำ */
+  async function ensurePayer(payload) {
+    if (!newPayer) return payload.customer_id;
+    const created = await api.createCustomer({
+      name: newPayer.name.trim(),
+      phone: newPayer.phone.trim() || null,
+      address: payload.address ?? null,
+    });
+    setNewPayer(null);
+    setPayer(created);
+    setForm((prev) => ({ ...prev, customer_id: created.customer_id }));
+    return created.customer_id;
+  }
+
   async function save() {
     setConfirmingService(false);
+
+    // ต้องรู้อย่างน้อยหนึ่งคน: ผู้ป่วย หรือผู้ว่าจ้าง (เคสที่ไม่มีทั้งคู่ไม่รู้ว่าจะดูแลใคร/เก็บเงินใคร)
+    if (!form.client_name.trim() && !form.customer_id && !newPayer?.name.trim()) {
+      setError('กรุณากรอกชื่อผู้ป่วย หรือระบุผู้ว่าจ้างอย่างน้อยหนึ่งอย่าง');
+      setFieldErrors((prev) => ({ ...prev, client_name: 'กรอกชื่อผู้ป่วย หรือเลือก/เพิ่มผู้ว่าจ้างด้านบน' }));
+      formEl.current?.querySelector('[name="client_name"]')?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      return;
+    }
+
     setSaving(true);
     setError(null);
     try {
       const payload = toPayload(form);
+      payload.customer_id = await ensurePayer(payload);
 
       // เคสใหม่ต้องผูกแฟ้มผู้ป่วยเสมอ — เลือกไว้แล้วใช้เลย ไม่งั้นสร้างใหม่จากข้อมูลที่กรอก
       if (!isEdit) payload.patient_id = await ensurePatient(payload);
@@ -644,8 +682,9 @@ export default function CaseFormPage() {
       const serviceParts = isPhysio
         ? [selectedPhysio?.name]
         : [selectedFormat?.name, gradeName];
-      payload.title =
-        [...serviceParts, payload.client_name].filter(Boolean).join(' · ') || payload.client_name;
+      // ยังไม่รู้ชื่อผู้ป่วย = ใช้ชื่อผู้ว่าจ้างต่อท้ายแทน เคสจะได้ค้นเจอด้วยชื่อคนที่โทรมาจอง
+      const who = payload.client_name || payer?.name || newPayer?.name?.trim() || null;
+      payload.title = [...serviceParts, who].filter(Boolean).join(' · ') || who;
 
       // ฟิลด์เหล่านี้ย้ายไปเก็บที่แฟ้มผู้ป่วยแล้ว ไม่เก็บซ้ำในเคส (allergies/relation ไม่ใช่คอลัมน์ของเคสอยู่แล้ว)
       delete payload.allergies;
@@ -710,7 +749,26 @@ export default function CaseFormPage() {
             โหมดแก้ไข: ถ้าเคสยังไม่มีผู้ว่าจ้าง ให้ค้นหา/เพิ่มลูกค้าเจ้าของเคสได้ที่นี่ (บันทึกแล้วใบแจ้งหนี้จะตามให้เอง) */}
         <h2>ผู้ว่าจ้าง</h2>
         <div className="customer-picker">
-          {payer ? (
+          {newPayer ? (
+            <div className="picked-customer new-payer">
+              <div>
+                <strong>ผู้ว่าจ้างรายใหม่: {newPayer.name}</strong>
+                <p className="muted">จะบันทึกเข้าระบบลูกค้า (CUS-xxxx) ให้เมื่อกดบันทึกเคส</p>
+                <label className="customer-search">
+                  เบอร์โทรผู้ว่าจ้าง (ถ้ามี)
+                  <input
+                    type="tel"
+                    inputMode="tel"
+                    value={newPayer.phone}
+                    onChange={(e) => setNewPayer((prev) => ({ ...prev, phone: e.target.value }))}
+                  />
+                </label>
+              </div>
+              <button type="button" className="btn" onClick={() => { setPayerQuery(newPayer.name); setNewPayer(null); }}>
+                ยกเลิก
+              </button>
+            </div>
+          ) : payer ? (
             <div className="picked-customer">
               <div>
                 <strong>ผู้ว่าจ้าง: {payer.name}</strong>
@@ -741,6 +799,21 @@ export default function CaseFormPage() {
                     </li>
                   ))}
                 </ul>
+              )}
+              {/* ไม่เจอในระบบ (หรือเจอแต่ไม่ใช่คนนี้) — เพิ่มเป็นลูกค้าใหม่จากชื่อที่พิมพ์ได้เลย */}
+              {payerQuery.trim() && (
+                <button
+                  type="button"
+                  className="btn add-payer"
+                  onClick={() => {
+                    setNewPayer({ name: payerQuery.trim(), phone: '' });
+                    setPayerQuery('');
+                    setPayerMatches([]);
+                    setFieldErrors((prev) => (prev.client_name ? { ...prev, client_name: undefined } : prev));
+                  }}
+                >
+                  + เพิ่ม "{payerQuery.trim()}" เป็นผู้ว่าจ้างรายใหม่
+                </button>
               )}
             </>
           )}
@@ -887,64 +960,6 @@ export default function CaseFormPage() {
             {fieldError('fee')}
           </label>
 
-          {/* อุปกรณ์เสริม — คิดเงินแยกจากค่าบริการ แล้วบวกเข้ายอดใบแจ้งหนี้ (ใบร่าง/ใบที่ยังไม่รับเงินปรับตามให้เอง) */}
-          <fieldset className="addons-field">
-            <legend>อุปกรณ์เสริม (คิดเงินเพิ่ม)</legend>
-            {form.addons.length === 0 && <p className="muted">ยังไม่มีอุปกรณ์เสริม</p>}
-            {form.addons.map((a, i) => (
-              <div className="addon-row" key={i}>
-                <label>ชื่ออุปกรณ์
-                  <input
-                    name={`addons.${i}.name`}
-                    value={a.name}
-                    placeholder="เช่น เตียงลม, รถเข็น"
-                    aria-invalid={fieldErrors[`addons.${i}.name`] ? true : undefined}
-                    onChange={(e) => setAddon(i, 'name', e.target.value)}
-                  />
-                  {fieldError(`addons.${i}.name`)}
-                </label>
-                <label>จำนวน
-                  <input
-                    type="number" min="0" step="any"
-                    name={`addons.${i}.quantity`}
-                    value={a.quantity}
-                    aria-invalid={fieldErrors[`addons.${i}.quantity`] ? true : undefined}
-                    onChange={(e) => setAddon(i, 'quantity', e.target.value)}
-                  />
-                  {fieldError(`addons.${i}.quantity`)}
-                </label>
-                <label>ราคาต่อหน่วย (บาท)
-                  <input
-                    type="number" min="0" step="0.01"
-                    name={`addons.${i}.unit_price`}
-                    value={a.unit_price}
-                    aria-invalid={fieldErrors[`addons.${i}.unit_price`] ? true : undefined}
-                    onChange={(e) => setAddon(i, 'unit_price', e.target.value)}
-                  />
-                  {fieldError(`addons.${i}.unit_price`)}
-                </label>
-                <span className="addon-amount">{formatBaht(addonAmount(a))}</span>
-                <button
-                  type="button"
-                  className="btn danger-ghost"
-                  aria-label={`ลบ ${a.name || 'อุปกรณ์แถวนี้'}`}
-                  onClick={() => removeAddon(i)}
-                >
-                  ลบ
-                </button>
-              </div>
-            ))}
-            <div className="addon-foot">
-              <button type="button" className="btn" onClick={addAddon}>+ เพิ่มอุปกรณ์เสริม</button>
-              {form.addons.length > 0 && (
-                <p className="form-hint muted">
-                  รวมอุปกรณ์เสริม <strong>{formatBaht(addonsTotal(form.addons))}</strong>
-                  {' '}· ยอดในใบแจ้งหนี้ = ค่าบริการ + อุปกรณ์เสริม ={' '}
-                  <strong>{formatBaht(Number(form.fee || 0) + addonsTotal(form.addons))}</strong>
-                </p>
-              )}
-            </div>
-          </fieldset>
           {/* ยอดที่พนักงานจะเห็นเป็นรายได้ของตัวเองเมื่อปิดเคส — ดึงจากแพ็คเกจให้ แก้ทับได้
               เห็นเฉพาะผู้จัดการ · คนอื่นเปิดเคสได้ตามปกติแล้ว server เติมค่าจ้างจากเรท/แพ็คเกจให้เอง
               (payFromService ใน cases/repo.js) — ไม่ใช่ปล่อยว่างจนพนักงานเห็น "ยังไม่ระบุค่าจ้าง" */}
@@ -985,6 +1000,67 @@ export default function CaseFormPage() {
           )}
         </div>
 
+        {/* อุปกรณ์เสริม — คิดเงินแยกจากค่าบริการ แล้วบวกเข้ายอดใบแจ้งหนี้ (ใบร่าง/ใบที่ยังไม่รับเงินปรับตามให้เอง)
+            อยู่นอก .grid ของรายละเอียดเคสโดยตั้งใจ: ในกริดกล่องนี้ถูกบีบเหลือหนึ่งคอลัมน์บนบางจอ
+            (เคยเจอบนมือถือ — ชื่อหัวข้อกับปุ่มเพิ่มหักเป็นสองบรรทัด) แยกออกมาจึงกว้างเต็มฟอร์มเสมอ */}
+        <section className="addons-field" aria-labelledby="addons-title">
+          <h3 id="addons-title">อุปกรณ์เสริม <span className="muted">(คิดเงินเพิ่ม)</span></h3>
+          {form.addons.length === 0 && <p className="muted">ยังไม่มีอุปกรณ์เสริม</p>}
+          {form.addons.map((a, i) => (
+            <div className="addon-row" key={i}>
+              <label>ชื่ออุปกรณ์
+                <input
+                  name={`addons.${i}.name`}
+                  value={a.name}
+                  placeholder="เช่น เตียงลม, รถเข็น"
+                  aria-invalid={fieldErrors[`addons.${i}.name`] ? true : undefined}
+                  onChange={(e) => setAddon(i, 'name', e.target.value)}
+                />
+                {fieldError(`addons.${i}.name`)}
+              </label>
+              <label>จำนวน
+                <input
+                  type="number" min="0" step="any"
+                  name={`addons.${i}.quantity`}
+                  value={a.quantity}
+                  aria-invalid={fieldErrors[`addons.${i}.quantity`] ? true : undefined}
+                  onChange={(e) => setAddon(i, 'quantity', e.target.value)}
+                />
+                {fieldError(`addons.${i}.quantity`)}
+              </label>
+              <label>ราคาต่อหน่วย (บาท)
+                <input
+                  type="number" min="0" step="0.01"
+                  name={`addons.${i}.unit_price`}
+                  value={a.unit_price}
+                  aria-invalid={fieldErrors[`addons.${i}.unit_price`] ? true : undefined}
+                  onChange={(e) => setAddon(i, 'unit_price', e.target.value)}
+                />
+                {fieldError(`addons.${i}.unit_price`)}
+              </label>
+              <span className="addon-amount">{formatBaht(addonAmount(a))}</span>
+              <button
+                type="button"
+                className="btn danger-ghost"
+                aria-label={`ลบ ${a.name || 'อุปกรณ์แถวนี้'}`}
+                onClick={() => removeAddon(i)}
+              >
+                ลบ
+              </button>
+            </div>
+          ))}
+          <div className="addon-foot">
+            <button type="button" className="btn addon-add" onClick={addAddon}>+ เพิ่มอุปกรณ์เสริม</button>
+            {form.addons.length > 0 && (
+              <p className="form-hint muted">
+                รวมอุปกรณ์เสริม <strong>{formatBaht(addonsTotal(form.addons))}</strong>
+                {' '}· ยอดในใบแจ้งหนี้ = ค่าบริการ + อุปกรณ์เสริม ={' '}
+                <strong>{formatBaht(Number(form.fee || 0) + addonsTotal(form.addons))}</strong>
+              </p>
+            )}
+          </div>
+        </section>
+
         <h2>ผู้รับการดูแล</h2>
 
         {isEdit ? (
@@ -997,7 +1073,7 @@ export default function CaseFormPage() {
               </p>
             )}
             <div className="grid">
-              <label>ชื่อผู้ป่วย *<input required {...field('client_name')} />{fieldError('client_name')}</label>
+              <label>ชื่อผู้ป่วย {payerKnown ? '(ว่างได้ — ยังไม่ทราบชื่อ)' : '*'}<input {...field('client_name')} />{fieldError('client_name')}</label>
               <label>เพศ
                 <select {...field('patient_gender')}>
                   <option value="">— ไม่ระบุ —</option>
@@ -1101,7 +1177,7 @@ export default function CaseFormPage() {
 
             <h3>ข้อมูลผู้ป่วยใหม่</h3>
             <div className="grid">
-              <label>ชื่อผู้ป่วย *<input required {...field('client_name')} />{fieldError('client_name')}</label>
+              <label>ชื่อผู้ป่วย {payerKnown ? '(ว่างได้ — ยังไม่ทราบชื่อ)' : '*'}<input {...field('client_name')} />{fieldError('client_name')}</label>
               <label>เพศ
                 <select {...field('patient_gender')}>
                   <option value="">— ไม่ระบุ —</option>

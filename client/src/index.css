@@ -1538,6 +1538,13 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
 }
 .customer-results button:hover { background: var(--bg); }
 .customer-results .muted { font-size: 0.75rem; }
+/* ปุ่ม "เพิ่มเป็นผู้ว่าจ้างรายใหม่" ใต้ผลค้นหา + การ์ดของผู้ว่าจ้างที่จะบันทึกตอนเปิดเคส */
+.customer-picker .add-payer { margin-top: 0.5rem; max-width: 100%; white-space: normal; text-align: left; }
+.picked-customer.new-payer > div { flex: 1; min-width: 0; }
+.picked-customer.new-payer .customer-search { margin-top: 0.5rem; max-width: 20rem; }
+@media (max-width: 640px) {
+  .customer-picker .add-payer { width: 100%; }
+}
 
 /* ฟอร์มช่องเดียวเรียงลงมา (เปลี่ยนรหัสผ่าน) — ไม่ใช้ .grid สามคอลัมน์ */
 .form.narrow { display: flex; flex-direction: column; gap: 0.875rem; max-width: 26.25rem; }
@@ -4787,28 +4794,46 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
   .page-head { padding-bottom: 1rem; }
 }
 
-/* ---------- อุปกรณ์เสริมในฟอร์มเคส ---------- */
-.grid .addons-field {
-  grid-column: 1 / -1;
+/* ---------- อุปกรณ์เสริมในฟอร์มเคส ----------
+   เป็นบล็อกของตัวเองใต้กริดรายละเอียดเคส (ไม่ใช่ช่องในกริด) จึงกว้างเต็มฟอร์มทุกขนาดจอ */
+.addons-field {
+  margin-top: 1rem;
   border: 1px solid var(--border);
   border-radius: 10px;
-  padding: 0.75rem 1rem 1rem;
-  margin: 0;
+  padding: 0.875rem 1rem 1rem;
   min-width: 0;
 }
-.addons-field legend { padding: 0 0.375rem; font-weight: 600; }
+.addons-field h3 { margin: 0 0 0.625rem; font-size: 0.9375rem; }
+.addons-field h3 .muted { font-weight: 500; }
+.addons-field > .muted { margin: 0 0 0.75rem; }
 .addon-row {
   display: grid;
   grid-template-columns: minmax(0, 2fr) minmax(0, 0.7fr) minmax(0, 1fr) auto auto;
   gap: 0.625rem;
   align-items: end;
-  margin-bottom: 0.625rem;
+  margin-bottom: 0.75rem;
 }
-.addon-amount { padding-bottom: 0.6rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.addon-row label {
+  display: flex; flex-direction: column; gap: 0.3125rem; min-width: 0;
+  font-size: 0.8125rem; font-weight: 600; color: var(--muted);
+}
+.addon-amount { padding-bottom: 0.6rem; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .addon-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; }
 .addon-foot .form-hint { margin: 0; }
+
+/* มือถือ: แต่ละรายการเป็นการ์ดย่อย — ชื่อเต็มแถว · จำนวนคู่ราคา · ยอดคู่ปุ่มลบ */
 @media (max-width: 640px) {
-  .addon-row { grid-template-columns: 1fr 1fr; padding-bottom: 0.625rem; border-bottom: 1px solid var(--border); }
+  .addons-field { padding: 0.75rem; }
+  .addon-row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+    gap: 0.5rem 0.625rem;
+    padding: 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
   .addon-row > label:first-child { grid-column: 1 / -1; }
-  .addon-amount { padding-bottom: 0; align-self: center; }
+  .addon-amount { padding-bottom: 0; align-self: center; font-size: 0.9375rem; }
+  .addon-row .btn { justify-self: end; }
+  .addon-foot { flex-direction: column; align-items: stretch; }
+  .addon-add { width: 100%; }
 }

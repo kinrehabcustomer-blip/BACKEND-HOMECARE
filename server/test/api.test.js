@@ -368,6 +368,32 @@ if (process.env.RUN_DB_TESTS !== '1') {
       assert.equal(dup.details.existing_invoice_id, created.invoice_id);
     });
 
+    test('เปิดเคสด้วยผู้ว่าจ้างอย่างเดียว (ยังไม่รู้ชื่อผู้ป่วย) ได้ — ไม่มีทั้งคู่ไม่ได้', async () => {
+      const customer = await post('/api/customers', { name: 'ญาติโทรมาจอง', phone: '0812345678' }, MANAGER, 201);
+      const c = await post('/api/cases', { case_type: 'other', customer_id: customer.customer_id, fee: 1500 }, MANAGER, 201);
+      assert.equal(c.client_name, 'ยังไม่ระบุผู้ป่วย');
+      assert.equal(c.patient_id, null);
+      assert.equal(c.customer_id, customer.customer_id);
+
+      const [draft] = (await get(`/api/invoices?case_id=${c.case_id}`, MANAGER)).body.data;
+      assert.equal(draft.bill_to_name, 'ญาติโทรมาจอง');
+      assert.equal(draft.total, 1500);
+      assert.doesNotMatch(draft.service_description, /ยังไม่ระบุผู้ป่วย/, 'ห้ามพิมพ์คำแทนชื่อลงใบที่ส่งลูกค้า');
+      assert.equal(draft.is_stale, false);
+
+      // ล้างชื่อตอนแก้เคส = กลับเป็นคำแทน (ไม่ชน NOT NULL) · ใส่ชื่อจริงทีหลังได้
+      const res = await fetch(`${base}/api/cases/${c.case_id}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json', cookie: `${COOKIE_NAME}=${signToken(MANAGER)}` },
+        body: JSON.stringify({ client_name: null }),
+      });
+      assert.equal(res.status, 200);
+      assert.equal((await res.json()).client_name, 'ยังไม่ระบุผู้ป่วย');
+
+      const bad = await post('/api/cases', { case_type: 'other', fee: 1500 }, MANAGER, 400);
+      assert.ok(bad.details.some((d) => d.field === 'client_name'));
+    });
+
     test('อุปกรณ์เสริม: บวกเข้าใบ ซิงก์ตามเคส ย้ายไปใบส่วนที่เหลือ และขึ้นป้ายเมื่อเปลี่ยนหลังแบ่งงวด', async () => {
       const patchCase = async (id, body) => {
         const res = await fetch(`${base}/api/cases/${id}`, {
