@@ -17,6 +17,7 @@ import {
   todayTH,
 } from '../labels.js';
 import LineIcon from './LineIcon.jsx';
+import StaffPicker from './StaffPicker.jsx';
 
 /**
  * ชื่อบริการของเคส — สองสายเก็บคนละที่ (Homecare = รูปแบบ+เกรด, กายภาพ = ชื่อแพ็คเกจ)
@@ -767,16 +768,14 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                 {!terminal && (
                   <div className="assign-form">
                     {/* แสดงเฉพาะตำแหน่งที่เคสต้องการ (กติกาเดียวกับหน้าเปิดเคส — ดู positionsForCase) */}
-                    <select value={pick} onChange={(e) => setPick(e.target.value)}>
-                      <option value="">— เลือกพนักงาน —</option>
-                      {shownStaff.map((e) => (
-                        <option key={e.employee_id} value={e.employee_id}>
-                          {e.employee_id} · {e.first_name} {e.last_name} ({POSITION_LABELS[e.position]})
-                          {wantedPositions && !wantedPositions.includes(e.position) ? ' · ไม่ตรงระดับ' : ''}
-                          {' · '}ถืออยู่ {e.active_cases} เคส
-                        </option>
-                      ))}
-                    </select>
+                    <StaffPicker
+                      label="เลือกพนักงาน"
+                      staff={shownStaff}
+                      value={pick}
+                      wantedPositions={wantedPositions}
+                      emptyText="ยังไม่มีพนักงานตำแหน่งที่ตรงกับเคสนี้"
+                      onChange={setPick}
+                    />
                     {/* ปุ่มเดียวเสมอ — คนแรกที่เพิ่มจะถูกใช้เป็นตัวอ้างของระบบให้เอง
                         (เส้น API ที่ยิงจึงต่างกัน แต่สำหรับคนใช้คือ "เพิ่มพนักงาน" เหมือนกันหมด) */}
                     <button

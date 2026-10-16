@@ -8,6 +8,7 @@ import {
   formatBaht, ageFromBirthDate, positionsForCase,
 } from '../labels.js';
 import LineIcon from '../components/LineIcon.jsx';
+import StaffPicker from '../components/StaffPicker.jsx';
 import { useCanSeeStaffPay } from '../auth.jsx';
 import { useScrollLock } from '../lib/scrollLock.js';
 
@@ -1320,16 +1321,20 @@ export default function CaseFormPage() {
           {!isEdit && (
             <label className="span-2">
               พนักงานที่รับเคส
-              <select {...field('assigned_to')}>
-                <option value="">— ยังไม่จับคู่ (จับคู่ทีหลังได้) —</option>
-                {shownStaff.map((e) => (
-                  <option key={e.employee_id} value={e.employee_id}>
-                    {e.employee_id} · {e.first_name} {e.last_name} ({POSITION_LABELS[e.position]})
-                    {wantedPositions && !wantedPositions.includes(e.position) ? ' · ไม่ตรงระดับ' : ''}
-                    {' · '}ถืออยู่ {e.active_cases} เคส
-                  </option>
-                ))}
-              </select>
+              <StaffPicker
+                name="assigned_to"
+                label="พนักงานที่รับเคส"
+                staff={shownStaff}
+                value={form.assigned_to}
+                wantedPositions={wantedPositions}
+                placeholder="— ยังไม่จับคู่ (จับคู่ทีหลังได้) —"
+                emptyText="ยังไม่มีพนักงานตำแหน่งที่ตรงกับบริการนี้"
+                invalid={Boolean(fieldErrors.assigned_to)}
+                onChange={(id) => {
+                  setForm((prev) => ({ ...prev, assigned_to: id }));
+                  setFieldErrors((prev) => (prev.assigned_to ? { ...prev, assigned_to: undefined } : prev));
+                }}
+              />
             {fieldError('assigned_to')}
             </label>
           )}
