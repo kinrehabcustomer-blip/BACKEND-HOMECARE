@@ -70,12 +70,28 @@ export function AuthProvider({ children }) {
 export const useAuth = () => useContext(AuthContext);
 
 /**
- * เห็นค่าจ้างพนักงาน/กำไรได้ไหม — เฉพาะตำแหน่งผู้จัดการ (แคบกว่า admin ที่รวม HR ด้วย)
+ * หมวดสิทธิ์ของผู้ใช้ (office / billing / money) — server ส่งมากับ session (ดู POSITION_PERMISSIONS
+ * ใน server/src/lib/auth.js) หน้าเว็บใช้แค่ซ่อนเมนู/ปุ่ม ตัวจริงที่กันคือด่านของแต่ละเส้น API
+ *
+ * session จาก server รุ่นก่อนมีหมวดยังไม่มีช่อง permissions — เดาจากกติกาเดิม
+ * (หลังบ้าน = office + billing · ผู้จัดการได้ money เพิ่ม) แทนที่จะปล่อยให้ทุกคนโดนล็อกออกจากทุกหน้า
+ */
+export function permissionsOf(user) {
+  if (!user) return [];
+  if (Array.isArray(user.permissions)) return user.permissions;
+  if (user.role !== 'admin') return [];
+  return user.position === 'manager' ? ['office', 'billing', 'money'] : ['office', 'billing'];
+}
+
+export const useCan = (permission) => permissionsOf(useAuth()?.user).includes(permission);
+
+/**
+ * เห็นค่าจ้างพนักงาน/กำไรได้ไหม = มีสิทธิ์หมวด money (ผู้จัดการ · การเงิน)
  *
  * ตัวนี้ใช้ตัดสินแค่ว่าจะ "วาด" อะไรบนหน้าจอ — ตัวจริงที่กันคือ server ที่ตัดฟิลด์ออกจาก payload
  * (ดู canSeeStaffPay ใน server/src/lib/auth.js) แก้ค่านี้ในเบราว์เซอร์แล้วก็ยังไม่มีตัวเลขให้ดูอยู่ดี
  */
-export const useCanSeeStaffPay = () => useAuth()?.user?.position === 'manager';
+export const useCanSeeStaffPay = () => useCan('money');
 
 /**
  * เห็นรายได้รวมของบริษัทได้ไหม (กราฟรายได้หน้าภาพรวม) — เฉพาะตำแหน่งผู้จัดการเช่นกัน
@@ -86,7 +102,7 @@ export const useCanSeeStaffPay = () => useAuth()?.user?.position === 'manager';
  *
  * ตัวจริงที่กันคือ requireManager หน้าเส้น /api/invoices/revenue — อันนี้แค่ไม่วาดการ์ดที่ยังไงก็โหลดไม่ได้
  */
-export const useCanSeeRevenue = () => useAuth()?.user?.position === 'manager';
+export const useCanSeeRevenue = () => useCan('money');
 
 /** ครอบหน้าที่ต้อง login — ยังไม่ login ให้เด้งไปหน้า login */
 export function RequireAuth({ children }) {

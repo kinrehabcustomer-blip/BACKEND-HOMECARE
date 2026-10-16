@@ -2068,3 +2068,34 @@ describe('อุปกรณ์เสริมของเคส', () => {
     assert.ok(!updateCaseSchema.safeParse({ addons: [{ name: 'x', quantity: 0, unit_price: 1 }] }).success);
   });
 });
+
+describe('ต่อเคส — วันของรอบใหม่', () => {
+  test('เริ่มวันถัดจากวันสิ้นสุด และยาวเท่ารอบก่อน (ข้ามเดือน/ปีอธิกสุรทินถูก)', async () => {
+    const { nextRoundDates } = await import('../../client/src/lib/caseRounds.js');
+    assert.deepEqual(nextRoundDates('2026-10-01', '2026-10-31', '2026-10-16'), { start_date: '2026-11-01', end_date: '2026-12-01' });
+    assert.deepEqual(nextRoundDates('2028-02-01', '2028-02-28', 'x'), { start_date: '2028-02-29', end_date: '2028-03-27' });
+    assert.deepEqual(nextRoundDates('2026-12-25', '2026-12-31', 'x'), { start_date: '2027-01-01', end_date: '2027-01-07' });
+  });
+
+  test('ไม่มีวันสิ้นสุด = เริ่มวันนี้ · ไม่มีวันเริ่ม = รู้แค่วันเริ่มรอบใหม่', async () => {
+    const { nextRoundDates } = await import('../../client/src/lib/caseRounds.js');
+    assert.deepEqual(nextRoundDates('2026-10-01', '', '2026-10-16'), { start_date: '2026-10-16', end_date: '' });
+    assert.deepEqual(nextRoundDates(null, '2026-10-31', '2026-10-16'), { start_date: '2026-11-01', end_date: '' });
+  });
+});
+
+describe('วันสิ้นสุดตามรูปแบบบริการ', () => {
+  test('รายวัน 1 · รายสัปดาห์ 7 · รายเดือน 30 วัน นับรวมวันเริ่ม', async () => {
+    const { endDateFor } = await import('../../client/src/lib/caseRounds.js');
+    assert.equal(endDateFor('2026-11-02', 'daily'), '2026-11-02');
+    assert.equal(endDateFor('2026-11-02', 'weekly'), '2026-11-08');
+    assert.equal(endDateFor('2026-11-02', 'monthly'), '2026-12-01');
+    assert.equal(endDateFor('2028-02-15', 'monthly'), '2028-03-15');
+  });
+
+  test('ไม่มีวันเริ่ม หรือไม่รู้หมวด = null (คงวันสิ้นสุดเดิม)', async () => {
+    const { endDateFor } = await import('../../client/src/lib/caseRounds.js');
+    assert.equal(endDateFor('', 'monthly'), null);
+    assert.equal(endDateFor('2026-11-02', undefined), null);
+  });
+});

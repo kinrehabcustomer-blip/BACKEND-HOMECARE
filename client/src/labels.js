@@ -8,9 +8,11 @@ export const POSITION_LABELS = {
   speech_therapist: 'นักแก้ไขการพูด',
   manager: 'ผู้จัดการ',
   hr: 'HR',
-  // แอดมิน = สิทธิ์เท่าผู้จัดการทุกอย่าง ยกเว้นเรื่องเงิน (ค่าจ้าง/กำไร/รอบจ่าย/รายได้บริษัท)
-  // ป้ายเขียนว่า "แอดมิน" ไม่ใช่ "ผู้ดูแลระบบ" เพราะคำหลังชวนให้เข้าใจว่าสิทธิ์สูงกว่าผู้จัดการ
-  admin: 'แอดมิน',
+  // Admin HC (ชื่อเดิม "แอดมิน") = สิทธิ์เท่าผู้จัดการทุกอย่าง ยกเว้นเรื่องเงิน (ค่าจ้าง/กำไร/รอบจ่าย/รายได้บริษัท)
+  // คีย์ยังเป็น 'admin' — เปลี่ยนแค่ป้าย ข้อมูลพนักงานเดิมไม่ต้องย้าย
+  admin: 'Admin HC',
+  admin_ipd: 'Admin IPD', // ยังไม่กำหนดสิทธิ์ (ดู POSITION_PERMISSIONS ฝั่ง server)
+  finance: 'การเงิน',     // เข้าได้เฉพาะใบแจ้งหนี้ · ค่าตอบแทนพนักงาน · รายได้บริษัท
 };
 
 /**
@@ -22,7 +24,7 @@ export const THERAPY_POSITIONS = ['therapist', 'occupational_therapist', 'speech
 
 /** กลุ่มพนักงาน — back = สายสำนักงาน · front = ที่เหลือทั้งหมด (ออกไปดูแลผู้ป่วยจริง)
     ต้องตรงกับ BACK_POSITIONS / FRONT_POSITIONS ใน server/src/employees/schema.js */
-export const BACK_POSITIONS = ['manager', 'hr', 'admin'];
+export const BACK_POSITIONS = ['manager', 'hr', 'admin', 'admin_ipd', 'finance'];
 export const FRONT_POSITIONS = Object.keys(POSITION_LABELS).filter((p) => !BACK_POSITIONS.includes(p));
 
 /**
@@ -120,9 +122,9 @@ export const SERVICE_KIND_LABELS = {
 
 /**
  * ค่าภาษา (อังกฤษ) ของ Homecare — บวกเพิ่มจากราคาในตารางเรท ทุกแพ็คเกจ ตามหมวดของรูปแบบบริการ
- * หมวดที่ไม่มีในนี้ (รายสัปดาห์) = ไม่มีตัวเลือกค่าภาษา
+ * รายวัน 500 · รายสัปดาห์ 3,500 · รายเดือน 10,000 — หมวดที่ไม่มีในนี้ = ไม่มีตัวเลือกค่าภาษา
  */
-export const ENGLISH_SURCHARGE = { daily: 500, monthly: 10000 };
+export const ENGLISH_SURCHARGE = { daily: 500, weekly: 3500, monthly: 10000 };
 
 /** สถานะกะของพนักงานภาคสนาม (คำนวณตอนอ่านจากฝั่ง server — ดู withVisitState) */
 export const VISIT_STATE_LABELS = {
@@ -174,6 +176,7 @@ export const CASE_EVENT_LABELS = {
   closed: 'ปิดเคส',
   cancelled: 'ยกเลิกเคส',
   reopened: 'เปิดเคสใหม่',
+  renewed: 'ต่อเคส',
   visit_adjusted: 'แก้กะ',
   pay_approved: 'อนุมัติค่าจ้าง',
   pay_rejected: 'ไม่อนุมัติค่าจ้าง',

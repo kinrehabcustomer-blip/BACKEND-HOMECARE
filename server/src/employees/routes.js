@@ -15,7 +15,7 @@ import {
   STATUSES,
 } from './schema.js';
 import { ApiError, asyncRoute, notFound } from '../lib/errors.js';
-import { canSeeStaffPay, BLOCKED_STATUSES, ADMIN_POSITIONS } from '../lib/auth.js';
+import { canSeeStaffPay, BLOCKED_STATUSES, can } from '../lib/auth.js';
 
 export const employeesRouter = Router();
 
@@ -76,7 +76,7 @@ employeesRouter.get(
   '/:id',
   asyncRoute(async (req, res) => {
     res.set('Cache-Control', 'no-store');
-    res.json(await repo.findDetailById(req.params.id, ADMIN_POSITIONS.includes(req.user.position)));
+    res.json(await repo.findDetailById(req.params.id, can(req.user.position, 'office')));
   }),
 );
 
@@ -91,8 +91,12 @@ employeesRouter.get(
  * ปิดทางเดียวไม่พอ ต้องปิดที่ "ใครมีสิทธิ์แต่งตั้งผู้จัดการ" ซึ่งคือผู้จัดการเท่านั้น
  */
 export function ensureCanGrantManager(req, nextPosition) {
-  if (nextPosition === 'manager' && !canSeeStaffPay(req.user.position)) {
+  if (nextPosition === 'manager' && req.user.position !== 'manager') {
     throw new ApiError(403, 'เฉพาะผู้จัดการเท่านั้นที่ตั้งตำแหน่งผู้จัดการให้คนอื่นได้');
+  }
+  // ตำแหน่งที่เห็นเรื่องเงิน (เช่น การเงิน) ก็เป็นการเลื่อนสิทธิ์เหมือนกัน — HR/Admin HC แต่งตั้งเองไม่ได้
+  if (canSeeStaffPay(nextPosition) && !canSeeStaffPay(req.user.position)) {
+    throw new ApiError(403, 'เฉพาะผู้จัดการเท่านั้นที่ตั้งตำแหน่งที่เห็นข้อมูลการเงินให้คนอื่นได้');
   }
 }
 
@@ -103,8 +107,12 @@ export function ensureCanGrantManager(req, nextPosition) {
  * ก็ได้บัญชีผู้จัดการทั้งบัญชี — เป็นทางอ้อมของการเลื่อนสิทธิ์ที่ ensureCanGrantManager ปิดไว้
  */
 export function ensureCanManageTarget(req, target) {
-  if (target.position === 'manager' && !canSeeStaffPay(req.user.position)) {
+  if (target.position === 'manager' && req.user.position !== 'manager') {
     throw new ApiError(403, 'เฉพาะผู้จัดการเท่านั้นที่แก้ไขหรือนำบัญชีผู้จัดการออกได้');
+  }
+  // บัญชีที่เห็นเรื่องเงินถูกยึดผ่านทางเดียวกับผู้จัดการได้ (แก้อีเมลแล้วกดลืมรหัสผ่าน) — กันแบบเดียวกัน
+  if (canSeeStaffPay(target.position) && !canSeeStaffPay(req.user.position)) {
+    throw new ApiError(403, 'เฉพาะผู้จัดการเท่านั้นที่แก้ไขหรือนำบัญชีฝ่ายการเงินออกได้');
   }
 }
 

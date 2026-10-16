@@ -14,7 +14,7 @@ import { myRouter } from './my/routes.js';
 import { notifyRouter } from './notify/routes.js';
 import { publicReviewsRouter, reviewsRouter } from './reviews/routes.js';
 import { errorHandler } from './lib/errors.js';
-import { requireAuth, requireAdmin, requireManager, requirePasswordChanged } from './lib/auth.js';
+import { requireAuth, requireAdmin, requireBilling, requireCaseAccess, requireManager, requirePasswordChanged } from './lib/auth.js';
 
 export function createApp() {
   const app = express();
@@ -44,12 +44,13 @@ export function createApp() {
   // ส่วนจัดการหลังบ้านทั้งหมด — ต้อง login + เป็น admin (ผู้จัดการ/HR) เท่านั้น
   // พนักงานภาคสนาม (field) เข้าไม่ได้ทุกเส้นในกลุ่มนี้ (ยังไม่มีฟีเจอร์ฝั่ง field — จะเพิ่มพร้อมระบบเช็คอิน)
   app.use('/api/employees', signedIn, requireAdmin, employeesRouter);
-  app.use('/api/cases', signedIn, requireAdmin, casesRouter);
+  // การเงินเข้าได้เฉพาะเส้นที่หน้าค่าตอบแทนต้องใช้ (ดู requireCaseAccess) — ที่เหลือต้องเป็น office
+  app.use('/api/cases', signedIn, requireCaseAccess, casesRouter);
   app.use('/api/customers', signedIn, requireAdmin, customersRouter);
   app.use('/api/patients', signedIn, requireAdmin, patientsRouter);
   app.use('/api/packages', signedIn, requireAdmin, packagesRouter);
   app.use('/api/physio', signedIn, requireAdmin, physioRouter);
-  app.use('/api/invoices', signedIn, requireAdmin, invoicesRouter);
+  app.use('/api/invoices', signedIn, requireBilling, invoicesRouter);
   // คะแนนประเมินจากญาติ — ผู้จัดการและ HR เปิดดูได้ (HR เป็นคนดูแลเรื่องประเมินผลงานอยู่แล้ว)
   app.use('/api/reviews', signedIn, requireAdmin, reviewsRouter);
   // ค่าตอบแทนและการปิดรอบทำให้เงินจริงออกจากบริษัท — HR เป็น admin แต่ไม่ใช่ผู้มีสิทธิ์ด้านการเงิน

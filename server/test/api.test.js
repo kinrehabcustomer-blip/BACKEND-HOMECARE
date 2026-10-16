@@ -200,6 +200,60 @@ if (process.env.RUN_DB_TESTS !== '1') {
     return post('/api/cases', { case_type: 'other', client_name: 'Workflow patient', fee: 2000, staff_pay: 1200 }, MANAGER, 201);
   }
 
+  describe('สิทธิ์ตามตำแหน่ง — การเงิน / Admin IPD / Admin HC', () => {
+    const FINANCE = emp('EMP-0091', 'finance');
+    const IPD = emp('EMP-0092', 'admin_ipd');
+    const HC = emp('EMP-0093', 'admin');
+
+    before(async () => {
+      for (const [id, position] of [['EMP-0091', 'finance'], ['EMP-0092', 'admin_ipd'], ['EMP-0093', 'admin']]) {
+        await sql.run(
+          `INSERT INTO employees (employee_id, first_name, last_name, position, email, status, password_hash, must_change_password)
+           VALUES (:id, 'Perm', 'Test', :position, :id || '@example.invalid', 'active', 'x', false)`,
+          { id, position },
+        );
+      }
+    });
+
+    test('การเงิน: เข้าได้เฉพาะใบแจ้งหนี้ · ค่าตอบแทน · รายได้ — งานหลังบ้านอื่น 403', async () => {
+      for (const path of ['/api/invoices', '/api/invoices/revenue', '/api/payroll/case-queue', '/api/cases/attendance/pending',
+        '/api/cases/assignable-employees', '/api/cases/CASE-FIXTURE/pay']) {
+        assert.equal((await get(path, FINANCE)).status, 200, path);
+      }
+      for (const path of ['/api/cases', '/api/cases/CASE-FIXTURE', '/api/customers', '/api/patients', '/api/employees',
+        '/api/packages/matrix', '/api/reviews/summary']) {
+        assert.equal((await get(path, FINANCE)).status, 403, path);
+      }
+      const me = (await get('/api/auth/me', FINANCE)).body;
+      assert.deepEqual(me.permissions, ['billing', 'money']);
+      const alerts = (await get('/api/notify/alerts', FINANCE)).body;
+      assert.deepEqual(Object.keys(alerts.groups).sort(), ['invoices', 'payroll']);
+    });
+
+    test('Admin IPD: ยังไม่มีสิทธิ์หน้าไหนเลย', async () => {
+      for (const path of ['/api/cases', '/api/invoices', '/api/payroll/preview', '/api/notify/alerts', '/api/employees']) {
+        assert.equal((await get(path, IPD)).status, 403, path);
+      }
+      assert.deepEqual((await get('/api/auth/me', IPD)).body.permissions, []);
+    });
+
+    test('Admin HC: สิทธิ์เท่าแอดมินเดิม — งานหลังบ้าน + ใบแจ้งหนี้ ไม่มีเรื่องเงิน', async () => {
+      assert.equal((await get('/api/cases', HC)).status, 200);
+      assert.equal((await get('/api/invoices', HC)).status, 200);
+      assert.equal((await get('/api/payroll/preview', HC)).status, 403);
+      assert.equal((await get('/api/invoices/revenue', HC)).status, 403);
+      const alerts = (await get('/api/notify/alerts', HC)).body;
+      assert.deepEqual(Object.keys(alerts.groups).sort(), ['attendance', 'cases', 'invoices']);
+    });
+
+    test('HR แต่งตั้งตำแหน่งการเงินไม่ได้ (เป็นการเลื่อนสิทธิ์เรื่องเงิน) — ผู้จัดการทำได้', async () => {
+      const denied = await post('/api/employees', { first_name: 'Fin', last_name: 'Ance', position: 'finance' }, HR, 403);
+      assert.match(denied.error, /การเงิน/);
+      await post('/api/employees', { first_name: 'Fin', last_name: 'Ance', position: 'finance' }, MANAGER, 201);
+      await post('/api/employees', { first_name: 'Ipd', last_name: 'Admin', position: 'admin_ipd' }, HR, 201);
+    });
+  });
+
   describe('Authentication fixture states', () => {
     test('temporary password is visible only to office roles and erased after password change', async () => {
       const created = await post('/api/employees', { first_name: 'Temporary', last_name: 'Employee', position: 'caregiver' }, MANAGER, 201);
@@ -384,6 +438,69 @@ if (process.env.RUN_DB_TESTS !== '1') {
       await post('/api/cases', { case_type: 'other', client_name: 'x', assigned_to: office.employee_id }, MANAGER, 409);
 
       await post(`/api/cases/${c.case_id}/assign`, { employee_id: FIELD.employee_id });
+    });
+
+    test('ต่อเคส: รอบใหม่เป็นเคสใหม่ ผูกกับรอบก่อน ทีมตามมา ใบแจ้งหนี้แยก และต่อซ้ำไม่ได้', async () => {
+      const patchCase = async (id, body) => {
+        const res = await fetch(`${base}/api/cases/${id}`, {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json', cookie: `${COOKIE_NAME}=${signToken(MANAGER)}` },
+          body: JSON.stringify(body),
+        });
+        assert.equal(res.status, 200);
+        return res.json();
+      };
+      const { today } = await sql.one(`SELECT to_char(now() AT TIME ZONE 'Asia/Bangkok','YYYY-MM-DD') AS today`);
+      const inDays = (n) => new Date(Date.parse(`${today}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+
+      const first = await post('/api/cases', {
+        case_type: 'other', client_name: 'Renew patient', fee: 30000, start_date: inDays(-25), end_date: inDays(3),
+        assigned_to: FIELD.employee_id,
+      }, MANAGER, 201);
+      assert.equal(first.round_no, 1);
+      await sql.run(`INSERT INTO employees (employee_id, first_name, last_name, position, email, status, password_hash, must_change_password)
+                     VALUES ('EMP-0081', 'Team', 'Mate', 'caregiver', 'emp-0081@example.invalid', 'active', 'x', false)`);
+      await post(`/api/cases/${first.case_id}/team`, { employee_id: 'EMP-0081' });
+
+      // ใกล้ครบภายใน 7 วันและยังไม่ต่อ = ขึ้นกระดิ่ง + ตัวกรอง (เกณฑ์เดียวกัน)
+      const soonIds = async () => (await get('/api/cases?ending_soon=yes&per_page=100', MANAGER)).body.data.map((c) => c.case_id);
+      assert.ok((await soonIds()).includes(first.case_id));
+      const before = (await get('/api/notify/alerts', MANAGER)).body.groups.cases.ending_soon;
+      assert.ok(before >= 1);
+
+      const second = await post('/api/cases', {
+        case_type: 'other', client_name: 'Renew patient', fee: 32000, start_date: inDays(4), end_date: inDays(32),
+        assigned_to: FIELD.employee_id, renewed_from: first.case_id,
+      }, MANAGER, 201);
+      assert.equal(second.round_no, 2);
+      assert.equal(second.renewed_from, first.case_id);
+      assert.equal(second.team_count, 1, 'ทีมดูแลรอบก่อนตามมา (ไม่รวมคนหลักซ้ำ)');
+
+      const firstNow = (await get(`/api/cases/${first.case_id}`, MANAGER)).body;
+      assert.equal(firstNow.renewed_to, second.case_id);
+      assert.ok(!(await soonIds()).includes(first.case_id), 'ต่อแล้วต้องหลุดจากรายการใกล้ครบ');
+      assert.equal((await get('/api/notify/alerts', MANAGER)).body.groups.cases.ending_soon, before - 1);
+
+      // ใบแจ้งหนี้แยกรอบ — รอบใหม่ได้ใบร่างของตัวเอง ยอดตามราคารอบใหม่
+      const [inv] = (await get(`/api/invoices?case_id=${second.case_id}`, MANAGER)).body.data;
+      assert.equal(inv.total, 32000);
+
+      const events = (await get(`/api/cases/${first.case_id}/events`, MANAGER)).body;
+      assert.ok(events.some((e) => e.event === 'renewed' && e.detail.includes(second.case_id)));
+
+      // ต่อซ้ำไม่ได้ — บอกรหัสรอบที่มีอยู่แล้วกลับไป
+      const dup = await post('/api/cases', { case_type: 'other', client_name: 'x', renewed_from: first.case_id }, MANAGER, 409);
+      assert.equal(dup.details.existing_case_id, second.case_id);
+
+      // แก้เคสส่ง renewed_from มาก็ไม่มีผล (ตั้งได้ตอนสร้างเท่านั้น)
+      const patched = await patchCase(second.case_id, { renewed_from: null, note: 'x' });
+      assert.equal(patched.renewed_from, first.case_id);
+
+      // ยกเลิกรอบใหม่แล้ว ต่อใหม่ได้ · เคสที่ยกเลิกเองต่อไม่ได้
+      await post(`/api/cases/${second.case_id}/cancel`, { reason: 'ลูกค้าเปลี่ยนใจ' });
+      const third = await post('/api/cases', { case_type: 'other', client_name: 'x', renewed_from: first.case_id }, MANAGER, 201);
+      assert.equal(third.round_no, 2);
+      await post('/api/cases', { case_type: 'other', client_name: 'x', renewed_from: second.case_id }, MANAGER, 409);
     });
 
     test('เปิดเคสด้วยผู้ว่าจ้างอย่างเดียว (ยังไม่รู้ชื่อผู้ป่วย) ได้ — ไม่มีทั้งคู่ไม่ได้', async () => {

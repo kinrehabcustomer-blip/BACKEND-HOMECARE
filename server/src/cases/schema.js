@@ -109,6 +109,9 @@ const caseFields = z.object({
 
   // จับคู่พนักงานตั้งแต่ตอนสร้างเคยได้ ถ้าเว้นว่างจะเป็น 'ยังไม่จับคู่พนักงาน'
   assigned_to: z.string().trim().optional().nullable(),
+
+  // ต่อเคส: รหัสเคสรอบก่อน — ตั้งได้ตอนสร้างเท่านั้น (updateCaseSchema ตัดออก)
+  renewed_from: z.string().trim().min(1).optional().nullable(),
 });
 
 // สถานะเปลี่ยนผ่าน endpoint เฉพาะ (assign/unassign/close/reopen) เท่านั้น ไม่ให้แก้ตรงๆ
@@ -123,7 +126,7 @@ export const createCaseSchema = caseFields.superRefine((v, ctx) => {
   }
 });
 
-export const updateCaseSchema = caseFields.omit({ assigned_to: true }).partial();
+export const updateCaseSchema = caseFields.omit({ assigned_to: true, renewed_from: true }).partial();
 
 export const assignSchema = z.object({
   employee_id: z.string().trim().min(1, 'กรุณาเลือกพนักงาน'),
@@ -647,6 +650,7 @@ export const listQuerySchema = z.object({
   no_staff_pay: z.literal('yes').optional(),
   overdue_close: z.literal('yes').optional(),
   closed_no_invoice: z.literal('yes').optional(),
+  ending_soon: z.literal('yes').optional(),
   year: z.string().regex(/^\d{4}$/).optional(),
   month: z.string().regex(/^(0[1-9]|1[0-2])$/).optional(),
   page: z.coerce.number().int().min(1).default(1),

@@ -32,6 +32,7 @@ const PSEUDO_STATUS = {
   overdue_close: 'เลยกำหนดปิดเคส',
   no_staff_pay: 'ยังไม่ตั้งค่าจ้าง',
   closed_no_invoice: 'ปิดแล้วยังไม่มีใบแจ้งหนี้',
+  ending_soon: 'ใกล้ครบกำหนด (ยังไม่ต่อ)',
 };
 const PSEUDO_KEYS = Object.keys(PSEUDO_STATUS);
 

@@ -1,7 +1,7 @@
 import * as cases from '../cases/repo.js';
 import * as invoices from '../invoices/repo.js';
 import * as payroll from '../payroll/repo.js';
-import { canSeeStaffPay } from '../lib/auth.js';
+import { can } from '../lib/auth.js';
 import { todayTH, unstaffedToday } from './repo.js';
 
 /**
@@ -28,7 +28,7 @@ export const ALERT_KEYS = {
      เคยนับสองแถว แล้วยอดบนกระดิ่งบวกกะเดียวกันสองครั้ง — วัดกับฐานจริงซ้ำ 14 จาก 14 */
   attendance: ['exceptions', 'unstaffed_today'],
   payroll: ['unreleased', 'unbatched', 'draft_runs'],
-  cases: ['unassigned', 'overdue_close', 'no_staff_pay', 'closed_no_invoice'],
+  cases: ['unassigned', 'overdue_close', 'ending_soon', 'no_staff_pay', 'closed_no_invoice'],
   invoices: ['overdue', 'draft_stale', 'data_stale'],
 };
 
@@ -43,24 +43,30 @@ export async function collectAlerts(user) {
      ตัดทั้งกลุ่มออกจาก payload ของคนที่ไม่ใช่ผู้จัดการ ไม่ใช่ส่งไปแล้วให้หน้าเว็บซ่อน —
      ไม่งั้น HR เห็นกระดิ่งบอกว่ามีเงินค้าง 5 เคส แล้วกดเข้าไปเจอ 403
      กลายเป็นแจ้งเตือนที่หลอกให้ไปชนกำแพง */
-  const wantsPayroll = canSeeStaffPay(user?.position);
+  /* กติกาเดียวกันกับทุกกลุ่ม: ส่งเฉพาะกลุ่มที่ตำแหน่งนั้นเปิดหน้าได้จริง
+     (การเงินเห็นใบแจ้งหนี้ + ค่าตอบแทน · HR/Admin HC เห็นเคส/การมาทำงาน/ใบแจ้งหนี้) */
+  const position = user?.position;
+  const wantsOffice = can(position, 'office');
+  const wantsBilling = can(position, 'billing');
+  const wantsPayroll = can(position, 'money');
 
   const [caseCounts, invoiceCounts, payrollCounts, exceptions, unstaffed] = await Promise.all([
-    cases.alertCounts(),
-    invoices.alertCounts(),
+    wantsOffice ? cases.alertCounts() : null,
+    wantsBilling ? invoices.alertCounts() : null,
     wantsPayroll ? payroll.alertCounts(today) : null,
-    cases.attendanceExceptions(),
-    unstaffedToday({ today }),
+    wantsOffice ? cases.attendanceExceptions() : null,
+    wantsOffice ? unstaffedToday({ today }) : null,
   ]);
 
-  const groups = {
-    cases: pick('cases', caseCounts),
-    invoices: pick('invoices', invoiceCounts),
-    attendance: pick('attendance', {
+  const groups = {};
+  if (wantsOffice) {
+    groups.cases = pick('cases', caseCounts);
+    groups.attendance = pick('attendance', {
       exceptions: exceptions.length,
       unstaffed_today: unstaffed.length,
-    }),
-  };
+    });
+  }
+  if (wantsBilling) groups.invoices = pick('invoices', invoiceCounts);
   if (payrollCounts) groups.payroll = pick('payroll', payrollCounts);
 
   /* ยอดรวมคิดฝั่ง server ไม่ใช่ให้หน้าเว็บบวกเอง — เลขบนกระดิ่งต้องตรงกับสิ่งที่กางออกมาเสมอ

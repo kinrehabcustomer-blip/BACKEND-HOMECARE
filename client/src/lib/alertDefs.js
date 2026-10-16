@@ -81,6 +81,12 @@ export const ALERT_GROUPS = [
         to: '/cases?overdue_close=yes',
       },
       {
+        key: 'ending_soon',
+        label: 'ใกล้ครบกำหนด — ยังไม่ได้ต่อเคส',
+        hint: 'ครบภายใน 7 วัน · ถามลูกค้าว่าจะใช้บริการต่อไหม',
+        to: '/cases?ending_soon=yes',
+      },
+      {
         key: 'no_staff_pay',
         label: 'มีกะแล้วแต่ยังไม่ตั้งค่าจ้าง',
         hint: 'ปล่อยค่าจ้างของเคสนี้ไม่ได้เลย',

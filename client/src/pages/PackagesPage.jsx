@@ -416,6 +416,7 @@ export default function PackagesPage() {
           {/* ค่าภาษาไม่ได้อยู่ในตาราง — บวกเพิ่มตอนเปิดเคส (ติ๊ก "ภาษาอังกฤษ" ในฟอร์มเคส) ทุกแพ็คเกจ */}
           <p className="muted">
             ค่าภาษา (อังกฤษ) บวกเพิ่มทุกแพ็คเกจ: รายวัน +{formatBaht(ENGLISH_SURCHARGE.daily)}
+            {' · '}รายสัปดาห์ +{formatBaht(ENGLISH_SURCHARGE.weekly)}
             {' · '}รายเดือน +{formatBaht(ENGLISH_SURCHARGE.monthly)}
           </p>
           <p className="muted">

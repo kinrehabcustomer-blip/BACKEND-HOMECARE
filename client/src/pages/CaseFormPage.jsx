@@ -5,10 +5,11 @@ import { useToast } from '../toast.jsx';
 import MapPicker from '../components/MapPicker.jsx';
 import {
   CASE_TYPE_LABELS, POSITION_LABELS, GENDER_LABELS, SERVICE_KIND_LABELS, ENGLISH_SURCHARGE,
-  formatBaht, ageFromBirthDate, positionsForCase,
+  formatBaht, ageFromBirthDate, positionsForCase, todayTH,
 } from '../labels.js';
 import LineIcon from '../components/LineIcon.jsx';
 import StaffPicker from '../components/StaffPicker.jsx';
+import { nextRoundDates, endDateFor } from '../lib/caseRounds.js';
 import { useCanSeeStaffPay } from '../auth.jsx';
 import { useScrollLock } from '../lib/scrollLock.js';
 
@@ -205,6 +206,9 @@ export default function CaseFormPage() {
       if (fmt && !fmt.graded) merged.pkg_grade_id = ''; // รูปแบบไม่อิงเกรด ล้างเกรดทิ้ง
       const surcharge = ENGLISH_SURCHARGE[fmt?.category] ?? 0;
       if (!surcharge) merged.pkg_english = false; // ย้ายไปหมวดที่ไม่มีค่าภาษา ธงต้องไม่ค้าง
+      // เปลี่ยนรูปแบบบริการ = ความยาวของบริการเปลี่ยน → วันสิ้นสุดตามจำนวนวันของหมวดใหม่
+      // (เฉพาะตอนเปลี่ยนรูปแบบ ไม่ใช่ตอนเปลี่ยนเกรด/ระดับ — ไม่งั้นวันสิ้นสุดที่แก้เองจะถูกทับทุกครั้ง)
+      if ('pkg_format_id' in next) merged.end_date = endDateFor(merged.start_date, fmt?.category) ?? merged.end_date;
       const gid = fmt?.graded ? (merged.pkg_grade_id === '' ? null : Number(merged.pkg_grade_id)) : null;
       if (fmt && merged.pkg_staff_tier && (!fmt.graded || gid)) {
         const r = lookupRate(fmt.format_id, gid, merged.pkg_staff_tier);
@@ -411,6 +415,56 @@ export default function CaseFormPage() {
     }, 250);
     return () => clearTimeout(timer);
   }, [payerQuery, form.customer_id]);
+
+  /* ---------- ต่อเคส (?renew=CASE-0005) ----------
+     คัดลอกทุกอย่างจากรอบก่อนมาเป็นค่าเริ่มต้น: ผู้ว่าจ้าง ผู้ป่วย บริการ ค่าบริการ อุปกรณ์เสริม ที่อยู่ พิกัด พนักงาน
+     แก้ได้ทุกช่องก่อนบันทึก (ลูกค้าต่อแล้วเปลี่ยนแพ็คเกจ/ราคาได้) · ทีมดูแลรอบก่อน server ใส่ให้เองตอนบันทึก */
+  const renewFrom = !isEdit ? searchParams.get('renew') : null;
+  const [renewSource, setRenewSource] = useState(null);
+  useEffect(() => {
+    if (!renewFrom) return;
+    api
+      .getCase(renewFrom)
+      .then((c) => {
+        const filled = { ...BLANK };
+        for (const key of Object.keys(BLANK)) filled[key] = c[key] ?? '';
+        if (filled.client_name === PATIENT_PENDING) filled.client_name = '';
+        filled.addons = (c.addons ?? []).map((a) => ({
+          name: a.name, quantity: String(a.quantity), unit_price: String(a.unit_price),
+        }));
+        if (!filled.service_kind) {
+          if (filled.physio_package_id !== '') filled.service_kind = 'physio';
+          else if (filled.pkg_format_id !== '') filled.service_kind = 'homecare';
+        }
+        Object.assign(filled, nextRoundDates(c.start_date, c.end_date, todayTH()));
+        setForm(filled);
+        initial.current = JSON.stringify(filled);
+        setRenewSource(c);
+        if (c.customer_id) setPayer({ customer_id: c.customer_id, name: c.customer_name });
+        // แฟ้มผู้ป่วยเดิม — โชว์เป็นผู้ป่วยที่เลือกอยู่ (ไม่ทับข้อมูลในฟอร์มด้วยข้อมูลแฟ้ม รอบก่อนอาจแก้ไว้แล้ว)
+        if (c.patient_id) api.getPatient(c.patient_id).then(setPickedPatient).catch(() => {});
+      })
+      .catch((err) => setError(err.message));
+  }, [renewFrom]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* ต่อเคสแพ็คเกจ Homecare — วันสิ้นสุดรอบใหม่ตามจำนวนวันของรูปแบบบริการ (กติกาเดียวกับตอนกรอกวันเริ่ม)
+     ไม่ใช่ความยาวของรอบก่อน ซึ่งอาจถูกแก้สั้น/ยาวเป็นกรณีพิเศษ · ตารางเรทโหลดคนละจังหวะกับเคส
+     จึงรอให้มีทั้งคู่แล้วปรับครั้งเดียว (ผู้ใช้แก้ทับได้ตามปกติหลังจากนั้น) */
+  const renewDatesApplied = useRef(false);
+  useEffect(() => {
+    if (!renewSource || !matrix || renewDatesApplied.current) return;
+    renewDatesApplied.current = true;
+    const fmt = renewSource.pkg_format_id
+      ? matrix.formats.find((f) => f.format_id === renewSource.pkg_format_id)
+      : null;
+    setForm((prev) => {
+      const end = endDateFor(prev.start_date, fmt?.category);
+      if (!end || end === prev.end_date) return prev;
+      const next = { ...prev, end_date: end };
+      initial.current = JSON.stringify(next); // ค่าตั้งต้นของฟอร์ม ไม่ใช่ "ยังไม่บันทึก"
+      return next;
+    });
+  }, [renewSource, matrix]);
 
   // เปิดเคสจากหน้าผู้รับการดูแล (?patient_id=PAT-0001) -> เลือกผู้ป่วยรายนั้นให้เลย
   useEffect(() => {
@@ -715,8 +769,13 @@ export default function CaseFormPage() {
         toast('บันทึกการแก้ไขแล้ว');
         navigate(`/cases?open=${id}`);
       } else {
+        if (renewFrom) payload.renewed_from = renewFrom;
         const created = await api.createCase(payload);
-        toast(`เปิดเคส ${created.case_id} แล้ว · ระบบออกใบแจ้งหนี้ (ร่าง) ให้เรียบร้อย`);
+        toast(
+          renewFrom
+            ? `ต่อเคสเป็น ${created.case_id} (รอบที่ ${created.round_no}) แล้ว · ระบบออกใบแจ้งหนี้ (ร่าง) ของรอบนี้ให้เรียบร้อย`
+            : `เปิดเคส ${created.case_id} แล้ว · ระบบออกใบแจ้งหนี้ (ร่าง) ให้เรียบร้อย`,
+        );
         // เด้งกลับรายการพร้อมเปิดเคสที่เพิ่งสร้าง — เห็นผลทันทีและกดจับคู่พนักงานต่อได้เลย
         navigate(`/cases?open=${created.case_id}`);
       }
@@ -737,8 +796,14 @@ export default function CaseFormPage() {
     <>
       <header className="page-head">
         <div>
-          <h1>{isEdit ? `แก้ไขเคส ${id}` : 'เปิดเคสใหม่'}</h1>
-          {!isEdit && <p className="muted">ระบบจะออกรหัสเคส (CASE-xxxx) ให้อัตโนมัติหลังบันทึก</p>}
+          <h1>{isEdit ? `แก้ไขเคส ${id}` : renewFrom ? `ต่อเคส ${renewFrom}` : 'เปิดเคสใหม่'}</h1>
+          {!isEdit && !renewFrom && <p className="muted">ระบบจะออกรหัสเคส (CASE-xxxx) ให้อัตโนมัติหลังบันทึก</p>}
+          {renewFrom && (
+            <p className="muted">
+              รอบที่ {(renewSource?.round_no ?? 1) + 1} — คัดลอกข้อมูลจากรอบก่อนมาให้แล้ว ตรวจ/แก้ได้ทุกช่องก่อนบันทึก
+              {' '}· ระบบจะออกรหัสเคสใหม่และใบแจ้งหนี้ (ร่าง) ของรอบนี้ให้ ทีมดูแลรอบก่อนตามมาด้วย
+            </p>
+          )}
         </div>
         {/* ไม่มีปุ่มยกเลิกตรงนี้ — แถบล่างเป็น sticky ติดขอบจอตลอด ปุ่มยกเลิกที่นั่นกดถึงได้เสมอ
             มีสองที่ทำหน้าที่เดียวกันคือให้คนต้องเลือกโดยไม่จำเป็น และบนมือถือมันกินไปทั้งบรรทัด */}
@@ -917,7 +982,7 @@ export default function CaseFormPage() {
                 disabled={serviceLocked}
                 onChange={(e) => toggleEnglish(e.target.checked)}
               />
-              ภาษาอังกฤษ (+{formatBaht(englishFee)}{selectedFormat.category === 'monthly' ? '/เดือน' : '/วัน'})
+              ภาษาอังกฤษ (+{formatBaht(englishFee)}{{ monthly: '/เดือน', weekly: '/สัปดาห์' }[selectedFormat.category] ?? '/วัน'})
             </label>
           )}
           {isPhysio && selectedPhysio && (
@@ -944,7 +1009,25 @@ export default function CaseFormPage() {
               )}
             </p>
           )}
-          <label>วันเริ่ม<input type="date" {...field('start_date')} />{fieldError('start_date')}</label>
+          {/* กรอกวันเริ่มแล้ววันสิ้นสุดตั้งให้ตามจำนวนวันของรูปแบบบริการ (รายวัน 1 · รายสัปดาห์ 7 · รายเดือน 30)
+              แก้วันสิ้นสุดทับเองได้ · สายกายภาพ/ยังไม่เลือกรูปแบบ = ไม่ตั้งให้ */}
+          <label>วันเริ่ม
+            <input
+              type="date"
+              {...field('start_date')}
+              onChange={(e) => {
+                const start = e.target.value;
+                setForm((prev) => {
+                  const fmt = prev.service_kind === 'homecare'
+                    ? matrix?.formats.find((f) => f.format_id === Number(prev.pkg_format_id))
+                    : null;
+                  return { ...prev, start_date: start, end_date: endDateFor(start, fmt?.category) ?? prev.end_date };
+                });
+                setFieldErrors((prev) => (prev.start_date ? { ...prev, start_date: undefined } : prev));
+              }}
+            />
+            {fieldError('start_date')}
+          </label>
           <label>วันสิ้นสุด (ถ้ามี)<input type="date" {...field('end_date')} />{fieldError('end_date')}</label>
           <label>ค่าบริการที่ได้รับ (บาท)
             <input type="number" min="0" step="0.01" {...field('fee')} />

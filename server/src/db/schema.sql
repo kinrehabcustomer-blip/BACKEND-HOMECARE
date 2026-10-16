@@ -44,7 +44,7 @@ ALTER TABLE employees DROP CONSTRAINT IF EXISTS employees_position_check;
 ALTER TABLE employees ADD CONSTRAINT employees_position_check
   CHECK (position IN ('caregiver', 'assistant_nurse', 'practical_nurse', 'nurse',
                       'therapist', 'occupational_therapist', 'speech_therapist',
-                      'manager', 'hr', 'admin'));
+                      'manager', 'hr', 'admin', 'admin_ipd', 'finance'));
 
 -- ใบรับรอง / ใบประกอบวิชาชีพ ผูกกับพนักงานผ่าน employee_id
 CREATE TABLE IF NOT EXISTS employee_certificates (
@@ -1589,3 +1589,17 @@ WITH moved AS (
   RETURNING d.invoice_id
 )
 UPDATE invoices SET addons = '[]'::jsonb WHERE invoice_id IN (SELECT invoice_id FROM moved);
+
+-- ============================================================================
+-- ต่อเคส (ลูกค้าใช้บริการต่อเนื่อง) — รอบใหม่เป็นเคสใหม่ของตัวเอง ผูกกลับไปหารอบก่อน
+--
+-- ไม่ต่อในเคสเดิม เพราะค่าบริการ/ค่าจ้างเหมา/ใบแจ้งหนี้/งวดค่าจ้างเป็นก้อนเดียวต่อเคส
+-- ต่อในเคสเดิมแล้วใบที่ชำระไปแล้วกับยอดค่าจ้างของรอบก่อนจะปนกับรอบใหม่
+--
+-- renewed_from = เคสรอบก่อน (ลบเคสต้นทางแล้วรอบนี้ยังอยู่ แค่หลุดจากสาย)
+-- round_no     = รอบที่เท่าไรของสายนี้ (เคสแรก = 1) — เก็บไว้เลย ไม่ไล่นับย้อนทุกครั้งที่อ่าน
+-- ============================================================================
+ALTER TABLE cases ADD COLUMN IF NOT EXISTS renewed_from TEXT
+  REFERENCES cases (case_id) ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE cases ADD COLUMN IF NOT EXISTS round_no INTEGER NOT NULL DEFAULT 1;
+CREATE INDEX IF NOT EXISTS idx_cases_renewed_from ON cases (renewed_from) WHERE renewed_from IS NOT NULL;

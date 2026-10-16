@@ -101,6 +101,10 @@ const SELECT_CASE = `
           JOIN employees te ON te.employee_id = t.employee_id
           WHERE t.case_id = c.case_id) AS team_names,
          (SELECT COUNT(*)::int FROM case_team t WHERE t.case_id = c.case_id) AS team_count,
+         /* รอบถัดไปของเคสนี้ (ต่อเคสแล้ว) — ไม่นับรอบที่ยกเลิก เพราะยกเลิกแล้วต้องต่อใหม่ได้ */
+         (SELECT r.case_id FROM cases r
+          WHERE r.renewed_from = c.case_id AND r.status <> 'cancelled'
+          ORDER BY r.created_at DESC LIMIT 1) AS renewed_to,
          ${PATIENT_LIVE}
   FROM cases c
   LEFT JOIN employees e           ON e.employee_id  = c.assigned_to
@@ -139,6 +143,16 @@ const OVERDUE_CLOSE_SQL = `
   c.status IN ('assigned', 'in_progress')
   AND c.end_date IS NOT NULL AND c.end_date < :today`;
 
+/** ใกล้ครบกำหนด (ภายใน ENDING_SOON_DAYS วัน) และยังไม่ได้ต่อเคส — ถามลูกค้าว่าจะใช้บริการต่อไหม
+    เลยวันสิ้นสุดไปแล้วอยู่ใน OVERDUE_CLOSE_SQL แทน ไม่นับซ้ำ · ต้องส่ง :today และ :soon มาด้วย */
+export const ENDING_SOON_DAYS = 7;
+const ENDING_SOON_SQL = `
+  c.status IN ('assigned', 'in_progress')
+  AND c.end_date IS NOT NULL AND c.end_date >= :today AND c.end_date <= :soon
+  AND NOT EXISTS (SELECT 1 FROM cases r WHERE r.renewed_from = c.case_id AND r.status <> 'cancelled')`;
+
+const soonTH = () => isoDateTH(new Date(Date.now() + ENDING_SOON_DAYS * 86_400_000));
+
 /** มีกะลงไว้แล้วแต่ยังไม่ตั้งค่าจ้างพนักงาน — ปล่อยค่าจ้างของเคสนี้ไม่ได้เลย
     เกณฑ์คือ "มีกะแล้ว" ไม่ใช่ทุกเคสที่ยังไม่ตั้ง เพราะเคสที่เพิ่งเปิดยังไม่ถึงเวลาต้องตั้ง */
 const NO_STAFF_PAY_SQL = `
@@ -152,7 +166,7 @@ const CLOSED_NO_INVOICE_SQL = `
   c.status = 'closed'
   AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.case_id = c.case_id AND i.status <> 'cancelled')`;
 
-export async function list({ q, status, case_type, assigned_to, no_staff_pay, overdue_close, closed_no_invoice, year, month, page, per_page, sort, order }) {
+export async function list({ q, status, case_type, assigned_to, no_staff_pay, overdue_close, closed_no_invoice, ending_soon, year, month, page, per_page, sort, order }) {
   const where = [];
   const params = {};
 
@@ -187,6 +201,11 @@ export async function list({ q, status, case_type, assigned_to, no_staff_pay, ov
   }
   if (closed_no_invoice) {
     where.push(`(${CLOSED_NO_INVOICE_SQL})`);
+  }
+  if (ending_soon) {
+    where.push(`(${ENDING_SOON_SQL})`);
+    params.today = isoDateTH(new Date());
+    params.soon = soonTH();
   }
 
   const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
@@ -435,9 +454,15 @@ async function staffLabel(tx, employeeId) {
 export function create(rawInput, actor) {
   const input = clearUnusedKind(rawInput);
   return transaction(async (tx) => {
+    /* ต่อเคส — ล็อกเคสรอบก่อนไว้ก่อนเช็ค เพื่อให้กดต่อพร้อมกันสองครั้งได้รอบใหม่แค่ใบเดียว
+       (คำขอที่สองรอจนคำขอแรก commit แล้วจะเห็นรอบที่เพิ่งสร้าง) */
+    const prev = input.renewed_from ? await renewalSource(tx, input.renewed_from) : null;
+
     const caseId = await nextCaseId(tx);
     const values = { case_id: caseId };
     for (const col of COLUMNS) values[col] = input[col] ?? null;
+    values.renewed_from = prev?.case_id ?? null;
+    values.round_no = prev ? prev.round_no + 1 : 1;
     // รู้แค่ผู้ว่าจ้าง ยังไม่รู้ชื่อผู้ป่วย (schema บังคับให้มีอย่างใดอย่างหนึ่งแล้ว)
     if (!values.client_name) values.client_name = PATIENT_PENDING;
     values.pkg_english = input.pkg_english ?? false; // คอลัมน์ NOT NULL — ไม่ส่งมา = ไม่ได้ขอภาษาอังกฤษ
@@ -465,8 +490,8 @@ export function create(rawInput, actor) {
     const assignedAt = values.assigned_to ? NOW : 'NULL';
 
     await tx.one(
-      `INSERT INTO cases (case_id, status, assigned_to, assigned_at, ${COLUMNS.join(', ')})
-       VALUES (:case_id, :status, :assigned_to, ${assignedAt},
+      `INSERT INTO cases (case_id, status, assigned_to, assigned_at, renewed_from, round_no, ${COLUMNS.join(', ')})
+       VALUES (:case_id, :status, :assigned_to, ${assignedAt}, :renewed_from, :round_no,
                ${COLUMNS.map((c) => `:${c}`).join(', ')})
        RETURNING case_id`,
       values,
@@ -477,8 +502,56 @@ export function create(rawInput, actor) {
       await logEvent(tx, caseId, 'assigned', `มอบหมายให้ ${await staffLabel(tx, values.assigned_to)}`, actor);
     }
 
+    if (prev) {
+      // ทีมดูแลรอบก่อนตามมาด้วย (เฉพาะคนที่ยังรับงานได้) — คนหลักมาจากฟอร์มแล้ว ไม่ใส่ซ้ำ
+      await tx.run(
+        `INSERT INTO case_team (case_id, employee_id, added_by)
+         SELECT :case_id, t.employee_id, :actor
+         FROM case_team t
+         JOIN employees e ON e.employee_id = t.employee_id
+         WHERE t.case_id = :prev
+           AND e.status IN ('active', 'probation')
+           AND e.position = ANY(:front::text[])
+           AND t.employee_id IS DISTINCT FROM :assigned_to
+         ON CONFLICT DO NOTHING`,
+        {
+          case_id: caseId,
+          prev: prev.case_id,
+          actor: actor?.employee_id ?? null,
+          front: FRONT_POSITIONS,
+          assigned_to: values.assigned_to,
+        },
+      );
+      await logEvent(tx, caseId, 'renewed', `ต่อจาก ${prev.case_id} (รอบที่ ${values.round_no})`, actor);
+      await logEvent(tx, prev.case_id, 'renewed', `ต่อเป็น ${caseId} (รอบที่ ${values.round_no})`, actor);
+    }
+
     return caseId;
   }).then(findById);
+}
+
+/**
+ * เคสรอบก่อนที่จะต่อ — ล็อกแถวแล้วตรวจว่าต่อได้จริง
+ * ยกเลิกไปแล้ว = ไม่ได้ให้บริการจริง ไม่มีอะไรให้ต่อ · ต่อไปแล้ว (รอบใหม่ยังไม่ถูกยกเลิก) = ห้ามต่อซ้ำ
+ */
+async function renewalSource(tx, caseId) {
+  const prev = await tx.one(
+    'SELECT case_id, status, round_no FROM cases WHERE case_id = :id FOR UPDATE',
+    { id: caseId },
+  );
+  if (!prev) throw new ApiError(400, `ไม่พบเคสรหัส ${caseId} ที่จะต่อ`);
+  if (prev.status === 'cancelled') {
+    throw new ApiError(409, 'เคสนี้ถูกยกเลิกไปแล้ว ต่อเคสไม่ได้ — เปิดเคสใหม่แทน');
+  }
+  const existing = await tx.one(
+    `SELECT case_id FROM cases WHERE renewed_from = :id AND status <> 'cancelled'
+     ORDER BY created_at DESC LIMIT 1`,
+    { id: caseId },
+  );
+  if (existing) {
+    throw new ApiError(409, `เคส ${caseId} ต่อไปแล้วเป็น ${existing.case_id}`, { existing_case_id: existing.case_id });
+  }
+  return prev;
 }
 
 /** ชื่อช่องที่เอาไปเขียนลงประวัติ — ช่องที่ไม่มีในนี้ใช้ชื่อคอลัมน์ไปตรงๆ (ดีกว่าไม่บอกเลย) */
@@ -1527,8 +1600,9 @@ export async function alertCounts() {
           คำอธิบายของแต่ละเกณฑ์อยู่ที่ก้อนนั้น ไม่เขียนซ้ำที่นี่ */
        (SELECT COUNT(*) FROM cases c WHERE ${OVERDUE_CLOSE_SQL})     AS overdue_close,
        (SELECT COUNT(*) FROM cases c WHERE ${NO_STAFF_PAY_SQL})      AS no_staff_pay,
-       (SELECT COUNT(*) FROM cases c WHERE ${CLOSED_NO_INVOICE_SQL}) AS closed_no_invoice`,
-    { today },
+       (SELECT COUNT(*) FROM cases c WHERE ${CLOSED_NO_INVOICE_SQL}) AS closed_no_invoice,
+       (SELECT COUNT(*) FROM cases c WHERE ${ENDING_SOON_SQL})      AS ending_soon`,
+    { today, soon: soonTH() },
   );
 
   return {
@@ -1536,6 +1610,7 @@ export async function alertCounts() {
     overdue_close: Number(row.overdue_close),
     no_staff_pay: Number(row.no_staff_pay),
     closed_no_invoice: Number(row.closed_no_invoice),
+    ending_soon: Number(row.ending_soon),
   };
 }
 

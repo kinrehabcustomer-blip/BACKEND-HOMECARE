@@ -18,15 +18,33 @@ export const COOKIE_NAME = 'kin_session';
 // — เช็ค req.user.role === 'admin' กับ req.user.position === 'admin' จึงไม่ใช่คำถามเดียวกัน
 // = พนักงานกลุ่ม back (ประกาศที่ employees/schema.js ที่เดียว คู่กับกลุ่ม front)
 export const ADMIN_POSITIONS = BACK_POSITIONS;
+// role 'admin' = ใช้หน้าจอหลังบ้าน (ไม่ใช่แอปพนักงานภาคสนาม) — เข้าหน้าไหนได้บ้างดูที่ permissions ด้านล่าง
 export const roleForPosition = (position) => (ADMIN_POSITIONS.includes(position) ? 'admin' : 'field');
 
 /**
- * ต้นทุน/กำไรของแพ็คเกจ = เฉพาะผู้จัดการ — แคบกว่า admin หนึ่งขั้น (HR เข้าหน้าแพ็คเกจได้ แต่ไม่เห็นตัวเลขนี้)
+ * สิทธิ์รายหมวดของพนักงานกลุ่ม back — ส่งไปกับ session เป็น permissions ให้หน้าเว็บซ่อนเมนู
+ * (ต้องตรงกับ NAV ใน client/src/App.jsx)
+ *   office  = งานหลังบ้าน: ภาพรวม · เคส · ตารางงาน · การมาทำงาน · ลูกค้า · ผู้ป่วย · แพ็คเกจ · พนักงาน · ประเมิน
+ *   billing = ใบแจ้งหนี้
+ *   money   = ค่าจ้างพนักงาน/ต้นทุน/กำไร · ค่าตอบแทนพนักงาน (payroll) · รายได้บริษัท
  *
- * แยกจาก roleForPosition โดยตั้งใจ ไม่ใช่เพิ่มค่า role ใหม่ — ถ้าเอาไปรวมเป็น role
- * ทุกจุดที่เช็ค admin อยู่ต้องมานั่งไล่ว่าหมายถึงอันไหน สิทธิ์ย่อยแบบนี้จึงถามเป็นคำถามของตัวเอง
+ * กลุ่ม front ไม่มีหมวดไหนเลย — ใช้แอปภาคสนาม (/api/my) ซึ่งเห็นเฉพาะงานของตัวเอง
  */
-export const canSeeStaffPay = (position) => position === 'manager';
+export const POSITION_PERMISSIONS = {
+  manager: ['office', 'billing', 'money'],
+  hr: ['office', 'billing'],
+  admin: ['office', 'billing'],   // Admin HC
+  finance: ['billing', 'money'],  // การเงิน — เฉพาะหน้าเรื่องเงิน ไม่เห็นเคส/ลูกค้า/ผู้ป่วย/พนักงาน
+  admin_ipd: [],                  // Admin IPD — ยังไม่กำหนดสิทธิ์ (ผู้ใช้ขอเว้นไว้ก่อน 2026-10-16)
+};
+export const permissionsFor = (position) => POSITION_PERMISSIONS[position] ?? [];
+export const can = (position, permission) => permissionsFor(position).includes(permission);
+
+/**
+ * เห็นค่าจ้างพนักงาน/ต้นทุน/กำไรได้ไหม = มีสิทธิ์หมวด money
+ * (เดิมเป็นผู้จัดการคนเดียว — ตอนนี้รวมการเงินด้วย ซึ่งเข้าได้เฉพาะหน้าเรื่องเงินอยู่แล้ว)
+ */
+export const canSeeStaffPay = (position) => can(position, 'money');
 
 /**
  * ลบตัวเลขต้นทุน/กำไรออกจากแถวก่อนส่งให้คนที่ไม่ใช่ผู้จัดการ
@@ -158,13 +176,28 @@ export function requireAuth(req, res, next) {
 }
 
 /**
- * เฉพาะผู้ดูแลระบบ (ตำแหน่งผู้จัดการ/HR) — วางต่อจาก requireAuth เสมอ (ต้องมี req.user ก่อน)
- * ตำแหน่งถูกอ่านสดมาแล้วใน requireAuth จึงไม่ต้อง query ซ้ำที่นี่
+ * ด่านตามหมวดสิทธิ์ — วางต่อจาก requireAuth เสมอ (ต้องมี req.user ก่อน)
+ * ตำแหน่งถูกอ่านสดมาแล้วใน requireAuth จึงไม่ต้อง query ซ้ำ และลดสิทธิ์ระหว่าง session ได้ทันที
  */
-export function requireAdmin(req, res, next) {
+export const requirePermission = (permission, message) => (req, res, next) => {
   if (!req.user) return next(new ApiError(401, 'กรุณาเข้าสู่ระบบ'));
-  if (roleForPosition(req.user.position) !== 'admin') {
-    return next(new ApiError(403, 'เฉพาะผู้จัดการหรือ HR เท่านั้นที่เข้าถึงส่วนนี้ได้'));
+  if (!can(req.user.position, permission)) {
+    return next(new ApiError(403, message ?? 'บัญชีของคุณไม่มีสิทธิ์เข้าถึงส่วนนี้'));
+  }
+  next();
+};
+
+/** งานหลังบ้าน (เคส/ลูกค้า/ผู้ป่วย/พนักงาน/แพ็คเกจ/ประเมิน) — ผู้จัดการ · HR · Admin HC */
+export const requireAdmin = requirePermission('office', 'บัญชีของคุณไม่มีสิทธิ์เข้าถึงงานหลังบ้านส่วนนี้');
+
+/** ใบแจ้งหนี้ — ผู้จัดการ · HR · Admin HC · การเงิน */
+export const requireBilling = requirePermission('billing', 'บัญชีของคุณไม่มีสิทธิ์เข้าถึงใบแจ้งหนี้');
+
+/** ใช้หน้าจอหลังบ้านได้ (มีสิทธิ์อย่างน้อยหนึ่งหมวด) — ใช้กับของรวมอย่างกระดิ่งแจ้งเตือน */
+export function requireBackOffice(req, res, next) {
+  if (!req.user) return next(new ApiError(401, 'กรุณาเข้าสู่ระบบ'));
+  if (permissionsFor(req.user.position).length === 0) {
+    return next(new ApiError(403, 'บัญชีของคุณยังไม่ได้กำหนดสิทธิ์การใช้งาน'));
   }
   next();
 }
@@ -185,16 +218,26 @@ export function requirePasswordChanged(req, res, next) {
 }
 
 /**
- * เฉพาะผู้จัดการ — ใช้กับข้อมูลเงินที่ไม่ใช่เรื่องของทุกคนในทีม:
- * ค่าจ้าง/กำไร, คำสั่งที่ทำให้เงินออกจากบริษัท, และรายได้รวมของบริษัท
- *
- * จงใจแคบกว่า requireAdmin ซึ่งรวม HR ด้วย และอ่านตำแหน่งสดที่ requireAuth ใส่ไว้ใน req.user
- * จึงลดสิทธิ์พนักงานระหว่างที่ session ยังไม่หมดอายุได้ทันทีเหมือนด่านอื่นในระบบ
+ * หมวด money — ข้อมูลเงินที่ไม่ใช่เรื่องของทุกคนในทีม:
+ * ค่าจ้าง/กำไร, คำสั่งที่ทำให้เงินออกจากบริษัท, และรายได้รวมของบริษัท (ผู้จัดการ · การเงิน)
+ * ชื่อเดิมคงไว้เพราะถูกเรียกหลายที่ — ความหมายคือ "มีสิทธิ์เรื่องเงิน" ไม่ใช่ตำแหน่งผู้จัดการ
  */
-export function requireManager(req, res, next) {
+export const requireManager = requirePermission('money', 'เฉพาะผู้จัดการหรือฝ่ายการเงินเท่านั้นที่เข้าถึงข้อมูลส่วนนี้ได้');
+
+/**
+ * เส้นของ /api/cases ที่หน้าค่าตอบแทนพนักงานต้องใช้ — การเงินไม่มีสิทธิ์ office แต่ต้องอนุมัติกะ
+ * ปล่อยค่าจ้าง และดูสรุปได้ จึงเปิดเฉพาะเส้นเหล่านี้ให้หมวด money (เส้นอื่นของเคสยังต้องเป็น office)
+ * ตัวเส้นเองยังมีด่านเงินของตัวเองซ้ำอีกชั้น (ensureCanPay / requireManager)
+ */
+const MONEY_CASE_ROUTES = [
+  /^\/assignable-employees$/,
+  /^\/attendance\/(pending|decide|report)$/,
+  /^\/[^/]+\/pay(\/[^/]+)?$/,
+  /^\/[^/]+\/approve-pay$/,
+];
+export function requireCaseAccess(req, res, next) {
   if (!req.user) return next(new ApiError(401, 'กรุณาเข้าสู่ระบบ'));
-  if (!canSeeStaffPay(req.user.position)) {
-    return next(new ApiError(403, 'เฉพาะผู้จัดการเท่านั้นที่เข้าถึงข้อมูลส่วนนี้ได้'));
-  }
-  next();
+  if (can(req.user.position, 'office')) return next();
+  if (can(req.user.position, 'money') && MONEY_CASE_ROUTES.some((re) => re.test(req.path))) return next();
+  return next(new ApiError(403, 'บัญชีของคุณไม่มีสิทธิ์เข้าถึงข้อมูลเคส'));
 }

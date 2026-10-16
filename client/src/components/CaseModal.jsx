@@ -407,6 +407,18 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                 </h2>
                 <p className="muted">{item.customer_name ?? item.client_name}</p>
                 <span className={`badge case-${item.status}`}>{CASE_STATUS_LABELS[item.status]}</span>
+                {/* สายของเคสต่อเนื่อง — กดไปรอบก่อน/รอบถัดไปได้ */}
+                {(item.renewed_from || item.renewed_to || item.round_no > 1) && (
+                  <p className="case-rounds muted">
+                    รอบที่ {item.round_no ?? 1}
+                    {item.renewed_from && (
+                      <> · ต่อจาก <Link className="link mono" to={`/cases?open=${item.renewed_from}`}>{item.renewed_from}</Link></>
+                    )}
+                    {item.renewed_to && (
+                      <> · ต่อเป็น <Link className="link mono" to={`/cases?open=${item.renewed_to}`}>{item.renewed_to}</Link></>
+                    )}
+                  </p>
+                )}
               </div>
 
               <div className="modal-head-actions">
@@ -840,6 +852,11 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
 
             <footer className="modal-foot">
               <Link className="btn" to={`/cases/${item.case_id}/edit`}>แก้ไขข้อมูล</Link>
+
+              {/* ลูกค้าใช้บริการต่อ — เปิดเคสรอบใหม่ที่คัดลอกจากเคสนี้ (ต่อได้ครั้งเดียว ยกเลิกแล้วต่อไม่ได้) */}
+              {status !== 'cancelled' && !item.renewed_to && (
+                <Link className="btn" to={`/cases/new?renew=${item.case_id}`}>ต่อเคส</Link>
+              )}
 
               {/* เคสจบแล้ว (ปิด/ยกเลิก) — เหลือแค่เปิดใหม่ */}
               {terminal && (

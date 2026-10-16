@@ -17,7 +17,7 @@ export default function LoginPage() {
      เพราะหน้ารายการเก็บตัวกรอง/หน้าที่เปิดอยู่ไว้ใน URL ทั้งหมด (?status=...&open=CASE-0001)
      ตัดทิ้งแล้วจะกลับมาเจอรายการเปล่าๆ ต้องไล่กรองใหม่เองทั้งที่ระบบพากลับมาถูกหน้าแล้ว */
   const from = location.state?.from;
-  const backTo = from ? `${from.pathname}${from.search ?? ''}` : '/dashboard';
+  const backTo = from ? `${from.pathname}${from.search ?? ''}` : '/'; // '/' พาไปหน้าแรกตามสิทธิ์ (การเงินไม่มีหน้าภาพรวม)
 
   // login อยู่แล้วก็ไม่ต้องเห็นหน้านี้ — กลับไปหน้าที่ตั้งใจจะเข้าตอนแรก
   if (loading) return <p className="muted app-loading">กำลังตรวจสอบสิทธิ์…</p>;

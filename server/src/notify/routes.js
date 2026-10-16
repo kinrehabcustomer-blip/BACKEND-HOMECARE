@@ -2,7 +2,7 @@ import { Router } from 'express';
 import * as repo from './repo.js';
 import { sendDigestEmail, mailerReady } from '../lib/mailer.js';
 import { ApiError, asyncRoute } from '../lib/errors.js';
-import { requireAuth, requireAdmin, requirePasswordChanged } from '../lib/auth.js';
+import { requireAuth, requireAdmin, requireBackOffice, requirePasswordChanged } from '../lib/auth.js';
 import { collectAlerts } from './alerts.js';
 
 /**
@@ -128,7 +128,7 @@ notifyRouter.get(
   '/alerts',
   requireAuth,
   requirePasswordChanged,
-  requireAdmin,
+  requireBackOffice, // ทุกคนที่ใช้หลังบ้าน — collectAlerts ตัดกลุ่มที่ตำแหน่งนั้นเข้าไม่ได้ออกเอง
   asyncRoute(async (req, res) => res.json(await collectAlerts(req.user))),
 );
 

@@ -1,6 +1,7 @@
 import { Fragment, Suspense, lazy, useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, NavLink, Navigate, Link, useNavigate, useLocation } from 'react-router-dom';
-import { AuthProvider, RequireAuth, useAuth } from './auth.jsx';
+import { AuthProvider, RequireAuth, useAuth, permissionsOf } from './auth.jsx';
+import { POSITION_LABELS } from './labels.js';
 import LoginPage from './pages/LoginPage.jsx';
 import LineIcon from './components/LineIcon.jsx';
 import ChangePasswordForm from './components/ChangePasswordForm.jsx';
@@ -23,6 +24,7 @@ const ReviewFormPage = lazy(() => import('./pages/ReviewFormPage.jsx'));
 const ReviewsPage = lazy(() => import('./pages/ReviewsPage.jsx'));
 const ReviewDetailPage = lazy(() => import('./pages/ReviewDetailPage.jsx'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage.jsx'));
+const RevenuePage = lazy(() => import('./pages/RevenuePage.jsx'));
 const EmployeeListPage = lazy(() => import('./pages/EmployeeListPage.jsx'));
 const EmployeeFormPage = lazy(() => import('./pages/EmployeeFormPage.jsx'));
 const EmployeeDetailPage = lazy(() => import('./pages/EmployeeDetailPage.jsx'));
@@ -74,20 +76,35 @@ function NavIcon({ name }) {
 
 /* เมนูเก็บเป็นข้อมูล ไม่ใช่ JSX ตายตัว — ใช้สองที่: วาดรายการเมนู และหาชื่อหน้าปัจจุบันมาโชว์บนแถบบน
    ถ้าแยกกันเขียนสองชุด วันหนึ่งจะมีเมนูที่เปลี่ยนชื่อแล้วแถบบนยังเรียกชื่อเก่า */
+/* perm = หมวดสิทธิ์ที่ต้องมีถึงจะเห็นเมนูนี้ (ดู POSITION_PERMISSIONS ใน server/src/lib/auth.js)
+   unlessPerm = ซ่อนถ้ามีหมวดนี้อยู่แล้ว — หน้ารายได้แยกมีไว้ให้การเงิน ผู้จัดการดูกราฟเดียวกันที่หน้าภาพรวม */
 const ADMIN_NAV = [
-  { to: '/dashboard', icon: 'dashboard', label: 'ภาพรวม' },
-  { to: '/cases', icon: 'cases', label: 'เคส' },
-  { to: '/calendar', icon: 'calendar', label: 'ตารางงาน' },
-  { to: '/attendance', icon: 'clock', label: 'การมาทำงาน' },
-  { to: '/invoices', icon: 'invoice', label: 'ใบแจ้งหนี้' },
-  { to: '/payroll', icon: 'wallet', label: 'ค่าตอบแทนพนักงาน', managerOnly: true },
-  { to: '/customers', icon: 'users', label: 'ลูกค้า' },
-  { to: '/patients', icon: 'heart', label: 'ผู้รับการดูแล' },
-  { to: '/packages', icon: 'home', label: 'แพ็คเกจ Homecare' },
-  { to: '/physio-packages', icon: 'activity', label: 'แพ็คเกจกายภาพบำบัด' },
-  { to: '/employees', icon: 'user', label: 'พนักงาน' },
-  { to: '/reviews', icon: 'star', label: 'คะแนนประเมินจากญาติ' },
+  { to: '/dashboard', icon: 'dashboard', label: 'ภาพรวม', perm: 'office' },
+  { to: '/cases', icon: 'cases', label: 'เคส', perm: 'office' },
+  { to: '/calendar', icon: 'calendar', label: 'ตารางงาน', perm: 'office' },
+  { to: '/attendance', icon: 'clock', label: 'การมาทำงาน', perm: 'office' },
+  { to: '/invoices', icon: 'invoice', label: 'ใบแจ้งหนี้', perm: 'billing' },
+  { to: '/payroll', icon: 'wallet', label: 'ค่าตอบแทนพนักงาน', perm: 'money' },
+  { to: '/revenue', icon: 'dashboard', label: 'รายได้บริษัท', perm: 'money', unlessPerm: 'office' },
+  { to: '/customers', icon: 'users', label: 'ลูกค้า', perm: 'office' },
+  { to: '/patients', icon: 'heart', label: 'ผู้รับการดูแล', perm: 'office' },
+  { to: '/packages', icon: 'home', label: 'แพ็คเกจ Homecare', perm: 'office' },
+  { to: '/physio-packages', icon: 'activity', label: 'แพ็คเกจกายภาพบำบัด', perm: 'office' },
+  { to: '/employees', icon: 'user', label: 'พนักงาน', perm: 'office' },
+  { to: '/reviews', icon: 'star', label: 'คะแนนประเมินจากญาติ', perm: 'office' },
 ];
+
+/** เมนูหลังบ้านที่ผู้ใช้คนนี้เห็น — ว่าง = ตำแหน่งที่ยังไม่ได้กำหนดสิทธิ์ (เช่น Admin IPD ตอนนี้) */
+const navFor = (user) => {
+  const perms = permissionsOf(user);
+  return ADMIN_NAV.filter((i) => perms.includes(i.perm) && !(i.unlessPerm && perms.includes(i.unlessPerm)));
+};
+
+/** หน้าแรกหลัง login — หน้าแรกที่เข้าได้จริง ไม่ใช่ /dashboard ตายตัว (การเงินเข้าภาพรวมไม่ได้) */
+const homePath = (user) => {
+  if (user.role !== 'admin') return '/my-today';
+  return navFor(user)[0]?.to ?? '/no-access';
+};
 
 const FIELD_NAV = [
   { to: '/my-today', icon: 'today', label: 'งานวันนี้' },
@@ -101,8 +118,7 @@ function Sidebar() {
   const navigate = useNavigate();
   const location = useLocation();
   const isAdmin = user.role === 'admin';
-  const isManager = user.position === 'manager';
-  const items = isAdmin ? ADMIN_NAV.filter((item) => !item.managerOnly || isManager) : FIELD_NAV;
+  const items = isAdmin ? navFor(user) : FIELD_NAV;
 
   // เมนูพับได้เฉพาะจอแคบ (CSS ซ่อนปุ่มบนจอกว้าง) — บนจอกว้างค่านี้ไม่มีผลกับอะไรเลย
   const [menuOpen, setMenuOpen] = useState(false);
@@ -133,7 +149,8 @@ function Sidebar() {
           ใส่ให้เขาก็ได้กระดิ่งที่กดแล้วเจอ 403 ทุกบรรทัด */}
       <div className="brand">
         <img className="brand-logo" src="/logo-navbar.webp" alt="KIN Home Care" />
-        {isAdmin && <NotificationBell />}
+        {/* ตำแหน่งที่ยังไม่มีสิทธิ์หมวดไหนเลย ไม่มีของค้างให้ดู (และ /api/notify/alerts ตอบ 403) */}
+        {isAdmin && items.length > 0 && <NotificationBell />}
       </div>
 
       {/* ปุ่มพับ/กางเมนู — โผล่เฉพาะจอแคบ (ดู @media ใน index.css)
@@ -229,18 +246,12 @@ function ForcePasswordChange() {
 }
 
 /** เนื้อในของเลย์เอาต์ — อยู่หลัง RequireAuth แล้ว จึงมั่นใจว่า user ไม่เป็น null */
-function LayoutInner({ children, admin, manager }) {
+function LayoutInner({ children, perm }) {
   const { user } = useAuth();
 
-  // หน้าการเงินของพนักงานแคบกว่า admin — HR กลับหน้า dashboard, field กลับหน้างานของตัวเอง
-  // ฝั่ง server ใช้ requireManager ซ้ำอีกชั้น จึงกัน API ตรงและกรณีตำแหน่งถูกลดระหว่าง session ด้วย
-  if (manager && user.position !== 'manager') {
-    return <Navigate to={user.role === 'admin' ? '/dashboard' : '/my-today'} replace />;
-  }
-
-  // หน้าเฉพาะ admin (ผู้จัดการ/HR) — พนักงานภาคสนามเด้งไปหน้า "งานวันนี้" (หน้าหลักของ field)
-  // เป็นแค่การกันฝั่งหน้าเว็บ ตัวจริงกันที่ API (requireAdmin) อีกชั้น
-  if (admin && user.role !== 'admin') return <Navigate to="/my-today" replace />;
+  // หน้าที่ต้องมีหมวดสิทธิ์ (office/billing/money) — ไม่มีก็เด้งไปหน้าแรกของตัวเอง
+  // เป็นแค่การกันฝั่งหน้าเว็บ ตัวจริงกันที่ด่านของแต่ละเส้น API อีกชั้น
+  if (perm && !permissionsOf(user).includes(perm)) return <Navigate to={homePath(user)} replace />;
 
   // ยังไม่ได้ตั้งรหัสของตัวเอง — API ปฏิเสธทุกเส้นอยู่แล้ว จึงไม่มีอะไรให้ทำในระบบนอกจากตั้งรหัส
   if (user.must_change_password) return <ForcePasswordChange />;
@@ -256,13 +267,33 @@ function LayoutInner({ children, admin, manager }) {
 }
 
 /** เลย์เอาต์ของหน้าที่ต้อง login (มี sidebar); หน้า login ใช้เลย์เอาต์ของตัวเอง
- *  admin=true = หน้านั้นเข้าได้เฉพาะผู้ดูแลระบบ
- *  manager=true = หน้าการเงินที่เข้าได้เฉพาะผู้จัดการ */
-function AppLayout({ children, admin = false, manager = false }) {
+ *  perm = หมวดสิทธิ์ที่หน้านั้นต้องใช้ ('office' | 'billing' | 'money') · ไม่ใส่ = ทุกคนที่ login เข้าได้ */
+function AppLayout({ children, perm = null }) {
   return (
     <RequireAuth>
-      <LayoutInner admin={admin} manager={manager}>{children}</LayoutInner>
+      <LayoutInner perm={perm}>{children}</LayoutInner>
     </RequireAuth>
+  );
+}
+
+/** "/" และ "/home" — พาไปหน้าแรกตามตำแหน่ง */
+function HomeRedirect() {
+  const { user } = useAuth();
+  return <Navigate to={homePath(user)} replace />;
+}
+
+/** ตำแหน่งหลังบ้านที่ยังไม่ได้กำหนดสิทธิ์ (เช่น Admin IPD) — บอกตรงๆ แทนการเด้งวนหรือหน้าว่าง */
+function NoAccessPage() {
+  const { user } = useAuth();
+  if (navFor(user).length > 0 || user.role !== 'admin') return <Navigate to={homePath(user)} replace />;
+  return (
+    <div className="empty-state">
+      <h1>ยังไม่ได้กำหนดสิทธิ์การใช้งาน</h1>
+      <p className="muted">
+        บัญชีตำแหน่ง {POSITION_LABELS[user.position] ?? user.position} ยังไม่มีสิทธิ์เข้าหน้าไหนในระบบ —
+        กรุณาติดต่อผู้จัดการ
+      </p>
+    </div>
   );
 }
 
@@ -283,21 +314,23 @@ export default function App() {
             <Route path="/settings" element={<AppLayout><SettingsPage /></AppLayout>} />
             {/* ลิงก์เดิมที่อาจถูก bookmark ไว้ ให้เด้งไปหน้าตั้งค่าแทน */}
             <Route path="/change-password" element={<Navigate to="/settings" replace />} />
-            <Route path="/" element={<Navigate to="/dashboard" replace />} />
-            <Route path="/dashboard" element={<AppLayout admin><DashboardPage /></AppLayout>} />
-            <Route path="/employees" element={<AppLayout admin><EmployeeListPage /></AppLayout>} />
-            <Route path="/employees/new" element={<AppLayout admin><EmployeeFormPage /></AppLayout>} />
-            <Route path="/employees/:id" element={<AppLayout admin><EmployeeDetailPage /></AppLayout>} />
-            <Route path="/employees/:id/edit" element={<AppLayout admin><EmployeeFormPage /></AppLayout>} />
+            <Route path="/" element={<RequireAuth><HomeRedirect /></RequireAuth>} />
+            <Route path="/no-access" element={<AppLayout><NoAccessPage /></AppLayout>} />
+            <Route path="/dashboard" element={<AppLayout perm="office"><DashboardPage /></AppLayout>} />
+            <Route path="/employees" element={<AppLayout perm="office"><EmployeeListPage /></AppLayout>} />
+            <Route path="/employees/new" element={<AppLayout perm="office"><EmployeeFormPage /></AppLayout>} />
+            <Route path="/employees/:id" element={<AppLayout perm="office"><EmployeeDetailPage /></AppLayout>} />
+            <Route path="/employees/:id/edit" element={<AppLayout perm="office"><EmployeeFormPage /></AppLayout>} />
 
-            <Route path="/cases" element={<AppLayout admin><CaseListPage /></AppLayout>} />
-            <Route path="/cases/new" element={<AppLayout admin><CaseFormPage /></AppLayout>} />
-            <Route path="/cases/:id/edit" element={<AppLayout admin><CaseFormPage /></AppLayout>} />
+            <Route path="/cases" element={<AppLayout perm="office"><CaseListPage /></AppLayout>} />
+            <Route path="/cases/new" element={<AppLayout perm="office"><CaseFormPage /></AppLayout>} />
+            <Route path="/cases/:id/edit" element={<AppLayout perm="office"><CaseFormPage /></AppLayout>} />
 
-            <Route path="/calendar" element={<AppLayout admin><CalendarPage /></AppLayout>} />
-            <Route path="/attendance" element={<AppLayout admin><AttendancePage /></AppLayout>} />
-            <Route path="/invoices" element={<AppLayout admin><InvoiceListPage /></AppLayout>} />
-            <Route path="/payroll" element={<AppLayout manager><PayrollPage /></AppLayout>} />
+            <Route path="/calendar" element={<AppLayout perm="office"><CalendarPage /></AppLayout>} />
+            <Route path="/attendance" element={<AppLayout perm="office"><AttendancePage /></AppLayout>} />
+            <Route path="/invoices" element={<AppLayout perm="billing"><InvoiceListPage /></AppLayout>} />
+            <Route path="/payroll" element={<AppLayout perm="money"><PayrollPage /></AppLayout>} />
+            <Route path="/revenue" element={<AppLayout perm="money"><RevenuePage /></AppLayout>} />
 
             {/* หน้าของพนักงานภาคสนาม — เข้าได้ทั้ง field และ admin (แสดงเฉพาะงานที่ตัวเองรับ) */}
             <Route path="/my-today" element={<AppLayout><MyTodayPage /></AppLayout>} />
@@ -305,23 +338,23 @@ export default function App() {
             <Route path="/my-calendar" element={<AppLayout><MyCalendarPage /></AppLayout>} />
             <Route path="/my-attendance" element={<AppLayout><MyAttendancePage /></AppLayout>} />
 
-            <Route path="/customers" element={<AppLayout admin><CustomerListPage /></AppLayout>} />
-            <Route path="/customers/new" element={<AppLayout admin><CustomerFormPage /></AppLayout>} />
-            <Route path="/customers/:id" element={<AppLayout admin><CustomerDetailPage /></AppLayout>} />
-            <Route path="/customers/:id/edit" element={<AppLayout admin><CustomerFormPage /></AppLayout>} />
+            <Route path="/customers" element={<AppLayout perm="office"><CustomerListPage /></AppLayout>} />
+            <Route path="/customers/new" element={<AppLayout perm="office"><CustomerFormPage /></AppLayout>} />
+            <Route path="/customers/:id" element={<AppLayout perm="office"><CustomerDetailPage /></AppLayout>} />
+            <Route path="/customers/:id/edit" element={<AppLayout perm="office"><CustomerFormPage /></AppLayout>} />
 
-            <Route path="/patients" element={<AppLayout admin><PatientListPage /></AppLayout>} />
-            <Route path="/patients/new" element={<AppLayout admin><PatientFormPage /></AppLayout>} />
-            <Route path="/patients/:id" element={<AppLayout admin><PatientDetailPage /></AppLayout>} />
-            <Route path="/patients/:id/edit" element={<AppLayout admin><PatientFormPage /></AppLayout>} />
+            <Route path="/patients" element={<AppLayout perm="office"><PatientListPage /></AppLayout>} />
+            <Route path="/patients/new" element={<AppLayout perm="office"><PatientFormPage /></AppLayout>} />
+            <Route path="/patients/:id" element={<AppLayout perm="office"><PatientDetailPage /></AppLayout>} />
+            <Route path="/patients/:id/edit" element={<AppLayout perm="office"><PatientFormPage /></AppLayout>} />
 
-            <Route path="/reviews" element={<AppLayout admin><ReviewsPage /></AppLayout>} />
-            <Route path="/reviews/:id" element={<AppLayout admin><ReviewDetailPage /></AppLayout>} />
+            <Route path="/reviews" element={<AppLayout perm="office"><ReviewsPage /></AppLayout>} />
+            <Route path="/reviews/:id" element={<AppLayout perm="office"><ReviewDetailPage /></AppLayout>} />
 
-            <Route path="/packages" element={<AppLayout admin><PackagesPage /></AppLayout>} />
-            <Route path="/physio-packages" element={<AppLayout admin><PhysioPackagesPage /></AppLayout>} />
+            <Route path="/packages" element={<AppLayout perm="office"><PackagesPage /></AppLayout>} />
+            <Route path="/physio-packages" element={<AppLayout perm="office"><PhysioPackagesPage /></AppLayout>} />
 
-            <Route path="*" element={<AppLayout admin><p>ไม่พบหน้านี้</p></AppLayout>} />
+            <Route path="*" element={<AppLayout perm="office"><p>ไม่พบหน้านี้</p></AppLayout>} />
           </Routes>
         </Suspense>
       </AuthProvider>

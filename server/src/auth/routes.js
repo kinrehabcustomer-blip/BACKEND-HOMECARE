@@ -11,6 +11,7 @@ import {
   hashPassword,
   requireAuth,
   roleForPosition,
+  permissionsFor,
   signToken,
   verifyPassword,
 } from '../lib/auth.js';
@@ -290,6 +291,8 @@ const toSession = (e) => ({
   last_name: e.last_name,
   email: e.email,
   position: e.position,
-  role: roleForPosition(e.position), // สิทธิ์คิดจากตำแหน่ง (ผู้จัดการ/HR = admin, ที่เหลือ = field)
+  role: roleForPosition(e.position), // สิทธิ์คิดจากตำแหน่ง (กลุ่ม back = admin, ที่เหลือ = field)
+  // หมวดที่เข้าได้ (office/billing/money) — หน้าเว็บใช้ซ่อนเมนู ตัวจริงที่กันคือด่านของแต่ละเส้น
+  permissions: permissionsFor(e.position),
   must_change_password: e.must_change_password,
 });

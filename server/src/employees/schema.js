@@ -16,18 +16,18 @@ export const THERAPY_POSITIONS = ['therapist', 'occupational_therapist', 'speech
 export const POSITIONS = [
   'caregiver', 'assistant_nurse', 'practical_nurse', 'nurse',
   ...THERAPY_POSITIONS,
-  // สายสำนักงาน — ทั้งสามได้สิทธิ์ระดับ admin, ต่างกันแค่ผู้จัดการเท่านั้นที่แตะเรื่องเงินได้
-  // (ดู ADMIN_POSITIONS กับ canSeeStaffPay ใน lib/auth.js)
-  'manager', 'hr', 'admin',
+  // สายสำนักงาน (กลุ่ม back) — สิทธิ์ของแต่ละตำแหน่งดูที่ POSITION_PERMISSIONS ใน lib/auth.js
+  // 'admin' = Admin HC (ชื่อเดิม "แอดมิน") · 'admin_ipd' = Admin IPD · 'finance' = การเงิน
+  'manager', 'hr', 'admin', 'admin_ipd', 'finance',
 ];
 /**
  * พนักงานแบ่งเป็นสองกลุ่ม (ต้องตรงกับ client/src/labels.js)
- *   back  = สายสำนักงาน: ผู้จัดการ · HR · แอดมิน
+ *   back  = สายสำนักงาน: ผู้จัดการ · HR · Admin HC · Admin IPD · การเงิน
  *   front = ทุกตำแหน่งที่เหลือ: สายดูแล (CG/NA/PN/RN) + สายบำบัด — คนที่ออกไปดูแลผู้ป่วยจริง
  * front เท่านั้นที่รับเคส/ลงกะได้ และเปิดรับแบบประเมินจากญาติ
  * ประกาศ front เป็น "ทุกอย่างที่ไม่ใช่ back" — เพิ่มตำแหน่งหน้างานใหม่ที่ POSITIONS แล้วตามมาเอง
  */
-export const BACK_POSITIONS = ['manager', 'hr', 'admin'];
+export const BACK_POSITIONS = ['manager', 'hr', 'admin', 'admin_ipd', 'finance'];
 export const FRONT_POSITIONS = POSITIONS.filter((p) => !BACK_POSITIONS.includes(p));
 
 export const EMPLOYMENT_TYPES = ['fulltime', 'parttime', 'contract', 'daily'];

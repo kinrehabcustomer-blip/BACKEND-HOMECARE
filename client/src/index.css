@@ -4927,3 +4927,6 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
 .staff-sheet-list .staff-opt { min-height: 3.25rem; padding: 0.625rem 0.75rem; }
 .staff-sheet-list .staff-opt-name { font-size: 1rem; }
 .staff-sheet-list .staff-opt-sub { font-size: 0.8125rem; }
+
+/* สายของเคสต่อเนื่องใต้หัว popup เคส — รอบที่ · ต่อจาก · ต่อเป็น */
+.case-rounds { margin: 0.375rem 0 0; font-size: 0.8125rem; }
