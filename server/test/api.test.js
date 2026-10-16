@@ -368,6 +368,117 @@ if (process.env.RUN_DB_TESTS !== '1') {
       assert.equal(dup.details.existing_invoice_id, created.invoice_id);
     });
 
+    test('อุปกรณ์เสริม: บวกเข้าใบ ซิงก์ตามเคส ย้ายไปใบส่วนที่เหลือ และขึ้นป้ายเมื่อเปลี่ยนหลังแบ่งงวด', async () => {
+      const patchCase = async (id, body) => {
+        const res = await fetch(`${base}/api/cases/${id}`, {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json', cookie: `${COOKIE_NAME}=${signToken(MANAGER)}` },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        assert.equal(res.status, 200, JSON.stringify(data));
+        return data;
+      };
+      const invoicesOf = async (id) => (await get(`/api/invoices?case_id=${id}`, MANAGER)).body.data;
+      const bed = { name: 'เตียงลม', quantity: 1, unit_price: 3500 };
+      const gloves = { name: 'ถุงมือ', quantity: 2, unit_price: 120.5 };
+
+      const c = await post('/api/cases', { case_type: 'other', client_name: 'Addon patient', fee: 10000, addons: [bed, gloves] }, MANAGER, 201);
+      assert.deepEqual(c.addons, [bed, gloves]);
+
+      // ใบร่างที่ระบบออกให้ตอนเปิดเคส = ค่าบริการ + อุปกรณ์
+      let [draft] = await invoicesOf(c.case_id);
+      assert.equal(draft.total, 13741);
+      assert.equal(draft.addons.length, 2);
+      assert.equal(draft.is_stale, false);
+
+      // แก้อุปกรณ์ → ใบร่างตาม + ประวัติบอกยอดเดิม → ใหม่
+      await patchCase(c.case_id, { addons: [bed] });
+      [draft] = await invoicesOf(c.case_id);
+      assert.equal(draft.total, 13500);
+      assert.deepEqual(draft.addons, [bed]);
+      assert.equal(draft.is_stale, false);
+      const edited = (await get(`/api/cases/${c.case_id}/events`, MANAGER)).body.filter((e) => e.event === 'edited');
+      assert.match(edited[0].detail, /อุปกรณ์เสริม: 3,741 บาท → 3,500 บาท/);
+
+      // ส่งรายการเดิมซ้ำ (ฟอร์มส่งมาทั้งชุด) ต้องไม่นับว่าแก้อุปกรณ์
+      await patchCase(c.case_id, { addons: [bed], note: 'แก้แค่หมายเหตุ' });
+      const edited2 = (await get(`/api/cases/${c.case_id}/events`, MANAGER)).body.filter((e) => e.event === 'edited');
+      assert.equal(edited2.length, edited.length + 1);
+      assert.doesNotMatch(edited2[0].detail, /อุปกรณ์เสริม/);
+
+      // แบ่งมัดจำ → อุปกรณ์ย้ายไปอยู่ใบส่วนที่เหลือ ยอดรวมสองใบยังเท่าเดิม
+      await post(`/api/invoices/${draft.invoice_id}/billing-plan`, { mode: 'deposit', deposit_amount: 5000 });
+      const plan = await invoicesOf(c.case_id);
+      const deposit = plan.find((v) => v.billing_kind === 'deposit');
+      const balance = plan.find((v) => v.billing_kind === 'balance');
+      assert.equal(deposit.total, 5000);
+      assert.deepEqual(deposit.addons, []);
+      assert.equal(balance.total, 8500);
+      assert.deepEqual(balance.addons, [bed]);
+      assert.ok(plan.every((v) => !v.is_stale));
+
+      // เพิ่มอุปกรณ์หลังแบ่งงวด → ใบงวดไม่ซิงก์ แต่ต้องขึ้นป้ายทั้งคู่ (ฝั่งแถวกับตัวกรอง SQL ต้องตรงกัน)
+      await patchCase(c.case_id, { addons: [bed, gloves] });
+      const after = await invoicesOf(c.case_id);
+      assert.equal(after.find((v) => v.billing_kind === 'balance').total, 8500);
+      assert.ok(after.every((v) => v.service_stale));
+      assert.equal((await get(`/api/invoices?case_id=${c.case_id}&stale=yes`, MANAGER)).body.data.length, 2);
+    });
+
+    test('อุปกรณ์เสริม: เคสที่ไม่ตั้งค่าบริการ ยอดใบ = ค่าอุปกรณ์ล้วน และป้ายยอดไม่ตรงทำงาน', async () => {
+      const c = await post('/api/cases', { case_type: 'other', client_name: 'Addon only',
+        addons: [{ name: 'รถเข็น', quantity: 1, unit_price: 500 }] }, MANAGER, 201);
+      const [draft] = (await get(`/api/invoices?case_id=${c.case_id}`, MANAGER)).body.data;
+      assert.equal(draft.total, 500);
+      assert.equal(draft.is_stale, false);
+
+      await sql.run('UPDATE invoices SET amount = 0, total = 0 WHERE invoice_id = :id', { id: draft.invoice_id });
+      const row = (await get(`/api/invoices/${draft.invoice_id}`, MANAGER)).body;
+      assert.equal(row.fee_stale, true);
+      assert.equal(row.case_fee, 500);
+      const flagged = (await get(`/api/invoices?case_id=${c.case_id}&stale=yes`, MANAGER)).body.data;
+      assert.equal(flagged.length, 1, 'SQL stale filter must agree with the row flag');
+
+      // เคสที่ไม่มีทั้งค่าบริการและอุปกรณ์ ยังไม่ขึ้นป้าย (เหมือนก่อนมีฟีเจอร์นี้)
+      const bare = await post('/api/cases', { case_type: 'other', client_name: 'No price' }, MANAGER, 201);
+      const [bareDraft] = (await get(`/api/invoices?case_id=${bare.case_id}`, MANAGER)).body.data;
+      assert.equal(bareDraft.total, 0);
+      assert.equal(bareDraft.is_stale, false);
+    });
+
+    test('อุปกรณ์เสริม: ใบตามกะใส่บรรทัดอุปกรณ์ครั้งเดียว ใบรอบถัดไปไม่เก็บซ้ำ', async () => {
+      const c = await post('/api/cases', { case_type: 'other', client_name: 'Addon visits', fee: 2000,
+        addons: [{ name: 'เตียงลม', quantity: 1, unit_price: 3500 }] }, MANAGER, 201);
+      const [draft] = (await get(`/api/invoices?case_id=${c.case_id}`, MANAGER)).body.data;
+      const del = await fetch(`${base}/api/invoices/${draft.invoice_id}`, {
+        method: 'DELETE', headers: { cookie: `${COOKIE_NAME}=${signToken(MANAGER)}` },
+      });
+      assert.equal(del.status, 200);
+
+      for (const d of ['2026-01-05', '2026-01-06']) {
+        await sql.run(
+          `INSERT INTO case_visits (case_id, visit_date, status, check_in_at, check_out_at)
+           VALUES (:id, :d, 'done', (:d || ' 08:00:00+07')::timestamptz, (:d || ' 16:00:00+07')::timestamptz)`,
+          { id: c.case_id, d },
+        );
+      }
+
+      const first = await post('/api/invoices', { case_id: c.case_id, basis: 'visits', to: '2026-01-05' }, MANAGER, 201);
+      assert.equal(first.items.length, 2);
+      assert.equal(first.items[1].description, 'อุปกรณ์เสริม: เตียงลม');
+      assert.equal(first.total, 1000 + 3500);
+      assert.equal(first.addons.length, 1);
+
+      await post(`/api/invoices/${first.invoice_id}/billing-plan`, { mode: 'full' });
+      await post(`/api/invoices/${first.invoice_id}/issue`, {});
+
+      const second = await post('/api/invoices', { case_id: c.case_id, basis: 'visits', from: '2026-01-06' }, MANAGER, 201);
+      assert.equal(second.items.length, 1, 'อุปกรณ์เก็บไปแล้วในใบแรก ห้ามเก็บซ้ำ');
+      assert.equal(second.total, 1000);
+      assert.deepEqual(second.addons, []);
+    });
+
     test('case wages require release; attendance approval and closing do not create payouts', async () => {
       const c = await newCase();
       await post(`/api/cases/${c.case_id}/assign`, { employee_id: FIELD.employee_id });

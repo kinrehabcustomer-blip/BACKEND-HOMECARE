@@ -446,7 +446,7 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                   </p>
                 )}
                 <Field label="อาการปัจจุบัน" value={item.current_symptoms} />
-                <Field label="อุปกรณ์ / สายต่างๆ" value={item.medical_devices} />
+                {item.medical_devices && <Field label="อุปกรณ์ / สายต่างๆ" value={item.medical_devices} />}
                 <Field label="จุดประสงค์ของญาติในการดูแล" value={item.care_goal} />
               </section>
 
@@ -503,6 +503,14 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                     />
                   )}
                   <Field label="ค่าบริการที่ได้รับ" value={item.fee != null && formatBaht(item.fee)} />
+                  {item.addons?.length > 0 && (
+                    <Field
+                      label="อุปกรณ์เสริม (คิดเพิ่มในใบแจ้งหนี้)"
+                      value={item.addons
+                        .map((x) => `${x.name}${x.quantity !== 1 ? ` ×${x.quantity}` : ''} ${formatBaht(x.quantity * x.unit_price)}`)
+                        .join(' · ')}
+                    />
+                  )}
                   {/* ยอดที่พนักงานจะเห็นเป็นรายได้ของตัวเองเมื่อปิดเคส — ต้องเห็นก่อนกดปิด (เฉพาะผู้จัดการ) */}
                   {seePay && (
                     <Field label="ค่าจ้างพนักงาน" value={item.staff_pay != null && formatBaht(item.staff_pay)} />
@@ -672,8 +680,8 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                             <><LineIcon name="alert" className="text-ico" />{v.payer_stale
                               ? 'ผู้จ่ายในใบไม่ตรงกับเคส'
                               : v.fee_stale
-                                ? `ไม่ตรงกับค่าจ้างเคส (${formatBaht(v.case_fee)})`
-                                : 'เคสเปลี่ยนแพ็คเกจหลังออกใบนี้'}</>
+                                ? `ไม่ตรงกับยอดของเคส (${formatBaht(v.case_fee)})`
+                                : 'เคสเปลี่ยนแพ็คเกจ/อุปกรณ์เสริมหลังออกใบนี้'}</>
                           </p>
                         )}
                       </div>

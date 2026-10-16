@@ -145,15 +145,19 @@ invoicesRouter.post(
 
     // ออกใบตามกะที่ไปจริง — แตกเป็นรายการรายครั้ง ยอดรวมคิดจากกะที่ทำเสร็จแล้วเท่านั้น
     let items = [];
+    let addons = caseRow.addons;
     if (input.basis === 'visits') {
       ({ lines: items } = await repo.visitLines(caseRow, input));
       if (items.length === 0) {
         throw new ApiError(409, 'เคสนี้ยังไม่มีกะที่เช็คอิน–เอาท์ครบในช่วงที่เลือก จึงออกใบตามกะไม่ได้');
       }
+      /* ใบตามกะมักออกเป็นรอบๆ (ทีละช่วงวัน) แต่อุปกรณ์เสริมเก็บครั้งเดียวต่อเคส
+         ใบก่อนหน้าที่ยังไม่ยกเลิกเก็บไปแล้ว = ใบนี้ไม่ใส่ซ้ำ */
+      if (await repo.addonsBilled(caseRow.case_id)) addons = [];
     }
 
     // req.user มาจาก requireAuth = พนักงานที่กำลังทำรายการนี้ → บันทึกเป็นผู้ออกเอกสาร
-    res.status(201).json(await repo.createFromCase({ ...caseRow, customer }, input, req.user, items));
+    res.status(201).json(await repo.createFromCase({ ...caseRow, customer }, input, req.user, items, { addons }));
   }),
 );
 

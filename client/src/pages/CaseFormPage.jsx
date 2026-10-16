@@ -39,8 +39,26 @@ const BLANK = {
 
   // fee = ค่าบริการที่ลูกค้าจ่าย · staff_pay = ค่าจ้างที่พนักงานได้เมื่อปิดเคส (คนละตัวเลข)
   start_date: '', end_date: '', fee: '', staff_pay: '', note: '',
+  // อุปกรณ์เสริมที่คิดเงินเพิ่ม [{ name, quantity, unit_price }] — บวกเข้ายอดใบแจ้งหนี้ ไม่รวมในค่าบริการ
+  addons: [],
   assigned_to: '',
 };
+
+const BLANK_ADDON = { name: '', quantity: '1', unit_price: '' };
+
+/** ยอดของบรรทัด — ปัดสองตำแหน่งแบบเดียวกับ server/src/lib/addons.js ตัวเลขบนฟอร์มจะได้ตรงกับใบ */
+const addonAmount = (a) => Math.round(Number(a.quantity || 0) * Number(a.unit_price || 0) * 100) / 100;
+const addonsTotal = (list) => Math.round(list.reduce((s, a) => s + addonAmount(a), 0) * 100) / 100;
+
+/** แถวที่ยังไม่กรอกอะไรเลยถือว่าไม่มี (กดเพิ่มแล้วไม่ใช้) — แถวที่กรอกครึ่งๆ ส่งไปให้ server ทักเป็นรายช่อง */
+const addonsPayload = (list) =>
+  list
+    .filter((a) => String(a.name).trim() !== '' || String(a.unit_price) !== '')
+    .map((a) => ({
+      name: String(a.name).trim(),
+      quantity: Number(a.quantity === '' ? 1 : a.quantity),
+      unit_price: Number(a.unit_price === '' ? 0 : a.unit_price),
+    }));
 
 /* ตัวเลือกที่ระบุแพ็คเกจ/เรทจริง — ไม่รวม service_kind เพราะเคสเก่าที่ยังว่างถูกเดาให้ตอนโหลด
    (ต้องตรงกับ SERVICE_ID_FIELDS ใน server/src/cases/repo.js) */
@@ -410,6 +428,9 @@ export default function CaseFormPage() {
       .then((c) => {
         const filled = { ...BLANK };
         for (const key of Object.keys(BLANK)) filled[key] = c[key] ?? '';
+        filled.addons = (c.addons ?? []).map((a) => ({
+          name: a.name, quantity: String(a.quantity), unit_price: String(a.unit_price),
+        }));
 
         // เคสที่เปิดก่อนมีสองสายไม่มี service_kind — เดาจากสิ่งที่ผูกไว้จริง
         // ไม่เดา ชุด dropdown จะถูกซ่อนแล้วบริการที่เลือกไว้จะหายไปจากสายตา (และโดนล้างทิ้งตอนกดบันทึก)
@@ -465,6 +486,23 @@ export default function CaseFormPage() {
       setFieldErrors((prev) => (prev[key] ? { ...prev, [key]: undefined } : prev));
     },
   });
+
+  /* ---------- อุปกรณ์เสริม: เพิ่ม/แก้/ลบทีละแถว ---------- */
+  const setAddon = (i, key, value) => {
+    setForm((prev) => ({
+      ...prev,
+      addons: prev.addons.map((a, j) => (j === i ? { ...a, [key]: value } : a)),
+    }));
+    const errKey = `addons.${i}.${key}`;
+    setFieldErrors((prev) => (prev[errKey] ? { ...prev, [errKey]: undefined } : prev));
+  };
+  const addAddon = () => setForm((prev) => ({ ...prev, addons: [...prev.addons, { ...BLANK_ADDON }] }));
+  /* ลบแถวกลางแล้วเลขแถวของข้อความเตือนเลื่อน — ล้างข้อความเตือนของอุปกรณ์ทิ้งทั้งชุด ไม่ให้ไปค้างผิดแถว */
+  const removeAddon = (i) => {
+    setForm((prev) => ({ ...prev, addons: prev.addons.filter((_, j) => j !== i) }));
+    setFieldErrors((prev) =>
+      Object.fromEntries(Object.entries(prev).filter(([k]) => !k.startsWith('addons.'))));
+  };
 
   /** ข้อความเตือนใต้ช่อง — มาจาก details ของ zod ที่ server ส่งกลับมา
       ต้องมีคู่กับ aria-invalid เสมอ ไม่ใช้ขอบแดงสื่อความหมายอย่างเดียว (คนตาบอดสีจะไม่เห็น
@@ -622,6 +660,8 @@ export default function CaseFormPage() {
          ถ้าปล่อยผ่าน แค่ HR เข้ามาแก้หมายเหตุ ค่าจ้างที่ผู้จัดการตั้งทับไว้เองก็จะถูกดีดกลับเป็นเรทของแพ็คเกจ
          (หรือหายเป็น null เลยถ้าเคสนั้นไม่ได้เลือกแพ็คเกจไว้) — กติกาเดียวกับหน้าแพ็คเกจ/กายภาพ */
       if (!seePay) delete payload.staff_pay;
+
+      payload.addons = addonsPayload(form.addons);
 
       // ล้างสถานะ "ยังไม่บันทึก" ก่อนเปลี่ยนหน้า ไม่งั้น beforeunload จะเตือนทั้งที่บันทึกสำเร็จแล้ว
       initial.current = JSON.stringify(form);
@@ -846,6 +886,65 @@ export default function CaseFormPage() {
             <input type="number" min="0" step="0.01" {...field('fee')} />
             {fieldError('fee')}
           </label>
+
+          {/* อุปกรณ์เสริม — คิดเงินแยกจากค่าบริการ แล้วบวกเข้ายอดใบแจ้งหนี้ (ใบร่าง/ใบที่ยังไม่รับเงินปรับตามให้เอง) */}
+          <fieldset className="addons-field">
+            <legend>อุปกรณ์เสริม (คิดเงินเพิ่ม)</legend>
+            {form.addons.length === 0 && <p className="muted">ยังไม่มีอุปกรณ์เสริม</p>}
+            {form.addons.map((a, i) => (
+              <div className="addon-row" key={i}>
+                <label>ชื่ออุปกรณ์
+                  <input
+                    name={`addons.${i}.name`}
+                    value={a.name}
+                    placeholder="เช่น เตียงลม, รถเข็น"
+                    aria-invalid={fieldErrors[`addons.${i}.name`] ? true : undefined}
+                    onChange={(e) => setAddon(i, 'name', e.target.value)}
+                  />
+                  {fieldError(`addons.${i}.name`)}
+                </label>
+                <label>จำนวน
+                  <input
+                    type="number" min="0" step="any"
+                    name={`addons.${i}.quantity`}
+                    value={a.quantity}
+                    aria-invalid={fieldErrors[`addons.${i}.quantity`] ? true : undefined}
+                    onChange={(e) => setAddon(i, 'quantity', e.target.value)}
+                  />
+                  {fieldError(`addons.${i}.quantity`)}
+                </label>
+                <label>ราคาต่อหน่วย (บาท)
+                  <input
+                    type="number" min="0" step="0.01"
+                    name={`addons.${i}.unit_price`}
+                    value={a.unit_price}
+                    aria-invalid={fieldErrors[`addons.${i}.unit_price`] ? true : undefined}
+                    onChange={(e) => setAddon(i, 'unit_price', e.target.value)}
+                  />
+                  {fieldError(`addons.${i}.unit_price`)}
+                </label>
+                <span className="addon-amount">{formatBaht(addonAmount(a))}</span>
+                <button
+                  type="button"
+                  className="btn danger-ghost"
+                  aria-label={`ลบ ${a.name || 'อุปกรณ์แถวนี้'}`}
+                  onClick={() => removeAddon(i)}
+                >
+                  ลบ
+                </button>
+              </div>
+            ))}
+            <div className="addon-foot">
+              <button type="button" className="btn" onClick={addAddon}>+ เพิ่มอุปกรณ์เสริม</button>
+              {form.addons.length > 0 && (
+                <p className="form-hint muted">
+                  รวมอุปกรณ์เสริม <strong>{formatBaht(addonsTotal(form.addons))}</strong>
+                  {' '}· ยอดในใบแจ้งหนี้ = ค่าบริการ + อุปกรณ์เสริม ={' '}
+                  <strong>{formatBaht(Number(form.fee || 0) + addonsTotal(form.addons))}</strong>
+                </p>
+              )}
+            </div>
+          </fieldset>
           {/* ยอดที่พนักงานจะเห็นเป็นรายได้ของตัวเองเมื่อปิดเคส — ดึงจากแพ็คเกจให้ แก้ทับได้
               เห็นเฉพาะผู้จัดการ · คนอื่นเปิดเคสได้ตามปกติแล้ว server เติมค่าจ้างจากเรท/แพ็คเกจให้เอง
               (payFromService ใน cases/repo.js) — ไม่ใช่ปล่อยว่างจนพนักงานเห็น "ยังไม่ระบุค่าจ้าง" */}
@@ -1040,10 +1139,6 @@ export default function CaseFormPage() {
           <label className="span-2">อาการปัจจุบัน
             <textarea rows={2} {...field('current_symptoms')} />
             {fieldError('current_symptoms')}
-          </label>
-          <label className="span-2">อุปกรณ์ / สายต่างๆ
-            <textarea rows={2} {...field('medical_devices')} />
-            {fieldError('medical_devices')}
           </label>
           <label className="span-2">จุดประสงค์ของญาติในการดูแล
             <textarea rows={2} {...field('care_goal')} />

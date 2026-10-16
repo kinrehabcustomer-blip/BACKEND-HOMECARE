@@ -62,6 +62,9 @@ function paidBy(payments, method, total, status) {
 /** ช่องทางชำระเงิน — ตรงกับ 3 ช่องบนหัวเอกสาร (เงินสด / บัตรเครดิต / โอน) */
 const PAYMENT_METHODS = ['เงินสด', 'โอน', 'บัตรเครดิต'];
 
+/** ยอดของบรรทัดอุปกรณ์ — ปัดแบบเดียวกับ server/src/lib/addons.js */
+const addonAmount = (a) => Math.round(Number(a.quantity) * Number(a.unit_price) * 100) / 100;
+
 export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onClose, onChanged, onReissued }) {
   const { user } = useAuth();
   const toast = useToast();
@@ -280,6 +283,18 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
 
   const pay = item ? paidBy(item.payments, item.payment_method, item.total, item.status) : {};
 
+  /* อุปกรณ์เสริม — เก็บแยกในคอลัมน์ addons แต่บวกอยู่ใน amount แล้ว
+     แตกเป็นบรรทัดของตัวเอง แล้วบรรทัดแพ็คเกจเหลือเฉพาะส่วนที่เป็นค่าบริการ (ยอดรวมยังเท่า amount)
+     ใบแบ่งงวด: อุปกรณ์อยู่ที่ใบส่วนที่เหลือ ใบมัดจำไม่มี จึงเป็นบรรทัดเดียวเหมือนเดิม
+     ยอดในใบน้อยกว่าค่าอุปกรณ์ (มัดจำกินเข้าไปถึงค่าอุปกรณ์ / แก้ยอดเอง) = แตกไม่ลง พิมพ์บรรทัดเดียว
+     ใบรายครั้งมีบรรทัดอุปกรณ์อยู่ใน items อยู่แล้ว */
+  const addonCandidates = item && !(item.items?.length > 0) ? (item.addons ?? []) : [];
+  const addonSum = Math.round(addonCandidates.reduce((s, a) => s + addonAmount(a), 0) * 100) / 100;
+  const addons = item && Number(item.amount) >= addonSum ? addonCandidates : [];
+  const serviceAmount = item
+    ? Math.round((Number(item.amount) - (addons.length > 0 ? addonSum : 0)) * 100) / 100
+    : 0;
+
   /* เนื้อในของเอกสาร — ใช้สองที่: ตัวที่เห็นในกล่องบนจอ กับสำเนาที่พิมพ์ (.print-sheet)
      สร้างครั้งเดียวแล้วใช้ซ้ำ สองที่จึงไม่มีวันพิมพ์ออกมาไม่ตรงกับที่เห็น */
   const docBody = item && (
@@ -345,12 +360,25 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
               </tr>
             ))
           ) : (
-            <tr>
-              <td className="inv-c">1</td>
-              <td>{item.service_description}</td>
-              <td className="inv-c">1</td>
-              <td className="inv-r">{amountText(item.amount)}</td>
-            </tr>
+            <>
+              <tr>
+                <td className="inv-c">1</td>
+                <td>{item.service_description}</td>
+                <td className="inv-c">1</td>
+                <td className="inv-r">{amountText(serviceAmount)}</td>
+              </tr>
+              {addons.map((a, i) => (
+                <tr key={`addon-${i}`}>
+                  <td className="inv-c">{i + 2}</td>
+                  <td>
+                    อุปกรณ์เสริม: {a.name}
+                    {a.quantity !== 1 && ` (${amountText(a.unit_price)} × ${a.quantity})`}
+                  </td>
+                  <td className="inv-c">{a.quantity}</td>
+                  <td className="inv-r">{amountText(addonAmount(a))}</td>
+                </tr>
+              ))}
+            </>
           )}
         </tbody>
         <tfoot>
@@ -576,14 +604,14 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                   )}
                   {item.fee_stale && (
                     <p>
-                      <LineIcon name="alert" className="text-ico" />ค่าจ้างในเคสตอนนี้คือ <strong>{amountText(item.case_fee)}</strong>
+                      <LineIcon name="alert" className="text-ico" />ยอดตามเคสตอนนี้ (ค่าบริการ + อุปกรณ์เสริม) คือ <strong>{amountText(item.case_fee)}</strong>
                       {' '}แต่ยอดสุทธิของใบนี้เป็น <strong>{amountText(item.total)}</strong> — ยังไม่ตรงกัน
                     </p>
                   )}
                   {item.service_stale && (
                     <p>
-                      <LineIcon name="alert" className="text-ico" />เคสนี้เปลี่ยนแพ็คเกจ/บริการหลังออกใบนี้ —
-                      {' '}รายการและยอดในใบยังเป็นของบริการเดิม
+                      <LineIcon name="alert" className="text-ico" />เคสนี้เปลี่ยนแพ็คเกจ/บริการ หรืออุปกรณ์เสริมหลังออกใบนี้ —
+                      {' '}รายการและยอดในใบยังเป็นของชุดเดิม
                     </p>
                   )}
                   <p>

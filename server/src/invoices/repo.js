@@ -1,4 +1,5 @@
 import { sql, nextInvoiceId, transaction } from '../db/index.js';
+import { normalizeAddons, addonAmount, addonsTotal, addonsTotalSql } from '../lib/addons.js';
 
 const NOW = `to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')`;
 /* วันนี้ตามเวลาไทย ไม่ใช่ UTC — ใช้กับวันที่ออกใบ/วันรับชำระ/เกณฑ์เลยกำหนด
@@ -184,10 +185,20 @@ const EDITABLE = [
 
 /* บริการที่เคสเลือกอยู่ ย่อเป็นข้อความเดียว — จดไว้ในใบ (service_key) ตอนออก/ซิงก์ แล้วเทียบตอนอ่าน
    เพื่อจับว่าเคสเปลี่ยนแพ็คเกจหลังออกใบ (ดู withComputed.service_stale)
-   สูตรต้องตรงกับที่เติมของเก่าใน schema.sql · ไม่รวม service_kind ด้วยเหตุผลที่เขียนไว้ที่นั่น */
+   สูตรต้องตรงกับที่เติมของเก่าใน schema.sql · ไม่รวม service_kind ด้วยเหตุผลที่เขียนไว้ที่นั่น
+   อุปกรณ์เสริมต่อท้ายเฉพาะเคสที่มี (concat_ws ข้าม NULL) — เคสที่ไม่มีจึงได้ key เดิมทุกตัวอักษร
+   ใบเก่าไม่โดนป้าย "แพ็คเกจไม่ตรง" ทั้งระบบเพราะเพิ่มฟีเจอร์นี้ */
+/* ยอดที่ใบควรเป็นตามเคสตอนนี้ = ค่าบริการ + อุปกรณ์เสริม — ต้องตรงกับ priceParts
+   ไม่ได้ตั้งค่าบริการและไม่มีอุปกรณ์ = NULL (ยังไม่มีราคาให้เทียบ ไม่ขึ้นป้าย "ยอดไม่ตรง")
+   ไม่ได้ตั้งค่าบริการแต่มีอุปกรณ์ = ค่าอุปกรณ์ล้วน เหมือนที่ priceParts ใช้ fee ?? 0 */
+const caseBillableSql = (c) =>
+  `CASE WHEN ${c}.fee IS NULL AND ${c}.addons = '[]'::jsonb THEN NULL
+        ELSE COALESCE(${c}.fee, 0) + ${addonsTotalSql(c)} END`;
+
 const serviceKeySql = (c) => `concat_ws('|',
   COALESCE(${c}.physio_package_id::text, ''), COALESCE(${c}.pkg_format_id::text, ''),
-  COALESCE(${c}.pkg_grade_id::text, ''), COALESCE(${c}.pkg_staff_tier, ''))`;
+  COALESCE(${c}.pkg_grade_id::text, ''), COALESCE(${c}.pkg_staff_tier, ''),
+  NULLIF(${c}.addons::text, '[]'))`;
 
 // case_payer_name = ชื่อผู้จ่าย "ที่ควรจะเป็น" ของเคสตอนนี้ ไล่ตามลำดับ:
 //   ผู้ว่าจ้างของเคส -> ผู้ว่าจ้างของแฟ้มผู้ป่วย (เผื่อเพิ่งผูกทีหลัง เคสยังไม่มี) -> ชื่อผู้ป่วยในเคส
@@ -200,7 +211,8 @@ const SELECT_INVOICE = `
          COALESCE((SELECT SUM(p.amount) FROM invoice_payments p WHERE p.invoice_id = i.invoice_id), 0) AS paid_amount,
          c.title       AS case_title,
          c.status      AS case_status,
-         c.fee         AS case_fee,
+         /* ยอดที่ใบควรเป็นตามเคสตอนนี้ = ค่าบริการ + อุปกรณ์เสริม (ดู priceParts) */
+         ${caseBillableSql('c')} AS case_fee,
          CASE WHEN c.case_id IS NOT NULL THEN ${serviceKeySql('c')} END AS case_service_key,
          cu.name       AS customer_name,
          cu.phone      AS customer_phone,
@@ -234,10 +246,34 @@ const listPriceOf = (c) =>
 function priceParts(caseRow) {
   const net = caseRow.fee ?? 0;
   const list = listPriceOf(caseRow);
+  // อุปกรณ์เสริมคิดเต็มราคาเสมอ ไม่มีส่วนลด — บวกเข้ายอดก่อนลด ส่วนลดยังเป็นของค่าบริการล้วนๆ
+  const extra = addonsTotal(caseRow.addons);
   return list != null && list > net
-    ? { amount: list, discount: list - net }
-    : { amount: net, discount: 0 };
+    ? { amount: list + extra, discount: list - net }
+    : { amount: net + extra, discount: 0 };
 }
+
+/** บรรทัดอุปกรณ์เสริมในรูปเดียวกับ invoice_items — ใช้ต่อท้ายใบที่แตกเป็นรายครั้ง */
+export const addonLines = (addons, startSeq = 1) =>
+  normalizeAddons(addons).map((a, i) => ({
+    seq: startSeq + i,
+    description: `อุปกรณ์เสริม: ${a.name}`,
+    quantity: a.quantity,
+    unit_price: a.unit_price,
+    amount: addonAmount(a),
+  }));
+
+/** เคสนี้มีใบ (ที่ไม่ได้ยกเลิก) ที่เก็บค่าอุปกรณ์เสริมไปแล้วหรือยัง — กันเก็บซ้ำตอนออกใบตามกะหลายรอบ */
+export const addonsBilled = (caseId) =>
+  sql
+    .one(
+      `SELECT EXISTS (
+         SELECT 1 FROM invoices
+         WHERE case_id = :id AND status <> 'cancelled' AND addons <> '[]'::jsonb
+       ) AS billed`,
+      { id: caseId },
+    )
+    .then((r) => r.billed);
 
 /**
  * "เกินกำหนดชำระ" คำนวณตอนอ่าน ไม่เก็บเป็นสถานะใน DB
@@ -296,7 +332,7 @@ const withComputed = (row) => {
 /* ค่าจ้างและชื่อผู้จ่าย "ปัจจุบัน" ของเคสที่ใบใบนี้ผูกอยู่ — เขียนเป็นซับคิวรีที่อ้าง i ตรงๆ
    ไม่ใช่คอลัมน์จาก SELECT_INVOICE เพราะต้องใช้ได้ทั้งใน WHERE ของ COUNT (FROM invoices i)
    และใน WHERE ของรายการ ซึ่งทั้งสองที่ไม่มี JOIN ชุดนั้นให้ใช้ */
-const CASE_FEE_SQL = `(SELECT c.fee FROM cases c WHERE c.case_id = i.case_id)`;
+const CASE_FEE_SQL = `(SELECT ${caseBillableSql('c')} FROM cases c WHERE c.case_id = i.case_id)`;
 const CASE_PAYER_SQL = `(
   SELECT COALESCE(ccu.name, pcu.name, c.client_name)
   FROM cases c
@@ -602,16 +638,22 @@ export async function visitLines(caseRow, { from, to } = {}) {
  * ไม่ผูกอ่านสด เพราะใบที่ออกไปแล้วต้องคงเดิมแม้ลูกค้าจะย้ายบ้านหรือเคสจะถูกแก้ราคา
  *
  * items = รายการรายครั้งที่ route เตรียมมาให้ (ออกใบตามกะที่ไปจริง) — ไม่ส่งมา = ใบแบบแพ็คเกจตามเดิม
+ * addons = อุปกรณ์เสริมที่จะเก็บในใบนี้ (ปริยาย = ของเคสทั้งหมด) — ใบรายครั้งต่อท้ายเป็นบรรทัดใน items
+ *          ส่วนใบแพ็คเกจเก็บไว้ในคอลัมน์ addons แล้วหน้าเอกสารแตกเป็นบรรทัดเอง
  */
-export function createFromCase(caseRow, input, actor, items = []) {
+export function createFromCase(caseRow, input, actor, visitItems = [], { addons = caseRow.addons } = {}) {
   const customer = caseRow.customer ?? null;
+  const billedAddons = normalizeAddons(addons);
+  const items = visitItems.length > 0
+    ? [...visitItems, ...addonLines(billedAddons, visitItems.length + 1)]
+    : [];
 
   // ยอดก่อนลด + ส่วนลด แจกแจงมาจากราคาเต็มที่เคสอ้างอิงอยู่ (ดู priceParts)
   // ส่งยอดมาเองก็ให้ส่วนลดเป็นของผู้เรียกล้วนๆ ไม่เดาจากราคาตั้งของเคส จะได้ไม่ขัดกับยอดที่ตั้งใจ
   // ใบที่แตกเป็นรายครั้งใช้ผลรวมของรายการเป็นยอดก่อนลด — ราคาตั้งของแพ็คเกจไม่เกี่ยวแล้ว
   const auto = items.length > 0
-    ? { amount: items.reduce((s, i) => s + i.amount, 0), discount: 0 }
-    : priceParts(caseRow);
+    ? { amount: roundMoney(items.reduce((s, i) => s + i.amount, 0)), discount: 0 }
+    : priceParts({ ...caseRow, addons: billedAddons });
   const amount = input.amount ?? auto.amount;
   const discount = input.discount ?? (input.amount != null ? 0 : auto.discount);
 
@@ -639,6 +681,7 @@ export function createFromCase(caseRow, input, actor, items = []) {
     // พนักงานที่กดออกใบ — เก็บชื่อ ณ ตอนนั้นไว้เลย ใบจะได้ไม่เปลี่ยนชื่อผู้ทำรายการทีหลัง
     issued_by: actor?.employee_id ?? null,
     issued_by_name: actor?.name ?? null,
+    addons: JSON.stringify(billedAddons),
   };
 
   return transaction(async (tx) => {
@@ -648,12 +691,12 @@ export function createFromCase(caseRow, input, actor, items = []) {
          (invoice_id, case_id, customer_id, issue_date, due_date,
           bill_to_name, bill_to_tax_id, bill_to_address,
           service_description, amount, discount, total, payment_method, note,
-          issued_by, issued_by_name, service_key)
+          issued_by, issued_by_name, addons, service_key)
        VALUES
          (:invoice_id, :case_id, :customer_id, :issue_date, :due_date,
           :bill_to_name, :bill_to_tax_id, :bill_to_address,
           :service_description, :amount, :discount, :total, :payment_method, :note,
-          :issued_by, :issued_by_name,
+          :issued_by, :issued_by_name, :addons,
           (SELECT ${serviceKeySql('c')} FROM cases c WHERE c.case_id = :case_id))
        RETURNING invoice_id`,
       { ...values, invoice_id: invoiceId },
@@ -706,6 +749,7 @@ export async function syncOpenFromCase(caseRow, customer) {
          amount              = :amount,
          discount            = :discount,
          total               = GREATEST(0, :amount::double precision - :discount::double precision),
+         addons              = :addons,
          service_key         = (SELECT ${serviceKeySql('c')} FROM cases c WHERE c.case_id = invoices.case_id),
          updated_at          = ${NOW}
      WHERE case_id = :case_id AND status IN ${OPEN_STATUSES}
@@ -728,6 +772,7 @@ export async function syncOpenFromCase(caseRow, customer) {
       service_description: describeService(caseRow),
       amount: price.amount,
       discount: price.discount,
+      addons: JSON.stringify(normalizeAddons(caseRow.addons)),
     },
   );
   return changed;
@@ -981,11 +1026,13 @@ export async function setBillingPlanForTransaction(tx, invoiceId, { mode, deposi
   }
 
   // ใบแรกกลายเป็นใบมัดจำ — ส่วนลดถูกคิดไปแล้วในยอดเต็ม จึงไม่ยกมาที่งวด (ไม่งั้นลดซ้ำสองรอบ)
+  // อุปกรณ์เสริมย้ายไปอยู่ใบส่วนที่เหลือ (ดู INSERT ด้านล่าง) — ใบมัดจำเป็นเงินก้อนเดียว ไม่แตกบรรทัด
   const changed = await tx.run(
     `UPDATE invoices
      SET billing_kind = 'deposit',
          service_description = :description,
          amount = :amount, discount = 0, total = :amount,
+         addons = '[]'::jsonb,
          updated_at = ${NOW}
      WHERE invoice_id = :id AND status = 'draft' AND billing_kind IS NULL`,
     { id: invoiceId, amount: deposit, description: `เงินมัดจำ — ${inv.service_description}` },
@@ -998,12 +1045,12 @@ export async function setBillingPlanForTransaction(tx, invoiceId, { mode, deposi
        (invoice_id, case_id, customer_id, issue_date, due_date,
         bill_to_name, bill_to_tax_id, bill_to_address,
         service_description, amount, discount, total, payment_method, note,
-        issued_by, issued_by_name, billing_kind, parent_invoice_id, service_key)
+        issued_by, issued_by_name, billing_kind, parent_invoice_id, service_key, addons)
      VALUES
        (:invoice_id, :case_id, :customer_id, :issue_date, :due_date,
         :bill_to_name, :bill_to_tax_id, :bill_to_address,
         :description, :amount, 0, :amount, :payment_method, :note,
-        :issued_by, :issued_by_name, 'balance', :parent, :service_key)`,
+        :issued_by, :issued_by_name, 'balance', :parent, :service_key, :addons)`,
     {
       invoice_id: nextId,
       case_id: inv.case_id,
@@ -1022,6 +1069,9 @@ export async function setBillingPlanForTransaction(tx, invoiceId, { mode, deposi
       parent: invoiceId,
       // งวดที่เหลือออกตามบริการชุดเดียวกับใบมัดจำ ไม่ใช่ของเคสตอนนี้ — ถ้าเคสเปลี่ยนไปแล้วต้องขึ้นป้ายทั้งคู่
       service_key: inv.service_key ?? null,
+      /* อุปกรณ์เสริมเก็บในใบส่วนที่เหลือ ให้แยกเป็นบรรทัดของตัวเองออกจากค่าแพ็คเกจได้
+         (ยอดส่วนที่เหลือรวมค่าอุปกรณ์ไว้แล้ว เพราะ inv.total = ค่าบริการ + อุปกรณ์) */
+      addons: JSON.stringify(normalizeAddons(inv.addons)),
     },
   );
 

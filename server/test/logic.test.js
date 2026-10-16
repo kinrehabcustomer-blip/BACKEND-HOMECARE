@@ -2022,3 +2022,36 @@ describe('แบบประเมิน — นิยามฝั่งหน�
     for (const n of [1, 2, 3, 4, 5]) assert.ok(SCORE_LABELS[n], `ขาดป้ายของ ${n} ดาว`);
   });
 });
+
+describe('อุปกรณ์เสริมของเคส', () => {
+  test('ยอดรวมปัดทีละบรรทัดก่อนรวม และรับค่าว่างได้', async () => {
+    const { addonsTotal, addonAmount } = await import('../src/lib/addons.js');
+    assert.equal(addonsTotal(null), 0);
+    assert.equal(addonsTotal([]), 0);
+    assert.equal(addonAmount({ quantity: 3, unit_price: 0.335 }), 1.01);
+    assert.equal(
+      addonsTotal([
+        { name: 'เตียงลม', quantity: 1, unit_price: 3500 },
+        { name: 'ถุงมือ', quantity: 2, unit_price: 120.5 },
+      ]),
+      3741,
+    );
+  });
+
+  test('บรรทัดใบรายครั้งต่อเลขลำดับจากกะ และยอดตรงกับ addonsTotal', async () => {
+    const { addonLines } = await import('../src/invoices/repo.js');
+    const lines = addonLines([{ name: 'รถเข็น', quantity: 2, unit_price: 500 }], 4);
+    assert.deepEqual(lines, [
+      { seq: 4, description: 'อุปกรณ์เสริม: รถเข็น', quantity: 2, unit_price: 500, amount: 1000 },
+    ]);
+  });
+
+  test('schema รับรายการที่ถูกต้อง และปฏิเสธชื่อว่าง/ราคาติดลบ', () => {
+    const base = { case_type: 'other', client_name: 'ทดสอบ' };
+    assert.ok(createCaseSchema.safeParse({ ...base, addons: [{ name: 'เตียงลม', quantity: 1, unit_price: 3500 }] }).success);
+    assert.ok(createCaseSchema.safeParse({ ...base, addons: null }).success);
+    assert.ok(!createCaseSchema.safeParse({ ...base, addons: [{ name: ' ', quantity: 1, unit_price: 1 }] }).success);
+    assert.ok(!createCaseSchema.safeParse({ ...base, addons: [{ name: 'x', quantity: 1, unit_price: -1 }] }).success);
+    assert.ok(!updateCaseSchema.safeParse({ addons: [{ name: 'x', quantity: 0, unit_price: 1 }] }).success);
+  });
+});

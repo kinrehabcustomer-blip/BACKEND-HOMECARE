@@ -105,7 +105,7 @@ export default function MyCaseModal({ caseId, onClose }) {
                 )}
                 <Field label="หมู่เลือด" value={item.patient_blood_type} />
                 <Field label="อาการปัจจุบัน" value={item.current_symptoms} />
-                <Field label="อุปกรณ์ / สายต่างๆ" value={item.medical_devices} />
+                {item.medical_devices && <Field label="อุปกรณ์ / สายต่างๆ" value={item.medical_devices} />}
                 <Field label="จุดประสงค์ในการดูแล" value={item.care_goal} />
               </section>
 

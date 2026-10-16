@@ -1566,3 +1566,26 @@ BEGIN
   END IF;
 END
 $archive_packages$;
+
+-- ============================================================================
+-- อุปกรณ์เสริมของเคส (เช่น เตียงลม ที่นอนกันแผลกดทับ รถเข็น) — คิดเงินแยกจากค่าบริการ
+--
+-- เก็บเป็นรายการ [{ name, quantity, unit_price }] ในเคส แล้วคัดลอกลงใบแจ้งหนี้ตอนออก/ซิงก์
+-- (snapshot แบบเดียวกับยอดเงินอื่นในใบ — ใบที่ออกไปแล้วต้องไม่ขยับเองเมื่อเคสถูกแก้ทีหลัง)
+-- ยอดสุทธิของใบ = ค่าบริการของเคส (fee) + ผลรวมอุปกรณ์เสริม
+-- ============================================================================
+ALTER TABLE cases    ADD COLUMN IF NOT EXISTS addons JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS addons JSONB NOT NULL DEFAULT '[]'::jsonb;
+
+-- แผนมัดจำที่แบ่งไว้ก่อนมีการย้ายอุปกรณ์เสริม: อุปกรณ์ค้างอยู่ที่ใบมัดจำ ส่วนใบส่วนที่เหลือว่าง
+-- ย้ายไปไว้ที่ใบส่วนที่เหลือ ให้แยกบรรทัดออกจากค่าแพ็คเกจได้ (แตะเฉพาะคู่ที่ยังไม่ย้าย จึงรันซ้ำได้)
+WITH moved AS (
+  UPDATE invoices b
+  SET addons = d.addons
+  FROM invoices d
+  WHERE b.parent_invoice_id = d.invoice_id
+    AND b.billing_kind = 'balance' AND d.billing_kind = 'deposit'
+    AND d.addons <> '[]'::jsonb AND b.addons = '[]'::jsonb
+  RETURNING d.invoice_id
+)
+UPDATE invoices SET addons = '[]'::jsonb WHERE invoice_id IN (SELECT invoice_id FROM moved);

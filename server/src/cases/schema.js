@@ -80,6 +80,20 @@ export const createCaseSchema = z.object({
   // สิทธิ์ manager-only บังคับที่ route เพราะ schema ไม่รู้ว่าใครเป็นผู้เรียก
   staff_pay: z.number().nonnegative('ค่าจ้างพนักงานต้องไม่ติดลบ').optional().nullable(),
 
+  // อุปกรณ์เสริมที่คิดเงินเพิ่มจากค่าบริการ — ถูกบวกเข้ายอดใบแจ้งหนี้ (ดู lib/addons.js)
+  // null/ไม่ส่ง = ไม่มีอุปกรณ์เสริม · ส่ง [] ตอนแก้เคส = ล้างรายการเดิมทิ้ง
+  addons: z
+    .array(
+      z.object({
+        name: z.string().trim().min(1, 'กรุณากรอกชื่ออุปกรณ์').max(200),
+        quantity: z.number().positive('จำนวนต้องมากกว่า 0').max(10000),
+        unit_price: z.number().nonnegative('ราคาต้องไม่ติดลบ').max(10_000_000),
+      }),
+    )
+    .max(50, 'อุปกรณ์เสริมได้ไม่เกิน 50 รายการ')
+    .optional()
+    .nullable(),
+
   // พิกัดสถานที่ดูแล (สำหรับ geofence ตอนเช็คอิน) — ตั้งจาก geocode ที่อยู่ หรือกรอกมือ
   geo_lat: z.number().min(-90).max(90).optional().nullable(),
   geo_lng: z.number().min(-180).max(180).optional().nullable(),

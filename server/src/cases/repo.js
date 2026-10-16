@@ -5,6 +5,7 @@ import { sql, nextCaseId, transaction } from '../db/index.js';
 import { REPORT_CONTENT_FIELDS } from './schema.js';
 import { decodeImage } from '../employees/schema.js';
 import { ApiError } from '../lib/errors.js';
+import { normalizeAddons, addonsTotal } from '../lib/addons.js';
 
 const COLUMNS = [
   'title',
@@ -41,6 +42,7 @@ const COLUMNS = [
   'end_date',
   'fee',       // ค่าบริการที่ลูกค้าจ่าย
   'staff_pay', // ค่าจ้างที่พนักงานได้ — คัดลอกจากแพ็คเกจ/เรทตอนเลือกบริการ (snapshot เหมือน fee)
+  'addons',    // อุปกรณ์เสริมที่คิดเงินเพิ่ม (JSONB) — บวกเข้ายอดใบแจ้งหนี้ ไม่รวมใน fee
 
   // พิกัดสถานที่ดูแล (geofence)
   'geo_lat',
@@ -437,6 +439,8 @@ export function create(rawInput, actor) {
     const values = { case_id: caseId };
     for (const col of COLUMNS) values[col] = input[col] ?? null;
     values.pkg_english = input.pkg_english ?? false; // คอลัมน์ NOT NULL — ไม่ส่งมา = ไม่ได้ขอภาษาอังกฤษ
+    // node-postgres แปลง array เป็น array ของ Postgres ไม่ใช่ JSON — ต้อง stringify เองก่อนลงคอลัมน์ JSONB
+    values.addons = JSON.stringify(normalizeAddons(input.addons));
 
     // ไม่ได้ส่งค่าจ้างมา = ใช้ของแพ็คเกจ · ส่งตัวเลขมาเอง (รวม 0) = เคารพตามนั้น
     if (values.staff_pay == null) values.staff_pay = await payFromService(input, tx);
@@ -479,7 +483,7 @@ const FIELD_LABELS = {
   current_symptoms: 'อาการปัจจุบัน', medical_devices: 'อุปกรณ์การแพทย์', care_goal: 'เป้าหมายการดูแล',
   service_start_preference: 'ความสะดวกเริ่มบริการ', address: 'ที่อยู่', client_phone: 'เบอร์ติดต่อ',
   nurse_call_preference: 'ความต้องการผู้ดูแล', start_date: 'วันเริ่ม', end_date: 'วันสิ้นสุด',
-  fee: 'ค่าบริการ', staff_pay: 'ค่าจ้างพนักงาน',
+  fee: 'ค่าบริการ', staff_pay: 'ค่าจ้างพนักงาน', addons: 'อุปกรณ์เสริม',
   geo_lat: 'พิกัด', geo_lng: 'พิกัด', geofence_radius_m: 'รัศมีเช็คอิน', note: 'หมายเหตุ',
 };
 
@@ -491,7 +495,10 @@ const FIELD_LABELS = {
 function changedLabels(current, values, fields) {
   const labels = [];
   for (const f of fields) {
-    if (String(current?.[f] ?? '') === String(values[f] ?? '')) continue;
+    if (f === 'addons') {
+      // values.addons เป็น JSON ที่ stringify แล้ว ส่วนของเดิมเป็น array — เทียบในรูปเดียวกัน
+      if (JSON.stringify(normalizeAddons(current?.addons)) === values.addons) continue;
+    } else if (String(current?.[f] ?? '') === String(values[f] ?? '')) continue;
     const label = FIELD_LABELS[f] ?? f;
     if (!labels.includes(label)) labels.push(label);
   }
@@ -540,6 +547,11 @@ async function valueChanges(tx, current, values) {
   if ('fee' in values && String(current?.fee ?? '') !== String(values.fee ?? '')) {
     out.push(`ค่าบริการ: ${bahtText(current?.fee)} → ${bahtText(values.fee)}`);
   }
+  if ('addons' in values) {
+    const before = addonsTotal(current?.addons);
+    const after = addonsTotal(JSON.parse(values.addons));
+    if (before !== after) out.push(`อุปกรณ์เสริม: ${bahtText(before)} → ${bahtText(after)}`);
+  }
   return out;
 }
 
@@ -551,6 +563,7 @@ export async function update(caseId, rawInput, actor) {
 
   const values = { case_id: caseId };
   for (const col of fields) values[col] = input[col] ?? null;
+  if ('addons' in values) values.addons = JSON.stringify(normalizeAddons(values.addons));
 
   await transaction(async (tx) => {
     const payState = await staffPayUpdateForTransaction(tx, caseId, input);
