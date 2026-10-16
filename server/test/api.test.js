@@ -394,6 +394,45 @@ if (process.env.RUN_DB_TESTS !== '1') {
       assert.ok(bad.details.some((d) => d.field === 'client_name'));
     });
 
+    test('ใส่ชื่อผู้ป่วยย้อนหลังในหน้าแก้เคส → สร้างแฟ้มผู้ป่วยและผูกกับเคส (ครั้งเดียว)', async () => {
+      const patchCase = async (id, body) => {
+        const res = await fetch(`${base}/api/cases/${id}`, {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json', cookie: `${COOKIE_NAME}=${signToken(MANAGER)}` },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        assert.equal(res.status, 200, JSON.stringify(data));
+        return data;
+      };
+      const customer = await post('/api/customers', { name: 'ลูกชายผู้ป่วย' }, MANAGER, 201);
+      const c = await post('/api/cases', { case_type: 'other', customer_id: customer.customer_id }, MANAGER, 201);
+      assert.equal(c.patient_id, null);
+
+      // แก้อย่างอื่นโดยยังไม่ใส่ชื่อ = ยังไม่สร้างแฟ้ม
+      assert.equal((await patchCase(c.case_id, { client_name: null, note: 'รอชื่อ' })).patient_id, null);
+
+      const named = await patchCase(c.case_id, {
+        client_name: 'เจโค', patient_gender: 'male', patient_age: 81, medical_history: 'เบาหวาน', address: 'บางนา',
+      });
+      assert.match(named.patient_id, /^PAT-/);
+      const patient = await sql.one('SELECT * FROM patients WHERE patient_id = :id', { id: named.patient_id });
+      assert.equal(patient.name, 'เจโค');
+      assert.equal(patient.gender, 'male');
+      assert.equal(patient.age, 81);
+      assert.equal(patient.medical_history, 'เบาหวาน');
+      assert.equal(patient.customer_id, customer.customer_id);
+
+      const events = (await get(`/api/cases/${c.case_id}/events`, MANAGER)).body;
+      assert.match(events.find((e) => e.event === 'edited').detail, new RegExp(`สร้างแฟ้มผู้ป่วย ${named.patient_id}`));
+
+      // แก้ชื่ออีกรอบ = แก้ snapshot ในเคสเฉยๆ ไม่สร้างแฟ้มซ้ำ
+      const renamed = await patchCase(c.case_id, { client_name: 'เจโค ใจดี' });
+      assert.equal(renamed.patient_id, named.patient_id);
+      const { n } = await sql.one("SELECT COUNT(*)::int AS n FROM patients WHERE name LIKE 'เจโค%'");
+      assert.equal(n, 1);
+    });
+
     test('อุปกรณ์เสริม: บวกเข้าใบ ซิงก์ตามเคส ย้ายไปใบส่วนที่เหลือ และขึ้นป้ายเมื่อเปลี่ยนหลังแบ่งงวด', async () => {
       const patchCase = async (id, body) => {
         const res = await fetch(`${base}/api/cases/${id}`, {

@@ -905,8 +905,9 @@ export default function CaseFormPage() {
             </select>
           </label>
           )}
+          {/* เต็มแถว — ไม่งั้นช่องถัดไป (วันเริ่ม) ขึ้นมาแทรกคอลัมน์ที่เหลือข้างกล่องติ๊กบนจอสามคอลัมน์ */}
           {isHomecare && englishFee > 0 && (
-            <label className="checkbox-row">
+            <label className="checkbox-row full-row">
               <input
                 type="checkbox"
                 checked={Boolean(form.pkg_english)}
@@ -915,19 +916,6 @@ export default function CaseFormPage() {
               />
               ภาษาอังกฤษ (+{formatBaht(englishFee)}{selectedFormat.category === 'monthly' ? '/เดือน' : '/วัน'})
             </label>
-          )}
-          {isHomecare && currentRate && currentRate.available && currentRate.customer_price != null && (
-            <p className="form-hint muted">
-              ค่าบริการ <strong>
-                {formatBaht((currentRate.net_price ?? currentRate.customer_price) + (form.pkg_english ? englishFee : 0))}
-              </strong>
-              {currentRate.discount_value > 0 &&
-                ` (จากราคาเต็ม ${formatBaht(currentRate.customer_price)} − ส่วนลด ${formatBaht(currentRate.discount_value)})`}
-              {form.pkg_english && englishFee > 0 && ` · รวมค่าภาษาอังกฤษ ${formatBaht(englishFee)}`}
-              {seePay && currentRate.staff_pay != null && ` · ค่าตอบแทนพนักงาน ${formatBaht(currentRate.staff_pay)}`}
-              {seePay && currentRate.margin != null && ` · ส่วนต่าง ${currentRate.margin}%`}
-              {' '}— เติมลงช่องด้านล่างให้แล้ว แก้ทับได้
-            </p>
           )}
           {isPhysio && selectedPhysio && (
             <p className="form-hint muted">
@@ -1070,6 +1058,13 @@ export default function CaseFormPage() {
               <p className="notice snapshot-note">
                 ผูกกับแฟ้มผู้ป่วย <Link className="link" to={`/patients/${form.patient_id}`}>{form.patient_id}</Link>
                 {' '}· การแก้ด้านล่างแก้เฉพาะข้อมูลในเคสนี้ (snapshot) ไม่กระทบแฟ้มผู้ป่วย
+              </p>
+            )}
+            {/* เคสที่เปิดตอนรู้แค่ผู้ว่าจ้าง — server สร้างแฟ้มให้เมื่อได้ชื่อ (cases/repo.js → patientForNamedCase) */}
+            {!form.patient_id && original && !original.client_name && (
+              <p className="notice snapshot-note">
+                เคสนี้ยังไม่มีแฟ้มผู้ป่วย — กรอกชื่อผู้ป่วยแล้วกดบันทึก ระบบจะสร้างแฟ้มผู้รับการดูแล (PAT-xxxx)
+                {' '}ผูกกับผู้ว่าจ้างของเคสนี้ให้อัตโนมัติ
               </p>
             )}
             <div className="grid">

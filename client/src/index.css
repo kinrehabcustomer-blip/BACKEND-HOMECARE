@@ -1449,6 +1449,9 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
 /* ช่อง checkbox เรียงแนวนอน (กล่อง + ข้อความข้างกัน) แทนการเรียงลงของ .grid label */
 .grid label.checkbox-row { flex-direction: row; align-items: center; gap: 0.5rem; grid-column: span 2; }
 .grid label.checkbox-row input { width: auto; }
+/* ช่องที่ต้องจบแถวเสมอ ทุกขนาดจอ (span-2 ยังเหลือที่ว่างให้ช่องถัดไปแทรกบนจอสามคอลัมน์) */
+.grid .full-row,
+.grid label.checkbox-row.full-row { grid-column: 1 / -1; }
 /* ฟอร์มในกล่อง popup แคบกว่าฟอร์มเต็มหน้า — สองคอลัมน์กำลังพอดี (ยุบเหลือคอลัมน์เดียวบนจอแคบ ดู media query ท้ายไฟล์) */
 .grid.cols-2 { grid-template-columns: 1fr 1fr; }
 .form-actions { margin-top: 1.5rem; padding-top: 1.125rem; border-top: 1px solid var(--border); }

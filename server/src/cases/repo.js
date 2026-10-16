@@ -1,4 +1,4 @@
-import { sql, nextCaseId, transaction } from '../db/index.js';
+import { sql, nextCaseId, nextPatientId, transaction } from '../db/index.js';
 /* รายการช่องของรายงานมาจาก schema.js ที่เดียว — ฟอร์มมี 80 กว่าช่อง การก๊อปรายชื่อมาไว้สองที่
    แปลว่าวันหนึ่งจะมีช่องที่ผ่าน validation แล้วแต่ไม่ถูกเขียนลงตาราง (บันทึกสำเร็จแต่ข้อมูลหาย)
    ต่างจากตาราง cases ที่ยังประกาศ COLUMNS เอง เพราะช่องน้อยและมีคอลัมน์ที่ระบบเติมเองปนอยู่ */
@@ -563,6 +563,39 @@ async function valueChanges(tx, current, values) {
   return out;
 }
 
+/**
+ * เคสที่เปิดตอนรู้แค่ผู้ว่าจ้าง (ชื่อผู้ป่วยเป็น PATIENT_PENDING ไม่มีแฟ้มผู้ป่วย) แล้วเพิ่งกรอกชื่อจริงในหน้าแก้
+ * → สร้างแฟ้มผู้ป่วยจากข้อมูลในเคส ผูกกับผู้ว่าจ้างเดียวกัน คืนรหัส PAT ใหม่ (ไม่เข้าเงื่อนไข = null)
+ *
+ * จำกัดเฉพาะเคสที่เคยเป็น "ยังไม่ระบุผู้ป่วย" — เคสเก่าที่มีชื่อจริงแต่ไม่มีแฟ้ม (ก่อนมีระบบแฟ้มผู้ป่วย)
+ * ไม่ถูกสร้างแฟ้มเงียบๆ ทุกครั้งที่มีคนกดบันทึก
+ */
+async function patientForNamedCase(tx, current, values) {
+  if (current.patient_id || current.client_name !== PATIENT_PENDING) return null;
+  if ('patient_id' in values && values.patient_id) return null; // ผู้เรียกผูกแฟ้มเดิมมาให้เองแล้ว
+  const name = values.client_name;
+  if (!name || name === PATIENT_PENDING) return null;
+
+  const pick = (col) => (col in values ? values[col] : current[col]) ?? null;
+  const patientId = await nextPatientId(tx);
+  await tx.run(
+    `INSERT INTO patients (patient_id, name, gender, age, weight_kg, height_cm, medical_history, address, customer_id, status)
+     VALUES (:patient_id, :name, :gender, :age, :weight_kg, :height_cm, :medical_history, :address, :customer_id, 'active')`,
+    {
+      patient_id: patientId,
+      name,
+      gender: pick('patient_gender'),
+      age: pick('patient_age'),
+      weight_kg: pick('weight_kg'),
+      height_cm: pick('height_cm'),
+      medical_history: pick('medical_history'),
+      address: pick('address'),
+      customer_id: pick('customer_id'),
+    },
+  );
+  return patientId;
+}
+
 export async function update(caseId, rawInput, actor) {
   // สลับสายบริการตอนแก้เคส ต้องล้างของสายเดิมด้วย ไม่งั้นค้างเป็นเคสที่มีทั้งเรท Homecare และแพ็คเกจกายภาพบำบัด
   const input = clearUnusedKind(rawInput);
@@ -592,8 +625,16 @@ export async function update(caseId, rawInput, actor) {
       values.staff_pay = payState.staff_pay;
     }
 
+    // เคสที่เปิดโดยรู้แค่ผู้ว่าจ้าง เพิ่งได้ชื่อผู้ป่วย → สร้างแฟ้มผู้ป่วยแล้วผูกกับเคส (ทรานแซกชันเดียวกัน)
+    const newPatient = await patientForNamedCase(tx, current, values);
+    if (newPatient) {
+      values.patient_id = newPatient;
+      if (!fields.includes('patient_id')) fields.push('patient_id');
+    }
+
     const changed = changedLabels(current, values, fields);
     const details = await valueChanges(tx, current, values);
+    if (newPatient) details.push(`สร้างแฟ้มผู้ป่วย ${newPatient}`);
 
     await tx.run(
       `UPDATE cases
