@@ -1,6 +1,7 @@
 import { sql, nextEmployeeId, transaction } from '../db/index.js';
 import { hashPassword, generateTempPassword } from '../lib/auth.js';
 import { encryptTempPassword, decryptTempPassword } from '../lib/tempPassword.js';
+import { ApiError } from '../lib/errors.js';
 
 const COLUMNS = [
   'first_name',
@@ -103,7 +104,7 @@ export async function findDetailById(employeeId, includeTempPassword = false) {
     portfolio_.listFor(employeeId),
     // ประวัติการทำงาน: เคสที่กำลังทำอยู่และที่ปิดไปแล้ว — เรียงใหม่สุดขึ้นก่อน
     sql.all(
-      `SELECT case_id, title, case_type, client_name, status,
+      `SELECT case_id, title, case_type, service_kind, physio_package_id, client_name, status,
               start_date, end_date, assigned_at, closed_at, fee
        FROM cases
        WHERE assigned_to = :id
@@ -125,9 +126,28 @@ export async function findDetailById(employeeId, includeTempPassword = false) {
   return result;
 }
 
+/** รหัสพนักงานซ้ำ — เช็คก่อนเขียน จะได้บอกว่าซ้ำกับใคร (ชนกันพร้อมกันพอดียังมี PK กันอีกชั้น) */
+export async function ensureEmployeeCodeFree(db, code, exceptId = null) {
+  const taken = await codeOwner(db, code, exceptId);
+  if (taken) {
+    throw new ApiError(409, `รหัสพนักงาน ${code} มีอยู่แล้ว (${taken.name})`, [
+      { field: 'employee_id', message: `รหัสนี้ถูกใช้กับ ${taken.name} แล้ว` },
+    ]);
+  }
+}
+
+/** เจ้าของรหัสนี้ (ถ้ามี) — ใช้ทั้งตอนบันทึก และเส้นตรวจซ้ำที่หน้าฟอร์มเรียกระหว่างพิมพ์ */
+export const codeOwner = (db, code, exceptId = null) =>
+  db.one(
+    `SELECT employee_id, first_name || ' ' || last_name AS name FROM employees
+     WHERE employee_id = :code AND employee_id IS DISTINCT FROM :except`,
+    { code, except: exceptId },
+  );
+
 export function create(input) {
   return transaction(async (tx) => {
-    const employeeId = await nextEmployeeId(tx);
+    if (input.employee_id) await ensureEmployeeCodeFree(tx, input.employee_id);
+    const employeeId = input.employee_id || (await nextEmployeeId(tx));
     const values = { employee_id: employeeId };
     for (const col of COLUMNS) values[col] = input[col] ?? null;
 
@@ -148,19 +168,42 @@ export function create(input) {
 }
 
 export async function update(employeeId, input) {
+  /* เปลี่ยนรหัส (เช่น EMP-0007 → A6901007) — ทุกตารางที่อ้างพนักงานเป็น ON UPDATE CASCADE
+     เคส กะ ค่าจ้าง ใบเสร็จ ฯลฯ จึงตามรหัสใหม่ไปเองในคำสั่งเดียวกัน */
+  const nextId = input.employee_id && input.employee_id !== employeeId ? input.employee_id : null;
   const fields = COLUMNS.filter((col) => col in input);
-  if (fields.length === 0) return findById(employeeId);
+  if (fields.length === 0 && !nextId) return findById(employeeId);
 
-  const values = { employee_id: employeeId };
-  for (const col of fields) values[col] = input[col] ?? null;
+  return transaction(async (tx) => {
+    const values = { employee_id: employeeId, next_id: nextId ?? employeeId };
+    for (const col of fields) values[col] = input[col] ?? null;
+    const sets = [...fields.map((c) => `${c} = :${c}`), 'employee_id = :next_id', `updated_at = ${NOW}`];
 
-  return sql.one(
-    `UPDATE employees
-     SET ${fields.map((c) => `${c} = :${c}`).join(', ')}, updated_at = ${NOW}
-     WHERE employee_id = :employee_id
-     RETURNING ${PUBLIC}`,
-    values,
-  );
+    if (nextId) {
+      await ensureEmployeeCodeFree(tx, nextId, employeeId);
+      /* รหัสผ่านชั่วคราวเข้ารหัสโดยผูกกับรหัสพนักงาน (AAD) — เปลี่ยนรหัสแล้วต้องเข้ารหัสใหม่
+         ไม่งั้น HR เปิดดูรหัสชั่วคราวของคนนี้ไม่ได้อีกเลย */
+      const cred = await tx.one(
+        'SELECT temp_password_encrypted FROM employees WHERE employee_id = :id FOR UPDATE',
+        { id: employeeId },
+      );
+      if (cred?.temp_password_encrypted) {
+        values.temp_password_encrypted = encryptTempPassword(
+          decryptTempPassword(cred.temp_password_encrypted, employeeId),
+          nextId,
+        );
+        sets.push('temp_password_encrypted = :temp_password_encrypted');
+      }
+    }
+
+    return tx.one(
+      `UPDATE employees
+       SET ${sets.join(', ')}
+       WHERE employee_id = :employee_id
+       RETURNING ${PUBLIC}`,
+      values,
+    );
+  });
 }
 
 /** ลาออก: เก็บประวัติไว้ ไม่ลบแถว เพราะ employee_id ยังถูกอ้างอิงจากโมดูลอื่น */

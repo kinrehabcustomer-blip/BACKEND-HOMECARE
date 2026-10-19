@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import CaseModal from './CaseModal.jsx';
 import { useSheetSwipe } from '../lib/sheetSwipe.js';
 import { useScrollLock } from '../lib/scrollLock.js';
-import { CASE_TYPE_LABELS, CASE_STATUS_LABELS, formatBaht, formatDate } from '../labels.js';
+import { SERVICE_KIND_LABELS, serviceKindOf, CASE_STATUS_LABELS, formatBaht, formatDate } from '../labels.js';
 
 /**
  * หน้าต่างประวัติการทำงานฉบับเต็มของพนักงานหนึ่งคน — ตารางแบบเดียวกับหน้าเคส
@@ -67,7 +67,7 @@ export default function WorkHistoryModal({ employeeName, cases = [], onClose }) 
                   <tr>
                     <th>รหัสเคส</th>
                     <th>ชื่อเคส / ผู้รับบริการ</th>
-                    <th>ประเภท</th>
+                    <th>บริการ</th>
                     <th>วันที่ / ค่าจ้าง</th>
                     <th>สถานะ</th>
                   </tr>
@@ -91,7 +91,7 @@ export default function WorkHistoryModal({ employeeName, cases = [], onClose }) 
                         {c.title}
                         <span className="cell-sub">{c.client_name}</span>
                       </td>
-                      <td>{CASE_TYPE_LABELS[c.case_type]}</td>
+                      <td>{SERVICE_KIND_LABELS[serviceKindOf(c)]}</td>
                       <td title={`${whenLabel(c)} ${whenOf(c)}`}>
                         {whenOf(c)}
                         {c.fee != null && <span className="cell-sub">{formatBaht(c.fee)}</span>}

@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import EChart from './EChart.jsx';
 import { useChartTokens } from '../lib/chartTheme.js';
-import { CASE_TYPE_LABELS } from '../labels.js';
+import { SERVICE_KIND_LABELS } from '../labels.js';
 
 /* ความสูงต่อหนึ่งแท่ง (รวมช่องว่างระหว่างแท่ง) — คูณจำนวนประเภทที่มีจริง
    ไม่ตั้งความสูงตายตัว เพราะเดือนที่มี 2 ประเภทกับ 8 ประเภทต้องการที่ไม่เท่ากัน
@@ -10,7 +10,7 @@ const ROW_H = 38;
 const PAD_H = 16;
 
 /**
- * เคสตามประเภท — กราฟแท่งแนวนอน
+ * เคสตามประเภทบริการ (Homecare / กายภาพบำบัด) — กราฟแท่งแนวนอน
  *
  * แนวนอนไม่ใช่แนวตั้ง เพราะชื่อประเภทเป็นภาษาไทยยาว ("ดูแลผู้ป่วยติดเตียง", "เฝ้าไข้ที่โรงพยาบาล")
  * ถ้าวางเป็นแท่งตั้ง ป้ายใต้แกนจะต้องเอียงหรือโดนตัด ซึ่งอ่านยากกว่าตัวกราฟเสียอีก
@@ -49,7 +49,7 @@ export default function CaseTypeChart({ byType, total }) {
       yAxis: {
         type: 'category',
         inverse: true,
-        data: rows.map((r) => CASE_TYPE_LABELS[r.case_type] ?? r.case_type),
+        data: rows.map((r) => SERVICE_KIND_LABELS[r.service_kind] ?? r.service_kind),
         axisLabel: { color: tokens.muted, fontFamily: tokens.font, fontSize: 13 },
         axisLine: { show: false },
         axisTick: { show: false },
@@ -85,7 +85,7 @@ export default function CaseTypeChart({ byType, total }) {
       option={option}
       height={rows.length * ROW_H + PAD_H}
       /* คนที่ใช้โปรแกรมอ่านหน้าจอไม่เห็น canvas — สรุปตัวเลขทั้งชุดไว้ในป้ายกำกับแทน */
-      ariaLabel={`เคสตามประเภท: ${rows.map((r) => `${CASE_TYPE_LABELS[r.case_type] ?? r.case_type} ${r.count} เคส`).join(', ')}`}
+      ariaLabel={`เคสตามประเภทบริการ: ${rows.map((r) => `${SERVICE_KIND_LABELS[r.service_kind] ?? r.service_kind} ${r.count} เคส`).join(', ')}`}
     />
   );
 }

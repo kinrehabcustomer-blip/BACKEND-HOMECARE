@@ -13,8 +13,10 @@ import {
   POSITIONS,
   EMPLOYMENT_TYPES,
   STATUSES,
+  EMPLOYEE_CODE_RE,
 } from './schema.js';
 import { ApiError, asyncRoute, notFound } from '../lib/errors.js';
+import { sql } from '../db/index.js';
 import { canSeeStaffPay, BLOCKED_STATUSES, can } from '../lib/auth.js';
 
 export const employeesRouter = Router();
@@ -69,6 +71,21 @@ employeesRouter.post(
     const employee = await repo.create(input);
     res.set('Cache-Control', 'no-store');
     res.status(201).json(employee);
+  }),
+);
+
+/**
+ * ตรวจรหัสพนักงานระหว่างกรอก (add-on กรอกรหัสเอง) — ต้องมาก่อน '/:id'
+ * ?id=A6901059[&except=รหัสของคนที่กำลังแก้] → { valid, available, taken_by }
+ * ตัวจริงที่กันซ้ำคือตอนบันทึก (ensureEmployeeCodeFree + PK) อันนี้แค่บอกล่วงหน้า
+ */
+employeesRouter.get(
+  '/check-id',
+  asyncRoute(async (req, res) => {
+    const code = String(req.query.id ?? '').trim();
+    const valid = EMPLOYEE_CODE_RE.test(code);
+    const owner = valid ? await repo.codeOwner(sql, code, req.query.except || null) : null;
+    res.json({ valid, available: valid && !owner, taken_by: owner?.name ?? null });
   }),
 );
 
@@ -147,6 +164,12 @@ employeesRouter.patch(
   asyncRoute(async (req, res) => {
     const input = updateEmployeeSchema.parse(req.body);
     ensureCanManageTarget(req, req.employee);
+
+    // รหัสพนักงานคือชื่อที่ใช้ login ด้วย — เปลี่ยนของตัวเองแล้ว session ปัจจุบันหลุดทันที ต้องให้คนอื่นเปลี่ยนให้
+    if (input.employee_id && input.employee_id !== req.employee.employee_id
+        && req.employee.employee_id === req.user.employee_id) {
+      throw new ApiError(403, 'เปลี่ยนรหัสพนักงานของตัวเองไม่ได้ — ให้ผู้จัดการหรือ HR คนอื่นเปลี่ยนให้');
+    }
     await ensurePositionChangeAllowed(req, req.employee, input.position);
 
     const statusChanged = input.status && input.status !== req.employee.status;

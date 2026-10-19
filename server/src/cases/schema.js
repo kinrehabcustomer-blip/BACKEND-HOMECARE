@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { zodDate } from '../lib/dates.js';
 // ตัวตรวจรูปแบบ data URL — ตัวเดียวกับรูปพนักงาน/ใบรับรอง/เซลฟี่เช็คอิน (รูปแผลในรายงานใช้ร่วม)
 import { imageSchema } from '../employees/schema.js';
+import { patientCode } from '../patients/schema.js';
 
 export const CASE_TYPES = [
   'elderly_care',
@@ -23,15 +24,31 @@ const optionalLongText = z.string().trim().max(2000).optional().nullable(); // �
 
 export const SERVICE_KINDS = ['homecare', 'physio'];
 
+/**
+ * รหัสเคส = VN + ปี พ.ศ. 2 หลัก + เลข 7 หลักที่เจ้าหน้าที่กรอกเอง (เช่น VN690215209)
+ * ไม่ใช่เลขรันอัตโนมัติแบบ CASE-0001 เดิม — ระบบตรวจแค่รูปแบบและห้ามซ้ำ
+ * เคสเก่าที่ยังเป็น CASE-xxxx ใช้ต่อได้ และแก้เป็นรหัส VN ได้ในหน้าแก้เคส
+ * (ต้องตรงกับ CASE_CODE_RE ใน client/src/lib/codes.js)
+ */
+export const CASE_CODE_RE = /^VN\d{9}$/;
+export const caseCode = z
+  .string()
+  .trim()
+  .regex(CASE_CODE_RE, 'รหัสเคสต้องเป็น VN + ปี พ.ศ. 2 หลัก + เลข 7 หลัก (เช่น VN690215209)');
+
 /* ชื่อที่เก็บแทนเมื่อเปิดเคสโดยรู้แค่ผู้ว่าจ้าง (ญาติโทรมาจองก่อน ยังไม่บอกชื่อผู้ป่วย)
    คอลัมน์ client_name เป็น NOT NULL และถูกใช้ทั่วระบบ (ชื่อเคส/ค้นหา/ใบแจ้งหนี้) — เติมคำนี้แทนการปล่อยว่าง
    หน้าแก้เคสแปลงกลับเป็นช่องว่างให้กรอกชื่อจริงทีหลัง */
 export const PATIENT_PENDING = 'ยังไม่ระบุผู้ป่วย';
 
 const caseFields = z.object({
+  // รหัสเคส — บังคับตอนเปิดเคส · ตอนแก้ (updateCaseSchema) ส่งมา = เปลี่ยนรหัส
+  case_id: caseCode,
   // ชื่อเคสถูกสร้างอัตโนมัติจากแพ็คเกจ + ชื่อผู้ป่วย (ไม่มีช่องให้กรอกแล้ว) — รับค่าที่ส่งมาได้แต่ไม่บังคับ
   title: z.string().trim().max(200).optional().nullable(),
-  case_type: z.enum(CASE_TYPES, { errorMap: () => ({ message: 'ประเภทเคสไม่ถูกต้อง' }) }),
+  /* ประเภทเคสไม่มีช่องให้เลือกแล้ว (เหลือแค่ประเภทบริการ) — server ตั้งให้เองจากประเภทบริการ
+     (ดู caseTypeForService ใน cases/repo.js) · ยังรับค่าที่ส่งมาได้เผื่อเครื่องมือที่เรียก API ตรง */
+  case_type: z.enum(CASE_TYPES, { errorMap: () => ({ message: 'ประเภทเคสไม่ถูกต้อง' }) }).optional(),
 
   // ลูกค้าที่เคสนี้ให้บริการ — เลือกแล้วระบบเติมข้อมูลผู้ป่วยด้านล่างให้อัตโนมัติ (เว้นว่างได้)
   customer_id: z.string().trim().optional().nullable(),
@@ -126,7 +143,14 @@ export const createCaseSchema = caseFields.superRefine((v, ctx) => {
   }
 });
 
-export const updateCaseSchema = caseFields.omit({ assigned_to: true, renewed_from: true }).partial();
+export const updateCaseSchema = caseFields
+  .omit({ assigned_to: true, renewed_from: true })
+  .partial()
+  .extend({
+    // รหัสของแฟ้มผู้ป่วยที่จะสร้างให้ ตอนเพิ่งใส่ชื่อผู้ป่วยให้เคสที่เปิดด้วยผู้ว่าจ้างอย่างเดียว
+    // (ไม่ใช่คอลัมน์ของเคส — ดู patientForNamedCase ใน cases/repo.js)
+    patient_code: patientCode.optional().nullable(),
+  });
 
 export const assignSchema = z.object({
   employee_id: z.string().trim().min(1, 'กรุณาเลือกพนักงาน'),
@@ -641,6 +665,8 @@ export const listQuerySchema = z.object({
   q: z.string().trim().optional(),
   status: z.enum(CASE_STATUSES).optional(),
   case_type: z.enum(CASE_TYPES).optional(),
+  // ประเภทบริการ — เกณฑ์เดียวกับกราฟหน้าภาพรวม (ดู PHYSIO_CASE_SQL ใน cases/repo.js)
+  service_kind: z.enum(SERVICE_KINDS).optional(),
   assigned_to: z.string().trim().optional(),
   /* ตัวกรอง "ของค้าง" — ปลายทางของแถวในกระดิ่งแจ้งเตือน (ดู notify/alerts.js)
      ทั้งสามตัวไม่ใช่สถานะใน DB แต่คิดจากข้อมูลอื่นของเคส เกณฑ์อยู่ใน cases/repo.js ที่เดียว

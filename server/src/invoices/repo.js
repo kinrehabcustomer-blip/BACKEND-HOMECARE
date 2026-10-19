@@ -211,6 +211,10 @@ const SELECT_INVOICE = `
             (เก็บสองที่แล้ววันหนึ่งจะไม่ตรงกัน เช่น ลบรายการรับเงินแล้วลืมหักยอดสะสม) */
          COALESCE((SELECT SUM(p.amount) FROM invoice_payments p WHERE p.invoice_id = i.invoice_id), 0) AS paid_amount,
          c.title       AS case_title,
+         /* ผู้ป่วยของเคส — หัวใบแจ้งหนี้โชว์รหัส/ชื่อผู้ป่วย (ผู้จ่ายยังอยู่ที่ bill_to_* และช่องลงนาม)
+            เคสที่ยังไม่รู้ชื่อผู้ป่วยได้ NULL ไม่ใช่คำแทนชื่อ — เอกสารที่ส่งลูกค้าต้องไม่มีคำว่า "ยังไม่ระบุผู้ป่วย" */
+         c.patient_id  AS patient_id,
+         NULLIF(c.client_name, '${PATIENT_PENDING}') AS patient_name,
          c.status      AS case_status,
          /* ยอดที่ใบควรเป็นตามเคสตอนนี้ = ค่าบริการ + อุปกรณ์เสริม (ดู priceParts) */
          ${caseBillableSql('c')} AS case_fee,
@@ -456,7 +460,11 @@ export async function list({ q, status, customer_id, case_id, overdue, stale, dr
   // NULLS LAST — due_date/paid_at ว่างได้ ถ้าไม่ใส่ การเรียงจากมากไปน้อยจะเอาใบที่ยังไม่ได้ระบุขึ้นก่อน
   const rows = await sql.all(
     `${SELECT_INVOICE} ${clause}
-     ORDER BY i.${sort} ${order.toUpperCase()} NULLS LAST
+     ORDER BY ${sort === 'invoice_id'
+       /* เลขใบมีสองรูปแบบปนกัน (INV-0001 เดิม · HC-IV6909010001 ใหม่) เรียงตามตัวอักษร "INV" จะอยู่เหนือ "HC"
+          ใบใหม่จึงจมใต้ใบเก่า — เรียงตามเวลาที่ออกใบแทน แล้วใช้เลขใบตัดสินใบที่ออกวินาทีเดียวกัน */
+       ? `i.created_at ${order.toUpperCase()}, i.invoice_id ${order.toUpperCase()}`
+       : `i.${sort} ${order.toUpperCase()} NULLS LAST`}
      LIMIT :limit OFFSET :offset`,
     { ...params, limit: per_page, offset: (page - 1) * per_page },
   );
@@ -506,7 +514,7 @@ export const casesWithoutInvoice = () =>
 /** ใบแจ้งหนี้ของเคสหนึ่งใบ — เคสหนึ่งออกได้ใบเดียว แต่ถ้ายกเลิกแล้วออกใหม่ได้ จึงคืนเป็นรายการ */
 export const listForCase = (caseId) =>
   sql
-    .all(`${SELECT_INVOICE} WHERE i.case_id = :id ORDER BY i.invoice_id DESC`, { id: caseId })
+    .all(`${SELECT_INVOICE} WHERE i.case_id = :id ORDER BY i.created_at DESC, i.invoice_id DESC`, { id: caseId })
     .then((rows) => rows.map(withComputed));
 
 /**

@@ -5,7 +5,7 @@ import VisitReportModal from '../components/VisitReportModal.jsx';
 import { serviceName } from '../components/MyCaseModal.jsx';
 import { getPosition } from '../lib/geo.js';
 import PageRefresh, { RefreshButton } from '../components/PageRefresh.jsx';
-import { CASE_TYPE_LABELS, VISIT_STATE_LABELS, timeText, durationText } from '../labels.js';
+import { SERVICE_KIND_LABELS, serviceKindOf, VISIT_STATE_LABELS, timeText, durationText } from '../labels.js';
 import LineIcon from '../components/LineIcon.jsx';
 
 /** หน้าหลักของพนักงานภาคสนาม — กะงานวันนี้ พร้อมปุ่มเช็คอิน/เช็คเอาท์ */
@@ -178,7 +178,7 @@ function ShiftCard({ visit, busy, onCheckIn, onCheckOut, onReport }) {
           <span className={`badge visit-${visit.state}`}>{VISIT_STATE_LABELS[visit.state]}</span>
         </div>
         <h2 className="shift-title">{visit.client_name}</h2>
-        <p className="muted">{serviceName(visit) || CASE_TYPE_LABELS[visit.case_type]}</p>
+        <p className="muted">{serviceName(visit) || SERVICE_KIND_LABELS[serviceKindOf(visit)]}</p>
         {visit.address && <p className="muted shift-addr"><LineIcon name="pin" className="text-ico" />{visit.address}</p>}
 
         {/* แพ้ยา/แพ้อาหาร — อ่านสดจากแฟ้มผู้ป่วย ไม่ใช่สำเนาในเคส (แฟ้มถูกแก้เมื่อไหร่ต้องเห็นทันที)

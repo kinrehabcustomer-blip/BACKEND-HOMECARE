@@ -250,11 +250,11 @@ export default function InvoiceListPage() {
       <div className="table-wrap">
         <table className="table table-cards table-2line table-indexed">
           <colgroup>
-            {/* เลขที่ใบต้องกว้างพอสำหรับ "INV-0001 + ป้ายไม่ตรงกับเคส" และสถานะพอสำหรับป้ายเต็มก้อน
+            {/* เลขที่ใบต้องกว้างพอสำหรับ "HC-IV6909010001" (15 ตัว) + ป้ายไม่ตรงกับเคส และสถานะพอสำหรับป้ายเต็มก้อน
                 ที่ยืมมาคือชื่อผู้จ่ายกับรายการ ซึ่งเป็นข้อความอิสระ ตัดท้ายได้ตามออกแบบ */}
             <col style={{ width: '5%' }} />
-            <col style={{ width: '16%' }} />
-            <col style={{ width: '19%' }} />
+            <col style={{ width: '18%' }} />
+            <col style={{ width: '17%' }} />
             <col style={{ width: '20%' }} />
             <col style={{ width: '14%' }} />
             <col style={{ width: '11%' }} />

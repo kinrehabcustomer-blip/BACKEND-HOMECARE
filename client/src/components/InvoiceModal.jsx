@@ -9,6 +9,7 @@ import { INVOICE_STATUS_LABELS, amountText, bahtText, docDate, todayTH } from '.
 import { ISSUER, printStamp } from '../lib/issuer.js';
 import LineIcon from './LineIcon.jsx';
 import ConfirmButton from './ConfirmButton.jsx';
+import FinanceReceiptDoc from './FinanceReceiptDoc.jsx';
 import { ACCEPTED, compressImage, formatFileSize } from '../lib/image.js';
 
 const FOCUSABLE = 'a[href], button:not(:disabled), input, select, textarea, [tabindex]:not([tabindex="-1"])';
@@ -72,6 +73,10 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
   // จอแคบ: ปัดลงเพื่อปิด — ใช้ ref เดียวกับ focus trap เพราะ element เดียวแปะสอง ref ไม่ได้
   useSheetSwipe(onClose, boxRef);
   const [item, setItem] = useState(null);
+  // ใบที่ชำระแล้วมีสองเอกสาร: ใบเสร็จของลูกค้า · ใบเสร็จส่วนที่ 2 ของฝ่ายการเงิน (ดู FinanceReceiptDoc)
+  const [docView, setDocView] = useState('customer');
+  // เปิดใบอื่น (กดลูกศรไปใบถัดไป) = เริ่มที่ใบของลูกค้าเสมอ ไม่ค้างหน้าฝ่ายการเงินของใบก่อน
+  useEffect(() => setDocView('customer'), [invoiceId]);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
   // ฟอร์มรับชำระ — ทำเป็นฟอร์มในหน้าแทน prompt() เพราะเบราว์เซอร์บล็อกกล่องเด้งได้ กดแล้วจะเหมือนปุ่มเสีย
@@ -185,8 +190,9 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
 
   // ชำระแล้วถือเป็น "ใบเสร็จรับเงิน" ตามธรรมเนียมเอกสารไทย · ยังไม่ชำระคือ "ใบแจ้งหนี้"
   const isReceipt = item?.status === 'paid';
+  const showFinance = isReceipt && docView === 'finance';
   const printTitle = item?.invoice_id
-    ? `${isReceipt ? 'ใบเสร็จรับเงิน' : 'ใบแจ้งหนี้'}_${item.invoice_id}`.replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_')
+    ? `${isReceipt ? (showFinance ? 'ใบเสร็จรับเงิน_ฝ่ายการเงิน' : 'ใบเสร็จรับเงิน') : 'ใบแจ้งหนี้'}_${item.invoice_id}`.replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_')
     : null;
 
   // Save as PDF ใช้ชื่อเอกสารเป็นชื่อไฟล์เริ่มต้น และคืนชื่อหน้าเดิมเมื่อปิดเอกสาร
@@ -295,6 +301,28 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
     ? Math.round((Number(item.amount) - (addons.length > 0 ? addonSum : 0)) * 100) / 100
     : 0;
 
+  /* บรรทัดของใบเสร็จฝ่ายการเงิน — ชุดเดียวกับใบของลูกค้าทุกบรรทัด แต่มีช่องส่วนลดแยก
+     ส่วนลดของใบเป็นส่วนลดค่าบริการ จึงลงบรรทัดแรก (แพ็คเกจ) · ผลรวม (ยอด − ส่วนลด) เท่ายอดสุทธิของใบพอดี */
+  const financeLines = !item
+    ? []
+    : (item.items?.length > 0
+        ? item.items.map((l) => ({ description: l.description, amount: Number(l.amount), discount: 0 }))
+        : [
+            { description: item.service_description, amount: serviceAmount, discount: 0 },
+            ...addons.map((a) => ({
+              description: `อุปกรณ์เสริม: ${a.name}${a.quantity !== 1 ? ` (${amountText(a.unit_price)} × ${a.quantity})` : ''}`,
+              amount: addonAmount(a),
+              discount: 0,
+            })),
+          ]
+      ).map((l, i) => (i === 0 ? { ...l, discount: Number(item.discount ?? 0) } : l));
+
+  /* ผู้ลงนามช่องเจ้าหน้าที่การเงิน = คนที่บันทึกรับเงินจริง (ใบเสร็จฝ่ายการเงินเป็นหลักฐานว่าใครรับเงิน)
+     ใบเก่าที่ไม่ได้เก็บชื่อผู้รับเงิน → ใช้คนที่กำลังพิมพ์แทน */
+  const financeBody = item && isReceipt && (
+    <FinanceReceiptDoc item={item} lines={financeLines} pay={pay} cashier={item.paid_by_name || printerName} />
+  );
+
   /* เนื้อในของเอกสาร — ใช้สองที่: ตัวที่เห็นในกล่องบนจอ กับสำเนาที่พิมพ์ (.print-sheet)
      สร้างครั้งเดียวแล้วใช้ซ้ำ สองที่จึงไม่มีวันพิมพ์ออกมาไม่ตรงกับที่เห็น */
   const docBody = item && (
@@ -319,8 +347,9 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
 
       <div className="inv-parties">
         <div>
-          <p>รหัสลูกค้า : <span className="mono">{item.customer_id ?? '—'}</span></p>
-          <p>คุณ {item.bill_to_name}</p>
+          {/* หัวใบระบุผู้ป่วย (คนที่รับบริการ) — ผู้จ่ายเงินอยู่ที่บรรทัด "ได้รับเงินจาก" และช่องลงนามผู้จ่ายด้านล่าง */}
+          <p>รหัสผู้ป่วย : <span className="mono">{item.patient_id ?? '—'}</span></p>
+          <p>ชื่อผู้ป่วย : {item.patient_name ?? '—'}</p>
           {item.bill_to_tax_id && (
             <p>เลขผู้เสียภาษี : <span className="mono">{item.bill_to_tax_id}</span></p>
           )}
@@ -461,7 +490,7 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
     createPortal(
       <div className="print-sheet" aria-hidden="true">
         <div className="invoice-doc">
-          {docBody}
+          {showFinance ? financeBody : docBody}
 
           {/* สลิปโอนเงินแนบท้ายเอกสาร — มีเฉพาะในสำเนาที่พิมพ์ แต่ละใบขึ้นแผ่นใหม่ต่อจากตัวใบ
               บนจอไม่ต้องเห็นซ้ำ ส่วน "สลิปโอนเงิน" ด้านบนโชว์อยู่แล้ว (รูปเป็น URL เดียวกัน จึงโหลดค้างไว้แล้วตอนกดพิมพ์) */}
@@ -905,7 +934,7 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
 
               {/* ตัวเอกสารบนจอ (ดูก่อนพิมพ์) — ตอนสั่งพิมพ์ใช้สำเนาใน .print-sheet ด้านล่างแทน */}
               <div className={`invoice-doc ${item.needs_plan ? 'is-hidden' : ''}`}>
-                {docBody}
+                {showFinance ? financeBody : docBody}
               </div>
             </div>
 
@@ -969,6 +998,19 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
               )}
 
               {/* ยังไม่ได้เลือกวิธีเก็บเงิน = ยังไม่มีเอกสารให้พิมพ์/ออก/รับเงิน */}
+              {/* ชำระแล้ว = ออกได้สองเอกสาร — เลือกที่นี่ ตัวเอกสารด้านบนเปลี่ยนตาม และปุ่มพิมพ์พิมพ์ใบที่เลือกอยู่ */}
+              {isReceipt && (
+                <select
+                  className="foot-switch"
+                  aria-label="เลือกเอกสารที่จะดู/พิมพ์"
+                  value={docView}
+                  onChange={(e) => setDocView(e.target.value)}
+                >
+                  <option value="customer">ใบเสร็จ (ลูกค้า)</option>
+                  <option value="finance">ใบเสร็จฝ่ายการเงิน</option>
+                </select>
+              )}
+
               {!item.needs_plan && (
                 <button className="btn" onClick={() => window.print()}>พิมพ์ / บันทึก PDF</button>
               )}

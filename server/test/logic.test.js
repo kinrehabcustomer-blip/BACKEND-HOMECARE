@@ -69,7 +69,7 @@ const caseGuards = await import('../src/cases/routes.js');
 
 // ---------- contract ค่าจ้างของเคส ----------
 describe('staff_pay — schema, สิทธิ์ และการคำนวณใหม่ต้องตรงกัน', () => {
-  const base = { case_type: 'other', client_name: 'ผู้ป่วยทดสอบ' };
+  const base = { case_id: 'VN690000001', case_type: 'other', client_name: 'ผู้ป่วยทดสอบ' };
 
   test('schema เก็บ staff_pay ของ manager ไว้ ไม่ strip ทิ้ง', () => {
     assert.equal(createCaseSchema.parse({ ...base, staff_pay: 1234 }).staff_pay, 1234);
@@ -1631,8 +1631,9 @@ describe('Workflow — เปิดเคสถึงเงินเข้าพ
   const CASE_STAFF_PAY = 20_000;
   const TEAM = ['EMP-0002', 'EMP-0005'];
 
-  test('1. เปิดเคส — ชื่อผู้ป่วยกับประเภทเคสเป็นสองช่องที่ขาดไม่ได้', () => {
+  test('1. เปิดเคส — ต้องมีรหัสเคส VN และชื่อผู้ป่วย (หรือผู้ว่าจ้าง)', () => {
     const base = {
+      case_id: 'VN690215209',
       case_type: 'elderly_care',
       client_name: 'ผู้ป่วยทดสอบ workflow',
       service_kind: 'homecare',
@@ -1646,6 +1647,12 @@ describe('Workflow — เปิดเคสถึงเงินเข้าพ
     assert.equal(createCaseSchema.safeParse({ ...base, client_name: '' }).success, false);
     // ประเภทเคสต้องเป็นค่าใน enum ไม่ใช่ข้อความอิสระ — ไม่งั้นหลุดไปชน CHECK ของฐานข้อมูล
     assert.equal(createCaseSchema.safeParse({ ...base, case_type: 'อื่นๆ' }).success, false);
+    // รหัสเคส: ต้องมี และต้องเป็น VN + ตัวเลข 9 หลักพอดี
+    const { case_id: _omit, ...noCode } = base;
+    assert.equal(createCaseSchema.safeParse(noCode).success, false);
+    for (const bad of ['VN69021520', 'VN6902152099', 'vn690215209', 'CASE-0001', 'VN69O215209']) {
+      assert.equal(createCaseSchema.safeParse({ ...base, case_id: bad }).success, false, bad);
+    }
   });
 
   test('2. ออกใบแจ้งหนี้ — ออกได้จากร่างเท่านั้น แล้วรับชำระเกินยอดไม่ได้', () => {
@@ -2060,7 +2067,7 @@ describe('อุปกรณ์เสริมของเคส', () => {
   });
 
   test('schema รับรายการที่ถูกต้อง และปฏิเสธชื่อว่าง/ราคาติดลบ', () => {
-    const base = { case_type: 'other', client_name: 'ทดสอบ' };
+    const base = { case_id: 'VN690000001', case_type: 'other', client_name: 'ทดสอบ' };
     assert.ok(createCaseSchema.safeParse({ ...base, addons: [{ name: 'เตียงลม', quantity: 1, unit_price: 3500 }] }).success);
     assert.ok(createCaseSchema.safeParse({ ...base, addons: null }).success);
     assert.ok(!createCaseSchema.safeParse({ ...base, addons: [{ name: ' ', quantity: 1, unit_price: 1 }] }).success);
@@ -2097,5 +2104,95 @@ describe('วันสิ้นสุดตามรูปแบบบริก�
     const { endDateFor } = await import('../../client/src/lib/caseRounds.js');
     assert.equal(endDateFor('', 'monthly'), null);
     assert.equal(endDateFor('2026-11-02', undefined), null);
+  });
+});
+
+describe('รหัสผู้ป่วย KN (ฝั่งหน้าเว็บ)', () => {
+  test('แยก/ประกอบรหัส · ไม่ครบ 7 หลัก = ยังไม่มีรหัส · รูปแบบตรงกับ server', async () => {
+    const { joinPatientCode, splitPatientCode, PATIENT_CODE_RE: CLIENT_RE } = await import('../../client/src/lib/patientCode.js');
+    const { PATIENT_CODE_RE } = await import('../src/patients/schema.js');
+    assert.equal(String(CLIENT_RE), String(PATIENT_CODE_RE));
+    assert.deepEqual(splitPatientCode('KN690202463'), { year: '69', number: '0202463' });
+    assert.equal(joinPatientCode('69', '0202463'), 'KN690202463');
+    assert.equal(joinPatientCode('69', '020246'), '');
+    assert.equal(splitPatientCode('PAT-0003').number, '');
+    assert.match(splitPatientCode('').year, /^\d{2}$/);
+  });
+});
+
+describe('เลขที่ใบแจ้งหนี้ HC-IV', () => {
+  test('ปี พ.ศ. 2 หลัก + เดือน + วัน ตามเวลาไทย (ตีหนึ่งไทยยังเป็นวันใหม่ ไม่ใช่เมื่อวานแบบ UTC)', async () => {
+    const { invoiceDayCode } = await import('../src/db/index.js');
+    assert.equal(invoiceDayCode(new Date('2026-09-01T03:00:00Z')), '690901');
+    // 18:30 UTC วันที่ 31 ส.ค. = 01:30 วันที่ 1 ก.ย. ตามเวลาไทย
+    assert.equal(invoiceDayCode(new Date('2026-08-31T18:30:00Z')), '690901');
+    assert.equal(invoiceDayCode(new Date('2026-12-31T16:59:00Z')), '691231');
+    assert.equal(invoiceDayCode(new Date('2026-12-31T17:00:00Z')), '700101');
+  });
+
+  test('ลำดับใบของวันนั้น 4 หลัก จากตัวนับแยกรายวัน', async () => {
+    const { nextInvoiceId } = await import('../src/db/index.js');
+    const counters = {};
+    const tx = {
+      one: async (_sql, { counter }) => ({ value: (counters[counter] = (counters[counter] ?? 0) + 1) }),
+    };
+    const day1 = new Date('2026-09-01T03:00:00Z');
+    const day2 = new Date('2026-09-02T03:00:00Z');
+    assert.equal(await nextInvoiceId(tx, day1), 'HC-IV6909010001');
+    assert.equal(await nextInvoiceId(tx, day1), 'HC-IV6909010002');
+    assert.equal(await nextInvoiceId(tx, day2), 'HC-IV6909020001', 'วันใหม่เริ่ม 0001');
+    assert.deepEqual(Object.keys(counters).sort(), ['invoice:690901', 'invoice:690902']);
+  });
+});
+
+describe('รหัสพนักงาน A', () => {
+  test('ชุด 2 หลัก + เลขรัน 3 หลัก: 999 แล้วขึ้นชุดถัดไปที่ 001', async () => {
+    const { employeeCodeFor } = await import('../src/db/index.js');
+    assert.equal(employeeCodeFor('69', 1), 'A6901001');
+    assert.equal(employeeCodeFor('69', 59), 'A6901059');
+    assert.equal(employeeCodeFor('69', 999), 'A6901999');
+    assert.equal(employeeCodeFor('69', 1000), 'A6902001');
+    assert.equal(employeeCodeFor('69', 1998), 'A6902999');
+    assert.equal(employeeCodeFor('69', 1999), 'A6903001');
+    assert.throws(() => employeeCodeFor('69', 99 * 999 + 1));
+  });
+
+  test('ออกอัตโนมัติข้ามเลขที่มีคนกรอกเองไปแล้ว · ตัวนับแยกรายปี', async () => {
+    const { nextEmployeeId } = await import('../src/db/index.js');
+    const counters = {};
+    const existing = new Set(['A6901002']);
+    const tx = {
+      one: async (q, p) => (q.includes('id_counters')
+        ? { value: (counters[p.counter] = (counters[p.counter] ?? 0) + 1) }
+        : existing.has(p.id) ? { taken: 1 } : null),
+    };
+    const y69 = new Date('2026-06-01T03:00:00Z');
+    assert.equal(await nextEmployeeId(tx, y69), 'A6901001');
+    assert.equal(await nextEmployeeId(tx, y69), 'A6901003', 'A6901002 มีคนใช้แล้ว ต้องข้าม');
+    assert.equal(await nextEmployeeId(tx, new Date('2027-06-01T03:00:00Z')), 'A7001001', 'ปีใหม่เริ่มชุด 01 เลข 001');
+  });
+});
+
+describe('แบบบันทึกของพนักงาน หลังเอาช่องประเภทเคสออก', () => {
+  test('ประเภทเคสที่ server ตั้งให้ ยังเลือกแบบบันทึกถูกชุด', async () => {
+    const { usesDailyRecord, usesPhysioRecord } = await import('../../client/src/lib/dailyCare.js');
+    const homecare = { service_kind: 'homecare', physio_package_id: null, case_type: 'elderly_care' };
+    const noService = { service_kind: null, physio_package_id: null, case_type: 'elderly_care' };
+    const physio = { service_kind: 'physio', physio_package_id: 3, case_type: 'physiotherapy' };
+    assert.equal(usesDailyRecord(homecare), true);
+    assert.equal(usesPhysioRecord(homecare), false);
+    assert.equal(usesDailyRecord(noService), true);
+    assert.equal(usesDailyRecord(physio), false);
+    assert.equal(usesPhysioRecord(physio), true);
+    // เคสเก่าประเภทพิเศษ (ทำแผล) ยังได้ฟอร์มสั้นแบบเดิม
+    assert.equal(usesDailyRecord({ ...homecare, case_type: 'wound_care' }), false);
+  });
+
+  test('ประเภทบริการที่หน้าเว็บโชว์แทนประเภทเคส', async () => {
+    const { serviceKindOf } = await import('../../client/src/labels.js');
+    assert.equal(serviceKindOf({ service_kind: 'homecare' }), 'homecare');
+    assert.equal(serviceKindOf({ physio_package_id: 2 }), 'physio');
+    assert.equal(serviceKindOf({ case_type: 'physiotherapy' }), 'physio', 'เคสเก่าที่ตั้งแค่ประเภทเคส');
+    assert.equal(serviceKindOf({}), 'homecare');
   });
 });

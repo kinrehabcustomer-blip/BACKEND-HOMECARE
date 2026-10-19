@@ -6,7 +6,8 @@ import CaseLocationLink from './CaseLocationLink.jsx';
 import { useSheetSwipe } from '../lib/sheetSwipe.js';
 import { useScrollLock } from '../lib/scrollLock.js';
 import {
-  CASE_TYPE_LABELS,
+  SERVICE_KIND_LABELS,
+  serviceKindOf,
   CASE_STATUS_LABELS,
   GENDER_LABELS,
   VISIT_STATE_LABELS,
@@ -19,7 +20,7 @@ export const serviceName = (c) => {
   if (c.physio_package_id && c.physio_package_name) {
     return [c.physio_package_name, c.physio_sessions && `${c.physio_sessions} ครั้ง`].filter(Boolean).join(' · ');
   }
-  return [c.format_name, c.grade_name].filter(Boolean).join(' · ') || CASE_TYPE_LABELS[c.case_type];
+  return [c.format_name, c.grade_name].filter(Boolean).join(' · ') || SERVICE_KIND_LABELS[serviceKindOf(c)];
 };
 
 function Field({ label, value }) {
@@ -119,7 +120,7 @@ export default function MyCaseModal({ caseId, onClose }) {
               <section>
                 <h3>รายละเอียดการให้บริการ</h3>
                 <div className="field-grid">
-                  <Field label="ประเภทเคส" value={CASE_TYPE_LABELS[item.case_type]} />
+                  <Field label="ประเภทบริการ" value={SERVICE_KIND_LABELS[serviceKindOf(item)]} />
                   <Field label="บริการ" value={serviceName(item)} />
                   <Field label="วันเริ่ม" value={item.start_date && formatDate(item.start_date)} />
                   <Field label="วันสิ้นสุด" value={item.end_date && formatDate(item.end_date)} />

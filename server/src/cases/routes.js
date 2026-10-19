@@ -33,7 +33,9 @@ import {
   attendanceQuerySchema,
   CASE_TYPES,
   CASE_STATUSES,
+  CASE_CODE_RE,
 } from './schema.js';
+import { sql } from '../db/index.js';
 import { geocode, reverseGeocode, searchPlaces } from '../lib/geocode.js';
 import { resolveMapLink } from '../lib/maplink.js';
 import { canSeeStaffPay, requireManager } from '../lib/auth.js';
@@ -91,6 +93,21 @@ casesRouter.param('id', (req, res, next, id) => {
     })
     .catch(next);
 });
+
+/**
+ * ตรวจรหัสเคสระหว่างกรอก — ต้องมาก่อน '/:id'
+ * ?id=VN690215209[&except=รหัสของเคสที่กำลังแก้] → { valid, available, taken_by }
+ * ตัวจริงที่กันซ้ำคือตอนบันทึก (ensureCaseCodeFree + PK) อันนี้แค่บอกล่วงหน้า
+ */
+casesRouter.get(
+  '/check-id',
+  asyncRoute(async (req, res) => {
+    const code = String(req.query.id ?? '').trim();
+    const valid = CASE_CODE_RE.test(code);
+    const owner = valid ? await repo.caseCodeOwner(sql, code, req.query.except || null) : null;
+    res.json({ valid, available: valid && !owner, taken_by: owner?.client_name ?? null });
+  }),
+);
 
 casesRouter.get('/meta', (req, res) => {
   res.json({ case_types: CASE_TYPES, statuses: CASE_STATUSES });

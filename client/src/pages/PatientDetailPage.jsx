@@ -126,13 +126,7 @@ export default function PatientDetailPage() {
 
         <section className="card">
           <h2>ผู้ว่าจ้าง / ที่อยู่</h2>
-          <Row label="ผู้ว่าจ้าง (ลูกค้า)">
-            {patient.customer ? (
-              <Link className="link" to={`/customers/${patient.customer.customer_id}`}>
-                {patient.customer.name} <span className="mono muted">({patient.customer.customer_id})</span>
-              </Link>
-            ) : null}
-          </Row>
+          <Row label="ผู้ว่าจ้าง">{patient.customer?.name ?? null}</Row>
           <Row label="ที่อยู่สถานที่ดูแล">{fullAddress}</Row>
         </section>
 

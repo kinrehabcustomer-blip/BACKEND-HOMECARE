@@ -7,7 +7,7 @@ import CaseTypeChart from '../components/CaseTypeChart.jsx';
 import ErrorBar from '../components/ErrorBar.jsx';
 import PageRefresh from '../components/PageRefresh.jsx';
 import {
-  CASE_TYPE_LABELS, CASE_STATUS_LABELS, MONTH_LABELS,
+  SERVICE_KIND_LABELS, serviceKindOf, CASE_STATUS_LABELS, MONTH_LABELS,
   formatDate, formatPeriod, toBuddhistYear,
 } from '../labels.js';
 
@@ -94,7 +94,7 @@ export default function DashboardPage() {
   const pct = (n) => (total === 0 ? '—' : `${Math.round((n / total) * 100)}%`);
 
   // เรียงมากไปน้อย ประเภทที่ยังไม่มีเคสเลยไม่ต้องแสดง (กราฟเรียงซ้ำอีกชั้นเผื่อถูกเรียกจากที่อื่น)
-  const byType = summary ? [...summary.by_type].sort((a, b) => b.count - a.count) : [];
+  const byType = summary ? [...(summary.by_service ?? [])].sort((a, b) => b.count - a.count) : [];
 
   return (
     <PageRefresh onRefresh={reload} busy={loading}>
@@ -197,7 +197,7 @@ export default function DashboardPage() {
 
           <div className="columns">
             <section className="card">
-              <h2>เคสตามประเภท</h2>
+              <h2>เคสตามประเภทบริการ</h2>
               <CaseTypeChart byType={byType} total={total} />
             </section>
 
@@ -214,7 +214,7 @@ export default function DashboardPage() {
                           <strong>{c.title}</strong>
                           <p className="muted">
                             <span className="mono">{c.case_id}</span>
-                            {' · '}{CASE_TYPE_LABELS[c.case_type]}
+                            {' · '}{SERVICE_KIND_LABELS[serviceKindOf(c)]}
                             {c.start_date && ` · เริ่ม ${formatDate(c.start_date)}`}
                           </p>
                         </div>

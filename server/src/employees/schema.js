@@ -48,7 +48,19 @@ const englishName = (field) =>
     .optional()
     .nullable();
 
+/**
+ * รหัสพนักงานที่กรอกเอง = A + ตัวเลข 7 หลัก (ปี พ.ศ. 2 · ชุด 2 · เลขรัน 3) เช่น A6901059
+ * ไม่กรอก = ระบบออกให้อัตโนมัติ (ดู nextEmployeeId) · ต้องตรงกับ EMPLOYEE_CODE_RE ใน client/src/lib/employeeCode.js
+ */
+export const EMPLOYEE_CODE_RE = /^A\d{7}$/;
+export const employeeCode = z
+  .string()
+  .trim()
+  .regex(EMPLOYEE_CODE_RE, 'รหัสพนักงานต้องเป็น A + ตัวเลข 7 หลัก (เช่น A6901059)');
+
 export const createEmployeeSchema = z.object({
+  // กรอกเองได้ (add-on) — ไม่ส่งมา = ระบบออกให้ · ตอนแก้ (update) ส่งมา = เปลี่ยนรหัส
+  employee_id: employeeCode.optional(),
   first_name: z.string().trim().min(1, 'กรุณากรอกชื่อ').max(100),
   last_name: z.string().trim().min(1, 'กรุณากรอกนามสกุล').max(100),
   first_name_en: englishName('ชื่อ'),

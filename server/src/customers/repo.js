@@ -102,7 +102,7 @@ export async function findDetailById(customerId) {
       { id: customerId },
     ),
     sql.all(
-      `SELECT c.case_id, c.title, c.case_type, c.status, c.start_date, c.end_date, c.fee,
+      `SELECT c.case_id, c.title, c.case_type, c.service_kind, c.physio_package_id, c.status, c.start_date, c.end_date, c.fee,
               e.first_name || ' ' || e.last_name AS assigned_name
        FROM cases c
        LEFT JOIN employees e ON e.employee_id = c.assigned_to

@@ -62,7 +62,7 @@ export default function LoginPage() {
             required
             autoCapitalize="none"
             spellCheck={false}
-            placeholder="you@kin.co.th หรือ EMP-0006"
+            placeholder="you@kin.co.th หรือรหัสพนักงาน เช่น A6901059"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
           />

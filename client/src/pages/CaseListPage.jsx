@@ -6,7 +6,7 @@ import SortHead from '../components/SortHead.jsx';
 import ErrorBar from '../components/ErrorBar.jsx';
 import PageRefresh from '../components/PageRefresh.jsx';
 import {
-  CASE_TYPE_LABELS, CASE_STATUS_LABELS, MONTH_LABELS,
+  CASE_STATUS_LABELS, SERVICE_KIND_LABELS, MONTH_LABELS,
   formatBaht, formatDate, formatPeriod, toBuddhistYear,
 } from '../labels.js';
 
@@ -16,7 +16,7 @@ const PER_PAGE_OPTIONS = [20, 50, 100];
 // title ของเคสถูกตั้งอัตโนมัติเป็น "บริการ · ชื่อผู้ป่วย" การเรียงตาม title จึงคือการเรียงตามบริการ
 const SORTABLE = {
   case_id: { label: 'รหัสเคส', hint: 'เรียงตามลำดับที่เปิดเคส' },
-  title: { label: 'บริการ / ลูกค้า', hint: 'เรียงตามชื่อบริการ' },
+  title: { label: 'บริการ / ผู้ป่วย', hint: 'เรียงตามชื่อบริการ' },
   start_date: { label: 'เริ่ม / ค่าจ้าง', hint: 'เรียงตามวันเริ่มให้บริการ' },
 };
 
@@ -56,9 +56,9 @@ export default function CaseListPage() {
   const get = (key) => params.get(key) ?? DEFAULTS[key] ?? '';
   const q = get('q');
   const status = CASE_STATUS_LABELS[get('status')] ? get('status') : '';
+  const serviceKind = SERVICE_KIND_LABELS[get('service_kind')] ? get('service_kind') : '';
   // ตัวกรองเทียมที่เปิดอยู่ (ถ้ามี) — ทีละตัวเท่านั้น เพราะมันใช้ช่อง dropdown ร่วมกัน
   const pseudo = PSEUDO_KEYS.find((key) => get(key) === 'yes') ?? '';
-  const caseType = CASE_TYPE_LABELS[get('case_type')] ? get('case_type') : '';
   const assignedTo = get('assigned_to');
   const year = /^\d{4}$/.test(get('year')) ? get('year') : '';
   // เดือนที่ไม่มีปีกำกับไม่มีความหมาย (พฤษภาคมของปีไหน?) — ตัดทิ้งตั้งแต่ตอนอ่าน
@@ -69,7 +69,7 @@ export default function CaseListPage() {
   const page = Math.max(1, Number(get('page')) || 1);
   const openId = params.get('open');
 
-  const filtered = Boolean(q || status || caseType || assignedTo || year || pseudo);
+  const filtered = Boolean(q || status || serviceKind || assignedTo || year || pseudo);
 
   /** เขียนค่าลง URL — ปริยาย replace เพื่อไม่ให้ทุกตัวอักษรที่พิมพ์กลายเป็นประวัติหนึ่งชั้น */
   const patch = (changes, { push = false } = {}) => {
@@ -88,7 +88,7 @@ export default function CaseListPage() {
   const sortBy = (s, o) => patch({ sort: s, order: o, page: '1' });
   const clearFilters = () =>
     patch({
-      q: '', status: '', case_type: '', assigned_to: '', year: '', month: '', page: '1',
+      q: '', status: '', service_kind: '', assigned_to: '', year: '', month: '', page: '1',
       ...Object.fromEntries(PSEUDO_KEYS.map((key) => [key, ''])),
     });
 
@@ -115,7 +115,7 @@ export default function CaseListPage() {
     const timer = setTimeout(() => {
       const query = Object.fromEntries(
         Object.entries({
-          q, status, case_type: caseType, assigned_to: assignedTo, year, month,
+          q, status, service_kind: serviceKind, assigned_to: assignedTo, year, month,
           ...(pseudo ? { [pseudo]: 'yes' } : null),
           page, per_page: perPage, sort, order,
         }).filter(([, v]) => v !== '' && v != null),
@@ -136,7 +136,7 @@ export default function CaseListPage() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [q, status, caseType, assignedTo, pseudo, year, month, page, perPage, sort, order, reloadKey]);
+  }, [q, status, serviceKind, assignedTo, pseudo, year, month, page, perPage, sort, order, reloadKey]);
 
   // ยอดสรุปด้านบนต้องนับเฉพาะช่วงเวลาที่กรองอยู่ ไม่งั้นตัวเลขจะไม่ตรงกับรายการที่เห็น
   useEffect(() => {
@@ -210,9 +210,9 @@ export default function CaseListPage() {
             <option key={m.month} value={m.month}>{MONTH_LABELS[m.month]} ({m.count})</option>
           ))}
         </select>
-        <select value={caseType} onChange={(e) => setFilter('case_type', e.target.value)} aria-label="ประเภท">
-          <option value="">ทุกประเภท</option>
-          {Object.entries(CASE_TYPE_LABELS).map(([value, label]) => (
+        <select value={serviceKind} onChange={(e) => setFilter('service_kind', e.target.value)} aria-label="ประเภทบริการ">
+          <option value="">ทุกบริการ</option>
+          {Object.entries(SERVICE_KIND_LABELS).map(([value, label]) => (
             <option key={value} value={value}>{label}</option>
           ))}
         </select>
@@ -296,7 +296,8 @@ export default function CaseListPage() {
                   ) : (
                     <span className="muted">ไม่ระบุบริการ</span>
                   )}
-                  <span className="cell-sub">{c.customer_name ?? c.client_name}</span>
+                  {/* บรรทัดรองคือผู้ป่วย (ผู้รับการดูแล) ไม่ใช่ผู้ว่าจ้าง — พนักงานจับคู่/ตามงานด้วยชื่อคนที่ไปดูแล */}
+                  <span className="cell-sub">{c.client_name}</span>
                 </td>
                 <td data-label="เริ่ม / ค่าจ้าง">
                   {c.start_date ? formatDate(c.start_date) : <span className="muted">ยังไม่ระบุ</span>}

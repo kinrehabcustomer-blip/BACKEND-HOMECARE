@@ -33,9 +33,6 @@ const CaseFormPage = lazy(() => import('./pages/CaseFormPage.jsx'));
 const CalendarPage = lazy(() => import('./pages/CalendarPage.jsx'));
 const InvoiceListPage = lazy(() => import('./pages/InvoiceListPage.jsx'));
 const PayrollPage = lazy(() => import('./pages/PayrollPage.jsx'));
-const CustomerListPage = lazy(() => import('./pages/CustomerListPage.jsx'));
-const CustomerFormPage = lazy(() => import('./pages/CustomerFormPage.jsx'));
-const CustomerDetailPage = lazy(() => import('./pages/CustomerDetailPage.jsx'));
 const PatientListPage = lazy(() => import('./pages/PatientListPage.jsx'));
 const PatientFormPage = lazy(() => import('./pages/PatientFormPage.jsx'));
 const PatientDetailPage = lazy(() => import('./pages/PatientDetailPage.jsx'));
@@ -86,10 +83,9 @@ const ADMIN_NAV = [
   { to: '/invoices', icon: 'invoice', label: 'ใบแจ้งหนี้', perm: 'billing' },
   { to: '/payroll', icon: 'wallet', label: 'ค่าตอบแทนพนักงาน', perm: 'money' },
   { to: '/revenue', icon: 'dashboard', label: 'รายได้บริษัท', perm: 'money', unlessPerm: 'office' },
-  { to: '/customers', icon: 'users', label: 'ลูกค้า', perm: 'office' },
-  { to: '/patients', icon: 'heart', label: 'ผู้รับการดูแล', perm: 'office' },
   { to: '/packages', icon: 'home', label: 'แพ็คเกจ Homecare', perm: 'office' },
   { to: '/physio-packages', icon: 'activity', label: 'แพ็คเกจกายภาพบำบัด', perm: 'office' },
+  { to: '/patients', icon: 'heart', label: 'ผู้ป่วย', perm: 'office' },
   { to: '/employees', icon: 'user', label: 'พนักงาน', perm: 'office' },
   { to: '/reviews', icon: 'star', label: 'คะแนนประเมินจากญาติ', perm: 'office' },
 ];
@@ -183,7 +179,7 @@ function Sidebar() {
           {items.map((i) => (
             <Fragment key={i.to}>
               {i.to === items[0].to && <span className="nav-section-label">{isAdmin ? 'การดำเนินงาน' : 'พื้นที่ทำงาน'}</span>}
-              {i.to === '/customers' && <span className="nav-section-label">ข้อมูลและบริการ</span>}
+              {i.to === '/packages' && <span className="nav-section-label">ข้อมูลและบริการ</span>}
               <NavLink to={i.to}><NavIcon name={i.icon} />{i.label}</NavLink>
             </Fragment>
           ))}
@@ -338,10 +334,8 @@ export default function App() {
             <Route path="/my-calendar" element={<AppLayout><MyCalendarPage /></AppLayout>} />
             <Route path="/my-attendance" element={<AppLayout><MyAttendancePage /></AppLayout>} />
 
-            <Route path="/customers" element={<AppLayout perm="office"><CustomerListPage /></AppLayout>} />
-            <Route path="/customers/new" element={<AppLayout perm="office"><CustomerFormPage /></AppLayout>} />
-            <Route path="/customers/:id" element={<AppLayout perm="office"><CustomerDetailPage /></AppLayout>} />
-            <Route path="/customers/:id/edit" element={<AppLayout perm="office"><CustomerFormPage /></AppLayout>} />
+            {/* ไม่มีหน้าลูกค้าแล้ว — ข้อมูลผู้ว่าจ้างดู/แก้ในแฟ้มผู้ป่วย · ลิงก์/บุ๊กมาร์กเก่าพาไปหน้าผู้ป่วยแทนหน้าว่าง */}
+            <Route path="/customers/*" element={<Navigate to="/patients" replace />} />
 
             <Route path="/patients" element={<AppLayout perm="office"><PatientListPage /></AppLayout>} />
             <Route path="/patients/new" element={<AppLayout perm="office"><PatientFormPage /></AppLayout>} />

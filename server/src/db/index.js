@@ -109,9 +109,67 @@ async function nextId(tx, counter, prefix) {
   return `${prefix}-${String(value).padStart(4, '0')}`;
 }
 
-export const nextEmployeeId = (tx) => nextId(tx, 'employee', 'EMP');
+/**
+ * รหัสพนักงาน = A + ปี พ.ศ. 2 หลัก + ชุด 2 หลัก + เลขรัน 3 หลัก  เช่น A6901059
+ * เลขรันวิ่ง 001–999 ครบแล้วขึ้นชุดถัดไป: A6901999 → A6902001 · ตัวนับเริ่มใหม่ทุกปี พ.ศ. (A7001001)
+ *
+ * ลำดับที่ n ของปี (เริ่ม 1) → ชุด = ⌈n/999⌉ · เลขรัน = ((n−1) mod 999) + 1
+ */
+export function employeeCodeFor(yy, n) {
+  const series = Math.floor((n - 1) / 999) + 1;
+  const num = ((n - 1) % 999) + 1;
+  if (series > 99) throw new Error(`รหัสพนักงานของปี ${yy} เต็มแล้ว (99 ชุด × 999 คน)`);
+  return `A${yy}${String(series).padStart(2, '0')}${String(num).padStart(3, '0')}`;
+}
+
+/** ปี พ.ศ. 2 หลักตามเวลาไทย */
+const beYear2 = (now) => String((new Date(now.getTime() + 7 * 3.6e6).getUTCFullYear() + 543) % 100).padStart(2, '0');
+
+/**
+ * ออกรหัสพนักงานใหม่อัตโนมัติ — ข้ามเลขที่มีคนใช้อยู่แล้ว (เจ้าหน้าที่กรอกรหัสเองได้ ซึ่งอาจดักหน้าตัวนับไว้)
+ * ตัวนับแยกรายปีใน id_counters ชื่อ 'employee:YY' · รหัสเก่าแบบ EMP-0001 คงเดิม
+ */
+export async function nextEmployeeId(tx, now = new Date()) {
+  const yy = beYear2(now);
+  for (;;) {
+    const { value } = await tx.one(
+      `INSERT INTO id_counters (name, value) VALUES (:counter, 1)
+       ON CONFLICT (name) DO UPDATE SET value = id_counters.value + 1
+       RETURNING value`,
+      { counter: `employee:${yy}` },
+    );
+    const id = employeeCodeFor(yy, value);
+    const taken = await tx.one('SELECT 1 AS taken FROM employees WHERE employee_id = :id', { id });
+    if (!taken) return id;
+  }
+}
 export const nextCaseId = (tx) => nextId(tx, 'case', 'CASE');
 export const nextCustomerId = (tx) => nextId(tx, 'customer', 'CUS');
 export const nextPatientId = (tx) => nextId(tx, 'patient', 'PAT');
-export const nextInvoiceId = (tx) => nextId(tx, 'invoice', 'INV');
+/**
+ * เลขที่ใบแจ้งหนี้ = HC-IV + ปี พ.ศ. 2 หลัก + เดือน 2 หลัก + วัน 2 หลัก + ลำดับใบของวันนั้น 4 หลัก
+ * เช่น HC-IV6909010001 = ใบแรกของวันที่ 1 ก.ย. 2569 · ใบที่สองของวันเดียวกัน = HC-IV6909010002
+ *
+ * วันที่ตามเวลาไทย (ไม่ใช่ UTC — ออกใบตอนตีสองต้องได้เลขของวันนั้น ไม่ใช่เมื่อวาน)
+ * ตัวนับแยกรายวันใน id_counters ชื่อ 'invoice:YYMMDD' — upsert แถวเดียวจึงไม่มีเลขซ้ำแม้ออกพร้อมกัน
+ * ใบเก่าแบบ INV-0001 คงเลขเดิม (ส่งให้ลูกค้าไปแล้ว) ตัวนับ 'invoice' เดิมไม่ถูกใช้อีก
+ */
+export function invoiceDayCode(now = new Date()) {
+  const th = new Date(now.getTime() + 7 * 3.6e6);
+  const yy = String((th.getUTCFullYear() + 543) % 100).padStart(2, '0');
+  const mm = String(th.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(th.getUTCDate()).padStart(2, '0');
+  return `${yy}${mm}${dd}`;
+}
+
+export async function nextInvoiceId(tx, now = new Date()) {
+  const day = invoiceDayCode(now);
+  const { value } = await tx.one(
+    `INSERT INTO id_counters (name, value) VALUES (:counter, 1)
+     ON CONFLICT (name) DO UPDATE SET value = id_counters.value + 1
+     RETURNING value`,
+    { counter: `invoice:${day}` },
+  );
+  return `HC-IV${day}${String(value).padStart(4, '0')}`;
+}
 export const nextPayrollId = (tx) => nextId(tx, 'payroll', 'PAY');

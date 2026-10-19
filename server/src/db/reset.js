@@ -134,14 +134,12 @@ for (const [name, value] of Object.entries(COUNTERS)) {
     { name, value },
   );
 }
-// พนักงานนับต่อจากเลขของคนที่เก็บไว้ (EMP-0001 → คนถัดไปเป็น EMP-0002)
-const kept = Number(person.employee_id.split('-')[1]);
-await sql.run(
-  `INSERT INTO id_counters (name, value) VALUES ('employee', :value)
-   ON CONFLICT (name) DO UPDATE SET value = :value`,
-  { value: kept },
-);
+// ตัวนับเลขใบแจ้งหนี้รายวัน (invoice:YYMMDD — ดู nextInvoiceId) ล้างทิ้ง ใบแรกของวันจะเริ่ม 0001 ใหม่
+await sql.run(`DELETE FROM id_counters WHERE name LIKE 'invoice:%'`);
+// ตัวนับรหัสพนักงานรายปี (employee:YY — ดู nextEmployeeId) ล้างทิ้ง คนถัดไปเริ่มชุด 01 เลข 001
+// (ถ้ารหัสของคนที่เก็บไว้ตรงกับเลขนั้นพอดี ตัวออกรหัสข้ามให้เอง)
+await sql.run(`DELETE FROM id_counters WHERE name LIKE 'employee:%'`);
 
-console.log('\nตั้งตัวนับรหัสใหม่แล้ว — ของถัดไปจะเป็น CUS-0001 · PAT-0001 · CASE-0001 · INV-0001');
-console.log(`พนักงานคนถัดไปจะเป็น EMP-${String(kept + 1).padStart(4, '0')}`);
+console.log('\nตั้งตัวนับรหัสใหม่แล้ว — ของถัดไปจะเป็น CUS-0001 · ใบแจ้งหนี้ HC-IV + วันที่ + 0001 (รหัสเคส VN / ผู้ป่วย KN กรอกเอง)');
+console.log('พนักงานคนถัดไปจะได้รหัส A + ปี พ.ศ. + 01001 (หรือกรอกรหัสเองในฟอร์ม)');
 await pool.end();

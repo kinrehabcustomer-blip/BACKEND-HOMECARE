@@ -3,7 +3,7 @@ import { api } from '../api.js';
 import MyCaseModal from '../components/MyCaseModal.jsx';
 import ErrorBar from '../components/ErrorBar.jsx';
 import PageRefresh from '../components/PageRefresh.jsx';
-import { CASE_TYPE_LABELS, VISIT_STATE_LABELS, MONTH_LABELS, toBuddhistYear } from '../labels.js';
+import { SERVICE_KIND_LABELS, serviceKindOf, VISIT_STATE_LABELS, MONTH_LABELS, toBuddhistYear } from '../labels.js';
 import { CAL_STATES, dayLabel, timeRange } from '../lib/calendarUi.js';
 
 const WEEKDAYS = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
@@ -155,7 +155,7 @@ export default function MyCalendarPage() {
                       title={[
                         timeRange(c),
                         c.case_id,
-                        CASE_TYPE_LABELS[c.case_type],
+                        SERVICE_KIND_LABELS[serviceKindOf(c)],
                         c.client_name,
                         VISIT_STATE_LABELS[c.state],
                       ].filter(Boolean).join(' · ')}
@@ -165,7 +165,7 @@ export default function MyCalendarPage() {
                       {timeRange(c) && <span className="cal-chip-time">{timeRange(c)}</span>}
                       {c.client_name}
                       <span className="cal-chip-sub">
-                        {CASE_TYPE_LABELS[c.case_type]}
+                        {SERVICE_KIND_LABELS[serviceKindOf(c)]}
                         {/* สถานะเป็นคำ ไม่ใช่แค่สี — ขึ้นเฉพาะโหมดรายการบนมือถือที่ชิปมีที่พอ
                             (ในตารางบนจอกว้าง ชิปสูงสองบรรทัดอยู่แล้ว เพิ่มอีกคำจะล้นช่อง) */}
                         <span className="cal-chip-state"> · {VISIT_STATE_LABELS[c.state]}</span>

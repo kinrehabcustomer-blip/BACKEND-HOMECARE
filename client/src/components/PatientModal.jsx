@@ -269,14 +269,8 @@ export default function PatientModal({ patientId, siblings = [], onNavigate, onC
                 ) : (
                   <div className="field-grid">
                     <Field
-                      label="ลูกค้า (ผู้ว่าจ้าง)"
-                      value={
-                        patient.customer && (
-                          <Link className="link" to={`/customers?open=${patient.customer.customer_id}`}>
-                            {patient.customer.name} ({patient.customer.customer_id})
-                          </Link>
-                        )
-                      }
+                      label="ผู้ว่าจ้าง"
+                      value={patient.customer?.name}
                     />
                     <Field
                       label="เบอร์ผู้ว่าจ้าง"

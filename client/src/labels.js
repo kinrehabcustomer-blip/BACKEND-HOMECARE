@@ -88,17 +88,6 @@ export const MARITAL_STATUS_LABELS = {
   widowed: 'หม้าย',
 };
 
-export const CASE_TYPE_LABELS = {
-  elderly_care: 'ดูแลผู้สูงอายุ',
-  bedridden_care: 'ดูแลผู้ป่วยติดเตียง',
-  post_op_care: 'ดูแลหลังผ่าตัด',
-  physiotherapy: 'กายภาพบำบัด',
-  wound_care: 'ทำแผล',
-  hospital_watch: 'เฝ้าไข้ที่โรงพยาบาล',
-  medical_escort: 'พาไปพบแพทย์',
-  other: 'อื่นๆ',
-};
-
 export const CASE_STATUS_LABELS = {
   unassigned: 'ยังไม่จับคู่พนักงาน',
   assigned: 'จับคู่แล้ว/รอเริ่ม',
@@ -119,6 +108,15 @@ export const SERVICE_KIND_LABELS = {
   homecare: 'Homecare',
   physio: 'กายภาพบำบัด',
 };
+
+/**
+ * ประเภทบริการของเคส ('homecare' | 'physio') — ใช้แทน "ประเภทเคส" ที่เอาออกจากหน้าเว็บแล้ว
+ * เคสเก่าที่ยังไม่มี service_kind แต่ตั้งประเภทเคสเป็นกายภาพไว้ ก็นับเป็นกายภาพ (เกณฑ์เดียวกับสรุปฝั่ง server)
+ */
+export const serviceKindOf = (c) =>
+  c?.service_kind === 'physio' || c?.physio_package_id != null || c?.case_type === 'physiotherapy'
+    ? 'physio'
+    : 'homecare';
 
 /**
  * ค่าภาษา (อังกฤษ) ของ Homecare — บวกเพิ่มจากราคาในตารางเรท ทุกแพ็คเกจ ตามหมวดของรูปแบบบริการ

@@ -4,11 +4,14 @@ import { api } from '../api.js';
 import { useToast } from '../toast.jsx';
 import MapPicker from '../components/MapPicker.jsx';
 import {
-  CASE_TYPE_LABELS, POSITION_LABELS, GENDER_LABELS, SERVICE_KIND_LABELS, ENGLISH_SURCHARGE,
+  POSITION_LABELS, GENDER_LABELS, SERVICE_KIND_LABELS, ENGLISH_SURCHARGE,
   formatBaht, ageFromBirthDate, positionsForCase, todayTH,
 } from '../labels.js';
 import LineIcon from '../components/LineIcon.jsx';
 import StaffPicker from '../components/StaffPicker.jsx';
+import PatientCodeInput from '../components/PatientCodeInput.jsx';
+import YearCodeInput from '../components/YearCodeInput.jsx';
+import { isPatientCode, isCaseCode } from '../lib/patientCode.js';
 import { nextRoundDates, endDateFor } from '../lib/caseRounds.js';
 import { useCanSeeStaffPay } from '../auth.jsx';
 import { useScrollLock } from '../lib/scrollLock.js';
@@ -17,7 +20,8 @@ const TIERS = ['CG', 'NA', 'PN', 'RN'];
 const CATEGORY_LABELS = { daily: 'รายวัน', weekly: 'รายสัปดาห์', monthly: 'รายเดือน' };
 
 const BLANK = {
-  case_type: 'elderly_care',
+  // รหัสเคส VN + ปี พ.ศ. 2 หลัก + เลข 7 หลัก (กรอกเอง) — ตอนแก้: ว่าง = คงรหัสเดิม
+  case_code: '',
   customer_id: '',
   patient_id: '',
   service_kind: '',
@@ -43,6 +47,8 @@ const BLANK = {
   start_date: '', end_date: '', fee: '', staff_pay: '', note: '',
   // อุปกรณ์เสริมที่คิดเงินเพิ่ม [{ name, quantity, unit_price }] — บวกเข้ายอดใบแจ้งหนี้ ไม่รวมในค่าบริการ
   addons: [],
+  // รหัสผู้ป่วย (KN…) ของแฟ้มที่จะสร้างใหม่ — ไม่ใช่คอลัมน์ของเคส (ถูกตัดออกก่อนบันทึกเคส)
+  patient_code: '',
   assigned_to: '',
 };
 
@@ -140,7 +146,10 @@ export default function CaseFormPage() {
   const [payerMatches, setPayerMatches] = useState([]);
   // ผู้ว่าจ้างรายใหม่ที่ยังไม่มีในระบบ { name, phone } — บันทึกเข้าตารางลูกค้าตอนกดบันทึกเคส
   // (ไม่สร้างทันทีที่กดเพิ่ม เพราะถ้าเปลี่ยนใจไม่เปิดเคส จะเหลือลูกค้าค้างในระบบโดยไม่มีใครรู้)
-  const [newPayer, setNewPayer] = useState(null);
+  const [payerPhone, setPayerPhone] = useState('');
+  /* พิมพ์ชื่อผู้ว่าจ้างแล้วไม่ได้เลือกจากรายการที่มีอยู่ = ผู้ว่าจ้างรายใหม่ (ไม่ต้องกดปุ่มเพิ่มก่อน)
+     คิดจากช่องที่กรอกอยู่ตรงๆ ไม่เก็บเป็น state แยก — ช่องกับสิ่งที่จะบันทึกจึงไม่มีทางไม่ตรงกัน */
+  const newPayer = !form.customer_id && payerQuery.trim() ? { name: payerQuery, phone: payerPhone } : null;
 
   useEffect(() => {
     api.assignableEmployees().then(setStaff).catch(() => {});
@@ -493,6 +502,7 @@ export default function CaseFormPage() {
         const filled = { ...BLANK };
         for (const key of Object.keys(BLANK)) filled[key] = c[key] ?? '';
         if (filled.client_name === PATIENT_PENDING) filled.client_name = '';
+        filled.case_code = isCaseCode(c.case_id) ? c.case_id : ''; // รหัสเดิมแบบ CASE-xxxx = ช่องว่าง (กรอก VN เพื่อเปลี่ยน)
         filled.addons = (c.addons ?? []).map((a) => ({
           name: a.name, quantity: String(a.quantity), unit_price: String(a.unit_price),
         }));
@@ -671,6 +681,7 @@ export default function CaseFormPage() {
     if (!payload.client_name) return null;
 
     const patient = await api.createPatient({
+      patient_id: form.patient_code,
       name: payload.client_name,
       gender: payload.patient_gender,
       age: payload.patient_age,
@@ -708,7 +719,8 @@ export default function CaseFormPage() {
       phone: newPayer.phone.trim() || null,
       address: payload.address ?? null,
     });
-    setNewPayer(null);
+    setPayerQuery('');
+    setPayerPhone('');
     setPayer(created);
     setForm((prev) => ({ ...prev, customer_id: created.customer_id }));
     return created.customer_id;
@@ -716,6 +728,14 @@ export default function CaseFormPage() {
 
   async function save() {
     setConfirmingService(false);
+
+    // กรอกเบอร์ผู้ว่าจ้างไว้แต่ไม่มีชื่อ — บันทึกผู้ว่าจ้างที่ไม่มีชื่อไม่ได้ ทักให้กรอกชื่อ ไม่ใช่ทิ้งเบอร์ไปเงียบๆ
+    if (!form.customer_id && !payerQuery.trim() && payerPhone.trim()) {
+      setError('กรอกเบอร์ผู้ว่าจ้างไว้แล้ว — กรุณากรอกชื่อผู้ว่าจ้างด้วย');
+      setFieldErrors((prev) => ({ ...prev, payer_name: 'กรอกชื่อผู้ว่าจ้าง' }));
+      formEl.current?.querySelector('[name="payer_name"]')?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      return;
+    }
 
     // ต้องรู้อย่างน้อยหนึ่งคน: ผู้ป่วย หรือผู้ว่าจ้าง (เคสที่ไม่มีทั้งคู่ไม่รู้ว่าจะดูแลใคร/เก็บเงินใคร)
     if (!form.client_name.trim() && !form.customer_id && !newPayer?.name.trim()) {
@@ -725,11 +745,36 @@ export default function CaseFormPage() {
       return;
     }
 
+    /* รหัสเคส VN เป็นเลขที่เจ้าหน้าที่กรอก (ระบบออกเองไม่ได้) — เปิดเคส/ต่อเคสต้องกรอกให้ครบ
+       หน้าแก้: ว่าง/กรอกไม่ครบ = คงรหัสเดิม */
+    if (!isEdit && !isCaseCode(form.case_code)) {
+      setError('กรุณากรอกรหัสเคส (VN) ให้ครบ');
+      setFieldErrors((prev) => ({ ...prev, case_code: 'กรอกให้ครบ: VN + ปี พ.ศ. 2 หลัก + เลข 7 หลัก' }));
+      formEl.current?.querySelector('[name="case_code"]')?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      return;
+    }
+
+    /* ต้องสร้างแฟ้มผู้ป่วยใหม่ = ต้องมีรหัส KN ครบ (เปิดเคสใหม่ที่ไม่ได้เลือกผู้ป่วยเดิม
+       หรือแก้เคสที่เพิ่งใส่ชื่อผู้ป่วยให้ครั้งแรก) — ทักก่อนยิง จะได้ไม่สร้างผู้ว่าจ้างไปครึ่งทาง */
+    const needsCode = form.client_name.trim() && !form.patient_id && (!isEdit || !original?.client_name);
+    if (needsCode && !isPatientCode(form.patient_code)) {
+      setError('กรุณากรอกรหัสผู้ป่วย (KN) สำหรับแฟ้มผู้ป่วยใหม่');
+      setFieldErrors((prev) => ({ ...prev, patient_code: 'กรอกให้ครบ: KN + ปี พ.ศ. 2 หลัก + เลข 7 หลัก' }));
+      formEl.current?.querySelector('[name="patient_code"]')?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      return;
+    }
+
     setSaving(true);
     setError(null);
     try {
       const payload = toPayload(form);
       payload.customer_id = await ensurePayer(payload);
+      // รหัสแฟ้มใหม่ส่งไปที่ /patients (เปิดเคส) หรือแนบไปกับการแก้เคส (สร้างแฟ้มย้อนหลัง) เท่านั้น
+      if (!(isEdit && needsCode)) delete payload.patient_code;
+      // รหัสเคส: เปิดเคส = บังคับส่ง · แก้เคส = ส่งเฉพาะตอนกรอกรหัสใหม่ที่ต่างจากเดิม (= เปลี่ยนรหัส)
+      delete payload.case_code;
+      if (!isEdit) payload.case_id = form.case_code;
+      else if (isCaseCode(form.case_code) && form.case_code !== id) payload.case_id = form.case_code;
 
       // เคสใหม่ต้องผูกแฟ้มผู้ป่วยเสมอ — เลือกไว้แล้วใช้เลย ไม่งั้นสร้างใหม่จากข้อมูลที่กรอก
       if (!isEdit) payload.patient_id = await ensurePatient(payload);
@@ -765,9 +810,9 @@ export default function CaseFormPage() {
       if (isEdit) {
         // การจับคู่พนักงานทำผ่านปุ่มใน popup เท่านั้น เพื่อไม่ให้สถานะเคสกับพนักงานขัดแย้งกัน
         const { assigned_to: _unused, ...rest } = payload;
-        await api.updateCase(id, rest);
-        toast('บันทึกการแก้ไขแล้ว');
-        navigate(`/cases?open=${id}`);
+        const updated = await api.updateCase(id, rest);
+        toast(updated.case_id !== id ? `บันทึกแล้ว · เปลี่ยนรหัสเคสเป็น ${updated.case_id}` : 'บันทึกการแก้ไขแล้ว');
+        navigate(`/cases?open=${updated.case_id}`); // เปลี่ยนรหัสแล้วเคสเดิมไม่มีอยู่ที่รหัสเก่า
       } else {
         if (renewFrom) payload.renewed_from = renewFrom;
         const created = await api.createCase(payload);
@@ -797,11 +842,11 @@ export default function CaseFormPage() {
       <header className="page-head">
         <div>
           <h1>{isEdit ? `แก้ไขเคส ${id}` : renewFrom ? `ต่อเคส ${renewFrom}` : 'เปิดเคสใหม่'}</h1>
-          {!isEdit && !renewFrom && <p className="muted">ระบบจะออกรหัสเคส (CASE-xxxx) ให้อัตโนมัติหลังบันทึก</p>}
+          {!isEdit && !renewFrom && <p className="muted">กรอกรหัสเคส (VN) · ระบบออกใบแจ้งหนี้ (ร่าง) ให้หลังบันทึก</p>}
           {renewFrom && (
             <p className="muted">
               รอบที่ {(renewSource?.round_no ?? 1) + 1} — คัดลอกข้อมูลจากรอบก่อนมาให้แล้ว ตรวจ/แก้ได้ทุกช่องก่อนบันทึก
-              {' '}· ระบบจะออกรหัสเคสใหม่และใบแจ้งหนี้ (ร่าง) ของรอบนี้ให้ ทีมดูแลรอบก่อนตามมาด้วย
+              {' '}· กรอกรหัสเคส (VN) ของรอบนี้ แล้วระบบออกใบแจ้งหนี้ (ร่าง) ให้ ทีมดูแลรอบก่อนตามมาด้วย
             </p>
           )}
         </div>
@@ -817,26 +862,7 @@ export default function CaseFormPage() {
             โหมดแก้ไข: ถ้าเคสยังไม่มีผู้ว่าจ้าง ให้ค้นหา/เพิ่มลูกค้าเจ้าของเคสได้ที่นี่ (บันทึกแล้วใบแจ้งหนี้จะตามให้เอง) */}
         <h2>ผู้ว่าจ้าง</h2>
         <div className="customer-picker">
-          {newPayer ? (
-            <div className="picked-customer new-payer">
-              <div>
-                <strong>ผู้ว่าจ้างรายใหม่: {newPayer.name}</strong>
-                <p className="muted">จะบันทึกเข้าระบบลูกค้า (CUS-xxxx) ให้เมื่อกดบันทึกเคส</p>
-                <label className="customer-search">
-                  เบอร์โทรผู้ว่าจ้าง (ถ้ามี)
-                  <input
-                    type="tel"
-                    inputMode="tel"
-                    value={newPayer.phone}
-                    onChange={(e) => setNewPayer((prev) => ({ ...prev, phone: e.target.value }))}
-                  />
-                </label>
-              </div>
-              <button type="button" className="btn" onClick={() => { setPayerQuery(newPayer.name); setNewPayer(null); }}>
-                ยกเลิก
-              </button>
-            </div>
-          ) : payer ? (
+          {payer ? (
             <div className="picked-customer">
               <div>
                 <strong>ผู้ว่าจ้าง: {payer.name}</strong>
@@ -845,56 +871,76 @@ export default function CaseFormPage() {
               <button type="button" className="btn" onClick={unpickPayer}>เปลี่ยน / ไม่ผูก</button>
             </div>
           ) : (
-            <>
-              <label className="customer-search">
-                ผู้ว่าจ้าง (ลูกค้าผู้จ่าย) — ไม่บังคับ
+            /* กรอกชื่อ/เบอร์ผู้ว่าจ้างได้เลย — ไม่เลือกจากรายการ = บันทึกเป็นผู้ว่าจ้างรายใหม่ตอนกดบันทึกเคส
+               รายชื่อที่มีอยู่แล้วโผล่ใต้ช่องชื่อ ให้กดเลือกแทนได้ (กันสร้างคนเดิมซ้ำ) */
+            <div className="grid payer-grid">
+              <label>
+                ชื่อผู้ว่าจ้าง — ไม่บังคับ
                 <input
+                  name="payer_name"
                   value={payerQuery}
-                  onChange={(e) => setPayerQuery(e.target.value)}
+                  aria-invalid={fieldErrors.payer_name ? true : undefined}
+                  autoComplete="off"
+                  onChange={(e) => {
+                    setPayerQuery(e.target.value);
+                    setFieldErrors((prev) => (prev.client_name || prev.payer_name ? { ...prev, client_name: undefined, payer_name: undefined } : prev));
+                  }}
+                />
+                {fieldError('payer_name')}
+                {payerMatches.length > 0 && (
+                  <>
+                    <span className="form-hint muted">มีในระบบแล้ว? กดเลือกด้านล่าง — ไม่เลือกจะบันทึกเป็นผู้ว่าจ้างรายใหม่</span>
+                    <ul className="customer-results">
+                      {payerMatches.map((c) => (
+                        <li key={c.customer_id}>
+                          <button type="button" onClick={() => pickPayer(c)}>
+                            <strong>{c.name}</strong>
+                            <span className="muted">
+                              <span className="mono">{c.customer_id}</span>
+                              {c.phone && ` · ${c.phone}`}
+                            </span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                )}
+              </label>
+              <label>
+                เบอร์โทรผู้ว่าจ้าง
+                <input
+                  type="tel"
+                  inputMode="tel"
+                  value={payerPhone}
+                  onChange={(e) => setPayerPhone(e.target.value)}
                 />
               </label>
-              {payerMatches.length > 0 && (
-                <ul className="customer-results">
-                  {payerMatches.map((c) => (
-                    <li key={c.customer_id}>
-                      <button type="button" onClick={() => pickPayer(c)}>
-                        <strong>{c.name}</strong>
-                        <span className="muted">
-                          <span className="mono">{c.customer_id}</span>
-                          {c.phone && ` · ${c.phone}`}
-                        </span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              {/* ไม่เจอในระบบ (หรือเจอแต่ไม่ใช่คนนี้) — เพิ่มเป็นลูกค้าใหม่จากชื่อที่พิมพ์ได้เลย */}
-              {payerQuery.trim() && (
-                <button
-                  type="button"
-                  className="btn add-payer"
-                  onClick={() => {
-                    setNewPayer({ name: payerQuery.trim(), phone: '' });
-                    setPayerQuery('');
-                    setPayerMatches([]);
-                    setFieldErrors((prev) => (prev.client_name ? { ...prev, client_name: undefined } : prev));
-                  }}
-                >
-                  + เพิ่ม "{payerQuery.trim()}" เป็นผู้ว่าจ้างรายใหม่
-                </button>
-              )}
-            </>
+            </div>
           )}
         </div>
 
         <h2>รายละเอียดเคส</h2>
         <div className="grid">
-          <label>ประเภทเคส *
-            <select required {...field('case_type')}>
-              {Object.entries(CASE_TYPE_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-            </select>
-          {fieldError('case_type')}
+          <label>รหัสเคส (VN) {isEdit ? '' : '*'}
+            <YearCodeInput
+              prefix="VN"
+              name="case_code"
+              value={form.case_code}
+              invalid={Boolean(fieldErrors.case_code || fieldErrors.case_id)}
+              checker={(code) => (code === id ? Promise.resolve(null) : api.checkCaseId(code, isEdit ? id : null))}
+              takenLabel="รหัสนี้ถูกใช้กับเคสอื่นแล้ว"
+              onChange={(code) => {
+                setForm((prev) => ({ ...prev, case_code: code }));
+                setFieldErrors((prev) => (prev.case_code || prev.case_id ? { ...prev, case_code: undefined, case_id: undefined } : prev));
+              }}
+            />
+            {isEdit && !isCaseCode(id) && (
+              <span className="form-hint muted">รหัสเดิม {id} — กรอกรหัส VN เพื่อเปลี่ยน (กะ ใบแจ้งหนี้ และค่าจ้างที่ผูกอยู่ตามไปเอง)</span>
+            )}
+            {fieldError('case_code')}
+            {fieldError('case_id')}
           </label>
+          {/* ไม่มีช่องประเภทเคสแล้ว — server ตั้งให้เองจากประเภทบริการ (ใช้เลือกแบบบันทึกของพนักงาน) */}
           {serviceLocked && (
             <p className="form-hint muted span-2">
               <LineIcon name="alert" className="text-ico" />เคสนี้ปิดหรือยกเลิกไปแล้ว จึงเปลี่ยนแพ็คเกจไม่ได้
@@ -1149,12 +1195,26 @@ export default function CaseFormPage() {
             {/* เคสที่เปิดตอนรู้แค่ผู้ว่าจ้าง — server สร้างแฟ้มให้เมื่อได้ชื่อ (cases/repo.js → patientForNamedCase) */}
             {!form.patient_id && original && !original.client_name && (
               <p className="notice snapshot-note">
-                เคสนี้ยังไม่มีแฟ้มผู้ป่วย — กรอกชื่อผู้ป่วยแล้วกดบันทึก ระบบจะสร้างแฟ้มผู้รับการดูแล (PAT-xxxx)
+                เคสนี้ยังไม่มีแฟ้มผู้ป่วย — กรอกชื่อและรหัสผู้ป่วย (KN) แล้วกดบันทึก ระบบจะสร้างแฟ้มผู้รับการดูแล
                 {' '}ผูกกับผู้ว่าจ้างของเคสนี้ให้อัตโนมัติ
               </p>
             )}
             <div className="grid">
               <label>ชื่อผู้ป่วย {payerKnown ? '(ว่างได้ — ยังไม่ทราบชื่อ)' : '*'}<input {...field('client_name')} />{fieldError('client_name')}</label>
+              {!form.patient_id && !original?.client_name && (
+                <label>รหัสผู้ป่วย (KN) *
+                  <PatientCodeInput
+                    name="patient_code"
+                    value={form.patient_code}
+                    invalid={Boolean(fieldErrors.patient_code)}
+                    onChange={(code) => {
+                      setForm((prev) => ({ ...prev, patient_code: code }));
+                      setFieldErrors((prev) => (prev.patient_code ? { ...prev, patient_code: undefined } : prev));
+                    }}
+                  />
+                  {fieldError('patient_code')}
+                </label>
+              )}
               <label>เพศ
                 <select {...field('patient_gender')}>
                   <option value="">— ไม่ระบุ —</option>
@@ -1251,7 +1311,7 @@ export default function CaseFormPage() {
               )}
 
               <p className="notice picker-note">
-                ยังไม่ได้เลือกผู้ป่วย — ระบบจะ<strong>สร้างแฟ้มผู้รับการดูแลใหม่ (PAT-xxxx)</strong>
+                ยังไม่ได้เลือกผู้ป่วย — ระบบจะ<strong>สร้างแฟ้มผู้รับการดูแลใหม่ (รหัส KN ที่กรอก)</strong>
                 จากข้อมูลที่กรอกด้านล่างให้อัตโนมัติเมื่อกดบันทึก
               </p>
             </div>
@@ -1259,6 +1319,20 @@ export default function CaseFormPage() {
             <h3>ข้อมูลผู้ป่วยใหม่</h3>
             <div className="grid">
               <label>ชื่อผู้ป่วย {payerKnown ? '(ว่างได้ — ยังไม่ทราบชื่อ)' : '*'}<input {...field('client_name')} />{fieldError('client_name')}</label>
+              {!form.patient_id && (
+                <label>รหัสผู้ป่วย (KN) {payerKnown ? '(กรอกเมื่อมีชื่อผู้ป่วย)' : '*'}
+                  <PatientCodeInput
+                    name="patient_code"
+                    value={form.patient_code}
+                    invalid={Boolean(fieldErrors.patient_code)}
+                    onChange={(code) => {
+                      setForm((prev) => ({ ...prev, patient_code: code }));
+                      setFieldErrors((prev) => (prev.patient_code ? { ...prev, patient_code: undefined } : prev));
+                    }}
+                  />
+                  {fieldError('patient_code')}
+                </label>
+              )}
               <label>เพศ
                 <select {...field('patient_gender')}>
                   <option value="">— ไม่ระบุ —</option>

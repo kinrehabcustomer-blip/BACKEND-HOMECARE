@@ -149,6 +149,18 @@ export const api = {
   getEmployee: (id) => request(`/employees/${id}`),
   createEmployee: (body) => request('/employees', { method: 'POST', body }),
   updateEmployee: (id, body) => request(`/employees/${id}`, { method: 'PATCH', body }),
+  /** ตรวจรหัสพนักงานที่กรอกเองว่าว่างไหม — except = รหัสของคนที่กำลังแก้ (ไม่นับว่าซ้ำกับตัวเอง) */
+  /** ตรวจรหัสเคส (VN…) ว่าว่างไหม — except = รหัสของเคสที่กำลังแก้ (ไม่นับว่าซ้ำกับตัวเอง) */
+  checkCaseId: (id, except) => {
+    const params = new URLSearchParams({ id });
+    if (except) params.set('except', except);
+    return request(`/cases/check-id?${params}`);
+  },
+  checkEmployeeId: (id, except) => {
+    const params = new URLSearchParams({ id });
+    if (except) params.set('except', except);
+    return request(`/employees/check-id?${params}`);
+  },
   resignEmployee: (id, resign_date) =>
     request(`/employees/${id}`, { method: 'DELETE', body: { resign_date } }),
   deleteEmployee: (id) => request(`/employees/${id}?hard=true`, { method: 'DELETE' }),

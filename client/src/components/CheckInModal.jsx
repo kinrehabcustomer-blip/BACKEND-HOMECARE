@@ -7,7 +7,7 @@ import { getPosition } from '../lib/geo.js';
 import { compressImage } from '../lib/image.js';
 import { serviceName } from './MyCaseModal.jsx';
 import LocationMap from './LocationMap.jsx';
-import { CASE_TYPE_LABELS } from '../labels.js';
+import { SERVICE_KIND_LABELS, serviceKindOf } from '../labels.js';
 import LineIcon from './LineIcon.jsx';
 
 /**
@@ -90,7 +90,7 @@ export default function CheckInModal({ visit, onDone, onClose }) {
           <div>
             <p className="mono muted">{visit.case_id}</p>
             <h2>เช็คอินเข้างาน</h2>
-            <p className="muted">{visit.client_name} · {serviceName(visit) || CASE_TYPE_LABELS[visit.case_type]}</p>
+            <p className="muted">{visit.client_name} · {serviceName(visit) || SERVICE_KIND_LABELS[serviceKindOf(visit)]}</p>
           </div>
           <button className="modal-close" onClick={onClose} aria-label="ปิด" disabled={busy}>×</button>
         </header>

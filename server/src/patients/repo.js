@@ -1,4 +1,18 @@
-import { sql, nextPatientId, transaction } from '../db/index.js';
+import { sql, transaction } from '../db/index.js';
+import { ApiError } from '../lib/errors.js';
+
+/** รหัสผู้ป่วยซ้ำ — เช็คก่อนเขียน จะได้บอกได้ว่าซ้ำกับใคร (ชนกันพร้อมกันพอดียังมี PK กันอีกชั้น) */
+export async function ensurePatientCodeFree(db, code, exceptId = null) {
+  const taken = await db.one(
+    'SELECT patient_id, name FROM patients WHERE patient_id = :code AND patient_id IS DISTINCT FROM :except',
+    { code, except: exceptId },
+  );
+  if (taken) {
+    throw new ApiError(409, `รหัสผู้ป่วย ${code} มีอยู่แล้ว (${taken.name})`, [
+      { field: 'patient_id', message: `รหัสนี้ถูกใช้กับ ${taken.name} แล้ว` },
+    ]);
+  }
+}
 
 const COLUMNS = [
   'customer_id', // ผู้ว่าจ้าง (FK ไป customers) — ไม่ใช่ตัวผู้ป่วยเอง
@@ -100,12 +114,13 @@ export async function findDetailById(patientId) {
   const [customer, cases] = await Promise.all([
     patient.customer_id
       ? sql.one(
-          'SELECT customer_id, name, phone FROM customers WHERE customer_id = :id',
+          // ส่งครบทุกช่องที่ฟอร์มผู้ป่วยแก้ได้ — ขาดช่องไหน ฟอร์มจะเห็นเป็นค่าว่างแล้วบันทึกทับของจริงทิ้ง
+          'SELECT customer_id, name, phone, tax_id, billing_address FROM customers WHERE customer_id = :id',
           { id: patient.customer_id },
         )
       : Promise.resolve(null),
     sql.all(
-      `SELECT c.case_id, c.title, c.case_type, c.status, c.start_date, c.end_date, c.fee,
+      `SELECT c.case_id, c.title, c.case_type, c.service_kind, c.physio_package_id, c.status, c.start_date, c.end_date, c.fee,
               e.first_name || ' ' || e.last_name AS assigned_name
        FROM cases c
        LEFT JOIN employees e ON e.employee_id = c.assigned_to
@@ -120,8 +135,8 @@ export async function findDetailById(patientId) {
 
 export function create(input) {
   return transaction(async (tx) => {
-    const patientId = await nextPatientId(tx);
-    const values = { patient_id: patientId };
+    await ensurePatientCodeFree(tx, input.patient_id);
+    const values = { patient_id: input.patient_id };
     for (const col of COLUMNS) values[col] = input[col] ?? null;
     // status เป็น NOT NULL DEFAULT 'active' — ส่ง null ไม่ได้ ถ้าไม่ระบุมาให้ใช้ค่าปริยาย
     values.status = input.status ?? 'active';
@@ -136,19 +151,27 @@ export function create(input) {
 }
 
 export async function update(patientId, input) {
+  /* เปลี่ยนรหัส (เช่น PAT-0003 → KN690202463) — cases.patient_id เป็น ON UPDATE CASCADE
+     เคสที่ผูกอยู่ทุกใบจึงตามรหัสใหม่ไปเองในคำสั่งเดียวกัน */
+  const nextId = input.patient_id && input.patient_id !== patientId ? input.patient_id : null;
   const fields = COLUMNS.filter((col) => col in input);
-  if (fields.length === 0) return findById(patientId);
+  if (fields.length === 0 && !nextId) return findById(patientId);
 
-  const values = { patient_id: patientId };
-  for (const col of fields) values[col] = input[col] ?? null;
+  return transaction(async (tx) => {
+    if (nextId) await ensurePatientCodeFree(tx, nextId, patientId);
 
-  return sql.one(
-    `UPDATE patients
-     SET ${fields.map((c) => `${c} = :${c}`).join(', ')}, updated_at = ${NOW}
-     WHERE patient_id = :patient_id
-     RETURNING *`,
-    values,
-  );
+    const values = { patient_id: patientId, next_id: nextId ?? patientId };
+    for (const col of fields) values[col] = input[col] ?? null;
+    const sets = [...fields.map((c) => `${c} = :${c}`), 'patient_id = :next_id', `updated_at = ${NOW}`];
+
+    return tx.one(
+      `UPDATE patients
+       SET ${sets.join(', ')}
+       WHERE patient_id = :patient_id
+       RETURNING *`,
+      values,
+    );
+  });
 }
 
 export async function remove(patientId) {

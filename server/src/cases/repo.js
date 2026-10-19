@@ -1,8 +1,9 @@
-import { sql, nextCaseId, nextPatientId, transaction } from '../db/index.js';
+import { sql, transaction } from '../db/index.js';
 /* รายการช่องของรายงานมาจาก schema.js ที่เดียว — ฟอร์มมี 80 กว่าช่อง การก๊อปรายชื่อมาไว้สองที่
    แปลว่าวันหนึ่งจะมีช่องที่ผ่าน validation แล้วแต่ไม่ถูกเขียนลงตาราง (บันทึกสำเร็จแต่ข้อมูลหาย)
    ต่างจากตาราง cases ที่ยังประกาศ COLUMNS เอง เพราะช่องน้อยและมีคอลัมน์ที่ระบบเติมเองปนอยู่ */
 import { REPORT_CONTENT_FIELDS, PATIENT_PENDING } from './schema.js';
+import { ensurePatientCodeFree } from '../patients/repo.js';
 import { decodeImage, FRONT_POSITIONS } from '../employees/schema.js';
 import { ApiError } from '../lib/errors.js';
 import { normalizeAddons, addonsTotal } from '../lib/addons.js';
@@ -153,6 +154,12 @@ const ENDING_SOON_SQL = `
 
 const soonTH = () => isoDateTH(new Date(Date.now() + ENDING_SOON_DAYS * 86_400_000));
 
+/** เคสสายกายภาพบำบัด — ตัวกรองรายการเคสกับสรุปหน้าภาพรวมใช้เกณฑ์นี้ร่วมกัน (นับตรงกันเสมอ)
+    เคสเก่าที่ยังไม่มี service_kind แต่ตั้งประเภทเคสเป็นกายภาพไว้ ก็นับเป็นกายภาพ
+    (ต้องตรงกับ serviceKindOf ใน client/src/labels.js) · ใช้ COALESCE กัน NULL ทำให้ NOT (...) หลุดทั้งแถว */
+const PHYSIO_CASE_SQL = `(COALESCE(c.service_kind, '') = 'physio' OR c.physio_package_id IS NOT NULL
+  OR c.case_type = 'physiotherapy')`;
+
 /** มีกะลงไว้แล้วแต่ยังไม่ตั้งค่าจ้างพนักงาน — ปล่อยค่าจ้างของเคสนี้ไม่ได้เลย
     เกณฑ์คือ "มีกะแล้ว" ไม่ใช่ทุกเคสที่ยังไม่ตั้ง เพราะเคสที่เพิ่งเปิดยังไม่ถึงเวลาต้องตั้ง */
 const NO_STAFF_PAY_SQL = `
@@ -166,7 +173,7 @@ const CLOSED_NO_INVOICE_SQL = `
   c.status = 'closed'
   AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.case_id = c.case_id AND i.status <> 'cancelled')`;
 
-export async function list({ q, status, case_type, assigned_to, no_staff_pay, overdue_close, closed_no_invoice, ending_soon, year, month, page, per_page, sort, order }) {
+export async function list({ q, status, case_type, service_kind, assigned_to, no_staff_pay, overdue_close, closed_no_invoice, ending_soon, year, month, page, per_page, sort, order }) {
   const where = [];
   const params = {};
 
@@ -185,6 +192,9 @@ export async function list({ q, status, case_type, assigned_to, no_staff_pay, ov
   if (case_type) {
     where.push('c.case_type = :case_type');
     params.case_type = case_type;
+  }
+  if (service_kind) {
+    where.push(service_kind === 'physio' ? `(${PHYSIO_CASE_SQL})` : `NOT (${PHYSIO_CASE_SQL})`);
   }
   if (assigned_to) {
     where.push('c.assigned_to = :assigned_to');
@@ -451,6 +461,35 @@ async function staffLabel(tx, employeeId) {
   return name ? `${name} (${employeeId})` : employeeId;
 }
 
+/**
+ * ประเภทเคส (คอลัมน์ case_type) — ไม่มีให้เลือกในหน้าเว็บแล้ว ระบบตั้งให้จากประเภทบริการ
+ *
+ * ยังต้องเก็บค่าไว้ เพราะเป็นตัวเลือกแบบบันทึกของพนักงาน (client/src/lib/dailyCare.js):
+ *   กายภาพบำบัด → 'physiotherapy' = แบบบันทึกการรักษากายภาพ
+ *   Homecare / ยังไม่ระบุบริการ → 'elderly_care' = แบบบันทึกการดูแลประจำวัน (ฟอร์มเต็ม)
+ * เคสเก่าที่ตั้งประเภทไว้เอง (ทำแผล/เฝ้าไข้ ฯลฯ) คงค่าเดิม — แบบบันทึกของเคสเหล่านั้นจึงไม่เปลี่ยน
+ */
+const isPhysioService = (s) => s.service_kind === 'physio' || s.physio_package_id != null;
+const caseTypeForService = (s) => (isPhysioService(s) ? 'physiotherapy' : 'elderly_care');
+
+/** เจ้าของรหัสเคสนี้ (ถ้ามี) — ใช้ทั้งตอนบันทึก และเส้นตรวจซ้ำที่หน้าฟอร์มเรียกระหว่างพิมพ์ */
+export const caseCodeOwner = (db, code, exceptId = null) =>
+  db.one(
+    `SELECT case_id, client_name FROM cases
+     WHERE case_id = :code AND case_id IS DISTINCT FROM :except`,
+    { code, except: exceptId },
+  );
+
+/** รหัสเคสซ้ำ — เช็คก่อนเขียน จะได้บอกว่าซ้ำกับเคสของใคร (ชนกันพร้อมกันพอดียังมี PK กันอีกชั้น) */
+async function ensureCaseCodeFree(db, code, exceptId = null) {
+  const taken = await caseCodeOwner(db, code, exceptId);
+  if (taken) {
+    throw new ApiError(409, `รหัสเคส ${code} มีอยู่แล้ว (${taken.client_name})`, [
+      { field: 'case_id', message: `รหัสนี้ถูกใช้กับเคสของ ${taken.client_name} แล้ว` },
+    ]);
+  }
+}
+
 export function create(rawInput, actor) {
   const input = clearUnusedKind(rawInput);
   return transaction(async (tx) => {
@@ -458,9 +497,11 @@ export function create(rawInput, actor) {
        (คำขอที่สองรอจนคำขอแรก commit แล้วจะเห็นรอบที่เพิ่งสร้าง) */
     const prev = input.renewed_from ? await renewalSource(tx, input.renewed_from) : null;
 
-    const caseId = await nextCaseId(tx);
+    await ensureCaseCodeFree(tx, input.case_id);
+    const caseId = input.case_id;
     const values = { case_id: caseId };
     for (const col of COLUMNS) values[col] = input[col] ?? null;
+    values.case_type = input.case_type ?? caseTypeForService(input);
     values.renewed_from = prev?.case_id ?? null;
     values.round_no = prev ? prev.round_no + 1 : 1;
     // รู้แค่ผู้ว่าจ้าง ยังไม่รู้ชื่อผู้ป่วย (schema บังคับให้มีอย่างใดอย่างหนึ่งแล้ว)
@@ -643,14 +684,22 @@ async function valueChanges(tx, current, values) {
  * จำกัดเฉพาะเคสที่เคยเป็น "ยังไม่ระบุผู้ป่วย" — เคสเก่าที่มีชื่อจริงแต่ไม่มีแฟ้ม (ก่อนมีระบบแฟ้มผู้ป่วย)
  * ไม่ถูกสร้างแฟ้มเงียบๆ ทุกครั้งที่มีคนกดบันทึก
  */
-async function patientForNamedCase(tx, current, values) {
+async function patientForNamedCase(tx, current, values, patientCode) {
   if (current.patient_id || current.client_name !== PATIENT_PENDING) return null;
   if ('patient_id' in values && values.patient_id) return null; // ผู้เรียกผูกแฟ้มเดิมมาให้เองแล้ว
   const name = values.client_name;
   if (!name || name === PATIENT_PENDING) return null;
 
+  // รหัสผู้ป่วยเป็นเลขที่เจ้าหน้าที่กรอก (KN…) ระบบออกเองไม่ได้ — ได้ชื่อแล้วต้องได้รหัสมาคู่กัน
+  if (!patientCode) {
+    throw new ApiError(400, 'กรุณากรอกรหัสผู้ป่วย (KN) เพื่อสร้างแฟ้มผู้ป่วยให้เคสนี้', [
+      { field: 'patient_code', message: 'กรอกรหัสผู้ป่วย เช่น KN690202463' },
+    ]);
+  }
+  await ensurePatientCodeFree(tx, patientCode);
+
   const pick = (col) => (col in values ? values[col] : current[col]) ?? null;
-  const patientId = await nextPatientId(tx);
+  const patientId = patientCode;
   await tx.run(
     `INSERT INTO patients (patient_id, name, gender, age, weight_kg, height_cm, medical_history, address, customer_id, status)
      VALUES (:patient_id, :name, :gender, :age, :weight_kg, :height_cm, :medical_history, :address, :customer_id, 'active')`,
@@ -672,8 +721,11 @@ async function patientForNamedCase(tx, current, values) {
 export async function update(caseId, rawInput, actor) {
   // สลับสายบริการตอนแก้เคส ต้องล้างของสายเดิมด้วย ไม่งั้นค้างเป็นเคสที่มีทั้งเรท Homecare และแพ็คเกจกายภาพบำบัด
   const input = clearUnusedKind(rawInput);
+  /* เปลี่ยนรหัสเคส (เช่น CASE-0007 → VN690215209) — ทุกตารางที่อ้างเคสเป็น ON UPDATE CASCADE
+     กะ ใบแจ้งหนี้ ค่าจ้าง รายงาน ทีม ประวัติ และสายต่อเคส จึงตามรหัสใหม่ไปเองในคำสั่งเดียวกัน */
+  const nextId = input.case_id && input.case_id !== caseId ? input.case_id : null;
   const fields = COLUMNS.filter((col) => col in input);
-  if (fields.length === 0) return findById(caseId);
+  if (fields.length === 0 && !nextId) return findById(caseId);
 
   const values = { case_id: caseId };
   for (const col of fields) values[col] = input[col] ?? null;
@@ -699,7 +751,7 @@ export async function update(caseId, rawInput, actor) {
     }
 
     // เคสที่เปิดโดยรู้แค่ผู้ว่าจ้าง เพิ่งได้ชื่อผู้ป่วย → สร้างแฟ้มผู้ป่วยแล้วผูกกับเคส (ทรานแซกชันเดียวกัน)
-    const newPatient = await patientForNamedCase(tx, current, values);
+    const newPatient = await patientForNamedCase(tx, current, values, input.patient_code);
     if (newPatient) {
       values.patient_id = newPatient;
       if (!fields.includes('patient_id')) fields.push('patient_id');
@@ -707,25 +759,39 @@ export async function update(caseId, rawInput, actor) {
 
     const changed = changedLabels(current, values, fields);
     const details = await valueChanges(tx, current, values);
+
+    /* สลับสายบริการ (Homecare ↔ กายภาพ) = ประเภทเคสต้องตาม ไม่งั้นพนักงานได้แบบบันทึกผิดชุด
+       ทำหลังนับ "ช่องที่แก้" แล้ว — ช่องนี้ไม่มีในหน้าเว็บ ไม่ต้องขึ้นในประวัติว่าแก้ประเภทเคส */
+    if (!('case_type' in input) && isPhysioService({ ...current, ...values }) !== isPhysioService(current)) {
+      values.case_type = caseTypeForService({ ...current, ...values });
+      if (!fields.includes('case_type')) fields.push('case_type');
+    }
     if (newPatient) details.push(`สร้างแฟ้มผู้ป่วย ${newPatient}`);
 
+    if (nextId) {
+      await ensureCaseCodeFree(tx, nextId, caseId);
+      details.push(`เปลี่ยนรหัสเคส ${caseId} → ${nextId}`);
+    }
+    values.next_case_id = nextId ?? caseId;
+    const sets = [...fields.map((c) => `${c} = :${c}`), 'case_id = :next_case_id', `updated_at = ${NOW}`];
     await tx.run(
       `UPDATE cases
-       SET ${fields.map((c) => `${c} = :${c}`).join(', ')}, updated_at = ${NOW}
+       SET ${sets.join(', ')}
        WHERE case_id = :case_id`,
       values,
     );
 
     // ไม่มีอะไรเปลี่ยน = ไม่บันทึก (กดบันทึกโดยไม่แก้อะไรไม่ควรมีบรรทัดขึ้นในประวัติ)
-    if (changed.length > 0) {
-      const shown = changed.slice(0, 8).join(', ');
+    if (changed.length > 0 || nextId) {
+      const shown = (changed.length ? changed : ['รหัสเคส']).slice(0, 8).join(', ');
       const more = changed.length > 8 ? ` และอีก ${changed.length - 8} ช่อง` : '';
       const extra = details.length > 0 ? ` — ${details.join(' · ')}` : '';
-      await logEvent(tx, caseId, 'edited', `แก้ ${shown}${more}${extra}`, actor);
+      // เปลี่ยนรหัสแล้วแถวของรหัสเดิมไม่มีอยู่ — ประวัติต้องผูกกับรหัสใหม่ (ไม่งั้นชน FK)
+      await logEvent(tx, nextId ?? caseId, 'edited', `แก้ ${shown}${more}${extra}`, actor);
     }
   });
 
-  return findById(caseId);
+  return findById(nextId ?? caseId);
 }
 
 /**
@@ -2775,7 +2841,13 @@ export async function summary(period) {
 
   const [byStatus, byType, totals] = await Promise.all([
     sql.all(`SELECT status, COUNT(*) AS count FROM cases c ${clause} GROUP BY status`, params),
-    sql.all(`SELECT case_type, COUNT(*) AS count FROM cases c ${clause} GROUP BY case_type`, params),
+    /* แยกตามประเภทบริการ (ประเภทเคสไม่มีให้เลือกแล้ว) — เคสเก่าที่ตั้งแค่ประเภทเคสเป็นกายภาพก็นับเป็นกายภาพ */
+    sql.all(
+      `SELECT CASE WHEN ${PHYSIO_CASE_SQL} THEN 'physio' ELSE 'homecare' END AS service_kind,
+              COUNT(*) AS count
+       FROM cases c ${clause} GROUP BY 1`,
+      params,
+    ),
     sql.one(`SELECT COUNT(*) AS total FROM cases c ${clause}`, params),
   ]);
 
@@ -2786,7 +2858,7 @@ export async function summary(period) {
     month: period?.month ?? null,
     total: Number(totals.total),
     by_status: toNumber(byStatus),
-    by_type: toNumber(byType),
+    by_service: toNumber(byType),
   };
 }
 

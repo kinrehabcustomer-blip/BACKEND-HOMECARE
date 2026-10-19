@@ -12,7 +12,7 @@ import CaseReportDoc from './CaseReportDoc.jsx';
 import ReportArchiveModal from './ReportArchiveModal.jsx';
 import InvoiceModal from './InvoiceModal.jsx';
 import {
-  CASE_TYPE_LABELS, CASE_STATUS_LABELS, POSITION_LABELS, GENDER_LABELS, SERVICE_KIND_LABELS,
+  CASE_STATUS_LABELS, POSITION_LABELS, GENDER_LABELS, SERVICE_KIND_LABELS,
   INVOICE_STATUS_LABELS, CASE_EVENT_LABELS, formatBaht, formatDate, stampText, positionsForCase,
   todayTH,
 } from '../labels.js';
@@ -500,7 +500,6 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                 )}
 
                 <div className="field-grid">
-                  <Field label="ประเภทเคส" value={CASE_TYPE_LABELS[item.case_type]} />
                   <Field label="ประเภทบริการ" value={SERVICE_KIND_LABELS[item.service_kind]} />
                   {item.physio_package_id ? (
                     <Field

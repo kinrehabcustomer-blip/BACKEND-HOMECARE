@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { CASE_TYPE_LABELS, CASE_STATUS_LABELS, formatBaht, formatDate } from '../labels.js';
+import { SERVICE_KIND_LABELS, serviceKindOf, CASE_STATUS_LABELS, formatBaht, formatDate } from '../labels.js';
 
 /**
  * เคสที่ผูกกับผู้รับการดูแลรายนี้ — มุมของผู้ป่วย จึงโชว์ "พนักงานที่รับ" ไม่ใช่ชื่อผู้ป่วยซ้ำ
@@ -40,7 +40,7 @@ export default function PatientCases({ cases = [], limit }) {
             <strong>{c.title}</strong>
             <p className="muted">
               <span className="mono">{c.case_id}</span>
-              {' · '}{CASE_TYPE_LABELS[c.case_type]}
+              {' · '}{SERVICE_KIND_LABELS[serviceKindOf(c)]}
               {c.assigned_name && ` · ${[c.assigned_name, c.team_names].filter(Boolean).join(' · ')}`}
             </p>
             <p className="muted">

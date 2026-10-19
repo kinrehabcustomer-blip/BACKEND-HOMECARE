@@ -119,10 +119,10 @@ export default function PatientListPage() {
     <PageRefresh onRefresh={() => setReloadKey((k) => k + 1)} busy={loading}>
       <header className="page-head">
         <div>
-          <h1>ผู้รับการดูแล</h1>
+          <h1>ผู้ป่วย</h1>
           <p className="muted">{result ? `ทั้งหมด ${result.pagination.total} ราย` : ' '}</p>
         </div>
-        <Link className="btn primary" to="/patients/new">+ เพิ่มผู้รับการดูแล</Link>
+        <Link className="btn primary" to="/patients/new">+ เพิ่มผู้ป่วย</Link>
       </header>
 
       <div className="toolbar">
@@ -150,7 +150,7 @@ export default function PatientListPage() {
       {/* กรองมาจากลิงก์ของลูกค้ารายหนึ่ง — ต้องบอกให้เห็น ไม่งั้นคนอ่านนึกว่านี่คือทั้งระบบ */}
       {customerId && (
         <p className="notice filter-chip">
-          แสดงเฉพาะผู้รับการดูแลของ <strong className="mono">{customerId}</strong>
+          แสดงเฉพาะผู้ป่วยของ <strong className="mono">{customerId}</strong>
           <button className="btn link-btn" onClick={() => setFilter('customer_id', '')}>แสดงทั้งหมด</button>
         </p>
       )}
@@ -222,14 +222,7 @@ export default function PatientListPage() {
                   <td data-label="ผู้ว่าจ้าง" title={p.customer_name || undefined}>
                     {p.customer_name ? (
                       <>
-                        {/* stopPropagation กันไม่ให้การกดลิงก์เปิด popup ผู้รับการดูแลตามไปด้วย */}
-                        <Link
-                          className="link"
-                          to={`/customers?open=${p.customer_id}`}
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          {p.customer_name}
-                        </Link>
+                        {p.customer_name}
                         {p.customer_phone && (
                           <span className="cell-sub">
                             <a className="link mono" href={`tel:${p.customer_phone}`} onClick={(e) => e.stopPropagation()}>
@@ -264,12 +257,12 @@ export default function PatientListPage() {
                 <td colSpan={7} className="empty">
                   {filtered ? (
                     <>
-                      ไม่พบผู้รับการดูแลที่ตรงกับเงื่อนไข{' '}
+                      ไม่พบผู้ป่วยที่ตรงกับเงื่อนไข{' '}
                       <button className="btn link-btn" onClick={clearFilters}>ล้างตัวกรอง</button>
                     </>
                   ) : (
                     <>
-                      ยังไม่มีผู้รับการดูแลในระบบ{' '}
+                      ยังไม่มีผู้ป่วยในระบบ{' '}
                       <Link className="link" to="/patients/new">เพิ่มรายแรก →</Link>
                     </>
                   )}

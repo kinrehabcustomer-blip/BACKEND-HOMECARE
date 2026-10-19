@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import WorkHistoryModal from './WorkHistoryModal.jsx';
-import { CASE_TYPE_LABELS, CASE_STATUS_LABELS, formatBaht, formatDate } from '../labels.js';
+import { SERVICE_KIND_LABELS, serviceKindOf, CASE_STATUS_LABELS, formatBaht, formatDate } from '../labels.js';
 
 /**
  * ประวัติการทำงาน = เคสที่พนักงานคนนี้ถืออยู่ ทั้งที่กำลังทำและที่ปิดไปแล้ว
@@ -40,7 +40,7 @@ export default function WorkHistory({ cases = [], limit, collapsible = false, em
             <strong>{c.title}</strong>
             <p className="muted">
               <span className="mono">{c.case_id}</span>
-              {' · '}{CASE_TYPE_LABELS[c.case_type]}
+              {' · '}{SERVICE_KIND_LABELS[serviceKindOf(c)]}
               {' · '}{c.client_name}
             </p>
             <p className="muted">

@@ -5,9 +5,13 @@ import { useToast } from '../toast.jsx';
 import CertificateSection from '../components/CertificateSection.jsx';
 import PortfolioSection from '../components/PortfolioSection.jsx';
 import PhotoField from '../components/PhotoField.jsx';
+import EmployeeCodeField from '../components/EmployeeCodeField.jsx';
+import { EMPLOYEE_CODE_RE } from '../lib/employeeCode.js';
 import { POSITION_LABELS, EMPLOYMENT_TYPE_LABELS, STATUS_LABELS, GENDER_LABELS } from '../labels.js';
 
 const BLANK = {
+  // รหัสที่กรอกเอง (add-on) — ว่าง = ให้ระบบออกรหัส / ตอนแก้ = ไม่เปลี่ยนรหัส
+  employee_id: '',
   first_name: '', last_name: '', first_name_en: '', last_name_en: '',
   nickname: '', national_id: '', phone: '', email: '',
   gender: '', birth_date: '', address: '', education: '',
@@ -56,6 +60,7 @@ export default function EmployeeFormPage() {
       // แปลง null จาก DB กลับเป็น "" เพื่อไม่ให้ input กลายเป็น uncontrolled
       const filled = { ...BLANK };
       for (const key of Object.keys(BLANK)) filled[key] = emp[key] ?? '';
+      filled.employee_id = ''; // รหัสปัจจุบันโชว์ในช่องรหัสอยู่แล้ว — ช่องนี้เก็บเฉพาะรหัสใหม่ที่จะเปลี่ยน
       setForm(filled);
       initial.current = JSON.stringify(filled);
       setSavedPhoto({ has_photo: emp.has_photo, updated_at: emp.updated_at });
@@ -113,6 +118,17 @@ export default function EmployeeFormPage() {
     setFieldErrors({});
     try {
       const payload = toPayload(form);
+
+      /* รหัสที่กรอกเอง: ไม่กรอก = ระบบออกให้ (เพิ่มใหม่) / ไม่เปลี่ยน (แก้ไข)
+         กรอกแล้วรูปแบบผิด = ทักก่อนยิง (ซ้ำกับคนอื่น server ตอบ 409 พร้อมชื่อเจ้าของรหัสมาเอง) */
+      if (!payload.employee_id || (isEdit && payload.employee_id === id)) {
+        delete payload.employee_id;
+      } else if (!EMPLOYEE_CODE_RE.test(payload.employee_id)) {
+        setFieldErrors({ employee_id: 'รหัสพนักงานต้องเป็น A + ตัวเลข 7 หลัก (เช่น A6901059)' });
+        formEl.current?.querySelector('[name="employee_id"]')?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        setSaving(false);
+        return;
+      }
       // ครั้งก่อนสร้างคนไว้แล้วแต่ขั้นแนบไฟล์ล้ม — รอบนี้ต้อง "แก้คนเดิม" ไม่ใช่สร้างใหม่
       const existingId = isEdit ? id : createdId.current;
       const saved = existingId
@@ -207,16 +223,26 @@ export default function EmployeeFormPage() {
             <input required name="last_name" {...field('last_name')} />
             {fieldError('last_name')}
           </label>
+          <label>ชื่อเล่น
+            <input name="nickname" {...field('nickname')} />
+            {fieldError('nickname')}
+          </label>
+          {/* รหัสพนักงานคู่กับตำแหน่งเสมอ — ขึ้นแถวใหม่ที่คอลัมน์แรก (employee-code ใน index.css)
+              จึงอยู่ระนาบเดียวกันทั้งกริดสามคอลัมน์และสองคอลัมน์ */}
+          <EmployeeCodeField
+            currentId={isEdit ? id : null}
+            value={form.employee_id}
+            error={fieldErrors.employee_id}
+            onChange={(code) => {
+              setForm((prev) => ({ ...prev, employee_id: code }));
+              setFieldErrors((prev) => (prev.employee_id ? { ...prev, employee_id: undefined } : prev));
+            }}
+          />
           <label>ตำแหน่ง *
             <select required name="position" {...field('position')}>
               {Object.entries(POSITION_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
             </select>
             {fieldError('position')}
-          </label>
-
-          <label>ชื่อเล่น
-            <input name="nickname" {...field('nickname')} />
-            {fieldError('nickname')}
           </label>
           <label>เบอร์โทร
             <input name="phone" inputMode="tel" {...field('phone')} />

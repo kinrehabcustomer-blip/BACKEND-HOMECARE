@@ -5,7 +5,7 @@ import CaseModal from '../components/CaseModal.jsx';
 import { useSheetSwipe } from '../lib/sheetSwipe.js';
 import { useScrollLock } from '../lib/scrollLock.js';
 import {
-  CASE_TYPE_LABELS, MONTH_LABELS, POSITION_LABELS, SERVICE_KIND_LABELS, VISIT_STATE_LABELS,
+  MONTH_LABELS, POSITION_LABELS, SERVICE_KIND_LABELS, VISIT_STATE_LABELS,
   formatDate, toBuddhistYear,
 } from '../labels.js';
 import { CAL_STATES, dayLabel, timeRange } from '../lib/calendarUi.js';
@@ -289,7 +289,6 @@ export default function CalendarPage() {
                         timeRange(c),
                         c.case_id,
                         SERVICE_KIND_LABELS[kindOf(c)],
-                        CASE_TYPE_LABELS[c.case_type],
                         c.client_name,
                         c.assigned_name ?? 'ยังไม่จับคู่พนักงาน',
                         VISIT_STATE_LABELS[c.state],
@@ -336,7 +335,7 @@ export default function CalendarPage() {
                   <p className="muted">
                     <span className="mono">{c.case_id}</span>
                     {' · '}{c.assigned_name ?? 'ยังไม่จับคู่'}
-                    {' · '}{CASE_TYPE_LABELS[c.case_type]}
+                    {' · '}{SERVICE_KIND_LABELS[kindOf(c)]}
                   </p>
                 </div>
                 <button className="btn tiny" onClick={() => patch({ open: c.case_id })}>ลงวันนัด</button>
@@ -395,7 +394,7 @@ function DayPanel({ day, list, onOpenCase, onClose }) {
               <div>
                 <strong>{timeRange(c) ?? 'ไม่ระบุเวลา'} · {c.assigned_name ?? '— ยังไม่จับคู่ —'}</strong>
                 <p className="muted">
-                  {c.client_name} · {CASE_TYPE_LABELS[c.case_type]} · {SERVICE_KIND_LABELS[kindOf(c)]}
+                  {c.client_name} · {SERVICE_KIND_LABELS[kindOf(c)]}
                 </p>
                 <p className="muted">
                   <button className="btn link-btn" onClick={() => onOpenCase(c.case_id)}>

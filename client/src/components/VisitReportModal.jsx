@@ -4,7 +4,7 @@ import { useScrollLock } from '../lib/scrollLock.js';
 import { useAuth } from '../auth.jsx';
 import CaseReports from './CaseReports.jsx';
 import { serviceName } from './MyCaseModal.jsx';
-import { CASE_TYPE_LABELS, formatDate } from '../labels.js';
+import { SERVICE_KIND_LABELS, serviceKindOf, formatDate } from '../labels.js';
 
 /**
  * popup บันทึกรายงานอาการของ "กะนี้" — เปิดจากการ์ดงานวันนี้ของพนักงาน
@@ -42,7 +42,7 @@ export default function VisitReportModal({ visit, onSaved, onClose }) {
             <p className="muted">
               {visit.client_name}
               {' · '}
-              {serviceName(visit) || CASE_TYPE_LABELS[visit.case_type]}
+              {serviceName(visit) || SERVICE_KIND_LABELS[serviceKindOf(visit)]}
             </p>
           </div>
           <button className="modal-close" onClick={onClose} aria-label="ปิด">×</button>
