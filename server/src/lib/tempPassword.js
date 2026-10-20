@@ -20,3 +20,16 @@ export function decryptTempPassword(value, employeeId) {
   cipher.setAuthTag(tag);
   return Buffer.concat([cipher.update(encrypted), cipher.final()]).toString('utf8');
 }
+
+/**
+ * ถอดรหัสแบบไม่ล้มทั้งคำขอ — คืน null เมื่อถอดไม่ออก
+ * กุญแจผูกกับ JWT_SECRET: หมุน secret แล้วสำเนาเดิมทุกแถวถอดไม่ออกถาวร (GCM auth tag ไม่ผ่าน)
+ * ถ้าปล่อย throw หน้าดูพนักงาน/การเปลี่ยนรหัสพนักงานจะกลายเป็น 500 ทั้งที่ข้อมูลอื่นปกติดี
+ */
+export function tryDecryptTempPassword(value, employeeId) {
+  try {
+    return decryptTempPassword(value, employeeId);
+  } catch {
+    return null;
+  }
+}

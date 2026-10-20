@@ -2342,7 +2342,8 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
 .cal-title { margin: 0 0 0.75rem; font-size: 1.0625rem; }
 .cal-grid {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
+  /* minmax(0, 1fr) ไม่ใช่ 1fr — 1fr ยอมให้คอลัมน์กว้างตามข้อความในชิปที่ไม่ตัดบรรทัด วันที่มีชื่อยาวจึงกว้างกว่าวันอื่น */
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 1px;
   background: var(--border);
   border: 1px solid var(--border);
@@ -4274,7 +4275,7 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
   margin-top: 0.875rem;
 }
 .payroll-actions .btn { justify-content: center; }
-/* เหลือปุ่มเดียว (รอบที่จ่ายแล้วมีแค่ "ยกเลิกรอบ") = เต็มแถว ไม่ใช่ลอยครึ่งเดียว */
+/* เหลือปุ่มเดียว = เต็มแถว ไม่ใช่ลอยครึ่งเดียว (รอบที่จ่าย/ยกเลิกแล้วไม่มีปุ่มเลย) */
 .payroll-actions .btn:only-child { grid-column: 1 / -1; }
 
 /* จอกว้างพอวางเรียงเดียวได้ — สี่ช่องเท่ากัน ยังสมมาตรและไม่กินความกว้างทั้งกล่อง */
@@ -4864,6 +4865,12 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
   /* หน้าภาพรวมเป็นแดชบอร์ดหลายการ์ดวางเป็นกริด — การ์ดกริดชนขอบไม่ได้ ใบเดี่ยวจึงคงมุมมนไว้ให้ทั้งหน้าเข้าชุดกัน */
   :is(.content, .content > .pull-zone > .pull-content):has(.hero-card) > .card:not(.narrow) { margin-inline: 0; border-inline: 1px solid var(--border); border-radius: var(--radius-card); }
   :is(.content, .content > .pull-zone > .pull-content):has(.hero-card) > .page-head { margin-bottom: 1.375rem; }
+  /* หน้ารายละเอียด (ผู้ป่วย / พนักงาน / คะแนนประเมิน) มีการ์ดคู่วางเป็นคอลัมน์ (.columns) ซึ่งชนขอบไม่ได้
+     การ์ดเดี่ยวในหน้าเดียวกันจึงคงมุมมนเหมือนกันทั้งหน้า ไม่ใช่บางใบชนขอบบางใบไม่ชน */
+  :is(.content, .content > .pull-zone > .pull-content):has(> .columns) > .card:not(.narrow) {
+    margin-inline: 0; border-inline: 1px solid var(--border); border-top: 1px solid var(--border); border-radius: var(--radius-card);
+  }
+  :is(.content, .content > .pull-zone > .pull-content):has(> .columns) > .page-head { margin-bottom: 1.375rem; }
 }
 .list-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-card); overflow: hidden; }
 .list-card > .toolbar { margin: 0; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; }
@@ -5251,3 +5258,31 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
 /* แถบที่มีหัวแบบ hero (สูงกว่าช่องกรอก) — ปุ่มไม่ต้องยืดสูงตามแถบ ให้ขนาดปกติวางกึ่งกลาง */
 .toolbar:has(.page-hero) .toolbar-action { align-self: center; margin-right: 1rem; }
 @media (max-width: 900px) { .toolbar:has(.page-hero) .toolbar-action { margin-right: 0; } }
+
+/* ---------- หน้าคะแนนประเมิน: ช่องสรุป + ตาราง อยู่ในการ์ดขาวใบเดียว ---------- */
+.reviews-card > .review-tiles { margin: 0; padding: 1rem; }
+.reviews-card .table-wrap > .table { border-inline: 0; border-bottom: 0; border-radius: 0; }
+.reviews-card > .empty-state { margin: 0; border: 0; }
+/* ชื่อ + รหัส·ตำแหน่ง + ป้ายสถานะ (พักงาน/ลาออก) ยาวเกินคอลัมน์ได้ — ให้ตัดลงบรรทัดใหม่ ไม่ล้นไปทับคอลัมน์คะแนน */
+.reviews-card .name-cell { flex-wrap: wrap; row-gap: 0.25rem; }
+/* จอคอม: การ์ดยืดลงจนสุดจอ เหมือนหน้าการมาทำงาน */
+@media (min-width: 901px) {
+  .content:has(.reviews-card) { display: flex; flex-direction: column; padding-bottom: 0; }
+  .content:has(.reviews-card) > .pull-zone,
+  .content:has(.reviews-card) > .pull-zone > .pull-content { flex: 1; display: flex; flex-direction: column; }
+  .reviews-card { flex: 1; border-bottom: 0; }
+}
+@media (max-width: 600px) { .reviews-card > .review-tiles { padding: 0 0 1rem; } }
+
+/* ---------- มือถือ: เป้ากดให้ใหญ่พอนิ้ว (ราว 40px) ---------- */
+/* กลุ่มปุ่ม ‹ วันนี้ › ในแถบตัวกรองหน้าตารางงาน — บนจอแคบปุ่มเคยแบนเหลือ 16px เพราะไม่มีความสูงขั้นต่ำ
+   (จอคอมได้ความสูงจากการยืดตามแถบ แต่จอแคบปุ่มกลุ่มนี้ตกลงบรรทัดใหม่ของตัวเอง) */
+.cal-hero-nav button { min-height: 2.5rem; }
+@media (max-width: 900px) {
+  .modal-close { min-width: 2.75rem; min-height: 2.75rem; display: inline-flex; align-items: center; justify-content: center; }
+  .per-page select, .att-filter select { min-height: 2.5rem; }
+  .history-toggle { min-height: 2.5rem; }
+  /* ช่องสรุป 3 ช่องหน้าคะแนนประเมิน — 2+1 เหลือช่องโหว่ ให้ช่องแรก (คะแนนเฉลี่ย) กินเต็มแถว แล้วอีกสองช่องแบ่งครึ่ง */
+  .reviews-card .review-tiles { grid-template-columns: 1fr 1fr; }
+  .reviews-card .review-tiles > .tile:first-child { grid-column: 1 / -1; }
+}

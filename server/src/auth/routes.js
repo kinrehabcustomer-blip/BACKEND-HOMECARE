@@ -238,9 +238,10 @@ authRouter.post(
        มักเกิดตอน "เข้าไม่ได้เพราะมีคนอื่นเข้าไปแล้ว" เซสชันของคนนั้นต้องตายพร้อมกัน */
     await sql.run(
       `UPDATE employees
-       SET password_hash = :hash, must_change_password = FALSE, temp_password_encrypted = NULL, password_changed_at = now()
+       SET password_hash = :hash, must_change_password = FALSE, temp_password_encrypted = NULL, password_changed_at = :changed_at
        WHERE employee_id = :id`,
-      { hash: await hashPassword(new_password), id: employee.employee_id },
+      // นาฬิกาฝั่งแอป ไม่ใช่ now() ของ DB — ต้องเป็นนาฬิกาเดียวกับ iat_ms ใน token (ดู requireAuth)
+      { hash: await hashPassword(new_password), id: employee.employee_id, changed_at: new Date() },
     );
     await clearLoginFailures(email);
 
@@ -272,9 +273,11 @@ authRouter.post(
 
     await sql.run(
       `UPDATE employees
-       SET password_hash = :hash, must_change_password = FALSE, temp_password_encrypted = NULL, password_changed_at = now()
+       SET password_hash = :hash, must_change_password = FALSE, temp_password_encrypted = NULL, password_changed_at = :changed_at
        WHERE employee_id = :id`,
-      { hash: await hashPassword(new_password), id },
+      /* นาฬิกาฝั่งแอป ไม่ใช่ now() ของ DB — token ใบใหม่ข้างล่างออกหลังบรรทัดนี้ด้วยนาฬิกาเดียวกัน
+         iat_ms จึง >= password_changed_at เสมอแม้ DB กับแอปเวลาเหลื่อมกัน (ดู requireAuth) */
+      { hash: await hashPassword(new_password), id, changed_at: new Date() },
     );
 
     /* เซสชันเก่าถูกเพิกถอนไปแล้วรวมถึงใบที่กำลังใช้อยู่นี้ — ออกใบใหม่ให้ทันที

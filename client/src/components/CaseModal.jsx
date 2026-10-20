@@ -467,16 +467,18 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
 
               <section>
                 <h3>รายละเอียดการใช้บริการ</h3>
-                <div className="field-grid">
-                  <Field label="วัน/เวลาที่สะดวกเริ่มใช้บริการ" value={item.service_start_preference} />
-                  <Field label="เบอร์ติดต่อคุณญาติ" value={item.client_phone} />
-                </div>
+                {/* 3 ช่องนี้เอาออกจากฟอร์มเปิดเคสแล้ว — โชว์เฉพาะเคสเก่าที่เคยกรอกไว้ ไม่ขึ้น "ไม่ได้ระบุ" ทั้งที่กรอกไม่ได้ */}
+                {(item.service_start_preference || item.client_phone) && (
+                  <div className="field-grid">
+                    {item.service_start_preference && <Field label="วัน/เวลาที่สะดวกเริ่มใช้บริการ" value={item.service_start_preference} />}
+                    {item.client_phone && <Field label="เบอร์ติดต่อคุณญาติ" value={item.client_phone} />}
+                  </div>
+                )}
                 <Field label="ที่อยู่สถานที่ดูแล" value={item.address} />
                 <CaseLocationLink key={`${item.geo_lat},${item.geo_lng}`} item={item} />
-                <Field
-                  label="วัน/เวลาที่สะดวกให้พยาบาลโทรประเมินและรับเคส"
-                  value={item.nurse_call_preference}
-                />
+                {item.nurse_call_preference && (
+                  <Field label="วัน/เวลาที่สะดวกให้พยาบาลโทรประเมินและรับเคส" value={item.nurse_call_preference} />
+                )}
               </section>
 
               <section>

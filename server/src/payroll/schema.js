@@ -30,6 +30,18 @@ export const payRunSchema = z.object({
   note: optionalText,
 });
 
+/**
+ * "จ่ายเลย" — เปิดรอบ + จ่ายในคำขอเดียว
+ * payout_ids = รหัสก้อนเงินทุกก้อนจากพรีวิวที่ผู้ใช้เห็นก่อนกด — server จ่ายเฉพาะเมื่อชุดตรงกันเป๊ะ
+ */
+export const payNowSchema = z.object({
+  period_to: date,
+  note: optionalText,
+  pay_date: date.optional(),
+  method: optionalText,
+  payout_ids: z.array(z.coerce.number().int().positive()).min(1, 'ไม่มีก้อนค่าจ้างให้จ่าย').max(10000),
+});
+
 export const previewQuerySchema = z.object({ period_to: date });
 
 /** ที่มาของยอดในแท็บสรุป — ต้องระบุทั้งเดือนและคน เพราะมันคือการกางยอดของช่องเดียวในตาราง */

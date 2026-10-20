@@ -16,7 +16,7 @@ import {
 } from './schema.js';
 import { decodeImage } from '../employees/schema.js';
 import { ApiError, asyncRoute, notFound } from '../lib/errors.js';
-import { requireManager } from '../lib/auth.js';
+import { requireManager, can } from '../lib/auth.js';
 
 export const invoicesRouter = Router();
 
@@ -64,7 +64,10 @@ export async function createDraftForCase(caseRow, actor) {
   if (existing) return repo.findById(existing.invoice_id);
 
   const customer = await resolvePayer(caseRow);
-  return repo.createFromCase({ ...caseRow, customer }, {}, actor);
+  const created = await repo.createFromCase({ ...caseRow, customer }, {}, actor);
+  // คำขอซ้ำที่มาพร้อมกันแพ้ล็อกของเคส (ดู createFromCase) — คืนใบร่างที่อีกคำขอเพิ่งสร้างแทน
+  if (created.reason === 'draft_exists') return repo.findById(created.invoice_id);
+  return created;
 }
 
 /** โหลดใบแจ้งหนี้ก่อนทุก route ที่มี :id — ไม่มีก็ 404 ตั้งแต่ตรงนี้ */
@@ -81,10 +84,20 @@ invoicesRouter.param('id', (req, res, next, id) => {
 
 invoicesRouter.get('/meta', (req, res) => res.json({ statuses: INVOICE_STATUSES }));
 
-/** ยอดสรุป — รับตัวกรองชุดเดียวกับรายการ เพื่อให้ตัวเลขด้านบนตรงกับสิ่งที่ผู้ใช้เห็นอยู่ */
+/**
+ * ยอดสรุป — รับตัวกรองชุดเดียวกับรายการ เพื่อให้ตัวเลขด้านบนตรงกับสิ่งที่ผู้ใช้เห็นอยู่
+ *
+ * ยอดเงินของแถว "ชำระแล้ว" คือรายได้รวมของบริษัท — ตัวเลขเดียวกับที่ /revenue กันไว้ให้เฉพาะหมวด money
+ * HR/แอดมินที่มีแค่สิทธิ์ billing ยิงเส้นนี้แล้วได้รายได้ไปเฉยๆ จึงตัดยอดเงินของแถวนั้นทิ้ง เหลือแค่จำนวนใบ
+ * (ยอดค้างของใบที่ยังไม่ชำระยังเห็นได้ — เป็นงานประจำของคนตามเก็บเงิน)
+ */
 invoicesRouter.get(
   '/summary',
-  asyncRoute(async (req, res) => res.json(await repo.summary(listQuerySchema.parse(req.query)))),
+  asyncRoute(async (req, res) => {
+    const rows = await repo.summary(listQuerySchema.parse(req.query));
+    if (can(req.user?.position, 'money')) return res.json(rows);
+    res.json(rows.map((r) => (r.status === 'paid' ? { status: r.status, count: r.count } : r)));
+  }),
 );
 
 /**
@@ -149,7 +162,10 @@ invoicesRouter.post(
     if (input.basis === 'visits') {
       ({ lines: items } = await repo.visitLines(caseRow, input));
       if (items.length === 0) {
-        throw new ApiError(409, 'เคสนี้ยังไม่มีกะที่เช็คอิน–เอาท์ครบในช่วงที่เลือก จึงออกใบตามกะไม่ได้');
+        throw new ApiError(
+          409,
+          'เคสนี้ไม่มีกะที่เช็คอิน–เอาท์ครบและยังไม่ได้ออกใบในช่วงที่เลือก จึงออกใบตามกะไม่ได้',
+        );
       }
       /* ใบตามกะมักออกเป็นรอบๆ (ทีละช่วงวัน) แต่อุปกรณ์เสริมเก็บครั้งเดียวต่อเคส
          ใบก่อนหน้าที่ยังไม่ยกเลิกเก็บไปแล้ว = ใบนี้ไม่ใส่ซ้ำ */
@@ -157,7 +173,19 @@ invoicesRouter.post(
     }
 
     // req.user มาจาก requireAuth = พนักงานที่กำลังทำรายการนี้ → บันทึกเป็นผู้ออกเอกสาร
-    res.status(201).json(await repo.createFromCase({ ...caseRow, customer }, input, req.user, items, { addons }));
+    const created = await repo.createFromCase({ ...caseRow, customer }, input, req.user, items, { addons });
+    /* เช็คซ้ำใน transaction หลังล็อกเคสแล้ว — ด่านข้างบนกันกรณีปกติ ส่วนนี้กันคำขอที่ยิงมาพร้อมกัน */
+    if (created.reason === 'draft_exists') {
+      throw new ApiError(
+        409,
+        `เคสนี้มีใบร่าง ${created.invoice_id} ค้างอยู่แล้ว — แก้ใบเดิมหรือลบทิ้งก่อนจึงจะออกใบใหม่ได้`,
+        { existing_invoice_id: created.invoice_id },
+      );
+    }
+    if (created.reason === 'visits_already_billed') {
+      throw new ApiError(409, 'มีกะในช่วงนี้ถูกออกใบไปพร้อมกันพอดี กรุณาโหลดข้อมูลใหม่แล้วลองอีกครั้ง');
+    }
+    res.status(201).json(created);
   }),
 );
 
@@ -210,7 +238,8 @@ invoicesRouter.post(
     if (!caseRow) throw new ApiError(409, 'เคสต้นทางถูกลบไปแล้ว');
 
     const customer = await resolvePayer(caseRow);
-    await repo.syncOpenFromCase(caseRow, customer);
+    // กดรีเฟรชเอง = ตั้งใจให้ข้อมูลเคสทับสิ่งที่แก้มือไว้ในใบนี้ จึงบังคับซิงก์และล้างธง manual_edit
+    await repo.syncOpenFromCase(caseRow, customer, { forceInvoiceId: req.params.id });
 
     res.json(await repo.findById(req.params.id));
   }),
@@ -249,6 +278,13 @@ invoicesRouter.post(
     }
     if (result.reason === 'empty_total') {
       throw new ApiError(409, 'ใบนี้ยังไม่มียอด — ตั้งค่าบริการของเคสก่อนจึงจะแบ่งงวดได้');
+    }
+    if (result.reason === 'has_items') {
+      throw new ApiError(
+        409,
+        'ใบนี้แตกเป็นรายครั้งตามกะที่ไปจริง จึงแบ่งมัดจำไม่ได้ — เลือก "เก็บเต็มจำนวน"' +
+          ' หรือถ้าต้องการเก็บมัดจำ ให้ลบใบนี้แล้วออกใบแบบแพ็คเกจแทน',
+      );
     }
     if (result.reason === 'deposit_not_less_than_total') {
       throw new ApiError(400, 'ยอดมัดจำต้องน้อยกว่ายอดเต็ม — ถ้าเก็บทั้งหมดให้เลือก "เก็บเต็มจำนวน"');
@@ -426,6 +462,14 @@ invoicesRouter.post(
     const result = await repo.cancel(req.params.id);
     throwIfInvoiceMoved(result);
     if (result.reason === 'invalid_status') throw new ApiError(409, 'ใบนี้ถูกยกเลิกไปแล้ว');
+    if (result.reason === 'sibling_has_payments') {
+      throw new ApiError(
+        409,
+        `ใบ ${result.invoice_id} ในแผนมัดจำเดียวกันรับชำระมาแล้ว — ยกเลิกใบนี้ใบเดียวจะทำให้ยอดของแผนขาดไป` +
+          ' ถ้ายอดตกลงเปลี่ยน ให้แก้ที่ช่อง "ยอดมัดจำ" ของใบมัดจำแทน' +
+          ' หรือถ้าจะยกเลิกทั้งแผน ให้ยกเลิกใบที่รับเงินแล้วก่อน (ใบที่ยังไม่รับเงินจะถูกยกเลิกตามให้เอง)',
+      );
+    }
     res.json(result);
   }),
 );

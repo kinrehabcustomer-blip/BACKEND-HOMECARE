@@ -1,6 +1,6 @@
 import { sql, nextEmployeeId, transaction } from '../db/index.js';
 import { hashPassword, generateTempPassword } from '../lib/auth.js';
-import { encryptTempPassword, decryptTempPassword } from '../lib/tempPassword.js';
+import { encryptTempPassword, tryDecryptTempPassword } from '../lib/tempPassword.js';
 import { ApiError } from '../lib/errors.js';
 
 const COLUMNS = [
@@ -120,7 +120,10 @@ export async function findDetailById(employeeId, includeTempPassword = false) {
        WHERE employee_id = :id AND must_change_password = TRUE`, { id: employeeId },
     );
     if (credential?.temp_password_encrypted) {
-      result.temp_password = decryptTempPassword(credential.temp_password_encrypted, employeeId);
+      const plain = tryDecryptTempPassword(credential.temp_password_encrypted, employeeId);
+      // ถอดไม่ออก (หมุน JWT_SECRET ไปแล้ว) — ไม่ส่งรหัส แต่บอกว่ามีอยู่และต้องออกรหัสใหม่ให้
+      if (plain == null) result.temp_password_unreadable = true;
+      else result.temp_password = plain;
     }
   }
   return result;
@@ -188,10 +191,10 @@ export async function update(employeeId, input) {
         { id: employeeId },
       );
       if (cred?.temp_password_encrypted) {
-        values.temp_password_encrypted = encryptTempPassword(
-          decryptTempPassword(cred.temp_password_encrypted, employeeId),
-          nextId,
-        );
+        /* ถอดไม่ออก (หมุน JWT_SECRET ไปแล้ว) = สำเนานี้ไม่มีใครอ่านได้อีกอยู่แล้ว
+           ล้างทิ้งแทนการล้มทั้งการเปลี่ยนรหัส — รหัสผ่านจริง (password_hash) ไม่ถูกแตะ */
+        const plain = tryDecryptTempPassword(cred.temp_password_encrypted, employeeId);
+        values.temp_password_encrypted = plain == null ? null : encryptTempPassword(plain, nextId);
         sets.push('temp_password_encrypted = :temp_password_encrypted');
       }
     }

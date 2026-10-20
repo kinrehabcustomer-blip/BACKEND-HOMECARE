@@ -62,7 +62,8 @@ export default function RevenueChart() {
         textStyle: { color: tokens.text, fontFamily: tokens.font },
         formatter: ([point]) => {
           const row = data[point.dataIndex];
-          const bills = row.invoices === 0 ? 'ไม่มีใบที่ชำระ' : `${row.invoices} ใบ`;
+          // รายได้เป็นเกณฑ์เงินสด (เงินที่รับจริงทุกงวด) — จำนวนใบ = ใบที่มีเงินเข้าในช่วงนั้น ไม่ใช่ใบที่ปิดยอด
+          const bills = row.invoices === 0 ? 'ไม่มีเงินเข้า' : `${row.invoices} ใบ`;
           return `${periodText(row.period, bucket)}<br/><strong>${formatBaht(row.revenue)}</strong> · ${bills}`;
         },
       },
@@ -137,8 +138,8 @@ export default function RevenueChart() {
             <strong>{formatBaht(result.total)}</strong>
             <span className="muted">
               {result.invoices === 0
-                ? ' — ยังไม่มีใบแจ้งหนี้ที่ชำระในช่วงนี้'
-                : ` จาก ${result.invoices} ใบที่ชำระแล้ว`}
+                ? ' — ยังไม่มีเงินเข้าในช่วงนี้'
+                : ` เงินที่รับจริงจาก ${result.invoices} ใบ`}
             </span>
           </p>
           <EChart

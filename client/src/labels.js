@@ -11,7 +11,6 @@ export const POSITION_LABELS = {
   // Admin HC (ชื่อเดิม "แอดมิน") = สิทธิ์เท่าผู้จัดการทุกอย่าง ยกเว้นเรื่องเงิน (ค่าจ้าง/กำไร/รอบจ่าย/รายได้บริษัท)
   // คีย์ยังเป็น 'admin' — เปลี่ยนแค่ป้าย ข้อมูลพนักงานเดิมไม่ต้องย้าย
   admin: 'Admin HC',
-  admin_ipd: 'Admin IPD', // ยังไม่กำหนดสิทธิ์ (ดู POSITION_PERMISSIONS ฝั่ง server)
   finance: 'การเงิน',     // เข้าได้เฉพาะใบแจ้งหนี้ · ค่าตอบแทนพนักงาน · รายได้บริษัท
 };
 
@@ -24,7 +23,7 @@ export const THERAPY_POSITIONS = ['therapist', 'occupational_therapist', 'speech
 
 /** กลุ่มพนักงาน — back = สายสำนักงาน · front = ที่เหลือทั้งหมด (ออกไปดูแลผู้ป่วยจริง)
     ต้องตรงกับ BACK_POSITIONS / FRONT_POSITIONS ใน server/src/employees/schema.js */
-export const BACK_POSITIONS = ['manager', 'hr', 'admin', 'admin_ipd', 'finance'];
+export const BACK_POSITIONS = ['manager', 'hr', 'admin', 'finance'];
 export const FRONT_POSITIONS = Object.keys(POSITION_LABELS).filter((p) => !BACK_POSITIONS.includes(p));
 
 /**
@@ -176,6 +175,7 @@ export const CASE_EVENT_LABELS = {
   reopened: 'เปิดเคสใหม่',
   renewed: 'ต่อเคส',
   visit_adjusted: 'แก้กะ',
+  visit_edited: 'แก้นัดหมายกะ',
   pay_approved: 'อนุมัติค่าจ้าง',
   pay_rejected: 'ไม่อนุมัติค่าจ้าง',
   pay_released: 'ปล่อยค่าจ้าง',

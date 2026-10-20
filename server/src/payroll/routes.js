@@ -3,6 +3,7 @@ import * as repo from './repo.js';
 import {
   createRunSchema,
   payRunSchema,
+  payNowSchema,
   previewQuerySchema,
   listQuerySchema,
   employeeCasesQuerySchema,
@@ -111,6 +112,41 @@ payrollRouter.post(
   }),
 );
 
+/**
+ * "จ่ายเลย" — เปิดรอบและบันทึกจ่ายใน transaction เดียว (ดู repo.payNow)
+ * ล้มตรงไหนก็ไม่เหลือรอบร่างค้าง และจ่ายได้เฉพาะชุดก้อนเงินที่ผู้ใช้เห็นในพรีวิวเท่านั้น
+ */
+payrollRouter.post(
+  '/pay-now',
+  asyncRoute(async (req, res) => {
+    const input = payNowSchema.parse(req.body);
+    if (input.period_to > TODAY()) {
+      throw new ApiError(400, 'วันตัดรอบต้องไม่เกินวันนี้');
+    }
+
+    const result = await repo.payNow({ ...input, pay_date: input.pay_date ?? TODAY() }, req.user);
+    if (result.reason === 'round_limit') {
+      throw new ApiError(
+        409,
+        `เดือน ${result.period_month} เปิดครบ 3 รอบแล้ว — ถ้าจะเปิดเพิ่มต้องยกเลิกรอบใดรอบหนึ่งก่อน`,
+      );
+    }
+    if (result.reason === 'preview_mismatch') {
+      throw new ApiError(
+        409,
+        'ยอดที่รอจ่ายเปลี่ยนไปหลังจากเปิดดูพรีวิว (มีการปล่อย/ถอนค่าจ้าง หรือรอบอื่นดึงไปแล้ว) — ยังไม่ได้จ่ายและไม่ได้สร้างรอบใด กรุณาโหลดพรีวิวใหม่แล้วตรวจยอดอีกครั้ง',
+      );
+    }
+    if (result.reason === 'empty_run') {
+      throw new ApiError(409, 'ไม่มียอดค่าจ้างให้จ่าย');
+    }
+    if (result.reason) {
+      throw new ApiError(409, 'รอบที่เพิ่งสร้างถูกเปลี่ยนแปลงระหว่างทำรายการ กรุณาโหลดข้อมูลใหม่');
+    }
+    res.status(201).json(result);
+  }),
+);
+
 payrollRouter.get('/:id', (req, res) => res.json(req.run));
 
 /** ค่าจ้างทุกก้อนที่อยู่ในสลิปใบหนึ่ง — ที่มาของยอด (หนึ่งบรรทัด = ค่าจ้างหนึ่งก้อนของหนึ่งเคส) */
@@ -156,7 +192,7 @@ payrollRouter.delete(
   }),
 );
 
-/** ปิดรอบเป็น "จ่ายแล้ว" — หลังจากนี้ล็อกทั้งรอบ แก้ได้ทางเดียวคือยกเลิกรอบ */
+/** ปิดรอบเป็น "จ่ายแล้ว" — หลังจากนี้ล็อกทั้งรอบถาวร (ยกเลิกไม่ได้ เพราะจะทำให้จ่ายซ้ำ) */
 payrollRouter.post(
   '/:id/pay',
   asyncRoute(async (req, res) => {
@@ -178,15 +214,22 @@ payrollRouter.post(
 );
 
 /**
- * ยกเลิกรอบ — รอบยังอยู่เป็นประวัติ แต่ค่าจ้างทุกก้อนกลับเข้ากองรอจ่าย
- * ใช้กับรอบที่จ่ายผิด/จ่ายไม่ครบด้วย: ก้อนที่ถูกปลดจะไปโผล่ในรอบถัดไปเอง ไม่มีทางตกหล่น
+ * ยกเลิกรอบร่าง — รอบยังอยู่เป็นประวัติ แต่ค่าจ้างทุกก้อนกลับเข้ากองรอจ่าย ไปโผล่ในรอบถัดไปเอง
+ * รอบที่จ่ายแล้วยกเลิกไม่ได้: เงินโอนออกไปแล้วจริง ถ้าปลดก้อนกลับเข้ากองทุกคนจะถูกจ่ายซ้ำในรอบหน้า
  */
 payrollRouter.post(
   '/:id/cancel',
   asyncRoute(async (req, res) => {
     const result = await repo.cancel(req.params.id);
     if (result.reason === 'not_found') throw notFound('ไม่พบรอบจ่ายนี้');
-    if (result.reason === 'invalid_status') throw new ApiError(409, 'รอบนี้ถูกยกเลิกไปแล้ว');
+    if (result.reason === 'invalid_status') {
+      throw new ApiError(
+        409,
+        result.status === 'paid'
+          ? 'รอบนี้จ่ายไปแล้ว ยกเลิกไม่ได้ — เงินโอนออกไปแล้วจริง ถ้ายกเลิก ค่าจ้างทุกก้อนในรอบจะกลับเข้ากองรอจ่ายและถูกจ่ายซ้ำในรอบถัดไป'
+          : 'รอบนี้ถูกยกเลิกไปแล้ว',
+      );
+    }
     if (result.reason === 'state_changed') {
       throw new ApiError(409, 'เดือนของรอบเปลี่ยนระหว่างทำรายการ กรุณาโหลดข้อมูลใหม่แล้วลองอีกครั้ง');
     }

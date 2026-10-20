@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import LineIcon from '../components/LineIcon.jsx';
 import { api } from '../api.js';
 import { STATUS_LABELS, POSITION_LABELS, stampText } from '../labels.js';
 import Stars from '../components/Stars.jsx';
@@ -44,110 +45,112 @@ export default function ReviewsPage() {
   return (
     <PageRefresh onRefresh={load} busy={loading}>
       <header className="page-head">
-        <div>
-          <h1>คะแนนประเมินจากญาติ</h1>
-          <p className="muted">
-            ญาติผู้รับบริการกรอกจากลิงก์เฉพาะตัวของพนักงานแต่ละคน · กดที่ชื่อเพื่อดูคะแนนรายหัวข้อและลิงก์/QR
-          </p>
+        {/* หัวหน้าแบบ hero — ไอคอนในกรอบสีทองอ่อน + ชื่อหน้าตัวใหญ่ (ชุดเดียวกับหน้าแพ็คเกจ) */}
+        <div className="page-hero">
+          <span className="page-hero-icon" aria-hidden="true"><LineIcon name="star" /></span>
+          <h1 className="page-hero-title">คะแนนประเมินจากญาติ</h1>
         </div>
       </header>
 
       {error && <p className="error">{error}</p>}
 
-      {/* is-static — ช่องตัวเลขพวกนี้กดไม่ได้ ต้องไม่เปลี่ยนสีตอนเอาเมาส์ชี้ ไม่งั้นหลอกว่ากดได้ */}
-      <div className="tiles review-tiles">
-        <div className="tile is-static">
-          <span className="tile-label">คะแนนเฉลี่ยทั้งทีม</span>
-          <span className="tile-value">{scoreText(teamAvg)}</span>
-          <Stars value={teamAvg} size="sm" />
+      {/* สรุปตัวเลข + ตาราง อยู่ในการ์ดขาวใบเดียว (โครงเดียวกับหน้าการมาทำงาน — ดู .reviews-card) */}
+      <div className="list-card reviews-card">
+        {/* is-static — ช่องตัวเลขพวกนี้กดไม่ได้ ต้องไม่เปลี่ยนสีตอนเอาเมาส์ชี้ ไม่งั้นหลอกว่ากดได้ */}
+        <div className="tiles review-tiles">
+          <div className="tile is-static">
+            <span className="tile-label">คะแนนเฉลี่ยทั้งทีม</span>
+            <span className="tile-value">{scoreText(teamAvg)}</span>
+            <Stars value={teamAvg} size="sm" />
+          </div>
+          <div className="tile is-static">
+            <span className="tile-label">แบบประเมินทั้งหมด</span>
+            <span className="tile-value">{totalReviews}</span>
+            <span className="tile-frac">ใบ</span>
+          </div>
+          <div className="tile is-static">
+            <span className="tile-label">มีคะแนนแล้ว</span>
+            <span className="tile-value">{rated.length}</span>
+            <span className="tile-frac">จาก {rows.length} คน</span>
+          </div>
         </div>
-        <div className="tile is-static">
-          <span className="tile-label">แบบประเมินทั้งหมด</span>
-          <span className="tile-value">{totalReviews}</span>
-          <span className="tile-frac">ใบ</span>
-        </div>
-        <div className="tile is-static">
-          <span className="tile-label">มีคะแนนแล้ว</span>
-          <span className="tile-value">{rated.length}</span>
-          <span className="tile-frac">จาก {rows.length} คน</span>
-        </div>
-      </div>
 
-      {rows.length === 0 ? (
-        <div className="empty-state">
-          <p>ยังไม่มีพนักงานกลุ่ม front ในระบบ</p>
-          <p className="muted">
-            แบบประเมินนี้เปิดใช้กับพนักงานที่ออกไปดูแลผู้ป่วย — CG, NA, PN, RN และสายบำบัด
-          </p>
-        </div>
-      ) : (
-        <div className="table-wrap">
-          <table className="table table-cards">
-            <thead>
-              <tr>
-                <th>พนักงาน</th>
-                <th>คะแนนรวม</th>
-                <th>จำนวนใบ</th>
-                <th>ประเมินล่าสุด</th>
-                <th>ลิงก์ประเมิน</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => (
-                /* กดได้ทั้งแถว ไม่ใช่เฉพาะชื่อ — ท่าเดียวกับตารางเคส/ลูกค้า/พนักงาน
-                   ชื่อจึงไม่เป็นลิงก์ซ้อนอยู่ข้างใน (ลิงก์ในแถวที่กดได้ = เป้าหมายซ้อนกันสองชั้น
-                   ที่คนใช้แป้นพิมพ์ต้องกด Tab ผ่านสองครั้งเพื่อไปที่เดียวกัน) */
-                <tr
-                  key={r.employee_id}
-                  className="row-clickable"
-                  tabIndex={0}
-                  onClick={() => navigate(`/reviews/${r.employee_id}`)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      navigate(`/reviews/${r.employee_id}`);
-                    }
-                  }}
-                >
-                  <td data-label="พนักงาน">
-                    <span className="name-cell">
-                      <span className="link">{r.first_name} {r.last_name}</span>
-                      {/* ทุกตำแหน่งหน้างานอยู่ตารางเดียวกันแล้ว — บอกตำแหน่งให้แยกออกว่าใครเป็นใคร */}
-                      <span className="cell-sub"><span className="mono">{r.employee_id}</span> · {POSITION_LABELS[r.position] ?? r.position}</span>
-                      {r.status !== 'active' && (
-                        <span className="badge muted-badge">{STATUS_LABELS[r.status] ?? r.status}</span>
-                      )}
-                    </span>
-                  </td>
-                  <td data-label="คะแนนรวม">
-                    {r.review_count ? (
-                      <span className="review-score-cell">
-                        <Stars value={r.avg_score} size="sm" />
-                        <strong>{scoreText(r.avg_score)}</strong>
-                      </span>
-                    ) : (
-                      <span className="muted">ยังไม่มีคะแนน</span>
-                    )}
-                  </td>
-                  <td data-label="จำนวนใบ">{r.review_count}</td>
-                  <td data-label="ประเมินล่าสุด">
-                    {r.last_review_at ? stampText(r.last_review_at) : <span className="muted">—</span>}
-                  </td>
-                  <td data-label="ลิงก์ประเมิน">
-                    {/* has_link บอกว่าเคยออกลิงก์ให้คนนี้แล้วหรือยัง — ยังไม่เคยออกไม่ใช่ปัญหา
-                        ลิงก์ถูกออกให้เองตอนเปิดหน้ารายละเอียดครั้งแรก */}
-                    {r.has_link ? (
-                      <span className="badge">ออกลิงก์แล้ว</span>
-                    ) : (
-                      <span className="muted">ยังไม่ได้ออก</span>
-                    )}
-                  </td>
+        {rows.length === 0 ? (
+          <div className="empty-state">
+            <p>ยังไม่มีพนักงานกลุ่ม front ในระบบ</p>
+            <p className="muted">
+              แบบประเมินนี้เปิดใช้กับพนักงานที่ออกไปดูแลผู้ป่วย — CG, NA, PN, RN และสายบำบัด
+            </p>
+          </div>
+        ) : (
+          <div className="table-wrap">
+            <table className="table table-cards">
+              <thead>
+                <tr>
+                  <th>พนักงาน</th>
+                  <th>คะแนนรวม</th>
+                  <th>จำนวนใบ</th>
+                  <th>ประเมินล่าสุด</th>
+                  <th>ลิงก์ประเมิน</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+              </thead>
+              <tbody>
+                {rows.map((r) => (
+                  /* กดได้ทั้งแถว ไม่ใช่เฉพาะชื่อ — ท่าเดียวกับตารางเคส/ลูกค้า/พนักงาน
+                     ชื่อจึงไม่เป็นลิงก์ซ้อนอยู่ข้างใน (ลิงก์ในแถวที่กดได้ = เป้าหมายซ้อนกันสองชั้น
+                     ที่คนใช้แป้นพิมพ์ต้องกด Tab ผ่านสองครั้งเพื่อไปที่เดียวกัน) */
+                  <tr
+                    key={r.employee_id}
+                    className="row-clickable"
+                    tabIndex={0}
+                    onClick={() => navigate(`/reviews/${r.employee_id}`)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        navigate(`/reviews/${r.employee_id}`);
+                      }
+                    }}
+                  >
+                    <td data-label="พนักงาน">
+                      <span className="name-cell">
+                        <span className="link">{r.first_name} {r.last_name}</span>
+                        {/* ทุกตำแหน่งหน้างานอยู่ตารางเดียวกันแล้ว — บอกตำแหน่งให้แยกออกว่าใครเป็นใคร */}
+                        <span className="cell-sub"><span className="mono">{r.employee_id}</span> · {POSITION_LABELS[r.position] ?? r.position}</span>
+                        {r.status !== 'active' && (
+                          <span className="badge muted-badge">{STATUS_LABELS[r.status] ?? r.status}</span>
+                        )}
+                      </span>
+                    </td>
+                    <td data-label="คะแนนรวม">
+                      {r.review_count ? (
+                        <span className="review-score-cell">
+                          <Stars value={r.avg_score} size="sm" />
+                          <strong>{scoreText(r.avg_score)}</strong>
+                        </span>
+                      ) : (
+                        <span className="muted">ยังไม่มีคะแนน</span>
+                      )}
+                    </td>
+                    <td data-label="จำนวนใบ">{r.review_count}</td>
+                    <td data-label="ประเมินล่าสุด">
+                      {r.last_review_at ? stampText(r.last_review_at) : <span className="muted">—</span>}
+                    </td>
+                    <td data-label="ลิงก์ประเมิน">
+                      {/* has_link บอกว่าเคยออกลิงก์ให้คนนี้แล้วหรือยัง — ยังไม่เคยออกไม่ใช่ปัญหา
+                          ลิงก์ถูกออกให้เองตอนเปิดหน้ารายละเอียดครั้งแรก */}
+                      {r.has_link ? (
+                        <span className="badge">ออกลิงก์แล้ว</span>
+                      ) : (
+                        <span className="muted">ยังไม่ได้ออก</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </PageRefresh>
   );
 }

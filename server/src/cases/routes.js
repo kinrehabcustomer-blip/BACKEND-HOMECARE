@@ -1,10 +1,9 @@
 import { Router } from 'express';
 import * as repo from './repo.js';
 import * as employees from '../employees/repo.js';
-import * as customers from '../customers/repo.js';
 import * as invoices from '../invoices/repo.js';
 // ตัวสร้างใบร่างอยู่ที่ชั้น route ของใบแจ้งหนี้ เพราะต้องใช้ตรรกะหาผู้จ่ายชุดเดียวกับตอนกดออกใบเอง
-import { createDraftForCase } from '../invoices/routes.js';
+import { createDraftForCase, resolvePayer } from '../invoices/routes.js';
 import {
   createCaseSchema,
   updateCaseSchema,
@@ -285,7 +284,12 @@ casesRouter.get('/:id', (req, res) => res.json(visible(req, req.case)));
 /** ประวัติการทำรายการของเคส — ใครจับคู่/ปิด/ยกเลิก เมื่อไหร่ (ดู case_events) */
 casesRouter.get(
   '/:id/events',
-  asyncRoute(async (req, res) => res.json(await repo.listEvents(req.params.id))),
+  asyncRoute(async (req, res) => {
+    const events = await repo.listEvents(req.params.id);
+    /* ปล่อยค่าจ้าง / ตั้งส่วนแบ่ง บันทึกยอดเงินรายคนไว้ในข้อความ — คนที่ไม่มีสิทธิ์ดูค่าจ้าง (HR/Admin HC) ห้ามเห็น */
+    const PAY_EVENTS = ['pay_released', 'pay_shares'];
+    res.json(canSeeStaffPay(req.user?.position) ? events : events.filter((e) => !PAY_EVENTS.includes(e.event)));
+  }),
 );
 
 // ---------- ค่าจ้างของเคส (ก้อนเดียว ผู้จัดการกดปล่อยเอง) ----------
@@ -336,8 +340,8 @@ casesRouter.put(
       if (stranger) {
         throw new ApiError(
           400,
-          `${stranger.employee_id} ไม่ได้มีส่วนในเคสนี้ — ตั้งส่วนแบ่งได้เฉพาะคนที่มีกะที่อนุมัติแล้ว` +
-            ' หรือเคยได้รับค่าจ้างของเคสนี้ไปก่อนหน้า',
+          `${stranger.employee_id} ไม่ได้มีส่วนในเคสนี้ — ตั้งส่วนแบ่งได้เฉพาะผู้รับผิดชอบหลัก คนในทีมดูแลเคส` +
+            ' คนที่มีกะในเคส หรือเคยได้รับค่าจ้างของเคสนี้ไปก่อนหน้า',
         );
       }
 
@@ -512,8 +516,13 @@ casesRouter.patch(
 
     // แก้เคสแล้วใบแจ้งหนี้ที่ยังแก้ได้ (ร่าง/ออกใบแล้ว) ต้องตามให้ทัน — ดู syncOpenFromCase
     // ส่ง updated ตัวเต็มเข้าไป ไม่ใช่ตัวที่ตัดค่าจ้างแล้ว — การซิงก์ใบต้องใช้ราคาจริงเสมอ
-    const customer = updated.customer_id ? await customers.findById(updated.customer_id) : null;
-    await invoices.syncOpenFromCase(updated, customer);
+    // ซิงก์เฉพาะตอนสิ่งที่ใบใช้เปลี่ยนจริง (ราคา/บริการ/ผู้จ่าย) — แก้โน้ตหรือเวลานัดไม่ควรไปแตะใบ
+    if (invoices.billingSignature(req.case) !== invoices.billingSignature(updated)) {
+      /* หาผู้จ่ายด้วย resolvePayer ตัวเดียวกับตอนออกใบ — ของเดิมดูแค่ customer_id ของเคส
+         เคสที่ผูกผู้ว่าจ้างไว้ที่แฟ้มผู้ป่วยจึงถูกซิงก์ชื่อผู้จ่ายกลับเป็นชื่อผู้ป่วยทุกครั้งที่แก้เคส */
+      const customer = await resolvePayer(updated);
+      await invoices.syncOpenFromCase(updated, customer);
+    }
 
     res.json(visible(req, updated));
   }),
@@ -691,6 +700,25 @@ function ensureSchedulable(caseRow) {
   }
 }
 
+/**
+ * คนที่จะได้กะนี้ต้องรับงานได้ — รวมกรณีไม่ระบุคน ซึ่ง repo จะเติมผู้รับผิดชอบหลักของเคสให้
+ * ตรวจแค่ตอนระบุคนไม่พอ: คนหลักที่ลาออก/ถูกพักงานไปหลังจับคู่ จะได้กะใหม่ไปเงียบๆ
+ * ทั้งที่เข้าระบบมาเช็คอินไม่ได้แล้ว กะนั้นจึงกลายเป็น "ขาดงาน" ที่ไม่มีใครรู้ล่วงหน้า
+ */
+async function ensureVisitAssignee(caseRow, assignedTo) {
+  if (assignedTo) return ensureAssignable(assignedTo);
+  if (!caseRow.assigned_to) return; // เคสยังไม่มีคน — กะว่างไว้ จับคู่เมื่อไหร่ระบบเติมให้เอง
+  try {
+    await ensureAssignable(caseRow.assigned_to);
+  } catch (err) {
+    if (!(err instanceof ApiError)) throw err;
+    throw new ApiError(
+      409,
+      `ผู้รับผิดชอบหลักของเคสลงกะไม่ได้แล้ว (${err.message}) — เลือกพนักงานให้กะนี้ หรือเปลี่ยนผู้รับผิดชอบหลักก่อน`,
+    );
+  }
+}
+
 casesRouter.get(
   '/:id/visits',
   asyncRoute(async (req, res) => res.json(await repo.listVisits(req.params.id))),
@@ -701,7 +729,7 @@ casesRouter.post(
   asyncRoute(async (req, res) => {
     ensureSchedulable(req.case);
     const input = createVisitSchema.parse(req.body);
-    if (input.assigned_to) await ensureAssignable(input.assigned_to);
+    await ensureVisitAssignee(req.case, input.assigned_to);
     res.status(201).json(await repo.addVisit(req.params.id, input));
   }),
 );
@@ -712,7 +740,7 @@ casesRouter.post(
   asyncRoute(async (req, res) => {
     ensureSchedulable(req.case);
     const input = bulkVisitSchema.parse(req.body);
-    if (input.assigned_to) await ensureAssignable(input.assigned_to);
+    await ensureVisitAssignee(req.case, input.assigned_to);
     res.status(201).json(await repo.addVisits(req.params.id, input.dates, input));
   }),
 );
@@ -752,7 +780,9 @@ casesRouter.patch(
       const visit = await repo.findVisit(Number(req.params.visitId));
       if (visit && visit.assigned_to !== input.assigned_to) await ensureAssignable(input.assigned_to);
     }
-    res.json(await repo.updateVisit(req.params.id, Number(req.params.visitId), input));
+    /* กติกาที่ขึ้นกับสถานะ (เช็คอินแล้ว / เคสจบแล้ว / ปล่อยเงินแล้ว) ตรวจใน repo หลังล็อกเคสและกะ
+       ตรวจที่นี่จะเป็นของเก่าได้ — ระหว่างนั้นอาจมีคนเช็คอินหรือปิดเคสไปแล้ว */
+    res.json(await repo.updateVisit(req.params.id, Number(req.params.visitId), input, req.user));
   }),
 );
 

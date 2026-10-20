@@ -115,14 +115,14 @@ const sendDigest = asyncRoute(async (req, res) => {
 notifyRouter.get('/daily-digest', cronOnly, sendDigest);
 
 /** ทางของคน — ผู้จัดการ/HR กดจากหน้าเว็บเพื่อทดสอบว่าอีเมลออกจริงไหม หรือส่งซ้ำ */
-notifyRouter.post('/daily-digest', requireAuth, requireAdmin, sendDigest);
+// บัญชีที่ยังใช้รหัสชั่วคราวต้องตั้งรหัสใหม่ก่อน — กติกาเดียวกับเส้นอื่นของหลังบ้าน (ดู app.js signedIn)
+notifyRouter.post('/daily-digest', requireAuth, requirePasswordChanged, requireAdmin, sendDigest);
 
 /**
  * ของค้างทั้งระบบสำหรับกระดิ่งบนแถบเมนู — เรียกทุกครั้งที่เปิดหน้าเว็บ
  *
- * ใส่ requirePasswordChanged ด้วย ต่างจาก /digest-preview ที่ไม่มี เพราะเส้นนี้ถูกเรียก
- * อัตโนมัติจากทุกหน้า ไม่ใช่ตอนคนกดปุ่ม — บัญชีที่ยังใช้รหัสชั่วคราวจะได้ 403 รัวๆ
- * ทุกครั้งที่เปิดหน้า ทั้งที่หน้าจอบังคับให้ตั้งรหัสอยู่แล้ว
+ * ใส่ requirePasswordChanged เหมือนเส้นอื่นของหลังบ้าน — บัญชีที่ยังใช้รหัสชั่วคราว
+ * ต้องตั้งรหัสใหม่ก่อนจึงจะเห็นข้อมูลของระบบได้
  */
 notifyRouter.get(
   '/alerts',
@@ -136,6 +136,7 @@ notifyRouter.get(
 notifyRouter.get(
   '/digest-preview',
   requireAuth,
+  requirePasswordChanged,
   requireAdmin,
   asyncRoute(async (req, res) => res.json({ ...(await collect()), mailer_ready: mailerReady })),
 );

@@ -526,13 +526,12 @@ describe('invoice mutations — สถานะ แผน และ payment ต�
 
 // ---------- สถานะรอบจ่ายต้องตัดสินหลังได้ row lock ----------
 describe('payroll run transitions — paid/cancelled ต้องไม่ถูกแก้จาก snapshot เก่า', () => {
-  test('ทุกคำสั่งแก้รอบร่างได้ตามกติกา; paid ยกเลิกได้อย่างเดียว; cancelled แตะซ้ำไม่ได้', () => {
+  test('ทุกคำสั่งแก้รอบร่างได้ตามกติกา; paid ถูกล็อกถาวร (ยกเลิกก็ไม่ได้ — กันจ่ายซ้ำ); cancelled แตะซ้ำไม่ได้', () => {
     for (const action of ['rebuild', 'remove_item', 'pay', 'cancel', 'remove']) {
       assert.equal(assessPayrollRunAction(action, 'draft').reason, undefined, action);
     }
 
-    assert.equal(assessPayrollRunAction('cancel', 'paid').reason, undefined);
-    for (const action of ['rebuild', 'remove_item', 'pay', 'remove']) {
+    for (const action of ['rebuild', 'remove_item', 'pay', 'cancel', 'remove']) {
       assert.equal(assessPayrollRunAction(action, 'paid').reason, 'invalid_status', action);
     }
     for (const action of ['rebuild', 'remove_item', 'pay', 'cancel', 'remove']) {
@@ -1792,8 +1791,9 @@ describe('Workflow — เปิดเคสถึงเงินเข้าพ
     // บันทึกการจ่ายทำได้จากร่างเท่านั้น — กดซ้ำจากรอบที่จ่ายแล้วต้องไม่ผ่าน
     assert.deepEqual(assessPayrollRunAction('pay', 'draft'), { status: 'draft' });
     assert.equal(assessPayrollRunAction('pay', 'paid').reason, 'invalid_status');
-    // ยกเลิกได้ทั้งร่างและรอบที่จ่ายแล้ว (เงินกลับเข้ากองรอจ่าย) แต่ยกเลิกซ้ำไม่ได้
-    assert.deepEqual(assessPayrollRunAction('cancel', 'paid'), { status: 'paid' });
+    // ยกเลิกได้เฉพาะร่าง — รอบที่จ่ายแล้วถ้ายกเลิกได้ ก้อนเงินจะกลับเข้ากองแล้วถูกจ่ายซ้ำ
+    assert.deepEqual(assessPayrollRunAction('cancel', 'draft'), { status: 'draft' });
+    assert.equal(assessPayrollRunAction('cancel', 'paid').reason, 'invalid_status');
     assert.equal(assessPayrollRunAction('cancel', 'cancelled').reason, 'invalid_status');
   });
 });

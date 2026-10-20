@@ -90,7 +90,7 @@ const ADMIN_NAV = [
   { to: '/reviews', icon: 'star', label: 'คะแนนประเมินจากญาติ', perm: 'office' },
 ];
 
-/** เมนูหลังบ้านที่ผู้ใช้คนนี้เห็น — ว่าง = ตำแหน่งที่ยังไม่ได้กำหนดสิทธิ์ (เช่น Admin IPD ตอนนี้) */
+/** เมนูหลังบ้านที่ผู้ใช้คนนี้เห็น — ว่าง = ตำแหน่งที่ยังไม่ได้กำหนดสิทธิ์ (ถ้ามีตำแหน่งใหม่ที่ยังไม่ได้ผูกสิทธิ์) */
 const navFor = (user) => {
   const perms = permissionsOf(user);
   return ADMIN_NAV.filter((i) => perms.includes(i.perm) && !(i.unlessPerm && perms.includes(i.unlessPerm)));
@@ -278,7 +278,7 @@ function HomeRedirect() {
   return <Navigate to={homePath(user)} replace />;
 }
 
-/** ตำแหน่งหลังบ้านที่ยังไม่ได้กำหนดสิทธิ์ (เช่น Admin IPD) — บอกตรงๆ แทนการเด้งวนหรือหน้าว่าง */
+/** ตำแหน่งหลังบ้านที่ยังไม่ได้กำหนดสิทธิ์ — บอกตรงๆ แทนการเด้งวนหรือหน้าว่าง (ตอนนี้ทุกตำแหน่งมีสิทธิ์แล้ว เผื่อเพิ่มตำแหน่งใหม่) */
 function NoAccessPage() {
   const { user } = useAuth();
   if (navFor(user).length > 0 || user.role !== 'admin') return <Navigate to={homePath(user)} replace />;

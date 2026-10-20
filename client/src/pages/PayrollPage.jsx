@@ -302,7 +302,7 @@ function Runs({ reloadKey }) {
                 disabled={busy || detail.employees === 0}
                 danger={false}
                 title={`บันทึกการจ่ายรอบ ${detail.run_id}?`}
-                detail={`${detail.employees} คน · ${formatBaht(detail.total_pay)} — หลังจากนี้ตัวเลขทั้งรอบถูกตรึง แก้ได้ทางเดียวคือยกเลิกรอบ`}
+                detail={`${detail.employees} คน · ${formatBaht(detail.total_pay)} — หลังจากนี้ตัวเลขทั้งรอบถูกตรึงถาวร ยกเลิกรอบไม่ได้อีก`}
                 confirmLabel="บันทึกการจ่าย"
                 onConfirm={() =>
                   run(async () => {
@@ -320,7 +320,8 @@ function Runs({ reloadKey }) {
             </>
           )}
 
-          {detail.status !== 'cancelled' && (
+          {/* ยกเลิกได้เฉพาะร่าง — รอบที่จ่ายแล้วเงินออกไปแล้ว ปลดก้อนกลับเข้ากอง = จ่ายซ้ำ (server ก็ปฏิเสธ) */}
+          {detail.status === 'draft' && (
             <ConfirmButton
               className="btn"
               disabled={busy}
@@ -475,7 +476,8 @@ function Runs({ reloadKey }) {
           {/* รายชื่อกับยอดที่จะจ่ายอยู่ข้างบนนี้ครบแล้ว — การบังคับให้ "เปิดรอบ" ก่อนแล้วค่อยไป
               กด "บันทึกการจ่าย" อีกหน้าจอหนึ่ง คือการให้ตรวจซ้ำสิ่งที่เพิ่งตรวจไป
               ทางหลักจึงเป็นปุ่มเดียวจบ ส่วนร่างเก็บไว้ให้กรณีที่ต้องเอาใครออกจากรอบก่อนจ่ายจริง
-              (จ่ายผิดก็ยังกด "ยกเลิกรอบ" ได้ เงินกลับเข้ากองรอจ่ายทั้งก้อน ไม่ใช่ทางเดียวที่กลับไม่ได้) */}
+              (รอบที่จ่ายแล้วยกเลิกไม่ได้ — ปลดก้อนกลับเข้ากองหลังโอนไปแล้ว = จ่ายซ้ำในรอบหน้า
+              ถ้าต้องตรวจ/เอาใครออกก่อน ให้ใช้ "เปิดเป็นร่างไว้ก่อน") */}
           <div className="quick-edit-actions">
             <button className="btn" onClick={() => { setOpening(false); setPreview(null); }}>ยกเลิก</button>
             <button
@@ -499,8 +501,20 @@ function Runs({ reloadKey }) {
               disabled={busy || roundsFull || !preview || preview.rows.length === 0}
               onClick={() =>
                 run(async () => {
-                  const created = await api.createPayrollRun({ period_to: cutoff });
-                  const paid = await api.payPayrollRun(created.run_id, { pay_date: todayTH() });
+                  /* คำขอเดียวจบ (สร้าง + จ่ายใน transaction เดียว) และส่งรหัสก้อนเงินทุกก้อนที่เห็นในพรีวิวไปด้วย
+                     ถ้ามีก้อนใหม่ถูกปล่อย/ถอนหลังเปิดพรีวิว server ปฏิเสธทั้งหมด ไม่มีรอบร่างค้าง
+                     — โหลดพรีวิวใหม่ให้เห็นตัวเลขล่าสุดก่อนกดอีกครั้ง */
+                  let paid;
+                  try {
+                    paid = await api.payPayrollNow({
+                      period_to: cutoff,
+                      pay_date: todayTH(),
+                      payout_ids: preview.rows.flatMap((r) => r.payout_ids ?? []),
+                    });
+                  } catch (e) {
+                    api.payrollPreview(cutoff).then(setPreview).catch(() => {});
+                    throw e;
+                  }
                   toast(`จ่ายรอบ ${paid.run_id} แล้ว ${formatBaht(paid.total_pay)}`);
                   setOpening(false);
                   setPreview(null);

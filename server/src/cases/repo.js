@@ -265,7 +265,9 @@ export function listForEmployee(employeeId) {
     `${SELECT_CASE}
      WHERE c.assigned_to = :id
         OR EXISTS (SELECT 1 FROM case_team t WHERE t.case_id = c.case_id AND t.employee_id = :id)
-        OR EXISTS (SELECT 1 FROM case_visits v WHERE v.case_id = c.case_id AND v.assigned_to = :id)
+        /* ไม่นับกะที่ยกเลิก — ให้ตรงกับ hasFieldAccess ไม่งั้นรายการโชว์เคสที่เปิดเข้าไปแล้วได้ 403 */
+        OR EXISTS (SELECT 1 FROM case_visits v
+                   WHERE v.case_id = c.case_id AND v.assigned_to = :id AND v.status <> 'cancelled')
      ORDER BY c.case_id DESC`,
     { id: employeeId },
   );
@@ -812,6 +814,31 @@ async function caseForTransition(tx, caseId, allowed) {
   return row;
 }
 
+/**
+ * ย้ายกะที่ "ยังไม่ถึงวันและยังไม่มีใครไป" ของคนหนึ่ง (from = null คือกะที่ยังไม่มีคน) ไปให้อีกคน (to = null คือปล่อยว่าง)
+ *
+ * ต้องย้ายตามทุกครั้งที่เปลี่ยนคนดูแลเคส — ไม่งั้นกะในตารางยังเป็นชื่อคนเดิม:
+ * คนเดิมยังเห็นงานวันนี้ของเคสที่ตัวเองถูกถอดไปแล้ว ส่วนคนใหม่เปิดหน้า "งานวันนี้" แล้วไม่เจออะไรเลย
+ * และกะที่ลงไว้ตอนเคสยังไม่มีคน (assigned_to = NULL) จะไม่มีวันมีเจ้าของ เช็คอินไม่ได้ตลอดไป
+ *
+ * ไม่แตะกะที่เช็คอินแล้ว (เป็นบันทึกว่าใครไปจริง) กะของวันที่ผ่านมาแล้ว (เป็นประวัติขาดงานของคนเดิม)
+ * และกะที่ยกเลิก — ต้องเรียกหลังล็อกแถวเคสแล้ว (caseForTransition) ลำดับล็อกจึงเหมือนเช็คอิน/ปิดเคส
+ */
+async function moveFutureVisits(tx, caseId, { from, to, includeUnassigned = false }) {
+  if (!from && !includeUnassigned) return 0;
+  return tx.run(
+    `UPDATE case_visits
+     SET assigned_to = :to, updated_at = ${NOW}
+     WHERE case_id = :case_id AND status <> 'cancelled' AND check_in_at IS NULL
+       AND visit_date >= :today
+       AND (assigned_to = :from ${includeUnassigned ? 'OR assigned_to IS NULL' : ''})
+       AND assigned_to IS DISTINCT FROM :to`,
+    { case_id: caseId, from: from ?? null, to: to ?? null, today: isoDateTH(new Date()) },
+  );
+}
+
+const movedNote = (n, who) => (n > 0 ? ` · ย้ายกะที่ยังไม่ถึงวัน ${n} กะ${who ? `ให้ ${who}` : ' (ยังไม่มีคนรับ)'}` : '');
+
 export async function assign(caseId, employeeId, actor) {
   await transaction(async (tx) => {
     const previous = await caseForTransition(tx, caseId, ACTIVE_CASE_STATES);
@@ -832,11 +859,19 @@ export async function assign(caseId, employeeId, actor) {
       employee_id: employeeId,
     });
 
+    /* กะข้างหน้าของคนหลักคนเดิม + กะที่ลงไว้ตอนยังไม่มีคน ตามไปเป็นของคนใหม่ (ดู moveFutureVisits)
+       กะที่ฝากคนอื่นในทีมไว้ไม่แตะ — นั่นคือการจัดคนรายกะที่ตั้งใจไว้แล้ว */
+    const moved = await moveFutureVisits(tx, caseId, {
+      from: previous?.assigned_to,
+      to: employeeId,
+      includeUnassigned: true,
+    });
+
     // สลับคนกลางคันคือจังหวะที่ต้องไล่ย้อนได้มากที่สุด — บันทึกทั้งคนเก่าและคนใหม่ในบรรทัดเดียว
     const to = await staffLabel(tx, employeeId);
     const from = previous?.assigned_to ? await staffLabel(tx, previous.assigned_to) : null;
     const detail = from && from !== to ? `เปลี่ยนผู้รับผิดชอบจาก ${from} เป็น ${to}` : `มอบหมายให้ ${to}`;
-    await logEvent(tx, caseId, 'assigned', detail, actor);
+    await logEvent(tx, caseId, 'assigned', detail + movedNote(moved, to), actor);
   });
 
   return findById(caseId);
@@ -884,7 +919,7 @@ export async function cancel(caseId, reason, actor) {
     const { n } = await tx.one(
       `WITH cancelled AS (
          UPDATE case_visits
-         SET status = 'cancelled', updated_at = ${NOW}
+         SET status = 'cancelled', auto_cancelled_at = ${NOW}, updated_at = ${NOW}
          WHERE case_id = :case_id AND status <> 'cancelled' AND check_in_at IS NULL
          RETURNING 1
        )
@@ -947,14 +982,24 @@ export async function addTeamMember(caseId, employeeId, actor) {
 export async function removeTeamMember(caseId, employeeId, actor) {
   return transaction(async (tx) => {
     // Serialize with unassign, which may promote this member to lead worker.
-    await caseForTransition(tx, caseId, [...ACTIVE_CASE_STATES, 'closed', 'cancelled']);
+    const row = await caseForTransition(tx, caseId, [...ACTIVE_CASE_STATES, 'closed', 'cancelled']);
     const removed = await tx.run(
       'DELETE FROM case_team WHERE case_id = :case_id AND employee_id = :employee_id',
       { case_id: caseId, employee_id: employeeId },
     );
     if (removed === 0) return false;
 
-    await logEvent(tx, caseId, 'unassigned', `นำ ${await staffLabel(tx, employeeId)} ออกจากทีมดูแลเคส`, actor);
+    // คนที่ออกจากทีมไม่ควรมีงานข้างหน้าของเคสนี้ค้างอยู่ — คืนให้คนหลักของเคส (ไม่มีคนหลัก = ปล่อยว่างรอจัดคน)
+    const moved = await moveFutureVisits(tx, caseId, { from: employeeId, to: row.assigned_to });
+    const lead = row.assigned_to ? await staffLabel(tx, row.assigned_to) : null;
+
+    await logEvent(
+      tx,
+      caseId,
+      'unassigned',
+      `นำ ${await staffLabel(tx, employeeId)} ออกจากทีมดูแลเคส` + movedNote(moved, lead),
+      actor,
+    );
     return true;
   });
 }
@@ -984,8 +1029,20 @@ export async function unassign(caseId, actor) {
         employee_id: next.employee_id,
       });
 
+      // งานข้างหน้าของคนที่ถูกถอด (และกะที่ยังไม่มีคน) ตกเป็นของคนที่ขึ้นมาแทน เหมือนการจับคู่ใหม่
       const to = await staffLabel(tx, next.employee_id);
-      await logEvent(tx, caseId, 'assigned', `ถอด ${from} ออก และเลื่อน ${to} ขึ้นเป็นผู้รับผิดชอบหลัก`, actor);
+      const moved = await moveFutureVisits(tx, caseId, {
+        from: previous?.assigned_to,
+        to: next.employee_id,
+        includeUnassigned: true,
+      });
+      await logEvent(
+        tx,
+        caseId,
+        'assigned',
+        `ถอด ${from} ออก และเลื่อน ${to} ขึ้นเป็นผู้รับผิดชอบหลัก` + movedNote(moved, to),
+        actor,
+      );
       return;
     }
 
@@ -995,7 +1052,16 @@ export async function unassign(caseId, actor) {
        WHERE case_id = :case_id`,
       { case_id: caseId },
     );
-    await logEvent(tx, caseId, 'unassigned', from ? `ถอด ${from} ออกจากเคส` : 'ยกเลิกการจับคู่', actor);
+    /* ไม่มีใครรับต่อ — กะข้างหน้าของคนที่ถูกถอดกลายเป็น "ยังไม่มีคน" ไม่ใช่ค้างชื่อเขาไว้
+       (ค้างไว้ = เขายังเช็คอินเคสที่ไม่ใช่งานตัวเองแล้วได้) จับคู่คนใหม่เมื่อไหร่ assign จะเติมให้เอง */
+    const moved = await moveFutureVisits(tx, caseId, { from: previous?.assigned_to, to: null });
+    await logEvent(
+      tx,
+      caseId,
+      'unassigned',
+      (from ? `ถอด ${from} ออกจากเคส` : 'ยกเลิกการจับคู่') + movedNote(moved, null),
+      actor,
+    );
   });
 
   return findById(caseId);
@@ -1030,7 +1096,7 @@ export async function close(caseId, endDate, actor) {
     // กะของวันที่ผ่านมาแล้วไม่แตะ — ปล่อยให้ยังเป็น "ขาดงาน" ตามความจริง
     const dropped = await tx.run(
       `UPDATE case_visits
-       SET status = 'cancelled', updated_at = ${NOW}
+       SET status = 'cancelled', auto_cancelled_at = ${NOW}, updated_at = ${NOW}
        WHERE case_id = :case_id AND status = 'scheduled'
          AND check_in_at IS NULL AND visit_date >= :today`,
       { case_id: caseId, today: isoDateTH(new Date()) },
@@ -1070,7 +1136,30 @@ export async function reopen(caseId, actor) {
        WHERE case_id = :case_id`,
       { case_id: caseId },
     );
-    await logEvent(tx, caseId, 'reopened', 'เปิดเคสใหม่', actor);
+
+    /* กะที่ระบบยกเลิกให้ตอนปิด/ยกเลิกเคส (auto_cancelled_at) คืนกลับเป็น "นัดไว้" — เปิดเคสใหม่ส่วนใหญ่
+       คือกดปิดผิดหรือลูกค้ากลับมา ถ้าไม่คืน ตารางทั้งเดือนข้างหน้าหายไปแล้วต้องลงใหม่ทีละวัน
+       คืนเฉพาะวันนี้เป็นต้นไป (วันที่ผ่านไปแล้วไม่มีใครไปทำย้อนหลังได้) และไม่แตะกะที่คนกดยกเลิกเอง
+       ล้างธงทั้งเคสทิ้ง — กะเก่าที่ไม่ได้คืนต้องไม่ถูกคืนตอนปิด–เปิดรอบหน้า */
+    const restored = await tx.run(
+      `UPDATE case_visits
+       SET status = 'scheduled', updated_at = ${NOW}
+       WHERE case_id = :case_id AND auto_cancelled_at IS NOT NULL AND status = 'cancelled'
+         AND check_in_at IS NULL AND visit_date >= :today`,
+      { case_id: caseId, today: isoDateTH(new Date()) },
+    );
+    await tx.run(
+      'UPDATE case_visits SET auto_cancelled_at = NULL WHERE case_id = :case_id AND auto_cancelled_at IS NOT NULL',
+      { case_id: caseId },
+    );
+
+    await logEvent(
+      tx,
+      caseId,
+      'reopened',
+      restored > 0 ? `เปิดเคสใหม่ · คืนกะที่ถูกยกเลิกตอนปิดเคส ${restored} กะ` : 'เปิดเคสใหม่',
+      actor,
+    );
   });
 
   return findById(caseId);
@@ -1159,9 +1248,24 @@ export async function addVisit(caseId, input) {
  * ช่วงเวลาของกะสำหรับเทียบว่าชนกันไหม — ไม่ระบุเวลา = ถือว่ากินทั้งวัน
  * ตั้งใจให้เตือนเกินไว้ดีกว่าเตือนขาด: กะที่ไม่ระบุเวลาสองกะในวันเดียวกันของคนเดียวกัน
  * คือสิ่งที่ต้องให้คนดูอีกที ไม่ใช่สิ่งที่ระบบควรเงียบไว้
+ *
+ * เทียบเป็น "นาทีนับจากวันอ้างอิง" ไม่ใช่เทียบข้อความ 'HH:MM' ของวันเดียวกัน —
+ * กะดึก 20:00–08:00 (เวลาจบ ≤ เวลาเริ่ม = ข้ามเที่ยงคืน) ถ้าเทียบเป็นข้อความจะได้ช่วงกลับหัว
+ * แล้วไม่ชนกับอะไรเลยสักกะ ทั้งที่จริงกินทั้งคืนจนถึงเช้าวันถัดไป
+ * นับเป็นนาทีต่อเนื่องข้ามวัน จึงเทียบกับกะของวันถัดไป (และกะดึกของเมื่อวาน) ได้ตรงๆ
  */
-const SPAN = (t) => `COALESCE(${t}.planned_start, '00:00')`;
-const SPAN_END = (t) => `COALESCE(${t}.planned_end, '23:59')`;
+const MINUTES = (t) => `(split_part(${t}, ':', 1)::int * 60 + split_part(${t}, ':', 2)::int)`;
+const DAY_MINUTES = (date) => `((${date})::date - DATE '2000-01-01') * 1440`;
+const START_MIN = (start) => `COALESCE(${MINUTES(start)}, 0)`;
+const END_MIN = (start, end) => `(CASE
+  WHEN ${end} IS NULL THEN 1440
+  WHEN ${start} IS NOT NULL AND ${MINUTES(end)} <= ${MINUTES(start)} THEN ${MINUTES(end)} + 1440
+  ELSE ${MINUTES(end)} END)`;
+const SPAN = (t) => `(${DAY_MINUTES(`${t}.visit_date`)} + ${START_MIN(`${t}.planned_start`)})`;
+const SPAN_END = (t) => `(${DAY_MINUTES(`${t}.visit_date`)} + ${END_MIN(`${t}.planned_start`, `${t}.planned_end`)})`;
+/** กะที่อาจชนได้อยู่ภายในวันก่อน–วันนี้–วันถัดไป (กะดึกยาวได้ไม่เกิน 24 ชม.) — เทียบเป็นข้อความให้ index ใช้ได้ */
+const NEAR_DAY = (col, date) =>
+  `${col} BETWEEN to_char((${date})::date - 1, 'YYYY-MM-DD') AND to_char((${date})::date + 1, 'YYYY-MM-DD')`;
 
 /**
  * กะที่เพิ่งลงไป ชนกับกะอื่นของพนักงานคนเดียวกันหรือเปล่า (รวมข้ามเคส)
@@ -1183,7 +1287,7 @@ export function visitConflicts(visitIds) {
             e.first_name || ' ' || e.last_name AS employee_name
      FROM case_visits v
      JOIN case_visits o ON o.assigned_to = v.assigned_to
-                       AND o.visit_date  = v.visit_date
+                       AND ${NEAR_DAY('o.visit_date', 'v.visit_date')}
                        AND o.visit_id   <> v.visit_id
                        AND o.status <> 'cancelled'
      JOIN cases oc     ON oc.case_id = o.case_id
@@ -1299,26 +1403,33 @@ export async function previewVisits(caseId, { dates, assigned_to, planned_start,
 
   const { slots, params } = listSlots(dates, {
     emp: who,
-    start: planned_start ?? '00:00',
-    end: planned_end ?? '23:59',
+    p_start: planned_start ?? null,
+    p_end: planned_end ?? null,
     self: caseId,
   });
 
+  /* ช่วงของกะที่กำลังจะลง คิดแบบเดียวกับ SPAN/SPAN_END (นาทีต่อเนื่องข้ามวัน) — กะดึกที่ลงวันนี้
+     จึงชนกับกะเช้าของพรุ่งนี้ได้ด้วย · visit_date ที่คืนไปคือ "วันที่กำลังจะลง" ไม่ใช่วันของกะที่ชน
+     เพราะหน้าจอใช้มันทำเครื่องหมายบนวันที่ผู้ใช้เลือกไว้ */
+  const pStart = 'CAST(:p_start AS text)';
+  const pEnd = 'CAST(:p_end AS text)';
+  const days = dates.map((_, i) => `(CAST(:d${i} AS text))`).join(', ');
+
   const [conflicts, duplicates] = await Promise.all([
     sql.all(
-      `SELECT o.visit_date, o.case_id AS other_case_id,
+      `SELECT d.day AS visit_date, o.visit_date AS other_date, o.case_id AS other_case_id,
               o.planned_start AS other_start, o.planned_end AS other_end,
               oc.client_name  AS other_client_name,
               e.first_name || ' ' || e.last_name AS employee_name
-       FROM case_visits o
+       FROM (VALUES ${days}) AS d(day)
+       JOIN case_visits o ON ${NEAR_DAY('o.visit_date', 'd.day')}
        JOIN cases oc ON oc.case_id = o.case_id
        LEFT JOIN employees e ON e.employee_id = o.assigned_to
        WHERE o.assigned_to = :emp
          AND o.status <> 'cancelled'
-         AND o.visit_date IN (${slots})
-         AND ${SPAN('o')} < :end
-         AND :start < ${SPAN_END('o')}
-       ORDER BY o.visit_date`,
+         AND ${SPAN('o')} < ${DAY_MINUTES('d.day')} + ${END_MIN(pStart, pEnd)}
+         AND ${DAY_MINUTES('d.day')} + ${START_MIN(pStart)} < ${SPAN_END('o')}
+       ORDER BY d.day, o.visit_date`,
       params,
     ),
     sql.all(
@@ -1340,6 +1451,7 @@ export async function previewVisits(caseId, { dates, assigned_to, planned_start,
     (c) =>
       !(
         c.other_case_id === caseId &&
+        c.other_date === c.visit_date && // กะของวันข้างเคียงที่ชนเพราะข้ามเที่ยงคืน ไม่ใช่ตัวซ้ำ
         dupDates.has(c.visit_date) &&
         (c.other_start ?? null) === (planned_start ?? null)
       ),
@@ -1348,22 +1460,113 @@ export async function previewVisits(caseId, { dates, assigned_to, planned_start,
   return { conflicts: meaningful, duplicates: [...dupDates] };
 }
 
-export async function updateVisit(caseId, visitId, input) {
+/** ช่องของกะที่แก้จากหน้านัดหมาย เขียนเป็นชื่อไทยลงประวัติ */
+const VISIT_EDIT_LABELS = {
+  visit_date: 'วันนัด',
+  assigned_to: 'พนักงาน',
+  planned_start: 'เวลาเริ่ม',
+  planned_end: 'เวลาจบ',
+  status: 'สถานะกะ',
+  note: 'หมายเหตุ',
+  staff_pay: 'ค่าจ้างรายกะ',
+};
+const VISIT_STATUS_TH = { scheduled: 'นัดไว้', done: 'ไปแล้ว', cancelled: 'ยกเลิก' };
+
+/* กะที่เช็คอินแล้วคือบันทึกการทำงานจริง — ใคร/วันไหน/เวลานัด/สถานะ เป็นฐานของการอนุมัติและค่าจ้าง
+   แก้ได้ทางเดียวคือ /adjust ซึ่งเก็บผู้แก้ ดึงการอนุมัติกลับ และกันเคสที่ปล่อยเงินแล้ว
+   ปล่อยให้แก้ผ่านเส้นนี้ได้ = เลี่ยงกติกาทั้งชุดนั้นด้วยการกด "บันทึก" ธรรมดา */
+const LOCKED_AFTER_CHECK_IN = ['visit_date', 'assigned_to', 'planned_start', 'planned_end', 'status'];
+
+/**
+ * แก้นัดหมายของกะ (วัน/คน/เวลา/สถานะ/หมายเหตุ)
+ *
+ * หน้าเว็บส่งทั้งฟอร์มมาทุกครั้ง จึงตรวจกติกาเฉพาะช่องที่ "ค่าเปลี่ยนจริง" — กะที่เช็คอินแล้ว
+ * ยังแก้หมายเหตุได้ตามปกติ ส่งค่าเดิมของช่องอื่นติดมาด้วยก็ไม่ถูกปฏิเสธ
+ *
+ * ล็อกเคสก่อนแล้วค่อยล็อกกะ — ลำดับเดียวกับเช็คอิน/ปิดเคส ไม่งั้นแก้กะพร้อมกับปิดเคสอาจ deadlock
+ * และสถานะเคสที่ตรวจต้องเป็นของหลังได้ล็อก (หน้าที่เปิดค้างไว้อาจเห็นเคสที่ถูกปิดไปแล้ว)
+ */
+export async function updateVisit(caseId, visitId, input, actor) {
   const fields = [
     'visit_date', 'assigned_to', 'planned_start', 'planned_end', 'status', 'note',
     'staff_pay', // ตั้งค่าจ้างเฉพาะกะนี้ — ส่ง null = กลับไปเกลี่ยจากยอดเคสตามปกติ
   ].filter((c) => c in input);
-  if (fields.length === 0) return listVisits(caseId);
 
-  const values = { case_id: caseId, visit_id: visitId };
-  for (const c of fields) values[c] = input[c] ?? null;
+  await transaction(async (tx) => {
+    const caseRow = await caseForTransition(tx, caseId, [...ACTIVE_CASE_STATES, 'closed', 'cancelled']);
+    const visit = await tx.one(
+      `SELECT v.visit_date, v.assigned_to, v.planned_start, v.planned_end, v.status, v.note, v.staff_pay,
+              v.check_in_at,
+              (SELECT COALESCE(SUM(p.amount), 0) FROM case_payouts p WHERE p.case_id = v.case_id) AS released
+       FROM case_visits v
+       WHERE v.visit_id = :visit_id AND v.case_id = :case_id
+       FOR UPDATE OF v`,
+      { visit_id: visitId, case_id: caseId },
+    );
+    if (!visit) throw new ApiError(404, 'ไม่พบกะนี้');
 
-  await sql.run(
-    `UPDATE case_visits
-     SET ${fields.map((c) => `${c} = :${c}`).join(', ')}, updated_at = ${NOW}
-     WHERE visit_id = :visit_id AND case_id = :case_id`,
-    values,
-  );
+    // ข้อความว่างกับ null คือ "ไม่มีหมายเหตุ" เหมือนกัน — ไม่นับเป็นการแก้
+    const norm = (v) => (v === '' || v === undefined ? null : v);
+    const changed = fields.filter((c) => norm(input[c]) !== norm(visit[c]));
+    if (changed.length === 0) return;
+
+    const locked = changed.filter((c) => LOCKED_AFTER_CHECK_IN.includes(c));
+    if (visit.check_in_at && locked.length > 0) {
+      throw new ApiError(
+        409,
+        `กะนี้เช็คอินไปแล้ว แก้${locked.map((c) => VISIT_EDIT_LABELS[c]).join('/')}จากหน้านัดหมายไม่ได้ — ` +
+          'ถ้าลงผิดให้ใช้ "แก้กะ" (แก้เวลาเข้า–ออก/สถานะ) ซึ่งบันทึกผู้แก้และส่งกลับไปรออนุมัติ',
+      );
+    }
+
+    const terminal = ['closed', 'cancelled'].includes(caseRow.status);
+    // กติกาเดียวกับการลงกะเพิ่ม (ensureSchedulable) — ย้ายกะไปวันใหม่ในเคสที่จบแล้ว = ลงกะใหม่ที่ไม่มีใครไป
+    if (terminal && changed.includes('visit_date')) {
+      throw new ApiError(409, 'เคสนี้จบไปแล้ว — ต้องเปิดเคสใหม่ก่อนจึงจะย้ายวันนัดได้');
+    }
+    if (terminal && changed.includes('status') && input.status !== 'cancelled') {
+      throw new ApiError(409, 'เคสนี้จบไปแล้ว — ต้องเปิดเคสใหม่ก่อนจึงจะเปิดกะกลับมาได้');
+    }
+
+    // เหมือน /adjust: เงินออกไปแล้ว สถานะกะ (ไปแล้ว/ยกเลิก) คือที่มาของยอดบนสลิป ขยับทีหลังไม่ได้
+    if (changed.includes('status') && Number(visit.released) > 0) {
+      throw new ApiError(
+        409,
+        'เคสนี้ปล่อยค่าจ้างไปแล้ว เปลี่ยนสถานะกะไม่ได้ — ถอนงวดที่ปล่อยคืนที่แท็บ "ปล่อยค่าจ้าง" ก่อน แล้วค่อยแก้',
+      );
+    }
+
+    const values = { case_id: caseId, visit_id: visitId };
+    for (const c of changed) values[c] = input[c] ?? null;
+    const sets = changed.map((c) => `${c} = :${c}`);
+    // คนเปลี่ยนสถานะเองแล้ว = ไม่ใช่กะที่ระบบยกเลิกให้อีกต่อไป ตอนเปิดเคสใหม่ต้องไม่ถูกคืนทับการตัดสินใจนี้
+    if (changed.includes('status')) sets.push('auto_cancelled_at = NULL');
+
+    await tx.run(
+      `UPDATE case_visits
+       SET ${sets.join(', ')}, updated_at = ${NOW}
+       WHERE visit_id = :visit_id AND case_id = :case_id`,
+      values,
+    );
+
+    // บันทึกค่าเดิม → ค่าใหม่ — การย้ายวัน/เปลี่ยนคนของกะคือเรื่องที่ญาติหรือพนักงานโต้แย้งทีหลังได้
+    const show = async (c, v) => {
+      if (v == null || v === '') return '-';
+      if (c === 'assigned_to') return (await staffLabel(tx, v)) ?? v;
+      if (c === 'status') return VISIT_STATUS_TH[v] ?? v;
+      return String(v);
+    };
+    const parts = [];
+    for (const c of changed) {
+      if (c === 'note' || c === 'staff_pay') {
+        parts.push(`แก้${VISIT_EDIT_LABELS[c]}`); // ค่าจ้างไม่ลงตัวเลข — HR อ่านประวัติเคสได้
+      } else {
+        parts.push(`${VISIT_EDIT_LABELS[c]} ${await show(c, visit[c])} → ${await show(c, input[c])}`);
+      }
+    }
+    await logEvent(tx, caseId, 'visit_edited', `แก้กะวันที่ ${visit.visit_date} — ${parts.join(' · ')}`, actor);
+  });
+
   return listVisits(caseId);
 }
 
@@ -1756,6 +1959,7 @@ export async function decideVisitPay(visitIds, { approve, reason }, actor) {
        WHERE v.visit_id IN (${slots})
          AND v.check_out_at IS NOT NULL
          AND v.pay_status = 'pending'
+         AND ${NOT_CANCELLED} -- กะที่ยกเลิกไม่อยู่ในคิวอนุมัติ ส่งรหัสตรงๆ มาก็ต้องไม่ถูกอนุมัติ
        RETURNING v.case_id, v.visit_date`,
       params,
     );
@@ -1780,12 +1984,17 @@ export async function decideVisitPay(visitIds, { approve, reason }, actor) {
   });
 }
 
-/** กะของเคสหนึ่งที่ยังรออนุมัติ — ใช้ตอนกด "อนุมัติทั้งเคส" จากหน้าจัดการเคส */
+/**
+ * กะของเคสหนึ่งที่ยังรออนุมัติ — ใช้ตอนกด "อนุมัติทั้งเคส" จากหน้าจัดการเคส
+ * ตัดกะที่ยกเลิกออกเหมือนคิวรวม (pendingApprovals) — กะที่ยกเลิกไม่ใช่งานที่นับ
+ * ถ้าอนุมัติติดไปด้วย หน้าคิวกับหน้าเคสจะบอกจำนวนกะที่อนุมัติไม่ตรงกัน
+ */
 export function pendingVisitIds(caseId) {
   return sql
     .all(
-      `SELECT visit_id FROM case_visits
-       WHERE case_id = :id AND check_out_at IS NOT NULL AND pay_status = 'pending'`,
+      `SELECT v.visit_id FROM case_visits v
+       WHERE v.case_id = :id AND v.check_out_at IS NOT NULL AND v.pay_status = 'pending'
+         AND ${NOT_CANCELLED}`,
       { id: caseId },
     )
     .then((rows) => rows.map((r) => r.visit_id));
@@ -2387,7 +2596,7 @@ export async function payStatus(caseId) {
 /**
  * ผู้มีส่วนได้ของเคสนี้ = ทุกคนที่อยู่ในเคส ไม่ว่ากะจะครบหรือถูกยืนยันแล้วหรือยัง
  *
- * รวมสี่ทาง: คนที่เคยเช็คอิน · คนที่ถูกนัดกะไว้ · คนที่ถูกมอบหมายทั้งเคส · คนที่เคยได้เงินของเคสนี้
+ * รวมห้าทาง: คนที่เคยเช็คอิน · คนที่ถูกนัดกะไว้ · คนที่ถูกมอบหมายทั้งเคส · คนในทีมดูแลเคส · คนที่เคยได้เงินของเคสนี้
  * (บวกคนที่ตั้งส่วนแบ่งไว้) — เกณฑ์เดิมคือ "ต้องมีกะที่อนุมัติแล้ว" ซึ่งแปลว่าเคสที่พนักงาน
  * ลืมเช็คอินทั้งเคส จ่ายเงินไม่ได้เลยทั้งที่งานเกิดขึ้นจริงและเคสปิดไปแล้ว
  *
@@ -2413,6 +2622,10 @@ function payShares(tx, caseId) {
          UNION
          SELECT c.assigned_to FROM cases c
          WHERE c.case_id = :id AND c.assigned_to IS NOT NULL
+         UNION
+         /* คนในทีมดูแลเคสเป็นผู้ร่วมงานเท่ากับคนหลัก — ไม่ใส่ไว้ = คนในทีมที่ยังไม่มีกะ
+            (หรือลืมเช็คอิน) ถูกเลือกเป็นผู้รับเงินไม่ได้เลย ทั้งตอนปล่อยและตอนตั้งส่วนแบ่ง */
+         SELECT t.employee_id FROM case_team t WHERE t.case_id = :id
          UNION
          SELECT p.employee_id FROM case_payouts p
          WHERE p.case_id = :id AND p.employee_id IS NOT NULL

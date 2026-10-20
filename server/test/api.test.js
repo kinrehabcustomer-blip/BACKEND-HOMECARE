@@ -224,13 +224,12 @@ if (process.env.RUN_DB_TESTS !== '1') {
     assert.equal((await sql.one('SELECT case_type FROM cases WHERE case_id = :id', { id: c.case_id })).case_type, 'elderly_care');
   });
 
-  describe('สิทธิ์ตามตำแหน่ง — การเงิน / Admin IPD / Admin HC', () => {
+  describe('สิทธิ์ตามตำแหน่ง — การเงิน / Admin HC', () => {
     const FINANCE = emp('EMP-0091', 'finance');
-    const IPD = emp('EMP-0092', 'admin_ipd');
     const HC = emp('EMP-0093', 'admin');
 
     before(async () => {
-      for (const [id, position] of [['EMP-0091', 'finance'], ['EMP-0092', 'admin_ipd'], ['EMP-0093', 'admin']]) {
+      for (const [id, position] of [['EMP-0091', 'finance'], ['EMP-0093', 'admin']]) {
         await sql.run(
           `INSERT INTO employees (employee_id, first_name, last_name, position, email, status, password_hash, must_change_password)
            VALUES (:id, 'Perm', 'Test', :position, :id || '@example.invalid', 'active', 'x', false)`,
@@ -254,11 +253,15 @@ if (process.env.RUN_DB_TESTS !== '1') {
       assert.deepEqual(Object.keys(alerts.groups).sort(), ['invoices', 'payroll']);
     });
 
-    test('Admin IPD: ยังไม่มีสิทธิ์หน้าไหนเลย', async () => {
-      for (const path of ['/api/cases', '/api/invoices', '/api/payroll/preview', '/api/notify/alerts', '/api/employees']) {
-        assert.equal((await get(path, IPD)).status, 403, path);
-      }
-      assert.deepEqual((await get('/api/auth/me', IPD)).body.permissions, []);
+    test('Admin IPD เลิกใช้แล้ว — ตั้งตำแหน่งนี้ไม่ได้ และ migrate ย้ายคนเดิมเป็น Admin HC', async () => {
+      await post('/api/employees', { first_name: 'Ipd', last_name: 'Admin', position: 'admin_ipd' }, MANAGER, 400);
+      // จำลองข้อมูลเก่า: ปลด CHECK ชั่วคราวแล้วใส่แถว admin_ipd จากนั้นรัน schema ซ้ำ
+      await sql.run('ALTER TABLE employees DROP CONSTRAINT IF EXISTS employees_position_check');
+      await sql.run(`INSERT INTO employees (employee_id, first_name, last_name, position, email, status, password_hash, must_change_password)
+                     VALUES ('EMP-0092', 'Old', 'Ipd', 'admin_ipd', 'ipd@example.invalid', 'active', 'x', false)`);
+      const { readFile } = await import('node:fs/promises');
+      await pool.query(await readFile(new URL('../src/db/schema.sql', import.meta.url), 'utf8'));
+      assert.equal((await sql.one(`SELECT position FROM employees WHERE employee_id = 'EMP-0092'`)).position, 'admin');
     });
 
     test('Admin HC: สิทธิ์เท่าแอดมินเดิม — งานหลังบ้าน + ใบแจ้งหนี้ ไม่มีเรื่องเงิน', async () => {
@@ -270,11 +273,30 @@ if (process.env.RUN_DB_TESTS !== '1') {
       assert.deepEqual(Object.keys(alerts.groups).sort(), ['attendance', 'cases', 'invoices']);
     });
 
+    test('รหัสผ่านชั่วคราวของบัญชีผู้จัดการ/การเงิน HR และ Admin HC มองไม่เห็น — ผู้จัดการเห็น', async () => {
+      const fin = await post('/api/employees', { first_name: 'Temp', last_name: 'Finance', position: 'finance' }, MANAGER, 201);
+      assert.ok(fin.temp_password);
+      assert.equal((await get(`/api/employees/${fin.employee_id}`, HR)).body.temp_password, undefined);
+      assert.equal((await get(`/api/employees/${fin.employee_id}`, HC)).body.temp_password, undefined);
+      assert.equal((await get(`/api/employees/${fin.employee_id}`, MANAGER)).body.temp_password, fin.temp_password);
+      // บัญชีทั่วไป HR ยังเห็นเหมือนเดิม (ไว้บอกพนักงานใหม่)
+      const cg = await post('/api/employees', { first_name: 'Temp', last_name: 'Carer', position: 'caregiver' }, MANAGER, 201);
+      assert.equal((await get(`/api/employees/${cg.employee_id}`, HR)).body.temp_password, cg.temp_password);
+    });
+
+    test('ประวัติเคส: เหตุการณ์ที่มียอดค่าจ้าง ซ่อนจากคนที่ไม่มีสิทธิ์ดูค่าจ้าง', async () => {
+      const c = await newCase();
+      await sql.run(`INSERT INTO case_events (case_id, event, detail) VALUES (:id, 'pay_released', 'งวดที่ 1 — 7,000 บาท')`, { id: c.case_id });
+      assert.ok((await get(`/api/cases/${c.case_id}/events`, MANAGER)).body.some((e) => e.event === 'pay_released'));
+      const hr = (await get(`/api/cases/${c.case_id}/events`, HR)).body;
+      assert.ok(Array.isArray(hr) && hr.length > 0);
+      assert.ok(!hr.some((e) => e.event === 'pay_released'));
+    });
+
     test('HR แต่งตั้งตำแหน่งการเงินไม่ได้ (เป็นการเลื่อนสิทธิ์เรื่องเงิน) — ผู้จัดการทำได้', async () => {
       const denied = await post('/api/employees', { first_name: 'Fin', last_name: 'Ance', position: 'finance' }, HR, 403);
       assert.match(denied.error, /การเงิน/);
       await post('/api/employees', { first_name: 'Fin', last_name: 'Ance', position: 'finance' }, MANAGER, 201);
-      await post('/api/employees', { first_name: 'Ipd', last_name: 'Admin', position: 'admin_ipd' }, HR, 201);
     });
   });
 
@@ -947,6 +969,402 @@ if (process.env.RUN_DB_TESTS !== '1') {
     });
   });
 
+  describe('ใบแจ้งหนี้: ซิงก์ตามเคส · ใบรายครั้ง · รายได้เงินสด · ยกเลิกแผนมัดจำ · สิทธิ์ยอดสรุป', () => {
+    const HC = emp('EMP-0095', 'admin');
+
+    before(async () => {
+      await sql.run(
+        `INSERT INTO employees (employee_id, first_name, last_name, position, email, status, password_hash, must_change_password)
+         VALUES ('EMP-0095', 'Billing', 'Admin', 'admin', 'emp-0095@example.invalid', 'active', 'x', false)
+         ON CONFLICT (employee_id) DO NOTHING`,
+      );
+    });
+
+    async function send(method, path, body, who = MANAGER) {
+      const res = await fetch(`${base}${path}`, {
+        method,
+        headers: { 'content-type': 'application/json', cookie: `${COOKIE_NAME}=${signToken(who)}` },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+      return { status: res.status, body: await res.json() };
+    }
+    const draftOf = async (caseId) =>
+      (await get(`/api/invoices?case_id=${caseId}`, MANAGER)).body.data.find((v) => v.status === 'draft');
+    const invoice = async (id) => (await get(`/api/invoices/${id}`, MANAGER)).body;
+    const pay = (id, body) => post(`/api/invoices/${id}/pay`, { request_id: crypto.randomUUID(), ...body });
+
+    test('แก้เคส: ซิงก์เฉพาะตอนราคา/ผู้จ่ายเปลี่ยน · ใบที่แก้มือไม่ถูกทับ · รีเฟรชเองทับและล้างธง · ผู้จ่ายจากแฟ้มผู้ป่วย', async () => {
+      const customer = await post('/api/customers', { name: 'ผู้จ่ายจากแฟ้มผู้ป่วย' }, MANAGER, 201);
+      await sql.run(
+        `INSERT INTO patients (patient_id, name, status, customer_id) VALUES ('KN690000951', 'ผู้ป่วยซิงก์', 'active', :cu)`,
+        { cu: customer.customer_id },
+      );
+      const c = await post('/api/cases', { case_type: 'other', client_name: 'ผู้ป่วยซิงก์', patient_id: 'KN690000951', fee: 3000 }, MANAGER, 201);
+      // เคสไม่มีผู้ว่าจ้างของตัวเอง — ผู้จ่ายต้องไล่ไปที่แฟ้มผู้ป่วย
+      await sql.run('UPDATE cases SET customer_id = NULL WHERE case_id = :id', { id: c.case_id });
+
+      // แก้ค่าบริการ → ใบร่างตาม และชื่อผู้จ่ายยังเป็นลูกค้าของผู้ป่วย (ของเดิมกลายเป็นชื่อผู้ป่วย)
+      assert.equal((await send('PATCH', `/api/cases/${c.case_id}`, { fee: 3500 })).status, 200);
+      let draft = await draftOf(c.case_id);
+      assert.equal(draft.total, 3500);
+      assert.equal(draft.bill_to_name, 'ผู้จ่ายจากแฟ้มผู้ป่วย');
+      assert.equal(draft.payer_stale, false);
+
+      // ฝ่ายบัญชีให้ส่วนลดในใบเอง
+      const edited = await send('PATCH', `/api/invoices/${draft.invoice_id}`, { discount: 500, note: 'ลดพิเศษ' });
+      assert.equal(edited.status, 200, JSON.stringify(edited.body));
+      assert.equal(edited.body.total, 3000);
+
+      // แก้แค่หมายเหตุของเคส = ไม่แตะใบ
+      await send('PATCH', `/api/cases/${c.case_id}`, { note: 'แก้หมายเหตุอย่างเดียว' });
+      assert.equal((await invoice(draft.invoice_id)).discount, 500);
+
+      // แก้ราคาเคส = ใบที่แก้มือไว้ต้องไม่ถูกทับ แต่ขึ้นป้ายไม่ตรงกับเคสให้คนตัดสินใจ
+      await send('PATCH', `/api/cases/${c.case_id}`, { fee: 4000 });
+      draft = await invoice(draft.invoice_id);
+      assert.equal(draft.discount, 500);
+      assert.equal(draft.total, 3000);
+      assert.equal(draft.fee_stale, true);
+
+      // กดดึงข้อมูลจากเคสเอง = ยอมให้เคสทับ และใบกลับมาซิงก์อัตโนมัติได้อีก
+      const refreshed = await post(`/api/invoices/${draft.invoice_id}/refresh`, {});
+      assert.equal(refreshed.total, 4000);
+      assert.equal(refreshed.discount, 0);
+      assert.equal(refreshed.bill_to_name, 'ผู้จ่ายจากแฟ้มผู้ป่วย');
+      assert.equal(refreshed.manual_edit, false);
+      await send('PATCH', `/api/cases/${c.case_id}`, { fee: 4200 });
+      assert.equal((await invoice(draft.invoice_id)).total, 4200);
+
+      // บันทึกฟอร์มใบโดยส่งค่าเดิมกลับมาทั้งชุด ไม่นับเป็นการแก้มือ
+      const same = await invoice(draft.invoice_id);
+      await send('PATCH', `/api/invoices/${draft.invoice_id}`, {
+        amount: same.amount, discount: same.discount, bill_to_name: same.bill_to_name, note: 'แก้โน้ตใบ',
+      });
+      assert.equal((await invoice(draft.invoice_id)).manual_edit, false);
+    });
+
+    test('ใบรายครั้ง: แบ่งมัดจำไม่ได้ · กะที่อยู่ในใบอื่นแล้วไม่ถูกเก็บซ้ำ · ยกเลิกใบแล้วออกกะเดิมได้อีก', async () => {
+      const c = await post('/api/cases', { case_type: 'other', client_name: 'Visit billing', fee: 2000 }, MANAGER, 201);
+      const auto = await draftOf(c.case_id);
+      assert.equal((await send('DELETE', `/api/invoices/${auto.invoice_id}`)).status, 200);
+      for (const d of ['2026-02-02', '2026-02-03']) {
+        await sql.run(
+          `INSERT INTO case_visits (case_id, visit_date, status, check_in_at, check_out_at)
+           VALUES (:id, :d, 'done', (:d || ' 08:00:00+07')::timestamptz, (:d || ' 16:00:00+07')::timestamptz)`,
+          { id: c.case_id, d },
+        );
+      }
+
+      const first = await post('/api/invoices', { case_id: c.case_id, basis: 'visits' }, MANAGER, 201);
+      assert.equal(first.items.length, 2);
+      assert.equal(first.total, 2000);
+
+      const split = await post(`/api/invoices/${first.invoice_id}/billing-plan`, { mode: 'deposit', deposit_amount: 500 }, MANAGER, 409);
+      assert.match(split.error, /รายครั้ง/);
+      assert.equal((await invoice(first.invoice_id)).billing_kind, null, 'ปฏิเสธแล้วใบต้องไม่ถูกแตะ');
+      assert.equal((await get(`/api/invoices?case_id=${c.case_id}`, MANAGER)).body.data.length, 1, 'ต้องไม่เกิดใบส่วนที่เหลือ');
+
+      await post(`/api/invoices/${first.invoice_id}/billing-plan`, { mode: 'full' });
+      await post(`/api/invoices/${first.invoice_id}/issue`, {});
+
+      // ช่วงวันซ้อนกับใบแรกทั้งหมด = ไม่มีกะเหลือให้เก็บ
+      const again = await post('/api/invoices', { case_id: c.case_id, basis: 'visits' }, MANAGER, 409);
+      assert.match(again.error, /ยังไม่ได้ออกใบ/);
+
+      // ใบแรกยกเลิก = กะกลับมาเก็บเงินได้
+      await post(`/api/invoices/${first.invoice_id}/cancel`, {});
+      const reissued = await post('/api/invoices', { case_id: c.case_id, basis: 'visits' }, MANAGER, 201);
+      assert.equal(reissued.items.length, 2);
+    });
+
+    test('ออกใบพร้อมกันสองคำขอ = ใบร่างใบเดียว', async () => {
+      const c = await newCase();
+      const auto = await draftOf(c.case_id);
+      await send('DELETE', `/api/invoices/${auto.invoice_id}`);
+      const results = await Promise.all([
+        send('POST', '/api/invoices', { case_id: c.case_id }),
+        send('POST', '/api/invoices', { case_id: c.case_id }),
+      ]);
+      assert.deepEqual(results.map((r) => r.status).sort(), [201, 409]);
+      const drafts = (await get(`/api/invoices?case_id=${c.case_id}&status=draft`, MANAGER)).body.data;
+      assert.equal(drafts.length, 1);
+    });
+
+    test('รายได้เกณฑ์เงินสด: นับงวดที่รับจริงตามวันรับ · ใบยกเลิกไม่นับ · request_id ซ้ำข้ามใบ = 409', async () => {
+      const todayRevenue = async () => {
+        const r = (await get('/api/invoices/revenue?bucket=day&points=2', MANAGER)).body;
+        return r.data[r.data.length - 1].revenue;
+      };
+      const before = await todayRevenue();
+
+      const c = await post('/api/cases', { case_type: 'other', client_name: 'Cash basis', fee: 10000 }, MANAGER, 201);
+      const draft = await draftOf(c.case_id);
+      await post(`/api/invoices/${draft.invoice_id}/billing-plan`, { mode: 'full' });
+      const requestId = crypto.randomUUID();
+      await post(`/api/invoices/${draft.invoice_id}/pay`, { request_id: requestId, amount: 3000 });
+      // ยังไม่ครบยอดก็เป็นเงินที่เข้าแล้ว (ของเดิมนับ 0 จนกว่าใบจะปิด)
+      assert.equal(await todayRevenue(), before + 3000);
+
+      // ใช้ request_id เดิมกับใบอื่น = คำขอขัดกัน ไม่ใช่ 500
+      const other = await post('/api/cases', { case_type: 'other', client_name: 'Cash basis 2', fee: 500 }, MANAGER, 201);
+      const otherDraft = await draftOf(other.case_id);
+      await post(`/api/invoices/${otherDraft.invoice_id}/billing-plan`, { mode: 'full' });
+      await post(`/api/invoices/${otherDraft.invoice_id}/pay`, { request_id: requestId, amount: 100 }, MANAGER, 409);
+
+      await post(`/api/invoices/${draft.invoice_id}/cancel`, {});
+      assert.equal(await todayRevenue(), before);
+    });
+
+    test('ยกเลิกงวดหนึ่งของแผนมัดจำ: ใบคู่ที่ยังไม่รับเงินถูกยกเลิกตาม · ใบคู่รับเงินแล้ว = 409', async () => {
+      const plan = async (name) => {
+        const c = await post('/api/cases', { case_type: 'other', client_name: name, fee: 10000 }, MANAGER, 201);
+        const draft = await draftOf(c.case_id);
+        await post(`/api/invoices/${draft.invoice_id}/billing-plan`, { mode: 'deposit', deposit_amount: 4000 });
+        const rows = (await get(`/api/invoices?case_id=${c.case_id}`, MANAGER)).body.data;
+        return {
+          deposit: rows.find((v) => v.billing_kind === 'deposit'),
+          balance: rows.find((v) => v.billing_kind === 'balance'),
+        };
+      };
+
+      const a = await plan('Cancel plan A');
+      await post(`/api/invoices/${a.balance.invoice_id}/cancel`, {});
+      assert.equal((await invoice(a.deposit.invoice_id)).status, 'cancelled');
+      assert.equal((await invoice(a.balance.invoice_id)).status, 'cancelled');
+
+      const b = await plan('Cancel plan B');
+      await pay(b.balance.invoice_id, { amount: 1000 });
+      const refused = await post(`/api/invoices/${b.deposit.invoice_id}/cancel`, {}, MANAGER, 409);
+      assert.match(refused.error, new RegExp(b.balance.invoice_id));
+      assert.notEqual((await invoice(b.deposit.invoice_id)).status, 'cancelled');
+      // ยกเลิกใบที่รับเงินแล้วเอง = ใบมัดจำที่ยังไม่รับเงินตามไป
+      await post(`/api/invoices/${b.balance.invoice_id}/cancel`, {});
+      assert.equal((await invoice(b.deposit.invoice_id)).status, 'cancelled');
+    });
+
+    test('ยอดสรุป: ยอดเงินของใบชำระแล้วเห็นเฉพาะหมวด money — Admin HC เห็นแค่จำนวนใบ', async () => {
+      const c = await post('/api/cases', { case_type: 'other', client_name: 'Summary paid', fee: 1000 }, MANAGER, 201);
+      const draft = await draftOf(c.case_id);
+      await post(`/api/invoices/${draft.invoice_id}/billing-plan`, { mode: 'full' });
+      await pay(draft.invoice_id, {});
+
+      const m = (await get('/api/invoices/summary', MANAGER)).body.find((r) => r.status === 'paid');
+      assert.ok(m.amount >= 1000);
+      const h = await get('/api/invoices/summary', HC);
+      assert.equal(h.status, 200);
+      const paid = h.body.find((r) => r.status === 'paid');
+      assert.equal(paid.count, m.count);
+      assert.equal('amount' in paid, false);
+      assert.equal('outstanding' in paid, false);
+      // แถวที่ยังไม่ชำระยังมียอดค้างให้ตามเก็บ
+      assert.ok(h.body.filter((r) => r.status !== 'paid').every((r) => 'outstanding' in r));
+    });
+  });
+
+  describe('กะของเคส — แก้นัดหมาย / ย้ายตามคนดูแล / ส่วนแบ่งทีม / เปิดเคสคืนกะ / กะข้ามเที่ยงคืน', () => {
+    const LEAD_A = emp('EMP-0082', 'caregiver');
+    const LEAD_B = emp('EMP-0083', 'caregiver');
+    let today;
+    const inDays = (n) => new Date(Date.parse(`${today}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+
+    async function call(method, path, body, who = MANAGER, expected = 200) {
+      const res = await fetch(`${base}${path}`, {
+        method,
+        headers: { 'content-type': 'application/json', cookie: `${COOKIE_NAME}=${signToken(who)}` },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+      const text = await res.text();
+      let data;
+      try { data = JSON.parse(text); } catch { data = text; }
+      assert.equal(res.status, expected, `${method} ${path}: ${text}`);
+      return data;
+    }
+    const visitRow = (id) => sql.one('SELECT * FROM case_visits WHERE visit_id = :id', { id });
+    const assignees = async (caseId) => Object.fromEntries(
+      (await sql.all('SELECT visit_date, assigned_to FROM case_visits WHERE case_id = :id', { id: caseId }))
+        .map((r) => [r.visit_date, r.assigned_to]),
+    );
+    const statuses = async (caseId) => Object.fromEntries(
+      (await sql.all('SELECT visit_date, status, auto_cancelled_at FROM case_visits WHERE case_id = :id', { id: caseId }))
+        .map((r) => [r.visit_date, r]),
+    );
+
+    before(async () => {
+      ({ today } = await sql.one(`SELECT to_char(now() AT TIME ZONE 'Asia/Bangkok','YYYY-MM-DD') AS today`));
+      for (const id of [LEAD_A.employee_id, LEAD_B.employee_id]) {
+        await sql.run(`INSERT INTO employees (employee_id, first_name, last_name, position, email, status, password_hash, must_change_password)
+                       VALUES (:id, 'Visit', :id, 'caregiver', :email, 'active', 'x', false)
+                       ON CONFLICT (employee_id) DO NOTHING`, { id, email: `${id.toLowerCase()}@example.invalid` });
+      }
+    });
+
+    test('PATCH กะ: กะที่เช็คอินแล้วแก้ได้แค่หมายเหตุ · ย้ายวันลงประวัติ · เคสจบ/ปล่อยเงินแล้วเปลี่ยนสถานะไม่ได้', async () => {
+      const c = await newCase();
+      await post(`/api/cases/${c.case_id}/assign`, { employee_id: FIELD.employee_id });
+      const sched = await post(`/api/cases/${c.case_id}/visits/bulk`,
+        { dates: [today, inDays(3)], assigned_to: FIELD.employee_id }, MANAGER, 201);
+      const attended = sched.visits.find((v) => v.visit_date === today);
+      const future = sched.visits.find((v) => v.visit_date === inDays(3));
+      assert.ok(await casesRepo.checkInVisit(attended.visit_id, { employee_id: FIELD.employee_id, lat: null, lng: null,
+        accuracy: null, distance: null, flagged: true, photo: null }));
+
+      // หน้าเว็บส่งทั้งฟอร์ม — ค่าเดิมของช่องที่ล็อกติดมาด้วยต้องไม่ถูกปฏิเสธ แก้หมายเหตุได้ตามปกติ
+      const row = await visitRow(attended.visit_id);
+      const form = { visit_date: row.visit_date, assigned_to: row.assigned_to, planned_start: row.planned_start,
+        planned_end: row.planned_end, status: row.status, note: 'แก้หมายเหตุได้' };
+      const path = `/api/cases/${c.case_id}/visits/${attended.visit_id}`;
+      await call('PATCH', path, form);
+      assert.equal((await visitRow(attended.visit_id)).note, 'แก้หมายเหตุได้');
+      assert.match((await call('PATCH', path, { ...form, visit_date: inDays(1) }, MANAGER, 409)).error, /เช็คอินไปแล้ว/);
+      await call('PATCH', path, { ...form, status: 'cancelled' }, MANAGER, 409);
+      await call('PATCH', path, { ...form, assigned_to: LEAD_A.employee_id }, MANAGER, 409);
+      await call('PATCH', path, { ...form, planned_start: '09:00' }, MANAGER, 409);
+      assert.equal((await visitRow(attended.visit_id)).visit_date, today);
+
+      // กะที่ยังไม่มีใครไป ย้ายวันได้ และลงประวัติว่าเปลี่ยนจากอะไรเป็นอะไร
+      const futurePath = `/api/cases/${c.case_id}/visits/${future.visit_id}`;
+      await call('PATCH', futurePath, { visit_date: inDays(4), planned_start: '09:00', planned_end: '12:00' });
+      assert.equal((await visitRow(future.visit_id)).visit_date, inDays(4));
+      const events = (await get(`/api/cases/${c.case_id}/events`, MANAGER)).body;
+      const edited = events.find((e) => e.event === 'visit_edited' && e.detail.includes(`วันนัด ${inDays(3)} → ${inDays(4)}`));
+      assert.ok(edited, JSON.stringify(events.map((e) => e.detail)));
+      assert.match(edited.detail, /เวลาเริ่ม - → 09:00/);
+
+      // เคสจบแล้ว: เปิดกะกลับมา/ย้ายวันไม่ได้ แต่ยังแก้หมายเหตุได้
+      await post(`/api/cases/${c.case_id}/close`, { force: true });
+      assert.equal((await visitRow(future.visit_id)).status, 'cancelled');
+      assert.match((await call('PATCH', futurePath, { status: 'scheduled' }, MANAGER, 409)).error, /เปิดเคสใหม่/);
+      await call('PATCH', futurePath, { visit_date: inDays(5) }, MANAGER, 409);
+      await call('PATCH', futurePath, { note: 'ยังจดได้' });
+
+      // ปล่อยเงินแล้ว: เปลี่ยนสถานะกะไม่ได้ (กติกาเดียวกับ /adjust)
+      await post(`/api/cases/${c.case_id}/reopen`, {});
+      await post(`/api/cases/${c.case_id}/pay/release`, { amount: 100 }, MANAGER, 201);
+      assert.match((await call('PATCH', futurePath, { status: 'cancelled' }, MANAGER, 409)).error, /ปล่อยค่าจ้าง/);
+    });
+
+    test('เปลี่ยนคนดูแลเคส: กะข้างหน้าย้ายตาม · กะที่ลงตอนยังไม่มีคนได้เจ้าของ · ถอดคนแล้วไม่ค้างชื่อ', async () => {
+      const c = await newCase();
+      const sched = await post(`/api/cases/${c.case_id}/visits/bulk`, { dates: [inDays(-1), today, inDays(2)] }, MANAGER, 201);
+      assert.ok(sched.visits.every((v) => v.assigned_to === null), 'เคสยังไม่มีคน กะจึงยังว่าง');
+
+      await post(`/api/cases/${c.case_id}/assign`, { employee_id: LEAD_B.employee_id });
+      let w = await assignees(c.case_id);
+      assert.equal(w[inDays(-1)], null, 'กะที่ผ่านไปแล้วไม่แตะ');
+      assert.equal(w[today], LEAD_B.employee_id);
+      assert.equal(w[inDays(2)], LEAD_B.employee_id);
+      const mine = (await get('/api/my/today', LEAD_B)).body;
+      assert.ok(mine.some((v) => v.case_id === c.case_id), 'งานวันนี้ของคนใหม่ต้องเห็นกะที่เพิ่งได้รับ');
+
+      // เปลี่ยนคนหลัก → กะข้างหน้าของคนเดิมตามไปเป็นของคนใหม่
+      await post(`/api/cases/${c.case_id}/assign`, { employee_id: LEAD_A.employee_id });
+      w = await assignees(c.case_id);
+      assert.equal(w[today], LEAD_A.employee_id);
+      assert.equal(w[inDays(2)], LEAD_A.employee_id);
+      assert.ok(!(await get('/api/my/today', LEAD_B)).body.some((v) => v.case_id === c.case_id));
+
+      // คนในทีมที่ถูกนำออก — กะของเขาคืนให้คนหลัก
+      await post(`/api/cases/${c.case_id}/team`, { employee_id: FIELD.employee_id });
+      const later = sched.visits.find((v) => v.visit_date === inDays(2));
+      await call('PATCH', `/api/cases/${c.case_id}/visits/${later.visit_id}`, { assigned_to: FIELD.employee_id });
+      await call('DELETE', `/api/cases/${c.case_id}/team/${FIELD.employee_id}`);
+      assert.equal((await visitRow(later.visit_id)).assigned_to, LEAD_A.employee_id);
+
+      // ถอดคนหลักโดยไม่มีใครรับต่อ → กะข้างหน้ากลายเป็นกะว่าง ไม่ค้างชื่อคนที่ถูกถอด
+      await post(`/api/cases/${c.case_id}/unassign`, {});
+      w = await assignees(c.case_id);
+      assert.equal(w[today], null);
+      assert.equal(w[inDays(2)], null);
+
+      // คนหลักที่ถูกพักงาน — ลงกะโดยไม่ระบุคน (= ใช้คนหลัก) ต้องถูกปฏิเสธพร้อมบอกทางออก
+      await post(`/api/cases/${c.case_id}/assign`, { employee_id: LEAD_B.employee_id });
+      await sql.run(`UPDATE employees SET status = 'suspended' WHERE employee_id = :id`, { id: LEAD_B.employee_id });
+      try {
+        const refused = await post(`/api/cases/${c.case_id}/visits/bulk`, { dates: [inDays(6)] }, MANAGER, 409);
+        assert.match(refused.error, /ผู้รับผิดชอบหลัก/);
+        await post(`/api/cases/${c.case_id}/visits/bulk`, { dates: [inDays(6)], assigned_to: LEAD_A.employee_id }, MANAGER, 201);
+      } finally {
+        await sql.run(`UPDATE employees SET status = 'active' WHERE employee_id = :id`, { id: LEAD_B.employee_id });
+      }
+    });
+
+    test('ส่วนแบ่งค่าจ้าง: คนในทีมดูแลเคสเลือกเป็นผู้รับได้ แม้ยังไม่มีกะ', async () => {
+      const c = await newCase();
+      await post(`/api/cases/${c.case_id}/assign`, { employee_id: FIELD.employee_id });
+      await post(`/api/cases/${c.case_id}/team`, { employee_id: LEAD_A.employee_id });
+
+      const pay = (await get(`/api/cases/${c.case_id}/pay`, MANAGER)).body;
+      assert.deepEqual(pay.shares.map((r) => r.employee_id).sort(), [FIELD.employee_id, LEAD_A.employee_id].sort());
+
+      await call('PUT', `/api/cases/${c.case_id}/pay/shares`, {
+        shares: [{ employee_id: FIELD.employee_id, share: 700 }, { employee_id: LEAD_A.employee_id, share: 500 }],
+      });
+      const released = await post(`/api/cases/${c.case_id}/pay/release`, {
+        amount: 500, shares: [{ employee_id: LEAD_A.employee_id, amount: 500 }],
+      }, MANAGER, 201);
+      assert.ok(released);
+      const payouts = await sql.all('SELECT employee_id, amount FROM case_payouts WHERE case_id = :id', { id: c.case_id });
+      assert.deepEqual(payouts.map((p) => [p.employee_id, Number(p.amount)]), [[LEAD_A.employee_id, 500]]);
+    });
+
+    test('เปิดเคสใหม่: คืนกะข้างหน้าที่ระบบยกเลิกตอนปิด/ยกเลิกเคส แต่ไม่คืนกะที่คนกดยกเลิกเอง', async () => {
+      const c = await newCase();
+      await post(`/api/cases/${c.case_id}/assign`, { employee_id: FIELD.employee_id });
+      const sched = await post(`/api/cases/${c.case_id}/visits/bulk`,
+        { dates: [inDays(1), inDays(2), inDays(3)], assigned_to: FIELD.employee_id }, MANAGER, 201);
+      const manual = sched.visits.find((v) => v.visit_date === inDays(3));
+      await call('PATCH', `/api/cases/${c.case_id}/visits/${manual.visit_id}`, { status: 'cancelled' });
+
+      await post(`/api/cases/${c.case_id}/close`, { force: true });
+      let s = await statuses(c.case_id);
+      assert.ok(Object.values(s).every((v) => v.status === 'cancelled'));
+      assert.equal(s[inDays(3)].auto_cancelled_at, null, 'กะที่คนยกเลิกเองไม่ถูกติดธงของระบบ');
+
+      await post(`/api/cases/${c.case_id}/reopen`, {});
+      s = await statuses(c.case_id);
+      assert.equal(s[inDays(1)].status, 'scheduled');
+      assert.equal(s[inDays(2)].status, 'scheduled');
+      assert.equal(s[inDays(3)].status, 'cancelled');
+      assert.ok(Object.values(s).every((v) => v.auto_cancelled_at === null), 'ธงถูกล้างหลังเปิดเคส');
+      const events = (await get(`/api/cases/${c.case_id}/events`, MANAGER)).body;
+      assert.ok(events.some((e) => e.event === 'reopened' && /คืนกะ.*2 กะ/.test(e.detail)));
+
+      // ยกเลิกเคสแล้วเปิดใหม่ก็คืนแบบเดียวกัน
+      await post(`/api/cases/${c.case_id}/cancel`, { reason: 'ทดสอบ' });
+      await post(`/api/cases/${c.case_id}/reopen`, {});
+      s = await statuses(c.case_id);
+      assert.deepEqual([s[inDays(1)].status, s[inDays(2)].status, s[inDays(3)].status], ['scheduled', 'scheduled', 'cancelled']);
+    });
+
+    test('กะข้ามเที่ยงคืน (20:00–08:00) ชนกับกะดึกวันเดียวกันและกะเช้าวันถัดไป', async () => {
+      const D = '2027-03-10';
+      const D1 = '2027-03-11';
+      const a = await newCase();
+      const b = await newCase();
+      const who = LEAD_A.employee_id;
+      const night = await post(`/api/cases/${a.case_id}/visits/bulk`,
+        { dates: [D], assigned_to: who, planned_start: '20:00', planned_end: '08:00' }, MANAGER, 201);
+      assert.equal(night.conflicts.length, 0);
+
+      // กะเช้าวันถัดไปทับช่วงท้ายของกะดึก (07:00–08:00)
+      const morning = await post(`/api/cases/${b.case_id}/visits/bulk`,
+        { dates: [D1], assigned_to: who, planned_start: '07:00', planned_end: '10:00' }, MANAGER, 201);
+      assert.equal(morning.conflicts.length, 1, JSON.stringify(morning.conflicts));
+      assert.equal(morning.conflicts[0].other_case_id, a.case_id);
+
+      const preview = (body) => post(`/api/cases/${b.case_id}/visits/preview`, { assigned_to: who, ...body });
+      // วันเดียวกัน ช่วงดึก — ของเดิมเทียบ '22:00' < '08:00' เป็นข้อความแล้วไม่ชน
+      const late = await preview({ dates: [D], planned_start: '22:00', planned_end: '23:00' });
+      assert.ok(late.conflicts.some((c) => c.other_case_id === a.case_id && c.visit_date === D), JSON.stringify(late));
+      // กะดึกที่กำลังจะลง ทับกะเช้าของวันถัดไป — visit_date คือวันที่กำลังจะลง
+      const overnight = await preview({ dates: [D], planned_start: '23:30', planned_end: '07:30' });
+      assert.ok(overnight.conflicts.some((c) => c.other_case_id === b.case_id && c.visit_date === D && c.other_date === D1));
+      // ชิดขอบพอดีไม่นับว่าชน
+      assert.equal((await preview({ dates: [D], planned_start: '18:00', planned_end: '20:00' })).conflicts.length, 0);
+      assert.equal((await preview({ dates: [D1], planned_start: '10:00', planned_end: '12:00' })).conflicts.length, 0);
+    });
+  });
+
   describe('Concurrent case transitions use the state after acquiring the lock', () => {
     for (const [name, initial, committed, action] of [
       ['start', 'assigned', 'closed', (id) => casesRepo.start(id, MANAGER)],
@@ -1006,6 +1424,153 @@ if (process.env.RUN_DB_TESTS !== '1') {
       assert.equal(results.find((r) => r.status === 'rejected').reason.status, 409);
       const row = await sql.one(`SELECT count(*)::int AS n FROM case_events WHERE case_id = :id AND event = 'started'`, { id: c.case_id });
       assert.equal(row.n, 1);
+    });
+  });
+
+  // ---------- รอบจ่าย: กันจ่ายซ้ำ ----------
+  describe('Payroll — paid runs are final and pay-now pays exactly the preview', () => {
+    const todayTH = async () =>
+      (await sql.one(`SELECT to_char(now() AT TIME ZONE 'Asia/Bangkok','YYYY-MM-DD') AS today`)).today;
+    const releaseFor = async (amount) => {
+      const c = await newCase();
+      await post(`/api/cases/${c.case_id}/assign`, { employee_id: FIELD.employee_id });
+      await post(`/api/cases/${c.case_id}/pay/release`, { amount }, MANAGER, 201);
+      return c;
+    };
+    const previewIds = async (today) =>
+      (await get(`/api/payroll/preview?period_to=${today}`, MANAGER)).body.rows.flatMap((r) => r.payout_ids);
+    const runCount = async () => (await sql.one('SELECT count(*)::int AS n FROM payroll_runs')).n;
+
+    test('cancelling a draft still works; cancelling a paid run is refused and keeps its payouts', async () => {
+      const today = await todayTH();
+      // ร่างที่ค้างจากเทสก่อนหน้า — ยกเลิกได้ปกติ (และคืนช่องรอบของเดือนนี้)
+      const drafts = (await get('/api/payroll?status=draft', MANAGER)).body;
+      for (const d of drafts) {
+        assert.equal((await post(`/api/payroll/${d.run_id}/cancel`, {})).status, 'cancelled');
+      }
+
+      await releaseFor(500);
+      const ids = await previewIds(today);
+      assert.ok(ids.length > 0);
+      const paid = await post('/api/payroll/pay-now', { period_to: today, payout_ids: ids }, MANAGER, 201);
+      assert.equal(paid.status, 'paid');
+      assert.equal(Number(paid.payouts), ids.length);
+
+      const refused = await post(`/api/payroll/${paid.run_id}/cancel`, {}, MANAGER, 409);
+      assert.match(refused.error, /จ่ายไปแล้ว ยกเลิกไม่ได้/);
+      const after = (await get(`/api/payroll/${paid.run_id}`, MANAGER)).body;
+      assert.equal(after.status, 'paid');
+      assert.equal(Number(after.payouts), ids.length, 'payout lines must stay bound to the paid run');
+      assert.deepEqual(await previewIds(today), [], 'paid wages must not become payable again');
+    });
+
+    test('pay-now refuses (409, no run left behind) when payouts changed after the preview', async () => {
+      const today = await todayTH();
+      await releaseFor(400);
+      const seen = await previewIds(today);
+
+      // ร่างแล้วยกเลิก — ก้อนกลับเข้ากองรอจ่ายครบ
+      const draft = await post('/api/payroll', { period_to: today }, MANAGER, 201);
+      assert.equal((await post(`/api/payroll/${draft.run_id}/cancel`, {})).status, 'cancelled');
+      assert.deepEqual(await previewIds(today), seen);
+
+      await releaseFor(300); // ปล่อยเพิ่มหลังผู้ใช้เปิดพรีวิว
+      const before = await runCount();
+      const stale = await post('/api/payroll/pay-now', { period_to: today, payout_ids: seen }, MANAGER, 409);
+      assert.match(stale.error, /โหลดพรีวิวใหม่/);
+      assert.equal(await runCount(), before, 'a refused pay-now must not leave a draft run');
+      assert.equal((await previewIds(today)).length, seen.length + 1);
+
+      const fresh = await previewIds(today);
+      const paid = await post('/api/payroll/pay-now', { period_to: today, payout_ids: fresh }, MANAGER, 201);
+      assert.equal(paid.status, 'paid');
+      assert.equal(Number(paid.payouts), fresh.length);
+      assert.equal(Number(paid.total_pay), 700);
+    });
+  });
+
+  // ---------- schema.sql รันซ้ำทุกครั้งที่ migrate ----------
+  describe('schema.sql re-run', () => {
+    test('staff_pay backfill fills open cases only — closed/cancelled cases keep NULL', async () => {
+      const { readFile } = await import('node:fs/promises');
+      const pkg = await sql.one(
+        `INSERT INTO physio_packages (name, sessions, special_price) VALUES ('Backfill pkg', 1, 1000)
+         RETURNING physio_package_id`,
+      );
+      const ids = {};
+      for (const status of ['unassigned', 'closed', 'cancelled']) {
+        const c = await newCase();
+        await sql.run(
+          `UPDATE cases SET staff_pay = NULL, status = :status, physio_package_id = :pkg WHERE case_id = :id`,
+          { status, pkg: pkg.physio_package_id, id: c.case_id },
+        );
+        ids[status] = c.case_id;
+      }
+      // ตั้งค่าจ้างให้แพ็คเกจทีหลัง แล้ว migrate ซ้ำสองครั้ง
+      await sql.run('UPDATE physio_packages SET staff_pay = 650 WHERE physio_package_id = :id', { id: pkg.physio_package_id });
+      const schema = await readFile(new URL('../src/db/schema.sql', import.meta.url), 'utf8');
+      await pool.query(schema);
+      await pool.query(schema);
+
+      const pay = async (id) => (await sql.one('SELECT staff_pay FROM cases WHERE case_id = :id', { id })).staff_pay;
+      assert.equal(await pay(ids.unassigned), 650);
+      assert.equal(await pay(ids.closed), null, 'closed case must not get staff pay backfilled');
+      assert.equal(await pay(ids.cancelled), null);
+    });
+  });
+
+  // ---------- หมุน JWT_SECRET แล้วสำเนารหัสชั่วคราวถอดไม่ออก ----------
+  describe('Unreadable temp password (JWT_SECRET rotated)', () => {
+    test('employee detail and rename keep working; unreadable copy is flagged then cleared', async () => {
+      const created = await post('/api/employees', { first_name: 'Rotated', last_name: 'Secret', position: 'caregiver' }, MANAGER, 201);
+      // ค่าที่เข้ารหัสด้วยกุญแจอื่น — auth tag ไม่ผ่าน เหมือนหลังหมุน secret
+      await sql.run(
+        `UPDATE employees SET temp_password_encrypted = 'AAAAAAAAAAAAAAAA.AAAAAAAAAAAAAAAAAAAAAA==.AAAA'
+         WHERE employee_id = :id`,
+        { id: created.employee_id },
+      );
+      const detail = await get(`/api/employees/${created.employee_id}`, MANAGER);
+      assert.equal(detail.status, 200);
+      assert.equal('temp_password' in detail.body, false);
+      assert.equal(detail.body.temp_password_unreadable, true);
+
+      const res = await fetch(`${base}/api/employees/${created.employee_id}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json', cookie: `${COOKIE_NAME}=${signToken(MANAGER)}` },
+        body: JSON.stringify({ employee_id: 'A6800888' }),
+      });
+      assert.equal(res.status, 200);
+      const stored = await sql.one(`SELECT temp_password_encrypted FROM employees WHERE employee_id = 'A6800888'`);
+      assert.equal(stored.temp_password_encrypted, null);
+      assert.equal((await get('/api/employees/A6800888', MANAGER)).status, 200);
+    });
+  });
+
+  // ---------- token ที่ออกในวินาทีเดียวกับการเปลี่ยนรหัส ----------
+  describe('Password change revokes same-second tokens', () => {
+    test('older token from the same second is rejected; the new session cookie keeps working', async () => {
+      const created = await post('/api/employees', { first_name: 'Same', last_name: 'Second', position: 'caregiver' }, MANAGER, 201);
+      const who = emp(created.employee_id, 'caregiver');
+      const me = (cookie) => fetch(`${base}/api/auth/me`, { headers: { cookie } });
+
+      const old = signToken(who);
+      const { iat_ms } = JSON.parse(Buffer.from(old.split('.')[1], 'base64url').toString('utf8'));
+      // เปลี่ยนรหัส 1 ms หลังออก token — วินาทีเดียวกันแทบทุกครั้ง (ของเดิมปล่อยผ่าน)
+      await sql.run(
+        `UPDATE employees SET password_changed_at = to_timestamp((:t)::double precision / 1000) WHERE employee_id = :id`,
+        { t: iat_ms + 1, id: created.employee_id },
+      );
+      assert.equal((await me(`${COOKIE_NAME}=${old}`)).status, 401);
+
+      await new Promise((r) => setTimeout(r, 5));
+      const changed = await fetch(`${base}/api/auth/change-password`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', cookie: `${COOKIE_NAME}=${signToken(who)}` },
+        body: JSON.stringify({ current_password: created.temp_password, new_password: 'Same-second-789!' }),
+      });
+      assert.equal(changed.status, 200);
+      const fresh = changed.headers.get('set-cookie').split(';')[0];
+      assert.equal((await me(fresh)).status, 200, 'the session issued right after the change must survive');
     });
   });
 }

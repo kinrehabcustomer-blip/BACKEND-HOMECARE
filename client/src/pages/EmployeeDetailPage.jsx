@@ -100,7 +100,7 @@ export default function EmployeeDetailPage() {
           <Row label="ชื่อ-นามสกุล (อังกฤษ)">
             {[employee.first_name_en, employee.last_name_en].filter(Boolean).join(' ')}
           </Row>
-          <Row label="เลขบัตรประชาชน"><span className="mono">{employee.national_id}</span></Row>
+          <Row label="เลขบัตรประชาชน">{employee.national_id && <span className="mono">{employee.national_id}</span>}</Row>
           <Row label="เพศ">{GENDER_LABELS[employee.gender]}</Row>
           <Row label="วันเกิด">{formatDate(employee.birth_date)}</Row>
           <Row label="เบอร์โทร">{employee.phone}</Row>

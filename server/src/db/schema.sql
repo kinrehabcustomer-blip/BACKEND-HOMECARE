@@ -41,10 +41,13 @@ CREATE INDEX IF NOT EXISTS idx_employees_name     ON employees (first_name, last
 -- และเปิดรับแบบประเมินจากญาติ — ดู THERAPY_POSITIONS ใน server/src/employees/schema.js
 -- ที่เป็นรายการต้นทางของทั้งสามที่ (ตัวกรองตอนจับคู่เคส และ REVIEW_POSITIONS)
 ALTER TABLE employees DROP CONSTRAINT IF EXISTS employees_position_check;
+-- ตำแหน่ง Admin IPD เลิกใช้แล้ว (2026-10-20) — ใครที่เคยตั้งไว้ย้ายเป็น Admin HC ('admin') ตามที่ผู้ใช้เลือก
+-- ต้องย้ายก่อน ADD CONSTRAINT ด้านล่าง ไม่งั้นแถวเดิมไม่ผ่าน CHECK แล้ว migrate ล้มทั้งไฟล์
+UPDATE employees SET position = 'admin' WHERE position = 'admin_ipd';
 ALTER TABLE employees ADD CONSTRAINT employees_position_check
   CHECK (position IN ('caregiver', 'assistant_nurse', 'practical_nurse', 'nurse',
                       'therapist', 'occupational_therapist', 'speech_therapist',
-                      'manager', 'hr', 'admin', 'admin_ipd', 'finance'));
+                      'manager', 'hr', 'admin', 'finance'));
 
 -- ใบรับรอง / ใบประกอบวิชาชีพ ผูกกับพนักงานผ่าน employee_id
 CREATE TABLE IF NOT EXISTS employee_certificates (
@@ -657,9 +660,12 @@ ALTER TABLE physio_packages ADD COLUMN IF NOT EXISTS staff_pay DOUBLE PRECISION 
 -- เคสเดิมที่เปิดก่อนมีคอลัมน์นี้ — เติมจากเรท/แพ็คเกจที่เคสอ้างอิงอยู่ (เท่าที่ยังหาเจอ)
 -- แตะเฉพาะแถวที่ยังว่าง เคสที่กรอกค่าจ้างเองไว้แล้วไม่ถูกทับ
 -- รันซ้ำได้เรื่อยๆ: ตั้งค่าจ้างในตารางเรท/แพ็คเกจทีหลังแล้วรันอีกครั้ง เคสที่ยังว่างจะได้ค่าไปด้วย
+-- ไม่แตะเคสที่ปิด/ยกเลิกไปแล้ว: schema นี้รันใหม่ทุกครั้งที่ migrate บน production — ตั้งเรททีหลัง
+-- แล้วเติมค่าจ้างย้อนให้เคสที่จบไปนานแล้ว = ตัวเลข "รายได้" ของงานเก่าโผล่ขึ้นมาเองโดยไม่มีใครสั่ง
 UPDATE cases c SET staff_pay = r.staff_pay
   FROM pkg_rates r
   WHERE c.staff_pay IS NULL
+    AND c.status NOT IN ('closed', 'cancelled')
     AND r.format_id = c.pkg_format_id
     AND r.grade_id IS NOT DISTINCT FROM c.pkg_grade_id
     AND r.staff_tier = c.pkg_staff_tier
@@ -669,6 +675,7 @@ UPDATE cases c SET staff_pay = r.staff_pay
 UPDATE cases c SET staff_pay = pp.staff_pay
   FROM physio_packages pp
   WHERE c.staff_pay IS NULL
+    AND c.status NOT IN ('closed', 'cancelled')
     AND pp.physio_package_id = c.physio_package_id
     AND pp.staff_pay IS NOT NULL;
 
@@ -783,6 +790,11 @@ ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS pay_note         TEXT;  -- เ�
 -- คิวรออนุมัติถูกเปิดดูบ่อย (ทุกวัน) และโตขึ้นเรื่อยๆ ตามจำนวนกะ — index เฉพาะแถวที่ยังค้าง
 CREATE INDEX IF NOT EXISTS idx_case_visits_pending
   ON case_visits (checked_in_by, visit_date) WHERE pay_status = 'pending';
+
+-- กะที่ "ระบบ" ยกเลิกให้ตอนปิด/ยกเลิกเคส (เวลาไทย 'YYYY-MM-DD HH24:MI:SS') — NULL = ไม่ได้ถูกยกเลิกแบบนั้น
+-- ต้องแยกจากกะที่คนกดยกเลิกเอง: ตอนเปิดเคสใหม่ ระบบคืนเฉพาะกะที่ตัวเองยกเลิกไป
+-- ถ้าไม่มีธงนี้ จะต้องเลือกระหว่างคืนทุกกะ (รวมที่ลูกค้าขอยกเลิกจริง) กับไม่คืนเลย (ต้องลงตารางใหม่ทั้งหมด)
+ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS auto_cancelled_at TEXT;
 
 -- ============================================================================
 -- เวลาที่บันทึกเปลี่ยนจาก UTC เป็นเวลาไทย
@@ -1516,6 +1528,20 @@ SET service_key = concat_ws('|', COALESCE(c.physio_package_id::text, ''), COALES
                             COALESCE(c.pkg_grade_id::text, ''), COALESCE(c.pkg_staff_tier, ''))
 FROM cases c
 WHERE c.case_id = i.case_id AND i.service_key IS NULL;
+
+-- ---------- ใบที่ถูกแก้ยอด/ผู้จ่าย/รายการด้วยมือ (การซิงก์ตามเคสต้องไม่ทับ) ----------
+-- ของเดิมแก้เคสครั้งใด ใบร่าง/ใบที่ออกแล้วถูกเขียนทับยอด ส่วนลด ผู้จ่าย และรายการบริการใหม่หมด
+-- ส่วนลดพิเศษหรือชื่อผู้จ่ายที่ฝ่ายบัญชีแก้ไว้ในใบจึงหายเงียบๆ ทุกครั้งที่มีคนแก้อะไรก็ได้ในเคส
+-- ธงนี้ตั้งตอนแก้ช่องเหล่านั้นที่ใบเอง แล้วการซิงก์อัตโนมัติจะข้ามใบนั้น (ป้าย "ไม่ตรงกับเคส" ยังขึ้นตามปกติ)
+-- กด "ดึงข้อมูลจากเคส" ที่ใบ = ตั้งใจให้เคสชนะ จึงล้างธงไปพร้อมกัน · ใบเก่าเริ่มเป็น FALSE (พฤติกรรมเดิม)
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS manual_edit BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- ---------- กะที่บรรทัดในใบรายครั้งเก็บเงินไปแล้ว ----------
+-- ไม่มีตัวนี้ ออกใบตามกะสองรอบช่วงวันซ้อนกัน (หรือกดออกซ้ำ) กะเดียวกันถูกเก็บเงินสองใบ
+-- ไม่ผูก FK เหตุผลเดียวกับทั้งตาราง (ลบกะแล้วใบที่ส่งไปต้องไม่เปลี่ยน) — ใช้แค่กันออกซ้ำ
+-- บรรทัดเก่า/บรรทัดอุปกรณ์เสริมเป็น NULL (ไม่รู้ว่ามาจากกะไหน — เริ่มกันได้ตั้งแต่ใบถัดไป)
+ALTER TABLE invoice_items ADD COLUMN IF NOT EXISTS visit_id INTEGER;
+CREATE INDEX IF NOT EXISTS idx_invoice_items_visit ON invoice_items (visit_id) WHERE visit_id IS NOT NULL;
 
 -- ==========================================================================
 -- ย้ายข้อมูลก่อนลบ (ต้องอยู่ท้ายไฟล์เสมอ — ตารางปลายทางถูกสร้างไปแล้วถึงตรงนี้)

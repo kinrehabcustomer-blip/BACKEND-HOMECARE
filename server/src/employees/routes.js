@@ -93,7 +93,16 @@ employeesRouter.get(
   '/:id',
   asyncRoute(async (req, res) => {
     res.set('Cache-Control', 'no-store');
-    res.json(await repo.findDetailById(req.params.id, can(req.user.position, 'office')));
+    /* รหัสผ่านชั่วคราวให้เห็นเฉพาะคนที่ "จัดการบัญชีนั้นได้" — ไม่งั้น HR/Admin HC เปิดดูรหัสของบัญชีผู้จัดการ/ฝ่ายการเงิน
+       ที่เพิ่งสร้าง แล้ว login เป็นบัญชีนั้นก่อนเจ้าตัว = ได้สิทธิ์เงินผ่านประตูหลัง (ข้าม ensureCanGrantManager) */
+    const detail = await repo.findDetailById(req.params.id, false);
+    if (!detail || !can(req.user.position, 'office')) return res.json(detail);
+    try {
+      ensureCanManageTarget(req, detail);
+    } catch {
+      return res.json(detail);
+    }
+    res.json(await repo.findDetailById(req.params.id, true));
   }),
 );
 

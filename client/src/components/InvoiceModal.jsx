@@ -887,6 +887,17 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                       </button>
                     </div>
 
+                    {/* ใบรายครั้งแบ่งมัดจำไม่ได้ (server ปฏิเสธด้วย 409) — บรรทัดรายกะรวมเต็มยอดจะค้างอยู่ที่ใบมัดจำ
+                        บอกเหตุผลแทนการโชว์ช่องกรอกที่กดแล้วยังไงก็ไม่ผ่าน */}
+                    {item.has_items ? (
+                    <div className="plan-option">
+                      <h4>มัดจำก่อน แล้วเก็บส่วนที่เหลือ</h4>
+                      <p className="muted">
+                        ใบนี้แตกเป็นรายครั้งตามกะที่ไปจริง จึงแบ่งมัดจำไม่ได้ — ถ้าต้องการเก็บมัดจำ
+                        ให้ลบใบนี้แล้วออกใบแบบแพ็คเกจแทน
+                      </p>
+                    </div>
+                    ) : (
                     <div className="plan-option">
                       <h4>มัดจำก่อน แล้วเก็บส่วนที่เหลือ</h4>
                       <label>
@@ -928,6 +939,7 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                         แบ่งเก็บมัดจำ
                       </button>
                     </div>
+                    )}
                   </div>
                 </section>
               )}

@@ -184,6 +184,11 @@ const EDITABLE = [
   'service_description', 'amount', 'discount', 'payment_method', 'note',
 ];
 
+// ช่องที่ syncOpenFromCase เขียนทับจากเคส — แก้ช่องพวกนี้ที่ใบเองแล้วใบต้องหลุดจากการซิงก์อัตโนมัติ
+const SYNCED_FIELDS = [
+  'amount', 'discount', 'bill_to_name', 'bill_to_tax_id', 'bill_to_address', 'service_description',
+];
+
 /* บริการที่เคสเลือกอยู่ ย่อเป็นข้อความเดียว — จดไว้ในใบ (service_key) ตอนออก/ซิงก์ แล้วเทียบตอนอ่าน
    เพื่อจับว่าเคสเปลี่ยนแพ็คเกจหลังออกใบ (ดู withComputed.service_stale)
    สูตรต้องตรงกับที่เติมของเก่าใน schema.sql · ไม่รวม service_kind ด้วยเหตุผลที่เขียนไว้ที่นั่น
@@ -590,7 +595,16 @@ export const listItems = (invoiceId) =>
  * ไม่มีกะที่ทำเสร็จเลย = ออกใบแบบนี้ไม่ได้ (ให้ผู้เรียกตัดสินใจต่อ)
  */
 export async function visitLines(caseRow, { from, to } = {}) {
-  const where = ['v.case_id = :id', 'v.check_out_at IS NOT NULL'];
+  const where = [
+    'v.case_id = :id',
+    'v.check_out_at IS NOT NULL',
+    /* กะที่อยู่ในใบอื่นที่ยังไม่ยกเลิกแล้ว = เก็บเงินไปแล้ว ไม่เอามาเก็บซ้ำ
+       (ออกใบตามกะเป็นรอบๆ ช่วงวันที่เลือกซ้อนกันได้ง่าย หรือกดออกซ้ำโดยไม่ได้ลบใบเดิม) */
+    `NOT EXISTS (
+       SELECT 1 FROM invoice_items ii
+       JOIN invoices bi ON bi.invoice_id = ii.invoice_id
+       WHERE ii.visit_id = v.visit_id AND bi.status <> 'cancelled')`,
+  ];
   const params = { id: caseRow.case_id };
   if (from) {
     where.push('v.visit_date >= :from');
@@ -603,7 +617,7 @@ export async function visitLines(caseRow, { from, to } = {}) {
 
   const [visits, booked] = await Promise.all([
     sql.all(
-      `SELECT v.visit_date, v.planned_start, v.planned_end,
+      `SELECT v.visit_id, v.visit_date, v.planned_start, v.planned_end,
               e.first_name || ' ' || e.last_name AS employee_name
        FROM case_visits v
        LEFT JOIN employees e ON e.employee_id = v.checked_in_by
@@ -626,6 +640,7 @@ export async function visitLines(caseRow, { from, to } = {}) {
 
   const lines = visits.map((v, i) => ({
     seq: i + 1,
+    visit_id: v.visit_id, // จดไว้ในบรรทัด กันกะนี้ถูกเก็บซ้ำในใบถัดไป (ดู NOT EXISTS ข้างบน)
     description: [
       `${v.visit_date}`,
       [v.planned_start, v.planned_end].filter(Boolean).join('-'),
@@ -694,6 +709,34 @@ export function createFromCase(caseRow, input, actor, visitItems = [], { addons 
   };
 
   return transaction(async (tx) => {
+    /* ล็อกแถวเคสก่อนเช็ค — การออกใบของเคสเดียวกันเข้าคิวทีละคำขอ
+       ของเดิมเช็ค "มีใบร่างอยู่แล้วไหม" นอก transaction แล้วค่อย INSERT คำขอสองตัวที่มาพร้อมกัน
+       (กดปุ่มซ้ำ / เปิดเคสซ้ำตอนเน็ตกระตุก) จึงผ่านด่านทั้งคู่ได้ใบร่างสองใบ
+       เลือกล็อกแทน unique index เพราะฐานจริงอาจมีใบร่างซ้ำค้างอยู่แล้ว สร้าง index จะล้มตอน migrate */
+    if (caseRow.case_id) {
+      await tx.one('SELECT case_id FROM cases WHERE case_id = :id FOR UPDATE', { id: caseRow.case_id });
+      const draft = await tx.one(
+        `SELECT invoice_id FROM invoices
+         WHERE case_id = :id AND status = 'draft'
+         ORDER BY invoice_id LIMIT 1`,
+        { id: caseRow.case_id },
+      );
+      if (draft) return { reason: 'draft_exists', invoice_id: draft.invoice_id };
+
+      // ตรวจกะซ้ำอีกรอบหลังได้ล็อก — visitLines อ่านไว้ก่อนเข้า transaction อาจมีใบอื่นเพิ่งเก็บกะเดียวกันไป
+      const visitIds = items.map((l) => l.visit_id).filter((id) => id != null);
+      if (visitIds.length > 0) {
+        const billed = await tx.one(
+          `SELECT ii.visit_id FROM invoice_items ii
+           JOIN invoices bi ON bi.invoice_id = ii.invoice_id
+           WHERE ii.visit_id = ANY(:ids::int[]) AND bi.status <> 'cancelled'
+           LIMIT 1`,
+          { ids: visitIds },
+        );
+        if (billed) return { reason: 'visits_already_billed' };
+      }
+    }
+
     const invoiceId = await nextInvoiceId(tx);
     await tx.one(
       `INSERT INTO invoices
@@ -713,14 +756,14 @@ export function createFromCase(caseRow, input, actor, visitItems = [], { addons 
 
     for (const line of items) {
       await tx.run(
-        `INSERT INTO invoice_items (invoice_id, seq, description, quantity, unit_price, amount)
-         VALUES (:invoice_id, :seq, :description, :quantity, :unit_price, :amount)`,
-        { ...line, invoice_id: invoiceId },
+        `INSERT INTO invoice_items (invoice_id, seq, description, quantity, unit_price, amount, visit_id)
+         VALUES (:invoice_id, :seq, :description, :quantity, :unit_price, :amount, :visit_id)`,
+        { ...line, visit_id: line.visit_id ?? null, invoice_id: invoiceId },
       );
     }
 
-    return invoiceId;
-  }).then(findById);
+    return { invoice_id: invoiceId };
+  }).then((result) => (result.reason ? result : findById(result.invoice_id)));
 }
 
 // ใบที่ยัง "แก้ได้" — เอกสารยังอยู่ในมือเรา ยังไม่ได้ส่งมอบให้ลูกค้าจริง
@@ -732,8 +775,11 @@ const OPEN_STATUSES = "('draft', 'issued')";
  *
  * ยอดก่อนลด/ส่วนลด ถูกคิดใหม่ทั้งคู่จากราคาของเคส (ดู priceParts) — ทับค่าเดิมในใบ
  * เพราะสองตัวนี้เป็นคู่กัน ถ้าอัปเดตแค่ตัวเดียวยอดสุทธิจะเพี้ยนทันที
+ *
+ * ใบที่ถูกแก้ยอด/ผู้จ่าย/รายการด้วยมือ (manual_edit) ไม่ถูกทับ — สิ่งที่คนตั้งใจแก้ในใบชนะการซิงก์อัตโนมัติ
+ * ยกเว้น forceInvoiceId = ใบที่ผู้ใช้กด "ดึงข้อมูลจากเคส" เอง ใบนั้นถูกทับและล้างธงไปพร้อมกัน
  */
-export async function syncOpenFromCase(caseRow, customer) {
+export async function syncOpenFromCase(caseRow, customer, { forceInvoiceId = null } = {}) {
   const price = priceParts(caseRow);
 
   /* ::double precision ในบรรทัด total ไม่ใช่ของประดับ — node-postgres ส่งพารามิเตอร์มาโดยไม่ระบุชนิด
@@ -760,8 +806,10 @@ export async function syncOpenFromCase(caseRow, customer) {
          total               = GREATEST(0, :amount::double precision - :discount::double precision),
          addons              = :addons,
          service_key         = (SELECT ${serviceKeySql('c')} FROM cases c WHERE c.case_id = invoices.case_id),
+         manual_edit         = FALSE,
          updated_at          = ${NOW}
      WHERE case_id = :case_id AND status IN ${OPEN_STATUSES}
+       AND (NOT manual_edit OR invoice_id = :force_id::text)
        /* ใบมัดจำ/ใบส่วนที่เหลือมียอดของงวดนั้นโดยเฉพาะ ซิงก์ทับจะกลายเป็นยอดเต็มทั้งสองใบ
           (ผู้จ่าย/ที่อยู่ก็ไม่ทับด้วย เพราะคำสั่งเดียวกัน — แก้ที่ใบเองหรือลบแล้วแบ่งใหม่) */
        AND billing_kind IS DISTINCT FROM 'deposit'
@@ -773,6 +821,7 @@ export async function syncOpenFromCase(caseRow, customer) {
        AND NOT EXISTS (SELECT 1 FROM invoice_payments ip WHERE ip.invoice_id = invoices.invoice_id)`,
     {
       case_id: caseRow.case_id,
+      force_id: forceInvoiceId,
       customer_id: customer?.customer_id ?? caseRow.customer_id ?? null,
       bill_to_name: customer?.name ?? caseRow.client_name,
       bill_to_tax_id: customer?.tax_id ?? null,
@@ -828,6 +877,27 @@ function describeService(c) {
     .join(' — ');
 }
 
+/**
+ * ทุกอย่างของเคสที่การซิงก์ใบ (syncOpenFromCase) อ่านไปใช้ ย่อเป็นข้อความเดียวไว้เทียบก่อน/หลังแก้เคส
+ *
+ * ของเดิมซิงก์ทุกครั้งที่บันทึกเคส แม้แก้แค่โน้ตหรือเวลานัด — ใบที่ฝ่ายบัญชีปรับไว้จึงถูกทับโดยไม่มีใครตั้งใจ
+ * ประกอบจากผลลัพธ์ของ priceParts/describeService เอง ไม่ใช่รายชื่อคอลัมน์ที่จดแยกไว้
+ * วันหนึ่งสองฟังก์ชันนั้นอ่านช่องใหม่เพิ่ม ตัวเทียบนี้จะตามไปเองโดยไม่ต้องจำมาแก้ที่นี่
+ * customer_id/patient_id อยู่ด้วยเพราะผู้จ่ายไล่จากสองช่องนี้ (ดู resolvePayer) · address คือที่อยู่ออกบิลสำรอง
+ */
+export function billingSignature(c) {
+  if (!c) return null;
+  return JSON.stringify([
+    priceParts(c),
+    describeService(c),
+    normalizeAddons(c.addons),
+    c.customer_id ?? null,
+    c.patient_id ?? null,
+    c.client_name ?? null,
+    c.address ?? null,
+  ]);
+}
+
 export async function updateInvoiceForTransaction(tx, invoiceId, input) {
   const fields = EDITABLE.filter((c) => c in input);
   const locked = await invoiceForUpdate(tx, invoiceId, 'update');
@@ -849,6 +919,18 @@ export async function updateInvoiceForTransaction(tx, invoiceId, input) {
 
   // ยอดสุทธิคิดใหม่ทุกครั้งที่ยอด/ส่วนลดถูกแตะ — ไม่ให้หน้าเว็บส่ง total มาเอง จะได้ไม่มีทางขัดกัน
   const sets = fields.map((c) => `${c} = :${c}`);
+
+  /* แก้ช่องที่การซิงก์ตามเคสจะเขียนทับ = ตั้งธง manual_edit ให้ซิงก์ข้ามใบนี้ (ดู syncOpenFromCase)
+     ตั้งเฉพาะตอนค่าเปลี่ยนจริง — ฟอร์มส่งทุกช่องกลับมาทุกครั้งที่บันทึก แก้แค่โน้ตแล้วติดธงไปด้วย
+     ใบจะหลุดจากการซิงก์ทั้งที่ไม่มีใครแตะยอดเลย */
+  const manualEdit = SYNCED_FIELDS.some(
+    (c) =>
+      c in input &&
+      (c === 'amount' || c === 'discount'
+        ? Number(input[c] ?? 0) !== Number(invoice[c] ?? 0)
+        : (input[c] ?? null) !== (invoice[c] ?? null)),
+  );
+  if (manualEdit) sets.push('manual_edit = TRUE');
   if (changesAmount) {
     const nextAmount = 'amount' in input ? input.amount : invoice.amount;
     const nextDiscount = 'discount' in input ? input.discount : invoice.discount;
@@ -979,7 +1061,17 @@ export async function payInvoiceForTransaction(tx, invoiceId, input, actor) {
 }
 
 export async function pay(invoiceId, input, actor) {
-  const result = await transaction((tx) => payInvoiceForTransaction(tx, invoiceId, input, actor));
+  let result;
+  try {
+    result = await transaction((tx) => payInvoiceForTransaction(tx, invoiceId, input, actor));
+  } catch (err) {
+    /* request_id ไม่ซ้ำทั้งตาราง แต่การค้นคำขอเดิมดูแค่ในใบนี้ — รหัสเดียวกันที่เคยใช้กับใบอื่น
+       ชน unique index แล้วกลายเป็น 500 ทั้งที่จริงคือ "คำขอเดิมแต่ข้อมูลต่างกัน" */
+    if (err.code === '23505' && err.constraint === 'uq_invoice_payments_request_id') {
+      return { reason: 'idempotency_conflict' };
+    }
+    throw err;
+  }
 
   return invoiceMutationResult(result);
 }
@@ -1029,6 +1121,11 @@ export async function setBillingPlanForTransaction(tx, invoiceId, { mode, deposi
     );
     return changed === 1 ? { invoice_id: invoiceId } : { reason: 'state_changed' };
   }
+
+  /* ใบรายครั้งแบ่งมัดจำไม่ได้ — บรรทัดรายกะ (รวมกันเท่ายอดเต็ม) จะค้างอยู่ที่ใบมัดจำ
+     ใบมัดจำจึงพิมพ์รายการรวมเต็มยอดทั้งที่เรียกเก็บแค่มัดจำ ส่วนอุปกรณ์เสริมที่อยู่ในบรรทัดอยู่แล้ว
+     ก็ถูกยกไปใบส่วนที่เหลือซ้ำอีกรอบ — ย้ายบรรทัดให้ถูกต้องไม่ได้ เพราะมัดจำไม่ได้ผูกกับกะไหน */
+  if (inv.has_items) return { reason: 'has_items' };
 
   const deposit = roundMoney(deposit_amount);
   const rest = roundMoney(Number(inv.total) - deposit);
@@ -1201,10 +1298,30 @@ export async function setDepositAmount(depositId, deposit) {
   return invoiceMutationResult(result);
 }
 
-/** ยกเลิก — ไม่ลบทิ้ง เพราะเลขที่เอกสารต้องเรียงต่อเนื่อง ห้ามข้าม */
+/**
+ * ยกเลิก — ไม่ลบทิ้ง เพราะเลขที่เอกสารต้องเรียงต่อเนื่อง ห้ามข้าม
+ *
+ * ใบที่เป็นงวดหนึ่งของแผนมัดจำ: ใบคู่ที่ยังไม่รับเงินถูกยกเลิกตามไปด้วย (เหตุผลเดียวกับ remove ด้านล่าง —
+ * ยกเลิกใบมัดจำใบเดียว ใบส่วนที่เหลือยังเรียกเก็บ "ยอดคงเหลือหลังหักมัดจำ" ทั้งที่ไม่มีมัดจำแล้ว
+ * ลูกค้าได้บิลน้อยกว่าที่ตกลงโดยไม่มีอะไรฟ้อง) · ใบคู่รับเงินมาแล้ว = ปฏิเสธ ให้คนตัดสินใจเอง
+ * เพราะเงินที่รับแล้วต้องมีใบรองรับ ยกเลิกตามให้อัตโนมัติไม่ได้
+ */
 export async function cancelInvoiceForTransaction(tx, invoiceId) {
+  const head = await tx.one(
+    'SELECT billing_kind, parent_invoice_id FROM invoices WHERE invoice_id = :id',
+    { id: invoiceId },
+  );
+  if (!head) return { reason: 'not_found' };
+  if (head.billing_kind === 'deposit' || head.billing_kind === 'balance' || head.parent_invoice_id != null) {
+    return cancelPlanPart(tx, invoiceId);
+  }
+
   const locked = await invoiceForUpdate(tx, invoiceId, 'cancel');
   if (locked.reason) return locked;
+  /* แถวที่ล็อกแล้วกลายเป็นงวดของแผน (มีคนเพิ่งแบ่งมัดจำระหว่างนี้) — ทางนี้ไม่ได้ล็อกใบคู่ไว้ */
+  if (locked.invoice.billing_kind === 'deposit' || locked.invoice.billing_kind === 'balance') {
+    return { reason: 'state_changed' };
+  }
   const changed = await tx.run(
     `UPDATE invoices
      SET status = 'cancelled', updated_at = ${NOW}
@@ -1212,6 +1329,41 @@ export async function cancelInvoiceForTransaction(tx, invoiceId) {
     { id: invoiceId },
   );
   return changed === 1 ? { invoice_id: invoiceId } : { reason: 'state_changed' };
+}
+
+/** ยกเลิกงวดหนึ่งของแผน + ใบคู่ที่ยังไม่รับเงิน — ล็อกทั้งแผนตามลำดับ root → children (ดู invoicePlanForUpdate) */
+async function cancelPlanPart(tx, invoiceId) {
+  const plan = await invoicePlanForUpdate(tx, invoiceId);
+  if (plan.reason) return plan;
+  const state = assessInvoiceAction('cancel', plan.target.status);
+  if (state.reason) return state;
+
+  const siblings = plan.rows.filter((row) => row.invoice_id !== invoiceId && row.status !== 'cancelled');
+  if (siblings.length > 0) {
+    /* อ่านเงินหลังล็อกครบแล้ว — payment ที่เพิ่ง commit ระหว่างรอ lock ต้องถูกนับ */
+    const paymentRows = await tx.all(
+      `SELECT invoice_id, COALESCE(SUM(amount), 0) AS paid
+       FROM invoice_payments
+       WHERE invoice_id = ANY(:ids::text[])
+       GROUP BY invoice_id`,
+      { ids: siblings.map((row) => row.invoice_id) },
+    );
+    const paidById = new Map(paymentRows.map((row) => [row.invoice_id, roundMoney(row.paid)]));
+    const blocker = siblings.find(
+      (row) => row.status === 'paid' || (paidById.get(row.invoice_id) ?? 0) > 0,
+    );
+    if (blocker) return { reason: 'sibling_has_payments', invoice_id: blocker.invoice_id };
+  }
+
+  const ids = [invoiceId, ...siblings.map((row) => row.invoice_id)];
+  const changed = await tx.run(
+    `UPDATE invoices
+     SET status = 'cancelled', updated_at = ${NOW}
+     WHERE invoice_id = ANY(:ids::text[]) AND status <> 'cancelled'`,
+    { ids },
+  );
+  if (changed !== ids.length) throw new Error('ยกเลิกสมาชิกแผนวางบิลได้ไม่ครบ แม้ถือ row lock แล้ว');
+  return { invoice_id: invoiceId };
 }
 
 export async function cancel(invoiceId) {
@@ -1315,8 +1467,11 @@ const BUCKETS = {
 /**
  * รายได้ตามช่วงเวลา สำหรับกราฟเส้นในหน้าภาพรวม
  *
- * นับเฉพาะใบที่ "ชำระแล้ว" และยึด paid_at (วันที่เงินเข้า) ไม่ใช่ issue_date — ใบที่ออกไปแล้ว
- * แต่ยังไม่เก็บเงินไม่ใช่รายได้ และวันที่ออกใบกับวันที่รับเงินมักคนละวัน
+ * เกณฑ์เงินสด: รวมเงินที่รับจริงทุกงวด (invoice_payments) ตามวันที่เงินเข้าของงวดนั้น ไม่ใช่ issue_date
+ * ของเดิมนับยอดเต็มของใบที่ "ชำระครบแล้ว" ลงวันรับงวดสุดท้าย — มัดจำที่รับเดือนก่อนไปโผล่เดือนที่ปิดยอด
+ * และใบที่รับไปบางงวดแต่ยังไม่ครบไม่ถูกนับเลย ทั้งที่เงินเข้าบัญชีแล้ว
+ * งวดของใบที่ยกเลิกไม่นับ (ถือว่าคืนเงิน/ไม่ใช่รายได้แล้ว) · paid_at เป็นวันที่ตามเวลาไทยอยู่แล้ว (ดู TODAY)
+ * invoices = จำนวนใบที่มีเงินเข้าในช่วงนั้น (ใบเดียวรับหลายงวดในช่วงเดียวกันนับครั้งเดียว)
  *
  * ช่วงเวลาถูกกางด้วย generate_series ก่อนแล้วค่อย LEFT JOIN — วันที่ไม่มีใบชำระเลยต้องได้ 0
  * ไม่ใช่หายไปจากผลลัพธ์ ไม่งั้นกราฟเส้นจะลากข้ามช่องว่างเหมือนวันนั้นมีรายได้ต่อเนื่อง
@@ -1335,14 +1490,16 @@ export async function revenue({ bucket, points }) {
                 '${step}'::interval
               )::date AS bucket
      )
-     SELECT to_char(b.bucket, 'YYYY-MM-DD') AS period,
-            COALESCE(SUM(i.total), 0)       AS revenue,
-            COUNT(i.invoice_id)             AS invoices
+     SELECT to_char(b.bucket, 'YYYY-MM-DD')  AS period,
+            COALESCE(SUM(pay.amount), 0)     AS revenue,
+            COUNT(DISTINCT pay.invoice_id)   AS invoices
      FROM buckets b
-     LEFT JOIN invoices i
-            ON i.status = 'paid'
-           AND i.paid_at IS NOT NULL
-           AND date_trunc('${unit}', LEFT(i.paid_at, 10)::date)::date = b.bucket
+     LEFT JOIN (
+       SELECT p.invoice_id, p.amount, p.paid_at
+       FROM invoice_payments p
+       JOIN invoices i ON i.invoice_id = p.invoice_id
+       WHERE i.status <> 'cancelled'
+     ) pay ON date_trunc('${unit}', LEFT(pay.paid_at, 10)::date)::date = b.bucket
      GROUP BY b.bucket
      ORDER BY b.bucket`,
     { today: TODAY(), span: `${points - 1} ${unit}` },

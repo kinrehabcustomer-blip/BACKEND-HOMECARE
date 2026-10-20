@@ -35,7 +35,6 @@ export const POSITION_PERMISSIONS = {
   hr: ['office', 'billing'],
   admin: ['office', 'billing'],   // Admin HC
   finance: ['billing', 'money'],  // การเงิน — เฉพาะหน้าเรื่องเงิน ไม่เห็นเคส/ลูกค้า/ผู้ป่วย/พนักงาน
-  admin_ipd: [],                  // Admin IPD — ยังไม่กำหนดสิทธิ์ (ผู้ใช้ขอเว้นไว้ก่อน 2026-10-16)
 };
 export const permissionsFor = (position) => POSITION_PERMISSIONS[position] ?? [];
 export const can = (position, permission) => permissionsFor(position).includes(permission);
@@ -87,7 +86,14 @@ export const verifyPassword = (plain, hash) => bcrypt.compare(plain, hash ?? '')
 export function signToken(employee) {
   return jwt.sign(
     // role ใน token เป็นแค่ข้อมูลประกอบ — การตัดสินสิทธิ์จริงเช็คตำแหน่งสดจาก DB (ดู requireAdmin)
-    { sub: employee.employee_id, role: roleForPosition(employee.position), name: `${employee.first_name} ${employee.last_name}` },
+    /* iat_ms = เวลาออก token ระดับมิลลิวินาที (iat มาตรฐานปัดเป็นวินาที) — ใช้เทียบกับ
+       password_changed_at ใน requireAuth ให้ตัด token ที่ออกก่อนเปลี่ยนรหัสได้แม้อยู่ในวินาทีเดียวกัน */
+    {
+      sub: employee.employee_id,
+      role: roleForPosition(employee.position),
+      name: `${employee.first_name} ${employee.last_name}`,
+      iat_ms: Date.now(),
+    },
     SECRET,
     { expiresIn: TOKEN_TTL },
   );
@@ -149,10 +155,21 @@ export function requireAuth(req, res, next) {
          เหตุผลที่คนกดเปลี่ยนรหัสส่วนใหญ่คือ "สงสัยว่ามีคนอื่นเข้าถึงบัญชีอยู่" —
          ถ้าเซสชันของคนนั้นยังใช้ได้ต่อ การเปลี่ยนรหัสก็ไม่ได้แก้อะไรเลยในช่วงเวลาที่อันตรายที่สุด
 
-         เทียบที่ความละเอียดวินาที เพราะ iat ของ JWT เป็นวินาทีถ้วน — token ที่ออกในวินาทีเดียว
-         กับที่เปลี่ยนรหัส (เช่น login ใหม่ทันทีหลังเปลี่ยน) จึงต้องผ่าน ไม่ใช่โดนตัดทิ้ง */
+         เทียบระดับมิลลิวินาทีด้วย iat_ms — เดิมเทียบ iat (วินาทีถ้วน) กับ floor(changedAt)
+         token ของคนร้ายที่ออกในวินาทีเดียวกับการเปลี่ยนรหัสจึงรอดไปได้
+         password_changed_at ถูกเขียนด้วยนาฬิกาฝั่งแอป (ดู auth/routes.js) ก่อนออก token ใบใหม่เสมอ
+         ใบใหม่ของคนที่เพิ่งเปลี่ยนรหัสจึงได้ iat_ms >= changedAt และผ่าน ไม่โดนเด้งออก
+
+         token รุ่นเก่าที่ไม่มี iat_ms (ออกก่อนอัปเดตนี้) — ถือว่าวินาทีเดียวกันคือ "ก่อน" ไว้ก่อน
+         (ฝั่งปลอดภัย: อย่างแย่ที่สุดต้อง login ใหม่หนึ่งครั้ง) */
       const changedAt = emp?.password_changed_epoch;
-      if (changedAt != null && payload.iat != null && payload.iat < Math.floor(Number(changedAt))) {
+      const changedMs = changedAt == null ? null : Math.round(Number(changedAt) * 1000);
+      const stale =
+        changedMs != null &&
+        (typeof payload.iat_ms === 'number'
+          ? payload.iat_ms < changedMs
+          : payload.iat != null && payload.iat < Math.ceil(changedMs / 1000));
+      if (stale) {
         res.clearCookie(COOKIE_NAME, clearCookieOptions);
         return next(new ApiError(401, 'รหัสผ่านถูกเปลี่ยนแล้ว กรุณาเข้าสู่ระบบใหม่'));
       }

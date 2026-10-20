@@ -131,7 +131,11 @@ export default function CalendarPage() {
   function shift(delta) {
     const d = new Date(anchorDate);
     if (view === 'week') d.setDate(d.getDate() + delta * 7);
-    else d.setMonth(d.getMonth() + delta);
+    else {
+      // ตั้งเป็นวันที่ 1 ก่อนเลื่อนเดือน — 31 ม.ค. + 1 เดือน จะกลายเป็น "31 ก.พ." แล้วล้นไป มี.ค. (ข้ามเดือนไปเลย)
+      d.setDate(1);
+      d.setMonth(d.getMonth() + delta);
+    }
     patch({ date: isoOf(d) });
   }
 

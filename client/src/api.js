@@ -430,6 +430,8 @@ export const api = {
   /** เอาคนออกจากรอบนี้ — กะของเขากลับเข้ากองรอจ่าย ไปโผล่รอบถัดไปเอง */
   removePayrollItem: (id, itemId) => request(`/payroll/${id}/items/${itemId}`, { method: 'DELETE' }),
   payPayrollRun: (id, body) => request(`/payroll/${id}/pay`, { method: 'POST', body }),
+  // เปิดรอบ + จ่ายในคำขอเดียว — ส่ง payout_ids จากพรีวิวไปให้ server ยืนยันว่าจ่ายตรงชุดที่เห็น
+  payPayrollNow: (body) => request('/payroll/pay-now', { method: 'POST', body }),
   cancelPayrollRun: (id) => request(`/payroll/${id}/cancel`, { method: 'POST' }),
 
   // วันนัดให้บริการของเคส — ทุกตัวคืน "รายการวันนัดล่าสุดทั้งหมด" กลับมา ไม่ต้องดึงซ้ำเอง

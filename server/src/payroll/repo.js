@@ -87,7 +87,9 @@ const RUN_ACTION_STATES = {
   rebuild: ['draft'],
   remove_item: ['draft'],
   pay: ['draft'],
-  cancel: ['draft', 'paid'],
+  /* รอบที่จ่ายแล้วยกเลิกไม่ได้ — การยกเลิกปลดก้อนเงินกลับเข้ากองรอจ่าย ถ้ายอมให้กับรอบที่โอนไปแล้ว
+     ทุกคนในรอบจะกลับมาโผล่ในรอบถัดไปแล้วถูกจ่ายซ้ำอีกรอบ */
+  cancel: ['draft'],
   remove: ['draft'],
 };
 
@@ -126,7 +128,9 @@ export async function preview(periodTo) {
             COALESCE(SUM(x.minutes), 0)   AS minutes,
             SUM(x.amount)                 AS total_pay,
             MIN(x.release_date)           AS oldest_release_date,
-            MIN(x.due_date)               AS earliest_due_date
+            MIN(x.due_date)               AS earliest_due_date,
+            -- รหัสก้อนเงินที่อยู่ในพรีวิว — "จ่ายเลย" ส่งกลับมาให้ server ยืนยันว่าจ่ายตรงชุดที่เห็น (ดู payNow)
+            array_agg(x.payout_id ORDER BY x.payout_id) AS payout_ids
      FROM (${ELIGIBLE_ROWS}) x
      GROUP BY x.employee_id, x.employee_name
      ORDER BY x.employee_name`,
@@ -528,64 +532,111 @@ export async function removeItem(runId, itemId) {
  * ยอดรายก้อนไม่ต้องคิดใหม่แล้ว (amount ตายตัวตั้งแต่ตอนปล่อย) เหลือแค่รวมขึ้นเป็นยอดสลิป
  * ให้ตรงกับก้อนที่ผูกอยู่จริง ณ ตอนกดจ่าย — เผื่อมีการถอนยอดคืนระหว่างที่รอบยังเป็นร่าง
  */
-export async function pay(runId, { pay_date, method, note }, actor) {
-  const result = await transaction(async (tx) => {
-    const state = await payrollRunForUpdate(tx, runId, 'pay');
-    if (state.reason) return state;
+export async function pay(runId, input, actor) {
+  const result = await transaction((tx) => payForTransaction(tx, runId, input, actor));
+  if (result.reason) return result;
+  return (await findById(result.run_id)) ?? { reason: 'not_found' };
+}
 
-    // อ่านหลังได้ lock ด้วย statement ใหม่ — remove/rebuild ที่ commit ก่อนหน้าจึงสะท้อนในจำนวนล่าสุด
-    const counts = await tx.one(
-      `SELECT COUNT(DISTINCT i.item_id) AS employees, COUNT(pl.payout_id) AS payouts
-       FROM payroll_items i
-       LEFT JOIN payroll_payout_lines pl ON pl.item_id = i.item_id
-       WHERE i.run_id = :id`,
-      { id: runId },
-    );
-    if (Number(counts.employees) === 0 || Number(counts.payouts) === 0) {
-      return { reason: 'empty_run' };
-    }
+/** ตัวปิดรอบจริง — แยกออกมาให้ payNow เรียกใน transaction เดียวกับการสร้างรอบได้ */
+async function payForTransaction(tx, runId, { pay_date, method, note }, actor) {
+  const state = await payrollRunForUpdate(tx, runId, 'pay');
+  if (state.reason) return state;
 
-    // 1) ยอดบนสลิป = ผลรวมของก้อนที่ผูกอยู่ (ล้างเป็นศูนย์ก่อน เผื่อสลิปที่ไม่เหลือก้อนเงินแล้ว)
-    await tx.run(
-      `UPDATE payroll_items i SET shifts = 0, minutes = 0, total_pay = 0
-       WHERE i.run_id = :id
-         AND EXISTS (SELECT 1 FROM payroll_runs r WHERE r.run_id = i.run_id AND r.status = 'draft')`,
-      { id: runId },
-    );
-    await tx.run(
-      `UPDATE payroll_items i
-       SET shifts = t.shifts, minutes = t.minutes, total_pay = t.total_pay
-       FROM (${LIVE_ITEMS}) t
-       WHERE i.item_id = t.item_id AND i.run_id = :id
-         AND EXISTS (SELECT 1 FROM payroll_runs r WHERE r.run_id = i.run_id AND r.status = 'draft')`,
-      { id: runId },
-    );
+  // อ่านหลังได้ lock ด้วย statement ใหม่ — remove/rebuild ที่ commit ก่อนหน้าจึงสะท้อนในจำนวนล่าสุด
+  const counts = await tx.one(
+    `SELECT COUNT(DISTINCT i.item_id) AS employees, COUNT(pl.payout_id) AS payouts
+     FROM payroll_items i
+     LEFT JOIN payroll_payout_lines pl ON pl.item_id = i.item_id
+     WHERE i.run_id = :id`,
+    { id: runId },
+  );
+  if (Number(counts.employees) === 0 || Number(counts.payouts) === 0) {
+    return { reason: 'empty_run' };
+  }
 
-    // 2) ปิดรอบ
-    const transitioned = await tx.run(
-      `UPDATE payroll_runs
-       SET status = 'paid', pay_date = :pay_date, method = :method,
-           note = COALESCE(:note, note),
-           paid_by = :by, paid_by_name = :by_name, updated_at = ${NOW}
-       WHERE run_id = :id AND status = 'draft'`,
-      {
-        id: runId,
-        pay_date,
-        method: method ?? null,
-        note: note ?? null,
-        by: actor?.employee_id ?? null,
-        by_name: actor?.name ?? null,
-      },
-    );
-    if (transitioned !== 1) throw new Error(`สถานะรอบ ${runId} เปลี่ยนหลังได้ row lock`);
-    return { run_id: runId };
-  });
+  // 1) ยอดบนสลิป = ผลรวมของก้อนที่ผูกอยู่ (ล้างเป็นศูนย์ก่อน เผื่อสลิปที่ไม่เหลือก้อนเงินแล้ว)
+  await tx.run(
+    `UPDATE payroll_items i SET shifts = 0, minutes = 0, total_pay = 0
+     WHERE i.run_id = :id
+       AND EXISTS (SELECT 1 FROM payroll_runs r WHERE r.run_id = i.run_id AND r.status = 'draft')`,
+    { id: runId },
+  );
+  await tx.run(
+    `UPDATE payroll_items i
+     SET shifts = t.shifts, minutes = t.minutes, total_pay = t.total_pay
+     FROM (${LIVE_ITEMS}) t
+     WHERE i.item_id = t.item_id AND i.run_id = :id
+       AND EXISTS (SELECT 1 FROM payroll_runs r WHERE r.run_id = i.run_id AND r.status = 'draft')`,
+    { id: runId },
+  );
+
+  // 2) ปิดรอบ
+  const transitioned = await tx.run(
+    `UPDATE payroll_runs
+     SET status = 'paid', pay_date = :pay_date, method = :method,
+         note = COALESCE(:note, note),
+         paid_by = :by, paid_by_name = :by_name, updated_at = ${NOW}
+     WHERE run_id = :id AND status = 'draft'`,
+    {
+      id: runId,
+      pay_date,
+      method: method ?? null,
+      note: note ?? null,
+      by: actor?.employee_id ?? null,
+      by_name: actor?.name ?? null,
+    },
+  );
+  if (transitioned !== 1) throw new Error(`สถานะรอบ ${runId} เปลี่ยนหลังได้ row lock`);
+  return { run_id: runId };
+}
+
+/** ใช้โยนออกจาก transaction เพื่อให้ ROLLBACK — ชุดก้อนเงินไม่ตรงกับที่ผู้ใช้เห็นในพรีวิว */
+class PreviewMismatch extends Error {}
+
+/**
+ * "จ่ายเลย" — เปิดรอบแล้วปิดเป็นจ่ายแล้วใน transaction เดียว และจ่ายได้เฉพาะชุดที่เห็นในพรีวิวเท่านั้น
+ *
+ * ของเดิมยิงสองคำขอ (สร้างรอบ → จ่าย) ปัญหามีสองทาง:
+ * (1) ยอดที่ถูกปล่อยหลังจากผู้ใช้เปิดพรีวิวถูกกวาดเข้ารอบแล้วจ่ายไปด้วย โดยไม่มีใครเห็นตัวเลขนั้นก่อนกด
+ * (2) คำขอที่สองล้ม = เหลือรอบร่างค้างอยู่ ผู้ใช้เห็นแค่ข้อความผิดพลาด ไม่รู้ว่ามีร่างกินช่องรอบไปแล้ว
+ *
+ * payout_ids คือรหัสก้อนเงินทั้งหมดในพรีวิว — ถ้าชุดที่กวาดได้จริงต่างไปแม้แต่ก้อนเดียว
+ * (มีก้อนใหม่ ถูกถอนคืน หรือรอบอื่นกวาดไปก่อน) ทั้งหมด ROLLBACK ไม่มีรอบค้าง ให้โหลดพรีวิวใหม่
+ */
+export async function payNow({ period_to, note, pay_date, method, payout_ids }, actor) {
+  const expected = [...new Set(payout_ids.map(Number))].sort((a, b) => a - b);
+  let result;
+  try {
+    result = await transaction(async (tx) => {
+      const created = await createRunForTransaction(tx, { period_to, note }, actor);
+      if (created.reason) return created;
+
+      const rows = await tx.all(
+        `SELECT pl.payout_id
+         FROM payroll_payout_lines pl
+         JOIN payroll_items i ON i.item_id = pl.item_id
+         WHERE i.run_id = :id
+         ORDER BY pl.payout_id`,
+        { id: created.run_id },
+      );
+      const actual = rows.map((r) => Number(r.payout_id));
+      if (actual.length !== expected.length || actual.some((id, k) => id !== expected[k])) {
+        throw new PreviewMismatch();
+      }
+
+      return payForTransaction(tx, created.run_id, { pay_date, method, note: null }, actor);
+    });
+  } catch (err) {
+    if (err instanceof PreviewMismatch) return { reason: 'preview_mismatch' };
+    throw err;
+  }
   if (result.reason) return result;
   return (await findById(result.run_id)) ?? { reason: 'not_found' };
 }
 
 /**
- * ยกเลิกรอบ — รอบยังอยู่เป็นประวัติ แต่ก้อนเงินทั้งหมดกลับเข้ากองรอจ่าย
+ * ยกเลิกรอบ (ร่างเท่านั้น) — รอบยังอยู่เป็นประวัติ แต่ก้อนเงินทั้งหมดกลับเข้ากองรอจ่าย
  * ลบเฉพาะ payroll_payout_lines ไม่ลบสลิป เพื่อให้ยังอ่านย้อนได้ว่ารอบที่ยกเลิกไปเคยจะจ่ายใครเท่าไหร่
  */
 export async function cancel(runId) {
@@ -596,12 +647,12 @@ export async function cancel(runId) {
     await tx.run(
       `DELETE FROM payroll_payout_lines
        WHERE item_id IN (SELECT item_id FROM payroll_items WHERE run_id = :id)
-         AND EXISTS (SELECT 1 FROM payroll_runs WHERE run_id = :id AND status IN ('draft', 'paid'))`,
+         AND EXISTS (SELECT 1 FROM payroll_runs WHERE run_id = :id AND status = 'draft')`,
       { id: runId },
     );
     const transitioned = await tx.run(
       `UPDATE payroll_runs SET status = 'cancelled', updated_at = ${NOW}
-       WHERE run_id = :id AND status IN ('draft', 'paid')`,
+       WHERE run_id = :id AND status = 'draft'`,
       { id: runId },
     );
     if (transitioned !== 1) throw new Error(`สถานะรอบ ${runId} เปลี่ยนหลังได้ row lock`);
