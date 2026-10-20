@@ -32,6 +32,7 @@ const COLUMNS = [
   'age',
   'nationality',
   'relation_to_customer',
+  'employer_relation',
 
   // การแพทย์เชิงคงที่
   'weight_kg',

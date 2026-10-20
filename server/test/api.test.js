@@ -728,6 +728,9 @@ if (process.env.RUN_DB_TESTS !== '1') {
       const p = await post('/api/patients', { patient_id: 'KN691111111', name: 'ผู้ป่วย KN' }, MANAGER, 201);
       assert.equal(p.patient_id, 'KN691111111');
       const dup = await post('/api/patients', { patient_id: 'KN691111111', name: 'ชื่ออื่น' }, MANAGER, 409);
+      // ความสัมพันธ์ของผู้ว่าจ้างกับผู้ป่วย — คอลัมน์ใหม่ บันทึกและอ่านกลับได้
+      const rel = await patch('/api/patients/KN691111111', { employer_relation: 'บุตร' });
+      assert.equal(rel.body.employer_relation, 'บุตร');
       // ตรวจซ้ำระหว่างกรอก (ฟอร์มผู้ป่วย / เปิดเคส)
       assert.deepEqual((await get('/api/patients/check-id?id=KN691111111', MANAGER)).body, { valid: true, available: false, taken_by: 'ผู้ป่วย KN' });
       assert.equal((await get('/api/patients/check-id?id=KN691111111&except=KN691111111', MANAGER)).body.available, true);

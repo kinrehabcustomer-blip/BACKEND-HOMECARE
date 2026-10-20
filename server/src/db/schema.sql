@@ -236,6 +236,11 @@ ALTER TABLE patients ADD COLUMN IF NOT EXISTS height_cm DOUBLE PRECISION CHECK (
 -- ข้อมูลเดิมยังอยู่ในช่องแพ้ยาทั้งก้อน แยกอัตโนมัติไม่ได้เพราะเป็นข้อความอิสระ ต้องให้คนมาแยกเอง
 ALTER TABLE patients ADD COLUMN IF NOT EXISTS food_allergies TEXT;
 
+-- ความสัมพันธ์ของผู้ว่าจ้างกับผู้ป่วย เช่น 'บุตร' (ผู้ว่าจ้างเป็นลูกของผู้ป่วย) — กรอกตรงส่วนผู้ว่าจ้าง
+-- กลับด้านกับ relation_to_customer เดิม (ผู้ป่วยเป็นอะไรกับผู้ว่าจ้าง) จึงแยกคอลัมน์ ไม่ปนกับข้อมูลเก่า
+-- relation_to_customer เลิกกรอกแล้ว เก็บไว้ให้ดูย้อนหลังเท่านั้น
+ALTER TABLE patients ADD COLUMN IF NOT EXISTS employer_relation TEXT;
+
 -- ---------- เคส (งานดูแลผู้รับบริการหนึ่งราย) ----------
 CREATE TABLE IF NOT EXISTS cases (
   case_id       TEXT PRIMARY KEY,

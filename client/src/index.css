@@ -23,7 +23,9 @@ html {
   --border: #e7dfd1;
   --border-hover: #d8ccb7;
   --divider: #f1eadd;        /* เส้นคั่นแบบ dashed จางๆ */
-  --text: #241f17;
+  /* ตัวอักษรเนื้อหาทั้งเว็บเป็นเทาเข้ม · หัวข้อ (h1–h6 / หัวการ์ด / หัวตาราง) ใช้ --heading สีเข้มเดิม ให้เด่นกว่าเนื้อหา */
+  --heading: #241f17;
+  --text: #5b5348;
   --muted: #706655;
   --text-faint: #706655;     /* ข้อความจางสุด เช่น "ไม่ได้ระบุ" */
   --brand: #916919;          /* ทอง KIN (เฉดเดียวกับโลโก้) — เข้มพอให้อ่านออกบนพื้นสว่าง */
@@ -61,7 +63,8 @@ html {
   --border: #322c20;
   --border-hover: #443c2b;
   --divider: #262115;
-  --text: #f3efe6;           /* ขาวอุ่น */
+  --heading: #f3efe6;        /* ขาวอุ่น */
+  --text: #cfc7b8;
   --muted: #a89e8b;
   --text-faint: #a89e8b;
   --brand: #d7a63f;          /* ทองสว่าง เด่นบนพื้นดำ */
@@ -82,6 +85,8 @@ body {
   margin: 0;
   background: var(--bg);
 }
+
+h1, h2, h3, h4, h5, h6 { color: var(--heading); }
 
 /* ไม่มีหน้าไหนในระบบนี้ที่ตั้งใจให้เลื่อนซ้ายขวาทั้งหน้า — ของที่กว้างเกินจอโดยธรรมชาติ
    (ตารางในโหมดปัด) มีกล่องเลื่อนของตัวเองอยู่แล้วคือ .table-wrap ถ้ามีอะไรหลุดออกมาอีก
@@ -496,6 +501,12 @@ body { overflow-x: clip; }
 .toolbar .search { flex: 1 1 16rem; min-width: 14rem; }
 /* ตรึงให้กว้างเท่ากัน ไม่ยืดหดตามความยาวตัวเลือกที่เลือกอยู่ */
 .toolbar select { width: 9.375rem; flex-shrink: 0; }
+/* แถบที่มีปุ่มหลักอยู่ท้าย — ช่องค้นหายืดกินที่ว่างที่เหลือพอดีจนถึงปุ่ม (ไม่เหลือช่องโหว่กลางแถบ)
+   ปุ่มสูงเท่าช่องกรอก/dropdown ในแถวเดียวกัน */
+.toolbar .search.search-compact { flex: 1 1 12rem; min-width: 12rem; }
+.toolbar .toolbar-action { flex-shrink: 0; align-self: stretch; display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem; margin-left: auto; }
+/* ข้อความอธิบายสั้นๆ ในแถบ (หน้าที่ไม่มีช่องค้นหา) — กินที่ว่างแทนช่องค้นหา ดันปุ่มไปขวา */
+.toolbar .toolbar-note { flex: 1 1 16rem; align-self: center; margin: 0; }
 
 /* ตัวเลือกช่วงเวลาบนหัวหน้าภาพรวม: ปี + เดือน อยู่คู่กัน */
 .period-picker { display: flex; gap: 0.5rem; flex-shrink: 0; }
@@ -557,6 +568,13 @@ select:disabled {
 /* รายการที่กางออกจาก <select> เบราว์เซอร์เป็นคนวาด CSS แตะได้จำกัดมาก
    ทำได้แค่สีพื้น/สีตัวอักษรของแต่ละบรรทัด (Firefox กับ Chrome บน Windows)
    ส่วนมุมมน เงา ระยะขอบ และสีแถบที่ชี้อยู่ สั่งไม่ได้ — ต้องเขียน dropdown เองถึงจะคุมได้ทั้งหมด */
+/* ช่องในฟอร์มที่ยังไม่ได้เลือก/กรอก — ตัวอักษรตั้งต้น (— ไม่ระบุ — / วว/ดด/ปปปป) เป็นสีเทาแบบ placeholder
+   ไม่ให้ดูเหมือนกรอกค่าไว้แล้ว · จำกัดแค่ในฟอร์ม (.grid) ตัวกรองหน้ารายการ "ทุกปี/ทุกสถานะ" คงสีปกติ */
+.grid select:has(> option[value=""]:checked),
+.grid input[type="date"][data-empty] { color: var(--muted); }
+.grid select option { color: var(--text); }
+.patient-code-year.is-idle { color: var(--muted); }
+
 select option {
   background-color: var(--surface);
   color: var(--text);
@@ -1440,12 +1458,14 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
    ซึ่งเหมาะกับการ์ดตัวเลขบนแดชบอร์ด (หัวข้อเป็นป้ายกำกับ ตัวเลขคือพระเอก)
    แต่ในฟอร์มมันกลับกัน — หัวข้อคือตัวแบ่งว่ากำลังกรอกเรื่องอะไรอยู่ ต้องอ่านชัดกว่าป้ายช่อง
    และในฟอร์มเดียวกันมี <h3> ที่ไม่ได้จางตาม ทำให้หัวข้อสองระดับกลายเป็นคนละสีโดยไม่มีเหตุผล */
-.form h2 { color: var(--text); }
+.form h2 { color: var(--heading); }
 
 .grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.875rem; }
 /* min-width: 0 — ไม่งั้นช่องในตารางกริดจะกว้างตามเนื้อหาขั้นต่ำของมัน แล้วดันคอลัมน์จนล้นจอแคบ */
 .grid label { display: flex; flex-direction: column; gap: 0.3125rem; min-width: 0; font-size: 0.8125rem; font-weight: 600; color: var(--muted); }
 .grid .span-2 { grid-column: span 2; }
+/* ช่องความสัมพันธ์กับผู้ป่วยเป็นกริดแยกต่อจากชื่อ/เบอร์ผู้ว่าจ้าง — เว้นระยะเท่าช่องว่างในกริด ไม่ให้ช่องติดกัน */
+.payer-relation { margin-top: 0.875rem; }
 /* ช่อง checkbox เรียงแนวนอน (กล่อง + ข้อความข้างกัน) แทนการเรียงลงของ .grid label */
 .grid label.checkbox-row { flex-direction: row; align-items: center; gap: 0.5rem; grid-column: span 2; }
 .grid label.checkbox-row input { width: auto; }
@@ -1721,7 +1741,8 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
 
   /* ตัวกรอง: ช่องค้นหาเต็มบรรทัด dropdown แบ่งกันคนละครึ่ง */
   .toolbar { flex-wrap: wrap; }
-  .toolbar .search { flex: 1 0 100%; }
+  .toolbar .search, .toolbar .search.search-compact { flex: 1 0 100%; }
+  .toolbar .toolbar-action { flex: 1 0 100%; margin-left: 0; }
   .toolbar select { flex: 1; width: auto; min-width: 8.125rem; }
 
   /* ตารางแคบสุดที่ยังอ่านออก — แคบกว่านี้ให้ปัดแนวนอนเอาในกล่อง .table-wrap
@@ -2353,7 +2374,9 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
   flex: 1;
   min-height: 0;    /* ขาดบรรทัดนี้ flex item จะไม่ยอมหดจนต่ำกว่าเนื้อหา overflow เลยไม่ทำงาน */
   overflow-y: auto;
-  overscroll-behavior: contain;  /* เลื่อนจนสุดในช่องแล้วไม่ลามไปเลื่อนทั้งหน้า */
+  /* ไม่ใส่ overscroll-behavior: contain — Chrome ถือว่าช่องที่ตั้ง contain เป็นตัวรับล้อเมาส์เสมอ
+     แม้รายการในช่องไม่ล้น ผลคือเอาเมาส์วางบนช่องวันไหนก็เลื่อนทั้งหน้าไม่ได้ (ปฏิทินเต็มไปด้วยช่องแบบนี้)
+     ปล่อยค่าปริยาย: ช่องที่ล้นจริงเลื่อนในช่องก่อน สุดแล้วค่อยไหลไปเลื่อนทั้งหน้า */
 
   /* แถบเลื่อนบางๆ — ค่าปริยายของ Windows หนาเกินไปสำหรับช่องปฏิทินที่แคบอยู่แล้ว */
   scrollbar-width: thin;
@@ -2479,6 +2502,43 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
   color: var(--muted);
 }
 .cal-legend-item { display: inline-flex; align-items: center; gap: 0.375rem; }
+
+/* ---------- หัวปฏิทิน: ไอคอน + ชื่อเดือน + ปุ่มเลื่อน (ซ้าย) · คำอธิบายสี (ขวา) ---------- */
+.cal-hero {
+  display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap;
+  gap: 0.75rem 1.5rem; margin-bottom: 1rem;
+}
+.cal-hero-main { display: flex; align-items: center; gap: 0.875rem; min-width: 0; }
+.cal-hero-icon {
+  display: grid; place-items: center; flex-shrink: 0;
+  width: 2.75rem; height: 2.75rem; border-radius: 0.75rem;
+  background: var(--brand-soft); color: var(--brand);
+}
+.cal-hero-icon svg { width: 1.375rem; height: 1.375rem; }
+.cal-hero-kicker { margin: 0 0 0.125rem; font-size: 0.75rem; font-weight: 600; letter-spacing: 0.02em; color: var(--muted); }
+.cal-hero .cal-title { margin: 0; font-size: 1.5rem; font-weight: 700; line-height: 1.2; letter-spacing: -0.01em; }
+.cal-hero-year { color: var(--brand); }
+/* ปุ่มเลื่อนช่วงเวลา — กลุ่มปุ่มติดกันแบบ segmented ท้ายแถบตัวกรอง (สูงเท่าช่องอื่นในแถบ) */
+.cal-hero-nav {
+  display: inline-flex; padding: 0; gap: 0;
+  border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); overflow: hidden;
+}
+.cal-hero-nav button {
+  display: inline-flex; align-items: center; justify-content: center; min-width: 2.5rem; padding: 0 0.875rem;
+  border: 0; background: none; font: inherit; font-size: 0.8125rem; font-weight: 600; color: var(--text); cursor: pointer;
+}
+.cal-hero-nav button + button { border-left: 1px solid var(--border); }
+.cal-hero-nav button:hover { background: var(--brand-soft); color: var(--brand); }
+.cal-hero-nav svg { width: 1rem; height: 1rem; }
+.toolbar .cal-hero-nav { gap: 0; margin-right: 1rem; } /* ทับ gap ของ .toolbar-action — ปุ่มกลุ่มนี้ต้องติดกัน คั่นแค่เส้น */
+@media (max-width: 900px) { .toolbar .cal-hero-nav { margin-right: 0; } .toolbar .cal-hero-nav button { flex: 1; } } /* จอแคบกลุ่มปุ่มเต็มบรรทัด แบ่งเท่ากัน */
+.cal-hero-prev { transform: rotate(90deg); }
+.cal-hero-next { transform: rotate(-90deg); }
+.cal-hero .cal-legend { margin: 0; }
+@media (max-width: 600px) {
+  .cal-hero .cal-title { font-size: 1.25rem; }
+  .cal-hero-main { flex-wrap: wrap; }
+}
 /* ช่องสีในคำอธิบายเล็กแค่ 12px — เป็นจุดที่สีใกล้กันจะแยกไม่ออกก่อนที่อื่น
    ขอบจางช่วยให้เห็นขอบเขตของช่องสีอ่อนๆ บนพื้นขาว ไม่งั้น "เสร็จแล้ว" แทบหายไปกับพื้น */
 .cal-swatch {
@@ -2500,6 +2560,13 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
     เลิกเป็น flex column แล้ว .cal-chips ก็ไม่มีอะไรคุมความสูง ชื่อจึงล้นออกนอกช่อง) */
 
 /* แท็บเล็ต/จอแคบ: บีบ 7 คอลัมน์ไม่ไหว ให้เลื่อนแนวนอนใน .table-wrap แทนการบีบจนอ่านไม่ออก */
+/* จอคอม มุมมองเดือน: ความสูงช่องคำนวณจากความสูงจอ ให้ทั้งเดือนอยู่ในจอเดียวไม่ต้องเลื่อน
+   17rem ≈ ส่วนบน (ชื่อเดือน + คำอธิบายสี + แถบตัวกรอง + หัววัน) และขอบล่างของหน้า
+   ไม่ต่ำกว่า 4.75rem (ยังเห็นเลขวัน + กะ 2 รายการ) ไม่สูงกว่า 8.5rem เดิม */
+@media (min-width: 40.0625rem) {
+  .cal-grid:not(.is-week) .cal-cell { height: clamp(4.75rem, calc((100dvh - 17rem) / var(--cal-rows, 6)), 8.5rem); }
+}
+
 @media (max-width: 40rem) {
   .cal-grid { min-width: 34rem; }
   .cal-cell { height: 6.5rem; }
@@ -2724,6 +2791,8 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
    เพราะ display:none กับ element แม่จะทำให้ลูกที่อยู่ข้างในหายไปด้วย เลยเอาเอกสารออกมาไม่ได้ */
 @media print {
   @page { size: A4; margin: 15mm; }
+  /* กระดาษพิมพ์ใช้ตัวอักษรเข้มทั้งหมด — เทาบนจออ่านสบาย แต่บนกระดาษจะจางเกินไป */
+  :root, :root[data-theme='dark'] { --text: var(--heading); }
 
   body * { visibility: hidden; }
   .invoice-doc, .invoice-doc *,
@@ -3400,7 +3469,7 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
 .shift-card { display: flex; align-items: center; gap: 1rem; margin-bottom: 0; }
 .shift-card .shift-main { flex: 1; min-width: 0; }
 /* ทับ .card h2 ที่เป็นหัวข้อเล็ก/จาง — ในการ์ดกะให้เป็นชื่อผู้ป่วยตัวหนา */
-.shift-card .shift-title { margin: 0.25rem 0 0.125rem; font-size: 1.0625rem; color: var(--text); font-weight: 700; }
+.shift-card .shift-title { margin: 0.25rem 0 0.125rem; font-size: 1.0625rem; color: var(--heading); font-weight: 700; }
 .shift-when { display: flex; align-items: center; gap: 0.5rem; }
 .shift-time { font-weight: 700; font-size: 0.9375rem; }
 .shift-addr { margin-top: 0.25rem; }
@@ -4760,9 +4829,53 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
 .nav-section-label:first-child { padding-top: 0; }
 .sidebar-foot { margin-top: 1.75rem; }
 .sidebar-panel nav { flex: 1; }
-.table th { color: var(--text); font-weight: 600; letter-spacing: 0; padding-block: 0.875rem; }
+.table th { color: var(--heading); font-weight: 600; letter-spacing: 0; padding-block: 0.875rem; }
 .table tbody td { border-bottom-color: var(--divider); }
 .toolbar { padding: 1rem; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-card); }
+/* หน้ารายการ: แถบตัวกรองกับตารางเป็นการ์ดใบเดียว — ตัวกรองเป็นหัวการ์ด คั่นด้วยเส้นเดียวกับแถวตาราง */
+/* จอใหญ่ทุกหน้า: เนื้อหากว้างเต็มพื้นที่ (ไม่ติดเพดาน 100rem) และกล่องหลักของหน้า (การ์ด / ตาราง / แถบตัวกรอง)
+   ชนขอบซ้าย-ขวาของกรอบสนิท — ดึงออกเท่าระยะขอบของหน้า แล้วเอากรอบข้าง/มุมมนออก (ชนขอบแล้วกรอบข้างไม่มีความหมาย)
+   ใช้กับลูกตรงของ .content (หรือของ .pull-zone > .pull-content ที่ครอบหน้าเพื่อดึงรีเฟรช) เท่านั้น การ์ดที่ซ้อนอยู่ในกริด (ไทล์หน้าภาพรวม ฯลฯ) ไม่โดน
+   .narrow (ฟอร์มแคบ เช่น เปลี่ยนรหัสผ่าน) ตั้งใจให้แคบ จึงไม่ยืด */
+@media (min-width: 901px) {
+  .content { max-width: none; padding-inline: 1rem; }
+  :is(.content, .content > .pull-zone > .pull-content) > .page-head { margin-inline: -1rem; padding-inline: 1rem; } /* เส้นใต้หัวยาวเต็มเท่ากล่อง */
+  :is(.content, .content > .pull-zone > .pull-content) > .card:not(.narrow),
+  :is(.content, .content > .pull-zone > .pull-content) > .toolbar,
+  :is(.content, .content > .pull-zone > .pull-content) > .list-card,
+  :is(.content, .content > .pull-zone > .pull-content) > .table-wrap { margin-inline: -1rem; border-inline: 0; border-radius: 0; }
+  :is(.content, .content > .pull-zone > .pull-content) > .table-wrap > .table { border-inline: 0; border-radius: 0; }
+  /* กล่องที่ต่อจากหัวหน้าทันที — ขอบบนชนเส้นใต้หัวสนิท เส้นนั้นทำหน้าที่เป็นขอบบนแทน */
+  :is(.content, .content > .pull-zone > .pull-content) > .page-head:has(+ .card:not(.narrow), + .toolbar, + .list-card, + .table-wrap) { margin-bottom: 0; }
+  :is(.content, .content > .pull-zone > .pull-content) > .page-head + .card:not(.narrow),
+  :is(.content, .content > .pull-zone > .pull-content) > .page-head + .toolbar,
+  :is(.content, .content > .pull-zone > .pull-content) > .page-head + .list-card { border-top: 0; }
+  :is(.content, .content > .pull-zone > .pull-content) > .page-head + .table-wrap > .table { border-top: 0; }
+  /* หน้าที่ไม่มีหัวบนจอ (h1 ซ่อนไว้ให้โปรแกรมอ่านหน้าจอ) — การ์ดชิดขอบบนสุดของกรอบ กินระยะขอบบนของ .content */
+  :is(.content, .content > .pull-zone > .pull-content) > .list-card:first-child,
+  :is(.content, .content > .pull-zone > .pull-content) > .sr-only + .list-card,
+  :is(.content, .content > .pull-zone > .pull-content) > .sr-only + .toolbar { margin-top: -2rem; border-top: 0; }
+  /* แถบตัวกรองที่ต่อด้วยปฏิทิน/ตารางทันที (หน้าตารางงาน) — ชิดกันสนิท เส้นใต้แถบเป็นเส้นบนของปฏิทินแทน (ไม่ซ้อนสองเส้น) */
+  :is(.content, .content > .pull-zone > .pull-content) > .toolbar:has(+ .table-wrap) { margin-bottom: 0; }
+  :is(.content, .content > .pull-zone > .pull-content) > .toolbar + .table-wrap > :is(.table, .cal-grid) { border-top: 0; border-inline: 0; border-radius: 0; }
+  /* ตารางเรทในหน้าแพ็คเกจ (อยู่ในหัวข้อย่อยแต่ละเกรด) — ชนขอบเหมือนตารางหน้าอื่น */
+  :is(.content, .content > .pull-zone > .pull-content) > .rate-section > .table-wrap { margin-inline: -1rem; }
+  :is(.content, .content > .pull-zone > .pull-content) > .rate-section > .table-wrap > .table { border-inline: 0; border-radius: 0; }
+  /* หน้าภาพรวมเป็นแดชบอร์ดหลายการ์ดวางเป็นกริด — การ์ดกริดชนขอบไม่ได้ ใบเดี่ยวจึงคงมุมมนไว้ให้ทั้งหน้าเข้าชุดกัน */
+  :is(.content, .content > .pull-zone > .pull-content):has(.hero-card) > .card:not(.narrow) { margin-inline: 0; border-inline: 1px solid var(--border); border-radius: var(--radius-card); }
+  :is(.content, .content > .pull-zone > .pull-content):has(.hero-card) > .page-head { margin-bottom: 1.375rem; }
+}
+.list-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-card); overflow: hidden; }
+.list-card > .toolbar { margin: 0; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; }
+.list-card > .error { margin: 0.75rem 1rem 0; }
+.list-card > .table-wrap > .table { border: 0; border-radius: 0; }
+.list-card > .table-wrap > .table tbody tr:last-child td { border-bottom: 0; }
+/* จอเล็กตารางกลายเป็นการ์ดรายแถวอยู่แล้ว — การ์ดครอบจะกลายเป็นการ์ดซ้อนการ์ด จึงถอดกรอบออก ให้ตัวกรองเป็นการ์ดของตัวเองเหมือนเดิม */
+@media (max-width: 600px) {
+  .list-card { background: none; border: 0; border-radius: 0; overflow: visible; }
+  .list-card > .toolbar { margin-bottom: 1rem; border: 1px solid var(--border); border-radius: var(--radius-card); }
+  .list-card > .error { margin: 0 0 1rem; }
+}
 .card { border-radius: var(--radius-card); }
 .hero-card { border-radius: var(--radius-card); }
 .hero-label { margin-bottom: 0.5rem; }
@@ -4778,8 +4891,8 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
 .sidebar nav a.active { font-weight: 600; box-shadow: inset 3px 0 var(--brand); }
 .nav-ico { transition: color 0.15s ease; }
 .page-head { padding-bottom: 1.25rem; border-bottom: 1px solid var(--border); }
-.page-head h1 { color: var(--text); font-weight: 600; }
-.card h2 { color: var(--text); font-weight: 600; }
+.page-head h1 { color: var(--heading); font-weight: 600; }
+.card h2 { color: var(--heading); font-weight: 600; }
 .card, .hero-card { box-shadow: none; }
 .tile { border-radius: var(--radius); }
 .hero-value, .tile-value { font-family: inherit; font-weight: 600; }
@@ -5055,7 +5168,7 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
   border-right: 1px solid var(--border);
   font-family: var(--font-mono);
   font-weight: 700;
-  color: var(--text);
+  color: var(--muted); /* ตัวอักษรนำหน้าตายตัว ไม่ใช่ค่าที่กรอก — สีเทาแบบเดียวกับข้อความตั้งต้นในช่อง */
 }
 .patient-code input {
   border: 0;
@@ -5092,3 +5205,49 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
   margin-bottom: 0.75rem; font-size: 0.8125rem;
 }
 .employer-edit .form-hint { margin: 0.625rem 0 0; }
+
+/* ---------- หน้าการมาทำงาน: แท็บ + ตัวกรอง + รายการ อยู่ในการ์ดขาวใบเดียว ---------- */
+.att-card > .att-tabs { margin: 0; padding: 0.375rem 1rem 0; }
+.att-card .att-filter { margin: 0; padding: 1rem; }
+.att-card .error, .att-card .notice { margin: 0 1rem 1rem; }
+.att-card .muted:only-child { padding: 1rem; }
+/* การ์ดย่อยข้างใน (สถานะว่าง ฯลฯ) ไม่ต้องมีกรอบซ้อน — กลืนเป็นเนื้อเดียวกับการ์ดแม่ */
+.att-card .card { margin: 0; border: 0; border-radius: 0; box-shadow: none; background: none; }
+.att-card .table-wrap > .table { border-inline: 0; border-bottom: 0; border-radius: 0; }
+.att-card .pager { margin: 0; padding: 1rem; }
+.att-card .tab-hint { margin: 0; padding: 0 1rem 0.75rem; }
+/* จอคอม: การ์ดขาวยืดลงไปจนสุดจอ — ไม่เหลือพื้นสีครีมโผล่ใต้รายการที่สั้น
+   .content / .pull-zone / .pull-content เป็นคอลัมน์ flex ต่อกันลงมา การ์ดจึง flex: 1 กินที่เหลือได้ */
+@media (min-width: 901px) {
+  .content:has(.att-card) { display: flex; flex-direction: column; padding-bottom: 0; }
+  .content:has(.att-card) > .pull-zone,
+  .content:has(.att-card) > .pull-zone > .pull-content { flex: 1; display: flex; flex-direction: column; }
+  .att-card { flex: 1; border-bottom: 0; }
+}
+@media (max-width: 600px) {
+  .att-card > .att-tabs { padding: 0; margin-bottom: 1rem; }
+  .att-card .att-filter { padding: 0 0 1rem; }
+  .att-card .error, .att-card .notice { margin: 0 0 1rem; }
+  .att-card .pager { padding: 1rem 0; }
+  .att-card .tab-hint { padding: 0 0 0.75rem; }
+}
+
+/* ข้อความ "กำลังโหลด…" ของรายการ — อยู่กลางพื้นที่รายการ ไม่ใช่ชิดซ้ายใต้ตัวกรอง */
+.loading-center { margin: 0; padding: 3rem 1rem; text-align: center; }
+
+/* ---------- หัวหน้าแบบ hero (ไอคอน + คำเล็ก + ชื่อหน้าตัวใหญ่) — หน้าตาเดียวกับหัวปฏิทิน ---------- */
+.page-hero { display: flex; align-items: center; gap: 0.875rem; min-width: 0; }
+.page-hero-icon {
+  display: grid; place-items: center; flex-shrink: 0;
+  width: 2.75rem; height: 2.75rem; border-radius: 0.75rem;
+  background: var(--brand-soft); color: var(--brand);
+}
+.page-hero-icon svg { width: 1.375rem; height: 1.375rem; }
+.page-hero-kicker { margin: 0 0 0.125rem; font-size: 0.75rem; font-weight: 600; letter-spacing: 0.02em; color: var(--muted); }
+.page-hero-title { margin: 0; font-size: 1.5rem; font-weight: 700; line-height: 1.2; letter-spacing: -0.01em; }
+.page-hero .muted { margin-top: 0.25rem; }
+@media (max-width: 600px) { .page-hero-title { font-size: 1.25rem; } }
+
+/* แถบที่มีหัวแบบ hero (สูงกว่าช่องกรอก) — ปุ่มไม่ต้องยืดสูงตามแถบ ให้ขนาดปกติวางกึ่งกลาง */
+.toolbar:has(.page-hero) .toolbar-action { align-self: center; margin-right: 1rem; }
+@media (max-width: 900px) { .toolbar:has(.page-hero) .toolbar-action { margin-right: 0; } }

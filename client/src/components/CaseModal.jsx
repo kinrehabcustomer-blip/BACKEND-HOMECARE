@@ -462,7 +462,7 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                 )}
                 <Field label="อาการปัจจุบัน" value={item.current_symptoms} />
                 {item.medical_devices && <Field label="อุปกรณ์ / สายต่างๆ" value={item.medical_devices} />}
-                <Field label="จุดประสงค์ของญาติในการดูแล" value={item.care_goal} />
+                <Field label="จุดประสงค์ในการดูแล" value={item.care_goal} />
               </section>
 
               <section>

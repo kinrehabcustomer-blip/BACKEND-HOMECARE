@@ -117,13 +117,10 @@ export function Approvals({ month, employeeId, patch, employeePicker, reloadKey 
     <>
       <MonthPicker month={month} onChange={(m) => patch({ month: m })}>{employeePicker}</MonthPicker>
 
-      {/* เหลือไว้แค่ท่าที่มองไม่เห็นจากหน้าจอ — ว่าแถวทั้งแถวกดเลือกได้ ไม่ใช่ต้องจิ้มช่องติ๊ก */}
-      <p className="muted tab-hint"><strong>แตะที่แถวเพื่อเลือก</strong></p>
-
       {error && <p className="error">{error}</p>}
 
       {loading && !rows ? (
-        <p className="muted">กำลังโหลด…</p>
+        <p className="muted loading-center">กำลังโหลด…</p>
       ) : rows?.length === 0 ? (
         /* คิวว่างไม่ได้แปลว่าไม่มีอะไรต้องทำ — บอกทั้งสองทางที่ไปต่อได้จริง
            (กะที่ค้างอยู่คนละที่ · ขั้นถัดไปของสายพาน) ไม่งั้นหน้าจอนี้เป็นทางตัน */
@@ -332,7 +329,7 @@ export function PayoutSummary({ month, employeeId, patch, employeePicker, reload
       {error && <p className="error">{error}</p>}
 
       {loading && !rows ? (
-        <p className="muted">กำลังโหลด…</p>
+        <p className="muted loading-center">กำลังโหลด…</p>
       ) : !error && rows?.length === 0 ? (
         // บอกให้ชัดว่าว่างเพราะ "ไม่มีใครเช็คอิน" หรือเพราะ "คนที่กรองไว้ไม่ได้เช็คอิน" — ไม่งั้นเข้าใจว่าข้อมูลหาย
         <section className="card empty-state">

@@ -288,7 +288,11 @@ export default function PatientModal({ patientId, siblings = [], onNavigate, onC
                       }
                     />
                     <Field label="ความสัมพันธ์กับผู้ติดต่อ" value={patient.emergency_contact_relation} />
-                    <Field label="ความสัมพันธ์กับผู้ว่าจ้าง" value={patient.relation_to_customer} />
+                    <Field label="ผู้ว่าจ้างเป็นอะไรกับผู้ป่วย" value={patient.employer_relation} />
+                    {/* ข้อมูลเดิม (กลับด้าน: ผู้ป่วยเป็นอะไรกับผู้ว่าจ้าง) — เลิกกรอกแล้ว โชว์เฉพาะแฟ้มที่เคยกรอกไว้ */}
+                    {patient.relation_to_customer && (
+                      <Field label="ผู้ป่วยเป็นอะไรกับผู้ว่าจ้าง (ข้อมูลเดิม)" value={patient.relation_to_customer} />
+                    )}
                   </div>
                 )}
               </section>

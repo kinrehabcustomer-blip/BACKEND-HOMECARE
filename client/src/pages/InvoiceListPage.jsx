@@ -42,7 +42,6 @@ export default function InvoiceListPage() {
   const navigate = useNavigate();
 
   const [result, setResult] = useState(null);
-  const [summary, setSummary] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
   const [reloadKey, setReloadKey] = useState(0);
@@ -117,10 +116,6 @@ export default function InvoiceListPage() {
         })
         .catch((err) => !cancelled && setError(err.message))
         .finally(() => !cancelled && setLoading(false));
-
-      // ยอดสรุปใช้ตัวกรองชุดเดียวกัน (ตัดหน้า/การเรียงออก) — ตัวเลขด้านบนจะได้ตรงกับรายการที่เห็น
-      const { page: _p, per_page: _pp, sort: _s, order: _o, ...forSummary } = query;
-      api.invoiceSummary(forSummary).then((s) => !cancelled && setSummary(s)).catch(() => {});
     }, 250);
 
     return () => {
@@ -173,205 +168,165 @@ export default function InvoiceListPage() {
     }
   };
 
-  const stat = (s) => summary?.find((x) => x.status === s) ?? { count: 0, amount: 0, outstanding: 0 };
-  const unpaid = stat('issued');
-  // ยอดรวมของ "รายการที่กรองอยู่" ทุกสถานะ — ตอบคำถาม "ที่เห็นอยู่นี่รวมเท่าไหร่"
-  const grandTotal = (summary ?? []).reduce((sum, s) => sum + s.amount, 0);
-
   const rows = result?.data ?? [];
   const visibleIds = rows.map((v) => v.invoice_id);
 
   return (
     <PageRefresh onRefresh={() => setReloadKey((k) => k + 1)} busy={loading}>
-      <header className="page-head">
-        <div>
-          <h1>ใบแจ้งหนี้</h1>
-          <p className="muted">
-            {result ? `ทั้งหมด ${result.pagination.total} ใบ · รวม ${formatBaht(grandTotal)} · ` : ''}
-            รอชำระ {unpaid.count} ใบ ({formatBaht(unpaid.outstanding)}
-            {unpaid.outstanding !== unpaid.amount && ` จาก ${formatBaht(unpaid.amount)}`}) ·
-            {' '}ชำระแล้ว {stat('paid').count} ใบ
-            {filtered && <> · <span className="mono">เฉพาะที่กรองอยู่</span></>}
-          </p>
-        </div>
-      </header>
+      {/* ไม่มีหัวหน้าบนจอ (แถบตัวกรองเป็นส่วนบนสุด) — คง h1 ไว้ให้โปรแกรมอ่านหน้าจอ */}
+      <h1 className="sr-only">ใบแจ้งหนี้</h1>
 
-      <div className="toolbar">
-        <input
-          className="search"
-          placeholder="ค้นหา เลขที่ใบ / ชื่อผู้จ่าย / รหัสเคส"
-          value={q}
-          onChange={(e) => setFilter('q', e.target.value)}
-        />
-        <select value={statusValue} onChange={(e) => setStatusFilter(e.target.value)} aria-label="สถานะ">
-          <option value="">ทุกสถานะ</option>
-          {Object.entries(INVOICE_STATUS_LABELS).map(([v, l]) => (
-            <option key={v} value={v}>{l}</option>
-          ))}
-          {/* ไม่ใช่สถานะใน DB — คิดสดจากข้อมูลอื่นของใบ แต่คนใช้มองเป็นสถานะหนึ่ง */}
-          {Object.entries(PSEUDO_STATUS).map(([value, label]) => (
-            <option key={value} value={value}>{label}</option>
-          ))}
-        </select>
-        {/* โผล่เฉพาะตอนมีอะไรกรองอยู่ — ปุ่มที่กดแล้วไม่เกิดอะไรขึ้นไม่ควรมีให้เห็น */}
-        {filtered && <button className="btn" onClick={clearFilters}>ล้างตัวกรอง</button>}
-      </div>
-
-      {/* error เป็นแถบเหนือตาราง ไม่ทับทั้งหน้า — คำค้นที่พิมพ์ไว้ต้องไม่หายไปเพราะเน็ตสะดุด */}
-      <ErrorBar message={error} onRetry={() => setReloadKey((k) => k + 1)} busy={loading} />
-
-      {/* เคสที่ไม่มีใบเหลืออยู่ — ซ่อนตอนกรองอยู่ เพราะกำลังหาใบที่มีอยู่แล้ว ไม่ได้มาออกใบใหม่ */}
-      {!filtered && missing.length > 0 && (
-        <section className="card">
-          <h2>เคสที่ยังไม่มีใบแจ้งหนี้ ({missing.length})</h2>
-          {missing.map((c) => (
-            <div className="history-item" key={c.case_id}>
-              <div>
-                <strong>{c.client_name ?? c.title}</strong>
-                <p className="muted">
-                  <OfficeLink className="link mono" to={`/cases?open=${c.case_id}`}>{c.case_id}</OfficeLink>
-                  {' · '}{CASE_STATUS_LABELS[c.status] ?? c.status}
-                  {' · '}ค่าบริการ {c.fee != null ? formatBaht(c.fee) : 'ยังไม่ระบุ'}
-                </p>
-              </div>
-              <div className="invoice-row-actions">
-                <button
-                  className="btn tiny primary"
-                  disabled={issuing != null}
-                  onClick={() => issueFor(c.case_id)}
-                >
-                  {issuing === c.case_id ? 'กำลังออกใบ…' : 'ออกใบแจ้งหนี้'}
-                </button>
-              </div>
-            </div>
-          ))}
-        </section>
-      )}
-
-      <div className="table-wrap">
-        <table className="table table-cards table-2line table-indexed">
-          <colgroup>
-            {/* เลขที่ใบต้องกว้างพอสำหรับ "HC-IV6909010001" (15 ตัว) + ป้ายไม่ตรงกับเคส และสถานะพอสำหรับป้ายเต็มก้อน
-                ที่ยืมมาคือชื่อผู้จ่ายกับรายการ ซึ่งเป็นข้อความอิสระ ตัดท้ายได้ตามออกแบบ */}
-            <col style={{ width: '5%' }} />
-            <col style={{ width: '18%' }} />
-            <col style={{ width: '17%' }} />
-            <col style={{ width: '20%' }} />
-            <col style={{ width: '14%' }} />
-            <col style={{ width: '11%' }} />
-            <col style={{ width: '15%' }} />
-          </colgroup>
-          <thead>
-            <tr>
-              <th>#</th>
-              <th><SortHead column="invoice_id" {...SORTABLE.invoice_id} sort={sort} order={order} onSort={sortBy} /></th>
-              <th>ผู้จ่าย / เบอร์</th>
-              <th className="cell-text">รายการ / เคส</th>
-              <th><SortHead column="issue_date" {...SORTABLE.issue_date} sort={sort} order={order} onSort={sortBy} /></th>
-              <th><SortHead column="total" {...SORTABLE.total} sort={sort} order={order} onSort={sortBy} /></th>
-              <th>สถานะ</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((v, i) => (
-              <tr
-                key={v.invoice_id}
-                className="row-clickable"
-                tabIndex={0}
-                onClick={() => openInvoice(v.invoice_id)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    openInvoice(v.invoice_id);
-                  }
-                }}
-              >
-                {/* ลำดับนับต่อเนื่องข้ามหน้า — เป็นลำดับของ "รายการที่เห็นตอนนี้" ไม่ใช่เลขที่เอกสาร */}
-                <td className="row-index" data-label="ลำดับ">{(page - 1) * Number(perPage) + i + 1}</td>
-                <td className="mono link" data-label="เลขที่ใบ">
-                  {v.invoice_id}
-                  {/* ใบไม่ตรงกับข้อมูลเคสแล้ว — เดิมรู้ได้ต่อเมื่อเปิดใบขึ้นมาดู ต้องเห็นตั้งแต่ในรายการ
-
-                      บอกให้ตรงว่าไม่ตรงเรื่องอะไร — server แยก fee_stale / payer_stale มาให้อยู่แล้ว
-                      และ popup เคสก็ใช้ความต่างนี้อยู่ ("ผู้จ่ายในใบไม่ตรง" vs "ไม่ตรงกับค่าจ้างเคส")
-                      หน้ารายการเคยทิ้งไปเหลือ "ไม่ตรงกับเคส" กลางๆ ซึ่งต้องเปิดใบดูอยู่ดีว่าเรื่องอะไร
-
-                      ใบที่ยกเลิกแล้วไม่ต้องเตือน ไม่มีใครต้องไปรีเฟรชมัน (เกณฑ์เดียวกับอีกสองที่) */}
-                  {v.is_stale && v.status !== 'cancelled' && (
-                    <span className="stale-flag" title="ข้อมูลในใบไม่ตรงกับเคสแล้ว — เปิดใบแล้วกด “รีเฟรชจากเคส”">
-                      {[
-                        v.service_stale && 'แพ็คเกจ',
-                        v.fee_stale && 'ยอด',
-                        v.payer_stale && 'ผู้จ่าย',
-                      ].filter(Boolean).join('/')}ไม่ตรง
-                    </span>
-                  )}
-                </td>
-                <td data-label="ผู้จ่าย" title={v.bill_to_name || undefined}>
-                  {v.bill_to_name}
-                  {v.customer_phone && (
-                    <span className="cell-sub">
-                      {/* stopPropagation กันไม่ให้การกดเบอร์เปิด popup ตามไปด้วย */}
-                      <a className="link mono" href={`tel:${v.customer_phone}`} onClick={(e) => e.stopPropagation()}>
-                        {v.customer_phone}
-                      </a>
-                    </span>
-                  )}
-                </td>
-                {/* รายละเอียดบริการเป็นข้อความอิสระ ยาวเกินคอลัมน์เสมอและถูก … ตัดท้าย
-                    บนมือถือมันตัดบรรทัดจึงอ่านได้ครบ แต่บน PC ที่บังคับบรรทัดเดียวจะอ่านต่อไม่ได้เลย
-                    title ให้ชี้เมาส์ค้างแล้วเห็นข้อความเต็ม — เป็นทางอ่านที่มีเฉพาะบน PC อยู่แล้ว */}
-                <td className="cell-text" data-label="รายการ" title={v.service_description || undefined}>
-                  {serviceHead(v.service_description)}
-                  {v.case_id && (
-                    <span className="cell-sub">
-                      <OfficeLink className="link mono" to={`/cases?open=${v.case_id}`} onClick={(e) => e.stopPropagation()}>
-                        {v.case_id}
-                      </OfficeLink>
-                    </span>
-                  )}
-                </td>
-                <td data-label="วันที่ออก">
-                  {formatDate(v.issue_date)}
-                  {v.due_date && <span className="cell-sub">ครบกำหนด {formatDate(v.due_date)}</span>}
-                </td>
-                <td data-label="ยอดสุทธิ">{formatBaht(v.total)}</td>
-                <td data-label="สถานะ">
-                  <span className={`badge invoice-${v.is_overdue ? 'overdue' : v.status}`}>
-                    {v.is_overdue ? 'เกินกำหนด' : INVOICE_STATUS_LABELS[v.status]}
-                  </span>
-                </td>
-              </tr>
+      {/* แถบตัวกรอง + ตาราง อยู่ในการ์ดใบเดียวกัน (เหมือนหน้ารายการอื่น — ดู .list-card) */}
+      <div className="list-card">
+        <div className="toolbar">
+          <input
+            className="search search-compact"
+            placeholder="ค้นหา เลขที่ใบ / ชื่อผู้จ่าย / รหัสเคส"
+            value={q}
+            onChange={(e) => setFilter('q', e.target.value)}
+          />
+          <select value={statusValue} onChange={(e) => setStatusFilter(e.target.value)} aria-label="สถานะ">
+            <option value="">ทุกสถานะ</option>
+            {Object.entries(INVOICE_STATUS_LABELS).map(([v, l]) => (
+              <option key={v} value={v}>{l}</option>
             ))}
+            {/* ไม่ใช่สถานะใน DB — คิดสดจากข้อมูลอื่นของใบ แต่คนใช้มองเป็นสถานะหนึ่ง */}
+            {Object.entries(PSEUDO_STATUS).map(([value, label]) => (
+              <option key={value} value={value}>{label}</option>
+            ))}
+          </select>
+          {/* โผล่เฉพาะตอนมีอะไรกรองอยู่ — ปุ่มที่กดแล้วไม่เกิดอะไรขึ้นไม่ควรมีให้เห็น */}
+          {filtered && <button className="btn" onClick={clearFilters}>ล้างตัวกรอง</button>}
+        </div>
 
-            {/* โหลดครั้งแรกยังไม่มีข้อมูลเลย — ต้องบอกว่ากำลังโหลด ไม่ใช่ปล่อยตารางว่างเงียบๆ
-                (ถ้ามีข้อมูลเก่าอยู่แล้ว คงไว้ให้อ่านต่อระหว่างโหลดรอบใหม่ ไม่ให้จอกระพริบ) */}
-            {loading && rows.length === 0 && (
-              <tr><td colSpan={7} className="empty">กำลังโหลด…</td></tr>
-            )}
+        {/* error เป็นแถบเหนือตาราง ไม่ทับทั้งหน้า — คำค้นที่พิมพ์ไว้ต้องไม่หายไปเพราะเน็ตสะดุด */}
+        <ErrorBar message={error} onRetry={() => setReloadKey((k) => k + 1)} busy={loading} />
 
-            {/* error มีแถบของตัวเองอยู่แล้ว — ไม่ต้องบอกซ้ำว่า "ไม่มีข้อมูล" ทั้งที่จริงๆ คือโหลดไม่สำเร็จ */}
-            {!loading && !error && rows.length === 0 && (
+        <div className="table-wrap">
+          <table className="table table-cards table-2line table-indexed">
+            <colgroup>
+              {/* เลขที่ใบต้องกว้างพอสำหรับ "HC-IV6909010001" (15 ตัว) + ป้ายไม่ตรงกับเคส และสถานะพอสำหรับป้ายเต็มก้อน
+                  ที่ยืมมาคือชื่อผู้จ่ายกับรายการ ซึ่งเป็นข้อความอิสระ ตัดท้ายได้ตามออกแบบ */}
+              <col style={{ width: '5%' }} />
+              <col style={{ width: '18%' }} />
+              <col style={{ width: '17%' }} />
+              <col style={{ width: '20%' }} />
+              <col style={{ width: '14%' }} />
+              <col style={{ width: '11%' }} />
+              <col style={{ width: '15%' }} />
+            </colgroup>
+            <thead>
               <tr>
-                <td colSpan={7} className="empty">
-                  {filtered ? (
-                    <>
-                      ไม่พบใบแจ้งหนี้ที่ตรงกับเงื่อนไข{' '}
-                      <button className="btn link-btn" onClick={clearFilters}>ล้างตัวกรอง</button>
-                    </>
-                  ) : (
-                    <>
-                      ยังไม่มีใบแจ้งหนี้
-                      {missing.length > 0
-                        ? ' — กด "ออกใบแจ้งหนี้" ที่เคสด้านบน'
-                        : ' — ระบบออกใบร่างให้เองเมื่อเปิดเคส'}
-                    </>
-                  )}
-                </td>
+                <th>#</th>
+                <th><SortHead column="invoice_id" {...SORTABLE.invoice_id} sort={sort} order={order} onSort={sortBy} /></th>
+                <th>ผู้จ่าย / เบอร์</th>
+                <th className="cell-text">รายการ / เคส</th>
+                <th><SortHead column="issue_date" {...SORTABLE.issue_date} sort={sort} order={order} onSort={sortBy} /></th>
+                <th><SortHead column="total" {...SORTABLE.total} sort={sort} order={order} onSort={sortBy} /></th>
+                <th>สถานะ</th>
               </tr>
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {rows.map((v, i) => (
+                <tr
+                  key={v.invoice_id}
+                  className="row-clickable"
+                  tabIndex={0}
+                  onClick={() => openInvoice(v.invoice_id)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      openInvoice(v.invoice_id);
+                    }
+                  }}
+                >
+                  {/* ลำดับนับต่อเนื่องข้ามหน้า — เป็นลำดับของ "รายการที่เห็นตอนนี้" ไม่ใช่เลขที่เอกสาร */}
+                  <td className="row-index" data-label="ลำดับ">{(page - 1) * Number(perPage) + i + 1}</td>
+                  <td className="mono link" data-label="เลขที่ใบ">
+                    {v.invoice_id}
+                    {/* ใบไม่ตรงกับข้อมูลเคสแล้ว — เดิมรู้ได้ต่อเมื่อเปิดใบขึ้นมาดู ต้องเห็นตั้งแต่ในรายการ
+
+                        บอกให้ตรงว่าไม่ตรงเรื่องอะไร — server แยก fee_stale / payer_stale มาให้อยู่แล้ว
+                        และ popup เคสก็ใช้ความต่างนี้อยู่ ("ผู้จ่ายในใบไม่ตรง" vs "ไม่ตรงกับค่าจ้างเคส")
+                        หน้ารายการเคยทิ้งไปเหลือ "ไม่ตรงกับเคส" กลางๆ ซึ่งต้องเปิดใบดูอยู่ดีว่าเรื่องอะไร
+
+                        ใบที่ยกเลิกแล้วไม่ต้องเตือน ไม่มีใครต้องไปรีเฟรชมัน (เกณฑ์เดียวกับอีกสองที่) */}
+                    {v.is_stale && v.status !== 'cancelled' && (
+                      <span className="stale-flag" title="ข้อมูลในใบไม่ตรงกับเคสแล้ว — เปิดใบแล้วกด “รีเฟรชจากเคส”">
+                        {[
+                          v.service_stale && 'แพ็คเกจ',
+                          v.fee_stale && 'ยอด',
+                          v.payer_stale && 'ผู้จ่าย',
+                        ].filter(Boolean).join('/')}ไม่ตรง
+                      </span>
+                    )}
+                  </td>
+                  <td data-label="ผู้จ่าย" title={v.bill_to_name || undefined}>
+                    {v.bill_to_name}
+                    {v.customer_phone && (
+                      <span className="cell-sub">
+                        {/* stopPropagation กันไม่ให้การกดเบอร์เปิด popup ตามไปด้วย */}
+                        <a className="link mono" href={`tel:${v.customer_phone}`} onClick={(e) => e.stopPropagation()}>
+                          {v.customer_phone}
+                        </a>
+                      </span>
+                    )}
+                  </td>
+                  {/* รายละเอียดบริการเป็นข้อความอิสระ ยาวเกินคอลัมน์เสมอและถูก … ตัดท้าย
+                      บนมือถือมันตัดบรรทัดจึงอ่านได้ครบ แต่บน PC ที่บังคับบรรทัดเดียวจะอ่านต่อไม่ได้เลย
+                      title ให้ชี้เมาส์ค้างแล้วเห็นข้อความเต็ม — เป็นทางอ่านที่มีเฉพาะบน PC อยู่แล้ว */}
+                  <td className="cell-text" data-label="รายการ" title={v.service_description || undefined}>
+                    {serviceHead(v.service_description)}
+                    {v.case_id && (
+                      <span className="cell-sub">
+                        <OfficeLink className="link mono" to={`/cases?open=${v.case_id}`} onClick={(e) => e.stopPropagation()}>
+                          {v.case_id}
+                        </OfficeLink>
+                      </span>
+                    )}
+                  </td>
+                  <td data-label="วันที่ออก">
+                    {formatDate(v.issue_date)}
+                    {v.due_date && <span className="cell-sub">ครบกำหนด {formatDate(v.due_date)}</span>}
+                  </td>
+                  <td data-label="ยอดสุทธิ">{formatBaht(v.total)}</td>
+                  <td data-label="สถานะ">
+                    <span className={`badge invoice-${v.is_overdue ? 'overdue' : v.status}`}>
+                      {v.is_overdue ? 'เกินกำหนด' : INVOICE_STATUS_LABELS[v.status]}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+
+              {/* โหลดครั้งแรกยังไม่มีข้อมูลเลย — ต้องบอกว่ากำลังโหลด ไม่ใช่ปล่อยตารางว่างเงียบๆ
+                  (ถ้ามีข้อมูลเก่าอยู่แล้ว คงไว้ให้อ่านต่อระหว่างโหลดรอบใหม่ ไม่ให้จอกระพริบ) */}
+              {loading && rows.length === 0 && (
+                <tr><td colSpan={7} className="empty">กำลังโหลด…</td></tr>
+              )}
+
+              {/* error มีแถบของตัวเองอยู่แล้ว — ไม่ต้องบอกซ้ำว่า "ไม่มีข้อมูล" ทั้งที่จริงๆ คือโหลดไม่สำเร็จ */}
+              {!loading && !error && rows.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="empty">
+                    {filtered ? (
+                      <>
+                        ไม่พบใบแจ้งหนี้ที่ตรงกับเงื่อนไข{' '}
+                        <button className="btn link-btn" onClick={clearFilters}>ล้างตัวกรอง</button>
+                      </>
+                    ) : (
+                      <>
+                        ยังไม่มีใบแจ้งหนี้
+                        {missing.length > 0
+                          ? ' — กด "ออกใบแจ้งหนี้" ที่เคสด้านล่าง'
+                          : ' — ระบบออกใบร่างให้เองเมื่อเปิดเคส'}
+                      </>
+                    )}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {result && (
@@ -403,6 +358,34 @@ export default function InvoiceListPage() {
             ต่อหน้า
           </label>
         </div>
+      )}
+
+      {/* เคสที่ไม่มีใบเหลืออยู่ — ซ่อนตอนกรองอยู่ เพราะกำลังหาใบที่มีอยู่แล้ว ไม่ได้มาออกใบใหม่ */}
+      {!filtered && missing.length > 0 && (
+        <section className="card">
+          <h2>เคสที่ยังไม่มีใบแจ้งหนี้ ({missing.length})</h2>
+          {missing.map((c) => (
+            <div className="history-item" key={c.case_id}>
+              <div>
+                <strong>{c.client_name ?? c.title}</strong>
+                <p className="muted">
+                  <OfficeLink className="link mono" to={`/cases?open=${c.case_id}`}>{c.case_id}</OfficeLink>
+                  {' · '}{CASE_STATUS_LABELS[c.status] ?? c.status}
+                  {' · '}ค่าบริการ {c.fee != null ? formatBaht(c.fee) : 'ยังไม่ระบุ'}
+                </p>
+              </div>
+              <div className="invoice-row-actions">
+                <button
+                  className="btn tiny primary"
+                  disabled={issuing != null}
+                  onClick={() => issueFor(c.case_id)}
+                >
+                  {issuing === c.case_id ? 'กำลังออกใบ…' : 'ออกใบแจ้งหนี้'}
+                </button>
+              </div>
+            </div>
+          ))}
+        </section>
       )}
 
       {openId && (

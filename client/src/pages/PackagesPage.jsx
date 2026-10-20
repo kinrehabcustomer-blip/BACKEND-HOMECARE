@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
-import { formatBaht, ENGLISH_SURCHARGE } from '../labels.js';
+import { formatBaht } from '../labels.js';
 import LineIcon from '../components/LineIcon.jsx';
 import ErrorBar from '../components/ErrorBar.jsx';
 import ConfirmButton from '../components/ConfirmButton.jsx';
@@ -410,23 +410,18 @@ export default function PackagesPage() {
   return (
     <PageRefresh onRefresh={reload} busy={loading}>
       <header className="page-head">
-        <div>
-          <h1>แพ็คเกจบริการ (พนักงานพาร์ทไทม์)</h1>
-          <p className="muted">ส่วนลดหักจากรายได้ส่วนของบริษัท ค่าจ้างพนักงานคงเดิม</p>
-          {/* ค่าภาษาไม่ได้อยู่ในตาราง — บวกเพิ่มตอนเปิดเคส (ติ๊ก "ภาษาอังกฤษ" ในฟอร์มเคส) ทุกแพ็คเกจ */}
-          <p className="muted">
-            ค่าภาษา (อังกฤษ) บวกเพิ่มทุกแพ็คเกจ: รายวัน +{formatBaht(ENGLISH_SURCHARGE.daily)}
-            {' · '}รายสัปดาห์ +{formatBaht(ENGLISH_SURCHARGE.weekly)}
-            {' · '}รายเดือน +{formatBaht(ENGLISH_SURCHARGE.monthly)}
-          </p>
-          <p className="muted">
-            ตารางเรทตามเกรด × รูปแบบบริการ × ระดับพนักงาน (CG / NA / PN / RN)
+        {/* หัวหน้าแบบเดียวกับหัวปฏิทิน: ไอคอนในกรอบสีทองอ่อน + คำเล็กด้านบน + ชื่อหน้าตัวใหญ่ */}
+        <div className="page-hero">
+          <span className="page-hero-icon" aria-hidden="true"><LineIcon name="home" /></span>
+          <div>
+            <p className="page-hero-kicker">Homecare · เรทตามเกรด × รูปแบบบริการ × ระดับพนักงาน</p>
+            <h1 className="page-hero-title">แพ็คเกจบริการ</h1>
             {/* บอกจำนวนที่ค้างไว้ตลอดเวลาที่แก้อยู่ — ตารางยาวกว่าหนึ่งหน้าจอ เลื่อนลงไปแก้ล่างสุด
-                แล้วลืมว่ายังไม่ได้บันทึกเป็นเรื่องที่เกิดง่ายมาก */}
+                แล้วลืมว่ายังไม่ได้บันทึกเป็นเรื่องที่เกิดง่ายมาก (คำอธิบายเรทเอาออกแล้ว เหลือแค่คำเตือนนี้) */}
             {editing && dirtyKeys.length > 0 && (
-              <> · <strong className="flag-text">แก้ไปแล้ว {dirtyKeys.length} ช่อง ยังไม่บันทึก</strong></>
+              <p className="muted"><strong className="flag-text">แก้ไปแล้ว {dirtyKeys.length} ช่อง ยังไม่บันทึก</strong></p>
             )}
-          </p>
+          </div>
         </div>
         <div className="actions">
           {editing ? (

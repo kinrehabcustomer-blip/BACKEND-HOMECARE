@@ -32,7 +32,7 @@ const BLANK = {
   // ตัวตนผู้ป่วย (มาจากแฟ้ม patient / หรือกรอกเพื่อสร้างแฟ้มใหม่) — client_name/gender/age/medical_history คัดลอกเป็น snapshot ในเคส
   client_name: '', patient_gender: '', patient_age: '', medical_history: '',
   // เฉพาะตอนสร้างผู้ป่วยใหม่ — เก็บที่แฟ้มผู้ป่วย ไม่ใช่คอลัมน์ของเคส (ถูกตัดออกก่อนบันทึกเคส)
-  weight_kg: '', height_cm: '', allergies: '', food_allergies: '', relation_to_customer: '',
+  weight_kg: '', height_cm: '', allergies: '', food_allergies: '',
 
   // การประเมิน/อาการครั้งนี้ (ข้อมูลของเคส เปลี่ยนได้ทุกรอบ)
   current_symptoms: '', medical_devices: '', care_goal: '',
@@ -137,6 +137,14 @@ export default function CaseFormPage() {
   const [query, setQuery] = useState('');
   const [matches, setMatches] = useState([]);
   const [pickedPatient, setPickedPatient] = useState(null);
+  /* ผู้ว่าจ้างเป็นอะไรกับผู้ป่วย — เก็บที่แฟ้มผู้ป่วย (employer_relation) ไม่ใช่ที่เคส จึงแยกจาก form
+     relationSaved = ค่าในแฟ้มตอนนี้ — แก้แล้วค่อยบันทึกกลับแฟ้มหลังบันทึกเคส */
+  const [relation, setRelation] = useState('');
+  const relationSaved = useRef('');
+  const loadRelation = (p) => {
+    setRelation(p?.employer_relation ?? '');
+    relationSaved.current = p?.employer_relation ?? '';
+  };
   // ผู้รับการดูแลที่อยู่ใต้ผู้ว่าจ้างที่เลือกไว้ — เสนอให้เลือกเลยโดยไม่ต้องพิมพ์ค้นหา
   const [ownPatients, setOwnPatients] = useState([]);
 
@@ -344,6 +352,7 @@ export default function CaseFormPage() {
    */
   function pickPatient(p) {
     setPickedPatient(p);
+    loadRelation(p);
     const cust = p.customer ?? (p.customer_id ? { customer_id: p.customer_id, name: p.customer_name } : null);
     setPayer(cust);
     setForm((prev) => ({
@@ -361,6 +370,7 @@ export default function CaseFormPage() {
   /** เลิกเลือกผู้ป่วย -> กลับไปโหมดค้นหา/สร้างใหม่ (ข้อมูลที่เติมไว้ไม่ล้าง เผื่อสร้างแฟ้มใหม่จากข้อมูลเดิม) */
   function unpickPatient() {
     setPickedPatient(null);
+    relationSaved.current = ''; // ค่าที่พิมพ์ค้างไว้ ใช้กับแฟ้มใหม่ต่อได้
     setQuery('');
     setForm((prev) => ({ ...prev, patient_id: '' }));
   }
@@ -453,7 +463,9 @@ export default function CaseFormPage() {
         setRenewSource(c);
         if (c.customer_id) setPayer({ customer_id: c.customer_id, name: c.customer_name });
         // แฟ้มผู้ป่วยเดิม — โชว์เป็นผู้ป่วยที่เลือกอยู่ (ไม่ทับข้อมูลในฟอร์มด้วยข้อมูลแฟ้ม รอบก่อนอาจแก้ไว้แล้ว)
-        if (c.patient_id) api.getPatient(c.patient_id).then(setPickedPatient).catch(() => {});
+        if (c.patient_id) {
+          api.getPatient(c.patient_id).then((p) => { setPickedPatient(p); loadRelation(p); }).catch(() => {});
+        }
       })
       .catch((err) => setError(err.message));
   }, [renewFrom]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -524,6 +536,7 @@ export default function CaseFormPage() {
         // มีผู้ว่าจ้างผูกไว้แล้ว — โชว์เป็นลูกค้าที่เลือกอยู่ (ใช้ชื่อจาก SELECT ของเคส ไม่ต้องยิงซ้ำ)
         // ยังไม่มี = ปล่อย payer เป็น null ส่วนผู้ว่าจ้างจะโชว์ช่องค้นหาให้เพิ่มลูกค้าเจ้าของเคส
         if (c.customer_id) setPayer({ customer_id: c.customer_id, name: c.customer_name });
+        if (c.patient_id) api.getPatient(c.patient_id).then(loadRelation).catch(() => {});
       })
       .catch((err) => setError(err.message));
 
@@ -534,7 +547,7 @@ export default function CaseFormPage() {
       .catch(() => setCaseInvoices([]));
   }, [id, isEdit]);
 
-  const isDirty = () => JSON.stringify(form) !== initial.current;
+  const isDirty = () => JSON.stringify(form) !== initial.current || relation.trim() !== relationSaved.current;
 
   /*
    * ปิดแท็บ/กดรีเฟรชทั้งที่ยังกรอกค้าง — ให้เบราว์เซอร์ถามก่อน
@@ -558,6 +571,7 @@ export default function CaseFormPage() {
        (ฟอร์มลูกค้า/ผู้ป่วย/พนักงานเขียน name ใส่ทีละช่องเอง จึงไม่เจอปัญหานี้) */
     name: key,
     value: form[key],
+    'data-empty': form[key] === '' ? '' : undefined, // ช่องวันที่ว่าง → ตัวอักษร วว/ดด/ปปปป สีเทา (ดู index.css)
     'aria-invalid': fieldErrors[key] ? true : undefined,
     onChange: (e) => {
       setForm((prev) => ({ ...prev, [key]: e.target.value }));
@@ -675,16 +689,16 @@ export default function CaseFormPage() {
     setLocError(null);
   };
 
-  /**
-   * ยังไม่ได้เลือกผู้ป่วย = ผู้ป่วยรายใหม่ -> สร้างแฟ้ม (PAT-xxxx) จากข้อมูลที่กรอก แล้วผูกกับผู้ว่าจ้าง (ถ้ามี)
-   * เก็บ patient_id กลับเข้าฟอร์ม เผื่อบันทึกเคสพลาดแล้วกดใหม่ จะไม่สร้างผู้ป่วยซ้ำ
-   */
   /** error รายช่องจาก API อื่น (ผู้ป่วย/ผู้ว่าจ้าง) ใช้ชื่อช่องของตารางนั้น — แปลงเป็นชื่อช่องในฟอร์มนี้ ให้ขึ้นใต้ช่องได้ */
   const remapFields = (map) => (err) => {
     if (err.fields) err.fields = err.fields.map((f) => ({ ...f, field: map[f.field] ?? f.field }));
     throw err;
   };
 
+  /**
+   * ยังไม่ได้เลือกผู้ป่วย = ผู้ป่วยรายใหม่ -> สร้างแฟ้ม (รหัส KN ที่กรอก) จากข้อมูลที่กรอก แล้วผูกกับผู้ว่าจ้าง (ถ้ามี)
+   * เก็บ patient_id กลับเข้าฟอร์ม เผื่อบันทึกเคสพลาดแล้วกดใหม่ จะไม่สร้างผู้ป่วยซ้ำ
+   */
   async function ensurePatient(payload) {
     if (payload.patient_id) return payload.patient_id;
     // รู้แค่ผู้ว่าจ้าง — ยังไม่มีชื่อให้สร้างแฟ้ม (server เติม "ยังไม่ระบุผู้ป่วย" ให้เคส)
@@ -700,12 +714,13 @@ export default function CaseFormPage() {
       medical_history: payload.medical_history,
       allergies: payload.allergies,
       food_allergies: payload.food_allergies,
-      relation_to_customer: payload.relation_to_customer,
+      employer_relation: relation.trim() || null,
       address: payload.address,
       customer_id: payload.customer_id, // ผูกผู้ว่าจ้างตั้งแต่แรก (null ได้ถ้ายังไม่รู้ผู้จ่าย)
     }).catch(remapFields({ patient_id: 'patient_code', name: 'client_name' }));
 
     setForm((prev) => ({ ...prev, patient_id: patient.patient_id }));
+    relationSaved.current = relation.trim(); // บันทึกไปพร้อมแฟ้มใหม่แล้ว
     return patient.patient_id;
   }
 
@@ -722,6 +737,17 @@ export default function CaseFormPage() {
 
   /** บันทึกผู้ว่าจ้างรายใหม่เข้าตารางลูกค้า แล้วสลับเป็น "เลือกแล้ว" ทันที
       ถ้าขั้นต่อไปล้ม (เช่น เปิดเคสไม่ผ่าน) กดบันทึกซ้ำจะใช้ลูกค้าเดิม ไม่สร้างซ้ำ */
+  /** ความสัมพันธ์ที่แก้ในฟอร์มนี้ → บันทึกกลับแฟ้มผู้ป่วย (เคสบันทึกไปแล้ว พลาดตรงนี้แค่เตือน ไม่ล้มทั้งหน้า) */
+  async function saveRelation(patientId) {
+    if (!patientId || relation.trim() === relationSaved.current) return;
+    try {
+      await api.updatePatient(patientId, { employer_relation: relation.trim() || null });
+      relationSaved.current = relation.trim();
+    } catch (err) {
+      toast(`บันทึกเคสแล้ว แต่บันทึกความสัมพันธ์กับผู้ป่วยไม่สำเร็จ: ${err.message}`);
+    }
+  }
+
   async function ensurePayer(payload) {
     if (!newPayer) return payload.customer_id;
     const created = await api.createCustomer({
@@ -801,7 +827,6 @@ export default function CaseFormPage() {
       // ฟิลด์เหล่านี้ย้ายไปเก็บที่แฟ้มผู้ป่วยแล้ว ไม่เก็บซ้ำในเคส (allergies/relation ไม่ใช่คอลัมน์ของเคสอยู่แล้ว)
       delete payload.allergies;
       delete payload.food_allergies;
-      delete payload.relation_to_customer;
       delete payload.weight_kg;
       delete payload.height_cm;
 
@@ -821,11 +846,13 @@ export default function CaseFormPage() {
         // การจับคู่พนักงานทำผ่านปุ่มใน popup เท่านั้น เพื่อไม่ให้สถานะเคสกับพนักงานขัดแย้งกัน
         const { assigned_to: _unused, ...rest } = payload;
         const updated = await api.updateCase(id, rest);
+        await saveRelation(updated.patient_id);
         toast(updated.case_id !== id ? `บันทึกแล้ว · เปลี่ยนรหัสเคสเป็น ${updated.case_id}` : 'บันทึกการแก้ไขแล้ว');
         navigate(`/cases?open=${updated.case_id}`); // เปลี่ยนรหัสแล้วเคสเดิมไม่มีอยู่ที่รหัสเก่า
       } else {
         if (renewFrom) payload.renewed_from = renewFrom;
         const created = await api.createCase(payload);
+        await saveRelation(created.patient_id);
         toast(
           renewFrom
             ? `ต่อเคสเป็น ${created.case_id} (รอบที่ ${created.round_no}) แล้ว · ระบบออกใบแจ้งหนี้ (ร่าง) ของรอบนี้ให้เรียบร้อย`
@@ -933,6 +960,19 @@ export default function CaseFormPage() {
               </label>
             </div>
           )}
+          {/* เก็บที่แฟ้มผู้ป่วย — ยังไม่มีผู้ป่วย (รู้แค่ผู้ว่าจ้าง) ก็ยังไม่มีที่ให้เก็บ */}
+          <div className="grid payer-grid payer-relation">
+            <label>
+              ความสัมพันธ์กับผู้ป่วย
+              <input
+                name="employer_relation"
+                value={relation}
+                disabled={!form.patient_id && !form.client_name.trim()}
+                onChange={(e) => setRelation(e.target.value)}
+              />
+              {fieldError('employer_relation')}
+            </label>
+          </div>
         </div>
 
         <h2>รายละเอียดเคส</h2>
@@ -1103,7 +1143,7 @@ export default function CaseFormPage() {
             <label>ค่าจ้างพนักงาน (บาท)
               <input
                 type="number" min="0" step="0.01"
-                placeholder={packagePay != null ? String(packagePay) : 'ยังไม่มีในแพ็คเกจ'}
+                placeholder={packagePay != null ? String(packagePay) : undefined}
                 {...field('staff_pay')}
               />
               {fieldError('staff_pay')}
@@ -1297,7 +1337,7 @@ export default function CaseFormPage() {
                           <strong>{p.name}{p.nickname && ` (${p.nickname})`}</strong>
                           <span className="muted">
                             <span className="mono">{p.patient_id}</span>
-                            {p.relation_to_customer && ` · ${p.relation_to_customer}`}
+                            {p.employer_relation ? ` · ผู้ว่าจ้างเป็น${p.employer_relation}` : p.relation_to_customer && ` · ${p.relation_to_customer}`}
                             {shownAge(p) && ` · ${shownAge(p)}`}
                           </span>
                         </button>
@@ -1327,11 +1367,6 @@ export default function CaseFormPage() {
               {query && matches.length === 0 && (
                 <p className="muted">ไม่พบผู้รับการดูแลที่ตรงกับ "{query}" — กรอกด้านล่างเพื่อสร้างแฟ้มใหม่</p>
               )}
-
-              <p className="notice picker-note">
-                ยังไม่ได้เลือกผู้ป่วย — ระบบจะ<strong>สร้างแฟ้มผู้รับการดูแลใหม่ (รหัส KN ที่กรอก)</strong>
-                จากข้อมูลที่กรอกด้านล่างให้อัตโนมัติเมื่อกดบันทึก
-              </p>
             </div>
 
             <h3>ข้อมูลผู้ป่วยใหม่</h3>
@@ -1362,10 +1397,6 @@ export default function CaseFormPage() {
               </label>
               <label>อายุ (ปี)<input type="number" min="0" max="130" {...field('patient_age')} />{fieldError('patient_age')}</label>
 
-              <label>ความสัมพันธ์กับผู้ว่าจ้าง
-                <input {...field('relation_to_customer')} />
-                {fieldError('relation_to_customer')}
-              </label>
               <label>น้ำหนัก (กก.)<input type="number" min="0" step="0.1" {...field('weight_kg')} />{fieldError('weight_kg')}</label>
               <label>ส่วนสูง (ซม.)<input type="number" min="0" step="0.1" {...field('height_cm')} />{fieldError('height_cm')}</label>
               <label className="span-2">โรคประจำตัว
@@ -1391,37 +1422,19 @@ export default function CaseFormPage() {
             <textarea rows={2} {...field('current_symptoms')} />
             {fieldError('current_symptoms')}
           </label>
-          <label className="span-2">จุดประสงค์ของญาติในการดูแล
+          <label className="span-2">จุดประสงค์ในการดูแล
             <textarea rows={2} {...field('care_goal')} />
             {fieldError('care_goal')}
           </label>
         </div>
 
-        <h2>รายละเอียดการใช้บริการ</h2>
-        <div className="grid">
-          <label className="span-2">วัน / เวลาที่สะดวกเริ่มใช้บริการ
-            <input {...field('service_start_preference')} />
-            {fieldError('service_start_preference')}
-          </label>
-          <label>เบอร์ติดต่อคุณญาติ<input {...field('client_phone')} />{fieldError('client_phone')}</label>
-
-          <label className="span-2">ที่อยู่สถานที่ดูแล
+        <h2>พิกัดสถานที่ดูแล (สำหรับเช็คอิน)</h2>
+        <div className="geo-section">
+          {/* ที่อยู่อยู่คู่กับพิกัด — พิมพ์ที่อยู่แล้วกด "ใช้ที่อยู่ด้านบน" ค้นพิกัดต่อได้ทันที */}
+          <label className="geo-label">ที่อยู่สถานที่ดูแล
             <textarea rows={2} {...field('address')} />
             {fieldError('address')}
           </label>
-          <label>วัน / เวลาที่สะดวกให้พยาบาลโทรประเมินและรับเคส
-            <input {...field('nurse_call_preference')} />
-            {fieldError('nurse_call_preference')}
-          </label>
-        </div>
-
-        <h2>พิกัดสถานที่ดูแล (สำหรับเช็คอิน)</h2>
-        <div className="geo-section">
-          <p className="muted">
-            พิมพ์ชื่อสถานที่เพื่อค้นหา หรือวางลิงก์ Google Maps ก็ได้ — ระบบจะดึงพิกัดและที่อยู่ให้เอง ·
-            เว้นว่างได้ (ไม่ตั้งพิกัด = ระบบจะไม่ตรวจระยะตอนเช็คอิน)
-          </p>
-
           <label className="geo-label">ค้นหาสถานที่ หรือวางลิงก์ Google Maps
             <input
               value={locQuery}

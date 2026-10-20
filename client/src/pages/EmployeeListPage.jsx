@@ -25,7 +25,6 @@ export default function EmployeeListPage() {
   const navigate = useNavigate();
 
   const [result, setResult] = useState(null);
-  const [summary, setSummary] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
   const [reloadKey, setReloadKey] = useState(0); // เด้งค่าเพื่อดึงรายการใหม่หลังแก้ด่วนใน popup
@@ -89,10 +88,6 @@ export default function EmployeeListPage() {
     };
   }, [q, status, position, page, perPage, sort, order, reloadKey]);
 
-  useEffect(() => {
-    api.summary().then(setSummary).catch(() => {});
-  }, [result]);
-
   // popup ถูกปิดด้วยปุ่มย้อนกลับของเบราว์เซอร์ — ประวัติที่เรา push ไว้ถูกใช้ไปแล้ว ต้องล้างธงทิ้ง
   useEffect(() => {
     if (!openId) pushedOpen.current = false;
@@ -118,149 +113,143 @@ export default function EmployeeListPage() {
   // รายชื่อของหน้านี้ ใช้ทำปุ่มดูคนก่อนหน้า/ถัดไปใน popup
   const visibleIds = rows.map((r) => r.employee_id);
 
-  const activeCount = summary?.by_status.find((s) => s.status === 'active')?.count ?? 0;
-
   return (
     <PageRefresh onRefresh={() => setReloadKey((k) => k + 1)} busy={loading}>
-      <header className="page-head">
-        <div>
-          <h1>พนักงาน</h1>
-          <p className="muted">
-            {summary ? `ทั้งหมด ${summary.total} คน · ทำงานอยู่ ${activeCount} คน` : ' '}
-          </p>
-        </div>
-        <Link className="btn primary" to="/employees/new">
-          + เพิ่มพนักงาน
-        </Link>
-      </header>
+      {/* ไม่มีหัวหน้าบนจอ (แถบตัวกรองเป็นส่วนบนสุด) — คง h1 ไว้ให้โปรแกรมอ่านหน้าจอ */}
+      <h1 className="sr-only">พนักงาน</h1>
 
-      <div className="toolbar">
-        <input
-          className="search"
-          placeholder="ค้นหา รหัส / ชื่อ / ชื่อเล่น / เบอร์โทร"
-          value={q}
-          onChange={(e) => setFilter('q', e.target.value)}
-        />
-        <select value={position} onChange={(e) => setFilter('position', e.target.value)}>
-          <option value="">ทุกตำแหน่ง</option>
-          {Object.entries(POSITION_LABELS).map(([value, label]) => (
-            <option key={value} value={value}>{label}</option>
-          ))}
-        </select>
-        <select value={status} onChange={(e) => setFilter('status', e.target.value)}>
-          <option value="">ทุกสถานะ</option>
-          {Object.entries(STATUS_LABELS).map(([value, label]) => (
-            <option key={value} value={value}>{label}</option>
-          ))}
-        </select>
-        {/* โผล่เฉพาะตอนมีอะไรกรองอยู่ — ปุ่มที่กดแล้วไม่เกิดอะไรขึ้นไม่ควรมีให้เห็น */}
-        {filtered && (
-          <button className="btn" onClick={() => patch({ q: '', status: '', position: '', page: '1' })}>
-            ล้างตัวกรอง
-          </button>
-        )}
-      </div>
-
-      {/* error เป็นแถบเหนือตาราง ไม่ทับทั้งหน้า — คำค้นและตัวกรองที่ตั้งไว้ต้องไม่หายไปเพราะเน็ตสะดุด */}
-      <ErrorBar message={error} onRetry={() => setReloadKey((k) => k + 1)} busy={loading} />
-
-      {/* จอแคบ: ให้ตารางเลื่อนแนวนอนในกล่องของตัวเอง ไม่ดันทั้งหน้าให้เลื่อนตาม */}
-      <div className="table-wrap">
-        <table className="table table-cards table-2line table-indexed">
-          {/* ตรึงความกว้างคอลัมน์ไว้ ไม่ให้ตารางขยับตามความยาวชื่อของแต่ละแถว */}
-          <colgroup>
-            <col style={{ width: '7%' }} />
-            <col style={{ width: '15%' }} />
-            <col style={{ width: '29%' }} />
-            <col style={{ width: '17%' }} />
-            <col style={{ width: '17%' }} />
-            <col style={{ width: '15%' }} />
-          </colgroup>
-          <thead>
-            <tr>
-              <th>#</th>
-              <th><SortHead column="employee_id" {...SORTABLE.employee_id} sort={sort} order={order} onSort={sortBy} /></th>
-              <th><SortHead column="first_name" {...SORTABLE.first_name} sort={sort} order={order} onSort={sortBy} /></th>
-              <th>เบอร์โทร</th>
-              <th>ตำแหน่ง</th>
-              <th>สถานะ</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((emp, i) => (
-              <tr
-                key={emp.employee_id}
-                className="row-clickable"
-                tabIndex={0}
-                onClick={() => openEmployee(emp.employee_id)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    openEmployee(emp.employee_id);
-                  }
-                }}
-              >
-                {/* ลำดับนับต่อเนื่องข้ามหน้า — หน้า 2 เริ่มที่ 21 ไม่ใช่ 1
-                    เป็นลำดับของ "รายการที่เห็นตอนนี้" จึงเปลี่ยนตามการเรียง/ตัวกรอง ไม่ใช่เลขประจำตัว */}
-                <td className="row-index" data-label="ลำดับ">{(page - 1) * Number(perPage) + i + 1}</td>
-                <td className="mono link" data-label="รหัส">{emp.employee_id}</td>
-                <td data-label="ชื่อ">
-                  <span className="name-cell">
-                    <Avatar employee={emp} />
-                    <span>
-                      {emp.first_name} {emp.last_name}
-                      {emp.nickname && <span className="muted"> ({emp.nickname})</span>}
-                    </span>
-                  </span>
-                </td>
-                <td data-label="เบอร์โทร">
-                  {emp.phone ? (
-                    // stopPropagation กันไม่ให้การกดเบอร์เปิด popup ตามไปด้วย
-                    <a className="link mono" href={`tel:${emp.phone}`} onClick={(e) => e.stopPropagation()}>
-                      {emp.phone}
-                    </a>
-                  ) : (
-                    <span className="muted">—</span>
-                  )}
-                </td>
-                <td data-label="ตำแหน่ง">
-                  {POSITION_LABELS[emp.position]}
-                  <span className="cell-sub">{EMPLOYMENT_TYPE_LABELS[emp.employment_type]}</span>
-                </td>
-                <td data-label="สถานะ">
-                  <span className={`badge ${emp.status}`}>{STATUS_LABELS[emp.status]}</span>
-                </td>
-              </tr>
+      {/* แถบตัวกรอง + ตาราง อยู่ในการ์ดใบเดียวกัน (จอเล็กแยกกลับเป็นแถบตัวกรอง + การ์ดรายแถว — ดู .list-card) */}
+      <div className="list-card">
+        <div className="toolbar">
+          <input
+            className="search search-compact"
+            placeholder="ค้นหา รหัส / ชื่อ / ชื่อเล่น / เบอร์โทร"
+            value={q}
+            onChange={(e) => setFilter('q', e.target.value)}
+          />
+          <select value={position} onChange={(e) => setFilter('position', e.target.value)}>
+            <option value="">ทุกตำแหน่ง</option>
+            {Object.entries(POSITION_LABELS).map(([value, label]) => (
+              <option key={value} value={value}>{label}</option>
             ))}
+          </select>
+          <select value={status} onChange={(e) => setFilter('status', e.target.value)}>
+            <option value="">ทุกสถานะ</option>
+            {Object.entries(STATUS_LABELS).map(([value, label]) => (
+              <option key={value} value={value}>{label}</option>
+            ))}
+          </select>
+          {/* โผล่เฉพาะตอนมีอะไรกรองอยู่ — ปุ่มที่กดแล้วไม่เกิดอะไรขึ้นไม่ควรมีให้เห็น */}
+          {filtered && (
+            <button className="btn" onClick={() => patch({ q: '', status: '', position: '', page: '1' })}>
+              ล้างตัวกรอง
+            </button>
+          )}
+          {/* ปุ่มหลักของหน้าอยู่ท้ายแถบตัวกรอง (ไม่มีหัวหน้าแล้ว) */}
+          <Link className="btn primary toolbar-action" to="/employees/new">+ เพิ่มพนักงาน</Link>
+        </div>
 
-            {/* โหลดครั้งแรกยังไม่มีข้อมูลเลย — ต้องบอกว่ากำลังโหลด ไม่ใช่ปล่อยตารางว่างเงียบๆ
-                (ถ้ามีข้อมูลเก่าอยู่แล้ว คงไว้ให้อ่านต่อระหว่างโหลดรอบใหม่ ไม่ให้จอกระพริบ) */}
-            {loading && rows.length === 0 && (
-              <tr><td colSpan={6} className="empty">กำลังโหลด…</td></tr>
-            )}
+        {/* error เป็นแถบเหนือตาราง ไม่ทับทั้งหน้า — คำค้นและตัวกรองที่ตั้งไว้ต้องไม่หายไปเพราะเน็ตสะดุด */}
+        <ErrorBar message={error} onRetry={() => setReloadKey((k) => k + 1)} busy={loading} />
 
-            {/* error มีแถบของตัวเองอยู่แล้ว — ไม่ต้องบอกซ้ำว่า "ไม่มีข้อมูล" ทั้งที่จริงๆ คือโหลดไม่สำเร็จ */}
-            {!loading && !error && rows.length === 0 && (
+        {/* จอแคบ: ให้ตารางเลื่อนแนวนอนในกล่องของตัวเอง ไม่ดันทั้งหน้าให้เลื่อนตาม */}
+        <div className="table-wrap">
+          <table className="table table-cards table-2line table-indexed">
+            {/* ตรึงความกว้างคอลัมน์ไว้ ไม่ให้ตารางขยับตามความยาวชื่อของแต่ละแถว */}
+            <colgroup>
+              <col style={{ width: '7%' }} />
+              <col style={{ width: '15%' }} />
+              <col style={{ width: '29%' }} />
+              <col style={{ width: '17%' }} />
+              <col style={{ width: '17%' }} />
+              <col style={{ width: '15%' }} />
+            </colgroup>
+            <thead>
               <tr>
-                <td colSpan={6} className="empty">
-                  {filtered ? (
-                    <>
-                      ไม่พบพนักงานที่ตรงกับเงื่อนไข{' '}
-                      <button className="btn link-btn" onClick={() => patch({ q: '', status: '', position: '', page: '1' })}>
-                        ล้างตัวกรอง
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      ยังไม่มีพนักงานในระบบ{' '}
-                      <Link className="link" to="/employees/new">เพิ่มคนแรก →</Link>
-                    </>
-                  )}
-                </td>
+                <th>#</th>
+                <th><SortHead column="employee_id" {...SORTABLE.employee_id} sort={sort} order={order} onSort={sortBy} /></th>
+                <th><SortHead column="first_name" {...SORTABLE.first_name} sort={sort} order={order} onSort={sortBy} /></th>
+                <th>เบอร์โทร</th>
+                <th>ตำแหน่ง</th>
+                <th>สถานะ</th>
               </tr>
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {rows.map((emp, i) => (
+                <tr
+                  key={emp.employee_id}
+                  className="row-clickable"
+                  tabIndex={0}
+                  onClick={() => openEmployee(emp.employee_id)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      openEmployee(emp.employee_id);
+                    }
+                  }}
+                >
+                  {/* ลำดับนับต่อเนื่องข้ามหน้า — หน้า 2 เริ่มที่ 21 ไม่ใช่ 1
+                      เป็นลำดับของ "รายการที่เห็นตอนนี้" จึงเปลี่ยนตามการเรียง/ตัวกรอง ไม่ใช่เลขประจำตัว */}
+                  <td className="row-index" data-label="ลำดับ">{(page - 1) * Number(perPage) + i + 1}</td>
+                  <td className="mono link" data-label="รหัส">{emp.employee_id}</td>
+                  <td data-label="ชื่อ">
+                    <span className="name-cell">
+                      <Avatar employee={emp} />
+                      <span>
+                        {emp.first_name} {emp.last_name}
+                        {emp.nickname && <span className="muted"> ({emp.nickname})</span>}
+                      </span>
+                    </span>
+                  </td>
+                  <td data-label="เบอร์โทร">
+                    {emp.phone ? (
+                      // stopPropagation กันไม่ให้การกดเบอร์เปิด popup ตามไปด้วย
+                      <a className="link mono" href={`tel:${emp.phone}`} onClick={(e) => e.stopPropagation()}>
+                        {emp.phone}
+                      </a>
+                    ) : (
+                      <span className="muted">—</span>
+                    )}
+                  </td>
+                  <td data-label="ตำแหน่ง">
+                    {POSITION_LABELS[emp.position]}
+                    <span className="cell-sub">{EMPLOYMENT_TYPE_LABELS[emp.employment_type]}</span>
+                  </td>
+                  <td data-label="สถานะ">
+                    <span className={`badge ${emp.status}`}>{STATUS_LABELS[emp.status]}</span>
+                  </td>
+                </tr>
+              ))}
+
+              {/* โหลดครั้งแรกยังไม่มีข้อมูลเลย — ต้องบอกว่ากำลังโหลด ไม่ใช่ปล่อยตารางว่างเงียบๆ
+                  (ถ้ามีข้อมูลเก่าอยู่แล้ว คงไว้ให้อ่านต่อระหว่างโหลดรอบใหม่ ไม่ให้จอกระพริบ) */}
+              {loading && rows.length === 0 && (
+                <tr><td colSpan={6} className="empty">กำลังโหลด…</td></tr>
+              )}
+
+              {/* error มีแถบของตัวเองอยู่แล้ว — ไม่ต้องบอกซ้ำว่า "ไม่มีข้อมูล" ทั้งที่จริงๆ คือโหลดไม่สำเร็จ */}
+              {!loading && !error && rows.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="empty">
+                    {filtered ? (
+                      <>
+                        ไม่พบพนักงานที่ตรงกับเงื่อนไข{' '}
+                        <button className="btn link-btn" onClick={() => patch({ q: '', status: '', position: '', page: '1' })}>
+                          ล้างตัวกรอง
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        ยังไม่มีพนักงานในระบบ{' '}
+                        <Link className="link" to="/employees/new">เพิ่มคนแรก →</Link>
+                      </>
+                    )}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {result && (

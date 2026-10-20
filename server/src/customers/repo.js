@@ -97,7 +97,7 @@ export async function findDetailById(customerId) {
   const [patients, cases] = await Promise.all([
     // ผู้รับการดูแลที่อยู่ใต้ลูกค้ารายนี้ (ลูกค้าหนึ่งคนดูแลได้หลายคน)
     sql.all(
-      `SELECT patient_id, name, nickname, gender, birth_date, age, relation_to_customer, status
+      `SELECT patient_id, name, nickname, gender, birth_date, age, relation_to_customer, employer_relation, status
        FROM patients WHERE customer_id = :id ORDER BY patient_id`,
       { id: customerId },
     ),

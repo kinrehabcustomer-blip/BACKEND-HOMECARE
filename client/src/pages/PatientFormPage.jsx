@@ -17,7 +17,7 @@ const BLANK = {
   // ตัวตน
   name: '', title: '', nickname: '', name_en: '', gender: '',
   national_id: '', passport_no: '', birth_date: '', age: '',
-  nationality: '', relation_to_customer: '',
+  nationality: '', employer_relation: '',
 
   // การแพทย์เชิงคงที่
   weight_kg: '', height_cm: '', medical_history: '', blood_type: '', medical_rights: '',
@@ -308,6 +308,10 @@ export default function PatientFormPage() {
                   <input name="employer_tax_id" inputMode="numeric" value={employer.tax_id} aria-invalid={fieldErrors.employer_tax_id ? true : undefined} onChange={setEmployerField('tax_id')} />
                   {fieldError('employer_tax_id')}
                 </label>
+                <label>ความสัมพันธ์กับผู้ป่วย
+                  <input name="employer_relation" placeholder="เช่น บุตร หลาน คู่สมรส" {...field('employer_relation')} />
+                  {fieldError('employer_relation')}
+                </label>
                 <label className="span-2">ที่อยู่ออกใบเสร็จ (ถ้าต่างจากที่อยู่ผู้ป่วย)
                   <input name="employer_billing_address" value={employer.billing_address} aria-invalid={fieldErrors.employer_billing_address ? true : undefined} onChange={setEmployerField('billing_address')} />
                   {fieldError('employer_billing_address')}
@@ -394,9 +398,6 @@ export default function PatientFormPage() {
               <option value="">— ไม่ระบุ —</option>
               {Object.entries(GENDER_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
             </select>
-          </label>
-          <label>ความสัมพันธ์กับผู้ว่าจ้าง
-            <input name="relation_to_customer" placeholder="เช่น บิดา มารดา คุณตา" {...field('relation_to_customer')} />
           </label>
           <label>สถานะ
             <select name="status" {...field('status')}>

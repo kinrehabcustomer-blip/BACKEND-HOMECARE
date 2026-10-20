@@ -12,7 +12,6 @@ import { Approvals } from '../components/PayrollTabs.jsx';
 import { downloadCsv, thisMonth, LATE_MINUTES } from '../lib/attendanceUi.js';
 import { useSheetSwipe } from '../lib/sheetSwipe.js';
 import { useScrollLock } from '../lib/scrollLock.js';
-import { useCanSeeStaffPay } from '../auth.jsx';
 
 /* หน้านี้คือเรื่อง "เข้า–ออกงาน" ทั้งหมด — รวมการยืนยันกะกลับมาด้วย
 
@@ -40,7 +39,6 @@ function daysAgo(dateStr) {
 /** หน้าติดตามการมาทำงานของพนักงานภาคสนาม (admin) */
 export default function AttendancePage() {
   const [params, setParams] = useSearchParams();
-  const canSeePayroll = useCanSeeStaffPay();
 
   // รายการต้องตรวจโหลดที่นี่ ไม่ใช่ในแท็บ — ตัวเลขบนแท็บต้องเห็นได้โดยไม่ต้องกดเข้าไปก่อน
   const [exceptions, setExceptions] = useState(null);
@@ -103,68 +101,60 @@ export default function AttendancePage() {
 
   return (
     <PageRefresh onRefresh={refreshAll}>
-      <header className="page-head">
-        <div>
-          <h1>การมาทำงาน</h1>
-          <p className="muted">
-            ติดตามการเช็คอิน–เอาท์ของพนักงานภาคสนาม และแก้เวลาที่ลงผิด
-            {canSeePayroll && (
-              <> · เรื่องค่าจ้าง (สรุป/จ่าย) อยู่ที่{' '}
-                <Link className="link" to="/payroll">ค่าตอบแทนพนักงาน</Link>
-              </>
-            )}
-          </p>
+      {/* ไม่มีหัวหน้าบนจอ (การ์ดแท็บเป็นส่วนบนสุด) — คง h1 ไว้ให้โปรแกรมอ่านหน้าจอ */}
+      <h1 className="sr-only">การมาทำงาน</h1>
+
+      {/* แท็บ + ตัวกรอง + รายการ อยู่ในการ์ดขาวใบเดียว (โครงเดียวกับหน้ารายการอื่น — ดู .att-card) */}
+      <div className="list-card att-card">
+        <div className="att-tabs" role="tablist" aria-label="มุมมองการมาทำงาน">
+          {Object.entries(TABS).map(([key, label]) => (
+            <button
+              key={key}
+              role="tab"
+              aria-selected={tab === key}
+              className={`att-tab ${tab === key ? 'is-active' : ''}`}
+              onClick={() => patch({ tab: key === 'exceptions' ? '' : key, page: '' })}
+            >
+              {label}
+              {/* ตัวเลขงานค้างต้องเห็นจากแท็บอื่นด้วย ไม่งั้นต้องคอยกดเข้าไปเช็คเอง */}
+              {key === 'exceptions' && pending > 0 && <span className="tab-count">{pending}</span>}
+            </button>
+          ))}
         </div>
-      </header>
 
-      <div className="att-tabs" role="tablist" aria-label="มุมมองการมาทำงาน">
-        {Object.entries(TABS).map(([key, label]) => (
-          <button
-            key={key}
-            role="tab"
-            aria-selected={tab === key}
-            className={`att-tab ${tab === key ? 'is-active' : ''}`}
-            onClick={() => patch({ tab: key === 'exceptions' ? '' : key, page: '' })}
-          >
-            {label}
-            {/* ตัวเลขงานค้างต้องเห็นจากแท็บอื่นด้วย ไม่งั้นต้องคอยกดเข้าไปเช็คเอง */}
-            {key === 'exceptions' && pending > 0 && <span className="tab-count">{pending}</span>}
-          </button>
-        ))}
+        {tab === 'exceptions' && (
+          <Exceptions
+            rows={shownExceptions}
+            error={exError}
+            onReload={loadExceptions}
+            filters={employeePicker}
+          />
+        )}
+
+        {/* ยืนยันว่ากะที่ทำจบแล้วเกิดขึ้นจริง — ไม่กระทบการจ่ายเงินแล้ว แต่ยังเป็นตัวตัดสิน
+            ว่ากะไหนถูกนับในสรุปการมาทำงาน และเป็นที่เดียวที่ปฏิเสธกะที่น่าสงสัยได้ */}
+        {tab === 'approvals' && (
+          <Approvals
+            month={month}
+            employeeId={employeeId}
+            patch={patch}
+            employeePicker={employeePicker}
+            reloadKey={reloadKey}
+          />
+        )}
+        {tab === 'log' && (
+          <Log
+            month={month}
+            employeeId={employeeId}
+            state={get('state')}
+            q={get('q')}
+            page={Math.max(1, Number(get('page')) || 1)}
+            patch={patch}
+            employeePicker={employeePicker}
+            reloadKey={reloadKey}
+          />
+        )}
       </div>
-
-      {tab === 'exceptions' && (
-        <Exceptions
-          rows={shownExceptions}
-          error={exError}
-          onReload={loadExceptions}
-          filters={employeePicker}
-        />
-      )}
-
-      {/* ยืนยันว่ากะที่ทำจบแล้วเกิดขึ้นจริง — ไม่กระทบการจ่ายเงินแล้ว แต่ยังเป็นตัวตัดสิน
-          ว่ากะไหนถูกนับในสรุปการมาทำงาน และเป็นที่เดียวที่ปฏิเสธกะที่น่าสงสัยได้ */}
-      {tab === 'approvals' && (
-        <Approvals
-          month={month}
-          employeeId={employeeId}
-          patch={patch}
-          employeePicker={employeePicker}
-          reloadKey={reloadKey}
-        />
-      )}
-      {tab === 'log' && (
-        <Log
-          month={month}
-          employeeId={employeeId}
-          state={get('state')}
-          q={get('q')}
-          page={Math.max(1, Number(get('page')) || 1)}
-          patch={patch}
-          employeePicker={employeePicker}
-          reloadKey={reloadKey}
-        />
-      )}
     </PageRefresh>
   );
 }
@@ -440,7 +430,7 @@ function Exceptions({ rows, error, onReload, filters }) {
       {actionError && <p className="error">{actionError}</p>}
 
       {!rows ? (
-        !error && <p className="muted">กำลังโหลด…</p>
+        !error && <p className="muted loading-center">กำลังโหลด…</p>
       ) : rows.length === 0 ? (
         <section className="card empty-state">
           <p><LineIcon name="check" className="text-ico" />ไม่มีรายการต้องตรวจ</p>
@@ -625,7 +615,7 @@ function Log({ month, employeeId, state, q, page, patch, employeePicker, reloadK
       {error && <p className="error">{error}</p>}
 
       {loading && !rows ? (
-        !error && <p className="muted">กำลังโหลด…</p>
+        !error && <p className="muted loading-center">กำลังโหลด…</p>
       ) : !error && filteredRows.length === 0 ? (
         <section className="card empty-state">
           <p>{filtered ? 'ไม่พบกะที่ตรงกับเงื่อนไข' : 'ยังไม่มีการเช็คอินในเดือนนี้'}</p>

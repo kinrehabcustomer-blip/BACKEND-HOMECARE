@@ -60,6 +60,7 @@ export const createPatientSchema = z.object({
     .nullable(),
   nationality: optionalShort,
   relation_to_customer: optionalShort,
+  employer_relation: optionalShort, // ผู้ว่าจ้างเป็นอะไรกับผู้ป่วย
 
   weight_kg: z.number().positive('น้ำหนักต้องมากกว่า 0').max(500).optional().nullable(),
   height_cm: z.number().positive('ส่วนสูงต้องมากกว่า 0').max(300).optional().nullable(),

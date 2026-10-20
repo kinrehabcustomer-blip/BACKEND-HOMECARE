@@ -97,7 +97,10 @@ export default function PatientDetailPage() {
             {patient.birth_date && `${formatDate(patient.birth_date)}${age != null ? ` (อายุ ${age} ปี)` : ''}`}
           </Row>
           {!patient.birth_date && <Row label="อายุ">{age != null && `${age} ปี`}</Row>}
-          <Row label="ความสัมพันธ์กับผู้ว่าจ้าง">{patient.relation_to_customer}</Row>
+          <Row label="ผู้ว่าจ้างเป็นอะไรกับผู้ป่วย">{patient.employer_relation}</Row>
+          {patient.relation_to_customer && (
+            <Row label="ผู้ป่วยเป็นอะไรกับผู้ว่าจ้าง (ข้อมูลเดิม)">{patient.relation_to_customer}</Row>
+          )}
           <Row label="เลขบัตรประชาชน">
             {patient.national_id && <span className="mono">{patient.national_id}</span>}
           </Row>

@@ -7,7 +7,7 @@ import ErrorBar from '../components/ErrorBar.jsx';
 import PageRefresh from '../components/PageRefresh.jsx';
 import {
   CASE_STATUS_LABELS, SERVICE_KIND_LABELS, MONTH_LABELS,
-  formatBaht, formatDate, formatPeriod, toBuddhistYear,
+  formatBaht, formatDate, toBuddhistYear,
 } from '../labels.js';
 
 const PER_PAGE_OPTIONS = [20, 50, 100];
@@ -43,7 +43,6 @@ export default function CaseListPage() {
   const [periods, setPeriods] = useState([]);
   const [staff, setStaff] = useState([]);
   const [result, setResult] = useState(null);
-  const [summary, setSummary] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
   const [reloadKey, setReloadKey] = useState(0); // เด้งค่าเพื่อดึงรายการใหม่หลังแก้ไขใน popup
@@ -138,11 +137,6 @@ export default function CaseListPage() {
     };
   }, [q, status, serviceKind, assignedTo, pseudo, year, month, page, perPage, sort, order, reloadKey]);
 
-  // ยอดสรุปด้านบนต้องนับเฉพาะช่วงเวลาที่กรองอยู่ ไม่งั้นตัวเลขจะไม่ตรงกับรายการที่เห็น
-  useEffect(() => {
-    api.caseSummary({ year, month }).then(setSummary).catch(() => {});
-  }, [result, year, month]);
-
   // popup ถูกปิดด้วยปุ่มย้อนกลับของเบราว์เซอร์ — ประวัติที่เรา push ไว้ถูกใช้ไปแล้ว ต้องล้างธงทิ้ง
   useEffect(() => {
     if (!openId) pushedOpen.current = false;
@@ -165,199 +159,194 @@ export default function CaseListPage() {
   };
 
   const monthsOfYear = periods.find((p) => p.year === year)?.months ?? [];
-  const count = (s) => summary?.by_status.find((x) => x.status === s)?.count ?? 0;
 
   const rows = result?.data ?? [];
   const visibleIds = rows.map((c) => c.case_id);
 
   return (
     <PageRefresh onRefresh={() => setReloadKey((k) => k + 1)} busy={loading}>
-      <header className="page-head">
-        <div>
-          <h1>เคส</h1>
-          <p className="muted">
-            {summary
-              ? `${year ? `เปิดใน${formatPeriod(year, month)} · ` : ''}ทั้งหมด ${summary.total} เคส · ยังไม่จับคู่ ${count('unassigned')} · จับคู่แล้ว ${count('assigned')} · กำลังให้บริการ ${count('in_progress')} · ปิดแล้ว ${count('closed')}`
-              : ' '}
-          </p>
-        </div>
-        <Link className="btn primary" to="/cases/new">+ เปิดเคสใหม่</Link>
-      </header>
+      {/* ไม่มีหัวหน้าบนจอ (แถบตัวกรองเป็นส่วนบนสุด) — คง h1 ไว้ให้โปรแกรมอ่านหน้าจอ */}
+      <h1 className="sr-only">เคส</h1>
 
-      <div className="toolbar">
-        <input
-          className="search"
-          placeholder="ค้นหา รหัสเคส / แพ็คเกจ / ชื่อผู้ป่วย / เบอร์โทร"
-          value={q}
-          onChange={(e) => setFilter('q', e.target.value)}
-        />
-        <select value={year} onChange={(e) => setFilter('year', e.target.value)} aria-label="ปี">
-          <option value="">ทุกปี</option>
-          {periods.map((p) => (
-            <option key={p.year} value={p.year}>ปี {toBuddhistYear(p.year)} ({p.count})</option>
-          ))}
-        </select>
-        {/* เลือกเดือนไม่ได้จนกว่าจะเลือกปี — "พฤษภาคม" ของปีไหนไม่มีคำตอบ */}
-        <select
-          value={month}
-          onChange={(e) => setFilter('month', e.target.value)}
-          disabled={!year}
-          aria-label="เดือน"
-          title={year ? undefined : 'เลือกปีก่อน'}
-        >
-          <option value="">{year ? 'ทั้งปี' : 'ทุกเดือน'}</option>
-          {monthsOfYear.map((m) => (
-            <option key={m.month} value={m.month}>{MONTH_LABELS[m.month]} ({m.count})</option>
-          ))}
-        </select>
-        <select value={serviceKind} onChange={(e) => setFilter('service_kind', e.target.value)} aria-label="ประเภทบริการ">
-          <option value="">ทุกบริการ</option>
-          {Object.entries(SERVICE_KIND_LABELS).map(([value, label]) => (
-            <option key={value} value={value}>{label}</option>
-          ))}
-        </select>
-        <select value={statusValue} onChange={(e) => setStatusFilter(e.target.value)} aria-label="สถานะ">
-          <option value="">ทุกสถานะ</option>
-          {Object.entries(CASE_STATUS_LABELS).map(([value, label]) => (
-            <option key={value} value={value}>{label}</option>
-          ))}
-          {/* ไม่ใช่สถานะใน DB — ของค้างที่คิดจากข้อมูลอื่นของเคส (ดู PSEUDO_STATUS) */}
-          {Object.entries(PSEUDO_STATUS).map(([value, label]) => (
-            <option key={value} value={value}>{label}</option>
-          ))}
-        </select>
-        {/* "เคสของคนนี้" เป็นคำถามที่ถามบ่อย — server รองรับ assigned_to อยู่แล้ว แค่ไม่เคยมีช่องให้เลือก */}
-        <select value={assignedTo} onChange={(e) => setFilter('assigned_to', e.target.value)} aria-label="พนักงานที่รับ">
-          <option value="">พนักงานทุกคน</option>
-          {/* เฉพาะพนักงาน front (คนที่รับเคสได้) — สาย back ไม่มีเคสให้กรอง · คนที่เลือกค้างอยู่ใน URL ยังโชว์ไว้ */}
-          {staff.filter((e) => e.can_take_cases || e.employee_id === assignedTo).map((e) => (
-            <option key={e.employee_id} value={e.employee_id}>
-              {e.first_name} {e.last_name}
-            </option>
-          ))}
-        </select>
-        {/* โผล่เฉพาะตอนมีอะไรกรองอยู่ — ปุ่มที่กดแล้วไม่เกิดอะไรขึ้นไม่ควรมีให้เห็น */}
-        {filtered && <button className="btn" onClick={clearFilters}>ล้างตัวกรอง</button>}
-      </div>
-
-      {/* error เป็นแถบเหนือตาราง ไม่ทับทั้งหน้า — ตัวกรองที่ตั้งไว้ต้องไม่หายไปเพราะเน็ตสะดุด */}
-      <ErrorBar message={error} onRetry={() => setReloadKey((k) => k + 1)} busy={loading} />
-
-      {/* จอแคบ: ให้ตารางเลื่อนแนวนอนในกล่องของตัวเอง ไม่ดันทั้งหน้าให้เลื่อนตาม */}
-      <div className="table-wrap">
-        <table className="table table-cards table-2line table-indexed">
-          <colgroup>
-            {/* สถานะกว้าง 16% เพราะป้ายที่ยาวที่สุด ("ยังไม่จับคู่พนักงาน") ต้องการ 139px
-                ที่ 13% บนจอ 1280/1440 ได้ไม่ถึง แล้วป้ายโดน … ตัดจนอ่านไม่ออกว่าเคสอยู่สถานะไหน
-                ที่ยืมมาคือคอลัมน์บริการ ซึ่งเป็นข้อความอิสระ ตัดท้ายแล้วยังเดาความได้ */}
-            <col style={{ width: '6%' }} />
-            <col style={{ width: '12%' }} />
-            <col style={{ width: '23%' }} />
-            <col style={{ width: '14%' }} />
-            <col style={{ width: '13%' }} />
-            <col style={{ width: '16%' }} />
-            <col style={{ width: '16%' }} />
-          </colgroup>
-          <thead>
-            <tr>
-              <th>#</th>
-              <th><SortHead column="case_id" {...SORTABLE.case_id} sort={sort} order={order} onSort={sortBy} /></th>
-              <th><SortHead column="title" {...SORTABLE.title} sort={sort} order={order} onSort={sortBy} /></th>
-              <th><SortHead column="start_date" {...SORTABLE.start_date} sort={sort} order={order} onSort={sortBy} /></th>
-              <th>เบอร์โทร</th>
-              <th>พนักงานที่รับ</th>
-              <th>สถานะ</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((c, i) => (
-              <tr
-                key={c.case_id}
-                className="row-clickable"
-                tabIndex={0}
-                onClick={() => openCase(c.case_id)}
-                onKeyDown={(e) => {
-                  if (e.target !== e.currentTarget) return;
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    openCase(c.case_id);
-                  }
-                }}
-              >
-                {/* ลำดับนับต่อเนื่องข้ามหน้า — เป็นลำดับของ "รายการที่เห็นตอนนี้" ไม่ใช่เลขประจำตัว */}
-                <td className="row-index" data-label="ลำดับ">{(page - 1) * Number(perPage) + i + 1}</td>
-                <td className="mono link" data-label="รหัสเคส">{c.case_id}</td>
-                <td data-label="บริการ">
-                  {/* สองสายบริการเก็บชื่อคนละคอลัมน์ — กายภาพมาก่อนเพราะเคสที่ผูกแพ็คเกจไว้จะไม่มีเรท Homecare */}
-                  {c.physio_package_name ? (
-                    <>{c.physio_package_name}
-                      {c.physio_sessions && <span className="muted"> · {c.physio_sessions} ครั้ง</span>}</>
-                  ) : c.format_name ? (
-                    <>{c.format_name}{c.grade_name && <span className="muted"> · {c.grade_name}</span>}</>
-                  ) : (
-                    <span className="muted">ไม่ระบุบริการ</span>
-                  )}
-                  {/* บรรทัดรองคือผู้ป่วย (ผู้รับการดูแล) ไม่ใช่ผู้ว่าจ้าง — พนักงานจับคู่/ตามงานด้วยชื่อคนที่ไปดูแล */}
-                  <span className="cell-sub">{c.client_name}</span>
-                </td>
-                <td data-label="เริ่ม / ค่าจ้าง">
-                  {c.start_date ? formatDate(c.start_date) : <span className="muted">ยังไม่ระบุ</span>}
-                  {c.fee != null && <span className="cell-sub">{formatBaht(c.fee)}</span>}
-                </td>
-                <td data-label="เบอร์โทร">
-                  {c.client_phone ? (
-                    // stopPropagation กันไม่ให้การกดเบอร์เปิด popup ตามไปด้วย
-                    <a className="link mono" href={`tel:${c.client_phone}`} onClick={(e) => e.stopPropagation()}>
-                      {c.client_phone}
-                    </a>
-                  ) : (
-                    <span className="muted">—</span>
-                  )}
-                </td>
-                <td data-label="พนักงานที่รับ">
-                  {/* เคสหนึ่งมีพนักงานได้หลายคน — โชว์ทุกคน ไม่ใช่แค่คนที่ระบบอ้างเป็นตัวหลัก
-                      รหัสพนักงานโชว์เฉพาะตอนมีคนเดียว ไม่งั้นแถวจะยาวจนอ่านชื่อไม่ทัน */}
-                  {c.assigned_name ? (
-                    <>
-                      {[c.assigned_name, c.team_names].filter(Boolean).join(' · ')}
-                      {c.assigned_to && !c.team_count && <span className="cell-sub mono">{c.assigned_to}</span>}
-                    </>
-                  ) : (
-                    <span className="muted">—</span>
-                  )}
-                </td>
-                <td data-label="สถานะ">
-                  <span className={`badge case-${c.status}`}>{CASE_STATUS_LABELS[c.status]}</span>
-                </td>
-              </tr>
+      {/* แถบตัวกรอง + ตาราง อยู่ในการ์ดใบเดียวกัน (จอเล็กแยกกลับเป็นแถบตัวกรอง + การ์ดรายแถว — ดู .list-card) */}
+      <div className="list-card">
+        <div className="toolbar">
+          <input
+            className="search search-compact"
+            placeholder="ค้นหา รหัสเคส / แพ็คเกจ / ชื่อผู้ป่วย / เบอร์โทร"
+            value={q}
+            onChange={(e) => setFilter('q', e.target.value)}
+          />
+          <select value={year} onChange={(e) => setFilter('year', e.target.value)} aria-label="ปี">
+            <option value="">ทุกปี</option>
+            {periods.map((p) => (
+              <option key={p.year} value={p.year}>ปี {toBuddhistYear(p.year)} ({p.count})</option>
             ))}
+          </select>
+          {/* เลือกเดือนไม่ได้จนกว่าจะเลือกปี — "พฤษภาคม" ของปีไหนไม่มีคำตอบ */}
+          <select
+            value={month}
+            onChange={(e) => setFilter('month', e.target.value)}
+            disabled={!year}
+            aria-label="เดือน"
+            title={year ? undefined : 'เลือกปีก่อน'}
+          >
+            <option value="">{year ? 'ทั้งปี' : 'ทุกเดือน'}</option>
+            {monthsOfYear.map((m) => (
+              <option key={m.month} value={m.month}>{MONTH_LABELS[m.month]} ({m.count})</option>
+            ))}
+          </select>
+          <select value={serviceKind} onChange={(e) => setFilter('service_kind', e.target.value)} aria-label="ประเภทบริการ">
+            <option value="">ทุกบริการ</option>
+            {Object.entries(SERVICE_KIND_LABELS).map(([value, label]) => (
+              <option key={value} value={value}>{label}</option>
+            ))}
+          </select>
+          <select value={statusValue} onChange={(e) => setStatusFilter(e.target.value)} aria-label="สถานะ">
+            <option value="">ทุกสถานะ</option>
+            {Object.entries(CASE_STATUS_LABELS).map(([value, label]) => (
+              <option key={value} value={value}>{label}</option>
+            ))}
+            {/* ไม่ใช่สถานะใน DB — ของค้างที่คิดจากข้อมูลอื่นของเคส (ดู PSEUDO_STATUS) */}
+            {Object.entries(PSEUDO_STATUS).map(([value, label]) => (
+              <option key={value} value={value}>{label}</option>
+            ))}
+          </select>
+          {/* "เคสของคนนี้" เป็นคำถามที่ถามบ่อย — server รองรับ assigned_to อยู่แล้ว แค่ไม่เคยมีช่องให้เลือก */}
+          <select value={assignedTo} onChange={(e) => setFilter('assigned_to', e.target.value)} aria-label="พนักงานที่รับ">
+            <option value="">พนักงานทุกคน</option>
+            {/* เฉพาะพนักงาน front (คนที่รับเคสได้) — สาย back ไม่มีเคสให้กรอง · คนที่เลือกค้างอยู่ใน URL ยังโชว์ไว้ */}
+            {staff.filter((e) => e.can_take_cases || e.employee_id === assignedTo).map((e) => (
+              <option key={e.employee_id} value={e.employee_id}>
+                {e.first_name} {e.last_name}
+              </option>
+            ))}
+          </select>
+          {/* โผล่เฉพาะตอนมีอะไรกรองอยู่ — ปุ่มที่กดแล้วไม่เกิดอะไรขึ้นไม่ควรมีให้เห็น */}
+          {filtered && <button className="btn" onClick={clearFilters}>ล้างตัวกรอง</button>}
+          {/* ปุ่มเปิดเคสอยู่ท้ายแถบตัวกรอง (ดันไปชิดขวา) — ใกล้รายการที่จะเพิ่มเข้าไป */}
+          <Link className="btn primary toolbar-action" to="/cases/new">+ เปิดเคสใหม่</Link>
+        </div>
 
-            {/* โหลดครั้งแรกยังไม่มีข้อมูลเลย — ต้องบอกว่ากำลังโหลด ไม่ใช่ปล่อยตารางว่างเงียบๆ
-                (ถ้ามีข้อมูลเก่าอยู่แล้ว คงไว้ให้อ่านต่อระหว่างโหลดรอบใหม่ ไม่ให้จอกระพริบ) */}
-            {loading && rows.length === 0 && (
-              <tr><td colSpan={7} className="empty">กำลังโหลด…</td></tr>
-            )}
+        {/* error เป็นแถบเหนือตาราง ไม่ทับทั้งหน้า — ตัวกรองที่ตั้งไว้ต้องไม่หายไปเพราะเน็ตสะดุด */}
+        <ErrorBar message={error} onRetry={() => setReloadKey((k) => k + 1)} busy={loading} />
 
-            {/* error มีแถบของตัวเองอยู่แล้ว — ไม่ต้องบอกซ้ำว่า "ไม่มีข้อมูล" ทั้งที่จริงๆ คือโหลดไม่สำเร็จ */}
-            {!loading && !error && rows.length === 0 && (
+        {/* จอแคบ: ให้ตารางเลื่อนแนวนอนในกล่องของตัวเอง ไม่ดันทั้งหน้าให้เลื่อนตาม */}
+        <div className="table-wrap">
+          <table className="table table-cards table-2line table-indexed">
+            <colgroup>
+              {/* สถานะกว้าง 16% เพราะป้ายที่ยาวที่สุด ("ยังไม่จับคู่พนักงาน") ต้องการ 139px
+                  ที่ 13% บนจอ 1280/1440 ได้ไม่ถึง แล้วป้ายโดน … ตัดจนอ่านไม่ออกว่าเคสอยู่สถานะไหน
+                  ที่ยืมมาคือคอลัมน์บริการ ซึ่งเป็นข้อความอิสระ ตัดท้ายแล้วยังเดาความได้ */}
+              <col style={{ width: '6%' }} />
+              <col style={{ width: '12%' }} />
+              <col style={{ width: '23%' }} />
+              <col style={{ width: '14%' }} />
+              <col style={{ width: '13%' }} />
+              <col style={{ width: '16%' }} />
+              <col style={{ width: '16%' }} />
+            </colgroup>
+            <thead>
               <tr>
-                <td colSpan={7} className="empty">
-                  {filtered ? (
-                    <>
-                      ไม่พบเคสที่ตรงกับเงื่อนไข{' '}
-                      <button className="btn link-btn" onClick={clearFilters}>ล้างตัวกรอง</button>
-                    </>
-                  ) : (
-                    <>
-                      ยังไม่มีเคสในระบบ{' '}
-                      <Link className="link" to="/cases/new">เปิดเคสแรก →</Link>
-                    </>
-                  )}
-                </td>
+                <th>#</th>
+                <th><SortHead column="case_id" {...SORTABLE.case_id} sort={sort} order={order} onSort={sortBy} /></th>
+                <th><SortHead column="title" {...SORTABLE.title} sort={sort} order={order} onSort={sortBy} /></th>
+                <th><SortHead column="start_date" {...SORTABLE.start_date} sort={sort} order={order} onSort={sortBy} /></th>
+                <th>เบอร์โทร</th>
+                <th>พนักงานที่รับ</th>
+                <th>สถานะ</th>
               </tr>
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {rows.map((c, i) => (
+                <tr
+                  key={c.case_id}
+                  className="row-clickable"
+                  tabIndex={0}
+                  onClick={() => openCase(c.case_id)}
+                  onKeyDown={(e) => {
+                    if (e.target !== e.currentTarget) return;
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      openCase(c.case_id);
+                    }
+                  }}
+                >
+                  {/* ลำดับนับต่อเนื่องข้ามหน้า — เป็นลำดับของ "รายการที่เห็นตอนนี้" ไม่ใช่เลขประจำตัว */}
+                  <td className="row-index" data-label="ลำดับ">{(page - 1) * Number(perPage) + i + 1}</td>
+                  <td className="mono link" data-label="รหัสเคส">{c.case_id}</td>
+                  <td data-label="บริการ">
+                    {/* สองสายบริการเก็บชื่อคนละคอลัมน์ — กายภาพมาก่อนเพราะเคสที่ผูกแพ็คเกจไว้จะไม่มีเรท Homecare */}
+                    {c.physio_package_name ? (
+                      <>{c.physio_package_name}
+                        {c.physio_sessions && <span className="muted"> · {c.physio_sessions} ครั้ง</span>}</>
+                    ) : c.format_name ? (
+                      <>{c.format_name}{c.grade_name && <span className="muted"> · {c.grade_name}</span>}</>
+                    ) : (
+                      <span className="muted">ไม่ระบุบริการ</span>
+                    )}
+                    {/* บรรทัดรองคือผู้ป่วย (ผู้รับการดูแล) ไม่ใช่ผู้ว่าจ้าง — พนักงานจับคู่/ตามงานด้วยชื่อคนที่ไปดูแล */}
+                    <span className="cell-sub">{c.client_name}</span>
+                  </td>
+                  <td data-label="เริ่ม / ค่าจ้าง">
+                    {c.start_date ? formatDate(c.start_date) : <span className="muted">ยังไม่ระบุ</span>}
+                    {c.fee != null && <span className="cell-sub">{formatBaht(c.fee)}</span>}
+                  </td>
+                  <td data-label="เบอร์โทร">
+                    {c.client_phone ? (
+                      // stopPropagation กันไม่ให้การกดเบอร์เปิด popup ตามไปด้วย
+                      <a className="link mono" href={`tel:${c.client_phone}`} onClick={(e) => e.stopPropagation()}>
+                        {c.client_phone}
+                      </a>
+                    ) : (
+                      <span className="muted">—</span>
+                    )}
+                  </td>
+                  <td data-label="พนักงานที่รับ">
+                    {/* เคสหนึ่งมีพนักงานได้หลายคน — โชว์ทุกคน ไม่ใช่แค่คนที่ระบบอ้างเป็นตัวหลัก
+                        รหัสพนักงานโชว์เฉพาะตอนมีคนเดียว ไม่งั้นแถวจะยาวจนอ่านชื่อไม่ทัน */}
+                    {c.assigned_name ? (
+                      <>
+                        {[c.assigned_name, c.team_names].filter(Boolean).join(' · ')}
+                        {c.assigned_to && !c.team_count && <span className="cell-sub mono">{c.assigned_to}</span>}
+                      </>
+                    ) : (
+                      <span className="muted">—</span>
+                    )}
+                  </td>
+                  <td data-label="สถานะ">
+                    <span className={`badge case-${c.status}`}>{CASE_STATUS_LABELS[c.status]}</span>
+                  </td>
+                </tr>
+              ))}
+
+              {/* โหลดครั้งแรกยังไม่มีข้อมูลเลย — ต้องบอกว่ากำลังโหลด ไม่ใช่ปล่อยตารางว่างเงียบๆ
+                  (ถ้ามีข้อมูลเก่าอยู่แล้ว คงไว้ให้อ่านต่อระหว่างโหลดรอบใหม่ ไม่ให้จอกระพริบ) */}
+              {loading && rows.length === 0 && (
+                <tr><td colSpan={7} className="empty">กำลังโหลด…</td></tr>
+              )}
+
+              {/* error มีแถบของตัวเองอยู่แล้ว — ไม่ต้องบอกซ้ำว่า "ไม่มีข้อมูล" ทั้งที่จริงๆ คือโหลดไม่สำเร็จ */}
+              {!loading && !error && rows.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="empty">
+                    {filtered ? (
+                      <>
+                        ไม่พบเคสที่ตรงกับเงื่อนไข{' '}
+                        <button className="btn link-btn" onClick={clearFilters}>ล้างตัวกรอง</button>
+                      </>
+                    ) : (
+                      <>
+                        ยังไม่มีเคสในระบบ{' '}
+                        <Link className="link" to="/cases/new">เปิดเคสแรก →</Link>
+                      </>
+                    )}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {result && (

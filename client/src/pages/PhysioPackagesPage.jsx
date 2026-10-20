@@ -73,20 +73,6 @@ export default function PhysioPackagesPage() {
     load();
   }, []);
 
-  async function move(index, delta) {
-    const next = [...items];
-    const target = index + delta;
-    if (target < 0 || target >= next.length) return;
-    [next[index], next[target]] = [next[target], next[index]];
-    setItems(next); // ขยับให้เห็นทันที ไม่ต้องรอ server
-    try {
-      setItems(await api.reorderPhysioPackages(next.map((p) => p.physio_package_id)));
-    } catch (e) {
-      setError(e.message);
-      load(); // ลำดับบนจอกับใน DB อาจไม่ตรงกันแล้ว — ดึงของจริงมาทับ
-    }
-  }
-
   async function remove(p) {
     try {
       await api.deletePhysioPackage(p.physio_package_id);
@@ -101,103 +87,103 @@ export default function PhysioPackagesPage() {
 
   return (
     <PageRefresh onRefresh={load} busy={loading}>
-      <header className="page-head">
-        <div>
-          <h1>แพ็คเกจกายภาพบำบัด</h1>
-          <p className="muted">ส่วนลดหักจากรายได้ส่วนของบริษัท ค่าจ้างพนักงานคงเดิม</p>
-          <p className="muted">
-            แพ็คเกจเหมาจำนวนครั้ง · ตกเฉลี่ย (บาท/ครั้ง) คำนวณให้อัตโนมัติจากราคาพิเศษ ÷ จำนวนครั้ง
-          </p>
-        </div>
-        <button className="btn primary" onClick={() => setEditing({ ...BLANK })}>+ เพิ่มแพ็คเกจ</button>
-      </header>
-
       {error && <p className="error">{error}</p>}
 
       {/* table-cards: จอมือถือเลิกเป็นตาราง กลายเป็นการ์ดใบละแพ็คเกจ
           ตารางนี้มี 6 คอลัมน์ที่เป็นตัวเลขเกือบทั้งหมด บนจอ 390px ต้องปัดแนวนอนไปอ่านทีละคอลัมน์
           ซึ่งทำให้เทียบ "ราคาสุทธิ vs ตกเฉลี่ย" ของแพ็คเกจเดียวกันไม่ได้เลย ทั้งที่เป็นสองเลขที่ใช้ตัดสินใจ */}
-      <div className="table-wrap">
-        <table className="table physio-table table-cards">
-          <thead>
-            <tr>
-              <th>แพ็กเกจ</th>
-              <th>ราคาเต็ม (บาท)</th>
-              <th>ราคาสุทธิ (บาท)</th>
-              <th>ตกเฉลี่ย (บาท/ครั้ง)</th>
-              {/* ค่าจ้าง/กำไร = เฉพาะผู้จัดการ — ตัดทั้งคอลัมน์ ไม่ใช่ปล่อยหัวตารางค้างไว้ให้ว่าง */}
-              {seePay && <th>ค่าจ้างพนักงาน (บาท)</th>}
-              <th>จัดการ</th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((p, i) => (
-              <tr key={p.physio_package_id} className={p.active ? '' : 'is-inactive'}>
-                <td className="physio-name">
-                  {p.name}
-                  {!p.active && <span className="badge muted-badge">ปิดขาย</span>}
-                  <span className="cell-sub">{detailLine(p)}</span>
-                </td>
-                {/* ขีดฆ่าราคาเต็มเฉพาะตอนมีส่วนลดจริง — ไม่งั้นจะขีดฆ่าเลขเดียวกับราคาสุทธิ ดูสับสน
-                    is-blank บอก CSS ว่าช่องนี้ไม่มีเนื้อหาจริง — ในโหมดการ์ดจะถูกซ่อนไปเลย
-                    บรรทัด "ราคาเต็ม —" กินที่หนึ่งบรรทัดในการ์ดโดยไม่ได้บอกอะไร */}
-                <td className={`physio-was${p.discount > 0 ? '' : ' is-blank'}`} data-label="ราคาเต็ม">
-                  {p.discount > 0 ? <s>{formatBaht(p.original_price)}</s> : <span className="muted">—</span>}
-                </td>
-                <td className="physio-special" data-label="ราคาสุทธิ">
-                  {formatBaht(p.special_price)}
-                  {p.discount > 0 && (
-                    <span className="cell-sub">
-                      ลด {p.discount_percent > 0 ? `${p.discount_percent}%` : formatBaht(p.discount)}
-                    </span>
-                  )}
-                </td>
-                {/* ตกเฉลี่ยต่อครั้ง — server คิดให้จาก ราคาสุทธิ ÷ จำนวนครั้ง (ดู withComputed)
-                    ช่องนี้เคยหายไปทั้งที่หัวตารางมีคอลัมน์อยู่ ทำให้ทุกช่องเลื่อนซ้ายหนึ่งช่อง
-                    ค่าจ้างพนักงานไปโผล่ใต้หัว "ตกเฉลี่ย" และคอลัมน์ "จัดการ" ว่างเปล่า */}
-                <td className="physio-avg" data-label="ตกเฉลี่ย">
-                  {p.avg_per_session == null
-                    ? <span className="muted">—</span>
-                    : <>{formatBaht(p.avg_per_session)}<span className="cell-sub">ต่อครั้ง</span></>}
-                </td>
-
-                {/* ช่องที่ยังไม่ตั้งต้องเห็นชัด — ไม่มีค่าจ้าง = เคสสายกายภาพคำนวณค่าตอบแทนให้พนักงานไม่ได้เลย */}
-                {seePay && (
-                  <td className="physio-pay" data-label="ค่าจ้างพนักงาน">
-                    {p.staff_pay == null ? (
-                      <span className="pay-missing">ยังไม่ตั้ง</span>
-                    ) : (
-                      <>
-                        {formatBaht(p.staff_pay)}
-                        {p.margin != null && <span className="cell-sub">กำไร {p.margin}%</span>}
-                      </>
+      {/* แถบบน (คำอธิบาย + ปุ่มเพิ่ม) + ตาราง อยู่ในการ์ดใบเดียวกัน — โครงเดียวกับหน้ารายการอื่น */}
+      <div className="list-card">
+        <div className="toolbar">
+          {/* หัวแบบ hero (ไอคอน + คำเล็ก + ชื่อตัวใหญ่) อยู่ในแถบบนของการ์ด — เข้าชุดกับหน้าแพ็คเกจ Homecare */}
+          <div className="page-hero toolbar-note">
+            <span className="page-hero-icon" aria-hidden="true"><LineIcon name="activity" /></span>
+            <div>
+              <h1 className="page-hero-title">กายภาพบำบัด</h1>
+            </div>
+          </div>
+          <button className="btn primary toolbar-action" onClick={() => setEditing({ ...BLANK })}>+ เพิ่มแพ็คเกจ</button>
+        </div>
+        <div className="table-wrap">
+          <table className="table physio-table table-cards">
+            <thead>
+              <tr>
+                <th>แพ็กเกจ</th>
+                <th>ราคาเต็ม (บาท)</th>
+                <th>ราคาสุทธิ (บาท)</th>
+                <th>ตกเฉลี่ย (บาท/ครั้ง)</th>
+                {/* ค่าจ้าง/กำไร = เฉพาะผู้จัดการ — ตัดทั้งคอลัมน์ ไม่ใช่ปล่อยหัวตารางค้างไว้ให้ว่าง */}
+                {seePay && <th>ค่าจ้างพนักงาน (บาท)</th>}
+                <th>จัดการ</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((p) => (
+                <tr key={p.physio_package_id} className={p.active ? '' : 'is-inactive'}>
+                  <td className="physio-name">
+                    {p.name}
+                    {!p.active && <span className="badge muted-badge">ปิดขาย</span>}
+                    <span className="cell-sub">{detailLine(p)}</span>
+                  </td>
+                  {/* ขีดฆ่าราคาเต็มเฉพาะตอนมีส่วนลดจริง — ไม่งั้นจะขีดฆ่าเลขเดียวกับราคาสุทธิ ดูสับสน
+                      is-blank บอก CSS ว่าช่องนี้ไม่มีเนื้อหาจริง — ในโหมดการ์ดจะถูกซ่อนไปเลย
+                      บรรทัด "ราคาเต็ม —" กินที่หนึ่งบรรทัดในการ์ดโดยไม่ได้บอกอะไร */}
+                  <td className={`physio-was${p.discount > 0 ? '' : ' is-blank'}`} data-label="ราคาเต็ม">
+                    {p.discount > 0 ? <s>{formatBaht(p.original_price)}</s> : <span className="muted">—</span>}
+                  </td>
+                  <td className="physio-special" data-label="ราคาสุทธิ">
+                    {formatBaht(p.special_price)}
+                    {p.discount > 0 && (
+                      <span className="cell-sub">
+                        ลด {p.discount_percent > 0 ? `${p.discount_percent}%` : formatBaht(p.discount)}
+                      </span>
                     )}
                   </td>
-                )}
-                {/* row-actions = คลาสร่วมของโหมดการ์ด — ปุ่มกินเต็มความกว้างการ์ด กดด้วยนิ้วได้ */}
-                <td className="physio-actions row-actions">
-                  <button className="btn tiny" title="เลื่อนขึ้น" disabled={i === 0} onClick={() => move(i, -1)}><LineIcon name="arrow-up" /></button>
-                  <button className="btn tiny" title="เลื่อนลง" disabled={i === items.length - 1} onClick={() => move(i, 1)}><LineIcon name="arrow-down" /></button>
-                  <button className="btn tiny" onClick={() => setEditing(p)}>แก้ไข</button>
-                  <ConfirmButton
-                    className="btn tiny danger-ghost"
-                    title={`ลบแพ็คเกจ "${p.name}"?`}
-                    detail={'การลบนี้ย้อนกลับไม่ได้ — ถ้าแค่หยุดขายชั่วคราว ให้ติ๊ก "เปิดขาย" ออกแทน'}
-                    confirmLabel="ลบแพ็คเกจ"
-                    onConfirm={() => remove(p)}
-                  >
-                    ลบ
-                  </ConfirmButton>
-                </td>
-              </tr>
-            ))}
-            {items.length === 0 && (
-              <tr>
-                <td colSpan={seePay ? 6 : 5} className="empty">ยังไม่มีแพ็คเกจ — กด "+ เพิ่มแพ็คเกจ" เพื่อเริ่ม</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+                  {/* ตกเฉลี่ยต่อครั้ง — server คิดให้จาก ราคาสุทธิ ÷ จำนวนครั้ง (ดู withComputed)
+                      ช่องนี้เคยหายไปทั้งที่หัวตารางมีคอลัมน์อยู่ ทำให้ทุกช่องเลื่อนซ้ายหนึ่งช่อง
+                      ค่าจ้างพนักงานไปโผล่ใต้หัว "ตกเฉลี่ย" และคอลัมน์ "จัดการ" ว่างเปล่า */}
+                  <td className="physio-avg" data-label="ตกเฉลี่ย">
+                    {p.avg_per_session == null
+                      ? <span className="muted">—</span>
+                      : <>{formatBaht(p.avg_per_session)}<span className="cell-sub">ต่อครั้ง</span></>}
+                  </td>
+
+                  {/* ช่องที่ยังไม่ตั้งต้องเห็นชัด — ไม่มีค่าจ้าง = เคสสายกายภาพคำนวณค่าตอบแทนให้พนักงานไม่ได้เลย */}
+                  {seePay && (
+                    <td className="physio-pay" data-label="ค่าจ้างพนักงาน">
+                      {p.staff_pay == null ? (
+                        <span className="pay-missing">ยังไม่ตั้ง</span>
+                      ) : (
+                        <>
+                          {formatBaht(p.staff_pay)}
+                          {p.margin != null && <span className="cell-sub">กำไร {p.margin}%</span>}
+                        </>
+                      )}
+                    </td>
+                  )}
+                  {/* row-actions = คลาสร่วมของโหมดการ์ด — ปุ่มกินเต็มความกว้างการ์ด กดด้วยนิ้วได้ */}
+                  <td className="physio-actions row-actions">
+                    <button className="btn tiny" onClick={() => setEditing(p)}>แก้ไข</button>
+                    <ConfirmButton
+                      className="btn tiny danger-ghost"
+                      title={`ลบแพ็คเกจ "${p.name}"?`}
+                      detail={'การลบนี้ย้อนกลับไม่ได้ — ถ้าแค่หยุดขายชั่วคราว ให้ติ๊ก "เปิดขาย" ออกแทน'}
+                      confirmLabel="ลบแพ็คเกจ"
+                      onConfirm={() => remove(p)}
+                    >
+                      ลบ
+                    </ConfirmButton>
+                  </td>
+                </tr>
+              ))}
+              {items.length === 0 && (
+                <tr>
+                  <td colSpan={seePay ? 6 : 5} className="empty">ยังไม่มีแพ็คเกจ — กด "+ เพิ่มแพ็คเกจ" เพื่อเริ่ม</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {editing && (

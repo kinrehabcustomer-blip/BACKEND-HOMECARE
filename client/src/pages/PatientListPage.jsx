@@ -117,160 +117,160 @@ export default function PatientListPage() {
 
   return (
     <PageRefresh onRefresh={() => setReloadKey((k) => k + 1)} busy={loading}>
-      <header className="page-head">
-        <div>
-          <h1>ผู้ป่วย</h1>
-          <p className="muted">{result ? `ทั้งหมด ${result.pagination.total} ราย` : ' '}</p>
+      {/* ไม่มีหัวหน้าบนจอ (แถบตัวกรองเป็นส่วนบนสุด) — คง h1 ไว้ให้โปรแกรมอ่านหน้าจอ */}
+      <h1 className="sr-only">ผู้ป่วย</h1>
+
+      {/* แถบตัวกรอง + ตาราง อยู่ในการ์ดใบเดียวกัน (จอเล็กแยกกลับเป็นแถบตัวกรอง + การ์ดรายแถว — ดู .list-card) */}
+      <div className="list-card">
+        <div className="toolbar">
+          <input
+            className="search search-compact"
+            placeholder="ค้นหา รหัส / ชื่อ / ชื่อเล่น / ชื่ออังกฤษ / เลขบัตร"
+            value={q}
+            onChange={(e) => setFilter('q', e.target.value)}
+          />
+          <select value={status} onChange={(e) => setFilter('status', e.target.value)}>
+            <option value="">ทุกสถานะ</option>
+            {Object.entries(PATIENT_STATUS_LABELS).map(([v, l]) => (
+              <option key={v} value={v}>{l}</option>
+            ))}
+          </select>
+          <select value={hasCustomer} onChange={(e) => setFilter('has_customer', e.target.value)}>
+            <option value="">ผู้ว่าจ้าง: ทั้งหมด</option>
+            <option value="yes">ผูกลูกค้าแล้ว</option>
+            <option value="no">ยังไม่ผูกลูกค้า</option>
+          </select>
+          {/* โผล่เฉพาะตอนมีอะไรกรองอยู่ — ปุ่มที่กดแล้วไม่เกิดอะไรขึ้นไม่ควรมีให้เห็น */}
+          {filtered && <button className="btn" onClick={clearFilters}>ล้างตัวกรอง</button>}
+          {/* ปุ่มหลักของหน้าอยู่ท้ายแถบตัวกรอง (ไม่มีหัวหน้าแล้ว) */}
+          <Link className="btn primary toolbar-action" to="/patients/new">+ เพิ่มผู้ป่วย</Link>
         </div>
-        <Link className="btn primary" to="/patients/new">+ เพิ่มผู้ป่วย</Link>
-      </header>
 
-      <div className="toolbar">
-        <input
-          className="search"
-          placeholder="ค้นหา รหัส / ชื่อ / ชื่อเล่น / ชื่ออังกฤษ / เลขบัตร"
-          value={q}
-          onChange={(e) => setFilter('q', e.target.value)}
-        />
-        <select value={status} onChange={(e) => setFilter('status', e.target.value)}>
-          <option value="">ทุกสถานะ</option>
-          {Object.entries(PATIENT_STATUS_LABELS).map(([v, l]) => (
-            <option key={v} value={v}>{l}</option>
-          ))}
-        </select>
-        <select value={hasCustomer} onChange={(e) => setFilter('has_customer', e.target.value)}>
-          <option value="">ผู้ว่าจ้าง: ทั้งหมด</option>
-          <option value="yes">ผูกลูกค้าแล้ว</option>
-          <option value="no">ยังไม่ผูกลูกค้า</option>
-        </select>
-        {/* โผล่เฉพาะตอนมีอะไรกรองอยู่ — ปุ่มที่กดแล้วไม่เกิดอะไรขึ้นไม่ควรมีให้เห็น */}
-        {filtered && <button className="btn" onClick={clearFilters}>ล้างตัวกรอง</button>}
-      </div>
+        {/* กรองมาจากลิงก์ของลูกค้ารายหนึ่ง — ต้องบอกให้เห็น ไม่งั้นคนอ่านนึกว่านี่คือทั้งระบบ */}
+        {customerId && (
+          <p className="notice filter-chip">
+            แสดงเฉพาะผู้ป่วยของ <strong className="mono">{customerId}</strong>
+            <button className="btn link-btn" onClick={() => setFilter('customer_id', '')}>แสดงทั้งหมด</button>
+          </p>
+        )}
 
-      {/* กรองมาจากลิงก์ของลูกค้ารายหนึ่ง — ต้องบอกให้เห็น ไม่งั้นคนอ่านนึกว่านี่คือทั้งระบบ */}
-      {customerId && (
-        <p className="notice filter-chip">
-          แสดงเฉพาะผู้ป่วยของ <strong className="mono">{customerId}</strong>
-          <button className="btn link-btn" onClick={() => setFilter('customer_id', '')}>แสดงทั้งหมด</button>
-        </p>
-      )}
+        {/* error เป็นแถบเหนือตาราง ไม่ทับทั้งหน้า — คำค้นที่พิมพ์ไว้ต้องไม่หายไปเพราะเน็ตสะดุด */}
+        <ErrorBar message={error} onRetry={() => setReloadKey((k) => k + 1)} busy={loading} />
 
-      {/* error เป็นแถบเหนือตาราง ไม่ทับทั้งหน้า — คำค้นที่พิมพ์ไว้ต้องไม่หายไปเพราะเน็ตสะดุด */}
-      <ErrorBar message={error} onRetry={() => setReloadKey((k) => k + 1)} busy={loading} />
+        <div className="table-wrap">
+          <table className="table table-cards table-indexed">
+            <colgroup>
+              {/* สถานะกว้างขึ้นเป็น 15% — ป้ายสถานะต้องอ่านออกทั้งก้อน ตัดครึ่งแล้วไม่มีความหมาย
+                  ยืมจากผู้ว่าจ้าง ซึ่งเป็นชื่อคน/บริษัท ตัดท้ายด้วย … ยังพอรู้ว่าใคร */}
+              <col style={{ width: '6%' }} />
+              <col style={{ width: '13%' }} />
+              <col style={{ width: '25%' }} />
+              <col style={{ width: '13%' }} />
+              <col style={{ width: '18%' }} />
+              <col style={{ width: '15%' }} />
+              <col style={{ width: '10%' }} />
+            </colgroup>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th><SortHead column="patient_id" {...SORTABLE.patient_id} sort={sort} order={order} onSort={sortBy} /></th>
+                <th><SortHead column="name" {...SORTABLE.name} sort={sort} order={order} onSort={sortBy} /></th>
+                <th>เพศ / อายุ</th>
+                <th>ผู้ว่าจ้าง</th>
+                <th>สถานะ</th>
+                <th>เคส</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((p, i) => {
+                const age = ageFromBirthDate(p.birth_date) ?? p.age;
+                return (
+                  <tr
+                    key={p.patient_id}
+                    className="row-clickable"
+                    tabIndex={0}
+                    onClick={() => openPatient(p.patient_id)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        openPatient(p.patient_id);
+                      }
+                    }}
+                  >
+                    {/* ลำดับนับต่อเนื่องข้ามหน้า — เป็นลำดับของ "รายการที่เห็นตอนนี้" ไม่ใช่เลขประจำตัว */}
+                    <td className="row-index" data-label="ลำดับ">{(page - 1) * Number(perPage) + i + 1}</td>
+                    <td className="mono link" data-label="รหัส">{p.patient_id}</td>
+                    <td data-label="ชื่อ" title={[p.name, p.nickname && `(${p.nickname})`].filter(Boolean).join(" ")}>
+                      {p.name}
+                      {p.nickname && <span className="muted"> ({p.nickname})</span>}
+                      {/* การแพ้เป็นข้อมูลอันตรายที่สุดในหน้านี้ — ต้องเห็นตั้งแต่ตอนกวาดตาดูรายชื่อ
+                          ไม่ใช่ต้องเปิด popup ก่อนถึงจะรู้ · ไอคอน + ข้อความเต็มใน title ไม่ใช้สีอย่างเดียว
+                          แยกสองป้าย เพราะคนละคนที่ต้องรู้ (คนให้ยา vs คนเตรียมอาหาร) */}
+                      {p.allergies && (
+                        <span className="allergy-flag" title={`แพ้ยา: ${p.allergies}`}><LineIcon name="alert" className="text-ico" />แพ้ยา</span>
+                      )}
+                      {p.food_allergies && (
+                        <span className="allergy-flag food" title={`แพ้อาหาร: ${p.food_allergies}`}><LineIcon name="alert" className="text-ico" />แพ้อาหาร</span>
+                      )}
+                    </td>
+                    <td data-label="เพศ / อายุ">
+                      {[GENDER_LABELS[p.gender], age != null && `${age} ปี`].filter(Boolean).join(' / ') || (
+                        <span className="muted">—</span>
+                      )}
+                    </td>
+                    <td data-label="ผู้ว่าจ้าง" title={p.customer_name || undefined}>
+                      {p.customer_name ? (
+                        <>
+                          {p.customer_name}
+                          {p.customer_phone && (
+                            <span className="cell-sub">
+                              <a className="link mono" href={`tel:${p.customer_phone}`} onClick={(e) => e.stopPropagation()}>
+                                {p.customer_phone}
+                              </a>
+                            </span>
+                          )}
+                        </>
+                      ) : (
+                        <span className="muted">— ยังไม่ผูกลูกค้า —</span>
+                      )}
+                    </td>
+                    <td data-label="สถานะ">
+                      <span className={`badge ${p.status}`}>{PATIENT_STATUS_LABELS[p.status]}</span>
+                    </td>
+                    <td data-label="เคส">
+                      {p.case_count === 0 ? <span className="muted">—</span> : `${p.case_count} เคส`}
+                    </td>
+                  </tr>
+                );
+              })}
 
-      <div className="table-wrap">
-        <table className="table table-cards table-indexed">
-          <colgroup>
-            {/* สถานะกว้างขึ้นเป็น 15% — ป้ายสถานะต้องอ่านออกทั้งก้อน ตัดครึ่งแล้วไม่มีความหมาย
-                ยืมจากผู้ว่าจ้าง ซึ่งเป็นชื่อคน/บริษัท ตัดท้ายด้วย … ยังพอรู้ว่าใคร */}
-            <col style={{ width: '6%' }} />
-            <col style={{ width: '13%' }} />
-            <col style={{ width: '25%' }} />
-            <col style={{ width: '13%' }} />
-            <col style={{ width: '18%' }} />
-            <col style={{ width: '15%' }} />
-            <col style={{ width: '10%' }} />
-          </colgroup>
-          <thead>
-            <tr>
-              <th>#</th>
-              <th><SortHead column="patient_id" {...SORTABLE.patient_id} sort={sort} order={order} onSort={sortBy} /></th>
-              <th><SortHead column="name" {...SORTABLE.name} sort={sort} order={order} onSort={sortBy} /></th>
-              <th>เพศ / อายุ</th>
-              <th>ผู้ว่าจ้าง</th>
-              <th>สถานะ</th>
-              <th>เคส</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((p, i) => {
-              const age = ageFromBirthDate(p.birth_date) ?? p.age;
-              return (
-                <tr
-                  key={p.patient_id}
-                  className="row-clickable"
-                  tabIndex={0}
-                  onClick={() => openPatient(p.patient_id)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      openPatient(p.patient_id);
-                    }
-                  }}
-                >
-                  {/* ลำดับนับต่อเนื่องข้ามหน้า — เป็นลำดับของ "รายการที่เห็นตอนนี้" ไม่ใช่เลขประจำตัว */}
-                  <td className="row-index" data-label="ลำดับ">{(page - 1) * Number(perPage) + i + 1}</td>
-                  <td className="mono link" data-label="รหัส">{p.patient_id}</td>
-                  <td data-label="ชื่อ" title={[p.name, p.nickname && `(${p.nickname})`].filter(Boolean).join(" ")}>
-                    {p.name}
-                    {p.nickname && <span className="muted"> ({p.nickname})</span>}
-                    {/* การแพ้เป็นข้อมูลอันตรายที่สุดในหน้านี้ — ต้องเห็นตั้งแต่ตอนกวาดตาดูรายชื่อ
-                        ไม่ใช่ต้องเปิด popup ก่อนถึงจะรู้ · ไอคอน + ข้อความเต็มใน title ไม่ใช้สีอย่างเดียว
-                        แยกสองป้าย เพราะคนละคนที่ต้องรู้ (คนให้ยา vs คนเตรียมอาหาร) */}
-                    {p.allergies && (
-                      <span className="allergy-flag" title={`แพ้ยา: ${p.allergies}`}><LineIcon name="alert" className="text-ico" />แพ้ยา</span>
-                    )}
-                    {p.food_allergies && (
-                      <span className="allergy-flag food" title={`แพ้อาหาร: ${p.food_allergies}`}><LineIcon name="alert" className="text-ico" />แพ้อาหาร</span>
-                    )}
-                  </td>
-                  <td data-label="เพศ / อายุ">
-                    {[GENDER_LABELS[p.gender], age != null && `${age} ปี`].filter(Boolean).join(' / ') || (
-                      <span className="muted">—</span>
-                    )}
-                  </td>
-                  <td data-label="ผู้ว่าจ้าง" title={p.customer_name || undefined}>
-                    {p.customer_name ? (
+              {/* โหลดครั้งแรกยังไม่มีข้อมูลเลย — ต้องบอกว่ากำลังโหลด ไม่ใช่ปล่อยตารางว่างเงียบๆ
+                  (ถ้ามีข้อมูลเก่าอยู่แล้ว คงไว้ให้อ่านต่อระหว่างโหลดรอบใหม่ ไม่ให้จอกระพริบ) */}
+              {loading && rows.length === 0 && (
+                <tr><td colSpan={7} className="empty">กำลังโหลด…</td></tr>
+              )}
+
+              {/* error มีแถบของตัวเองอยู่แล้ว — ไม่ต้องบอกซ้ำว่า "ไม่มีข้อมูล" ทั้งที่จริงๆ คือโหลดไม่สำเร็จ */}
+              {!loading && !error && rows.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="empty">
+                    {filtered ? (
                       <>
-                        {p.customer_name}
-                        {p.customer_phone && (
-                          <span className="cell-sub">
-                            <a className="link mono" href={`tel:${p.customer_phone}`} onClick={(e) => e.stopPropagation()}>
-                              {p.customer_phone}
-                            </a>
-                          </span>
-                        )}
+                        ไม่พบผู้ป่วยที่ตรงกับเงื่อนไข{' '}
+                        <button className="btn link-btn" onClick={clearFilters}>ล้างตัวกรอง</button>
                       </>
                     ) : (
-                      <span className="muted">— ยังไม่ผูกลูกค้า —</span>
+                      <>
+                        ยังไม่มีผู้ป่วยในระบบ{' '}
+                        <Link className="link" to="/patients/new">เพิ่มรายแรก →</Link>
+                      </>
                     )}
                   </td>
-                  <td data-label="สถานะ">
-                    <span className={`badge ${p.status}`}>{PATIENT_STATUS_LABELS[p.status]}</span>
-                  </td>
-                  <td data-label="เคส">
-                    {p.case_count === 0 ? <span className="muted">—</span> : `${p.case_count} เคส`}
-                  </td>
                 </tr>
-              );
-            })}
-
-            {/* โหลดครั้งแรกยังไม่มีข้อมูลเลย — ต้องบอกว่ากำลังโหลด ไม่ใช่ปล่อยตารางว่างเงียบๆ
-                (ถ้ามีข้อมูลเก่าอยู่แล้ว คงไว้ให้อ่านต่อระหว่างโหลดรอบใหม่ ไม่ให้จอกระพริบ) */}
-            {loading && rows.length === 0 && (
-              <tr><td colSpan={7} className="empty">กำลังโหลด…</td></tr>
-            )}
-
-            {/* error มีแถบของตัวเองอยู่แล้ว — ไม่ต้องบอกซ้ำว่า "ไม่มีข้อมูล" ทั้งที่จริงๆ คือโหลดไม่สำเร็จ */}
-            {!loading && !error && rows.length === 0 && (
-              <tr>
-                <td colSpan={7} className="empty">
-                  {filtered ? (
-                    <>
-                      ไม่พบผู้ป่วยที่ตรงกับเงื่อนไข{' '}
-                      <button className="btn link-btn" onClick={clearFilters}>ล้างตัวกรอง</button>
-                    </>
-                  ) : (
-                    <>
-                      ยังไม่มีผู้ป่วยในระบบ{' '}
-                      <Link className="link" to="/patients/new">เพิ่มรายแรก →</Link>
-                    </>
-                  )}
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {result && (

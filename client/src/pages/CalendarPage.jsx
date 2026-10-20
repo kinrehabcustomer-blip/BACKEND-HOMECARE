@@ -40,7 +40,6 @@ export default function CalendarPage() {
   const [params, setParams] = useSearchParams();
 
   const [visits, setVisits] = useState(null);
-  const [unscheduled, setUnscheduled] = useState([]);
   const [staff, setStaff] = useState([]);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -111,19 +110,6 @@ export default function CalendarPage() {
     return () => { cancelled = true; };
   }, [days, employeeId, reloadKey]);
 
-  /* เคสที่รับงานแล้วแต่ยังไม่มีวันนัดในช่วงที่ดูอยู่ — เดิมหน้านี้บอกแค่ว่า "จะไม่ขึ้นบนปฏิทิน"
-     แต่ไม่มีทางรู้ว่าเคสไหนบ้าง ทั้งที่นี่คือรายการที่ต้องลงนัดต่อ */
-  useEffect(() => {
-    let cancelled = false;
-    Promise.all([
-      api.listCases({ status: 'assigned', per_page: 100 }),
-      api.listCases({ status: 'in_progress', per_page: 100 }),
-    ])
-      .then(([a, b]) => !cancelled && setUnscheduled([...a.data, ...b.data]))
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, [reloadKey]);
-
   // กรองสายบริการ/สถานะกะในหน้าเว็บ ไม่ยิง API ใหม่ — ข้อมูลทั้งช่วงโหลดมาแล้ว สลับดูจึงเปลี่ยนทันที
   const shown = useMemo(
     () => (visits ?? []).filter((c) => (!kind || kindOf(c) === kind) && (!state || c.state === state)),
@@ -139,10 +125,6 @@ export default function CalendarPage() {
     return map;
   }, [shown]);
 
-  const scheduledCaseIds = useMemo(() => new Set((visits ?? []).map((v) => v.case_id)), [visits]);
-  const needSchedule = unscheduled.filter((c) => !scheduledCaseIds.has(c.case_id));
-
-  const selected = staff.find((s) => s.employee_id === employeeId);
   const filtered = Boolean(employeeId || kind || state);
 
   /** ขยับช่วงที่ดู — เดือนละก้าว หรือสัปดาห์ละก้าวตามมุมมอง */
@@ -160,28 +142,36 @@ export default function CalendarPage() {
 
   return (
     <PageRefresh onRefresh={() => setReloadKey((k) => k + 1)} busy={loading}>
-      <header className="page-head no-print">
-        <div>
-          <h1>ตารางงาน</h1>
-          <p className="muted">
-            {selected && <>ตารางของ <strong>{selected.first_name} {selected.last_name}</strong> · </>}
-            {kind && <>เฉพาะ <strong>{SERVICE_KIND_LABELS[kind]}</strong> · </>}
-            {state && <>เฉพาะ <strong>{VISIT_STATE_LABELS[state]}</strong> · </>}
-            {view === 'week' ? 'สัปดาห์นี้' : 'เดือนนี้'}มี {shown.length} กะ
-            {filtered && visits && visits.length !== shown.length && (
-              <span className="muted"> (จากทั้งหมด {visits.length})</span>
-            )}
-          </p>
+      {/* ไม่มีหัวหน้าบนจอ (ชื่อเดือน/สัปดาห์เป็นส่วนบนสุด) — คง h1 ไว้ให้โปรแกรมอ่านหน้าจอ */}
+      <h1 className="sr-only">ตารางงาน</h1>
+
+      {/* หัวปฏิทิน: ไอคอน + ช่วงเวลาที่ดูอยู่ (ซ้าย) · คำอธิบายสี (ขวา) — ปุ่มเลื่อนช่วงเวลาอยู่ท้ายแถบตัวกรอง */}
+      <div className="cal-hero">
+        <div className="cal-hero-main">
+          <span className="cal-hero-icon" aria-hidden="true"><LineIcon name="calendar" /></span>
+          <div>
+            <p className="cal-hero-kicker">
+              {view === 'week' ? 'ตารางงานรายสัปดาห์' : 'ตารางงานประจำเดือน'}
+              {loading && ' · กำลังโหลด…'}
+            </p>
+            <h2 className="cal-title">
+              {view === 'week' ? rangeTitle : (
+                <>{MONTH_LABELS[mm]} <span className="cal-hero-year">{toBuddhistYear(year)}</span></>
+              )}
+            </h2>
+          </div>
         </div>
-        {/* cal-nav — ปุ่มเลื่อนช่วงเวลา ไม่ใช่ปุ่มสั่งงานหลักของหน้า
-            บนมือถือปุ่มใน .actions ปกติจะยืดหารความกว้างกันจนเต็มบรรทัด ซึ่งใหญ่เกินหน้าที่ของมัน
-            (ลูกศรตัวเดียวกินพื้นที่เท่าปุ่มบันทึก) และไม่เข้ากับแถบตัวกรองที่อยู่ใต้ลงมา */}
-        <div className="actions cal-nav">
-          <button className="btn" onClick={() => shift(-1)} aria-label={view === 'week' ? 'สัปดาห์ก่อนหน้า' : 'เดือนก่อนหน้า'}>←</button>
-          <button className="btn" onClick={() => patch({ date: '' })}>วันนี้</button>
-          <button className="btn" onClick={() => shift(1)} aria-label={view === 'week' ? 'สัปดาห์ถัดไป' : 'เดือนถัดไป'}>→</button>
+
+        {/* คำอธิบายสี — ชิปมี 5 สีตามสถานะกะ ไม่มีอะไรบอกก็เดาไม่ถูก */}
+        <div className="cal-legend">
+          {CAL_STATES.map((s) => (
+            <span key={s} className="cal-legend-item">
+              <i className={`cal-swatch visit-${s}`} aria-hidden="true" />
+              {VISIT_STATE_LABELS[s]}
+            </span>
+          ))}
         </div>
-      </header>
+      </div>
 
       <div className="toolbar no-print">
         <span className="seg">
@@ -191,7 +181,8 @@ export default function CalendarPage() {
 
         <select value={employeeId} onChange={(e) => patch({ employee_id: e.target.value })} aria-label="เลือกพนักงาน">
           <option value="">พนักงานทุกคน</option>
-          {staff.map((s) => (
+          {/* เฉพาะพนักงาน front (คนที่รับเคส/มีกะ) · คนที่เลือกค้างอยู่ใน URL ยังโชว์ไว้ */}
+          {staff.filter((s) => s.can_take_cases || s.employee_id === employeeId).map((s) => (
             <option key={s.employee_id} value={s.employee_id}>
               {s.first_name} {s.last_name}
               {s.nickname ? ` (${s.nickname})` : ''} · {POSITION_LABELS[s.position]}
@@ -215,38 +206,28 @@ export default function CalendarPage() {
         <button className="btn" onClick={() => window.print()}>
           <LineIcon name="printer" />พิมพ์
         </button>
+        {/* เลื่อนช่วงเวลา — ท้ายแถบตัวกรอง ชิดขวา */}
+        <div className="cal-hero-nav toolbar-action">
+          <button type="button" onClick={() => shift(-1)} aria-label={view === 'week' ? 'สัปดาห์ก่อนหน้า' : 'เดือนก่อนหน้า'}>
+            <LineIcon name="chevron" className="cal-hero-prev" />
+          </button>
+          <button type="button" onClick={() => patch({ date: '' })}>วันนี้</button>
+          <button type="button" onClick={() => shift(1)} aria-label={view === 'week' ? 'สัปดาห์ถัดไป' : 'เดือนถัดไป'}>
+            <LineIcon name="chevron" className="cal-hero-next" />
+          </button>
+        </div>
       </div>
 
       {/* error เป็นแถบเหนือปฏิทิน ไม่ทับทั้งหน้า — ตัวกรองที่ตั้งไว้ต้องไม่หายเพราะเน็ตสะดุด */}
       {error && <p className="error no-print">{error}</p>}
 
-      <h2 className="cal-title">
-        {rangeTitle}
-        {loading && <span className="muted"> · กำลังโหลด…</span>}
-      </h2>
-
-      {/* คำอธิบายสี — ชิปมี 5 สีตามสถานะกะ ไม่มีอะไรบอกก็เดาไม่ถูก */}
-      <div className="cal-legend">
-        {CAL_STATES.map((s) => (
-          <span key={s} className="cal-legend-item">
-            <i className={`cal-swatch visit-${s}`} aria-hidden="true" />
-            {VISIT_STATE_LABELS[s]}
-          </span>
-        ))}
-      </div>
-
-      {!loading && shown.length === 0 && (
-        <p className="notice no-print">
-          {/* ว่างเพราะตัวกรอง กับ ว่างเพราะไม่มีงานจริง เป็นคนละเรื่อง — บอกให้ตรงเหตุ */}
-          {filtered && visits?.length > 0
-            ? `ช่วงนี้ไม่มีกะที่ตรงกับตัวกรอง (มีทั้งหมด ${visits.length} กะ)`
-            : 'ไม่มีกะในช่วงนี้'}
-        </p>
-      )}
-
       {/* จอแคบ: ให้ปฏิทินเลื่อนแนวนอนในกล่องของตัวเอง ไม่ดันทั้งหน้าให้เลื่อนตาม */}
       <div className="table-wrap cal-print">
-        <div className={`cal-grid ${view === 'week' ? 'is-week' : ''}`}>
+        {/* --cal-rows = จำนวนแถวสัปดาห์ของเดือนนี้ (4–6) — CSS ใช้แบ่งความสูงจอให้ทั้งเดือนพอดีจอเดียว */}
+        <div
+          className={`cal-grid ${view === 'week' ? 'is-week' : ''}`}
+          style={view === 'month' ? { '--cal-rows': Math.ceil((new Date(year, month - 1, 1).getDay() + days.length) / 7) } : undefined}
+        >
           {WEEKDAYS.map((w) => <div key={w} className="cal-head">{w}</div>)}
 
           {/* ช่องว่างก่อนวันแรก — ให้คอลัมน์ตรงกับวันในสัปดาห์ (มุมมองสัปดาห์เริ่มวันอาทิตย์อยู่แล้ว) */}
@@ -323,27 +304,6 @@ export default function CalendarPage() {
         ทุกเคส (ทั้ง <strong>Homecare</strong> และ <strong>กายภาพบำบัด</strong>) แสดงตาม
         <strong>วันนัดที่ลงไว้</strong>ในหน้าจัดการเคส — เคสที่ยังไม่ลงวันนัดจะไม่ขึ้นบนปฏิทิน
       </p>
-
-      {needSchedule.length > 0 && (
-        <details className="card no-print">
-          <summary>เคสที่รับงานแล้วแต่ยังไม่มีวันนัด ({needSchedule.length})</summary>
-          <ul className="todo">
-            {needSchedule.map((c) => (
-              <li key={c.case_id}>
-                <div>
-                  <strong>{c.title}</strong>
-                  <p className="muted">
-                    <span className="mono">{c.case_id}</span>
-                    {' · '}{c.assigned_name ?? 'ยังไม่จับคู่'}
-                    {' · '}{SERVICE_KIND_LABELS[kindOf(c)]}
-                  </p>
-                </div>
-                <button className="btn tiny" onClick={() => patch({ open: c.case_id })}>ลงวันนัด</button>
-              </li>
-            ))}
-          </ul>
-        </details>
-      )}
 
       {openDay && (
         <DayPanel

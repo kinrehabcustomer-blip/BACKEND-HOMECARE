@@ -88,7 +88,7 @@ export default function YearCodeInput({
       <span className={`patient-code ${bad ? 'is-invalid' : ''}`}>
         <span className="patient-code-prefix" aria-hidden="true">{prefix}</span>
         <input
-          className="patient-code-year"
+          className={`patient-code-year ${parts.number ? '' : 'is-idle'}`}
           inputMode="numeric"
           aria-label="ปี พ.ศ. 2 หลัก"
           maxLength={2}

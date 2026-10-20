@@ -638,52 +638,52 @@ export default function PayrollPage() {
 
   return (
     <PageRefresh onRefresh={() => setReloadKey((k) => k + 1)}>
-      <header className="page-head">
-        <div>
-          <h1>ค่าตอบแทนพนักงาน</h1>
+      {/* ไม่มีหัวหน้าบนจอ (การ์ดแท็บเป็นส่วนบนสุด) — คง h1 ไว้ให้โปรแกรมอ่านหน้าจอ */}
+      <h1 className="sr-only">ค่าตอบแทนพนักงาน</h1>
+
+      {/* แท็บ + ตัวกรอง + รายการ อยู่ในการ์ดขาวใบเดียว — โครงเดียวกับหน้าการมาทำงาน (ดู .att-card) */}
+      <div className="list-card att-card">
+        <div className="att-tabs" role="tablist" aria-label="มุมมองค่าตอบแทน">
+          {Object.entries(TABS).map(([key, label]) => (
+            <button
+              key={key}
+              role="tab"
+              aria-selected={tab === key}
+              className={`att-tab ${tab === key ? 'is-active' : ''}`}
+              onClick={() => patch({ tab: key === TAB_ORDER[0] ? '' : key })}
+            >
+              {label}
+            </button>
+          ))}
         </div>
-      </header>
 
-      <div className="att-tabs" role="tablist" aria-label="มุมมองค่าตอบแทน">
-        {Object.entries(TABS).map(([key, label]) => (
-          <button
-            key={key}
-            role="tab"
-            aria-selected={tab === key}
-            className={`att-tab ${tab === key ? 'is-active' : ''}`}
-            onClick={() => patch({ tab: key === TAB_ORDER[0] ? '' : key })}
-          >
-            {label}
-          </button>
-        ))}
+        {tab === 'release' && (
+          <PayQueue
+            reloadKey={reloadKey}
+            openCase={get('open')}
+            onOpenCase={(id) => patch({ open: id })}
+          />
+        )}
+        {tab === 'runs' && <Runs reloadKey={reloadKey} />}
+        {tab === 'approvals' && (
+          <Approvals
+            month={month}
+            employeeId={employeeId}
+            patch={patch}
+            employeePicker={employeePicker}
+            reloadKey={reloadKey}
+          />
+        )}
+        {tab === 'summary' && (
+          <PayoutSummary
+            month={month}
+            employeeId={employeeId}
+            patch={patch}
+            employeePicker={employeePicker}
+            reloadKey={reloadKey}
+          />
+        )}
       </div>
-
-      {tab === 'release' && (
-        <PayQueue
-          reloadKey={reloadKey}
-          openCase={get('open')}
-          onOpenCase={(id) => patch({ open: id })}
-        />
-      )}
-      {tab === 'runs' && <Runs reloadKey={reloadKey} />}
-      {tab === 'approvals' && (
-        <Approvals
-          month={month}
-          employeeId={employeeId}
-          patch={patch}
-          employeePicker={employeePicker}
-          reloadKey={reloadKey}
-        />
-      )}
-      {tab === 'summary' && (
-        <PayoutSummary
-          month={month}
-          employeeId={employeeId}
-          patch={patch}
-          employeePicker={employeePicker}
-          reloadKey={reloadKey}
-        />
-      )}
     </PageRefresh>
   );
 }
