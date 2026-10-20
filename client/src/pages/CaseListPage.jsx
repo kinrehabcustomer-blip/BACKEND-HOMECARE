@@ -229,7 +229,8 @@ export default function CaseListPage() {
         {/* "เคสของคนนี้" เป็นคำถามที่ถามบ่อย — server รองรับ assigned_to อยู่แล้ว แค่ไม่เคยมีช่องให้เลือก */}
         <select value={assignedTo} onChange={(e) => setFilter('assigned_to', e.target.value)} aria-label="พนักงานที่รับ">
           <option value="">พนักงานทุกคน</option>
-          {staff.map((e) => (
+          {/* เฉพาะพนักงาน front (คนที่รับเคสได้) — สาย back ไม่มีเคสให้กรอง · คนที่เลือกค้างอยู่ใน URL ยังโชว์ไว้ */}
+          {staff.filter((e) => e.can_take_cases || e.employee_id === assignedTo).map((e) => (
             <option key={e.employee_id} value={e.employee_id}>
               {e.first_name} {e.last_name}
             </option>

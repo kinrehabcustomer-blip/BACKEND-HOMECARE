@@ -167,7 +167,7 @@ export default function PatientFormPage() {
    * คืน customer_id ที่จะผูกกับแฟ้ม · error ของช่องผู้ว่าจ้างย้ายชื่อเป็น employer_* ไม่ให้ชนช่องของผู้ป่วย
    */
   async function saveEmployer() {
-    if (!employer) return null;
+    if (!employer) return form.customer_id || null;
     if (!employer.name.trim()) {
       const err = new Error('กรุณากรอกชื่อผู้ว่าจ้าง หรือกด "ไม่ผูก"');
       err.fields = [{ field: 'employer_name', message: 'กรอกชื่อผู้ว่าจ้าง' }];
@@ -227,8 +227,6 @@ export default function PatientFormPage() {
     setFieldErrors({});
     try {
       const payload = toPayload(form);
-      payload.customer_id = await saveEmployer();
-
       /* รหัสผู้ป่วย: เพิ่มใหม่ต้องมีรหัส KN ครบ · แก้ไข = ส่งเฉพาะตอนกรอกรหัส KN ใหม่ที่ต่างจากเดิม
          (แฟ้มเก่าที่ยังเป็น PAT-xxxx ไม่บังคับเปลี่ยน — ช่องว่างไว้ = คงรหัสเดิม) */
       if (!isPatientCode(form.patient_id) || (isEdit && form.patient_id === id)) {
@@ -240,6 +238,9 @@ export default function PatientFormPage() {
           return;
         }
       }
+
+      // ผ่านการทักฝั่งหน้าจอแล้วค่อยบันทึกผู้ว่าจ้าง (สร้างใหม่/แก้ข้อมูล)
+      payload.customer_id = await saveEmployer();
 
       // วันเกิดแม่นกว่า — เก็บอายุซ้ำจะขัดกันเองเมื่อเวลาผ่านไป (ช่องอายุถูก disable ตอนมีวันเกิด)
       if (payload.birth_date) payload.age = null;
@@ -360,11 +361,14 @@ export default function PatientFormPage() {
           <label>รหัสผู้ป่วย {isEdit ? '' : '*'}
             <PatientCodeInput
               name="patient_id"
+              // แฟ้มที่กำลังแก้ ไม่นับว่ารหัสเดิมของตัวเองซ้ำ
+              checker={(code) => (code === id ? Promise.resolve(null) : api.checkPatientId(code, isEdit ? id : null))}
+              takenLabel="รหัสนี้ถูกใช้กับผู้ป่วยคนอื่นแล้ว"
               value={isPatientCode(form.patient_id) ? form.patient_id : ''}
               invalid={Boolean(fieldErrors.patient_id)}
               onChange={(code) => {
                 // แก้ไข: ลบเลขจนไม่ครบ = กลับไปใช้รหัสเดิม ไม่ใช่ส่งรหัสว่าง
-                setForm((prev) => ({ ...prev, patient_id: code || (isEdit ? id : '') }));
+                setForm((prev) => ({ ...prev, patient_id: code }));
                 setFieldErrors((prev) => (prev.patient_id ? { ...prev, patient_id: undefined } : prev));
               }}
             />

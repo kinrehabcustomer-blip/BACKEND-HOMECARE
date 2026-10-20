@@ -1,12 +1,16 @@
 import { sql, transaction } from '../db/index.js';
 import { ApiError } from '../lib/errors.js';
 
-/** รหัสผู้ป่วยซ้ำ — เช็คก่อนเขียน จะได้บอกได้ว่าซ้ำกับใคร (ชนกันพร้อมกันพอดียังมี PK กันอีกชั้น) */
-export async function ensurePatientCodeFree(db, code, exceptId = null) {
-  const taken = await db.one(
+/** เจ้าของรหัสผู้ป่วยนี้ (ถ้ามี) — ใช้ทั้งตอนบันทึก และเส้นตรวจซ้ำที่หน้าฟอร์มเรียกระหว่างพิมพ์ */
+export const patientCodeOwner = (db, code, exceptId = null) =>
+  db.one(
     'SELECT patient_id, name FROM patients WHERE patient_id = :code AND patient_id IS DISTINCT FROM :except',
     { code, except: exceptId },
   );
+
+/** รหัสผู้ป่วยซ้ำ — เช็คก่อนเขียน จะได้บอกได้ว่าซ้ำกับใคร (ชนกันพร้อมกันพอดียังมี PK กันอีกชั้น) */
+export async function ensurePatientCodeFree(db, code, exceptId = null) {
+  const taken = await patientCodeOwner(db, code, exceptId);
   if (taken) {
     throw new ApiError(409, `รหัสผู้ป่วย ${code} มีอยู่แล้ว (${taken.name})`, [
       { field: 'patient_id', message: `รหัสนี้ถูกใช้กับ ${taken.name} แล้ว` },

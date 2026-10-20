@@ -471,6 +471,8 @@ async function staffLabel(tx, employeeId) {
  */
 const isPhysioService = (s) => s.service_kind === 'physio' || s.physio_package_id != null;
 const caseTypeForService = (s) => (isPhysioService(s) ? 'physiotherapy' : 'elderly_care');
+/** สายกายภาพจริงของเคส — เคสเก่าที่ยังไม่มี service_kind ใช้ประเภทเคสที่ตั้งไว้ (เกณฑ์เดียวกับ serviceKindOf ฝั่งหน้าเว็บ) */
+const isPhysioCase = (s) => isPhysioService(s) || (!s.service_kind && s.case_type === 'physiotherapy');
 
 /** เจ้าของรหัสเคสนี้ (ถ้ามี) — ใช้ทั้งตอนบันทึก และเส้นตรวจซ้ำที่หน้าฟอร์มเรียกระหว่างพิมพ์ */
 export const caseCodeOwner = (db, code, exceptId = null) =>
@@ -762,7 +764,7 @@ export async function update(caseId, rawInput, actor) {
 
     /* สลับสายบริการ (Homecare ↔ กายภาพ) = ประเภทเคสต้องตาม ไม่งั้นพนักงานได้แบบบันทึกผิดชุด
        ทำหลังนับ "ช่องที่แก้" แล้ว — ช่องนี้ไม่มีในหน้าเว็บ ไม่ต้องขึ้นในประวัติว่าแก้ประเภทเคส */
-    if (!('case_type' in input) && isPhysioService({ ...current, ...values }) !== isPhysioService(current)) {
+    if (!('case_type' in input) && isPhysioCase({ ...current, ...values }) !== isPhysioCase(current)) {
       values.case_type = caseTypeForService({ ...current, ...values });
       if (!fields.includes('case_type')) fields.push('case_type');
     }

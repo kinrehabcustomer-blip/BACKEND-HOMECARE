@@ -3,7 +3,8 @@ import * as repo from './repo.js';
 import * as cases from '../cases/repo.js';
 import * as customers from '../customers/repo.js';
 import * as invoices from '../invoices/repo.js';
-import { createPatientSchema, updatePatientSchema, listQuerySchema } from './schema.js';
+import { createPatientSchema, updatePatientSchema, listQuerySchema, PATIENT_CODE_RE } from './schema.js';
+import { sql } from '../db/index.js';
 import { asyncRoute, notFound } from '../lib/errors.js';
 
 export const patientsRouter = Router();
@@ -25,6 +26,21 @@ patientsRouter.get(
   asyncRoute(async (req, res) => {
     const query = listQuerySchema.parse(req.query);
     res.json(await repo.list(query));
+  }),
+);
+
+/**
+ * ตรวจรหัสผู้ป่วยระหว่างกรอก (ฟอร์มผู้ป่วย / เปิดเคส) — ต้องมาก่อน '/:id'
+ * ?id=KN690202463[&except=รหัสของแฟ้มที่กำลังแก้] → { valid, available, taken_by }
+ * ตัวจริงที่กันซ้ำคือตอนบันทึก (ensurePatientCodeFree + PK) อันนี้แค่บอกล่วงหน้า
+ */
+patientsRouter.get(
+  '/check-id',
+  asyncRoute(async (req, res) => {
+    const code = String(req.query.id ?? '').trim();
+    const valid = PATIENT_CODE_RE.test(code);
+    const owner = valid ? await repo.patientCodeOwner(sql, code, req.query.except || null) : null;
+    res.json({ valid, available: valid && !owner, taken_by: owner?.name ?? null });
   }),
 );
 

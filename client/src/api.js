@@ -232,6 +232,12 @@ export const api = {
   listPatients: (params) => request(`/patients?${new URLSearchParams(params)}`),
   getPatient: (id) => request(`/patients/${id}`),
   createPatient: (body) => request('/patients', { method: 'POST', body }),
+  /** ตรวจรหัสผู้ป่วย (KN…) ว่าว่างไหม — except = รหัสของแฟ้มที่กำลังแก้ (ไม่นับว่าซ้ำกับตัวเอง) */
+  checkPatientId: (id, except) => {
+    const params = new URLSearchParams({ id });
+    if (except) params.set('except', except);
+    return request(`/patients/check-id?${params}`);
+  },
   updatePatient: (id, body) => request(`/patients/${id}`, { method: 'PATCH', body }),
   deletePatient: (id) => request(`/patients/${id}`, { method: 'DELETE' }),
 

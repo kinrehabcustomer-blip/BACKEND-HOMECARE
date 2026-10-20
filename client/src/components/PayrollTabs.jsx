@@ -1,9 +1,9 @@
 import { Fragment, useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
 import { api } from '../api.js';
 import { useToast } from '../toast.jsx';
 import { formatBaht, formatDate, timeText, durationText } from '../labels.js';
 import LineIcon from './LineIcon.jsx';
+import OfficeLink from './OfficeLink.jsx';
 import MonthPicker from './MonthPicker.jsx';
 import PayrollSummaryDoc from './PayrollSummaryDoc.jsx';
 import { LATE_MINUTES } from '../lib/attendanceUi.js';
@@ -138,9 +138,9 @@ export function Approvals({ month, employeeId, patch, employeePicker, reloadKey 
           </p>
           <div className="empty-actions">
             {stuck > 0 && (
-              <Link className="btn primary" to="/attendance">
+              <OfficeLink className="btn primary" to="/attendance">
                 มี {stuck} กะที่ต้องตรวจ →
-              </Link>
+              </OfficeLink>
             )}
           </div>
         </section>
@@ -207,13 +207,13 @@ export function Approvals({ month, employeeId, patch, employeePicker, reloadKey 
                       <span className="cell-sub">
                         {v.client_name} ·{' '}
                         {/* ลิงก์ไปเปิดเคส — ต้องไม่ถูกนับเป็นการเลือกแถวไปด้วย */}
-                        <Link
+                        <OfficeLink
                           className="link mono"
                           to={`/cases?open=${v.case_id}`}
                           onClick={(e) => e.stopPropagation()}
                         >
                           {v.case_id}
-                        </Link>
+                        </OfficeLink>
                       </span>
                     </td>
                     <td data-label="เข้า–ออก">
@@ -379,14 +379,14 @@ export function PayoutSummary({ month, employeeId, patch, employeePicker, reload
                   <td data-label="รออนุมัติ">
                     {r.pending_shifts > 0 ? (
                       /* stopPropagation กันไม่ให้การกดลิงก์กางแถวตามไปด้วย (แถวทั้งแถวกดได้แล้ว) */
-                      <Link
+                      <OfficeLink
                         className="link"
                         to={`/attendance?tab=approvals&month=${month}&employee_id=${r.employee_id}`}
                         onClick={(e) => e.stopPropagation()}
                       >
                         {r.pending_shifts} กะ
                         <span className="cell-sub">ยืนยันกะก่อนจึงจะแบ่งค่าจ้างได้ →</span>
-                      </Link>
+                      </OfficeLink>
                     ) : (
                       <span className="muted">—</span>
                     )}
@@ -404,13 +404,13 @@ export function PayoutSummary({ month, employeeId, patch, employeePicker, reload
                     {/* ทำงานแล้วแต่ยังไม่มีใครกดปล่อยค่าจ้าง — กดไปหาเคสของคนนี้ได้เลย */}
                     {r.pay === 0 && r.approved_shifts > 0 && (
                       <span className="cell-sub">
-                        <Link
+                        <OfficeLink
                           className="link flag-text"
                           to={`/cases?assigned_to=${r.employee_id}`}
                           onClick={(e) => e.stopPropagation()}
                         >
                           ยังไม่ได้ปล่อยค่าจ้าง →
-                        </Link>
+                        </OfficeLink>
                       </span>
                     )}
                     {r.rejected_shifts > 0 && (

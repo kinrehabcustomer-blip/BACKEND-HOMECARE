@@ -444,6 +444,8 @@ export default function CaseFormPage() {
         if (!filled.service_kind) {
           if (filled.physio_package_id !== '') filled.service_kind = 'physio';
           else if (filled.pkg_format_id !== '') filled.service_kind = 'homecare';
+          // เคสเก่าที่ตั้งประเภทเคสเป็นกายภาพไว้ (ไม่มีแพ็คเกจ) — เกณฑ์เดียวกับ serviceKindOf ในรายการ
+          else if (c.case_type === 'physiotherapy') filled.service_kind = 'physio';
         }
         Object.assign(filled, nextRoundDates(c.start_date, c.end_date, todayTH()));
         setForm(filled);
@@ -512,6 +514,8 @@ export default function CaseFormPage() {
         if (!filled.service_kind) {
           if (filled.physio_package_id !== '') filled.service_kind = 'physio';
           else if (filled.pkg_format_id !== '') filled.service_kind = 'homecare';
+          // เคสเก่าที่ตั้งประเภทเคสเป็นกายภาพไว้ (ไม่มีแพ็คเกจ) — เกณฑ์เดียวกับ serviceKindOf ในรายการ
+          else if (c.case_type === 'physiotherapy') filled.service_kind = 'physio';
         }
         setForm(filled);
         initial.current = JSON.stringify(filled);
@@ -675,6 +679,12 @@ export default function CaseFormPage() {
    * ยังไม่ได้เลือกผู้ป่วย = ผู้ป่วยรายใหม่ -> สร้างแฟ้ม (PAT-xxxx) จากข้อมูลที่กรอก แล้วผูกกับผู้ว่าจ้าง (ถ้ามี)
    * เก็บ patient_id กลับเข้าฟอร์ม เผื่อบันทึกเคสพลาดแล้วกดใหม่ จะไม่สร้างผู้ป่วยซ้ำ
    */
+  /** error รายช่องจาก API อื่น (ผู้ป่วย/ผู้ว่าจ้าง) ใช้ชื่อช่องของตารางนั้น — แปลงเป็นชื่อช่องในฟอร์มนี้ ให้ขึ้นใต้ช่องได้ */
+  const remapFields = (map) => (err) => {
+    if (err.fields) err.fields = err.fields.map((f) => ({ ...f, field: map[f.field] ?? f.field }));
+    throw err;
+  };
+
   async function ensurePatient(payload) {
     if (payload.patient_id) return payload.patient_id;
     // รู้แค่ผู้ว่าจ้าง — ยังไม่มีชื่อให้สร้างแฟ้ม (server เติม "ยังไม่ระบุผู้ป่วย" ให้เคส)
@@ -693,7 +703,7 @@ export default function CaseFormPage() {
       relation_to_customer: payload.relation_to_customer,
       address: payload.address,
       customer_id: payload.customer_id, // ผูกผู้ว่าจ้างตั้งแต่แรก (null ได้ถ้ายังไม่รู้ผู้จ่าย)
-    });
+    }).catch(remapFields({ patient_id: 'patient_code', name: 'client_name' }));
 
     setForm((prev) => ({ ...prev, patient_id: patient.patient_id }));
     return patient.patient_id;
@@ -718,7 +728,7 @@ export default function CaseFormPage() {
       name: newPayer.name.trim(),
       phone: newPayer.phone.trim() || null,
       address: payload.address ?? null,
-    });
+    }).catch(remapFields({ name: 'payer_name', phone: 'payer_phone' }));
     setPayerQuery('');
     setPayerPhone('');
     setPayer(created);
@@ -909,11 +919,17 @@ export default function CaseFormPage() {
               <label>
                 เบอร์โทรผู้ว่าจ้าง
                 <input
+                  name="payer_phone"
                   type="tel"
                   inputMode="tel"
                   value={payerPhone}
-                  onChange={(e) => setPayerPhone(e.target.value)}
+                  aria-invalid={fieldErrors.payer_phone ? true : undefined}
+                  onChange={(e) => {
+                    setPayerPhone(e.target.value);
+                    setFieldErrors((prev) => (prev.payer_phone ? { ...prev, payer_phone: undefined } : prev));
+                  }}
                 />
+                {fieldError('payer_phone')}
               </label>
             </div>
           )}
@@ -1205,6 +1221,8 @@ export default function CaseFormPage() {
                 <label>รหัสผู้ป่วย (KN) *
                   <PatientCodeInput
                     name="patient_code"
+                    checker={(code) => api.checkPatientId(code)}
+                    takenLabel="รหัสนี้ถูกใช้กับผู้ป่วยคนอื่นแล้ว"
                     value={form.patient_code}
                     invalid={Boolean(fieldErrors.patient_code)}
                     onChange={(code) => {
@@ -1323,6 +1341,8 @@ export default function CaseFormPage() {
                 <label>รหัสผู้ป่วย (KN) {payerKnown ? '(กรอกเมื่อมีชื่อผู้ป่วย)' : '*'}
                   <PatientCodeInput
                     name="patient_code"
+                    checker={(code) => api.checkPatientId(code)}
+                    takenLabel="รหัสนี้ถูกใช้กับผู้ป่วยคนอื่นแล้ว"
                     value={form.patient_code}
                     invalid={Boolean(fieldErrors.patient_code)}
                     onChange={(code) => {

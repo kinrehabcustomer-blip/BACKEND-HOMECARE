@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import InvoiceModal from '../components/InvoiceModal.jsx';
 import SortHead from '../components/SortHead.jsx';
+import OfficeLink from '../components/OfficeLink.jsx';
 import ErrorBar from '../components/ErrorBar.jsx';
 import PageRefresh from '../components/PageRefresh.jsx';
 import { api } from '../api.js';
@@ -228,7 +229,7 @@ export default function InvoiceListPage() {
               <div>
                 <strong>{c.client_name ?? c.title}</strong>
                 <p className="muted">
-                  <Link className="link mono" to={`/cases?open=${c.case_id}`}>{c.case_id}</Link>
+                  <OfficeLink className="link mono" to={`/cases?open=${c.case_id}`}>{c.case_id}</OfficeLink>
                   {' · '}{CASE_STATUS_LABELS[c.status] ?? c.status}
                   {' · '}ค่าบริการ {c.fee != null ? formatBaht(c.fee) : 'ยังไม่ระบุ'}
                 </p>
@@ -324,9 +325,9 @@ export default function InvoiceListPage() {
                   {serviceHead(v.service_description)}
                   {v.case_id && (
                     <span className="cell-sub">
-                      <Link className="link mono" to={`/cases?open=${v.case_id}`} onClick={(e) => e.stopPropagation()}>
+                      <OfficeLink className="link mono" to={`/cases?open=${v.case_id}`} onClick={(e) => e.stopPropagation()}>
                         {v.case_id}
-                      </Link>
+                      </OfficeLink>
                     </span>
                   )}
                 </td>

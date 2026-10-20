@@ -206,6 +206,24 @@ if (process.env.RUN_DB_TESTS !== '1') {
     return post('/api/cases', { case_type: 'other', client_name: 'Workflow patient', fee: 2000, staff_pay: 1200 }, MANAGER, 201);
   }
 
+  test('legacy physio case (case_type only): unrelated edits keep it, switching to Homecare resets case_type', async () => {
+    const patch = async (path, body) => {
+      const res = await fetch(`${base}${path}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json', cookie: `${COOKIE_NAME}=${signToken(MANAGER)}` },
+        body: JSON.stringify(body),
+      });
+      return { status: res.status, body: await res.json() };
+    };
+    const c = await newCase();
+    await sql.run(`UPDATE cases SET case_type = 'physiotherapy', service_kind = NULL, physio_package_id = NULL WHERE case_id = :id`, { id: c.case_id });
+    await patch(`/api/cases/${c.case_id}`, { note: 'แก้ช่องอื่น' });
+    assert.equal((await sql.one('SELECT case_type FROM cases WHERE case_id = :id', { id: c.case_id })).case_type, 'physiotherapy');
+    const res = await patch(`/api/cases/${c.case_id}`, { service_kind: 'homecare' });
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    assert.equal((await sql.one('SELECT case_type FROM cases WHERE case_id = :id', { id: c.case_id })).case_type, 'elderly_care');
+  });
+
   describe('สิทธิ์ตามตำแหน่ง — การเงิน / Admin IPD / Admin HC', () => {
     const FINANCE = emp('EMP-0091', 'finance');
     const IPD = emp('EMP-0092', 'admin_ipd');
@@ -710,6 +728,11 @@ if (process.env.RUN_DB_TESTS !== '1') {
       const p = await post('/api/patients', { patient_id: 'KN691111111', name: 'ผู้ป่วย KN' }, MANAGER, 201);
       assert.equal(p.patient_id, 'KN691111111');
       const dup = await post('/api/patients', { patient_id: 'KN691111111', name: 'ชื่ออื่น' }, MANAGER, 409);
+      // ตรวจซ้ำระหว่างกรอก (ฟอร์มผู้ป่วย / เปิดเคส)
+      assert.deepEqual((await get('/api/patients/check-id?id=KN691111111', MANAGER)).body, { valid: true, available: false, taken_by: 'ผู้ป่วย KN' });
+      assert.equal((await get('/api/patients/check-id?id=KN691111111&except=KN691111111', MANAGER)).body.available, true);
+      assert.equal((await get('/api/patients/check-id?id=KN699999999', MANAGER)).body.available, true);
+      assert.equal((await get('/api/patients/check-id?id=PAT-1', MANAGER)).body.valid, false);
       assert.match(dup.error, /มีอยู่แล้ว/);
 
       // แฟ้มเก่าแบบ PAT-xxxx: เปลี่ยนเป็นรหัส KN ได้ และเคสที่ผูกอยู่ตามรหัสใหม่ไปเอง

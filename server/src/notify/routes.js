@@ -89,9 +89,9 @@ const sendDigest = asyncRoute(async (req, res) => {
 
   const recipients = await repo.digestRecipients();
   if (recipients.length === 0) {
-    // เกณฑ์ผู้รับคือ "คนที่เข้าหลังบ้านได้" = ผู้จัดการและ HR (ดู digestRecipients) ต้องเขียนให้ตรง
+    // เกณฑ์ผู้รับคือ "คนที่เข้าหลังบ้านได้" = ผู้จัดการ / HR / Admin HC (ดู digestRecipients) ต้องเขียนให้ตรง
     // ไม่งั้นคนอ่านจะไปตามหาว่าทำไมตั้งอีเมลผู้จัดการแล้วยังไม่ส่ง ทั้งที่ปัญหาอยู่คนละที่
-    return res.json({ sent: false, reason: 'ไม่มีผู้จัดการหรือ HR ที่มีอีเมลในระบบ', date, sections });
+    return res.json({ sent: false, reason: 'ไม่มีผู้จัดการ / HR / Admin HC ที่มีอีเมลในระบบ', date, sections });
   }
 
   const sent = await sendDigestEmail({ to: recipients.map((r) => r.email), date, sections });

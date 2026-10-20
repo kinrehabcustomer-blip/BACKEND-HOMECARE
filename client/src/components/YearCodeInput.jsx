@@ -29,10 +29,15 @@ export default function YearCodeInput({
   checkerRef.current = checker;
   const hasChecker = Boolean(checker);
 
-  // ค่าจากภายนอกเปลี่ยน (โหลดมาแก้ / ล้างฟอร์ม) — ตามให้ทัน แต่ไม่ทับตอนกำลังพิมพ์ไม่ครบ
+  /* ค่าที่ช่องนี้ส่งออกไปเองล่าสุด — value ที่เด้งกลับมาเท่ากับค่านี้คือเสียงสะท้อนของการพิมพ์ ไม่ใช่ค่าจากภายนอก
+     (เดิมเทียบกับ parts: ลบปีออก 1 หลักตอนเลขครบ → ส่ง '' → ถูกมองว่าฟอร์มล้างค่า เลข 7 หลักหายและปีเด้งกลับ) */
+  const emitted = useRef(value);
+
+  // ค่าจากภายนอกเปลี่ยนจริง (โหลดมาแก้ / ล้างฟอร์ม / วางรหัสจากที่อื่น) — ตามให้ทัน
   useEffect(() => {
-    if (value && value !== joinCode(prefix, parts.year, parts.number)) setParts(splitCode(prefix, value));
-    if (!value && parts.number.length === 7) setParts(splitCode(prefix, ''));
+    if (value === emitted.current) return;
+    emitted.current = value;
+    if ((value || '') !== joinCode(prefix, parts.year, parts.number)) setParts(splitCode(prefix, value || ''));
   }, [value]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ตรวจซ้ำเมื่อครบแล้ว — หน่วงให้พิมพ์จบก่อน และทิ้งผลของคำค้นเก่าที่ตอบกลับมาช้ากว่า
@@ -57,7 +62,9 @@ export default function YearCodeInput({
   const update = (next) => {
     const merged = { ...parts, ...next };
     setParts(merged);
-    onChange(joinCode(prefix, merged.year, merged.number));
+    const code = joinCode(prefix, merged.year, merged.number);
+    emitted.current = code;
+    onChange(code);
   };
   const digits = (v, max) => v.replace(/\D/g, '').slice(0, max);
   const onPaste = (e) => {

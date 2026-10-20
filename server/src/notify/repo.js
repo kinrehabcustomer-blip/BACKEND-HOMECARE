@@ -1,4 +1,5 @@
 import { sql } from '../db/index.js';
+import { POSITION_PERMISSIONS } from '../lib/auth.js';
 import { LATE_THRESHOLD_MINUTES } from '../cases/repo.js';
 
 /**
@@ -85,15 +86,17 @@ export const overdueInvoices = ({ today }) =>
 
 /**
  * ผู้รับสรุปประจำวัน = คนที่เข้าหลังบ้านได้และยังทำงานอยู่
- * ยึด "ตำแหน่ง" เป็นเกณฑ์เดียวกับสิทธิ์ในระบบ (ADMIN_POSITIONS ใน lib/auth.js) ไม่ใช่คอลัมน์ role
+ * ยึด "ตำแหน่ง" ที่มีสิทธิ์ office (POSITION_PERMISSIONS ใน lib/auth.js) ไม่ใช่คอลัมน์ role
+ * — ผู้จัดการ / HR / Admin HC · ฝ่ายการเงินกับ Admin IPD ไม่ได้ (สรุปเป็นเรื่องเคส/กะ ที่สองตำแหน่งนี้เปิดดูไม่ได้)
  * ไม่งั้นคนที่เพิ่งเลื่อนเป็นผู้จัดการจะเข้าหน้าเว็บได้แต่ไม่ได้รับอีเมล
  */
 export const digestRecipients = () =>
   sql.all(
     `SELECT employee_id, email, first_name || ' ' || last_name AS name
      FROM employees
-     WHERE position IN ('manager', 'hr')
+     WHERE position = ANY(:positions::text[])
        AND status NOT IN ('resigned', 'suspended')
        AND email IS NOT NULL
      ORDER BY employee_id`,
+    { positions: Object.keys(POSITION_PERMISSIONS).filter((p) => POSITION_PERMISSIONS[p].includes('office')) },
   );
