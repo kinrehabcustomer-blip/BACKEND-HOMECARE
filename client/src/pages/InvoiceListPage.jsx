@@ -181,7 +181,7 @@ export default function InvoiceListPage() {
         <div className="toolbar">
           <input
             className="search search-compact"
-            placeholder="ค้นหา เลขที่ใบ / ชื่อผู้จ่าย / รหัสเคส"
+            placeholder="ค้นหา เลขที่ใบ / ชื่อผู้ป่วย / ผู้จ่าย / รหัสเคส"
             value={q}
             onChange={(e) => setFilter('q', e.target.value)}
           />
@@ -219,7 +219,7 @@ export default function InvoiceListPage() {
               <tr>
                 <th>#</th>
                 <th><SortHead column="invoice_id" {...SORTABLE.invoice_id} sort={sort} order={order} onSort={sortBy} /></th>
-                <th>ผู้จ่าย / เบอร์</th>
+                <th>ผู้ป่วย / เบอร์</th>
                 <th className="cell-text">รายการ / เคส</th>
                 <th><SortHead column="issue_date" {...SORTABLE.issue_date} sort={sort} order={order} onSort={sortBy} /></th>
                 <th><SortHead column="total" {...SORTABLE.total} sort={sort} order={order} onSort={sortBy} /></th>
@@ -261,13 +261,15 @@ export default function InvoiceListPage() {
                       </span>
                     )}
                   </td>
-                  <td data-label="ผู้จ่าย" title={v.bill_to_name || undefined}>
-                    {v.bill_to_name}
-                    {v.customer_phone && (
+                  {/* ชื่อผู้ป่วยของเคส (คนที่ทีมรู้จักและใช้เรียกเคส) — เคสที่ยังไม่รู้ชื่อผู้ป่วยใช้ชื่อผู้จ่ายแทน
+                      ผู้จ่ายตัวจริงยังอยู่ในใบแจ้งหนี้ (หัวใบ/ช่องลงนาม) ไม่ได้หายไปไหน */}
+                  <td data-label="ผู้ป่วย" title={v.patient_name || v.bill_to_name || undefined}>
+                    {v.patient_name || v.bill_to_name}
+                    {v.contact_phone && (
                       <span className="cell-sub">
                         {/* stopPropagation กันไม่ให้การกดเบอร์เปิด popup ตามไปด้วย */}
-                        <a className="link mono" href={`tel:${v.customer_phone}`} onClick={(e) => e.stopPropagation()}>
-                          {v.customer_phone}
+                        <a className="link mono" href={`tel:${v.contact_phone}`} onClick={(e) => e.stopPropagation()}>
+                          {v.contact_phone}
                         </a>
                       </span>
                     )}
@@ -327,38 +329,39 @@ export default function InvoiceListPage() {
             </tbody>
           </table>
         </div>
+        {/* แถบเลื่อนหน้าอยู่ท้ายการ์ด (การ์ดยืดเต็มจอ — อยู่นอกการ์ดจะถูกดันตกจอ) */}
+        {result && (
+          <div className="pager">
+            {/* มีหน้าเดียวก็ไม่ต้องมีปุ่มเลื่อนหน้าที่กดไม่ได้ — แต่ตัวเลือกจำนวนแถวยังต้องอยู่ */}
+            {result.pagination.total_pages > 1 && (
+              <>
+                <button className="btn" disabled={page <= 1} onClick={() => patch({ page: String(page - 1) })}>
+                  ก่อนหน้า
+                </button>
+                <span className="muted">
+                  หน้า {result.pagination.page} / {result.pagination.total_pages}
+                </span>
+                <button
+                  className="btn"
+                  disabled={page >= result.pagination.total_pages}
+                  onClick={() => patch({ page: String(page + 1) })}
+                >
+                  ถัดไป
+                </button>
+              </>
+            )}
+
+            <label className="per-page">
+              แสดง
+              <select value={perPage} onChange={(e) => setFilter('per_page', e.target.value)}>
+                {PER_PAGE_OPTIONS.map((n) => <option key={n} value={n}>{n}</option>)}
+              </select>
+              ต่อหน้า
+            </label>
+          </div>
+        )}
       </div>
 
-      {result && (
-        <div className="pager">
-          {/* มีหน้าเดียวก็ไม่ต้องมีปุ่มเลื่อนหน้าที่กดไม่ได้ — แต่ตัวเลือกจำนวนแถวยังต้องอยู่ */}
-          {result.pagination.total_pages > 1 && (
-            <>
-              <button className="btn" disabled={page <= 1} onClick={() => patch({ page: String(page - 1) })}>
-                ก่อนหน้า
-              </button>
-              <span className="muted">
-                หน้า {result.pagination.page} / {result.pagination.total_pages}
-              </span>
-              <button
-                className="btn"
-                disabled={page >= result.pagination.total_pages}
-                onClick={() => patch({ page: String(page + 1) })}
-              >
-                ถัดไป
-              </button>
-            </>
-          )}
-
-          <label className="per-page">
-            แสดง
-            <select value={perPage} onChange={(e) => setFilter('per_page', e.target.value)}>
-              {PER_PAGE_OPTIONS.map((n) => <option key={n} value={n}>{n}</option>)}
-            </select>
-            ต่อหน้า
-          </label>
-        </div>
-      )}
 
       {/* เคสที่ไม่มีใบเหลืออยู่ — ซ่อนตอนกรองอยู่ เพราะกำลังหาใบที่มีอยู่แล้ว ไม่ได้มาออกใบใหม่ */}
       {!filtered && missing.length > 0 && (

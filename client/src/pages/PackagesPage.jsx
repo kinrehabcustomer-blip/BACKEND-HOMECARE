@@ -409,9 +409,12 @@ export default function PackagesPage() {
 
   return (
     <PageRefresh onRefresh={reload} busy={loading}>
-      <header className="page-head">
-        {/* หัวหน้าแบบเดียวกับหัวปฏิทิน: ไอคอนในกรอบสีทองอ่อน + คำเล็กด้านบน + ชื่อหน้าตัวใหญ่ */}
-        <div className="page-hero">
+      {/* ทั้งหน้าอยู่ในการ์ดขาวใบเดียวชิดขอบ (ธีมเดียวกับหน้ารายการอื่น) — แถบบนสุด = หัวแบบ hero + ปุ่ม
+          ตารางเรทแต่ละกลุ่มยังเป็นรูปแบบเดิม แค่คั่นกันด้วยเส้นแทนการลอยบนพื้นครีม */}
+      <div className="list-card packages-card">
+      <div className="toolbar">
+        {/* หัวแบบเดียวกับหัวปฏิทิน: ไอคอนในกรอบสีทองอ่อน + คำเล็กด้านบน + ชื่อหน้าตัวใหญ่ */}
+        <div className="page-hero toolbar-note">
           <span className="page-hero-icon" aria-hidden="true"><LineIcon name="home" /></span>
           <div>
             <p className="page-hero-kicker">Homecare · เรทตามเกรด × รูปแบบบริการ × ระดับพนักงาน</p>
@@ -423,7 +426,7 @@ export default function PackagesPage() {
             )}
           </div>
         </div>
-        <div className="actions">
+        <div className="actions toolbar-action">
           {editing ? (
             <>
               <button
@@ -446,7 +449,7 @@ export default function PackagesPage() {
             </>
           )}
         </div>
-      </header>
+      </div>
 
       {/* error ตอนบันทึก/เพิ่ม-ลบเกรด — เป็นแถบเหนือตาราง ห้ามทับทั้งหน้า
           ไม่งั้นราคาที่แก้ค้างไว้หลายสิบช่องจะหายไปพร้อมกับหน้าจอ ทั้งที่ยังอยู่ใน state ครบ
@@ -505,8 +508,9 @@ export default function PackagesPage() {
       ))}
 
       {matrix.grades.length === 0 && (
-        <p className="muted">ยังไม่มีเกรด — กด "จัดการเกรด/รูปแบบ" เพื่อเพิ่ม</p>
+        <p className="muted packages-empty">ยังไม่มีเกรด — กด "จัดการเกรด/รูปแบบ" เพื่อเพิ่ม</p>
       )}
+      </div>
     </PageRefresh>
   );
 }

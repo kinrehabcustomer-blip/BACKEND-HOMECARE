@@ -766,6 +766,15 @@ export default function CaseFormPage() {
     setConfirmingService(false);
 
     // กรอกเบอร์ผู้ว่าจ้างไว้แต่ไม่มีชื่อ — บันทึกผู้ว่าจ้างที่ไม่มีชื่อไม่ได้ ทักให้กรอกชื่อ ไม่ใช่ทิ้งเบอร์ไปเงียบๆ
+    /* ความสัมพันธ์เก็บที่แฟ้มผู้ป่วย — กรอกได้ทุกเมื่อ (ช่องอยู่ก่อนส่วนผู้ป่วย) แต่ถ้าบันทึกโดยยังไม่มีผู้ป่วยเลย
+       ค่านี้ไม่มีที่ให้เก็บ จะหายไปเงียบๆ — ทักให้กรอกชื่อผู้ป่วยก่อน หรือเว้นช่องนี้ไว้ */
+    if (relation.trim() && !form.patient_id && !form.client_name.trim()) {
+      setError('กรอกความสัมพันธ์กับผู้ป่วยไว้ แต่ยังไม่มีชื่อผู้ป่วย — กรอกชื่อผู้ป่วยก่อน หรือเว้นช่องความสัมพันธ์ไว้');
+      setFieldErrors((prev) => ({ ...prev, employer_relation: 'ต้องมีชื่อผู้ป่วยก่อน จึงจะบันทึกความสัมพันธ์ได้' }));
+      formEl.current?.querySelector('[name="employer_relation"]')?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      return;
+    }
+
     if (!form.customer_id && !payerQuery.trim() && payerPhone.trim()) {
       setError('กรอกเบอร์ผู้ว่าจ้างไว้แล้ว — กรุณากรอกชื่อผู้ว่าจ้างด้วย');
       setFieldErrors((prev) => ({ ...prev, payer_name: 'กรอกชื่อผู้ว่าจ้าง' }));
@@ -967,8 +976,11 @@ export default function CaseFormPage() {
               <input
                 name="employer_relation"
                 value={relation}
-                disabled={!form.patient_id && !form.client_name.trim()}
-                onChange={(e) => setRelation(e.target.value)}
+                aria-invalid={fieldErrors.employer_relation ? true : undefined}
+                onChange={(e) => {
+                  setRelation(e.target.value);
+                  setFieldErrors((prev) => (prev.employer_relation ? { ...prev, employer_relation: undefined } : prev));
+                }}
               />
               {fieldError('employer_relation')}
             </label>

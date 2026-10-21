@@ -250,38 +250,39 @@ export default function EmployeeListPage() {
             </tbody>
           </table>
         </div>
+        {/* แถบเลื่อนหน้าอยู่ท้ายการ์ด (การ์ดยืดเต็มจอ — อยู่นอกการ์ดจะถูกดันตกจอ) */}
+        {result && (
+          <div className="pager">
+            {/* มีหน้าเดียวก็ไม่ต้องมีปุ่มเลื่อนหน้าที่กดไม่ได้ — แต่ตัวเลือกจำนวนแถวยังต้องอยู่ */}
+            {result.pagination.total_pages > 1 && (
+              <>
+                <button className="btn" disabled={page <= 1} onClick={() => patch({ page: String(page - 1) })}>
+                  ก่อนหน้า
+                </button>
+                <span className="muted">
+                  หน้า {result.pagination.page} / {result.pagination.total_pages}
+                </span>
+                <button
+                  className="btn"
+                  disabled={page >= result.pagination.total_pages}
+                  onClick={() => patch({ page: String(page + 1) })}
+                >
+                  ถัดไป
+                </button>
+              </>
+            )}
+
+            <label className="per-page">
+              แสดง
+              <select value={perPage} onChange={(e) => setFilter('per_page', e.target.value)}>
+                {PER_PAGE_OPTIONS.map((n) => <option key={n} value={n}>{n}</option>)}
+              </select>
+              ต่อหน้า
+            </label>
+          </div>
+        )}
       </div>
 
-      {result && (
-        <div className="pager">
-          {/* มีหน้าเดียวก็ไม่ต้องมีปุ่มเลื่อนหน้าที่กดไม่ได้ — แต่ตัวเลือกจำนวนแถวยังต้องอยู่ */}
-          {result.pagination.total_pages > 1 && (
-            <>
-              <button className="btn" disabled={page <= 1} onClick={() => patch({ page: String(page - 1) })}>
-                ก่อนหน้า
-              </button>
-              <span className="muted">
-                หน้า {result.pagination.page} / {result.pagination.total_pages}
-              </span>
-              <button
-                className="btn"
-                disabled={page >= result.pagination.total_pages}
-                onClick={() => patch({ page: String(page + 1) })}
-              >
-                ถัดไป
-              </button>
-            </>
-          )}
-
-          <label className="per-page">
-            แสดง
-            <select value={perPage} onChange={(e) => setFilter('per_page', e.target.value)}>
-              {PER_PAGE_OPTIONS.map((n) => <option key={n} value={n}>{n}</option>)}
-            </select>
-            ต่อหน้า
-          </label>
-        </div>
-      )}
 
       {openId && (
         <EmployeeModal

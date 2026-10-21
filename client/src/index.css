@@ -5286,3 +5286,98 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
   .reviews-card .review-tiles { grid-template-columns: 1fr 1fr; }
   .reviews-card .review-tiles > .tile:first-child { grid-column: 1 / -1; }
 }
+
+/* ---------- หน้ารายการทุกหน้า (จอคอม): การ์ดขาวยืดถึงขอบล่างจอ + เส้นคั่นระหว่างคอลัมน์ ----------
+   รายการสั้นแล้วเหลือพื้นสีครีมโล่งๆ ใต้ตาราง ดูเหมือนหน้าโหลดไม่เสร็จ — ให้การ์ดกินพื้นที่ที่เหลือทั้งหมด
+   (แถบเลื่อนหน้าอยู่ในการ์ดแล้ว ดันลงไปชิดล่างด้วย margin-top: auto)
+   เส้นคั่นแนวตั้งระหว่างหัวคอลัมน์/ช่อง ช่วยไล่สายตาในตารางกว้างเต็มจอ ว่าตัวเลขไหนอยู่คอลัมน์ไหน */
+@media (min-width: 901px) {
+  .content:has(.list-card) { display: flex; flex-direction: column; padding-bottom: 0; }
+  .content:has(.list-card) > .pull-zone,
+  .content:has(.list-card) > .pull-zone > .pull-content { flex: 1; display: flex; flex-direction: column; }
+  .list-card { flex: 1; display: flex; flex-direction: column; border-bottom: 0; }
+  .list-card > .pager { margin: auto 0 0; padding: 1rem; border-top: 1px solid var(--divider); }
+  /* การ์ดเป็นคอลัมน์ flex แล้ว — .tiles มี flex: 1 ติดมาจากแถบตัวเลขหน้าอื่น ต้องไม่ยืดสูงกินที่ทั้งการ์ด */
+  .list-card > .tiles { flex: none; }
+}
+@media (min-width: 601px) {
+  .list-card .table th + th { border-left: 1px solid var(--border); }
+  .list-card .table td + td { border-left: 1px solid var(--divider); }
+}
+@media (max-width: 600px) { .list-card > .pager { padding: 1rem 0 0; } }
+
+/* ข้อความสถานะว่าง / กำลังโหลด ในการ์ดรายการ — อยู่กลางพื้นที่ว่างของการ์ด (ทั้งแนวนอนและแนวตั้ง)
+   การ์ดยืดเต็มจอแล้ว ถ้าข้อความค้างอยู่บนสุดชิดซ้าย จะดูเหมือนหน้ายังโหลดไม่เสร็จ */
+.list-card > .empty-state, .list-card > .loading-center { text-align: center; }
+.list-card > .empty-state p, .list-card > .empty-state .cell-sub { text-align: center; }
+@media (min-width: 901px) {
+  .list-card > .empty-state, .list-card > .loading-center {
+    flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  }
+}
+
+/* ---------- ฟอนต์หัวข้อ (ทุกหน้า) ----------
+   หัวข้อใช้ Prompt — ทรงเรขาคณิต หนักแน่น แยกจากเนื้อหา (Anuphan) ได้ในแวบเดียว
+   คุมที่เดียวตรงนี้: ชื่อหน้า · หัว hero · หัวการ์ด/หัวข้อในฟอร์ม · หัวป๊อปอัป · ชื่อเดือนในปฏิทิน */
+:root { --font-heading: 'Prompt', 'Anuphan', 'Segoe UI', system-ui, sans-serif; }
+h1, h2, h3, h4, .page-hero-title, .cal-title, .login-heading h1 {
+  font-family: var(--font-heading);
+  font-optical-sizing: auto;
+}
+.page-head h1, .page-hero-title {
+  font-size: 1.625rem; font-weight: 600; line-height: 1.25; letter-spacing: -0.005em;
+}
+.page-head h1 + .muted, .page-head > div > .muted { margin-top: 0.25rem; font-size: 0.875rem; }
+.card h2, .form h2, .modal-head h2, .cal-hero .cal-title { font-weight: 600; letter-spacing: 0; }
+.form h2, .card h2 { font-size: 1.0625rem; }
+@media (max-width: 600px) { .page-head h1, .page-hero-title { font-size: 1.375rem; } }
+
+/* ---------- หน้าภาพรวม: ไม่มีหัวหน้า การ์ดสรุปขึ้นชิดขอบบน แถวบนของการ์ดคือช่วงเวลา + ตัวเลือกปี/เดือน ---------- */
+.hero-card { flex-wrap: wrap; }
+.hero-top {
+  flex: 1 0 100%; display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap;
+  padding-bottom: 1rem; margin-bottom: 0.25rem; border-bottom: 1px solid var(--border);
+}
+.empty-state > .hero-top { margin-bottom: 2rem; text-align: left; }
+/* ระยะจากขอบบนเท่ากับระยะขอบซ้าย/ขวาของการ์ด (1rem) — กรอบรอบการ์ดสม่ำเสมอทุกด้าน */
+@media (min-width: 901px) {
+  :is(.content, .content > .pull-zone > .pull-content) > .sr-only + .hero-card,
+  :is(.content, .content > .pull-zone > .pull-content) > .sr-only + .card { margin-top: -1rem; }
+}
+/* จอแคบการ์ดสรุปเรียงเป็นคอลัมน์ — flex-basis 100% / flex: 1 กลายเป็น "สูงเต็ม" แทน "กว้างเต็ม" จึงต้องปิดการยืด */
+@media (max-width: 900px) { .hero-top .period-picker { width: 100%; } .hero-card { flex-wrap: nowrap; } .hero-card > .hero-top, .hero-card > .tiles { flex: none; } }
+
+/* ---------- หน้าแพ็คเกจ Homecare: ทั้งหน้าเป็นการ์ดขาวใบเดียว (ธีมเดียวกับหน้าอื่น) ----------
+   ตารางเรทคงรูปแบบเดิม (หัวคอลัมน์สี CG/NA/PN/RN) — แต่ละกลุ่มคั่นด้วยเส้น ไม่ลอยบนพื้นครีม
+   ปุ่มในแถบบนขนาดปกติ วางกึ่งกลาง (กฎ .toolbar:has(.page-hero) .toolbar-action ด้านบน) */
+.packages-card > .toolbar .actions { flex-wrap: nowrap; }
+.packages-card > .rate-section { margin: 0; padding-top: 1.25rem; border-top: 1px solid var(--border); }
+.packages-card > .rate-section:first-of-type { border-top: 0; }
+.packages-card > .rate-section > h2 { margin: 0 1rem 0.375rem; font-size: 1.125rem; }
+.packages-card > .rate-section > h2 .muted { font-family: inherit; font-size: 0.8125rem; font-weight: 500; }
+.packages-card > .rate-section > .grade-desc { margin: 0 1rem 0.75rem; }
+.packages-card > .rate-section > .table-wrap > .table { border-inline: 0; border-bottom: 0; border-radius: 0; }
+.packages-card > .error, .packages-card > .notice, .packages-card > .packages-empty { margin: 1rem; }
+/* เว้นที่ใต้ตารางกลุ่มสุดท้าย — การ์ดชนขอบล่างจอ ถ้าไม่เว้น แถวสุดท้ายจะติดขอบจอพอดีจนดูเหมือนถูกตัด */
+.packages-card { padding-bottom: 3rem; }
+/* แผงจัดการเกรด/รูปแบบเป็น .card ของตัวเอง — อยู่ในการ์ดแม่แล้ว ไม่ต้องมีกรอบ/มุมมนซ้อน */
+.packages-card > .card { border-width: 1px 0 0; border-radius: 0; box-shadow: none; }
+.packages-card > :not(.toolbar):not(.rate-section):not(.error):not(.notice):not(.packages-empty) { margin: 0; padding: 1rem; border-top: 1px solid var(--border); }
+/* จอแคบ: กลุ่มเรทเป็นการ์ดพับเก็บได้ของตัวเองอยู่แล้ว — การ์ดแม่ถอดกรอบ (กฎ .list-card ≤600) ให้เรียงแบบเดิม */
+@media (max-width: 600px) {
+  .packages-card > .rate-section { padding-top: 0; border-top: 1px solid var(--border); }
+  .packages-card > .rate-section > h2 { margin: 0; }
+  .packages-card > :not(.toolbar):not(.rate-section):not(.error):not(.notice):not(.packages-empty) { padding: 1rem 0; }
+}
+
+/* ---------- เส้นตารางให้ชัดขึ้น (จอกว้าง) ----------
+   เดิมเส้นคั่นแถว/คอลัมน์ใช้สี --divider ซึ่งจางจนแทบไม่เห็นบนพื้นขาวเต็มจอ — ไล่สายตาข้ามคอลัมน์ไม่ได้
+   ใช้ --border-hover (เข้มกว่าหนึ่งขั้น) ทั้งตารางรายการและตารางเรทแพ็คเกจ */
+@media (min-width: 601px) {
+  .list-card .table th + th, .list-card .table td + td { border-left: 1px solid var(--border-hover); }
+  .list-card .table thead th { border-bottom: 1px solid var(--border-hover); }
+  .list-card .table tbody td { border-bottom-color: var(--border-hover); }
+  .rate-table th, .rate-table td { border-color: var(--border-hover); }
+  /* เส้นปิดท้ายใต้แถวสุดท้าย — ตารางจบตรงไหนต้องเห็นชัด ไม่ใช่กลืนไปกับพื้นขาวว่างของการ์ด */
+  .list-card .table tbody tr:last-child td { border-bottom: 1px solid var(--border-hover); }
+}

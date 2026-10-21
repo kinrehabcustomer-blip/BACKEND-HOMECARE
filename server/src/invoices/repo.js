@@ -226,6 +226,9 @@ const SELECT_INVOICE = `
          CASE WHEN c.case_id IS NOT NULL THEN ${serviceKeySql('c')} END AS case_service_key,
          cu.name       AS customer_name,
          cu.phone      AS customer_phone,
+         /* เบอร์ติดต่อของฝั่งผู้ป่วย (ตารางใบแจ้งหนี้โชว์ "ผู้ป่วย / เบอร์") — ไล่จากเบอร์ญาติในเคส
+            -> ผู้ติดต่อฉุกเฉินในแฟ้มผู้ป่วย -> เบอร์ผู้ว่าจ้าง (ผู้ป่วยไม่มีช่องเบอร์ของตัวเอง) */
+         COALESCE(NULLIF(c.client_phone, ''), NULLIF(p.emergency_contact_phone, ''), cu.phone, pcu.phone) AS contact_phone,
          COALESCE(ccu.name, pcu.name, c.client_name) AS case_payer_name
   FROM invoices i
   LEFT JOIN cases c      ON c.case_id      = i.case_id
@@ -423,7 +426,8 @@ function buildWhere({ q, status, customer_id, case_id, overdue, stale, draft_sta
   const params = {};
 
   if (q) {
-    where.push('(i.invoice_id ILIKE :q OR i.bill_to_name ILIKE :q OR i.case_id ILIKE :q)');
+    where.push(`(i.invoice_id ILIKE :q OR i.bill_to_name ILIKE :q OR i.case_id ILIKE :q
+      OR EXISTS (SELECT 1 FROM cases qc WHERE qc.case_id = i.case_id AND qc.client_name ILIKE :q))`);
     params.q = `%${q}%`;
   }
   if (status) {

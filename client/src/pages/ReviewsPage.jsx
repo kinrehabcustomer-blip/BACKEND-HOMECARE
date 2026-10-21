@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import LineIcon from '../components/LineIcon.jsx';
 import { api } from '../api.js';
 import { STATUS_LABELS, POSITION_LABELS, stampText } from '../labels.js';
 import Stars from '../components/Stars.jsx';
@@ -44,13 +43,8 @@ export default function ReviewsPage() {
 
   return (
     <PageRefresh onRefresh={load} busy={loading}>
-      <header className="page-head">
-        {/* หัวหน้าแบบ hero — ไอคอนในกรอบสีทองอ่อน + ชื่อหน้าตัวใหญ่ (ชุดเดียวกับหน้าแพ็คเกจ) */}
-        <div className="page-hero">
-          <span className="page-hero-icon" aria-hidden="true"><LineIcon name="star" /></span>
-          <h1 className="page-hero-title">คะแนนประเมินจากญาติ</h1>
-        </div>
-      </header>
+      {/* ไม่มีหัวหน้าบนจอ (การ์ดสรุปเป็นส่วนบนสุด) — คง h1 ไว้ให้โปรแกรมอ่านหน้าจอ */}
+      <h1 className="sr-only">คะแนนประเมินจากญาติ</h1>
 
       {error && <p className="error">{error}</p>}
 

@@ -96,44 +96,45 @@ export default function DashboardPage() {
   // เรียงมากไปน้อย ประเภทที่ยังไม่มีเคสเลยไม่ต้องแสดง (กราฟเรียงซ้ำอีกชั้นเผื่อถูกเรียกจากที่อื่น)
   const byType = summary ? [...(summary.by_service ?? [])].sort((a, b) => b.count - a.count) : [];
 
+  /* แถวบนสุดของการ์ดแรก (แทนหัวหน้าเดิม) — ตัวเลือกช่วงเวลาอยู่แถวเดียวเหนือทุกอย่างที่มันควบคุม */
+  const periodBar = (
+    <div className="hero-top">
+      <span className="muted">
+        {year ? `เคสที่เปิดใน${formatPeriod(year, month)}` : 'สรุปสถานะเคสทั้งหมดในระบบ'}
+      </span>
+      <div className="period-picker">
+        <select value={year} onChange={(e) => changeYear(e.target.value)} aria-label="เลือกปี">
+          <option value="">ทุกปี</option>
+          {periods.map((p) => (
+            <option key={p.year} value={p.year}>
+              ปี {toBuddhistYear(p.year)} ({p.count})
+            </option>
+          ))}
+        </select>
+
+        {/* เลือกเดือนไม่ได้จนกว่าจะเลือกปี — "พฤษภาคม" ของปีไหนไม่มีคำตอบ */}
+        <select
+          value={month}
+          onChange={(e) => setMonth(e.target.value)}
+          disabled={!year}
+          aria-label="เลือกเดือน"
+          title={year ? undefined : 'เลือกปีก่อน'}
+        >
+          <option value="">{year ? 'ทั้งปี' : 'ทุกเดือน'}</option>
+          {monthsOfYear.map((m) => (
+            <option key={m.month} value={m.month}>
+              {MONTH_LABELS[m.month]} ({m.count})
+            </option>
+          ))}
+        </select>
+      </div>
+    </div>
+  );
+
   return (
     <PageRefresh onRefresh={reload} busy={loading}>
-      <header className="page-head">
-        <div>
-          <h1>ภาพรวม</h1>
-          <p className="muted">
-            {year ? `เคสที่เปิดใน${formatPeriod(year, month)}` : 'สรุปสถานะเคสทั้งหมดในระบบ'}
-          </p>
-        </div>
-
-        {/* ตัวกรองอยู่แถวเดียวเหนือทุกอย่างที่มันควบคุม — ทั้งหน้าเปลี่ยนตามพร้อมกัน */}
-        <div className="period-picker">
-          <select value={year} onChange={(e) => changeYear(e.target.value)} aria-label="เลือกปี">
-            <option value="">ทุกปี</option>
-            {periods.map((p) => (
-              <option key={p.year} value={p.year}>
-                ปี {toBuddhistYear(p.year)} ({p.count})
-              </option>
-            ))}
-          </select>
-
-          {/* เลือกเดือนไม่ได้จนกว่าจะเลือกปี — "พฤษภาคม" ของปีไหนไม่มีคำตอบ */}
-          <select
-            value={month}
-            onChange={(e) => setMonth(e.target.value)}
-            disabled={!year}
-            aria-label="เลือกเดือน"
-            title={year ? undefined : 'เลือกปีก่อน'}
-          >
-            <option value="">{year ? 'ทั้งปี' : 'ทุกเดือน'}</option>
-            {monthsOfYear.map((m) => (
-              <option key={m.month} value={m.month}>
-                {MONTH_LABELS[m.month]} ({m.count})
-              </option>
-            ))}
-          </select>
-        </div>
-      </header>
+      {/* ไม่มีหัวหน้าบนจอ (การ์ดสรุปเป็นส่วนบนสุด) — คง h1 ไว้ให้โปรแกรมอ่านหน้าจอ */}
+      <h1 className="sr-only">ภาพรวม</h1>
 
       {/* error เป็นแถบเหนือเนื้อหา ไม่ทับทั้งหน้า — ตัวเลือกปี/เดือนกับตัวเลขที่โหลดมาได้แล้ว
           ต้องไม่หายไปเพราะเน็ตสะดุดครั้งเดียว และต้องมีทางกดกลับมาเองโดยไม่ต้องรีเฟรชเบราว์เซอร์ */}
@@ -143,6 +144,7 @@ export default function DashboardPage() {
         !error && <p className="muted">กำลังโหลด…</p>
       ) : total === 0 ? (
         <section className="card empty-state">
+          {periodBar}
           <p>{year ? `ไม่มีเคสที่เปิดใน${formatPeriod(year, month)}` : 'ยังไม่มีเคสในระบบ'}</p>
           {year ? (
             <button className="btn" onClick={() => changeYear('')}>ดูทุกช่วงเวลา</button>
@@ -156,6 +158,7 @@ export default function DashboardPage() {
       ) : (
         <>
           <section className="hero-card">
+            {periodBar}
             <div className="hero">
               <span className="hero-label">
                 {!year ? 'เคสทั้งหมด' : month ? 'เคสในเดือนนี้' : 'เคสในปีนี้'}
