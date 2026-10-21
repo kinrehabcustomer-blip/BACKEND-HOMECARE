@@ -273,7 +273,7 @@ export async function remove(employeeId) {
 export async function activeManagerCount(excludeId = null) {
   const row = await sql.one(
     `SELECT COUNT(*) AS n FROM employees
-     WHERE position = 'manager'
+     WHERE position IN ('manager', 'super_admin') -- ผู้ดูแลระบบสูงสุดนับเป็นคนดูแลระบบด้วย
        AND status NOT IN ('resigned', 'suspended')
        AND (:exclude::text IS NULL OR employee_id <> :exclude)`,
     { exclude: excludeId },

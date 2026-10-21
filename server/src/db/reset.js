@@ -23,7 +23,14 @@ import { pool, sql, transaction } from './index.js';
 
 const args = process.argv.slice(2);
 const confirmed = args.includes('--yes');
-const keep = (args.find((a) => a.startsWith('--keep=')) ?? '--keep=EMP-0001').split('=')[1];
+/* --super-admin=อีเมล = ล้างพนักงานทุกคน (ไม่เก็บใครไว้) แล้วสร้างบัญชี Super Admin ใหม่ด้วยอีเมลนี้ไว้ login
+   ใช้ตอนเริ่มระบบใหม่ทั้งหมด — ไม่ใส่ = พฤติกรรมเดิม (เก็บพนักงาน --keep ไว้หนึ่งคน) */
+const superAdminEmail = args.find((a) => a.startsWith('--super-admin='))?.split('=')[1]?.trim() || null;
+const keep = superAdminEmail
+  ? null
+  : (args.find((a) => a.startsWith('--keep=')) ?? '--keep=EMP-0001').split('=')[1];
+// ตารางที่ต้องเหลือข้อมูลหลังล้าง — นอกจากนี้ต้องว่างหมด (ตรวจซ้ำหลังลบ ไม่เชื่อว่า CASCADE ไล่ครบเอง)
+const KEPT_TABLES = ['pkg_grades', 'pkg_service_formats', 'pkg_rates', 'physio_packages', 'id_counters', 'employees'];
 
 // ลำดับการลบไล่จากตารางที่ถูกอ้างถึงน้อยที่สุดขึ้นไป — ลูกของแต่ละตัวหายตามเองด้วย FK CASCADE
 // (invoice_items ← invoices · case_visits, case_events ← cases · ใบรับรอง/ผลงาน/OTP ← employees)
@@ -35,8 +42,9 @@ const STEPS = [
   ['cases', 'DELETE FROM cases', 'เคส (+ กะงาน + ประวัติการทำรายการ)'],
   ['patients', 'DELETE FROM patients', 'ผู้รับการดูแล'],
   ['customers', 'DELETE FROM customers', 'ลูกค้า/ผู้ว่าจ้าง'],
-  ['employees', 'DELETE FROM employees WHERE employee_id <> :keep', 'พนักงาน (ยกเว้นคนที่เก็บไว้)'],
+  ['employees', 'DELETE FROM employees WHERE employee_id IS DISTINCT FROM :keep', 'พนักงาน (ยกเว้นคนที่เก็บไว้)'],
   ['password_reset_otps', 'DELETE FROM password_reset_otps', 'OTP รีเซ็ตรหัสผ่านที่ค้างอยู่'],
+  ['login_failures', 'DELETE FROM login_failures', 'ประวัติ login ผิด'],
 ];
 
 // ของถัดไปเริ่มที่ 0001 · พนักงานนับต่อจากคนที่เก็บไว้ ไม่งั้นคนถัดไปจะได้รหัสชนกับเขา
@@ -87,22 +95,30 @@ async function backup() {
   return file;
 }
 
-const person = await sql.one(
-  'SELECT employee_id, first_name, last_name, position FROM employees WHERE employee_id = :keep',
-  { keep },
-);
-if (!person) {
-  console.error(`✗ ไม่พบพนักงาน ${keep} — ยกเลิก (ล้างแล้วจะไม่เหลือใครเข้าระบบได้เลย)`);
-  await pool.end();
-  process.exit(1);
+if (superAdminEmail) {
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(superAdminEmail)) {
+    console.error(`✗ อีเมล Super Admin ไม่ถูกต้อง: ${superAdminEmail}`);
+    await pool.end();
+    process.exit(1);
+  }
+  console.log(`ลบพนักงานทุกคน แล้วสร้าง Super Admin ใหม่: ${superAdminEmail}`);
+} else {
+  const person = await sql.one(
+    'SELECT employee_id, first_name, last_name, position FROM employees WHERE employee_id = :keep',
+    { keep },
+  );
+  if (!person) {
+    console.error(`✗ ไม่พบพนักงาน ${keep} — ยกเลิก (ล้างแล้วจะไม่เหลือใครเข้าระบบได้เลย)`);
+    await pool.end();
+    process.exit(1);
+  }
+  console.log(`เก็บไว้: ${person.employee_id} ${person.first_name} ${person.last_name} (${person.position})`);
 }
-
-console.log(`เก็บไว้: ${person.employee_id} ${person.first_name} ${person.last_name} (${person.position})`);
 console.log('เก็บไว้: ตารางราคา Homecare (เกรด/รูปแบบ/เรท) และแพ็คเกจกายภาพบำบัด\n');
 
 console.log('จะลบ:');
 for (const [table, , label] of STEPS) {
-  const where = table === 'employees' ? 'WHERE employee_id <> :keep' : '';
+  const where = table === 'employees' ? 'WHERE employee_id IS DISTINCT FROM :keep' : '';
   const { n } = await sql.one(`SELECT COUNT(*) AS n FROM ${table} ${where}`, { keep });
   console.log(`  ${String(n).padStart(4)}  ${label}`);
 }
@@ -142,4 +158,27 @@ await sql.run(`DELETE FROM id_counters WHERE name LIKE 'employee:%'`);
 
 console.log('\nตั้งตัวนับรหัสใหม่แล้ว — ของถัดไปจะเป็น CUS-0001 · ใบแจ้งหนี้ HC-IV + วันที่ + 0001 (รหัสเคส VN / ผู้ป่วย KN กรอกเอง)');
 console.log('พนักงานคนถัดไปจะได้รหัส A + ปี พ.ศ. + 01001 (หรือกรอกรหัสเองในฟอร์ม)');
+
+if (superAdminEmail) {
+  // ผ่านตัวสร้างพนักงานตัวเดียวกับหน้าเว็บ — ได้รหัสตามรูปแบบ A…, รหัสผ่านชั่วคราว และบังคับเปลี่ยนตอน login ครั้งแรก
+  const { create } = await import('../employees/repo.js');
+  const admin = await create({
+    first_name: 'Super', last_name: 'Admin', position: 'super_admin',
+    email: superAdminEmail, status: 'active', employment_type: 'fulltime',
+  });
+  console.log('\nสร้างบัญชี Super Admin แล้ว');
+  console.log(`  รหัสพนักงาน : ${admin.employee_id}`);
+  console.log(`  อีเมล login  : ${superAdminEmail}`);
+  console.log(`  รหัสผ่านชั่วคราว: ${admin.temp_password}   (ระบบบังคับเปลี่ยนตอน login ครั้งแรก)`);
+}
+
+// ตรวจซ้ำ: ทุกตารางนอกจากที่ตั้งใจเก็บต้องว่างจริง — ไม่เชื่อว่า CASCADE ไล่ลบครบเอง
+const tables = await sql.all(`SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name`);
+const leftover = [];
+for (const { table_name: t } of tables) {
+  if (KEPT_TABLES.includes(t)) continue;
+  const { n } = await sql.one(`SELECT COUNT(*) AS n FROM ${t}`);
+  if (Number(n) > 0) leftover.push(`${t} (${n})`);
+}
+console.log(leftover.length ? `\n⚠ ยังมีข้อมูลค้าง: ${leftover.join(', ')}` : '\n✓ ตรวจแล้ว: ตารางอื่นว่างหมด เหลือแค่แพ็คเกจ Homecare / กายภาพบำบัด และพนักงานที่ตั้งใจเก็บ');
 await pool.end();

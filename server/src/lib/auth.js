@@ -31,6 +31,7 @@ export const roleForPosition = (position) => (ADMIN_POSITIONS.includes(position)
  * กลุ่ม front ไม่มีหมวดไหนเลย — ใช้แอปภาคสนาม (/api/my) ซึ่งเห็นเฉพาะงานของตัวเอง
  */
 export const POSITION_PERMISSIONS = {
+  super_admin: ['office', 'billing', 'money'], // Super Admin — ครบทุกหมวดเท่าผู้จัดการ (ต่างกันที่การแต่งตั้ง ดู employees/routes.js)
   manager: ['office', 'billing', 'money'],
   hr: ['office', 'billing'],
   admin: ['office', 'billing'],   // Admin HC

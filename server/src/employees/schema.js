@@ -19,15 +19,17 @@ export const POSITIONS = [
   // สายสำนักงาน (กลุ่ม back) — สิทธิ์ของแต่ละตำแหน่งดูที่ POSITION_PERMISSIONS ใน lib/auth.js
   // 'admin' = Admin HC (ชื่อเดิม "แอดมิน") · 'finance' = การเงิน (Admin IPD เลิกใช้แล้ว — ย้ายเป็น Admin HC)
   'manager', 'hr', 'admin', 'finance',
+  // super_admin = บัญชีดูแลระบบสูงสุด (ใช้ login หลังล้างระบบ) — สิทธิ์ครบทุกหมวด และเป็นคนเดียวที่ตั้ง/แก้ super admin ได้
+  'super_admin',
 ];
 /**
  * พนักงานแบ่งเป็นสองกลุ่ม (ต้องตรงกับ client/src/labels.js)
- *   back  = สายสำนักงาน: ผู้จัดการ · HR · Admin HC · การเงิน
+ *   back  = สายสำนักงาน: Super Admin · ผู้จัดการ · HR · Admin HC · การเงิน
  *   front = ทุกตำแหน่งที่เหลือ: สายดูแล (CG/NA/PN/RN) + สายบำบัด — คนที่ออกไปดูแลผู้ป่วยจริง
  * front เท่านั้นที่รับเคส/ลงกะได้ และเปิดรับแบบประเมินจากญาติ
  * ประกาศ front เป็น "ทุกอย่างที่ไม่ใช่ back" — เพิ่มตำแหน่งหน้างานใหม่ที่ POSITIONS แล้วตามมาเอง
  */
-export const BACK_POSITIONS = ['manager', 'hr', 'admin', 'finance'];
+export const BACK_POSITIONS = ['super_admin', 'manager', 'hr', 'admin', 'finance'];
 export const FRONT_POSITIONS = POSITIONS.filter((p) => !BACK_POSITIONS.includes(p));
 
 export const EMPLOYMENT_TYPES = ['fulltime', 'parttime', 'contract', 'daily'];

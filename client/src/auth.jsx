@@ -80,7 +80,7 @@ export function permissionsOf(user) {
   if (!user) return [];
   if (Array.isArray(user.permissions)) return user.permissions;
   if (user.role !== 'admin') return [];
-  return user.position === 'manager' ? ['office', 'billing', 'money'] : ['office', 'billing'];
+  return ['manager', 'super_admin'].includes(user.position) ? ['office', 'billing', 'money'] : ['office', 'billing'];
 }
 
 export const useCan = (permission) => permissionsOf(useAuth()?.user).includes(permission);

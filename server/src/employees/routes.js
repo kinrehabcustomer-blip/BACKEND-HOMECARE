@@ -116,8 +116,14 @@ employeesRouter.get(
  *      แล้ว login เป็นบัญชีนั้นได้เลย (ทางนี้ไม่ต้องแตะบัญชีตัวเองด้วยซ้ำ)
  * ปิดทางเดียวไม่พอ ต้องปิดที่ "ใครมีสิทธิ์แต่งตั้งผู้จัดการ" ซึ่งคือผู้จัดการเท่านั้น
  */
+/** ผู้ดูแลระบบระดับบน — Super Admin อยู่เหนือผู้จัดการ (ทำทุกอย่างที่ผู้จัดการทำได้ และตั้ง/แก้ Super Admin ได้คนเดียว) */
+const isTopAdmin = (position) => position === 'manager' || position === 'super_admin';
+
 export function ensureCanGrantManager(req, nextPosition) {
-  if (nextPosition === 'manager' && req.user.position !== 'manager') {
+  if (nextPosition === 'super_admin' && req.user.position !== 'super_admin') {
+    throw new ApiError(403, 'เฉพาะ Super Admin เท่านั้นที่ตั้งตำแหน่ง Super Admin ให้คนอื่นได้');
+  }
+  if (nextPosition === 'manager' && !isTopAdmin(req.user.position)) {
     throw new ApiError(403, 'เฉพาะผู้จัดการเท่านั้นที่ตั้งตำแหน่งผู้จัดการให้คนอื่นได้');
   }
   // ตำแหน่งที่เห็นเรื่องเงิน (เช่น การเงิน) ก็เป็นการเลื่อนสิทธิ์เหมือนกัน — HR/Admin HC แต่งตั้งเองไม่ได้
@@ -133,7 +139,10 @@ export function ensureCanGrantManager(req, nextPosition) {
  * ก็ได้บัญชีผู้จัดการทั้งบัญชี — เป็นทางอ้อมของการเลื่อนสิทธิ์ที่ ensureCanGrantManager ปิดไว้
  */
 export function ensureCanManageTarget(req, target) {
-  if (target.position === 'manager' && req.user.position !== 'manager') {
+  if (target.position === 'super_admin' && req.user.position !== 'super_admin') {
+    throw new ApiError(403, 'เฉพาะ Super Admin เท่านั้นที่แก้ไขหรือนำบัญชี Super Admin ออกได้');
+  }
+  if (target.position === 'manager' && !isTopAdmin(req.user.position)) {
     throw new ApiError(403, 'เฉพาะผู้จัดการเท่านั้นที่แก้ไขหรือนำบัญชีผู้จัดการออกได้');
   }
   // บัญชีที่เห็นเรื่องเงินถูกยึดผ่านทางเดียวกับผู้จัดการได้ (แก้อีเมลแล้วกดลืมรหัสผ่าน) — กันแบบเดียวกัน
@@ -151,8 +160,8 @@ export async function ensurePositionChangeAllowed(req, target, nextPosition) {
   }
   ensureCanGrantManager(req, nextPosition);
 
-  if (target.position === 'manager' && (await repo.activeManagerCount(target.employee_id)) === 0) {
-    throw new ApiError(409, 'นี่คือผู้จัดการคนสุดท้ายที่ใช้งานได้ — ตั้งผู้จัดการคนใหม่ก่อนจึงจะลดตำแหน่งคนนี้ได้');
+  if (isTopAdmin(target.position) && (await repo.activeManagerCount(target.employee_id)) === 0) {
+    throw new ApiError(409, 'นี่คือผู้ดูแลระบบคนสุดท้ายที่ใช้งานได้ — ตั้งผู้จัดการคนใหม่ก่อนจึงจะลดตำแหน่งคนนี้ได้');
   }
 }
 
@@ -163,8 +172,8 @@ export async function ensurePositionChangeAllowed(req, target, nextPosition) {
  * ตั้งผู้จัดการคนใหม่ได้อีกเลย (ดู ensureCanGrantManager) ต้องเข้าไปแก้ที่ฐานข้อมูลตรงๆ ทางเดียว
  */
 export async function ensureRemovable(target, action = 'นำคนนี้ออกได้') {
-  if (target.position === 'manager' && (await repo.activeManagerCount(target.employee_id)) === 0) {
-    throw new ApiError(409, `นี่คือผู้จัดการคนสุดท้ายที่ใช้งานได้ — ตั้งผู้จัดการคนใหม่ก่อนจึงจะ${action}`);
+  if (isTopAdmin(target.position) && (await repo.activeManagerCount(target.employee_id)) === 0) {
+    throw new ApiError(409, `นี่คือผู้ดูแลระบบคนสุดท้ายที่ใช้งานได้ — ตั้งผู้จัดการคนใหม่ก่อนจึงจะ${action}`);
   }
 }
 

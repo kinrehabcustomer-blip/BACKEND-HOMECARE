@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { api } from '../api.js';
 import { useToast } from '../toast.jsx';
+import { useAuth } from '../auth.jsx';
 import CertificateSection from '../components/CertificateSection.jsx';
 import PortfolioSection from '../components/PortfolioSection.jsx';
 import PhotoField from '../components/PhotoField.jsx';
@@ -31,6 +32,7 @@ export default function EmployeeFormPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const toast = useToast();
+  const { user } = useAuth();
   const isEdit = Boolean(id);
 
   const [form, setForm] = useState(BLANK);
@@ -240,7 +242,10 @@ export default function EmployeeFormPage() {
           />
           <label>ตำแหน่ง *
             <select required name="position" {...field('position')}>
-              {Object.entries(POSITION_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              {/* Super Admin ตั้งได้เฉพาะ Super Admin (server กันอีกชั้น) — คนอื่นไม่เห็นตัวเลือกนี้ เว้นแต่แฟ้มนี้เป็น Super Admin อยู่แล้ว */}
+              {Object.entries(POSITION_LABELS)
+                .filter(([v]) => v !== 'super_admin' || user?.position === 'super_admin' || form.position === 'super_admin')
+                .map(([v, l]) => <option key={v} value={v}>{l}</option>)}
             </select>
             {fieldError('position')}
           </label>

@@ -25,7 +25,7 @@ export default function EmployeeDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
-  const canSeeTempPassword = ['manager', 'admin', 'hr'].includes(user?.position);
+  const canSeeTempPassword = ['super_admin', 'manager', 'admin', 'hr'].includes(user?.position);
 
   const [employee, setEmployee] = useState(null);
   const [error, setError] = useState(null);

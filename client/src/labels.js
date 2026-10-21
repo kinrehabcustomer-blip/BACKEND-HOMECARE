@@ -12,6 +12,7 @@ export const POSITION_LABELS = {
   // คีย์ยังเป็น 'admin' — เปลี่ยนแค่ป้าย ข้อมูลพนักงานเดิมไม่ต้องย้าย
   admin: 'Admin HC',
   finance: 'การเงิน',     // เข้าได้เฉพาะใบแจ้งหนี้ · ค่าตอบแทนพนักงาน · รายได้บริษัท
+  super_admin: 'Super Admin', // ผู้ดูแลระบบสูงสุด — สิทธิ์ครบ และตั้ง/แก้ Super Admin ได้คนเดียว
 };
 
 /**
@@ -23,7 +24,7 @@ export const THERAPY_POSITIONS = ['therapist', 'occupational_therapist', 'speech
 
 /** กลุ่มพนักงาน — back = สายสำนักงาน · front = ที่เหลือทั้งหมด (ออกไปดูแลผู้ป่วยจริง)
     ต้องตรงกับ BACK_POSITIONS / FRONT_POSITIONS ใน server/src/employees/schema.js */
-export const BACK_POSITIONS = ['manager', 'hr', 'admin', 'finance'];
+export const BACK_POSITIONS = ['super_admin', 'manager', 'hr', 'admin', 'finance'];
 export const FRONT_POSITIONS = Object.keys(POSITION_LABELS).filter((p) => !BACK_POSITIONS.includes(p));
 
 /**

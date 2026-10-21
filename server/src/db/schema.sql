@@ -47,7 +47,7 @@ UPDATE employees SET position = 'admin' WHERE position = 'admin_ipd';
 ALTER TABLE employees ADD CONSTRAINT employees_position_check
   CHECK (position IN ('caregiver', 'assistant_nurse', 'practical_nurse', 'nurse',
                       'therapist', 'occupational_therapist', 'speech_therapist',
-                      'manager', 'hr', 'admin', 'finance'));
+                      'manager', 'hr', 'admin', 'finance', 'super_admin'));
 
 -- ใบรับรอง / ใบประกอบวิชาชีพ ผูกกับพนักงานผ่าน employee_id
 CREATE TABLE IF NOT EXISTS employee_certificates (
