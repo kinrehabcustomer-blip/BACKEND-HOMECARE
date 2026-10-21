@@ -72,7 +72,9 @@ export function Approvals({ month, employeeId, patch, employeePicker, reloadKey 
 
   const allPicked = rows?.length > 0 && picked.size === rows.length;
   const pickedRows = rows?.filter((v) => picked.has(v.visit_id)) ?? [];
-  const pickedTotal = pickedRows.reduce((s, v) => s + (v.pay ?? 0), 0);
+  /* ค่าจ้างไม่ได้คิดรายกะแล้ว (ก้อนเดียวต่อเคส ปล่อยที่แท็บ "ปล่อยค่าจ้าง") — แท็บนี้ยืนยันแค่ว่ากะเกิดขึ้นจริง
+     จึงสรุปเป็นชั่วโมงทำงาน ไม่ใช่ยอดเงิน (เดิมรวม v.pay ที่ server ไม่ได้ส่งมาแล้ว ได้ ฿0 ทุกครั้ง) */
+  const pickedMinutes = pickedRows.reduce((s, v) => s + (v.worked_minutes ?? 0), 0);
 
   async function decide(approve) {
     const ids = [...picked];
@@ -83,7 +85,7 @@ export function Approvals({ month, employeeId, patch, employeePicker, reloadKey 
       // ไม่อนุมัติต้องมีเหตุผลเสมอ — เป็นสิ่งเดียวที่พนักงานจะได้รู้ว่าทำไมกะนั้นไม่ได้เงิน
       reason = prompt(`ไม่อนุมัติ ${ids.length} กะ — เหตุผล (พนักงานจะเห็นข้อความนี้)`);
       if (!reason?.trim()) return;
-    } else if (!confirm(`อนุมัติค่าจ้าง ${ids.length} กะ รวม ${formatBaht(pickedTotal)}?`)) {
+    } else if (!confirm(`ยืนยัน ${ids.length} กะ (รวม ${durationText(pickedMinutes)})?`)) {
       return;
     }
 
@@ -108,10 +110,9 @@ export function Approvals({ month, employeeId, patch, employeePicker, reloadKey 
       v.off_schedule && 'นอกวันนัด',
       v.check_in_late_minutes > LATE_MINUTES && `สาย ${durationText(v.check_in_late_minutes)}`,
       v.worked_minutes === 0 && 'ทำงาน 0 นาที',
-      v.pay == null && 'ยังไม่ระบุค่าจ้าง',
     ].filter(Boolean);
 
-  const total = rows?.reduce((s, v) => s + (v.pay ?? 0), 0) ?? 0;
+  const totalMinutes = rows?.reduce((s, v) => s + (v.worked_minutes ?? 0), 0) ?? 0;
 
   return (
     <>
@@ -167,7 +168,6 @@ export function Approvals({ month, employeeId, patch, employeePicker, reloadKey 
                   <th>พนักงาน / เคส</th>
                   <th>เข้า–ออก</th>
                   <th>รวม</th>
-                  <th>ค่าจ้าง</th>
                 </tr>
               </thead>
               <tbody>
@@ -218,9 +218,6 @@ export function Approvals({ month, employeeId, patch, employeePicker, reloadKey 
                       {flags(v).length > 0 && <span className="cell-sub flag-text">{flags(v).join(' · ')}</span>}
                     </td>
                     <td data-label="รวม">{durationText(v.worked_minutes)}</td>
-                    <td data-label="ค่าจ้าง">
-                      {v.pay == null ? <span className="muted">—</span> : formatBaht(v.pay)}
-                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -230,8 +227,7 @@ export function Approvals({ month, employeeId, patch, employeePicker, reloadKey 
                   <th data-label="รวม">{rows.length} กะ</th>
                   <th />
                   <th />
-                  <th />
-                  <th data-label="ค่าจ้างรวม">{formatBaht(total)}</th>
+                  <th data-label="ชั่วโมงรวม">{durationText(totalMinutes)}</th>
                 </tr>
               </tfoot>
             </table>
@@ -241,7 +237,7 @@ export function Approvals({ month, employeeId, patch, employeePicker, reloadKey 
           {picked.size > 0 && (
             <div className="approve-bar">
               <p className="pick-count">
-                เลือกไว้ <strong>{picked.size}</strong> กะ · รวม <strong>{formatBaht(pickedTotal)}</strong>
+                เลือกไว้ <strong>{picked.size}</strong> กะ · รวม <strong>{durationText(pickedMinutes)}</strong>
               </p>
               <div className="pick-actions">
                 <button className="btn primary" disabled={busy} onClick={() => decide(true)}>

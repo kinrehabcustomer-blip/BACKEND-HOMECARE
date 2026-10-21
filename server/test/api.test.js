@@ -603,6 +603,31 @@ if (process.env.RUN_DB_TESTS !== '1') {
       await sql.run(`UPDATE cases SET case_id = 'CASE-FIXTURE' WHERE case_id = 'VN680000001'`);
     });
 
+    test('ยกเลิกเคส: ใบร่างถูกยกเลิกตาม · ใบของเคสที่ยกเลิกแล้วออกใบไม่ได้', async () => {
+      const c = await newCase();
+      const draft = (await get(`/api/invoices?case_id=${c.case_id}`, MANAGER)).body.data[0];
+      assert.equal(draft.status, 'draft');
+      await post(`/api/cases/${c.case_id}/cancel`, { reason: 'ลูกค้ายกเลิก' });
+      assert.equal((await get(`/api/invoices/${draft.invoice_id}`, MANAGER)).body.status, 'cancelled');
+      const events = (await get(`/api/cases/${c.case_id}/events`, MANAGER)).body;
+      assert.ok(events.some((e) => /ยกเลิกใบแจ้งหนี้ร่าง 1 ใบ/.test(e.detail)));
+
+      // ใบร่างที่หลุดรอด (เช่น ข้อมูลก่อนมีการยกเลิกตาม) — ด่านออกใบต้องกันไว้อีกชั้น
+      const c2 = await newCase();
+      const d2 = (await get(`/api/invoices?case_id=${c2.case_id}`, MANAGER)).body.data[0];
+      await post(`/api/invoices/${d2.invoice_id}/billing-plan`, { mode: 'full' });
+      await sql.run(`UPDATE cases SET status = 'cancelled' WHERE case_id = :id`, { id: c2.case_id });
+      const issued = await post(`/api/invoices/${d2.invoice_id}/issue`, {}, MANAGER, 409);
+      assert.match(issued.error, /ถูกยกเลิกแล้ว/);
+    });
+
+    test('รายการในใบ: ไม่ซ้ำชื่อผู้ป่วยเมื่อหัวรายการเป็นชื่อผู้ป่วยอยู่แล้ว', async () => {
+      const c = await post('/api/cases', { case_type: 'other', client_name: 'Grandpa Later', title: 'Grandpa Later', fee: 1000, staff_pay: 500 }, MANAGER, 201);
+      const inv = (await get(`/api/invoices?case_id=${c.case_id}`, MANAGER)).body.data[0];
+      const full = (await get(`/api/invoices/${inv.invoice_id}`, MANAGER)).body;
+      assert.ok(!/Grandpa Later.*ผู้รับบริการ: Grandpa Later/.test(full.service_description), full.service_description);
+    });
+
     test('deleted invoice: case shows up as missing an invoice and can be reissued', async () => {
       const c = await newCase();
       const draft = (await get(`/api/invoices?case_id=${c.case_id}`, MANAGER)).body.data[0];
@@ -1305,6 +1330,27 @@ if (process.env.RUN_DB_TESTS !== '1') {
       assert.ok(released);
       const payouts = await sql.all('SELECT employee_id, amount FROM case_payouts WHERE case_id = :id', { id: c.case_id });
       assert.deepEqual(payouts.map((p) => [p.employee_id, Number(p.amount)]), [[LEAD_A.employee_id, 500]]);
+    });
+
+    test('ส่วนแบ่งค่าจ้าง: เคสหลายคนที่ยังไม่ตกลงส่วนแบ่ง ต้องระบุยอดรายคน ไม่หารเท่ากันให้เอง', async () => {
+      const c = await newCase();
+      await post(`/api/cases/${c.case_id}/assign`, { employee_id: FIELD.employee_id });
+      await post(`/api/cases/${c.case_id}/team`, { employee_id: LEAD_A.employee_id });
+
+      const refused = await post(`/api/cases/${c.case_id}/pay/release`, { amount: 600 }, MANAGER, 400);
+      assert.match(refused.error, /ระบุยอดของแต่ละคน/);
+
+      await post(`/api/cases/${c.case_id}/pay/release`, {
+        amount: 600,
+        shares: [{ employee_id: FIELD.employee_id, amount: 600 }, { employee_id: LEAD_A.employee_id, amount: 0 }],
+      }, MANAGER, 201);
+      const payouts = await sql.all('SELECT employee_id, amount FROM case_payouts WHERE case_id = :id', { id: c.case_id });
+      assert.deepEqual(payouts.map((p) => [p.employee_id, Number(p.amount)]), [[FIELD.employee_id, 600]]);
+
+      // เคสคนเดียวยังปล่อยได้โดยไม่ต้องระบุ (ไม่มีอะไรให้แบ่ง)
+      const solo = await newCase();
+      await post(`/api/cases/${solo.case_id}/assign`, { employee_id: FIELD.employee_id });
+      await post(`/api/cases/${solo.case_id}/pay/release`, { amount: 300 }, MANAGER, 201);
     });
 
     test('เปิดเคสใหม่: คืนกะข้างหน้าที่ระบบยกเลิกตอนปิด/ยกเลิกเคส แต่ไม่คืนกะที่คนกดยกเลิกเอง', async () => {

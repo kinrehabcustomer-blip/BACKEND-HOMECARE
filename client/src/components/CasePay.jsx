@@ -69,6 +69,10 @@ export default function CasePayPanel({ caseId, busy, run, toast }) {
   const workers = shares.length;
   const manyHands = shares.length > 1;
   const entitled = entitlements(shares, total);
+  /* เคสที่มีพนักงานหลายคนและยังไม่ได้ตกลงส่วนแบ่ง — ให้ผู้จัดการกรอกเองว่าใครได้เท่าไหร่ ไม่หารเท่ากันให้เงียบๆ
+     (เคยหารเท่ากันตามหัว คนที่อยู่ในทีมแต่ไม่ได้ทำกะเลยก็ได้เท่าคนที่ทำงานจริง โดยไม่มีอะไรเตือน)
+     ตกลงส่วนแบ่งของทั้งเคสไว้แล้ว = ใช้ข้อตกลงนั้นเติมให้ เพราะคนตัดสินใจไปแล้ว */
+  const manual = manyHands && !hasAgreement;
 
   /* ยอดของงวดนี้: เว้นว่าง = ยอดคงเหลือทั้งหมด (กรณีปกติ งานจบแล้วจ่ายให้ครบ) */
   const text = amount.trim();
@@ -78,7 +82,15 @@ export default function CasePayPanel({ caseId, busy, run, toast }) {
   /* ส่วนแบ่งของงวดนี้ตามข้อตกลง (หรือหารเท่ากันถ้ายังไม่ได้ตกลงอะไร) พร้อมไล่ชดเชยงวดก่อน
      split เก็บเฉพาะตอนที่ผู้จัดการแก้เฉพาะงวดนี้ — null = ตามข้อตกลง ซึ่งเป็นกรณีส่วนใหญ่ */
   const proposal = validAmount ? allocateShares(shares, value) : [];
-  const rows = proposal.map((r) => ({ ...r, text: split?.[r.employee_id] ?? String(r.amount) }));
+  const rows = manual
+    ? shares.map((r) => ({
+        ...r,
+        amount: proposal.find((p) => p.employee_id === r.employee_id)?.amount ?? 0,
+        text: split?.[r.employee_id] ?? '',
+      }))
+    : proposal.map((r) => ({ ...r, text: split?.[r.employee_id] ?? String(r.amount) }));
+  // ปุ่ม "แบ่งเท่ากัน" ในโหมดกรอกเอง — ตัวช่วยตั้งต้น ไม่ใช่ค่าปริยาย
+  const fillEqual = () => setSplit(Object.fromEntries(rows.map((r) => [r.employee_id, String(r.amount)])));
   const sum = round(rows.reduce((s, r) => s + (Number(r.text) || 0), 0));
   const sumOk = validAmount && sum === round(value);
 
@@ -298,13 +310,23 @@ export default function CasePayPanel({ caseId, busy, run, toast }) {
                   {/* ---- งวดนี้ใครได้เท่าไหร่ (พรีวิว แก้เฉพาะงวดนี้ได้) ---- */}
                   {manyHands && (
                     <div className="pay-split">
-                      <p className="muted">
-                        <strong>งวดนี้แบ่งกันแบบนี้</strong>
-                        <span className="cell-sub">
-                          คิดจาก{hasAgreement ? 'ส่วนแบ่งที่ตกลงไว้' : 'การหารเท่ากัน'}
-                          แล้วไล่ชดเชยงวดก่อนให้แล้ว — แก้เฉพาะงวดนี้ได้ ผลรวมต้องเท่ากับยอดของงวด
-                        </span>
-                      </p>
+                      {manual ? (
+                        <p className="muted">
+                          <strong>กรอกยอดของแต่ละคนในงวดนี้</strong>
+                          <span className="cell-sub">
+                            เคสนี้มี {workers} คน — ระบบไม่หารให้เอง กรอกตามงานที่แต่ละคนทำจริง
+                            ผลรวมต้องเท่ากับยอดของงวด
+                          </span>
+                        </p>
+                      ) : (
+                        <p className="muted">
+                          <strong>งวดนี้แบ่งกันแบบนี้</strong>
+                          <span className="cell-sub">
+                            คิดจากส่วนแบ่งที่ตกลงไว้แล้วไล่ชดเชยงวดก่อนให้แล้ว — แก้เฉพาะงวดนี้ได้
+                            ผลรวมต้องเท่ากับยอดของงวด
+                          </span>
+                        </p>
+                      )}
 
                       <ul className="plain-list pay-split-rows">
                         {rows.map((r, i) => {
@@ -321,8 +343,11 @@ export default function CasePayPanel({ caseId, busy, run, toast }) {
                                     ค่าปริยายคือหารเท่ากันตามหัว ส่วนที่ต่างจากนั้นมาจากข้อตกลงที่คนตั้งเอง
                                     เอาเลขกะมาวางข้างยอดเงินเมื่อไหร่ คนอ่านจะกลับไปคิดว่ายอดมาจากกะทันที */}
                                 <span className="cell-sub">
-                                  ส่วนของทั้งเคส {formatBaht(entitled[i])} · ได้ไปแล้ว {formatBaht(r.paid)}
-                                  {over > 0 && (
+                                  {manual
+                                    ? `ทำ ${r.shifts ?? 0} กะ · ได้ไปแล้ว ${formatBaht(r.paid)}`
+                                    : `ส่วนของทั้งเคส ${formatBaht(entitled[i])} · ได้ไปแล้ว ${formatBaht(r.paid)}`}
+                                  {manual && !r.shifts && <span className="flag-text"> · ยังไม่มีกะในเคสนี้</span>}
+                                  {!manual && over > 0 && (
                                     <span className="flag-text"> · ได้ล่วงหน้าเกินไป {formatBaht(over)}</span>
                                   )}
                                 </span>
@@ -333,6 +358,7 @@ export default function CasePayPanel({ caseId, busy, run, toast }) {
                                 step="100"
                                 className="visit-pay-input"
                                 value={r.text}
+                                placeholder="0"
                                 disabled={busy}
                                 onChange={(e) =>
                                   setSplit({
@@ -351,7 +377,18 @@ export default function CasePayPanel({ caseId, busy, run, toast }) {
                           รวม {formatBaht(sum)} จาก {validAmount ? formatBaht(value) : '—'}
                           {validAmount && !sumOk && ` · ต่างอยู่ ${formatBaht(round(value - sum))}`}
                         </span>
-                        {split && (
+                        {manual ? (
+                          <span className="pick-actions">
+                            <button className="btn tiny" disabled={busy || !validAmount} onClick={fillEqual}>
+                              แบ่งเท่ากัน
+                            </button>
+                            {split && (
+                              <button className="btn tiny" disabled={busy} onClick={() => setSplit(null)}>
+                                ล้างตัวเลข
+                              </button>
+                            )}
+                          </span>
+                        ) : split && (
                           <button className="btn tiny" disabled={busy} onClick={() => setSplit(null)}>
                             คืนค่าที่ระบบเสนอ
                           </button>
@@ -480,11 +517,12 @@ function ShareAgreement({ caseId, pay, entitled, busy, run, toast, onSaved }) {
         <div className="approve-row pay-release-row">
           <p className="muted">
             <strong>
-              ส่วนแบ่งของเคส —{' '}
-              {hasAgreement ? 'ตกลงกันไว้เป็นพิเศษ' : `หารเท่ากัน ${shares.filter((r) => r.shifts > 0).length} คน`}
+              ส่วนแบ่งของเคส — {hasAgreement ? 'ตกลงกันไว้แล้ว' : 'ยังไม่ได้ตกลง (กรอกเองทุกงวด)'}
             </strong>
             <span className="cell-sub">
-              {shares.map((r, i) => `${r.employee_name} ${formatBaht(entitled[i])}`).join(' · ')}
+              {hasAgreement
+                ? shares.map((r, i) => `${r.employee_name} ${formatBaht(entitled[i])}`).join(' · ')
+                : shares.map((r) => `${r.employee_name} ทำ ${r.shifts ?? 0} กะ`).join(' · ')}
             </span>
             {/* ผลรวมของข้อตกลงหลุดจากค่าจ้างของเคสได้เมื่อยอดถูกแก้ทีหลัง — สัดส่วนยังใช้ได้อยู่
                 แต่ตัวเลขที่ตกลงกันไว้ไม่ใช่ตัวเลขที่จะได้จริงแล้ว ต้องบอก ไม่ใช่เกลี่ยเงียบๆ */}
@@ -496,8 +534,9 @@ function ShareAgreement({ caseId, pay, entitled, busy, run, toast, onSaved }) {
             )}
           </p>
           <div className="pick-actions">
-            <button className="btn tiny" disabled={busy} onClick={() => open(entitled)}>
-              แก้ส่วนแบ่ง
+            {/* ยังไม่ได้ตกลง = เปิดมาเป็นช่องว่างให้กรอก ไม่เติมตัวเลขหารเท่ากันไว้ล่อ */}
+            <button className="btn tiny" disabled={busy} onClick={() => open(hasAgreement ? entitled : shares.map(() => ''))}>
+              {hasAgreement ? 'แก้ส่วนแบ่ง' : 'ตั้งส่วนแบ่งของทั้งเคส'}
             </button>
             {hasAgreement && (
               <button className="btn tiny danger-ghost" disabled={busy} onClick={clear}>
@@ -521,7 +560,7 @@ function ShareAgreement({ caseId, pay, entitled, busy, run, toast, onSaved }) {
               <li key={r.employee_id}>
                 <span>
                   {r.employee_name}
-                  <span className="cell-sub">ได้ไปแล้ว {formatBaht(r.paid)}</span>
+                  <span className="cell-sub">ทำ {r.shifts ?? 0} กะ · ได้ไปแล้ว {formatBaht(r.paid)}</span>
                 </span>
                 <input
                   type="number"
@@ -529,6 +568,7 @@ function ShareAgreement({ caseId, pay, entitled, busy, run, toast, onSaved }) {
                   step="100"
                   className="visit-pay-input"
                   value={draft[r.employee_id]}
+                  placeholder="0"
                   disabled={busy}
                   onChange={(e) => setDraft({ ...draft, [r.employee_id]: e.target.value })}
                 />

@@ -158,6 +158,11 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
     [preview.conflicts],
   );
   const duplicateDates = useMemo(() => new Set(preview.duplicates), [preview.duplicates]);
+  // วันที่เลือกไว้ (ที่ยังไม่มีกะ) ซึ่งอยู่นอกช่วงวันเริ่ม–วันสิ้นสุดของเคส — ใช้เตือนก่อนบันทึก
+  const outOfRange = pickedList.filter(
+    (d) => !byDate.has(d)
+      && ((caseItem?.start_date && d < caseItem.start_date) || (caseItem?.end_date && d > caseItem.end_date)),
+  );
   // วันที่เลือกไว้ซึ่งมีกะอยู่แล้ว = ลบทิ้งได้ (ปุ่มลบจึงโผล่เฉพาะตอนที่ลบได้จริง)
   const pickedWithVisits = pickedList.filter((d) => byDate.has(d));
 
@@ -486,6 +491,18 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
                 disabled={busy}
                 onChange={(v) => setCustom((p) => ({ ...p, end: v }))}
               />
+            </div>
+          )}
+
+          {/* วันที่เลือกเลยช่วงของเคส (ก่อนวันเริ่ม/หลังวันสิ้นสุด) — เตือนเฉยๆ ไม่กั้น เพราะบางครั้งต่อเวลาให้จริง
+              แต่ส่วนใหญ่คือกดพลาด และกะที่เลยวันสิ้นสุดจะไม่อยู่ในรอบบิล/ค่าจ้างของเคสนี้ */}
+          {outOfRange.length > 0 && (
+            <div className="banner">
+              <strong>
+                {outOfRange.length} วันอยู่นอกช่วงของเคส
+                {' '}({caseItem?.start_date ? formatDate(caseItem.start_date) : '—'} – {caseItem?.end_date ? formatDate(caseItem.end_date) : 'ไม่ระบุ'})
+              </strong>
+              <span className="cell-sub">{outOfRange.slice(0, 5).map(formatDate).join(' · ')}{outOfRange.length > 5 ? ' …' : ''} — ถ้าต้องการต่อเวลาจริง ให้แก้วันสิ้นสุดของเคสหรือต่อเคสรอบใหม่</span>
             </div>
           )}
 

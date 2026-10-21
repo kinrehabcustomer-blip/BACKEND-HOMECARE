@@ -93,7 +93,8 @@ export default function AttendancePage() {
   const employeePicker = (
     <select value={employeeId} onChange={(e) => patch({ employee_id: e.target.value, page: '' })} aria-label="พนักงาน">
       <option value="">พนักงานทุกคน</option>
-      {staff.map((e) => (
+      {/* เฉพาะพนักงาน front (คนที่เช็คอินจริง) · คนที่เลือกค้างอยู่ใน URL ยังโชว์ไว้ */}
+      {staff.filter((e) => e.can_take_cases || e.employee_id === employeeId).map((e) => (
         <option key={e.employee_id} value={e.employee_id}>{e.first_name} {e.last_name}</option>
       ))}
     </select>

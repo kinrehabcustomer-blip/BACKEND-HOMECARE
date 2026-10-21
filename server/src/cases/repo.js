@@ -927,7 +927,18 @@ export async function cancel(caseId, reason, actor) {
       { case_id: caseId },
     );
 
-    const dropped = Number(n) > 0 ? ` — ยกเลิกกะที่ยังไม่ได้ไป ${Number(n)} กะด้วย` : '';
+    /* ใบแจ้งหนี้ร่างของเคสนี้ (ยังไม่ส่งลูกค้า ไม่มีเงินเข้า) ยกเลิกตามไปด้วย — เคยค้างไว้แล้วกดออกใบ/รับเงินได้
+       ทั้งที่เคสถูกยกเลิกแล้ว · ใบที่ออกไปแล้วหรือรับเงินมาแล้วไม่แตะ (เป็นเอกสารที่ลูกค้าถืออยู่ ต้องจัดการที่ใบเอง) */
+    const draftsCancelled = await tx.run(
+      `UPDATE invoices
+       SET status = 'cancelled', updated_at = ${NOW}
+       WHERE case_id = :case_id AND status = 'draft'
+         AND NOT EXISTS (SELECT 1 FROM invoice_payments ip WHERE ip.invoice_id = invoices.invoice_id)`,
+      { case_id: caseId },
+    );
+
+    const dropped = (Number(n) > 0 ? ` — ยกเลิกกะที่ยังไม่ได้ไป ${Number(n)} กะด้วย` : '')
+      + (draftsCancelled > 0 ? ` — ยกเลิกใบแจ้งหนี้ร่าง ${draftsCancelled} ใบ` : '');
     await logEvent(
       tx,
       caseId,
@@ -1890,8 +1901,8 @@ export async function alertCounts() {
 /**
  * กะที่ทำงานจบแล้วแต่ยังไม่ได้อนุมัติ — คิวที่ผู้จัดการต้องไล่ดูก่อนเงินเข้าพนักงาน
  *
- * ส่งยอดของแต่ละกะไปด้วย (เกลี่ยจากเคสถ้าไม่ได้ตั้งรายกะ) เพราะคนอนุมัติต้องเห็นว่ากำลังอนุมัติเงินเท่าไหร่
- * พร้อมธงที่ทำให้กะนั้นน่าสงสัย (นอกพื้นที่ / นอกวันนัด / สาย / ทำงาน 0 นาที) — เรียงของที่ต้องดูก่อนขึ้นบน
+ * ไม่ส่งยอดเงินรายกะ — ค่าจ้างเป็นก้อนเดียวต่อเคส (ดู releasePay) กะบอกแค่ใครทำงานกี่ชั่วโมง
+ * ส่งธงที่ทำให้กะนั้นน่าสงสัยไปด้วย (นอกพื้นที่ / นอกวันนัด / สาย / ทำงาน 0 นาที) — เรียงของที่ต้องดูก่อนขึ้นบน
  */
 export function pendingApprovals({ month, employee_id } = {}) {
   const where = [`${DONE}`, NOT_CANCELLED, `v.pay_status = 'pending'`];
@@ -2846,6 +2857,11 @@ export async function releasePay(caseId, { amount: requestedAmount, note, due_da
        (ไม่ได้เช็ค "กะอนุมัติแล้ว" อีกแล้ว — ดูเหตุผลใน payShares) */
     const shares = await payShares(tx, caseId);
     if (shares.length === 0) return { released: [], reason: 'no_one_in_case' };
+    /* เคสหลายคนที่ยังไม่ได้ตกลงส่วนแบ่ง — ต้องบอกมาว่าใครได้เท่าไหร่ ไม่หารเท่ากันให้เอง
+       (หารตามหัวทำให้คนที่อยู่ในทีมแต่ไม่ได้ทำกะได้เท่าคนที่ทำงานจริง โดยไม่มีใครตั้งใจ) */
+    if (!chosen && shares.length > 1 && !shares.some((r) => r.share != null)) {
+      return { released: [], reason: 'shares_required' };
+    }
 
     const split = chosen ? applyChosenShares(shares, chosen, amount) : { rows: allocateShares(shares, amount) };
     if (split.reason) return { released: [], amount, ...split };

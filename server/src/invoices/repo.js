@@ -872,7 +872,11 @@ function describeService(c) {
   const service = parts.filter(Boolean).join(' · ');
   // เคสที่ยังไม่รู้ชื่อผู้ป่วย ไม่พิมพ์ "ผู้รับบริการ: ยังไม่ระบุผู้ป่วย" ลงเอกสารที่ส่งลูกค้า
   const patient = c.client_name && c.client_name !== PATIENT_PENDING ? c.client_name : null;
-  return [service || c.title, patient && `ผู้รับบริการ: ${patient}`]
+  const head = service || c.title;
+  /* ยังไม่ได้เลือกบริการ — หัวรายการใช้ชื่อเคสแทน ซึ่งมักเป็นชื่อผู้ป่วยอยู่แล้ว (เติมชื่อผู้ป่วยตอนหลัง)
+     ต่อท้าย "ผู้รับบริการ: …" อีกจะได้ "สมชาย — ผู้รับบริการ: สมชาย" ซ้ำคำ จึงข้ามเมื่อหัวรายการมีชื่อนั้นอยู่แล้ว */
+  const showPatient = patient && !String(head ?? '').includes(patient);
+  return [head, showPatient && `ผู้รับบริการ: ${patient}`]
     .filter(Boolean)
     .join(' — ');
 }
@@ -974,6 +978,11 @@ export async function issueInvoiceForTransaction(tx, invoiceId) {
   const locked = await invoiceForUpdate(tx, invoiceId, 'issue');
   if (locked.reason) return locked;
   if (locked.invoice.billing_kind == null) return { reason: 'billing_plan_required' };
+  // เคสถูกยกเลิกไปแล้ว — ใบของเคสนั้นไม่ควรถูกส่งให้ลูกค้า (ใบร่างเก่าที่หลุดรอดมาก่อนมีการยกเลิกตาม)
+  if (locked.invoice.case_id) {
+    const caseRow = await tx.one('SELECT status FROM cases WHERE case_id = :id', { id: locked.invoice.case_id });
+    if (caseRow?.status === 'cancelled') return { reason: 'case_cancelled' };
+  }
 
   const changed = await tx.run(
     `UPDATE invoices

@@ -644,7 +644,8 @@ export default function PayrollPage() {
   const employeePicker = (
     <select value={employeeId} onChange={(e) => patch({ employee_id: e.target.value })} aria-label="พนักงาน">
       <option value="">พนักงานทุกคน</option>
-      {staff.map((e) => (
+      {/* เฉพาะพนักงาน front (คนที่มีกะ/ได้ค่าจ้างรายเคส) · คนที่เลือกค้างอยู่ใน URL ยังโชว์ไว้ */}
+      {staff.filter((e) => e.can_take_cases || e.employee_id === employeeId).map((e) => (
         <option key={e.employee_id} value={e.employee_id}>{e.first_name} {e.last_name}</option>
       ))}
     </select>

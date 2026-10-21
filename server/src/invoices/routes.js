@@ -372,6 +372,9 @@ invoicesRouter.post(
     if (result.reason === 'billing_plan_required') {
       throw new ApiError(409, 'กรุณาเลือกว่าจะเก็บเต็มจำนวนหรือแบ่งมัดจำก่อนออกใบ');
     }
+    if (result.reason === 'case_cancelled') {
+      throw new ApiError(409, 'เคสของใบนี้ถูกยกเลิกแล้ว จึงออกใบไม่ได้ — ถ้าจะเก็บเงินต่อ ให้เปิดเคสอีกครั้งก่อน');
+    }
     res.json(result);
   }),
 );
