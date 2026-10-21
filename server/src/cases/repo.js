@@ -2418,6 +2418,14 @@ export function payQueue() {
            WHERE ${NOT_CANCELLED} AND v.assigned_to IS NOT NULL
            UNION
            SELECT c2.case_id, c2.assigned_to FROM cases c2 WHERE c2.assigned_to IS NOT NULL
+           /* ทีมดูแลเคส / คนที่เคยได้งวด / คนที่ตั้งส่วนแบ่งไว้ — ชุดเดียวกับ payShares ไม่งั้นหัวแถว
+              ขึ้นชื่อคนเดียว ทั้งที่แผงจ่ายเงินให้กรอกยอดของสองคน */
+           UNION
+           SELECT t.case_id, t.employee_id FROM case_team t
+           UNION
+           SELECT p2.case_id, p2.employee_id FROM case_payouts p2 WHERE p2.employee_id IS NOT NULL
+           UNION
+           SELECT sh.case_id, sh.employee_id FROM case_pay_shares sh
          ) u
          LEFT JOIN employees e ON e.employee_id = u.employee_id
          GROUP BY u.case_id

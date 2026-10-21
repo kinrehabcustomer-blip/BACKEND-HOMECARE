@@ -350,7 +350,9 @@ export function PayoutSummary({ month, employeeId, patch, employeePicker, reload
                   </td>
                   <td data-label="จำนวนกะ">
                     {r.shifts}
-                    <span className="cell-sub">{r.cases_worked} เคส</span>
+                    {/* นับเฉพาะเคสที่มีกะในเดือนนี้ — เคสที่ได้เงินจากงานเดือนก่อนอยู่ใน popup รายเคส
+                        เขียนว่า "จาก N เคส" ไม่ใช่ "N เคส" ไม่งั้นอ่านชนกับจำนวนแถวใน popup */}
+                    {r.cases_worked > 0 && <span className="cell-sub">จาก {r.cases_worked} เคส</span>}
                   </td>
                   <td data-label="ชั่วโมงรวม">{durationText(r.minutes)}</td>
                   {/* เงินที่ค้างอยู่ที่โต๊ะผู้จัดการเอง ไม่ใช่ปัญหาของพนักงาน — กดไปที่คิวอนุมัติได้เลย */}

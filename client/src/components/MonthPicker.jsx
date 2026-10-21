@@ -14,7 +14,11 @@ export default function MonthPicker({ month, onChange, children }) {
     <div className="att-filter">
       <span className="month-step">
         <button className="btn icon-btn" onClick={() => onChange(shiftMonth(base, -1))} title="เดือนก่อนหน้า" aria-label="เดือนก่อนหน้า"><LineIcon name="chevron-left" /></button>
-        <input type="month" value={month} onChange={(e) => e.target.value && onChange(e.target.value)} aria-label="เดือน" />
+        {/* ช่องเดือนที่ว่าง (= ทุกเดือน) เบราว์เซอร์วาดเป็น "--------- ----" อ่านแล้วเหมือนพัง — ทับด้วยคำว่า "ทุกเดือน" */}
+        <span className={`month-input ${month ? '' : 'is-all'}`}>
+          <input type="month" value={month} onChange={(e) => e.target.value && onChange(e.target.value)} aria-label="เดือน" />
+          {!month && <span className="month-all" aria-hidden="true">ทุกเดือน</span>}
+        </span>
         <button
           className="btn icon-btn"
           onClick={() => onChange(shiftMonth(base, 1))}

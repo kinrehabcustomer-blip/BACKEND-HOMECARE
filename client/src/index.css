@@ -5216,11 +5216,12 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
 /* ---------- หน้าการมาทำงาน: แท็บ + ตัวกรอง + รายการ อยู่ในการ์ดขาวใบเดียว ---------- */
 .att-card > .att-tabs { margin: 0; padding: 0.375rem 1rem 0; }
 .att-card .att-filter { margin: 0; padding: 1rem; }
-.att-card .error, .att-card .notice { margin: 0 1rem 1rem; }
-.att-card .muted:only-child { padding: 1rem; }
+/* :not(.modal *) — popup ที่เปิดจากในการ์ดนี้ (แผงจ่ายเงิน/รายเคส) อยู่ใน DOM ของการ์ด กฎของการ์ดต้องไม่รั่วเข้าไป */
+.att-card .error:not(.modal *), .att-card .notice:not(.modal *) { margin: 0 1rem 1rem; }
+.att-card .muted:only-child:not(.modal *) { padding: 1rem; }
 /* การ์ดย่อยข้างใน (สถานะว่าง ฯลฯ) ไม่ต้องมีกรอบซ้อน — กลืนเป็นเนื้อเดียวกับการ์ดแม่ */
-.att-card .card { margin: 0; border: 0; border-radius: 0; box-shadow: none; background: none; }
-.att-card .table-wrap > .table { border-inline: 0; border-bottom: 0; border-radius: 0; }
+.att-card .card:not(.modal *) { margin: 0; border: 0; border-radius: 0; box-shadow: none; background: none; }
+.att-card .table-wrap:not(.modal *) > .table { border-inline: 0; border-bottom: 0; border-radius: 0; }
 .att-card .pager { margin: 0; padding: 1rem; }
 .att-card .tab-hint { margin: 0; padding: 0 1rem 0.75rem; }
 /* จอคอม: การ์ดขาวยืดลงไปจนสุดจอ — ไม่เหลือพื้นสีครีมโผล่ใต้รายการที่สั้น
@@ -5234,7 +5235,7 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
 @media (max-width: 600px) {
   .att-card > .att-tabs { padding: 0; margin-bottom: 1rem; }
   .att-card .att-filter { padding: 0 0 1rem; }
-  .att-card .error, .att-card .notice { margin: 0 0 1rem; }
+  .att-card .error:not(.modal *), .att-card .notice:not(.modal *) { margin: 0 0 1rem; }
   .att-card .pager { padding: 1rem 0; }
   .att-card .tab-hint { padding: 0 0 0.75rem; }
 }
@@ -5420,3 +5421,16 @@ h1, h2, h3, h4, .page-hero-title, .cal-title, .login-heading h1 {
   .payout-wrap .row-filler:hover { background: none; }
   .payout-wrap tfoot th { position: sticky; bottom: 0; z-index: 1; }
 }
+
+/* ---------- ตัวเลือกเดือน: ว่าง = "ทุกเดือน" (แท็บปล่อยค่าจ้าง) — ทับขีด "--------- ----" ของเบราว์เซอร์ ---------- */
+.month-input { position: relative; display: inline-flex; }
+.month-input.is-all input { color: transparent; }
+.month-input.is-all input::-webkit-datetime-edit { color: transparent; }
+.month-all {
+  position: absolute; left: 0.75rem; top: 50%; transform: translateY(-50%);
+  pointer-events: none; color: var(--text); font-size: 0.9375rem;
+}
+
+/* แถวเติมที่ว่างของตารางสรุปเงินได้ — จอแคบตารางเป็นการ์ด แถวนี้ต้องหายไปจริง
+   (.table-cards tbody tr สั่ง display: block ไว้ด้วย specificity สูงกว่า .row-filler) */
+@media (max-width: 900px) { .table-cards tbody tr.row-filler { display: none; } }
