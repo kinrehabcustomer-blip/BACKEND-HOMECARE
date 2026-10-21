@@ -2265,6 +2265,10 @@ export async function attendanceReport(month, employeeId = null) {
 /**
  * เคสที่พนักงานคนหนึ่งลงแรงในเดือนนั้น พร้อมยอดรวมของกะที่ทำในเคสนั้น — ที่มาของยอดในสรุปค่าตอบแทน
  * ให้กางดูได้ว่าเงินมาจากเคสไหน กี่กะ ไม่ใช่เห็นแค่ตัวเลขก้อนเดียว
+ *
+ * เคสที่ "ได้เงินเดือนนี้" ต้องขึ้นด้วยแม้ไม่มีกะในเดือนนี้เลย (ทำงานเดือนก่อน ปล่อยค่าจ้างเดือนนี้)
+ * เดิมตั้งต้นจากกะของเดือนอย่างเดียว ยอด pay ในสรุป (นับตามวันปล่อย) จึงมีเงิน แต่กางดูแล้ว
+ * ขึ้นว่า "เดือนนี้ยังไม่มีเคส" — ตัวเลขที่หาที่มาไม่เจอคือสิ่งที่ทำให้คนเลิกเชื่อรายงาน
  */
 export function payoutCases(month, employeeId) {
   return sql
@@ -2293,12 +2297,24 @@ export function payoutCases(month, employeeId) {
                          AND substr(p.released_at, 1, 7) = :month) x) AS installments,
               COALESCE((SELECT MAX(p.installment_no) FROM case_payouts p
                         WHERE p.case_id = c.case_id), 0) AS case_installments
-       ${WORKED_SHIFT}
-         AND v.checked_in_by = :emp
+       FROM cases c
+       LEFT JOIN case_visits v
+              ON v.case_id = c.case_id
+             AND v.checked_in_by = :emp
+             AND v.check_in_at IS NOT NULL
+             AND ${NOT_CANCELLED}
+             AND to_char(v.check_in_at AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM') = :month
+       LEFT JOIN pkg_service_formats f ON f.format_id = c.pkg_format_id
+       LEFT JOIN pkg_grades g          ON g.grade_id  = c.pkg_grade_id
+       LEFT JOIN physio_packages pp    ON pp.physio_package_id = c.physio_package_id
+       WHERE v.visit_id IS NOT NULL
+          OR EXISTS (SELECT 1 FROM case_payouts p
+                     WHERE p.case_id = c.case_id AND p.employee_id = :emp
+                       AND substr(p.released_at, 1, 7) = :month)
        GROUP BY c.case_id, c.title, c.client_name, c.case_type, c.service_kind, c.status,
                 c.closed_at, c.start_date, c.end_date,
                 f.name, g.name, pp.name, pp.sessions
-       ORDER BY last_visit_date DESC`,
+       ORDER BY last_visit_date DESC NULLS LAST`,
       { emp: employeeId, month },
     )
     .then((rows) =>

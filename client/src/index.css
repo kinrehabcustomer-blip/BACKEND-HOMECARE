@@ -5381,3 +5381,42 @@ h1, h2, h3, h4, .page-hero-title, .cal-title, .login-heading h1 {
   /* เส้นปิดท้ายใต้แถวสุดท้าย — ตารางจบตรงไหนต้องเห็นชัด ไม่ใช่กลืนไปกับพื้นขาวว่างของการ์ด */
   .list-card .table tbody tr:last-child td { border-bottom: 1px solid var(--border-hover); }
 }
+
+/* แถบ "ปล่อยค่าจ้างแล้วรอเข้ารอบ ฿…" + ปุ่มเปิดรอบจ่าย — เป็นกล่องสีทองอ่อนมีกรอบ ให้เห็นทันทีว่ามีเงินรอเข้ารอบ
+   (เดิมเป็นข้อความลอยบนพื้นขาวของการ์ด กลืนไปกับพื้นจนมองข้ามได้ง่าย) */
+.payroll-bar:has(.payroll-waiting) {
+  margin: 1rem; padding: 1rem 1.25rem;
+  background: var(--brand-soft); border: 1px solid var(--border-hover); border-radius: var(--radius-card);
+}
+
+/* ฟอร์มเปิดรอบจ่าย (วันที่ตัดยอด · รายชื่อ · ปุ่มจ่ายเลย) — กล่องมีกรอบแยกจากรายการรอบด้านล่าง
+   อยู่ในการ์ดขาวของหน้าแล้ว จึงใช้พื้นทองอ่อนจางๆ ให้เห็นว่าเป็นขั้นตอนที่กำลังทำอยู่ */
+.att-card > .payroll-open {
+  margin: 0 1rem 1rem; padding: 1.25rem;
+  background: var(--bg); border: 1px solid var(--border-hover); border-radius: var(--radius-card);
+}
+@media (max-width: 600px) { .att-card > .payroll-open, .payroll-bar:has(.payroll-waiting) { margin-inline: 0; } }
+
+/* ---------- แท็บ "ปล่อยค่าจ้าง": แผงจัดการเปิดเป็น popup ----------
+   เส้นซ้าย/ระยะเยื้องของ .case-pay มีไว้ผูกแผงกับแถวตอนกางใต้ตาราง — ใน popup ไม่ต้องใช้ */
+.pay-modal .modal-body > .case-pay { margin: 0; padding: 0.5rem 0 0; border: 0; }
+/* ปุ่มสุดท้ายของแผง (เช่น "ถอนคืน") ไม่ชิดขอบล่างของกล่อง */
+.pay-modal .modal-body { padding-bottom: 2rem; }
+/* รายการในงวด: ชื่อ+ยอด / สถานะ / ปุ่มถอนคืน — เว้นระยะให้แยกกันชัด ไม่อัดเป็นก้อนเดียว */
+.pay-round .approve-row > p { margin: 0; }
+.pay-round .approve-row .cell-sub { display: block; margin-top: 0.375rem; }
+.pay-round .approve-row > .btn { margin-top: 0.625rem; }
+
+/* ---------- แท็บ "สรุปเงินได้": แถวรวมอยู่ล่างสุดเสมอ (จอคอม) ----------
+   รายชื่อสั้น = ตารางยืดเต็มการ์ด แถวว่าง (.row-filler) กินที่เหลือ แถวรวมไปชิดขอบล่าง
+   รายชื่อยาว = แถวรวมติดขอบล่างจอ (sticky) ตอนเลื่อน — ยอดรวมเห็นตลอดไม่ต้องเลื่อนไปหา
+   overflow ต้อง visible ไม่งั้น .table-wrap กลายเป็นกล่องเลื่อนของ sticky แทนตัวหน้า */
+.row-filler { display: none; }
+@media (min-width: 901px) {
+  .list-card > .payout-wrap { flex: 1; display: flex; flex-direction: column; overflow: visible; }
+  .payout-wrap > .table { flex: 1; }
+  .payout-wrap .row-filler { display: table-row; height: 100%; }
+  .payout-wrap .row-filler td { padding: 0; }
+  .payout-wrap .row-filler:hover { background: none; }
+  .payout-wrap tfoot th { position: sticky; bottom: 0; z-index: 1; }
+}

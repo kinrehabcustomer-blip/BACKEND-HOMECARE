@@ -992,6 +992,19 @@ if (process.env.RUN_DB_TESTS !== '1') {
       const next = await post('/api/payroll', { period_to: today }, MANAGER, 201);
       assert.equal(Number(next.total_pay), 0, 'paid wages must not be picked up twice');
     });
+
+    test('employee-cases lists a case paid this month even without shifts this month', async () => {
+      const c = await newCase();
+      await post(`/api/cases/${c.case_id}/assign`, { employee_id: FIELD.employee_id });
+      await post(`/api/cases/${c.case_id}/pay/release`, { amount: 900 }, MANAGER, 201);
+      const { month } = await sql.one(`SELECT to_char(now() AT TIME ZONE 'Asia/Bangkok','YYYY-MM') AS month`);
+      const res = await get(`/api/payroll/employee-cases?month=${month}&employee_id=${FIELD.employee_id}`, MANAGER);
+      assert.equal(res.status, 200);
+      const row = res.body.find((r) => r.case_id === c.case_id);
+      assert.ok(row, 'case with pay released this month must be listed');
+      assert.equal(row.pay, 900);
+      assert.equal(row.shifts, 0);
+    });
   });
 
   describe('ใบแจ้งหนี้: ซิงก์ตามเคส · ใบรายครั้ง · รายได้เงินสด · ยกเลิกแผนมัดจำ · สิทธิ์ยอดสรุป', () => {

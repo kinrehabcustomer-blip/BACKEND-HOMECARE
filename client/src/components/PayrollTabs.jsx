@@ -1,8 +1,11 @@
 import { Fragment, useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { useToast } from '../toast.jsx';
-import { formatBaht, formatDate, timeText, durationText } from '../labels.js';
+import { CASE_STATUS_LABELS, formatBaht, formatDate, monthText, timeText, durationText } from '../labels.js';
+import { useSheetSwipe } from '../lib/sheetSwipe.js';
+import { useScrollLock } from '../lib/scrollLock.js';
 import LineIcon from './LineIcon.jsx';
+import CaseModal from './CaseModal.jsx';
 import OfficeLink from './OfficeLink.jsx';
 import MonthPicker from './MonthPicker.jsx';
 import PayrollSummaryDoc from './PayrollSummaryDoc.jsx';
@@ -263,22 +266,7 @@ export function PayoutSummary({ month, employeeId, patch, employeePicker, reload
 
   /* ที่มาของยอดรายคน — ยอดรวมตอบได้แค่ "ได้เท่าไหร่" แต่คำถามถัดมาเสมอคือ "มาจากเคสไหนบ้าง"
      โหลดตอนกดเท่านั้น เพราะเดือนหนึ่งมีพนักงานหลายสิบคน ส่วนใหญ่ไม่ได้ถูกกางดู */
-  const [openId, setOpenId] = useState(null);
-  const [cases, setCases] = useState(null);
-
-  function toggleCases(id) {
-    if (openId === id) {
-      setOpenId(null);
-      setCases(null);
-      return;
-    }
-    setOpenId(id);
-    setCases(null); // ล้างก่อนเสมอ ไม่งั้นระหว่างรอจะเห็นเคสของคนก่อนหน้าค้างอยู่ใต้ชื่อคนใหม่
-    api
-      .payrollEmployeeCases(month, id)
-      .then(setCases)
-      .catch((e) => setError(e.message));
-  }
+  const [openRow, setOpenRow] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -288,8 +276,7 @@ export function PayoutSummary({ month, employeeId, patch, employeePicker, reload
       .then((r) => {
         if (cancelled) return;
         setRows(r);
-        setOpenId(null);
-        setCases(null);
+        setOpenRow(null);
         setError(null); // เปลี่ยนเดือนแล้วโหลดผ่าน error ของเดือนก่อนต้องหายไปด้วย
       })
       .catch((e) => !cancelled && setError(e.message))
@@ -334,7 +321,7 @@ export function PayoutSummary({ month, employeeId, patch, employeePicker, reload
       ) : rows?.length > 0 ? (
         /* no-print: ใบสรุปด้านบนแทนตารางนี้บนกระดาษแล้ว ปล่อยไว้จะได้กระดาษเปล่าตามมาอีกหลายหน้า
            (ของที่ถูกซ่อนตอนพิมพ์ยังกินพื้นที่หน้ากระดาษอยู่ ถ้าไม่สั่ง display: none) */
-        <div className="table-wrap no-print">
+        <div className="table-wrap no-print payout-wrap">
           <table className="table table-cards">
             <thead>
               <tr><th>พนักงาน</th><th>จำนวนกะ</th><th>ชั่วโมงรวม</th><th>รออนุมัติ</th><th>ค่าจ้างรวม</th></tr>
@@ -346,22 +333,20 @@ export function PayoutSummary({ month, employeeId, patch, employeePicker, reload
                     tabIndex + onKeyDown เพราะชื่อพนักงานเลิกเป็น <button> แล้ว ถ้าไม่ใส่
                     คนที่ใช้แป้นพิมพ์จะกางดูรายเคสไม่ได้เลย (is-tappable มีกรอบโฟกัสรออยู่แล้ว) */}
                 <tr
-                  className={`is-tappable ${openId === r.employee_id ? 'is-picked' : ''}`}
+                  className={`is-tappable ${openRow?.employee_id === r.employee_id ? 'is-picked' : ''}`}
                   tabIndex={0}
-                  onClick={() => toggleCases(r.employee_id)}
+                  onClick={() => setOpenRow(r)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' || e.key === ' ') {
                       e.preventDefault();
-                      toggleCases(r.employee_id);
+                      setOpenRow(r);
                     }
                   }}
                 >
                   <td data-label="พนักงาน">
                     <span className="linkish">{r.employee_name}</span>
                     <span className="cell-sub mono">{r.employee_id}</span>
-                    <span className="cell-sub">
-                      {openId === r.employee_id ? 'แตะเพื่อย่อ' : 'แตะเพื่อดูรายเคส'}
-                    </span>
+                    <span className="cell-sub">แตะเพื่อดูรายเคส</span>
                   </td>
                   <td data-label="จำนวนกะ">
                     {r.shifts}
@@ -412,42 +397,10 @@ export function PayoutSummary({ month, employeeId, patch, employeePicker, reload
                   </td>
                 </tr>
 
-                {/* ทำไปกี่เคส เคสอะไรบ้าง ใบละเท่าไหร่ — กางใต้แถวของคนนั้น กินเต็มความกว้าง
-                    เพราะชื่อผู้รับบริการยาวกว่าคอลัมน์ "พนักงาน" ที่กว้างแค่หนึ่งในห้าของตาราง */}
-                {openId === r.employee_id && (
-                  <tr className="row-expand">
-                    <td colSpan={5}>
-                      {cases === null ? (
-                        <span className="muted">กำลังโหลด…</span>
-                      ) : cases.length === 0 ? (
-                        <span className="muted">เดือนนี้ยังไม่มีเคส</span>
-                      ) : (
-                        <ul className="plain-list payroll-item-cases">
-                          {cases.map((c) => (
-                            <li key={c.case_id}>
-                              <span>
-                                {c.client_name}
-                                <span className="cell-sub mono">{c.case_id}</span>
-                              </span>
-                              <span>
-                                {c.pay === 0 ? (
-                                  <span className="muted">ยังไม่ปล่อยค่าจ้าง</span>
-                                ) : (
-                                  formatBaht(c.pay)
-                                )}
-                                {c.installments && (
-                                  <span className="cell-sub">งวดที่ {c.installments}</span>
-                                )}
-                              </span>
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </td>
-                  </tr>
-                )}
                 </Fragment>
               ))}
+              {/* แถวว่างกินพื้นที่ที่เหลือ — ดันแถวรวมลงไปชิดล่างการ์ดตอนรายชื่อสั้น (ดู .payout-wrap) */}
+              <tr className="row-filler" aria-hidden="true"><td /><td /><td /><td /><td /></tr>
             </tbody>
             {/* data-label ไม่ได้มีไว้แค่สวย — จอเล็กหัวตารางถูกซ่อน แถวรวมที่เหลือแต่ตัวเลขเปล่าๆ
                 จะอ่านไม่ออกว่าเลขไหนคืออะไร */}
@@ -466,6 +419,116 @@ export function PayoutSummary({ month, employeeId, patch, employeePicker, reload
           </table>
         </div>
       ) : null}
+
+      {openRow && (
+        <EmployeeCasesModal month={month} row={openRow} onClose={() => setOpenRow(null)} />
+      )}
+    </>
+  );
+}
+
+/**
+ * ทำไปกี่เคส เคสอะไรบ้าง ใบละเท่าไหร่ ของพนักงานหนึ่งคนในเดือนนั้น — เปิดจากแถวในสรุปเงินได้
+ * เดิมกางใต้แถว ดันตารางทั้งก้อนลงจนหาแถวรวมไม่เจอ · กดแถวเคสเพื่อเปิดรายละเอียดเคส (CaseModal ซ้อนอีกชั้น)
+ * โหลดตอนเปิดเท่านั้น เพราะเดือนหนึ่งมีพนักงานหลายสิบคน ส่วนใหญ่ไม่ได้ถูกเปิดดู
+ */
+function EmployeeCasesModal({ month, row, onClose }) {
+  const [cases, setCases] = useState(null);
+  const [error, setError] = useState(null);
+  const [openCaseId, setOpenCaseId] = useState(null);
+  const sheetRef = useSheetSwipe(onClose);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .payrollEmployeeCases(month, row.employee_id)
+      .then((r) => !cancelled && setCases(r))
+      .catch((e) => !cancelled && setError(e.message));
+    return () => { cancelled = true; };
+  }, [month, row.employee_id]);
+
+  useScrollLock();
+  useEffect(() => {
+    // CaseModal ซ้อนอยู่ = ให้ Escape ปิดตัวนั้นก่อน ไม่ใช่ปิดพรวดทั้งสองชั้น
+    const onKeyDown = (e) => e.key === 'Escape' && !openCaseId && onClose();
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [onClose, openCaseId]);
+
+  return (
+    <>
+      <div className="modal-backdrop" onClick={onClose}>
+        <div className="modal modal-wide" ref={sheetRef} role="dialog" aria-modal="true" aria-label="รายเคส" onClick={(e) => e.stopPropagation()}>
+          <header className="modal-head">
+            <div>
+              <p className="mono muted">{row.employee_id}</p>
+              <h2>{row.employee_name}</h2>
+              <p className="muted">
+                {monthText(month)} · {row.shifts} กะ · ค่าจ้าง {formatBaht(row.pay)}
+              </p>
+            </div>
+            <button className="modal-close" onClick={onClose} aria-label="ปิด">×</button>
+          </header>
+
+          <div className="modal-body">
+            {error && <p className="error">{error}</p>}
+            {!cases && !error ? (
+              <p className="muted modal-loading">กำลังโหลด…</p>
+            ) : cases?.length === 0 ? (
+              <p className="muted">เดือนนี้ยังไม่มีเคส</p>
+            ) : cases ? (
+              <div className="table-wrap">
+                <table className="table table-cards">
+                  <colgroup>
+                    <col style={{ width: '40%' }} />
+                    <col style={{ width: '15%' }} />
+                    <col style={{ width: '25%' }} />
+                    <col style={{ width: '20%' }} />
+                  </colgroup>
+                  <thead>
+                    <tr><th>เคส / ผู้รับบริการ</th><th>จำนวนกะ</th><th>ค่าจ้างเดือนนี้</th><th>สถานะเคส</th></tr>
+                  </thead>
+                  <tbody>
+                    {cases.map((c) => (
+                      <tr
+                        key={c.case_id}
+                        className="is-tappable"
+                        tabIndex={0}
+                        onClick={() => setOpenCaseId(c.case_id)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            setOpenCaseId(c.case_id);
+                          }
+                        }}
+                      >
+                        <td data-label="เคส / ผู้รับบริการ">
+                          <span className="linkish">{c.client_name || c.title}</span>
+                          <span className="cell-sub mono">{c.case_id}</span>
+                        </td>
+                        <td data-label="จำนวนกะ">
+                          {c.shifts}
+                          {c.pending_shifts > 0 && <span className="cell-sub">รออนุมัติ {c.pending_shifts}</span>}
+                        </td>
+                        <td data-label="ค่าจ้างเดือนนี้">
+                          {c.pay === 0 ? <span className="muted">ยังไม่ปล่อยค่าจ้าง</span> : formatBaht(c.pay)}
+                          {c.installments && <span className="cell-sub">งวดที่ {c.installments}</span>}
+                        </td>
+                        <td data-label="สถานะเคส">
+                          <span className={`badge case-${c.status}`}>{CASE_STATUS_LABELS[c.status] ?? c.status}</span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </div>
+
+      {/* วางนอก backdrop — ไม่งั้นคลิกใน CaseModal จะไปโดน onClick ของ backdrop แล้วปิดทิ้ง */}
+      {openCaseId && <CaseModal caseId={openCaseId} onClose={() => setOpenCaseId(null)} />}
     </>
   );
 }

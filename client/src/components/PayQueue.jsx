@@ -1,5 +1,7 @@
-import { Fragment, useCallback, useEffect, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
+import { useSheetSwipe } from '../lib/sheetSwipe.js';
+import { useScrollLock } from '../lib/scrollLock.js';
 import { useToast } from '../toast.jsx';
 import { CASE_STATUS_LABELS, formatBaht, formatDate, monthText } from '../labels.js';
 import CasePayPanel from './CasePay.jsx';
@@ -16,7 +18,7 @@ import MonthPicker from './MonthPicker.jsx';
  * ใช้ตารางแบบเดียวกับหน้าอื่นในระบบ (.table-cards) ไม่ใช่รายการทรงอิสระของตัวเอง —
  * คนที่ใช้ระบบนี้อ่านตารางหน้าตานี้มาทั้งวันแล้วจากหน้าเคส/ใบแจ้งหนี้/รอบจ่าย ของที่หน้าตา
  * ไม่เหมือนใครบังคับให้หยุดอ่านใหม่ทุกครั้งว่าตัวเลขไหนคืออะไร · บนจอแคบมันยุบเป็นการ์ดให้เอง
- * ตามกติกาเดียวกับทุกตาราง แตะแถวไหนก็กางแผงจัดการของเคสนั้นใต้แถวนั้นเลย
+ * ตามกติกาเดียวกับทุกตาราง แตะแถวไหนก็เปิดแผงจัดการของเคสนั้นเป็น popup
  */
 /* ป้าย "ค้าง N วัน" ขึ้นเฉพาะลำดับ 1–3 — ลำดับ 4–5 ปกติรอปิดเคสก่อนจ่าย ติดป้ายไปก็เร่งผิดที่ */
 const URGENT_TIERS = [1, 2, 3];
@@ -200,7 +202,7 @@ export default function PayQueue({ reloadKey, openCase, onOpenCase }) {
                     <Fragment key={c.case_id}>
                       <tr
                         className={`is-tappable ${openCase === c.case_id ? 'is-picked' : ''}`}
-                        onClick={() => onOpenCase(openCase === c.case_id ? '' : c.case_id)}
+                        onClick={() => onOpenCase(c.case_id)}
                       >
                         <td className="row-index" data-label="ลำดับ">{i + 1}</td>
                         {/* ชื่อพนักงานเป็นตัวนำ เพราะหน้านี้คือหน้าจ่ายเงิน คำถามแรกคือ "จ่ายให้ใคร"
@@ -260,15 +262,6 @@ export default function PayQueue({ reloadKey, openCase, onOpenCase }) {
                         </td>
                       </tr>
 
-                      {/* แผงจัดการกางเป็นแถวของตัวเองใต้แถวเคส กินเต็มความกว้าง —
-                          ยัดไว้ในช่องใดช่องหนึ่งของแถวเดิมจะได้ความกว้างแค่หนึ่งในสี่ของตาราง */}
-                      {openCase === c.case_id && (
-                        <tr className="row-expand">
-                          <td colSpan={5}>
-                            <CasePayPanel caseId={c.case_id} busy={busy} run={run} toast={toast} />
-                          </td>
-                        </tr>
-                      )}
                     </Fragment>
                   ))}
                 </tbody>
@@ -277,6 +270,88 @@ export default function PayQueue({ reloadKey, openCase, onOpenCase }) {
           )}
         </>
       )}
+
+      {/* แผงจัดการเปิดเป็น popup — กางใต้แถวแล้วดันตารางทั้งก้อนลงไปจนหาแถวอื่นไม่เจอ
+          หาเคสจากทั้งคิว (ไม่ใช่แค่ที่กรองอยู่) ลิงก์ ?open= จากที่อื่นจะได้เปิดถูกเสมอ */}
+      {openCase && rows?.some((r) => r.case_id === openCase) && (
+        <PayModal
+          row={rows.find((r) => r.case_id === openCase)}
+          busy={busy}
+          run={run}
+          toast={toast}
+          onClose={() => onOpenCase('')}
+        />
+      )}
     </>
+  );
+}
+
+const FOCUSABLE = 'a[href], button:not(:disabled), input, select, textarea, [tabindex]:not([tabindex="-1"])';
+
+function PayModal({ row, busy, run, toast, onClose }) {
+  const boxRef = useRef(null);
+  useSheetSwipe(onClose, boxRef);
+  useScrollLock();
+
+  useEffect(() => {
+    const previous = document.activeElement;
+    boxRef.current?.focus();
+    return () => previous?.focus?.();
+  }, []);
+
+  /* Esc ปิด + ขังโฟกัสไว้ในกล่อง (แบบเดียวกับ popup อื่นในระบบ) */
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        onClose();
+        return;
+      }
+      if (e.key !== 'Tab') return;
+      const items = [...(boxRef.current?.querySelectorAll(FOCUSABLE) ?? [])].filter((el) => el.offsetParent !== null);
+      if (items.length === 0) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (e.shiftKey && (document.activeElement === first || document.activeElement === boxRef.current)) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [onClose]);
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div
+        className="modal pay-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label="ปล่อยค่าจ้าง"
+        tabIndex={-1}
+        ref={boxRef}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <header className="modal-head">
+          <div>
+            <p className="mono muted">
+              {row.case_id}
+              {row.client_name && ` · ${row.client_name}`}
+            </p>
+            <h2>{row.worker_names || 'ยังไม่มีพนักงาน'}</h2>
+            <span className={`badge case-${row.status}`}>{CASE_STATUS_LABELS[row.status] ?? row.status}</span>
+          </div>
+          <div className="modal-head-actions">
+            <button className="modal-close" onClick={onClose} aria-label="ปิด">×</button>
+          </div>
+        </header>
+        <div className="modal-body">
+          <CasePayPanel caseId={row.case_id} busy={busy} run={run} toast={toast} />
+        </div>
+      </div>
+    </div>
   );
 }

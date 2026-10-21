@@ -533,7 +533,9 @@ function Runs({ reloadKey }) {
       {!runs ? (
         <p className="muted">กำลังโหลด…</p>
       ) : runs.length === 0 ? (
-        <p className="muted">ยังไม่มีรอบจ่าย — กด “เปิดรอบจ่าย” เพื่อเริ่มรอบแรก</p>
+        <section className="card empty-state">
+          <p className="muted">ยังไม่มีรอบจ่าย — กด “เปิดรอบจ่าย” เพื่อเริ่มรอบแรก</p>
+        </section>
       ) : (
         <div className="table-wrap">
           <table className="table table-cards">
