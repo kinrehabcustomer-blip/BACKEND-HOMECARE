@@ -137,6 +137,8 @@ export const api = {
   // POST เดียวในระบบที่ตอบ 204 อย่างถูกต้อง (ล้างคุกกี้แล้วจบ ไม่มีอะไรให้คืน)
   logout: () => request('/auth/logout', { method: 'POST', empty: true }),
   me: () => request('/auth/me'),
+  // ผูก LINE กับบัญชีนี้ — ตั๋วมาจากปุ่มในหน้า "งานของฉัน" ใน LINE (ดู server/src/lib/lineBridge.js)
+  linkLine: (t) => request('/auth/line-link', { method: 'POST', body: { t } }),
 
   forgotPassword: (email) => request('/auth/forgot-password', { method: 'POST', body: { email } }),
   resetPassword: (body) => request('/auth/reset-password', { method: 'POST', body }),

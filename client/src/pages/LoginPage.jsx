@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth.jsx';
+import { api } from '../api.js';
 import PasswordInput from '../components/PasswordInput.jsx';
 
 export default function LoginPage() {
@@ -19,8 +20,33 @@ export default function LoginPage() {
   const from = location.state?.from;
   const backTo = from ? `${from.pathname}${from.search ?? ''}` : '/'; // '/' พาไปหน้าแรกตามสิทธิ์ (การเงินไม่มีหน้าภาพรวม)
 
+  /* มาจากปุ่มในหน้า "งานของฉัน" ใน LINE แต่ LINE นี้ยังไม่ได้ผูกกับบัญชีไหน (ดู GET /api/auth/line)
+     login ด้วยรหัสผ่านเดิมครั้งนี้ครั้งเดียว แล้วผูกให้ทันที — ครั้งต่อไปกดจาก LINE เข้าได้เลย */
+  const query = new URLSearchParams(location.search);
+  const lineTicket = query.get('line');
+  const lineError = query.get('line_error');
+
+  // login ค้างอยู่แล้วแต่กดมาจาก LINE ที่ยังไม่ผูก — ผูกให้เลย ไม่ต้องกรอกรหัสซ้ำ
+  useEffect(() => {
+    if (!user || !lineTicket) return;
+    api
+      .linkLine(lineTicket)
+      .then(() => navigate(backTo, { replace: true }))
+      .catch((err) => setError(err.message));
+  }, [user, lineTicket]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // login อยู่แล้วก็ไม่ต้องเห็นหน้านี้ — กลับไปหน้าที่ตั้งใจจะเข้าตอนแรก
   if (loading) return <p className="muted app-loading">กำลังตรวจสอบสิทธิ์…</p>;
+  // ผูกไม่ผ่าน (ตั๋วหมดอายุ / LINE นี้เป็นของคนอื่น) ไม่ขวางการเข้าระบบ — บอกเหตุผลแล้วให้เข้าต่อได้
+  if (user && lineTicket) {
+    return error ? (
+      <p className="error app-loading">
+        {error} · <Link to={backTo} replace>เข้าระบบต่อ</Link>
+      </p>
+    ) : (
+      <p className="muted app-loading">กำลังผูกบัญชีกับ LINE…</p>
+    );
+  }
   if (user) return <Navigate to={backTo} replace />;
 
   async function handleSubmit(e) {
@@ -29,7 +55,8 @@ export default function LoginPage() {
     setError(null);
     try {
       await login(email, password);
-      navigate(backTo, { replace: true });
+      // มาจาก LINE: useEffect ด้านบนผูกบัญชีแล้วพาไปต่อเอง (ทำงานทันทีที่ user ถูกตั้ง)
+      if (!lineTicket) navigate(backTo, { replace: true });
     } catch (err) {
       setError(err.message);
       setBusy(false);
@@ -51,6 +78,14 @@ export default function LoginPage() {
 
         {/* ข้อความส่งต่อมาจากหน้าตั้งรหัสผ่านใหม่ */}
         {location.state?.notice && <p className="notice">{location.state.notice}</p>}
+        {lineTicket && (
+          <p className="notice">เข้าสู่ระบบด้วยรหัสผ่านเดิม <b>ครั้งนี้ครั้งเดียว</b> เพื่อผูกบัญชีกับ LINE — ครั้งต่อไปกดจากหน้า "งานของฉัน" ใน LINE เข้าได้เลย</p>
+        )}
+        {lineError && (
+          <p className="error login-error">
+            {lineError === 'blocked' ? 'บัญชีนี้ใช้งานไม่ได้ — ติดต่อผู้ดูแลระบบ' : 'ลิงก์จาก LINE หมดอายุแล้ว กรุณากดปุ่มในหน้า "งานของฉัน" ใหม่อีกครั้ง'}
+          </p>
+        )}
         {error && <p className="error login-error">{error}</p>}
 
         <label>

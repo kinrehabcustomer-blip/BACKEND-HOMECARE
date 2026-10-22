@@ -16,6 +16,7 @@ import {
   verifyPassword,
 } from '../lib/auth.js';
 import { sendOtpEmail } from '../lib/mailer.js';
+import { ensureLineColumn, verifyLineTicket } from '../lib/lineBridge.js';
 
 export const authRouter = Router();
 
@@ -109,6 +110,54 @@ authRouter.post(
 
     res.cookie(COOKIE_NAME, signToken(employee), cookieOptions);
     res.json(toSession(employee));
+  }),
+);
+
+// ---------- เข้าระบบด้วย LINE (ตั๋วจาก chat.kinorigin.com/me · ดู lib/lineBridge.js) ----------
+// ผูกแล้ว = ออกคุกกี้เหมือน login ปกติแล้วพาเข้าหน้าแรกตามสิทธิ์ · ยังไม่ผูก = พาไปหน้า login พร้อมตั๋ว
+// ให้ login ด้วยรหัสผ่านเดิม 1 ครั้ง หน้า login จะเรียก /line-link ต่อเอง
+authRouter.get(
+  '/line',
+  asyncRoute(async (req, res) => {
+    const lineUserId = verifyLineTicket(req.query.t);
+    if (!lineUserId) return res.redirect(302, '/login?line_error=expired');
+    await ensureLineColumn();
+
+    const employee = await sql.one('SELECT * FROM employees WHERE line_user_id = :uid', { uid: lineUserId });
+    if (!employee) return res.redirect(302, `/login?line=${encodeURIComponent(req.query.t)}`);
+    if (BLOCKED_STATUSES[employee.status]) return res.redirect(302, '/login?line_error=blocked');
+
+    await sql.run(
+      `UPDATE employees SET last_login_at = to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')
+       WHERE employee_id = :id`,
+      { id: employee.employee_id },
+    );
+    res.cookie(COOKIE_NAME, signToken(employee), cookieOptions);
+    res.redirect(302, '/');
+  }),
+);
+
+const lineLinkSchema = z.object({ t: z.string().min(1) });
+
+/** ผูก LINE กับบัญชีที่เพิ่ง login ด้วยรหัสผ่าน — LINE หนึ่งบัญชีผูกได้พนักงานคนเดียว (ผูกใหม่ = ย้ายมาคนนี้ไม่ได้ ต้องให้แอดมินปลด) */
+authRouter.post(
+  '/line-link',
+  requireAuth,
+  asyncRoute(async (req, res) => {
+    const { t } = lineLinkSchema.parse(req.body);
+    const lineUserId = verifyLineTicket(t);
+    if (!lineUserId) throw new ApiError(400, 'ลิงก์จาก LINE หมดอายุแล้ว กรุณากดปุ่มในหน้า "งานของฉัน" ใหม่อีกครั้ง');
+    await ensureLineColumn();
+
+    const owner = await sql.one('SELECT employee_id FROM employees WHERE line_user_id = :uid', { uid: lineUserId });
+    if (owner && owner.employee_id !== req.user.employee_id) {
+      throw new ApiError(409, 'LINE นี้ผูกกับบัญชีพนักงานคนอื่นอยู่แล้ว — ติดต่อแอดมินให้ปลดก่อน');
+    }
+    await sql.run('UPDATE employees SET line_user_id = :uid WHERE employee_id = :id', {
+      uid: lineUserId,
+      id: req.user.employee_id,
+    });
+    res.json({ ok: true });
   }),
 );
 
