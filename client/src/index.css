@@ -5552,3 +5552,5 @@ h1, h2, h3, h4, .page-hero-title, .cal-title, .login-heading h1 {
 .family-msg.team { background: #f1ead6; }
 .family-msg p { margin: 4px 0 0; }
 .family-photo { max-width: 220px; max-height: 220px; border-radius: 8px; margin-top: 6px; }
+.customer-line { background: #f6f1e3; border-radius: 10px; padding: 8px 10px; margin-bottom: 10px; }
+.customer-line p { margin: 2px 0 0; }

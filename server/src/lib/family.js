@@ -267,3 +267,29 @@ export const hideMessage = (caseId, messageId) =>
     case_id: caseId,
     id: messageId,
   });
+
+/**
+ * "ให้ LINE นี้ดูการดูแล" — ผูก LINE ของลูกค้าเจ้าของเคส (คนที่ทักมาทาง OA Kin HomeCare) เป็นญาติคนแรกทันที
+ * ไม่ต้องส่งรหัส เพราะรู้ LINE อยู่แล้วจากแชท (lib/customerLine.js) · แอดมินต้องติ๊กยินยอมเหมือนการเชิญปกติ
+ * คืน { ok } · { ok:false, reason: 'no_line' | 'already' | 'full' }
+ */
+export async function linkCustomerLine(caseId, actorName) {
+  const row = await sql.one(
+    `SELECT cu.line_user_id, cu.line_display_name FROM cases c JOIN customers cu ON cu.customer_id = c.customer_id
+     WHERE c.case_id = :id`,
+    { id: caseId },
+  );
+  if (!row?.line_user_id) return { ok: false, reason: 'no_line' };
+  const exists = await sql.one(
+    `SELECT 1 AS x FROM case_family_links WHERE case_id = :id AND line_user_id = :uid AND revoked_at IS NULL`,
+    { id: caseId, uid: row.line_user_id },
+  );
+  if (exists) return { ok: false, reason: 'already' };
+  if ((await activeCount(caseId)) >= FAMILY_MAX_PER_CASE) return { ok: false, reason: 'full' };
+  await sql.run(
+    `INSERT INTO case_family_links (case_id, line_user_id, display_name, invited_by, consent_by, accepted_at, can_invite)
+     VALUES (:id, :uid, :name, :actor, :actor, now(), true)`,
+    { id: caseId, uid: row.line_user_id, name: row.line_display_name || 'ลูกค้า (LINE)', actor: actorName },
+  );
+  return { ok: true };
+}

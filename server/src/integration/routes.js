@@ -9,6 +9,7 @@ import * as repo from '../employees/repo.js';
 import * as cases from '../cases/repo.js';
 import { BLOCKED_STATUSES } from '../lib/auth.js';
 import * as family from '../lib/family.js';
+import { ensureCustomerLineColumns as ensureCustomerLineColumnsSafe, findByPhones, linkFromChat } from '../lib/customerLine.js';
 
 /**
  * ทางเข้าจากระบบสมัครงาน chat.kinorigin.com (ดร.ธงชัย 22 ต.ค. 2569 "ได้งาน → สร้างพนักงานใน staff ในคลิกเดียว")
@@ -167,6 +168,36 @@ integrationRouter.post(
     res.setHeader('Content-Type', row.mime);
     res.setHeader('Cache-Control', 'private, no-store');
     res.send(row.data);
+  }),
+);
+
+/**
+ * แชทลูกค้า LINE Kin HomeCare → ลูกค้าในระบบงาน (lib/customerLine.js)
+ *   /customers/link  ตั๋ว 'kin-cust-link' {d: {line_user_id, line_name, name, phone, note, referral, interest, first_at, conversation_id}, customer_id?}
+ *   /customers/match ตั๋ว 'kin-cust-match' {phones: [...]} → ลูกค้าที่เบอร์ตรง (ไว้เสนอคู่ให้ทีมยืนยัน)
+ */
+integrationRouter.post(
+  '/customers/link',
+  asyncRoute(async (req, res) => {
+    const { token } = hireSchema.parse(req.body);
+    const p = verifySigned(token, 'kin-cust-link');
+    if (!p?.d) throw new ApiError(401, 'ลายเซ็นไม่ถูกต้องหรือหมดอายุ');
+    if (p.d.line_user_id && !isLineUserId(p.d.line_user_id)) throw new ApiError(400, 'LINE userId ไม่ถูกต้อง');
+    const r = await linkFromChat(p.d, typeof p.customer_id === 'string' ? p.customer_id : null);
+    if (r.error) throw new ApiError(404, 'ไม่พบลูกค้ารายนี้ในระบบงาน');
+    if (r.conflict) return res.status(409).json({ error: `ลูกค้า ${r.customer_id} ${r.name} ผูก LINE คนอื่นไว้แล้ว`, ...r });
+    res.json(r);
+  }),
+);
+
+integrationRouter.post(
+  '/customers/match',
+  asyncRoute(async (req, res) => {
+    const { token } = hireSchema.parse(req.body);
+    const p = verifySigned(token, 'kin-cust-match');
+    if (!p || !Array.isArray(p.phones)) throw new ApiError(401, 'ลายเซ็นไม่ถูกต้องหรือหมดอายุ');
+    await ensureCustomerLineColumnsSafe();
+    res.json({ matches: await findByPhones(p.phones.slice(0, 500)) });
   }),
 );
 

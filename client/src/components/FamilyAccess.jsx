@@ -49,6 +49,7 @@ export default function FamilyAccess({ caseId, disabled }) {
 
   return (
     <div className="family-access">
+      <CustomerLine caseId={caseId} disabled={disabled} onLinked={load} />
       {items.length === 0 ? (
         <p className="muted">ยังไม่มีญาติที่ดูการดูแลผ่าน LINE</p>
       ) : (
@@ -101,6 +102,59 @@ export default function FamilyAccess({ caseId, disabled }) {
       {error && <p className="error">{error}</p>}
 
       <FamilyTimeline caseId={caseId} disabled={disabled} />
+    </div>
+  );
+}
+
+/**
+ * ช่องทางติดต่อ LINE ของลูกค้าเจ้าของเคส — มาจากแชทสอบถามทาง OA Kin HomeCare ที่ทีมกด "ส่งเข้าระบบงาน"
+ * ข้อความแชทอยู่ที่ chat.kinorigin.com (ปุ่มเปิดแชท) · ปุ่ม "ให้ LINE นี้ดูการดูแล" ผูกเป็นญาติคนแรกได้เลย ไม่ต้องส่งรหัส
+ */
+function CustomerLine({ caseId, disabled, onLinked }) {
+  const [d, setD] = useState(null);
+  const [consent, setConsent] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const load = () => api.caseCustomerLine(caseId).then(setD).catch(() => setD(null));
+  useEffect(() => { load(); }, [caseId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!d?.has_line) return null;
+  async function link() {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.linkCustomerLine(caseId);
+      setConsent(false);
+      onLinked();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="customer-line">
+      <div>
+        <strong>LINE ลูกค้า: {d.line_display_name || '-'}</strong>{' '}
+        <span className="muted">· {d.name} ({d.customer_id})</span>
+        <p className="muted">
+          ทักครั้งแรก {d.chat_first_at ? formatDate(d.chat_first_at) : '-'}
+          {d.chat_interest && ` · สนใจ ${d.chat_interest}`}
+          {d.chat_url && <> · <a href={d.chat_url} target="_blank" rel="noreferrer">เปิดแชท</a></>}
+        </p>
+      </div>
+      {!disabled && (
+        <div className="family-invite">
+          <label className="checkbox">
+            <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
+            ได้รับความยินยอมแล้ว ให้ LINE นี้ดูสรุปการดูแล
+          </label>
+          <button className="btn tiny primary" type="button" disabled={!consent || busy} onClick={link}>
+            {busy ? 'กำลังผูก…' : 'ให้ LINE นี้ดูการดูแล'}
+          </button>
+        </div>
+      )}
+      {error && <p className="error">{error}</p>}
     </div>
   );
 }

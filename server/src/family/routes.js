@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { sql } from '../db/index.js';
 import { ApiError, asyncRoute, notFound } from '../lib/errors.js';
 import * as family from '../lib/family.js';
+import { lineForCase } from '../lib/customerLine.js';
 import { decodeImage, imageSchema } from '../employees/schema.js';
 
 /**
@@ -56,6 +57,39 @@ familyRouter.post(
       oa: OA_ID,
       link: `https://line.me/R/oaMessage/${OA_ID}/?${encodeURIComponent(`ญาติ ${code}`)}`,
     });
+  }),
+);
+
+// ---------- ช่องทางติดต่อ LINE ของลูกค้าเจ้าของเคส (แชทสอบถามทาง OA Kin HomeCare · lib/customerLine.js) ----------
+
+const CHAT_ADMIN = 'https://chat.kinorigin.com/admin/conversations';
+
+familyRouter.get(
+  '/cases/:caseId/customer-line',
+  asyncRoute(async (req, res) => {
+    await family.ensureFamilyTable();
+    const row = await lineForCase(req.params.caseId);
+    res.set('Cache-Control', 'no-store');
+    res.json(
+      row
+        ? { ...row, chat_url: row.chat_conversation_id ? `${CHAT_ADMIN}/${row.chat_conversation_id}` : null }
+        : { has_line: false },
+    );
+  }),
+);
+
+/** ผูก LINE ลูกค้าเป็นญาติคนแรก (ไม่ต้องส่งรหัส) — ต้องติ๊กยินยอมเหมือนการเชิญ */
+familyRouter.post(
+  '/cases/:caseId/customer-line',
+  asyncRoute(async (req, res) => {
+    inviteSchema.parse(req.body ?? {});
+    await family.ensureFamilyTable();
+    const r = await family.linkCustomerLine(req.params.caseId, req.user.name);
+    if (!r.ok) {
+      const msg = { no_line: 'ลูกค้าเคสนี้ยังไม่ได้ผูก LINE', already: 'LINE นี้ดูการดูแลเคสนี้อยู่แล้ว', full: `ครบ ${family.FAMILY_MAX_PER_CASE} คนแล้ว` };
+      throw new ApiError(409, msg[r.reason]);
+    }
+    res.status(201).json(r);
   }),
 );
 

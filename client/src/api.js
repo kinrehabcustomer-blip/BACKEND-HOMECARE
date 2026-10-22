@@ -478,6 +478,9 @@ export const api = {
   createFamilyInvite: (caseId) => request(`/family/cases/${caseId}/invites`, { method: 'POST', body: { consent: true } }),
   revokeFamilyLink: (caseId, linkId) => request(`/family/cases/${caseId}/links/${linkId}`, { method: 'DELETE' }),
   familyMessages: (caseId) => request(`/family/cases/${caseId}/messages`),
+  // LINE ของลูกค้าเจ้าของเคส (ทักสอบถามทาง OA Kin HomeCare) + ผูกเป็นญาติคนแรกโดยไม่ต้องส่งรหัส
+  caseCustomerLine: (caseId) => request(`/family/cases/${caseId}/customer-line`),
+  linkCustomerLine: (caseId) => request(`/family/cases/${caseId}/customer-line`, { method: 'POST', body: { consent: true } }),
   postFamilyMessage: (caseId, body) => request(`/family/cases/${caseId}/messages`, { method: 'POST', body }),
   hideFamilyMessage: (caseId, id) => request(`/family/cases/${caseId}/messages/${id}`, { method: 'DELETE' }),
   familyPhotoUrl: (caseId, id) => `/api/family/cases/${caseId}/messages/${id}/photo`,
