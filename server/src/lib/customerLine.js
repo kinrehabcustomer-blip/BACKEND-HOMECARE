@@ -19,15 +19,29 @@ export const ensureCustomerLineColumns = () =>
 
 export const digits = (s) => String(s ?? '').replace(/\D/g, '');
 
-/** ลูกค้าที่เบอร์ตรง (เทียบเฉพาะตัวเลข · ≥9 หลัก) — ใช้ทั้งตอนส่งเข้าระบบและตอนเสนอคู่ของเก่า */
+/**
+ * ลูกค้าที่เบอร์ตรง (เทียบเฉพาะตัวเลข · ≥9 หลัก) — ใช้ทั้งตอนส่งเข้าระบบและตอนเสนอคู่ของเก่า
+ * เบอร์ญาติในระบบนี้อยู่ 3 ที่: ลูกค้า (customers.phone) · เคส (cases.client_phone = เบอร์ติดต่อญาติ)
+ * · ผู้ป่วย (patients.emergency_contact_phone) — ค้นครบทั้ง 3 แล้วคืนเป็นลูกค้า (ผู้ว่าจ้าง) ที่ผูกอยู่
+ * เคส/ผู้ป่วยที่ยังไม่ได้ผูกลูกค้า ข้ามไป (ไม่มีลูกค้าให้ผูก LINE) · source บอกว่าเจอจากที่ไหน
+ */
 export async function findByPhones(phones) {
   const list = [...new Set(phones.map(digits).filter((p) => p.length >= 9))];
   if (!list.length) return [];
+  const d = (col) => `regexp_replace(coalesce(${col}, ''), '[^0-9]', '', 'g')`;
   return sql.all(
-    `SELECT customer_id, name, phone, line_user_id,
-            regexp_replace(coalesce(phone, ''), '[^0-9]', '', 'g') AS phone_digits
-     FROM customers
-     WHERE regexp_replace(coalesce(phone, ''), '[^0-9]', '', 'g') = ANY(:phones::text[])`,
+    `SELECT DISTINCT ON (m.phone_digits, cu.customer_id)
+            cu.customer_id, cu.name, cu.phone, cu.line_user_id, m.phone_digits, m.source
+     FROM (
+       SELECT customer_id, ${d('phone')} AS phone_digits, 'ลูกค้า' AS source FROM customers
+       UNION ALL
+       SELECT customer_id, ${d('client_phone')}, 'เคส ' || case_id FROM cases WHERE customer_id IS NOT NULL
+       UNION ALL
+       SELECT customer_id, ${d('emergency_contact_phone')}, 'ผู้ป่วย ' || patient_id FROM patients WHERE customer_id IS NOT NULL
+     ) m
+     JOIN customers cu ON cu.customer_id = m.customer_id
+     WHERE m.phone_digits = ANY(:phones::text[])
+     ORDER BY m.phone_digits, cu.customer_id, m.source`,
     { phones: list },
   );
 }
