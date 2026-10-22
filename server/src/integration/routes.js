@@ -149,7 +149,7 @@ integrationRouter.post(
     const row = await family.postMessage(p.case_id, {
       kind: 'family', name: me.display_name || 'ญาติ', lineUserId: p.u, body, photo,
     });
-    res.status(201).json({ ok: true, message_id: row.message_id });
+    res.status(201).json({ ok: true, message_id: row.message_id, name: me.display_name || 'ญาติ' });
   }),
 );
 
