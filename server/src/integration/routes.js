@@ -39,6 +39,45 @@ const shiftBrief = (v) => ({
   reports: v.report_count,
 });
 
+/**
+ * รายงานเยี่ยมที่พนักงานพิมพ์ในแชท LINE OA สมัครงาน/PTOT ("รายงาน ..." · ดร. 22 ต.ค. 2569 ข้อ 5)
+ * ตั๋ว 'kin-report' ยิงจาก webhook ฝั่ง chat — ข้อความมาจาก LINE ของเจ้าตัวจริง (LINE ลงลายเซ็น webhook)
+ * ลงรายงานเข้ากะของวันนี้ของคนนั้นเท่านั้น (เกณฑ์เดียวกับ POST /my/visits/:id/reports) ข้อความทั้งก้อนลงช่อง "บันทึก"
+ * วันนี้มีหลายกะ = ใช้กะที่กำลังทำงานอยู่ · ยังเลือกไม่ได้ = ส่งรายการรหัสเคสกลับไปให้พิมพ์ระบุ
+ */
+integrationRouter.post(
+  '/report',
+  asyncRoute(async (req, res) => {
+    const { token } = hireSchema.parse(req.body);
+    const p = verifySigned(token, 'kin-report');
+    if (!p || !isLineUserId(p.u) || typeof p.text !== 'string') throw new ApiError(401, 'ลายเซ็นไม่ถูกต้องหรือหมดอายุ');
+    await ensureLineColumn();
+
+    const emp = await sql.one(
+      `SELECT employee_id, first_name, last_name, status FROM employees WHERE line_user_id = :uid`,
+      { uid: p.u },
+    );
+    if (!emp || BLOCKED_STATUSES[emp.status]) return res.json({ linked: false });
+
+    const all = (await cases.visitsForEmployeeOn(emp.employee_id, thDate(0))).filter(
+      (v) => v.state !== 'cancelled' && !['closed', 'cancelled'].includes(v.case_status),
+    );
+    const wanted = p.case_id ? all.filter((v) => v.case_id === p.case_id) : all;
+    const working = wanted.filter((v) => v.state === 'working');
+    const visit = wanted.length === 1 ? wanted[0] : working.length === 1 ? working[0] : null;
+    if (!visit) {
+      return res.json({ linked: true, saved: false, choices: [...new Set(all.map((v) => v.case_id))] });
+    }
+
+    const report = await cases.addReport(
+      visit.case_id,
+      { visit_id: visit.visit_id, report_type: 'routine', note: p.text.trim().slice(0, 2000) },
+      { employee_id: emp.employee_id, name: `${emp.first_name} ${emp.last_name} (LINE)` },
+    );
+    res.status(201).json({ linked: true, saved: true, case_id: visit.case_id, report_id: report.report_id });
+  }),
+);
+
 integrationRouter.post(
   '/my-summary',
   asyncRoute(async (req, res) => {
