@@ -12,6 +12,7 @@ import { invoicesRouter } from './invoices/routes.js';
 import { payrollRouter } from './payroll/routes.js';
 import { myRouter } from './my/routes.js';
 import { notifyRouter } from './notify/routes.js';
+import { integrationRouter } from './integration/routes.js';
 import { publicReviewsRouter, reviewsRouter } from './reviews/routes.js';
 import { errorHandler } from './lib/errors.js';
 import { requireAuth, requireAdmin, requireBilling, requireCaseAccess, requireManager, requirePasswordChanged } from './lib/auth.js';
@@ -62,6 +63,8 @@ export function createApp() {
 
   // แจ้งเตือนอัตโนมัติ — ตรวจสิทธิ์เองในเส้น เพราะ Vercel Cron ยิงเข้ามาโดยไม่มีคุกกี้ session
   app.use('/api/notify', notifyRouter);
+  // ระบบสมัครงาน chat.kinorigin.com → สร้างพนักงาน (ลงลายเซ็น ไม่ใช้คุกกี้ · ดู integration/routes.js)
+  app.use('/api/integration', integrationRouter);
 
   app.use((req, res) => res.status(404).json({ error: `ไม่พบ endpoint: ${req.method} ${req.path}` }));
   app.use(errorHandler);

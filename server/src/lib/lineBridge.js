@@ -19,17 +19,27 @@ const PUBLIC_KEY = createPublicKey(`-----BEGIN PUBLIC KEY-----
 MCowBQYDK2VwAyEAw+qNWMf5eVMSLX/i3xWn1x24NWlGvJSEeDBdqrl+lQc=
 -----END PUBLIC KEY-----`);
 
-export function verifyLineTicket(token) {
+/**
+ * ตรวจตั๋วลงลายเซ็นจาก chat.kinorigin.com — purpose แยกงานกันไม่ให้ตั๋วชนิดหนึ่งเอาไปใช้แทนอีกชนิด
+ * ('kin-staff' = เข้าระบบด้วย LINE · 'kin-hire' = สร้างพนักงานจากใบสมัคร) · คืน payload หรือ null
+ */
+export function verifySigned(token, purpose) {
   const [body, sig] = String(token ?? '').split('.');
   if (!body || !sig) return null;
   try {
     if (!verify(null, Buffer.from(body), PUBLIC_KEY, Buffer.from(sig, 'base64url'))) return null;
     const p = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
-    if (p.a !== 'kin-staff' || typeof p.e !== 'number' || p.e < Date.now()) return null;
-    return /^U[0-9a-f]{32}$/.test(p.u) ? p.u : null;
+    return p.a === purpose && typeof p.e === 'number' && p.e >= Date.now() ? p : null;
   } catch {
     return null;
   }
+}
+
+export const isLineUserId = (u) => typeof u === 'string' && /^U[0-9a-f]{32}$/.test(u);
+
+export function verifyLineTicket(token) {
+  const p = verifySigned(token, 'kin-staff');
+  return p && isLineUserId(p.u) ? p.u : null;
 }
 
 /* คอลัมน์ใหม่ — ใส่ใน schema.sql แล้วด้วย แต่ production รัน migrate เองด้วยมือ
