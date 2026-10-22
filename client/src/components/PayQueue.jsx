@@ -3,10 +3,9 @@ import { api } from '../api.js';
 import { useSheetSwipe } from '../lib/sheetSwipe.js';
 import { useScrollLock } from '../lib/scrollLock.js';
 import { useToast } from '../toast.jsx';
-import { CASE_STATUS_LABELS, formatBaht, formatDate, monthText } from '../labels.js';
+import { CASE_STATUS_LABELS, formatBaht, formatDate, openDatePicker } from '../labels.js';
 import CasePayPanel from './CasePay.jsx';
 import LineIcon from './LineIcon.jsx';
-import MonthPicker from './MonthPicker.jsx';
 
 /**
  * แท็บ "ปล่อยค่าจ้าง" — เคสทุกใบที่มีเงินให้จัดการ อยู่รวมกันในหน้าเดียว
@@ -26,9 +25,9 @@ const URGENT_TIERS = [1, 2, 3];
 /* เกินหนึ่งเดือน = ค้างข้ามรอบเงินเดือนไปแล้ว เปลี่ยนเป็นสีเตือน */
 const LATE_DAYS = 30;
 
-/* เดือนของเคส — ใช้ waiting_since ตัวเดียวกับที่ใช้เรียงลำดับ (วันปิดเคส / วันกะแรก)
-   ถ้าใช้คนละวันกับที่เรียง เคสจะย้ายเดือนโดยที่ลำดับไม่ขยับ แล้วเชื่อทั้งสองอย่างไม่ได้ */
-const monthOf = (c) => (c.waiting_since ?? c.created_at ?? '').slice(0, 7);
+/* วันของเคส — ใช้ waiting_since ตัวเดียวกับที่ใช้เรียงลำดับ (วันปิดเคส / วันกะแรก)
+   ถ้าใช้คนละวันกับที่เรียง เคสจะย้ายช่วงวันโดยที่ลำดับไม่ขยับ แล้วเชื่อทั้งสองอย่างไม่ได้ */
+const dayOf = (c) => (c.waiting_since ?? c.created_at ?? '').slice(0, 10);
 
 export default function PayQueue({ reloadKey, openCase, onOpenCase }) {
   const toast = useToast();
@@ -36,10 +35,14 @@ export default function PayQueue({ reloadKey, openCase, onOpenCase }) {
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
   const [showDone, setShowDone] = useState(false);
-  /* '' = ทุกเดือน และเป็นค่าปริยายของแท็บนี้ — ต่างจากแท็บอื่นที่เปิดมาเป็นเดือนใดเดือนหนึ่ง
-     คิวนี้คือ "เงินที่ยังค้างพนักงาน" ซึ่งส่วนใหญ่ค้างมาจากเดือนก่อน เปิดมาที่เดือนปัจจุบัน
-     แล้วรายการจะว่างทั้งที่ยังค้างอยู่จริง — ตัวกรองเดือนมีไว้ให้เจาะดู ไม่ใช่ซ่อนของค้าง */
-  const [month, setMonth] = useState('');
+  /* ช่วงวันที่ (ตั้งแต่ – ถึง) · ว่างทั้งคู่ = ทุกวัน และเป็นค่าปริยายของแท็บนี้
+     คิวนี้คือ "เงินที่ยังค้างพนักงาน" ซึ่งส่วนใหญ่ค้างมาจากเดือนก่อน เปิดมาแบบกรองไว้
+     แล้วรายการจะว่างทั้งที่ยังค้างอยู่จริง — ตัวกรองมีไว้ให้เจาะดู ไม่ใช่ซ่อนของค้าง
+     ใส่ฝั่งเดียวก็ได้ (ตั้งแต่วันที่ … เป็นต้นไป / จนถึงวันที่ …) */
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const filtering = from !== '' || to !== '';
+  const clearRange = () => { setFrom(''); setTo(''); };
 
   const load = useCallback(
     () =>
@@ -76,13 +79,13 @@ export default function PayQueue({ reloadKey, openCase, onOpenCase }) {
   const done = rows?.filter((r) => r.remaining <= 0) ?? [];
   const inScope = showDone ? [...pending, ...done] : pending;
 
-  /* เดือนที่มีเคสอยู่จริง — ใช้ในหน้าจอตอนรายการว่าง เพื่อบอกว่าของไปกองอยู่เดือนไหน
-     (ปฏิทินของเบราว์เซอร์กดไปเดือนที่ไม่มีของได้ และไม่มีอะไรบอกล่วงหน้า) */
-  const counts = new Map();
-  for (const c of inScope) counts.set(monthOf(c), (counts.get(monthOf(c)) ?? 0) + 1);
-  const months = [...counts.entries()].sort(([a], [b]) => b.localeCompare(a));
-
-  const shown = month ? inScope.filter((c) => monthOf(c) === month) : inScope;
+  const shown = inScope.filter((c) => {
+    const d = dayOf(c);
+    return (!from || d >= from) && (!to || d <= to);
+  });
+  const rangeText = from && to
+    ? `ระหว่าง ${formatDate(from)} – ${formatDate(to)}`
+    : from ? `ตั้งแต่ ${formatDate(from)}` : `ถึง ${formatDate(to)}`;
 
   return (
     <>
@@ -99,23 +102,43 @@ export default function PayQueue({ reloadKey, openCase, onOpenCase }) {
         </section>
       ) : (
         <>
-          {/* ตัวเลือกเดือนตัวเดียวกับแท็บ "อนุมัติจ่าย"/"สรุปเงินได้" — สามแท็บของหน้าเดียวกัน
-              ต้องเลือกเดือนด้วยท่าเดียวกัน · เคสที่จ่ายครบซ่อนหลังสวิตช์ ไม่ตัดทิ้ง
+          {/* กรองตามช่วงวันที่ (วันปิดเคส / วันกะแรก) · เคสที่จ่ายครบซ่อนหลังสวิตช์ ไม่ตัดทิ้ง
               เพราะยังต้องเปิดดูย้อนได้ตอนถอนงวดที่ปล่อยผิดคืน */}
-          <MonthPicker month={month} onChange={setMonth}>
+          <div className="att-filter">
+            <span className="date-range" role="group" aria-label="ช่วงวันที่">
+              <input
+                type="date"
+                value={from}
+                max={to || undefined}
+                onClick={openDatePicker}
+                onChange={(e) => setFrom(e.target.value)}
+                aria-label="ตั้งแต่วันที่"
+                title="ตั้งแต่วันที่"
+              />
+              <span className="date-range-sep">ถึง</span>
+              <input
+                type="date"
+                value={to}
+                min={from || undefined}
+                onClick={openDatePicker}
+                onChange={(e) => setTo(e.target.value)}
+                aria-label="ถึงวันที่"
+                title="ถึงวันที่"
+              />
+            </span>
             {/* ทางกลับไป "ไม่กรองเดือน" — โผล่เฉพาะตอนกรองเดือนอยู่จริง
                 ค่าปริยายของแท็บนี้คือทุกเดือน ชิปนี้จึงเป็นปุ่มล้างตัวกรอง ไม่ใช่ตัวเลือกมุมมอง
                 โชว์ค้างไว้ตอนไม่ได้กรองก็เป็นปุ่มที่กดแล้วไม่เกิดอะไร และไปนั่งข้างปุ่ม
                 "รวมที่จ่ายครบ" จนอ่านเหมือนสองปุ่มนี้เป็นตัวเลือกคู่กัน ทั้งที่คุมคนละมิติ
                 (เดือน vs สถานะการจ่าย) แล้วตัวเลขในสองปุ่มก็ไม่เท่ากันด้วย */}
-            {month !== '' && (
+            {filtering && (
               <button
                 type="button"
                 className="chip"
-                onClick={() => setMonth('')}
-                title="เลิกกรองเดือน แสดงทุกเดือน"
+                onClick={clearRange}
+                title="เลิกกรองช่วงวันที่ แสดงทุกวัน"
               >
-                ล้างตัวกรองเดือน
+                ล้างช่วงวันที่
               </button>
             )}
 
@@ -132,7 +155,7 @@ export default function PayQueue({ reloadKey, openCase, onOpenCase }) {
                 >
                   ค้างจ่าย ({pending.length})
                 </button>
-                {/* ไม่ใช้คำว่า "ทั้งหมด" — มันอ่านว่า "ทุกเคส" ซึ่งชนกับการเลิกกรองเดือน
+                {/* ไม่ใช้คำว่า "ทั้งหมด" — มันอ่านว่า "ทุกเคส" ซึ่งชนกับการเลิกกรองช่วงวันที่
                     ชื่อต้องบอกว่ามันเพิ่มอะไรเข้ามา ไม่ใช่บอกว่ามันครอบคลุมแค่ไหน */}
                 <button
                   type="button"
@@ -144,31 +167,21 @@ export default function PayQueue({ reloadKey, openCase, onOpenCase }) {
                 </button>
               </div>
             )}
-          </MonthPicker>
+          </div>
 
           {shown.length === 0 ? (
             <section className="card empty-state">
-              {/* ว่างเพราะกรองเดือน กับว่างเพราะไม่มีงานค้างจริง ต้องเขียนคนละแบบ */}
-              {month ? (
+              {/* ว่างเพราะกรองช่วงวันที่ กับว่างเพราะไม่มีงานค้างจริง ต้องเขียนคนละแบบ */}
+              {filtering ? (
                 <>
-                  <p>ไม่มีเคสที่ค้างปล่อยค่าจ้างใน{monthText(month)}</p>
+                  <p>ไม่มีเคสที่ค้างปล่อยค่าจ้าง{rangeText}</p>
                   {/* "ว่าง" ที่ไม่บอกอะไรต่อคือสาเหตุที่เงินค้างเดือนก่อนถูกลืม */}
                   {inScope.length > 0 && (
-                    <p className="muted">
-                      ยังมีเคสค้างอยู่ที่{' '}
-                      {months.map(([ym, n], i) => (
-                        <span key={ym}>
-                          {i > 0 && ' · '}
-                          <button type="button" className="inline-link" onClick={() => setMonth(ym)}>
-                            {monthText(ym)} ({n})
-                          </button>
-                        </span>
-                      ))}
-                    </p>
+                    <p className="muted">ยังมีเคสค้างอยู่นอกช่วงนี้ {inScope.length} เคส</p>
                   )}
                   <div className="empty-actions">
-                    <button type="button" className="btn" onClick={() => setMonth('')}>
-                      ดูทุกเดือน ({inScope.length})
+                    <button type="button" className="btn" onClick={clearRange}>
+                      ดูทุกวัน ({inScope.length})
                     </button>
                   </div>
                 </>
