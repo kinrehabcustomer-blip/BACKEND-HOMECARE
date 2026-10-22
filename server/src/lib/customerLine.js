@@ -18,6 +18,8 @@ export const ensureCustomerLineColumns = () =>
     }));
 
 export const digits = (s) => String(s ?? '').replace(/\D/g, '');
+// เทียบ 9 หลักท้าย — 081-234-5678 · +66 81 234 5678 · 66812345678 เป็นเบอร์เดียวกัน
+export const phoneKey = (s) => digits(s).slice(-9);
 
 /**
  * ลูกค้าที่เบอร์ตรง (เทียบเฉพาะตัวเลข · ≥9 หลัก) — ใช้ทั้งตอนส่งเข้าระบบและตอนเสนอคู่ของเก่า
@@ -26,9 +28,9 @@ export const digits = (s) => String(s ?? '').replace(/\D/g, '');
  * เคส/ผู้ป่วยที่ยังไม่ได้ผูกลูกค้า ข้ามไป (ไม่มีลูกค้าให้ผูก LINE) · source บอกว่าเจอจากที่ไหน
  */
 export async function findByPhones(phones) {
-  const list = [...new Set(phones.map(digits).filter((p) => p.length >= 9))];
+  const list = [...new Set(phones.map(digits).filter((p) => p.length >= 9).map(phoneKey))];
   if (!list.length) return [];
-  const d = (col) => `regexp_replace(coalesce(${col}, ''), '[^0-9]', '', 'g')`;
+  const d = (col) => `right(regexp_replace(coalesce(${col}, ''), '[^0-9]', '', 'g'), 9)`;
   return sql.all(
     `SELECT DISTINCT ON (m.phone_digits, cu.customer_id)
             cu.customer_id, cu.name, cu.phone, cu.line_user_id, m.phone_digits, m.source
