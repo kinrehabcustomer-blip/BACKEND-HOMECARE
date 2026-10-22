@@ -54,6 +54,11 @@ export default function EmployeeDetailPage() {
     reload();
   }
 
+  async function handleUnlinkLine() {
+    await api.unlinkEmployeeLine(id);
+    reload();
+  }
+
   async function handleDelete() {
     await api.deleteEmployee(id);
     navigate('/employees');
@@ -123,6 +128,27 @@ export default function EmployeeDetailPage() {
           <Row label="วันเริ่มงาน">{formatDate(employee.hire_date)}</Row>
           <Row label="วันลาออก">{formatDate(employee.resign_date)}</Row>
           <Row label="หมายเหตุ">{employee.note}</Row>
+          {/* เข้าระบบด้วย LINE จากหน้า "งานของฉัน" ใน LINE OA — ผูกเองครั้งแรกด้วยรหัสผ่าน ปลดได้ที่นี่ */}
+          <Row label="เข้าระบบด้วย LINE">
+            {employee.line_linked ? (
+              <>
+                ผูกแล้ว{' '}
+                <ConfirmButton
+                  className="btn tiny"
+                  title="ปลด LINE ออกจากบัญชีนี้?"
+                  detail="ครั้งหน้าที่เจ้าตัวกดจาก LINE จะต้องเข้าด้วยรหัสผ่านเดิม 1 ครั้งเพื่อผูกใหม่"
+                  confirmLabel="ปลด LINE"
+                  cancelLabel="ยกเลิก"
+                  danger={false}
+                  onConfirm={handleUnlinkLine}
+                >
+                  ปลด LINE
+                </ConfirmButton>
+              </>
+            ) : (
+              'ยังไม่ผูก'
+            )}
+          </Row>
         </section>
       </div>
 

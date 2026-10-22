@@ -18,6 +18,7 @@ import {
 import { ApiError, asyncRoute, notFound } from '../lib/errors.js';
 import { sql } from '../db/index.js';
 import { canSeeStaffPay, BLOCKED_STATUSES, can } from '../lib/auth.js';
+import { ensureLineColumn } from '../lib/lineBridge.js';
 
 export const employeesRouter = Router();
 
@@ -206,6 +207,20 @@ employeesRouter.patch(
     }
 
     res.json(await repo.update(req.params.id, input));
+  }),
+);
+
+/**
+ * ปลด LINE ที่ผูกไว้กับพนักงานคนนี้ (ดู lib/lineBridge.js) — ใช้ตอนเปลี่ยนเครื่อง/เปลี่ยน LINE หรือผูกผิดคน
+ * ปลดแล้วเจ้าตัวกดจาก LINE ครั้งหน้าจะต้อง login รหัสผ่านเดิม 1 ครั้งเพื่อผูกใหม่ · เซสชันที่เปิดอยู่ไม่ถูกตัด
+ */
+employeesRouter.delete(
+  '/:id/line',
+  asyncRoute(async (req, res) => {
+    ensureCanManageTarget(req, req.employee);
+    await ensureLineColumn();
+    await sql.run('UPDATE employees SET line_user_id = NULL WHERE employee_id = :id', { id: req.params.id });
+    res.json({ ok: true });
   }),
 );
 

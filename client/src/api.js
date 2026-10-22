@@ -166,6 +166,8 @@ export const api = {
   resignEmployee: (id, resign_date) =>
     request(`/employees/${id}`, { method: 'DELETE', body: { resign_date } }),
   deleteEmployee: (id) => request(`/employees/${id}?hard=true`, { method: 'DELETE' }),
+  // ปลด LINE ที่ผูกไว้ (เข้าระบบด้วย LINE) — เจ้าตัวต้อง login รหัสผ่าน 1 ครั้งเพื่อผูกใหม่
+  unlinkEmployeeLine: (id) => request(`/employees/${id}/line`, { method: 'DELETE' }),
 
   /** แนบรูปพนักงานทับของเดิม — ส่ง image: null เพื่อลบรูป (คืนข้อมูลพนักงานที่อัปเดตแล้ว) */
   setEmployeePhoto: (id, image) => request(`/employees/${id}/photo`, { method: 'PUT', body: { image } }),

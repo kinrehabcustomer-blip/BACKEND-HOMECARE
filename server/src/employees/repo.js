@@ -44,6 +44,8 @@ const PUBLIC = [
   'updated_at',
   'photo_size',
   '(photo_data IS NOT NULL) AS has_photo',
+  // ส่งแค่ "ผูก LINE แล้วไหม" ไม่ส่ง LINE userId ออกไป — หน้าเว็บใช้โชว์สถานะ/ปุ่มปลดเท่านั้น
+  '(line_user_id IS NOT NULL) AS line_linked',
 ].join(', ');
 
 export async function list({ q, status, position, page, per_page, sort, order }) {
