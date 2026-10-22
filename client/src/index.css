@@ -5434,3 +5434,97 @@ h1, h2, h3, h4, .page-hero-title, .cal-title, .login-heading h1 {
 /* แถวเติมที่ว่างของตารางสรุปเงินได้ — จอแคบตารางเป็นการ์ด แถวนี้ต้องหายไปจริง
    (.table-cards tbody tr สั่ง display: block ไว้ด้วย specificity สูงกว่า .row-filler) */
 @media (max-width: 900px) { .table-cards tbody tr.row-filler { display: none; } }
+
+/* =====================================================================
+   จอแท็บเล็ต/มือถือ (≤900): ใช้โครงเดียวกับจอคอม
+   - หน้ารายการทุกหน้า = การ์ดขาวใบเดียว กว้างชนขอบจอ ชิดขอบบน ยืดถึงล่างจอ
+   - แถบค้นหา/ตัวกรองอยู่ในการ์ด คั่นด้วยเส้น (ไม่ใช่การ์ดลอยแยก)
+   - รายการแต่ละแถวคั่นด้วยเส้นในการ์ดเดียวกัน (ไม่ใช่การ์ดเล็กลอยบนพื้นครีม)
+   - แถวรวม / แถบเลื่อนหน้า อยู่ท้ายการ์ด
+   --gx / --gt = ระยะขอบซ้าย-ขวา / บนของ .content ในแต่ละขนาดจอ ใช้หักลบให้การ์ดชนขอบพอดี
+   ===================================================================== */
+@media (max-width: 900px) {
+  .content { --gx: 1rem; --gt: 1.25rem; }
+  .content:has(.list-card) { display: flex; flex-direction: column; padding-bottom: 0; }
+  .content:has(.list-card) > .pull-zone,
+  .content:has(.list-card) > .pull-zone > .pull-content { flex: 1; display: flex; flex-direction: column; }
+
+  :is(.content, .content > .pull-zone > .pull-content) > .list-card {
+    flex: 1; display: flex; flex-direction: column;
+    margin-inline: calc(-1 * var(--gx)); margin-bottom: 0;
+    background: var(--surface); border: 0; border-radius: 0; overflow: visible;
+  }
+  :is(.content, .content > .pull-zone > .pull-content) > .list-card:first-child,
+  :is(.content, .content > .pull-zone > .pull-content) > .sr-only + .list-card { margin-top: calc(-1 * var(--gt)); }
+
+  .list-card > .toolbar { margin: 0; padding: 0.875rem var(--gx); border: 0; border-bottom: 1px solid var(--border); border-radius: 0; background: none; }
+  .list-card > .error, .list-card > .notice { margin: 0.75rem var(--gx) 0; }
+  .list-card > .pager { margin: auto 0 0; padding: 0.875rem var(--gx); border-top: 1px solid var(--divider); }
+  .list-card > .empty-state, .list-card > .loading-center { flex: 1; margin: 0; border: 0; border-radius: 0; background: none; }
+
+  /* หน้าที่มีแท็บ (การมาทำงาน / ค่าตอบแทน) */
+  .att-card > .att-tabs { margin: 0; padding: 0.25rem var(--gx) 0; border-bottom: 1px solid var(--border); }
+  .att-card .att-filter { margin: 0; padding: 0.875rem var(--gx); }
+  .att-card .tab-hint { margin: 0; padding: 0 var(--gx) 0.625rem; }
+  .att-card .error:not(.modal *), .att-card .notice:not(.modal *) { margin: 0 var(--gx) 0.875rem; }
+  .att-card .pager { padding: 0.875rem var(--gx); }
+  .att-card > .payroll-open { margin-inline: var(--gx); }
+
+  /* คะแนนประเมิน / แพ็คเกจ */
+  .reviews-card > .review-tiles { padding: 0.875rem var(--gx); }
+  .packages-card { padding-bottom: 2rem; }
+  .packages-card > .rate-section { padding: 0.875rem var(--gx) 0; border-top: 1px solid var(--border); }
+  .packages-card > .rate-section:first-of-type { border-top: 0; }
+  .packages-card > :not(.toolbar):not(.rate-section):not(.error):not(.notice):not(.packages-empty) { padding: 0.875rem var(--gx); }
+}
+
+@media (max-width: 600px) {
+  .content { --gx: 0.75rem; --gt: 1rem; }
+
+  /* แถว = รายการในการ์ด คั่นด้วยเส้น (ตารางบนคอมก็คั่นแถวด้วยเส้นแบบนี้) */
+  .list-card .table-wrap:not(.modal *) { margin: 0; }
+  .list-card .table-cards:not(.modal *) tbody tr {
+    margin: 0; padding: 0.875rem var(--gx);
+    border: 0; border-bottom: 1px solid var(--border-hover); border-radius: 0;
+    background: var(--surface);
+  }
+  .list-card .table-cards:not(.modal *) tbody tr.is-picked { background: var(--brand-soft); }
+  /* แถวรวม = แถบท้ายการ์ด พื้นเข้ม ติดขอบล่างจอตอนเลื่อน (เหมือนแถวรวมบนคอม) */
+  .list-card .table-cards:not(.modal *) tfoot tr {
+    position: sticky; bottom: 0; z-index: 1;
+    margin: 0; padding: 0.75rem var(--gx);
+    border: 0; border-top: 2px solid var(--border); border-radius: 0;
+    background: var(--bg);
+  }
+}
+
+/* ≤900: กล่องอื่นๆ ที่วางตรงๆ ใน .content ชนขอบแบบเดียวกับจอคอม (สำเนากฎชุด ≥901 ด้านบน ใช้ --gx/--gt แทนค่าตายตัว)
+   ข้อยกเว้นเหมือนจอคอม: หน้าภาพรวม (.hero-card) และหน้ารายละเอียดที่มีการ์ดคู่ (.columns) คงการ์ดมุมมน */
+@media (max-width: 900px) {
+  :is(.content, .content > .pull-zone > .pull-content) > .page-head { margin-inline: calc(-1 * var(--gx)); padding-inline: var(--gx); }
+  :is(.content, .content > .pull-zone > .pull-content) > .card:not(.narrow),
+  :is(.content, .content > .pull-zone > .pull-content) > .toolbar,
+  :is(.content, .content > .pull-zone > .pull-content) > .table-wrap { margin-inline: calc(-1 * var(--gx)); border-inline: 0; border-radius: 0; }
+  :is(.content, .content > .pull-zone > .pull-content) > .table-wrap > :is(.table, .cal-grid) { border-inline: 0; border-radius: 0; }
+  :is(.content, .content > .pull-zone > .pull-content) > .page-head:has(+ .card:not(.narrow), + .toolbar, + .list-card, + .table-wrap) { margin-bottom: 0; }
+  :is(.content, .content > .pull-zone > .pull-content) > .page-head + .card:not(.narrow),
+  :is(.content, .content > .pull-zone > .pull-content) > .page-head + .toolbar,
+  :is(.content, .content > .pull-zone > .pull-content) > .page-head + .list-card { border-top: 0; }
+  :is(.content, .content > .pull-zone > .pull-content) > .sr-only + .toolbar { margin-top: calc(-1 * var(--gt)); border-top: 0; }
+  :is(.content, .content > .pull-zone > .pull-content) > .toolbar:has(+ .table-wrap) { margin-bottom: 0; }
+  :is(.content, .content > .pull-zone > .pull-content) > .toolbar + .table-wrap > :is(.table, .cal-grid) { border-top: 0; }
+  :is(.content, .content > .pull-zone > .pull-content):has(.hero-card) > .card:not(.narrow),
+  :is(.content, .content > .pull-zone > .pull-content):has(> .columns) > .card:not(.narrow) {
+    margin-inline: 0; border-inline: 1px solid var(--border); border-radius: var(--radius-card);
+  }
+}
+
+/* ≤900 หน้าตารางงาน: ปฏิทิน (บนมือถือเป็นรายการวัน) อยู่บนพื้นขาวยืดถึงล่างจอ ต่อจากแถบตัวกรอง — เหมือนตารางปฏิทินบนคอม */
+@media (max-width: 900px) {
+  .content:has(> .cal-print, > .pull-zone > .pull-content > .cal-print) { display: flex; flex-direction: column; padding-bottom: 0; }
+  .content:has(.cal-print) > .pull-zone,
+  .content:has(.cal-print) > .pull-zone > .pull-content { flex: 1; display: flex; flex-direction: column; }
+  :is(.content, .content > .pull-zone > .pull-content) > .table-wrap.cal-print { flex: 1; background: var(--surface); padding-bottom: 1.5rem; }
+}
+/* การ์ดยืดเต็มจอแล้ว — กล่องตัวเลขสรุปของหน้าคะแนนประเมินต้องสูงตามเนื้อหา ไม่ยืดตาม (เหมือน .tiles บนคอม) */
+@media (max-width: 900px) { .list-card > .review-tiles, .list-card > .tiles { flex: none; } }
