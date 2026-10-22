@@ -7,6 +7,7 @@ import { useSheetSwipe } from '../lib/sheetSwipe.js';
 import { useScrollLock } from '../lib/scrollLock.js';
 import CaseVisitsModal from './CaseVisitsModal.jsx';
 import CaseReports from './CaseReports.jsx';
+import FamilyAccess from './FamilyAccess.jsx';
 import CaseLocationLink from './CaseLocationLink.jsx';
 import CaseReportDoc from './CaseReportDoc.jsx';
 import ReportArchiveModal from './ReportArchiveModal.jsx';
@@ -643,6 +644,12 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                 />
                 {/* ใบที่จะถูกพิมพ์ — ซ่อนอยู่บนจอ โผล่เฉพาะตอนสั่งพิมพ์ (ดู .report-doc ใน index.css) */}
                 <CaseReportDoc caseItem={item} reports={printReports} />
+              </section>
+
+              {/* ญาติดูสรุปการดูแลผ่าน LINE OA Kin HomeCare — เชิญได้เท่านั้น (ดร. 22 ต.ค. 2569) */}
+              <section>
+                <h3>ญาติที่ดูผ่าน LINE</h3>
+                <FamilyAccess caseId={item.case_id} disabled={item.status === 'cancelled'} />
               </section>
 
               {/* ออกใบแจ้งหนี้จากเคสนี้ — ระบบคัดลอกผู้จ่าย/ที่อยู่/ค่าจ้างไปให้เอง */}

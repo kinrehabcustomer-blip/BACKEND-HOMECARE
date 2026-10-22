@@ -1,12 +1,14 @@
+import { createHash } from 'node:crypto';
 import { Router } from 'express';
 import { z } from 'zod';
 import { sql } from '../db/index.js';
 import { ApiError, asyncRoute } from '../lib/errors.js';
 import { ensureLineColumn, isLineUserId, verifySigned } from '../lib/lineBridge.js';
-import { createEmployeeSchema } from '../employees/schema.js';
+import { createEmployeeSchema, decodeImage } from '../employees/schema.js';
 import * as repo from '../employees/repo.js';
 import * as cases from '../cases/repo.js';
 import { BLOCKED_STATUSES } from '../lib/auth.js';
+import * as family from '../lib/family.js';
 
 /**
  * ทางเข้าจากระบบสมัครงาน chat.kinorigin.com (ดร.ธงชัย 22 ต.ค. 2569 "ได้งาน → สร้างพนักงานใน staff ในคลิกเดียว")
@@ -75,6 +77,96 @@ integrationRouter.post(
       { employee_id: emp.employee_id, name: `${emp.first_name} ${emp.last_name} (LINE)` },
     );
     res.status(201).json({ linked: true, saved: true, case_id: visit.case_id, report_id: report.report_id });
+  }),
+);
+
+/**
+ * ญาติดูการดูแลผ่าน LINE OA KIN HomeCare หลัก (ข้อ 6 · ดูหัวไฟล์ lib/family.js)
+ *   /family/accept  ตั๋ว 'kin-family-join' {u, code, name} — ญาติส่ง "ญาติ <รหัส>" ในแชท OA
+ *   /family/summary ตั๋ว 'kin-family' {u} — หน้า /family ฝั่ง chat
+ */
+integrationRouter.post(
+  '/family/accept',
+  asyncRoute(async (req, res) => {
+    const { token } = hireSchema.parse(req.body);
+    const p = verifySigned(token, 'kin-family-join');
+    if (!p || !isLineUserId(p.u) || typeof p.code !== 'string') throw new ApiError(401, 'ลายเซ็นไม่ถูกต้องหรือหมดอายุ');
+    await family.ensureFamilyTable();
+    res.json(await family.accept(p.code, p.u, p.name));
+  }),
+);
+
+integrationRouter.post(
+  '/family/summary',
+  asyncRoute(async (req, res) => {
+    const { token } = hireSchema.parse(req.body);
+    const p = verifySigned(token, 'kin-family');
+    if (!p || !isLineUserId(p.u)) throw new ApiError(401, 'ลายเซ็นไม่ถูกต้องหรือหมดอายุ');
+    await family.ensureFamilyTable();
+    res.json({ cases: await family.summaryFor(p.u) });
+  }),
+);
+
+/** ญาติคนแรกชวนญาติอีกคน (แบบ ข · ≤5 คนต่อเคส) — ตั๋ว 'kin-family-invite' {u, case_id} */
+integrationRouter.post(
+  '/family/invite',
+  asyncRoute(async (req, res) => {
+    const { token } = hireSchema.parse(req.body);
+    const p = verifySigned(token, 'kin-family-invite');
+    if (!p || !isLineUserId(p.u) || typeof p.case_id !== 'string') throw new ApiError(401, 'ลายเซ็นไม่ถูกต้องหรือหมดอายุ');
+    await family.ensureFamilyTable();
+    res.json(await family.familyInvite(p.u, p.case_id));
+  }),
+);
+
+/**
+ * ญาติโพสต์ลงไทม์ไลน์เคส (แบบ 3) — ตั๋ว 'kin-family-post' {u, case_id, body, photo_sha}
+ * รูปส่งมาในตัวคำขอเป็น data URL (ย่อจากเบราว์เซอร์แล้ว) · photo_sha ในตั๋วผูกรูปกับลายเซ็น สลับรูปทีหลังไม่ได้
+ */
+const postSchema = z.object({ token: z.string().min(1), image: z.string().optional().nullable() });
+
+integrationRouter.post(
+  '/family/post',
+  asyncRoute(async (req, res) => {
+    const { token, image } = postSchema.parse(req.body);
+    const p = verifySigned(token, 'kin-family-post');
+    if (!p || !isLineUserId(p.u) || typeof p.case_id !== 'string') throw new ApiError(401, 'ลายเซ็นไม่ถูกต้องหรือหมดอายุ');
+    await family.ensureFamilyTable();
+    const me = await family.memberLink(p.u, p.case_id);
+    if (!me) throw new ApiError(403, 'ไม่ได้เป็นญาติที่ได้รับเชิญของเคสนี้');
+
+    let photo = null;
+    if (image) {
+      if (createHash('sha256').update(image).digest('hex') !== p.photo_sha) throw new ApiError(400, 'รูปไม่ตรงกับลายเซ็น');
+      try {
+        photo = decodeImage(image);
+      } catch (err) {
+        throw new ApiError(400, err.message);
+      }
+    }
+    const body = typeof p.body === 'string' ? p.body.trim() : '';
+    if (!body && !photo) throw new ApiError(400, 'ไม่มีข้อความหรือรูป');
+    const row = await family.postMessage(p.case_id, {
+      kind: 'family', name: me.display_name || 'ญาติ', lineUserId: p.u, body, photo,
+    });
+    res.status(201).json({ ok: true, message_id: row.message_id });
+  }),
+);
+
+/** รูปในไทม์ไลน์ให้หน้าญาติ — ตั๋ว 'kin-family-photo' {u, case_id, message_id} (ตรวจว่าเป็นญาติของเคสนั้น) */
+integrationRouter.post(
+  '/family/photo',
+  asyncRoute(async (req, res) => {
+    const { token } = hireSchema.parse(req.body);
+    const p = verifySigned(token, 'kin-family-photo');
+    if (!p || !isLineUserId(p.u) || typeof p.case_id !== 'string') throw new ApiError(401, 'ลายเซ็นไม่ถูกต้องหรือหมดอายุ');
+    await family.ensureFamilyTable();
+    if (!(await family.memberLink(p.u, p.case_id))) throw new ApiError(403, 'ไม่มีสิทธิ์');
+    const row = await family.messagePhoto(p.case_id, Number(p.message_id));
+    if (!row) throw new ApiError(404, 'ไม่พบรูป');
+    res.setHeader('Content-Type', row.mime);
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.send(row.data);
   }),
 );
 

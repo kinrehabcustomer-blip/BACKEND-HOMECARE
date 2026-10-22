@@ -13,6 +13,7 @@ import { payrollRouter } from './payroll/routes.js';
 import { myRouter } from './my/routes.js';
 import { notifyRouter } from './notify/routes.js';
 import { integrationRouter } from './integration/routes.js';
+import { familyRouter } from './family/routes.js';
 import { publicReviewsRouter, reviewsRouter } from './reviews/routes.js';
 import { errorHandler } from './lib/errors.js';
 import { requireAuth, requireAdmin, requireBilling, requireCaseAccess, requireManager, requirePasswordChanged } from './lib/auth.js';
@@ -48,6 +49,8 @@ export function createApp() {
   // การเงินเข้าได้เฉพาะเส้นที่หน้าค่าตอบแทนต้องใช้ (ดู requireCaseAccess) — ที่เหลือต้องเป็น office
   app.use('/api/cases', signedIn, requireCaseAccess, casesRouter);
   app.use('/api/customers', signedIn, requireAdmin, customersRouter);
+  // ญาติที่ดูการดูแลผ่าน LINE ของแต่ละเคส (เชิญ/ปลด) — family/routes.js
+  app.use('/api/family', signedIn, requireAdmin, familyRouter);
   app.use('/api/patients', signedIn, requireAdmin, patientsRouter);
   app.use('/api/packages', signedIn, requireAdmin, packagesRouter);
   app.use('/api/physio', signedIn, requireAdmin, physioRouter);

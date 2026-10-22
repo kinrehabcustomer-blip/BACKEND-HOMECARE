@@ -473,6 +473,14 @@ export const api = {
    * คืน { data, page, per_page, total, has_more, months } — months ไว้ทำตัวเลือกดูย้อนหลัง
    */
   listCaseReports: (id, params = {}) => request(`/cases/${id}/reports?${new URLSearchParams(params)}`),
+  // ญาติที่ดูการดูแลผ่าน LINE (เชิญ/ปลด) — server/src/family/routes.js
+  familyLinks: (caseId) => request(`/family/cases/${caseId}`),
+  createFamilyInvite: (caseId) => request(`/family/cases/${caseId}/invites`, { method: 'POST', body: { consent: true } }),
+  revokeFamilyLink: (caseId, linkId) => request(`/family/cases/${caseId}/links/${linkId}`, { method: 'DELETE' }),
+  familyMessages: (caseId) => request(`/family/cases/${caseId}/messages`),
+  postFamilyMessage: (caseId, body) => request(`/family/cases/${caseId}/messages`, { method: 'POST', body }),
+  hideFamilyMessage: (caseId, id) => request(`/family/cases/${caseId}/messages/${id}`, { method: 'DELETE' }),
+  familyPhotoUrl: (caseId, id) => `/api/family/cases/${caseId}/messages/${id}/photo`,
   caseReportPhotoUrl: (id, reportId) => `/api/cases/${id}/reports/${reportId}/photo`,
   addCaseReport: (id, body) => request(`/cases/${id}/reports`, { method: 'POST', body }),
   updateCaseReport: (id, reportId, body) =>

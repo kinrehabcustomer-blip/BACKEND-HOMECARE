@@ -5537,3 +5537,18 @@ h1, h2, h3, h4, .page-hero-title, .cal-title, .login-heading h1 {
   .date-range { display: flex; width: 100%; flex-wrap: nowrap; }
   .date-range input[type="date"] { flex: 1; min-width: 0; }
 }
+
+/* ญาติที่ดูผ่าน LINE (FamilyAccess.jsx) */
+.family-access .history-item { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.family-invite { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
+.family-invite .checkbox { display: flex; gap: 6px; align-items: flex-start; font-size: 0.9em; flex: 1 1 260px; }
+.family-access .notice a { word-break: break-all; }
+.family-timeline { margin-top: 12px; border-top: 1px solid var(--border, #e5ddc8); padding-top: 8px; }
+.family-timeline h4 { margin: 4px 0 8px; }
+.family-post textarea { width: 100%; box-sizing: border-box; }
+.family-post-actions { display: flex; align-items: center; gap: 8px; margin: 6px 0 10px; }
+.family-thumb { width: 44px; height: 44px; object-fit: cover; border-radius: 6px; }
+.family-msg { padding: 8px 10px; border-radius: 10px; margin-bottom: 8px; background: #faf6ec; }
+.family-msg.team { background: #f1ead6; }
+.family-msg p { margin: 4px 0 0; }
+.family-photo { max-width: 220px; max-height: 220px; border-radius: 8px; margin-top: 6px; }
