@@ -139,6 +139,8 @@ export const api = {
   me: () => request('/auth/me'),
   // ผูก LINE กับบัญชีนี้ — ตั๋วมาจากปุ่มในหน้า "งานของฉัน" ใน LINE (ดู server/src/lib/lineBridge.js)
   linkLine: (t) => request('/auth/line-link', { method: 'POST', body: { t } }),
+  // กรอกรหัสผูก LINE 6 หลักจากแอดมิน ในหน้าที่เปิดจาก LINE → ผูกแล้วเข้าระบบทันที ไม่ใช้รหัสผ่าน (คืน session)
+  lineCodeLogin: (t, code) => request('/auth/line-code', { method: 'POST', credentialCheck: true, body: { t, code } }),
 
   forgotPassword: (email) => request('/auth/forgot-password', { method: 'POST', body: { email } }),
   resetPassword: (body) => request('/auth/reset-password', { method: 'POST', body }),

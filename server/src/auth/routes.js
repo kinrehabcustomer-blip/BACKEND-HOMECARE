@@ -17,6 +17,7 @@ import {
 } from '../lib/auth.js';
 import { sendOtpEmail } from '../lib/mailer.js';
 import { ensureLineColumn, verifyLineTicket } from '../lib/lineBridge.js';
+import { linkLineByCode } from '../lib/lineLinkCode.js';
 
 export const authRouter = Router();
 
@@ -139,6 +140,28 @@ authRouter.get(
     );
     res.cookie(COOKIE_NAME, signToken(employee), cookieOptions);
     res.redirect(302, to);
+  }),
+);
+
+/**
+ * กรอกรหัสผูก LINE 6 หลักในหน้าเข้าระบบที่เปิดจากปุ่มใน LINE (ดร.ธงชัย 23 ต.ค. 2569 "พิมพ์ในแชทเขาไม่เข้าใจ")
+ * ตั๋ว LINE จาก ?line= + รหัสจากแอดมิน → ผูกแล้วเข้าระบบทันที (ไม่ต้องใช้รหัสผ่าน) · ตรรกะร่วมกับการพิมพ์ในแชท อยู่ใน lib/lineLinkCode.js
+ */
+const lineCodeSchema = z.object({ t: z.string().min(1), code: z.string().trim().regex(/^\d{6}$/, 'รหัสต้องเป็นตัวเลข 6 หลัก') });
+authRouter.post(
+  '/line-code',
+  asyncRoute(async (req, res) => {
+    const { t, code } = lineCodeSchema.parse(req.body);
+    const lineUserId = verifyLineTicket(t);
+    if (!lineUserId) throw new ApiError(400, 'ลิงก์จาก LINE หมดอายุแล้ว กลับไปกดปุ่มในเมนู LINE @kinjobs ใหม่อีกครั้ง');
+    const employee = await linkLineByCode(lineUserId, code);
+    await sql.run(
+      `UPDATE employees SET last_login_at = to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')
+       WHERE employee_id = :id`,
+      { id: employee.employee_id },
+    );
+    res.cookie(COOKIE_NAME, signToken(employee), cookieOptions);
+    res.json(toSession(employee));
   }),
 );
 

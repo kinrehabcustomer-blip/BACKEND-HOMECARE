@@ -62,7 +62,17 @@ export default function EmployeeDetailPage() {
   // รหัสผูก LINE 6 หลัก (ดร.ธงชัย 23 ต.ค. 2569) — แสดงครั้งเดียวหลังกด ไม่ดึงซ้ำจากเซิร์ฟเวอร์ (เก็บแค่ hash)
   const [lineCode, setLineCode] = useState(null);
   const [lineCodeError, setLineCodeError] = useState(null);
+  const [copied, setCopied] = useState(false);
+  function copyLineCodeMessage() {
+    const msg = `รหัสผูก LINE ของคุณ: ${lineCode.code}\n`
+      + '1. เปิด LINE @kinjobs กดปุ่ม "เช็คอินเข้างาน" ในเมนูด้านล่าง\n'
+      + '2. หน้าเข้าระบบจะเปิดขึ้น กรอกรหัส 6 หลักนี้ในช่อง "รหัส 6 หลัก"\n'
+      + '3. กด "ยืนยันรหัส แล้วเข้าระบบ" — ครั้งต่อไปกดจาก LINE เข้าได้ทันที ไม่ต้องใช้รหัสผ่าน\n'
+      + `(ใช้ได้ครั้งเดียว ถึง ${lineCode.expires_at} น.)`;
+    navigator.clipboard?.writeText(msg).then(() => setCopied(true)).catch(() => setLineCodeError('คัดลอกไม่ได้ — จดรหัสส่งให้เองได้เลย'));
+  }
   async function handleLineCode() {
+    setCopied(false);
     setLineCodeError(null);
     try {
       setLineCode(await api.createEmployeeLineCode(id));
@@ -163,10 +173,21 @@ export default function EmployeeDetailPage() {
             <button type="button" className="btn tiny" onClick={handleLineCode}>
               {employee.line_linked ? 'รหัสผูก LINE ใหม่' : 'ออกรหัสผูก LINE'}
             </button>
+            {/* อธิบายเป็นขั้น + ปุ่มคัดลอกข้อความส่งให้พนักงาน (ดร. 23 ต.ค. 2569 "รหัสผูกต้องอธิบายมากกว่านี้ ถึงจะเข้าใจ") */}
             {lineCode && (
-              <span style={{ display: 'block', marginTop: 6 }}>
-                รหัส <strong style={{ fontSize: '1.3em', letterSpacing: 3 }}>{lineCode.code}</strong>{' '}
-                · ให้เจ้าตัวพิมพ์รหัสนี้ในแชท LINE @kinjobs · ใช้ได้ครั้งเดียว ถึง {lineCode.expires_at} น.
+              <span style={{ display: 'block', marginTop: 8, padding: 10, border: '1px solid #e5d5b0', borderRadius: 10, background: '#fbf6ec' }}>
+                รหัสผูก LINE ของ {employee.first_name}:{' '}
+                <strong style={{ fontSize: '1.6em', letterSpacing: 4 }}>{lineCode.code}</strong>
+                <span style={{ display: 'block', marginTop: 6 }}>
+                  <b>ส่งรหัสนี้ให้พนักงาน แล้วบอกให้ทำ 3 ขั้น:</b>
+                  <br />1. เปิด LINE @kinjobs แล้วกดปุ่ม "เช็คอินเข้างาน" (หรือ "ส่งรายงานวันนี้") ในเมนูด้านล่าง
+                  <br />2. หน้าเข้าระบบจะเปิดขึ้นมา กรอกรหัส 6 หลักนี้ในช่อง "รหัส 6 หลัก"
+                  <br />3. กด "ยืนยันรหัส แล้วเข้าระบบ" — เสร็จ ครั้งต่อไปกดจาก LINE เข้าได้ทันที ไม่ต้องใช้รหัสผ่าน
+                  <br /><span className="muted">หรือพิมพ์รหัสนี้ส่งในแชท LINE @kinjobs ก็ได้ · ใช้ได้ครั้งเดียว ถึง {lineCode.expires_at} น.</span>
+                </span>
+                <button type="button" className="btn tiny" style={{ marginTop: 6 }} onClick={copyLineCodeMessage}>
+                  {copied ? 'คัดลอกแล้ว ✓ วางส่งใน LINE ได้เลย' : 'คัดลอกข้อความส่งให้พนักงาน'}
+                </button>
               </span>
             )}
             {lineCodeError && <span style={{ display: 'block', color: '#b42318' }}>{lineCodeError}</span>}
