@@ -116,15 +116,20 @@ authRouter.post(
 // ---------- เข้าระบบด้วย LINE (ตั๋วจาก chat.kinorigin.com/me · ดู lib/lineBridge.js) ----------
 // ผูกแล้ว = ออกคุกกี้เหมือน login ปกติแล้วพาเข้าหน้าแรกตามสิทธิ์ · ยังไม่ผูก = พาไปหน้า login พร้อมตั๋ว
 // ให้ login ด้วยรหัสผ่านเดิม 1 ครั้ง หน้า login จะเรียก /line-link ต่อเอง
+const LINE_LANDING = new Set(['/', '/my-today', '/my-cases', '/my-calendar']);
+
 authRouter.get(
   '/line',
   asyncRoute(async (req, res) => {
     const lineUserId = verifyLineTicket(req.query.t);
+    /* ?to= พาไปหน้าที่ตั้งใจหลังเข้าระบบ (ดร.ธงชัย 23 ต.ค. 2569 ปุ่ม "ส่งรายงานวันนี้" ใน LINE @kinjobs → หน้างานวันนี้)
+       รับเฉพาะหน้าในรายการ — กันลิงก์พาไปที่อื่น (open redirect) */
+    const to = LINE_LANDING.has(req.query.to) ? req.query.to : '/';
     if (!lineUserId) return res.redirect(302, '/login?line_error=expired');
     await ensureLineColumn();
 
     const employee = await sql.one('SELECT * FROM employees WHERE line_user_id = :uid', { uid: lineUserId });
-    if (!employee) return res.redirect(302, `/login?line=${encodeURIComponent(req.query.t)}`);
+    if (!employee) return res.redirect(302, `/login?line=${encodeURIComponent(req.query.t)}${to !== '/' ? `&to=${encodeURIComponent(to)}` : ''}`);
     if (BLOCKED_STATUSES[employee.status]) return res.redirect(302, '/login?line_error=blocked');
 
     await sql.run(
@@ -133,7 +138,7 @@ authRouter.get(
       { id: employee.employee_id },
     );
     res.cookie(COOKIE_NAME, signToken(employee), cookieOptions);
-    res.redirect(302, '/');
+    res.redirect(302, to);
   }),
 );
 

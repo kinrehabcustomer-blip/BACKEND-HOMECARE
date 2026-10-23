@@ -356,3 +356,39 @@ integrationRouter.post(
     res.json({ case_id: c.case_id, mode: added ? 'team' : 'already' });
   }),
 );
+
+/**
+ * ข้อ 4 ต่อ (ดร.ธงชัย 23 ต.ค. 2569 ทาง ก "ปุ่มส่งรายงานวันนี้ → ฟอร์มเดิมในระบบงาน"):
+ * รายงานอาการที่ผู้ดูแลบันทึกผ่านฟอร์มในระบบงาน → ฝั่ง chat ดึงไปส่งสรุปเข้า LINE OA Kin HomeCare ของญาติ
+ *   ตั๋ว 'kin-family-feed' {since} — ฝั่ง chat (cron) ดึงรายงานใหม่กว่า report_id ที่ส่งไปแล้ว · ที่นี่ไม่ยิง LINE เอง
+ *   ส่งเฉพาะเคสที่มีญาติผูกแล้ว · ข้ามรายงานที่มาจากแชท LINE ("(LINE)" — ฝั่ง chat ส่งไปแล้วตอนรับรายงาน)
+ *   ส่งแค่สัญญาณชีพหลัก + อาการ/การดูแล/อาหาร-ขับถ่ายแบบสั้น + ชื่อต้นผู้บันทึก — ไม่ส่งบันทึกภายใน/ติดตามต่อ/GPS
+ */
+integrationRouter.post(
+  '/family/report-feed',
+  asyncRoute(async (req, res) => {
+    const { token } = hireSchema.parse(req.body);
+    const p = verifySigned(token, 'kin-family-feed');
+    if (!p || !Number.isInteger(p.since) || p.since < 0) throw new ApiError(401, 'ลายเซ็นไม่ถูกต้องหรือหมดอายุ');
+    await family.ensureFamilyTable();
+    // ครั้งแรก (since = 0) ไม่ไล่ส่งย้อนหลัง — คืนแค่ตัวชี้ล่าสุดให้ฝั่ง chat เริ่มนับจากตรงนี้
+    if (p.since === 0) {
+      const last = await sql.one('SELECT COALESCE(MAX(report_id), 0)::int AS id FROM case_reports');
+      return res.json({ cursor: last.id, reports: [] });
+    }
+    const rows = await sql.all(
+      `SELECT r.report_id, r.case_id, r.report_date, r.report_time,
+              r.bp_systolic, r.bp_diastolic, r.pulse, r.respiratory_rate, r.spo2, r.temperature_c, r.blood_sugar,
+              left(r.symptoms, 200) AS symptoms, left(r.care_given, 200) AS care_given, left(r.intake_output, 200) AS intake_output,
+              split_part(COALESCE(r.reported_by_name, ''), ' ', 1) AS by_first,
+              (SELECT array_agg(DISTINCT l.line_user_id) FROM case_family_links l
+                WHERE l.case_id = r.case_id AND l.accepted_at IS NOT NULL AND l.revoked_at IS NULL AND l.line_user_id IS NOT NULL) AS family
+       FROM case_reports r
+       WHERE r.report_id > :since AND COALESCE(r.reported_by_name, '') NOT LIKE '%(LINE)'
+       ORDER BY r.report_id LIMIT 50`,
+      { since: p.since },
+    );
+    const cursor = rows.length ? rows[rows.length - 1].report_id : p.since;
+    res.json({ cursor, reports: rows.filter((r) => r.family?.length) });
+  }),
+);
