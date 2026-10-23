@@ -77,7 +77,19 @@ integrationRouter.post(
       { visit_id: visit.visit_id, report_type: 'routine', note: p.text.trim().slice(0, 2000) },
       { employee_id: emp.employee_id, name: `${emp.first_name} ${emp.last_name} (LINE)` },
     );
-    res.status(201).json({ linked: true, saved: true, case_id: visit.case_id, report_id: report.report_id });
+    /* ข้อ 4 (ดร.ธงชัย 23 ต.ค. 2569 "รายงานของผู้ดูแลเด้งเข้า LINE ญาติ"): ส่งรายชื่อ LINE ญาติที่ผูกเคสนี้แล้ว (ยังไม่ถูกปลด)
+       กลับไปให้ฝั่ง chat ส่งสรุปเข้า OA KIN HomeCare — ที่นี่ไม่ยิง LINE เอง (โทเคน OA อยู่ฝั่ง chat ที่เดียว)
+       ส่งแค่ชื่อต้นของผู้ดูแล (ไม่ส่งนามสกุล/เบอร์) ตามหลักเดียวกับหน้า /family */
+    await family.ensureFamilyTable();
+    const relatives = await sql.all(
+      `SELECT DISTINCT line_user_id FROM case_family_links
+       WHERE case_id = :id AND accepted_at IS NOT NULL AND revoked_at IS NULL AND line_user_id IS NOT NULL`,
+      { id: visit.case_id },
+    );
+    res.status(201).json({
+      linked: true, saved: true, case_id: visit.case_id, report_id: report.report_id,
+      family_line_ids: relatives.map((r) => r.line_user_id), caregiver_first_name: emp.first_name,
+    });
   }),
 );
 
