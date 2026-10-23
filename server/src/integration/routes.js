@@ -292,3 +292,55 @@ integrationRouter.post(
     });
   }),
 );
+
+/**
+ * เชื่อมลูกค้า LINE Kin HomeCare ↔ คนดูแลจาก LINE @kinjobs ผ่านเคสในระบบงานนี้ (ดร.ธงชัย 23 ต.ค. 2569 ข้อ 1–2)
+ *   ไม่ให้สอง OA คุยกันตรง · ฝั่ง chat ผูกประกาศหาคน (job_posts) เข้ากับรหัสเคสที่นี่ แล้วตอนกด "ได้งาน" ส่งคนเข้าเคส
+ *
+ *   /customers/cases  ตั๋ว 'kin-cust-cases' {cid} — เคสที่ยังเปิดอยู่ของลูกค้าคนนี้ (ให้แอดมินเลือกตอนลงประกาศ)
+ *                     ส่งแค่ รหัส · ชื่อเคส · ชนิด · สถานะ · วันเริ่ม · ชื่อคนดูแล — ไม่ส่งที่อยู่/เบอร์/อาการ
+ *   /cases/assign     ตั๋ว 'kin-case-assign' {case_id, employee_id, ref} — เคสยังไม่มีคน = ตั้งเป็นผู้รับผิดชอบหลัก
+ *                     (กะที่ลงไว้ตอนยังไม่มีคนตามไปเป็นของคนนี้ · ดู cases.assign) · มีคนหลักแล้ว = เพิ่มเข้าทีม
+ *                     ปิด/ยกเลิกแล้ว = 409 ไม่แตะ · ประวัติเคสบันทึกว่ามาจากประกาศรหัสไหน
+ */
+const CASE_OPEN = ['unassigned', 'assigned', 'in_progress'];
+
+integrationRouter.post(
+  '/customers/cases',
+  asyncRoute(async (req, res) => {
+    const { token } = hireSchema.parse(req.body);
+    const p = verifySigned(token, 'kin-cust-cases');
+    if (!p || typeof p.cid !== 'string') throw new ApiError(401, 'ลายเซ็นไม่ถูกต้องหรือหมดอายุ');
+    const rows = await sql.all(
+      `SELECT c.case_id, c.title, c.case_type, c.status, c.start_date,
+              CASE WHEN e.employee_id IS NULL THEN NULL ELSE e.first_name || ' ' || e.last_name END AS assigned_name
+       FROM cases c LEFT JOIN employees e ON e.employee_id = c.assigned_to
+       WHERE c.customer_id = :cid AND c.status IN ('unassigned', 'assigned', 'in_progress')
+       ORDER BY c.created_at DESC LIMIT 20`,
+      { cid: p.cid },
+    );
+    res.json({ cases: rows });
+  }),
+);
+
+integrationRouter.post(
+  '/cases/assign',
+  asyncRoute(async (req, res) => {
+    const { token } = hireSchema.parse(req.body);
+    const p = verifySigned(token, 'kin-case-assign');
+    if (!p || typeof p.case_id !== 'string' || typeof p.employee_id !== 'string') throw new ApiError(401, 'ลายเซ็นไม่ถูกต้องหรือหมดอายุ');
+    const c = await sql.one('SELECT case_id, status, assigned_to FROM cases WHERE case_id = :id', { id: p.case_id });
+    if (!c) throw new ApiError(404, 'ไม่พบเคสนี้ในระบบงาน');
+    if (!CASE_OPEN.includes(c.status)) throw new ApiError(409, 'เคสนี้ปิดหรือยกเลิกแล้ว');
+    const emp = await sql.one(`SELECT employee_id, status FROM employees WHERE employee_id = :id`, { id: p.employee_id });
+    if (!emp || BLOCKED_STATUSES[emp.status]) throw new ApiError(409, 'พนักงานนี้ไม่พร้อมรับงาน');
+    const actor = { employee_id: null, name: `ระบบสมัครงาน${p.ref ? ` (ประกาศ ${String(p.ref).slice(0, 20)})` : ''}` };
+    if (c.assigned_to === emp.employee_id) return res.json({ case_id: c.case_id, mode: 'already' });
+    if (!c.assigned_to) {
+      await cases.assign(c.case_id, emp.employee_id, actor);
+      return res.json({ case_id: c.case_id, mode: 'assigned' });
+    }
+    const added = await cases.addTeamMember(c.case_id, emp.employee_id, actor);
+    res.json({ case_id: c.case_id, mode: added ? 'team' : 'already' });
+  }),
+);
