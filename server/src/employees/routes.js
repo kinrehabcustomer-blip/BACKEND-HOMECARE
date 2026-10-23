@@ -18,7 +18,8 @@ import {
 import { ApiError, asyncRoute, notFound } from '../lib/errors.js';
 import { sql } from '../db/index.js';
 import { canSeeStaffPay, BLOCKED_STATUSES, can } from '../lib/auth.js';
-import { ensureLineColumn } from '../lib/lineBridge.js';
+import { ensureLineColumn, ensureLinkCodeTables, hashLinkCode, LINK_CODE_TTL_HOURS } from '../lib/lineBridge.js';
+import { randomInt } from 'node:crypto';
 
 export const employeesRouter = Router();
 
@@ -221,6 +222,39 @@ employeesRouter.delete(
     await ensureLineColumn();
     await sql.run('UPDATE employees SET line_user_id = NULL WHERE employee_id = :id', { id: req.params.id });
     res.json({ ok: true });
+  }),
+);
+
+/**
+ * ออกรหัสผูก LINE 6 หลักให้พนักงานคนนี้ (ดู lib/lineBridge.js) — พนักงานพิมพ์รหัสใน LINE @kinjobs แล้วผูกทันที ไม่ต้องใช้รหัสผ่าน
+ * ออกใหม่ = รหัสเก่าใช้ไม่ได้ · ผูก LINE อยู่แล้วก็ออกได้ (ใช้ตอนเปลี่ยนเครื่อง/เปลี่ยน LINE)
+ */
+employeesRouter.post(
+  '/:id/line-code',
+  asyncRoute(async (req, res) => {
+    ensureCanManageTarget(req, req.employee);
+    if (BLOCKED_STATUSES[req.employee.status]) throw new ApiError(400, 'บัญชีนี้ถูกปิดอยู่ ออกรหัสผูก LINE ไม่ได้');
+    await ensureLineColumn();
+    await ensureLinkCodeTables();
+    await sql.run('DELETE FROM line_link_codes WHERE expires_at < now()');
+    for (let i = 0; i < 5; i++) {
+      const code = String(randomInt(0, 1_000_000)).padStart(6, '0');
+      const taken = await sql.one(
+        'SELECT 1 AS x FROM line_link_codes WHERE code_hash = :h AND employee_id <> :id',
+        { h: hashLinkCode(code), id: req.params.id },
+      );
+      if (taken) continue;
+      const row = await sql.one(
+        `INSERT INTO line_link_codes (employee_id, code_hash, expires_at, created_by)
+         VALUES (:id, :h, now() + make_interval(hours => :ttl), :by)
+         ON CONFLICT (employee_id) DO UPDATE SET code_hash = EXCLUDED.code_hash, expires_at = EXCLUDED.expires_at,
+           created_by = EXCLUDED.created_by, created_at = now()
+         RETURNING to_char(expires_at AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI') AS expires_at`,
+        { id: req.params.id, h: hashLinkCode(code), ttl: LINK_CODE_TTL_HOURS, by: req.user.employee_id },
+      );
+      return res.json({ code, expires_at: row.expires_at, ttl_hours: LINK_CODE_TTL_HOURS });
+    }
+    throw new ApiError(500, 'ออกรหัสไม่สำเร็จ ลองกดใหม่อีกครั้ง');
   }),
 );
 

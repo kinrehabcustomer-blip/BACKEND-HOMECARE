@@ -168,6 +168,8 @@ export const api = {
   deleteEmployee: (id) => request(`/employees/${id}?hard=true`, { method: 'DELETE' }),
   // ปลด LINE ที่ผูกไว้ (เข้าระบบด้วย LINE) — เจ้าตัวต้อง login รหัสผ่าน 1 ครั้งเพื่อผูกใหม่
   unlinkEmployeeLine: (id) => request(`/employees/${id}/line`, { method: 'DELETE' }),
+  // ออกรหัสผูก LINE 6 หลัก — เจ้าตัวพิมพ์รหัสใน LINE @kinjobs แล้วผูกทันที ไม่ต้องใช้รหัสผ่าน (คืน { code, expires_at })
+  createEmployeeLineCode: (id) => request(`/employees/${id}/line-code`, { method: 'POST' }),
 
   /** แนบรูปพนักงานทับของเดิม — ส่ง image: null เพื่อลบรูป (คืนข้อมูลพนักงานที่อัปเดตแล้ว) */
   setEmployeePhoto: (id, image) => request(`/employees/${id}/photo`, { method: 'PUT', body: { image } }),

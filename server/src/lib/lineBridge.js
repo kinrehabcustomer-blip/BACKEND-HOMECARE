@@ -1,4 +1,4 @@
-import { createPublicKey, verify } from 'node:crypto';
+import { createHash, createPublicKey, verify } from 'node:crypto';
 import { sql } from '../db/index.js';
 
 /**
@@ -55,5 +55,34 @@ export const ensureLineColumn = () =>
     )
     .catch((err) => {
       ready = null;
+      throw err;
+    }));
+
+/*
+ * รหัสผูก LINE 6 หลัก (ดร.ธงชัย 23 ต.ค. 2569 "อนุญาตให้แก้ระบบงาน staff ทำรหัสผูก LINE 6 หลักจากหน้าพนักงาน")
+ * พนักงานเดิมที่ไม่อยากกรอกรหัสผ่าน: แอดมินกดออกรหัสในหน้าพนักงาน (POST /api/employees/:id/line-code)
+ * → พนักงานพิมพ์รหัสใน LINE @kinjobs → chat ส่งตั๋ว 'kin-line-code' {u, c} มาที่ /api/integration/line-code
+ * รหัสจากแอดมิน = ตัวยืนยันว่า LINE นี้คือพนักงานคนนี้ (แทนรหัสผ่าน) · เก็บแค่ hash · อายุ 24 ชม. · ใช้ครั้งเดียว
+ * กันเดารหัส: LINE หนึ่งบัญชีลองผิดได้ 5 ครั้ง/ชม.
+ */
+export const LINK_CODE_TTL_HOURS = 24;
+export const LINK_CODE_MAX_TRIES = 5;
+export const hashLinkCode = (code) => createHash('sha256').update(`kin-line-code:${code}`).digest('hex');
+
+let codesReady = null;
+export const ensureLinkCodeTables = () =>
+  (codesReady ??= sql
+    .run(`CREATE TABLE IF NOT EXISTS line_link_codes (
+            employee_id TEXT PRIMARY KEY,
+            code_hash TEXT NOT NULL UNIQUE,
+            expires_at TIMESTAMPTZ NOT NULL,
+            created_by TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now())`)
+    .then(() => sql.run(`CREATE TABLE IF NOT EXISTS line_link_tries (
+            line_user_id TEXT NOT NULL,
+            at TIMESTAMPTZ NOT NULL DEFAULT now())`))
+    .then(() => sql.run('CREATE INDEX IF NOT EXISTS idx_line_link_tries ON line_link_tries (line_user_id, at)'))
+    .catch((err) => {
+      codesReady = null;
       throw err;
     }));

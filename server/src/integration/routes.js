@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { sql } from '../db/index.js';
 import { ApiError, asyncRoute } from '../lib/errors.js';
-import { ensureLineColumn, isLineUserId, verifySigned } from '../lib/lineBridge.js';
+import { ensureLineColumn, ensureLinkCodeTables, hashLinkCode, isLineUserId, LINK_CODE_MAX_TRIES, verifySigned } from '../lib/lineBridge.js';
 import { createEmployeeSchema, decodeImage } from '../employees/schema.js';
 import * as repo from '../employees/repo.js';
 import * as cases from '../cases/repo.js';
@@ -25,6 +25,50 @@ import { ensureCustomerLineColumns as ensureCustomerLineColumnsSafe, findByPhone
 export const integrationRouter = Router();
 
 const hireSchema = z.object({ token: z.string().min(1) });
+
+/**
+ * ผูก LINE ด้วยรหัส 6 หลักที่แอดมินออกในหน้าพนักงาน (ดร.ธงชัย 23 ต.ค. 2569 · ดู lib/lineBridge.js)
+ * ตั๋ว 'kin-line-code' {u: LINE userId, c: รหัส} ยิงจาก webhook @kinjobs ตอนพนักงานพิมพ์รหัส
+ * → { linked: true, name } · รหัสผิด/หมดอายุ 400 · ลองผิดเกิน 5 ครั้ง/ชม. 429 · LINE ผูกคนอื่นอยู่ 409
+ */
+integrationRouter.post(
+  '/line-code',
+  asyncRoute(async (req, res) => {
+    const { token } = hireSchema.parse(req.body);
+    const p = verifySigned(token, 'kin-line-code');
+    if (!p || !isLineUserId(p.u) || !/^\d{6}$/.test(String(p.c ?? ''))) throw new ApiError(401, 'ลายเซ็นไม่ถูกต้องหรือหมดอายุ');
+    await ensureLineColumn();
+    await ensureLinkCodeTables();
+
+    const tries = await sql.one(
+      `SELECT count(*)::int AS n FROM line_link_tries WHERE line_user_id = :uid AND at > now() - interval '1 hour'`,
+      { uid: p.u },
+    );
+    if (tries.n >= LINK_CODE_MAX_TRIES) throw new ApiError(429, 'ใส่รหัสผิดหลายครั้ง รอ 1 ชั่วโมงแล้วลองใหม่ หรือขอรหัสใหม่จากผู้ประสานงาน');
+
+    const code = await sql.one(
+      'SELECT employee_id FROM line_link_codes WHERE code_hash = :h AND expires_at > now()',
+      { h: hashLinkCode(p.c) },
+    );
+    const emp = code
+      ? await sql.one('SELECT employee_id, first_name, status FROM employees WHERE employee_id = :id', { id: code.employee_id })
+      : null;
+    if (!emp || BLOCKED_STATUSES[emp.status]) {
+      await sql.run('INSERT INTO line_link_tries (line_user_id) VALUES (:uid)', { uid: p.u });
+      await sql.run(`DELETE FROM line_link_tries WHERE at < now() - interval '1 day'`);
+      throw new ApiError(400, 'รหัสไม่ถูกต้องหรือหมดอายุ');
+    }
+
+    const owner = await sql.one('SELECT employee_id FROM employees WHERE line_user_id = :uid', { uid: p.u });
+    if (owner && owner.employee_id !== emp.employee_id) {
+      throw new ApiError(409, 'LINE นี้ผูกกับบัญชีพนักงานคนอื่นอยู่แล้ว — ให้แอดมินปลด LINE ที่บัญชีเดิมก่อน');
+    }
+    await sql.run('UPDATE employees SET line_user_id = :uid WHERE employee_id = :id', { uid: p.u, id: emp.employee_id });
+    await sql.run('DELETE FROM line_link_codes WHERE employee_id = :id', { id: emp.employee_id });
+    await sql.run('DELETE FROM line_link_tries WHERE line_user_id = :uid', { uid: p.u });
+    res.json({ linked: true, employee_id: emp.employee_id, name: emp.first_name });
+  }),
+);
 
 /**
  * สรุปงานของฉันให้หน้า "งานของฉัน" ใน LINE (chat.kinorigin.com/me) — ตั๋ว purpose 'kin-my' อายุ 1 นาที ยิงจากเซิร์ฟเวอร์ chat

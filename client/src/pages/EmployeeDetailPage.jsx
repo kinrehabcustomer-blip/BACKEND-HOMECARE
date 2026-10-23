@@ -59,6 +59,18 @@ export default function EmployeeDetailPage() {
     reload();
   }
 
+  // รหัสผูก LINE 6 หลัก (ดร.ธงชัย 23 ต.ค. 2569) — แสดงครั้งเดียวหลังกด ไม่ดึงซ้ำจากเซิร์ฟเวอร์ (เก็บแค่ hash)
+  const [lineCode, setLineCode] = useState(null);
+  const [lineCodeError, setLineCodeError] = useState(null);
+  async function handleLineCode() {
+    setLineCodeError(null);
+    try {
+      setLineCode(await api.createEmployeeLineCode(id));
+    } catch (err) {
+      setLineCodeError(err.message);
+    }
+  }
+
   async function handleDelete() {
     await api.deleteEmployee(id);
     navigate('/employees');
@@ -147,7 +159,17 @@ export default function EmployeeDetailPage() {
               </>
             ) : (
               'ยังไม่ผูก'
+            )}{' '}
+            <button type="button" className="btn tiny" onClick={handleLineCode}>
+              {employee.line_linked ? 'รหัสผูก LINE ใหม่' : 'ออกรหัสผูก LINE'}
+            </button>
+            {lineCode && (
+              <span style={{ display: 'block', marginTop: 6 }}>
+                รหัส <strong style={{ fontSize: '1.3em', letterSpacing: 3 }}>{lineCode.code}</strong>{' '}
+                · ให้เจ้าตัวพิมพ์รหัสนี้ในแชท LINE @kinjobs · ใช้ได้ครั้งเดียว ถึง {lineCode.expires_at} น.
+              </span>
             )}
+            {lineCodeError && <span style={{ display: 'block', color: '#b42318' }}>{lineCodeError}</span>}
           </Row>
         </section>
       </div>
