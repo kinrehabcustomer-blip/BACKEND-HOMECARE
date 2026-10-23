@@ -380,10 +380,14 @@ integrationRouter.post(
       `SELECT r.report_id, r.case_id, r.report_date, r.report_time,
               r.bp_systolic, r.bp_diastolic, r.pulse, r.respiratory_rate, r.spo2, r.temperature_c, r.blood_sugar,
               left(r.symptoms, 200) AS symptoms, left(r.care_given, 200) AS care_given, left(r.intake_output, 200) AS intake_output,
+              -- รายงานกายภาพ (ดร. 23 ต.ค. 2569 "รายงานของนักกายภาพก็ลักษณะเดียวกัน") — ฝั่ง chat จัดข้อความแบบกายภาพเมื่อ is_physio
+              (c.service_kind = 'physio' OR c.physio_package_id IS NOT NULL OR c.case_type = 'physiotherapy') AS is_physio,
+              r.physio_treatments, r.rehab_minutes, r.assist_level, r.walk_aid, r.walk_distance_m,
+              r.pain_score, r.post_pain_score, r.post_bp_systolic, r.post_bp_diastolic, r.post_pulse, r.rehab_after,
               split_part(COALESCE(r.reported_by_name, ''), ' ', 1) AS by_first,
               (SELECT array_agg(DISTINCT l.line_user_id) FROM case_family_links l
                 WHERE l.case_id = r.case_id AND l.accepted_at IS NOT NULL AND l.revoked_at IS NULL AND l.line_user_id IS NOT NULL) AS family
-       FROM case_reports r
+       FROM case_reports r JOIN cases c ON c.case_id = r.case_id
        WHERE r.report_id > :since AND COALESCE(r.reported_by_name, '') NOT LIKE '%(LINE)'
        ORDER BY r.report_id LIMIT 50`,
       { since: p.since },
