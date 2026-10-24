@@ -180,7 +180,7 @@ authRouter.post(
 
     const owner = await sql.one('SELECT employee_id FROM employees WHERE line_user_id = :uid', { uid: lineUserId });
     if (owner && owner.employee_id !== req.user.employee_id) {
-      throw new ApiError(409, 'LINE นี้ผูกกับบัญชีพนักงานคนอื่นอยู่แล้ว — ติดต่อแอดมินให้ปลดก่อน');
+      throw new ApiError(409, 'LINE นี้ยืนยันตัวตนเป็นพนักงานคนอื่นอยู่แล้ว — ติดต่อผู้ประสานงานให้ยกเลิกที่บัญชีเดิมก่อน');
     }
     await sql.run('UPDATE employees SET line_user_id = :uid WHERE employee_id = :id', {
       uid: lineUserId,

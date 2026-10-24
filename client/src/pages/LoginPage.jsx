@@ -50,7 +50,7 @@ export default function LoginPage() {
         {error} · <Link to={backTo} replace>เข้าระบบต่อ</Link>
       </p>
     ) : (
-      <p className="muted app-loading">กำลังผูกบัญชีกับ LINE…</p>
+      <p className="muted app-loading">กำลังยืนยันตัวตน…</p>
     );
   }
   if (user) return <Navigate to={backTo} replace />;

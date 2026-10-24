@@ -30,7 +30,7 @@ export async function linkLineByCode(lineUserId, code) {
 
   const owner = await sql.one('SELECT employee_id FROM employees WHERE line_user_id = :uid', { uid: lineUserId });
   if (owner && owner.employee_id !== emp.employee_id) {
-    throw new ApiError(409, 'LINE นี้ผูกกับบัญชีพนักงานคนอื่นอยู่แล้ว — ให้แอดมินปลด LINE ที่บัญชีเดิมก่อน');
+    throw new ApiError(409, 'LINE นี้ยืนยันตัวตนเป็นพนักงานคนอื่นอยู่แล้ว — ติดต่อผู้ประสานงานให้ยกเลิกที่บัญชีเดิมก่อน');
   }
   await sql.run('UPDATE employees SET line_user_id = :uid WHERE employee_id = :id', { uid: lineUserId, id: emp.employee_id });
   await sql.run('DELETE FROM line_link_codes WHERE employee_id = :id', { id: emp.employee_id });
