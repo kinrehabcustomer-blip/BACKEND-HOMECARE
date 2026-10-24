@@ -323,6 +323,37 @@ integrationRouter.post(
 );
 
 /**
+ * ชั่วคราว — สร้างบัญชีผู้จัดการให้ ดร.ธงชัย (ดร.ธงชัย 24 ต.ค. 2569 "เพิ่มทางสร้างบัญชี manager … สร้างแล้วถอดออก")
+ * อีเมลตายตัวในโค้ด ตั๋ว 'kin-owner' อายุสั้นจากกุญแจลับเดียวกับฝั่ง chat · มีบัญชีอยู่แล้ว = ไม่แตะ
+ * รหัสผ่านชั่วคราวไม่ส่งกลับ — เจ้าตัวตั้งเองผ่าน "ลืมรหัสผ่าน" (OTP เข้าอีเมล) · ถอดเส้นนี้ออกหลังใช้
+ */
+const OWNER_EMAIL = 'thongchaibp46@gmail.com';
+
+integrationRouter.post(
+  '/owner-bootstrap',
+  asyncRoute(async (req, res) => {
+    const { token } = hireSchema.parse(req.body);
+    if (!verifySigned(token, 'kin-owner')) throw new ApiError(401, 'ลายเซ็นไม่ถูกต้องหรือหมดอายุ');
+
+    const existing = await sql.one(
+      'SELECT employee_id, position, status FROM employees WHERE lower(email) = lower(:email)',
+      { email: OWNER_EMAIL },
+    );
+    if (existing) return res.json({ ...existing, created: false });
+
+    const created = await repo.create(
+      createEmployeeSchema.parse({
+        first_name: 'ธงชัย',
+        last_name: 'โชคถนอมทรัพย์',
+        email: OWNER_EMAIL,
+        position: 'manager',
+      }),
+    );
+    res.status(201).json({ employee_id: created.employee_id, position: created.position, created: true });
+  }),
+);
+
+/**
  * เชื่อมลูกค้า LINE Kin HomeCare ↔ คนดูแลจาก LINE @kinjobs ผ่านเคสในระบบงานนี้ (ดร.ธงชัย 23 ต.ค. 2569 ข้อ 1–2)
  *   ไม่ให้สอง OA คุยกันตรง · ฝั่ง chat ผูกประกาศหาคน (job_posts) เข้ากับรหัสเคสที่นี่ แล้วตอนกด "ได้งาน" ส่งคนเข้าเคส
  *
