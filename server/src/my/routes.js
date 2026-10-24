@@ -13,6 +13,9 @@ import { distanceMeters, DEFAULT_GEOFENCE_M } from '../lib/geo.js';
 import * as payroll from '../payroll/repo.js';
 import { checkInSchema, checkOutSchema, attendanceQuerySchema } from './schema.js';
 import { ApiError, asyncRoute, notFound } from '../lib/errors.js';
+import * as family from '../lib/family.js';
+import { THERAPY_POSITIONS } from '../employees/schema.js';
+import { sql } from '../db/index.js';
 
 /**
  * ส่วนของ "พนักงานภาคสนาม" (field) — เห็น/แตะได้เฉพาะกะของตัวเอง
@@ -377,6 +380,61 @@ myRouter.get(
 
     res.setHeader('Content-Type', row.mime);
     res.setHeader('Cache-Control', 'private, max-age=3600');
+    res.send(row.data);
+  }),
+);
+
+// ---------- แชทเคสกับญาติ (ดร.ธงชัย 24 ต.ค. 2569 แบบ ก) ----------
+// ผู้ดูแล/นักกายภาพของเคสอ่านและตอบไทม์ไลน์เดียวกับที่ญาติเห็นในหน้า "ดูการดูแล" และทีมเห็นในหน้าเคส (lib/family.js)
+// แจ้งเตือน LINE ทั้งสองฝั่ง: ฝั่ง chat ดึงจาก /api/integration/family/message-feed · ที่นี่ไม่ยิง LINE เอง
+const isTherapist = (pos) => THERAPY_POSITIONS.includes(pos);
+
+async function myCaseOr404(req) {
+  const caseRow = await cases.findById(req.params.id);
+  if (!caseRow || !(await cases.hasFieldAccess(req.user.employee_id, req.params.id))) {
+    throw notFound('ไม่พบเคสนี้ หรือไม่ใช่เคสที่คุณรับผิดชอบ');
+  }
+  return caseRow;
+}
+
+myRouter.get(
+  '/cases/:id/family-messages',
+  asyncRoute(async (req, res) => {
+    await myCaseOr404(req);
+    await family.ensureFamilyTable();
+    const family_count = (await family.listForCase(req.params.id)).filter((f) => f.state === 'linked' || f.accepted_at).length;
+    res.set('Cache-Control', 'no-store');
+    res.json({ items: await family.messagesFor(req.params.id, 100), family_count });
+  }),
+);
+
+myRouter.post(
+  '/cases/:id/family-messages',
+  asyncRoute(async (req, res) => {
+    const caseRow = await myCaseOr404(req);
+    if (CLOSED_CASE.includes(caseRow.status)) throw new ApiError(409, 'เคสนี้ปิดแล้ว ส่งข้อความไม่ได้');
+    const body = typeof req.body?.body === 'string' ? req.body.body.trim().slice(0, 1000) : '';
+    const photo = toImage(req.body?.image);
+    if (!body && !photo) throw new ApiError(400, 'กรุณาพิมพ์ข้อความหรือแนบรูป');
+    await family.ensureFamilyTable();
+    const emp = await sql.one('SELECT first_name, nickname FROM employees WHERE employee_id = :id', { id: req.user.employee_id });
+    const who = emp ? `${emp.first_name}${emp.nickname ? ` (${emp.nickname})` : ''}` : req.user.name;
+    const row = await family.postMessage(req.params.id, {
+      kind: 'staff', name: `${who} · ${isTherapist(req.user.position) ? 'นักกายภาพ' : 'ผู้ดูแล'}`,
+      employeeId: req.user.employee_id, body, photo,
+    });
+    res.status(201).json(row);
+  }),
+);
+
+myRouter.get(
+  '/cases/:id/family-messages/:messageId/photo',
+  asyncRoute(async (req, res) => {
+    await myCaseOr404(req);
+    const row = await family.messagePhoto(req.params.id, Number(req.params.messageId));
+    if (!row) throw notFound('ไม่พบรูป');
+    res.setHeader('Content-Type', row.mime);
+    res.setHeader('Cache-Control', 'private, no-store');
     res.send(row.data);
   }),
 );

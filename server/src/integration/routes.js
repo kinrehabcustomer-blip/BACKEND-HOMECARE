@@ -413,3 +413,52 @@ integrationRouter.post(
     res.json({ cursor, reports: rows.filter((r) => r.family?.length) });
   }),
 );
+
+/**
+ * แชทเคส ญาติ ↔ ผู้ดูแล/นักกายภาพ ↔ ทีม (ดร.ธงชัย 24 ต.ค. 2569 แบบ ก "หน้าเว็บที่แตะจาก LINE")
+ * ข้อความอยู่ที่ case_family_messages ที่เดียว ทุกฝ่ายเห็นเหมือนกัน — ที่นี่แค่บอกฝั่ง chat ว่ามีข้อความใหม่ถึงใคร ให้ไปแจ้งเตือนใน LINE
+ *   ตั๋ว 'kin-family-msg-feed' {since} → { cursor, messages: [{message_id, case_id, client_name, author_kind, author_name, preview,
+ *     family: [LINE ญาติ ไม่รวมคนเขียน], staff: [LINE ผู้ดูแลของเคส ไม่รวมคนเขียน]}] }
+ *   ข้อความจากญาติ → แจ้งผู้ดูแล + ญาติคนอื่น · จากผู้ดูแล/ทีม → แจ้งญาติ + ผู้ดูแลคนอื่นของเคส · ทีมเห็นในหน้าเคสอยู่แล้ว
+ *   ครั้งแรก (since = 0) ไม่ไล่ย้อนหลัง
+ */
+integrationRouter.post(
+  '/family/message-feed',
+  asyncRoute(async (req, res) => {
+    const { token } = hireSchema.parse(req.body);
+    const p = verifySigned(token, 'kin-family-msg-feed');
+    if (!p || !Number.isInteger(p.since) || p.since < 0) throw new ApiError(401, 'ลายเซ็นไม่ถูกต้องหรือหมดอายุ');
+    await family.ensureFamilyTable();
+    await ensureLineColumn();
+    if (p.since === 0) {
+      const last = await sql.one('SELECT COALESCE(MAX(message_id), 0)::int AS id FROM case_family_messages');
+      return res.json({ cursor: last.id, messages: [] });
+    }
+    const rows = await sql.all(
+      `SELECT m.message_id, m.case_id, c.client_name, m.author_kind, m.author_name, m.line_user_id AS author_line, m.employee_id AS author_emp,
+              left(COALESCE(m.body, ''), 120) AS preview, (m.photo_data IS NOT NULL) AS has_photo,
+              (SELECT array_agg(DISTINCT l.line_user_id) FROM case_family_links l
+                WHERE l.case_id = m.case_id AND l.accepted_at IS NOT NULL AND l.revoked_at IS NULL AND l.line_user_id IS NOT NULL) AS family,
+              (SELECT array_agg(DISTINCT e.line_user_id) FROM employees e
+                WHERE e.line_user_id IS NOT NULL AND e.employee_id IS DISTINCT FROM m.employee_id
+                  AND (e.employee_id = c.assigned_to
+                       OR EXISTS (SELECT 1 FROM case_team t WHERE t.case_id = c.case_id AND t.employee_id = e.employee_id)
+                       OR EXISTS (SELECT 1 FROM case_visits v WHERE v.case_id = c.case_id AND v.assigned_to = e.employee_id
+                                    AND v.status <> 'cancelled' AND v.visit_date >= to_char(now() AT TIME ZONE 'Asia/Bangkok' - interval '14 days', 'YYYY-MM-DD')))) AS staff
+       FROM case_family_messages m JOIN cases c ON c.case_id = m.case_id
+       WHERE m.message_id > :since AND m.deleted_at IS NULL AND c.status NOT IN ('cancelled')
+       ORDER BY m.message_id LIMIT 50`,
+      { since: p.since },
+    );
+    const cursor = rows.length ? rows[rows.length - 1].message_id : p.since;
+    res.json({
+      cursor,
+      messages: rows.map((r) => ({
+        message_id: r.message_id, case_id: r.case_id, client_name: r.client_name, author_kind: r.author_kind,
+        author_name: r.author_name, preview: r.preview || (r.has_photo ? '(ส่งรูป)' : ''),
+        family: (r.family || []).filter((u) => u !== r.author_line),
+        staff: r.staff || [],
+      })).filter((m) => m.family.length || m.staff.length),
+    });
+  }),
+);

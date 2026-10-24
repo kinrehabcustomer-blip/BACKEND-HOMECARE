@@ -9,7 +9,8 @@ export default function MyCasesPage() {
   const [list, setList] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [openId, setOpenId] = useState(null);
+  // ?case=<รหัส> จากลิงก์แจ้งเตือนแชทเคสใน LINE → เปิดเคสนั้นเลย (24 ต.ค. 2569)
+  const [openId, setOpenId] = useState(() => new URLSearchParams(window.location.search).get('case'));
 
   const load = useCallback(() => {
     setLoading(true);

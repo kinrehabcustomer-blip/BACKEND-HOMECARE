@@ -125,7 +125,8 @@ authRouter.get(
     const lineUserId = verifyLineTicket(req.query.t);
     /* ?to= พาไปหน้าที่ตั้งใจหลังเข้าระบบ (ดร.ธงชัย 23 ต.ค. 2569 ปุ่ม "ส่งรายงานวันนี้" ใน LINE @kinjobs → หน้างานวันนี้)
        รับเฉพาะหน้าในรายการ — กันลิงก์พาไปที่อื่น (open redirect) */
-    const to = LINE_LANDING.has(req.query.to) ? req.query.to : '/';
+    // + /my-cases?case=<รหัสเคส> ลิงก์แจ้งเตือนแชทเคสจาก LINE (24 ต.ค. 2569) เปิดเคสนั้นให้เลย
+    const to = LINE_LANDING.has(req.query.to) || /^\/my-cases\?case=[A-Za-z0-9-]{3,30}$/.test(String(req.query.to || '')) ? req.query.to : '/';
     if (!lineUserId) return res.redirect(302, '/login?line_error=expired');
     await ensureLineColumn();
 

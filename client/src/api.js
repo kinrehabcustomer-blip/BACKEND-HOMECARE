@@ -252,6 +252,10 @@ export const api = {
   // ---------- ของฉัน (พนักงานภาคสนาม — เห็นเฉพาะเคส/กะตัวเอง) ----------
   myCases: () => request('/my/cases'),
   myCase: (id) => request(`/my/cases/${id}`),
+  // แชทเคสกับญาติ (24 ต.ค. 2569) — ไทม์ไลน์เดียวกับหน้า "ดูการดูแล" ของญาติและหน้าเคสของทีม
+  myFamilyMessages: (id) => request(`/my/cases/${id}/family-messages`),
+  postMyFamilyMessage: (id, body) => request(`/my/cases/${id}/family-messages`, { method: 'POST', body }),
+  myFamilyPhotoUrl: (id, mid) => `/api/my/cases/${id}/family-messages/${mid}/photo`,
   myCalendar: ({ year, month }) => request(`/my/calendar?${new URLSearchParams({ year, month })}`),
 
   // ตารางงาน + เช็คอิน/เอาท์

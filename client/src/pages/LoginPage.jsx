@@ -23,7 +23,7 @@ export default function LoginPage() {
   const from = location.state?.from;
   // ?to= มาจากลิงก์ LINE ที่ยังไม่ผูก (GET /api/auth/line) — รับเฉพาะหน้างานของพนักงาน (ดร. 23 ต.ค. 2569 ปุ่ม "ส่งรายงานวันนี้")
   const toParam = new URLSearchParams(location.search).get('to');
-  const safeTo = ['/my-today', '/my-cases', '/my-calendar'].includes(toParam) ? toParam : '/';
+  const safeTo = ['/my-today', '/my-cases', '/my-calendar'].includes(toParam) || /^\/my-cases\?case=[A-Za-z0-9-]{3,30}$/.test(toParam || '') ? toParam : '/';
   const backTo = from ? `${from.pathname}${from.search ?? ''}` : safeTo; // '/' พาไปหน้าแรกตามสิทธิ์ (การเงินไม่มีหน้าภาพรวม)
 
   /* มาจากปุ่มในหน้า "งานของฉัน" ใน LINE แต่ LINE นี้ยังไม่ได้ผูกกับบัญชีไหน (ดู GET /api/auth/line)
