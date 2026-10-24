@@ -128,6 +128,13 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
   useSheetSwipe(onClose, boxRef);
   const [editing, setEditing] = useState(false);
   const [item, setItem] = useState(null);
+  // รวมหน้าหลังบ้าน ข้อ 3 (ดร. 24 ต.ค. 2569) — ปุ่มกลับไปห้องแชทลูกค้าในแดชบอร์ด admin (ลูกค้าที่ส่งมาจากแชท LINE Kin HomeCare)
+  const [chatUrl, setChatUrl] = useState(null);
+  useEffect(() => {
+    setChatUrl(null);
+    if (!caseId) return;
+    api.caseCustomerLine(caseId).then((d) => setChatUrl(d?.chat_url || null)).catch(() => {});
+  }, [caseId]);
   const [staff, setStaff] = useState([]);
   const [pick, setPick] = useState('');
   const [error, setError] = useState(null);
@@ -408,6 +415,11 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                 </h2>
                 <p className="muted">{item.customer_name ?? item.client_name}</p>
                 <span className={`badge case-${item.status}`}>{CASE_STATUS_LABELS[item.status]}</span>
+                {chatUrl && (
+                  <a className="btn tiny primary" style={{ marginLeft: 8 }} href={chatUrl} target="_blank" rel="noreferrer">
+                    💬 เปิดห้องแชทลูกค้า (Admin)
+                  </a>
+                )}
                 {/* สายของเคสต่อเนื่อง — กดไปรอบก่อน/รอบถัดไปได้ */}
                 {(item.renewed_from || item.renewed_to || item.round_no > 1) && (
                   <p className="case-rounds muted">

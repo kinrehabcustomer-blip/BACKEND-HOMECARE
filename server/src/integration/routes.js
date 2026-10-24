@@ -462,3 +462,85 @@ integrationRouter.post(
     });
   }),
 );
+
+/**
+ * รวมหน้าหลังบ้าน ข้อ 2 (ดร.ธงชัย 24 ต.ค. 2569 "ข้อสองข้อสามได้เลยครับ") — ห้องแชทลูกค้าในแดชบอร์ด admin เห็นงานของเคสได้เลย ไม่ต้องสลับมา staff
+ *   /customers/case-overview ตั๋ว 'kin-case-overview' {cid, case_id} → ผู้ดูแล · กะวันนี้ + เช็คอิน/ออก · รายงานล่าสุด · ญาติที่เชื่อม · แชทเคส
+ *   /family/team-post        ตั๋ว 'kin-team-post' {cid, case_id, by, body} → ทีมตอบแชทเคสจากห้องแชท admin (ขึ้นชื่อ "<ชื่อ> · ทีม KIN HomeCare")
+ *   ตรวจว่าเคสเป็นของลูกค้า cid (ที่ห้องแชทนั้นผูกไว้) ทุกครั้ง · ไม่ส่งค่าจ้าง/ราคา/GPS/เซลฟี่
+ */
+async function customerCaseOr404(cid, caseId) {
+  const c = await sql.one(
+    `SELECT c.case_id, c.client_name, c.status, c.service_kind, c.start_date,
+            e.first_name AS a_first, e.last_name AS a_last, e.nickname AS a_nick, e.phone AS a_phone, e.position AS a_pos
+     FROM cases c LEFT JOIN employees e ON e.employee_id = c.assigned_to
+     WHERE c.case_id = :id AND c.customer_id = :cid`,
+    { id: caseId, cid },
+  );
+  if (!c) throw new ApiError(404, 'ไม่พบเคสนี้ของลูกค้ารายนี้');
+  return c;
+}
+const nameOf = (first, nick) => (first ? `${first}${nick ? ` (${nick})` : ''}` : null);
+
+integrationRouter.post(
+  '/customers/case-overview',
+  asyncRoute(async (req, res) => {
+    const { token } = hireSchema.parse(req.body);
+    const p = verifySigned(token, 'kin-case-overview');
+    if (!p || typeof p.cid !== 'string' || typeof p.case_id !== 'string') throw new ApiError(401, 'ลายเซ็นไม่ถูกต้องหรือหมดอายุ');
+    const c = await customerCaseOr404(p.cid, p.case_id);
+    await family.ensureFamilyTable();
+    const today = new Date(Date.now() + 7 * 3.6e6).toISOString().slice(0, 10);
+    const [team, visits, reports, fam, messages] = await Promise.all([
+      sql.all(
+        `SELECT e.first_name, e.nickname, e.position FROM case_team t JOIN employees e ON e.employee_id = t.employee_id
+         WHERE t.case_id = :id ORDER BY e.first_name`, { id: c.case_id }),
+      sql.all(
+        `SELECT v.visit_date, v.planned_start, v.planned_end, v.status,
+                to_char(v.check_in_at AT TIME ZONE 'Asia/Bangkok', 'HH24:MI') AS check_in,
+                to_char(v.check_out_at AT TIME ZONE 'Asia/Bangkok', 'HH24:MI') AS check_out,
+                e.first_name AS s_first, e.nickname AS s_nick
+         FROM case_visits v LEFT JOIN employees e ON e.employee_id = v.assigned_to
+         WHERE v.case_id = :id AND v.status <> 'cancelled' AND v.visit_date BETWEEN :d0 AND :d1
+         ORDER BY v.visit_date, v.planned_start NULLS LAST`,
+        { id: c.case_id, d0: today, d1: new Date(Date.now() + 7 * 3.6e6 + 864e5).toISOString().slice(0, 10) }),
+      sql.all(
+        `SELECT r.report_date, r.report_time, r.bp_systolic, r.bp_diastolic, r.pulse, r.spo2, r.temperature_c,
+                left(r.symptoms, 160) AS symptoms, left(r.care_given, 160) AS care_given,
+                split_part(COALESCE(r.reported_by_name, ''), ' ', 1) AS by_first
+         FROM case_reports r WHERE r.case_id = :id
+         ORDER BY r.report_date DESC, r.report_id DESC LIMIT 3`, { id: c.case_id }),
+      sql.one(
+        `SELECT count(*)::int AS n FROM case_family_links
+         WHERE case_id = :id AND accepted_at IS NOT NULL AND revoked_at IS NULL`, { id: c.case_id }),
+      family.messagesFor(c.case_id, 20),
+    ]);
+    res.json({
+      case_id: c.case_id, client_name: c.client_name, status: c.status, service_kind: c.service_kind, start_date: c.start_date,
+      assigned: c.a_first ? { name: nameOf(c.a_first, c.a_nick), last: c.a_last, phone: c.a_phone, position: c.a_pos } : null,
+      team: team.map((t) => ({ name: nameOf(t.first_name, t.nickname), position: t.position })),
+      today, visits: visits.map((v) => ({
+        date: v.visit_date, start: v.planned_start, end: v.planned_end, status: v.status,
+        check_in: v.check_in, check_out: v.check_out, staff: nameOf(v.s_first, v.s_nick),
+      })),
+      reports, family_count: fam?.n || 0, messages,
+    });
+  }),
+);
+
+integrationRouter.post(
+  '/family/team-post',
+  asyncRoute(async (req, res) => {
+    const { token } = hireSchema.parse(req.body);
+    const p = verifySigned(token, 'kin-team-post');
+    if (!p || typeof p.cid !== 'string' || typeof p.case_id !== 'string') throw new ApiError(401, 'ลายเซ็นไม่ถูกต้องหรือหมดอายุ');
+    const body = typeof p.body === 'string' ? p.body.trim().slice(0, 1000) : '';
+    if (!body) throw new ApiError(400, 'กรุณาพิมพ์ข้อความ');
+    const c = await customerCaseOr404(p.cid, p.case_id);
+    if (['closed', 'cancelled'].includes(c.status)) throw new ApiError(409, 'เคสนี้ปิดแล้ว');
+    await family.ensureFamilyTable();
+    const by = String(p.by || 'ทีม').slice(0, 60);
+    const row = await family.postMessage(c.case_id, { kind: 'team', name: `${by} · ทีม KIN HomeCare`, body });
+    res.status(201).json(row);
+  }),
+);
