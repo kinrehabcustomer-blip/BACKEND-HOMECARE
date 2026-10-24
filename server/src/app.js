@@ -15,6 +15,7 @@ import { notifyRouter } from './notify/routes.js';
 import { integrationRouter } from './integration/routes.js';
 import { familyRouter } from './family/routes.js';
 import { publicReviewsRouter, reviewsRouter } from './reviews/routes.js';
+import { publicBillRouter } from './invoices/publicRoutes.js';
 import { errorHandler } from './lib/errors.js';
 import { requireAuth, requireAdmin, requireBilling, requireCaseAccess, requireManager, requirePasswordChanged } from './lib/auth.js';
 
@@ -38,6 +39,8 @@ export function createApp() {
      ต้องมาก่อน /api/reviews ที่มีด่าน admin — express จับ prefix ตามลำดับที่ประกาศ
      ถ้าสลับกัน เส้นสาธารณะจะถูกด่าน admin กินไปด้วย แล้วญาติจะเปิดฟอร์มไม่ได้เลย */
   app.use('/api/reviews/form', publicReviewsRouter);
+  // ลิงก์ดูใบแจ้งหนี้/ใบเสร็จที่ส่งเข้า LINE ลูกค้า (24 ต.ค. 2569) — ไม่มี login ความปลอดภัยอยู่ที่ token ในลิงก์ (invoices/share.js)
+  app.use('/api/public/bill', publicBillRouter);
 
   /* ทุกเส้นที่ต้อง login ต้องผ่านสามด่านตามลำดับ: มีเซสชัน → ตั้งรหัสของตัวเองแล้ว → มีสิทธิ์พอ
      รวมเป็นชุดเดียวเพื่อไม่ให้ router ใหม่ในอนาคตลืมด่านกลางไป (ซึ่งจะเงียบสนิท ไม่มีอะไรฟ้อง) */

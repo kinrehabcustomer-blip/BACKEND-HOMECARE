@@ -399,6 +399,10 @@ export const api = {
     return request(`/invoices/revenue?${params}`);
   },
   getInvoice: (id) => request(`/invoices/${id}`),
+  // ส่งใบเข้า LINE ลูกค้า (24 ต.ค. 2569) · ลิงก์สาธารณะของลูกค้า
+  invoiceLine: (id) => request(`/invoices/${id}/line`),
+  sendInvoiceLine: (id) => request(`/invoices/${id}/line`, { method: 'POST' }),
+  publicBill: (token) => request(`/public/bill/${encodeURIComponent(token)}`),
   createInvoice: (body) => request('/invoices', { method: 'POST', body }),
   /** เคสที่ไม่มีใบแจ้งหนี้เหลืออยู่ (ไม่นับใบที่ยกเลิก) — ไว้เสนอปุ่มออกใบ */
   casesWithoutInvoice: () => request('/invoices/cases-without-invoice'),

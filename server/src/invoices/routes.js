@@ -17,6 +17,7 @@ import {
 import { decodeImage } from '../employees/schema.js';
 import { ApiError, asyncRoute, notFound } from '../lib/errors.js';
 import { requireManager, can } from '../lib/auth.js';
+import { lineTarget, queueLineSend, sendHistory } from './share.js';
 
 export const invoicesRouter = Router();
 
@@ -190,6 +191,28 @@ invoicesRouter.post(
 );
 
 invoicesRouter.get('/:id', (req, res) => res.json(req.invoice));
+
+/**
+ * ส่งใบแจ้งหนี้/ใบเสร็จเข้า LINE ลูกค้า (ดร.ธงชัย 24 ต.ค. 2569 ข้อ 4 · ดู share.js)
+ * GET = ส่งได้ไหม + ประวัติการส่ง · POST = ออกลิงก์ดูเอกสาร + ใส่คิว (ระบบแชทส่งออก OA Kin HomeCare ภายในไม่กี่นาที)
+ */
+invoicesRouter.get(
+  '/:id/line',
+  asyncRoute(async (req, res) => {
+    const t = await lineTarget(req.invoice);
+    res.json({ can_send: t.ok, reason: t.reason ?? null, customer_name: t.customer?.name ?? null, history: await sendHistory(req.invoice.invoice_id) });
+  }),
+);
+
+invoicesRouter.post(
+  '/:id/line',
+  asyncRoute(async (req, res) => {
+    const t = await lineTarget(req.invoice);
+    if (!t.ok) throw new ApiError(400, t.reason);
+    const r = await queueLineSend(req.invoice, t.customer, req.user);
+    res.status(r.queued ? 201 : 200).json({ ...r, history: await sendHistory(req.invoice.invoice_id) });
+  }),
+);
 
 /**
  * แก้ได้ตราบใดที่เอกสารยังอยู่ในมือเรา (ร่าง/ออกใบแล้ว) — ส่งมอบให้ลูกค้าครั้งเดียวตอนพิมพ์

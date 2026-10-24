@@ -7,6 +7,7 @@ import { ensureLineColumn, ensureLinkCodeTables, hashLinkCode, isLineUserId, LIN
 import { randomInt } from 'node:crypto';
 import { FRONT_POSITIONS } from '../employees/schema.js';
 import { linkLineByCode } from '../lib/lineLinkCode.js';
+import { outboxAck, outboxPending } from '../invoices/share.js';
 import { createEmployeeSchema, decodeImage } from '../employees/schema.js';
 import * as repo from '../employees/repo.js';
 import * as cases from '../cases/repo.js';
@@ -527,6 +528,21 @@ integrationRouter.post(
       })),
       reports, family_count: fam?.n || 0, messages,
     });
+  }),
+);
+
+/**
+ * รวมหน้าหลังบ้าน ข้อ 4 — คิวส่งใบแจ้งหนี้/ใบเสร็จเข้า LINE ลูกค้า (invoices/share.js)
+ *   /invoices/line-outbox ตั๋ว 'kin-invoice-outbox' {ack?: [{id, ok, error}]} → จดผลส่งรอบก่อน แล้วคืนคิวที่ยังรอส่ง
+ */
+integrationRouter.post(
+  '/invoices/line-outbox',
+  asyncRoute(async (req, res) => {
+    const { token } = hireSchema.parse(req.body);
+    const p = verifySigned(token, 'kin-invoice-outbox');
+    if (!p) throw new ApiError(401, 'ลายเซ็นไม่ถูกต้องหรือหมดอายุ');
+    const acked = Array.isArray(p.ack) ? await outboxAck(p.ack) : 0;
+    res.json({ acked, pending: p.ack?.length ? [] : await outboxPending() });
   }),
 );
 

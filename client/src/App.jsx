@@ -21,6 +21,7 @@ const ForgotPasswordPage = lazy(() => import('./pages/ForgotPasswordPage.jsx'));
 /* หน้าแบบประเมินของญาติ — lazy เหมือนหน้าอื่น และสำคัญกว่าหน้าอื่นด้วย
    คนที่เปิดคือญาติผู้ป่วยจากลิงก์ในไลน์ บนมือถือ ครั้งเดียวจบ ไม่ควรต้องโหลดระบบหลังบ้านทั้งก้อน */
 const ReviewFormPage = lazy(() => import('./pages/ReviewFormPage.jsx'));
+const PublicBillPage = lazy(() => import('./pages/PublicBillPage.jsx'));
 const ReviewsPage = lazy(() => import('./pages/ReviewsPage.jsx'));
 const ReviewDetailPage = lazy(() => import('./pages/ReviewDetailPage.jsx'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage.jsx'));
@@ -307,6 +308,8 @@ export default function App() {
             {/* แบบประเมินที่ญาติกรอก — ไม่มี AppLayout เพราะไม่มี login ไม่มีเมนู ไม่มีสิทธิ์อะไรให้ตรวจ
                 คนที่เปิดหน้านี้ไม่ใช่ผู้ใช้ของระบบ ความปลอดภัยอยู่ที่ token ในลิงก์ (ดู reviews/routes.js) */}
             <Route path="/review/:token" element={<ReviewFormPage />} />
+            {/* ใบแจ้งหนี้/ใบเสร็จที่ส่งเข้า LINE ลูกค้า — ไม่มี login แบบเดียวกับแบบประเมิน (server/src/invoices/share.js) */}
+            <Route path="/bill/:token" element={<PublicBillPage />} />
             <Route path="/settings" element={<AppLayout><SettingsPage /></AppLayout>} />
             {/* ลิงก์เดิมที่อาจถูก bookmark ไว้ ให้เด้งไปหน้าตั้งค่าแทน */}
             <Route path="/change-password" element={<Navigate to="/settings" replace />} />
