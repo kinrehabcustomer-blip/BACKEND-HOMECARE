@@ -593,6 +593,27 @@ integrationRouter.post(
   }),
 );
 
+/**
+ * รวมหน้าหลังบ้าน ข้อ 5 (24 ต.ค. 2569) — รูปในแชทเคสกับญาติ เปิดดูในห้องแชท admin ได้ ไม่ต้องสลับมา staff
+ *   /family/message-photo ตั๋ว 'kin-case-photo' {cid, case_id, message_id} → ไฟล์รูป (ตรวจว่าเคสเป็นของลูกค้า cid)
+ */
+integrationRouter.post(
+  '/family/message-photo',
+  asyncRoute(async (req, res) => {
+    const { token } = hireSchema.parse(req.body);
+    const p = verifySigned(token, 'kin-case-photo');
+    if (!p || typeof p.cid !== 'string' || typeof p.case_id !== 'string' || !Number.isInteger(p.message_id)) {
+      throw new ApiError(401, 'ลายเซ็นไม่ถูกต้องหรือหมดอายุ');
+    }
+    await customerCaseOr404(p.cid, p.case_id);
+    const row = await family.messagePhoto(p.case_id, p.message_id);
+    if (!row) throw new ApiError(404, 'ไม่พบรูป');
+    res.setHeader('Content-Type', row.mime || 'image/jpeg');
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.send(row.data);
+  }),
+);
+
 integrationRouter.post(
   '/family/team-post',
   asyncRoute(async (req, res) => {
