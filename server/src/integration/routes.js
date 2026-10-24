@@ -3,7 +3,9 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { sql } from '../db/index.js';
 import { ApiError, asyncRoute } from '../lib/errors.js';
-import { ensureLineColumn, isLineUserId, verifySigned } from '../lib/lineBridge.js';
+import { ensureLineColumn, ensureLinkCodeTables, hashLinkCode, isLineUserId, LINK_CODE_TTL_HOURS, verifySigned } from '../lib/lineBridge.js';
+import { randomInt } from 'node:crypto';
+import { FRONT_POSITIONS } from '../employees/schema.js';
 import { linkLineByCode } from '../lib/lineLinkCode.js';
 import { createEmployeeSchema, decodeImage } from '../employees/schema.js';
 import * as repo from '../employees/repo.js';
@@ -542,5 +544,46 @@ integrationRouter.post(
     const by = String(p.by || 'ทีม').slice(0, 60);
     const row = await family.postMessage(c.case_id, { kind: 'team', name: `${by} · ทีม KIN HomeCare`, body });
     res.status(201).json(row);
+  }),
+);
+
+/**
+ * ส่งรหัสยืนยันตัวตนพนักงานเข้า LINE จากการ์ดผู้สมัครในแดชบอร์ด admin (ดร.ธงชัย 24 ต.ค. 2569
+ * "ทำปุ่ม ส่งรหัสยืนยันตัวตนทาง LINE ที่การ์ดผู้สมัครในหน้า Admin ได้เลย" · "เข้า LINE ให้อัตโนมัติ ไม่ต้องไป copy ส่ง")
+ *   ตั๋ว 'kin-issue-line-code' {employee_id, by} → { code, expires_at, first_name } · ฝั่ง chat ส่งรหัสเข้า LINE @kinjobs ของผู้สมัครเอง
+ *   ออกให้เฉพาะพนักงานภาคสนาม (FRONT_POSITIONS) ที่ยังใช้งานอยู่ — บัญชีสำนักงาน/แอดมินออกจากทางนี้ไม่ได้ (กันยึดบัญชีหลังบ้าน)
+ *   ยืนยันตัวตนแล้ว → { linked: true } ไม่ออกรหัสใหม่ · รหัสเดิมของคนนั้นถูกแทนที่ (ใช้ได้ครั้งเดียว 24 ชม. เหมือนออกจากหน้าพนักงาน)
+ */
+integrationRouter.post(
+  '/employees/line-code',
+  asyncRoute(async (req, res) => {
+    const { token } = hireSchema.parse(req.body);
+    const p = verifySigned(token, 'kin-issue-line-code');
+    if (!p || typeof p.employee_id !== 'string') throw new ApiError(401, 'ลายเซ็นไม่ถูกต้องหรือหมดอายุ');
+    await ensureLineColumn();
+    await ensureLinkCodeTables();
+    const emp = await sql.one(
+      'SELECT employee_id, first_name, position, status, line_user_id FROM employees WHERE upper(employee_id) = upper(:id)',
+      { id: p.employee_id.trim() },
+    );
+    if (!emp) throw new ApiError(404, `ไม่พบพนักงานรหัส ${p.employee_id} ในระบบงาน`);
+    if (BLOCKED_STATUSES[emp.status]) throw new ApiError(409, 'บัญชีพนักงานนี้ถูกปิดอยู่');
+    if (!FRONT_POSITIONS.includes(emp.position)) throw new ApiError(403, 'ส่งรหัสทางนี้ได้เฉพาะพนักงานภาคสนาม — บัญชีสำนักงานออกรหัสที่หน้าพนักงานในระบบงาน');
+    if (emp.line_user_id) return res.json({ linked: true, employee_id: emp.employee_id, first_name: emp.first_name });
+    await sql.run('DELETE FROM line_link_codes WHERE expires_at < now()');
+    for (let i = 0; i < 5; i++) {
+      const code = String(randomInt(0, 1_000_000)).padStart(6, '0');
+      if (await sql.one('SELECT 1 AS x FROM line_link_codes WHERE code_hash = :h AND employee_id <> :id', { h: hashLinkCode(code), id: emp.employee_id })) continue;
+      const row = await sql.one(
+        `INSERT INTO line_link_codes (employee_id, code_hash, expires_at, created_by)
+         VALUES (:id, :h, now() + make_interval(hours => :ttl), :by)
+         ON CONFLICT (employee_id) DO UPDATE SET code_hash = EXCLUDED.code_hash, expires_at = EXCLUDED.expires_at,
+           created_by = EXCLUDED.created_by, created_at = now()
+         RETURNING to_char(expires_at AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI') AS expires_at`,
+        { id: emp.employee_id, h: hashLinkCode(code), ttl: LINK_CODE_TTL_HOURS, by: `admin: ${String(p.by || '').slice(0, 60)}` },
+      );
+      return res.json({ code, expires_at: row.expires_at, employee_id: emp.employee_id, first_name: emp.first_name });
+    }
+    throw new ApiError(500, 'ออกรหัสไม่สำเร็จ ลองกดใหม่อีกครั้ง');
   }),
 );
