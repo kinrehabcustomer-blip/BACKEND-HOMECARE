@@ -31,6 +31,7 @@ export default function LoginPage() {
   const query = new URLSearchParams(location.search);
   const lineTicket = query.get('line');
   const lineError = query.get('line_error');
+  const ssoError = query.get('sso_error');
 
   // login ค้างอยู่แล้วแต่กดมาจาก LINE ที่ยังไม่ผูก — ผูกให้เลย ไม่ต้องกรอกรหัสซ้ำ
   useEffect(() => {
@@ -129,6 +130,14 @@ export default function LoginPage() {
         {lineError && (
           <p className="error login-error">
             {lineError === 'blocked' ? 'บัญชีนี้ใช้งานไม่ได้ — ติดต่อผู้ดูแลระบบ' : 'ลิงก์จาก LINE หมดอายุแล้ว กรุณากดปุ่มในหน้า "งานของฉัน" ใหม่อีกครั้ง'}
+          </p>
+        )}
+        {/* มาจากปุ่ม "ระบบงาน Staff" ในแดชบอร์ด admin แต่เข้าไม่ได้ (GET /api/auth/admin-sso · 24 ต.ค. 2569) */}
+        {ssoError && (
+          <p className="error login-error">
+            {ssoError === 'nomatch'
+              ? 'อีเมลที่ใช้เข้าแดชบอร์ด admin ไม่ตรงกับอีเมลในประวัติพนักงาน หรือตำแหน่งนี้ยังเข้าจากปุ่มไม่ได้ (เปิดให้ Admin HC · HR · ผู้จัดการ) — ให้ HR ตั้งอีเมลในหน้าพนักงานให้ตรงกัน หรือเข้าด้วยรหัสผ่านด้านล่าง'
+              : ssoError === 'blocked' ? 'บัญชีนี้ใช้งานไม่ได้ — ติดต่อผู้ดูแลระบบ' : 'ลิงก์จากแดชบอร์ด admin หมดอายุ กรุณากดปุ่ม "ระบบงาน Staff" ใหม่อีกครั้ง'}
           </p>
         )}
         {error && <p className="error login-error">{error}</p>}

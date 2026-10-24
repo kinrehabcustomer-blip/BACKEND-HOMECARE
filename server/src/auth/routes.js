@@ -16,7 +16,7 @@ import {
   verifyPassword,
 } from '../lib/auth.js';
 import { sendOtpEmail } from '../lib/mailer.js';
-import { ensureLineColumn, verifyLineTicket } from '../lib/lineBridge.js';
+import { ensureLineColumn, verifyLineTicket, verifySigned } from '../lib/lineBridge.js';
 import { linkLineByCode } from '../lib/lineLinkCode.js';
 
 export const authRouter = Router();
@@ -134,6 +134,34 @@ authRouter.get(
     if (!employee) return res.redirect(302, `/login?line=${encodeURIComponent(req.query.t)}${to !== '/' ? `&to=${encodeURIComponent(to)}` : ''}`);
     if (BLOCKED_STATUSES[employee.status]) return res.redirect(302, '/login?line_error=blocked');
 
+    await sql.run(
+      `UPDATE employees SET last_login_at = to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')
+       WHERE employee_id = :id`,
+      { id: employee.employee_id },
+    );
+    res.cookie(COOKIE_NAME, signToken(employee), cookieOptions);
+    res.redirect(302, to);
+  }),
+);
+
+/**
+ * เข้าระบบงานจากแดชบอร์ด admin (chat.kinorigin.com/admin) ไม่ต้องกรอกรหัสอีก
+ * ดร.ธงชัย 24 ต.ค. 2569 อนุญาต: "โอเคครับ ทำได้เลย เพราะว่าเจ้าหน้าที่น่าจะเป็นเจ้าหน้าที่ home care อย่างเดียวที่ทำอย่างนี้ได้ ก็ส่วนฝ่ายบุคคล"
+ * ฝั่ง admin ล็อกอินด้วย Clerk (อีเมล + OTP) แล้วออกตั๋ว 'kin-admin-sso' {email} อายุ 2 นาที ลงลายเซ็นด้วยกุญแจเดียวกับตั๋ว LINE (lib/lineBridge.js)
+ * จับคู่ด้วยอีเมลในประวัติพนักงาน · เปิดเฉพาะ Super Admin · ผู้จัดการ · Admin HC · HR (ไม่รวมการเงิน และพนักงานภาคสนามที่เข้าทาง LINE)
+ * ไม่เจอ/ตำแหน่งไม่อยู่ในรายการ/บัญชีถูกปิด = ไปหน้าเข้าระบบพร้อมเหตุผล
+ */
+const ADMIN_SSO_POSITIONS = ['super_admin', 'manager', 'admin', 'hr'];
+authRouter.get(
+  '/admin-sso',
+  asyncRoute(async (req, res) => {
+    const p = verifySigned(req.query.t, 'kin-admin-sso');
+    const email = typeof p?.email === 'string' ? p.email.trim().toLowerCase() : '';
+    if (!email) return res.redirect(302, '/login?sso_error=expired');
+    const to = typeof req.query.to === 'string' && /^\/(?!\/)[A-Za-z0-9/_?=&.-]*$/.test(req.query.to) ? req.query.to : '/';
+    const employee = await sql.one('SELECT * FROM employees WHERE lower(email) = :email LIMIT 1', { email });
+    if (!employee || !ADMIN_SSO_POSITIONS.includes(employee.position)) return res.redirect(302, '/login?sso_error=nomatch');
+    if (BLOCKED_STATUSES[employee.status]) return res.redirect(302, '/login?sso_error=blocked');
     await sql.run(
       `UPDATE employees SET last_login_at = to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')
        WHERE employee_id = :id`,
