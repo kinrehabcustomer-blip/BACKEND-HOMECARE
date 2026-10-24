@@ -530,6 +530,53 @@ integrationRouter.post(
   }),
 );
 
+/**
+ * รวมหน้าหลังบ้าน ข้อ 3 (ดร.ธงชัย 24 ต.ค. 2569) — ป้ายสถานะบิลในห้องแชทลูกค้า admin (ดูอย่างเดียว · ออกบิล/รับเงินยังทำใน staff)
+ *   /customers/billing ตั๋ว 'kin-billing-summary' {cid} → ยอดค้าง · เกินกำหนด · ใบที่ยังค้าง ≤5 ใบ · รับเงินล่าสุด
+ *   ไม่ส่งเลขผู้เสียภาษี/ที่อยู่ออกบิล/รายการย่อย · ร่าง (draft) กับยกเลิกไม่นับ
+ */
+integrationRouter.post(
+  '/customers/billing',
+  asyncRoute(async (req, res) => {
+    const { token } = hireSchema.parse(req.body);
+    const p = verifySigned(token, 'kin-billing-summary');
+    if (!p || typeof p.cid !== 'string') throw new ApiError(401, 'ลายเซ็นไม่ถูกต้องหรือหมดอายุ');
+    const today = new Date(Date.now() + 7 * 3.6e6).toISOString().slice(0, 10);
+    const rows = await sql.all(
+      `SELECT i.invoice_id, i.case_id, i.issue_date, i.due_date, i.status, i.total,
+              COALESCE((SELECT SUM(x.amount) FROM invoice_payments x WHERE x.invoice_id = i.invoice_id), 0) AS paid
+       FROM invoices i
+       WHERE i.customer_id = :cid AND i.status IN ('issued', 'paid')
+       ORDER BY i.issue_date DESC, i.invoice_id DESC LIMIT 200`,
+      { cid: p.cid },
+    );
+    const money = (n) => Math.round(Number(n || 0) * 100) / 100;
+    const open = rows
+      .map((r) => ({ ...r, balance: r.status === 'paid' ? 0 : money(Number(r.total) - Number(r.paid)) }))
+      .filter((r) => r.balance > 0)
+      .map((r) => ({
+        invoice_id: r.invoice_id, case_id: r.case_id, issue_date: r.issue_date, due_date: r.due_date,
+        total: money(r.total), paid: money(r.paid), balance: r.balance, overdue: !!(r.due_date && r.due_date < today),
+      }));
+    const lastPaid = await sql.one(
+      `SELECT x.invoice_id, x.amount, x.paid_at
+       FROM invoice_payments x JOIN invoices i ON i.invoice_id = x.invoice_id
+       WHERE i.customer_id = :cid AND i.status <> 'cancelled'
+       ORDER BY x.paid_at DESC, x.payment_id DESC LIMIT 1`,
+      { cid: p.cid },
+    );
+    res.json({
+      today,
+      invoice_count: rows.length,
+      outstanding: money(open.reduce((t, r) => t + r.balance, 0)),
+      overdue: money(open.filter((r) => r.overdue).reduce((t, r) => t + r.balance, 0)),
+      open: open.slice(0, 5),
+      open_count: open.length,
+      last_paid: lastPaid ? { invoice_id: lastPaid.invoice_id, amount: money(lastPaid.amount), paid_at: lastPaid.paid_at } : null,
+    });
+  }),
+);
+
 integrationRouter.post(
   '/family/team-post',
   asyncRoute(async (req, res) => {
