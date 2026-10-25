@@ -11,6 +11,7 @@ import {
   portfolioSchema,
   portfolioUpdateSchema,
   POSITIONS,
+  BACK_POSITIONS,
   EMPLOYMENT_TYPES,
   STATUSES,
   EMPLOYEE_CODE_RE,
@@ -184,6 +185,15 @@ employeesRouter.patch(
   asyncRoute(async (req, res) => {
     const input = updateEmployeeSchema.parse(req.body);
     ensureCanManageTarget(req, req.employee);
+    /* เปลี่ยนอีเมลของบัญชีหลังบ้านคนอื่น แล้วกด "ลืมรหัสผ่าน" = ยึดบัญชีนั้นได้ใน 2 ขั้น (ยิงจริงแล้วได้ OTP จริง)
+       hr กับ admin สิทธิ์เท่ากัน ensureCanManageTarget จึงไม่กันกันเอง — ไม่ใช่การเลื่อนสิทธิ์
+       แต่ทำให้ไล่ย้อนไม่ได้ว่าใครลงมือ ซึ่งสำคัญขึ้นมากตั้งแต่มีบัญชีจริงหลายคน (ตรวจรอบ 9) */
+    if (input.email !== undefined && input.email !== req.employee.email
+        && BACK_POSITIONS.includes(req.employee.position)
+        && req.employee.employee_id !== req.user.employee_id
+        && !isTopAdmin(req.user.position)) {
+      throw new ApiError(403, 'เปลี่ยนอีเมลของบัญชีหลังบ้านคนอื่นได้เฉพาะผู้จัดการ');
+    }
 
     // รหัสพนักงานคือชื่อที่ใช้ login ด้วย — เปลี่ยนของตัวเองแล้ว session ปัจจุบันหลุดทันที ต้องให้คนอื่นเปลี่ยนให้
     if (input.employee_id && input.employee_id !== req.employee.employee_id
@@ -297,6 +307,8 @@ employeesRouter.delete(
 employeesRouter.put(
   '/:id/photo',
   asyncRoute(async (req, res) => {
+    // ด่านเดียวกับ PATCH/DELETE /:id — ไม่มีบรรทัดนี้ บัญชีหลังบ้านระดับล่างแก้แฟ้มของผู้จัดการได้ (ตรวจรอบ 9)
+    ensureCanManageTarget(req, req.employee);
     const { image } = employeePhotoSchema.parse(req.body);
     res.json(await repo.photo.set(req.params.id, toImage(image)));
   }),
@@ -327,6 +339,8 @@ employeesRouter.get(
 employeesRouter.post(
   '/:id/certificates',
   asyncRoute(async (req, res) => {
+    // ด่านเดียวกับ PATCH/DELETE /:id — ไม่มีบรรทัดนี้ บัญชีหลังบ้านระดับล่างแก้แฟ้มของผู้จัดการได้ (ตรวจรอบ 9)
+    ensureCanManageTarget(req, req.employee);
     const { image, ...input } = certificateSchema.parse(req.body);
     const created = await repo.certificates.add(req.params.id, {
       ...input,
@@ -340,6 +354,8 @@ employeesRouter.post(
 employeesRouter.put(
   '/:id/certificates/:certificateId/image',
   asyncRoute(async (req, res, next) => {
+    // ด่านเดียวกับ PATCH/DELETE /:id — ไม่มีบรรทัดนี้ บัญชีหลังบ้านระดับล่างแก้แฟ้มของผู้จัดการได้ (ตรวจรอบ 9)
+    ensureCanManageTarget(req, req.employee);
     const { image } = certificateImageSchema.parse(req.body);
     const updated = await repo.certificates.setImage(
       req.params.id,
@@ -369,6 +385,8 @@ employeesRouter.get(
 employeesRouter.delete(
   '/:id/certificates/:certificateId',
   asyncRoute(async (req, res, next) => {
+    // ด่านเดียวกับ PATCH/DELETE /:id — ไม่มีบรรทัดนี้ บัญชีหลังบ้านระดับล่างแก้แฟ้มของผู้จัดการได้ (ตรวจรอบ 9)
+    ensureCanManageTarget(req, req.employee);
     const removed = await repo.certificates.remove(req.params.id, Number(req.params.certificateId));
     if (!removed) return next(notFound('ไม่พบใบรับรองนี้'));
     res.status(204).end();
@@ -386,6 +404,8 @@ employeesRouter.get(
 employeesRouter.post(
   '/:id/portfolio',
   asyncRoute(async (req, res) => {
+    // ด่านเดียวกับ PATCH/DELETE /:id — ไม่มีบรรทัดนี้ บัญชีหลังบ้านระดับล่างแก้แฟ้มของผู้จัดการได้ (ตรวจรอบ 9)
+    ensureCanManageTarget(req, req.employee);
     const { image, ...input } = portfolioSchema.parse(req.body);
     res.status(201).json(await repo.portfolio.add(req.params.id, { ...input, image: toImage(image) }));
   }),
@@ -395,6 +415,8 @@ employeesRouter.post(
 employeesRouter.patch(
   '/:id/portfolio/:portfolioId',
   asyncRoute(async (req, res, next) => {
+    // ด่านเดียวกับ PATCH/DELETE /:id — ไม่มีบรรทัดนี้ บัญชีหลังบ้านระดับล่างแก้แฟ้มของผู้จัดการได้ (ตรวจรอบ 9)
+    ensureCanManageTarget(req, req.employee);
     const input = portfolioUpdateSchema.parse(req.body);
     const updated = await repo.portfolio.update(req.params.id, Number(req.params.portfolioId), input);
 
@@ -419,6 +441,8 @@ employeesRouter.get(
 employeesRouter.delete(
   '/:id/portfolio/:portfolioId',
   asyncRoute(async (req, res, next) => {
+    // ด่านเดียวกับ PATCH/DELETE /:id — ไม่มีบรรทัดนี้ บัญชีหลังบ้านระดับล่างแก้แฟ้มของผู้จัดการได้ (ตรวจรอบ 9)
+    ensureCanManageTarget(req, req.employee);
     const removed = await repo.portfolio.remove(req.params.id, Number(req.params.portfolioId));
     if (!removed) return next(notFound('ไม่พบผลงานนี้'));
     res.status(204).end();
