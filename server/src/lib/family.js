@@ -65,6 +65,21 @@ export const ensureFamilyTable = () =>
     .then(() => sql.run('CREATE INDEX IF NOT EXISTS idx_family_msg_case ON case_family_messages (case_id, created_at DESC)'))
     .then(() => sql.run('CREATE INDEX IF NOT EXISTS idx_family_case ON case_family_links (case_id)'))
     .then(() => sql.run('CREATE INDEX IF NOT EXISTS idx_family_line ON case_family_links (line_user_id) WHERE line_user_id IS NOT NULL'))
+    /* LINE เดียวกันผูกเคสเดียวกันได้ครั้งเดียว — linkCustomerLine() กับ accept() ต่างก็ตรวจด้วย SELECT
+       ก่อน INSERT/UPDATE ซึ่งสองคำขอพร้อมกันลอดได้ทั้งคู่ · ดัชนีนี้คือด่านจริงที่ฐานข้อมูลบังคับเอง
+       แยกเฉพาะแถวที่ยังไม่ถูกปลด (revoked_at IS NULL) เพราะปลดแล้วเชิญใหม่ต้องทำได้
+       ถ้าฐานเดิมมีคู่ซ้ำค้างอยู่ CREATE UNIQUE INDEX จะล้ม — จับไว้แล้วเตือน ไม่ให้ ensureFamilyTable
+       ทั้งตัวพังตามจนทุกเส้นของญาติใช้ไม่ได้ (ล้างคู่ซ้ำแล้วค่อยรันใหม่รอบหน้าก็ติดเอง) */
+    .then(() =>
+      sql
+        .run(
+          `CREATE UNIQUE INDEX IF NOT EXISTS uq_family_case_line ON case_family_links (case_id, line_user_id)
+           WHERE revoked_at IS NULL AND line_user_id IS NOT NULL`,
+        )
+        .catch((err) => {
+          console.warn('[family] สร้าง uq_family_case_line ไม่สำเร็จ (น่าจะมีคู่ (case_id, line_user_id) ซ้ำค้างอยู่):', err.message);
+        }),
+    )
     .catch((err) => {
       ready = null;
       throw err;
@@ -147,11 +162,19 @@ export async function accept(code, lineUserId, displayName) {
   }
   if (link.expired) return { ok: false, reason: 'expired' };
   if (link.case_over) return { ok: false, reason: 'case_closed' };
-  await sql.run(
+  /* 🔴 UPDATE เป็นตัวตัดสินว่าใครได้รหัสใบนี้ ไม่ใช่ SELECT ข้างบน
+     เดิม SELECT ตรวจ accepted_at แล้วค่อย UPDATE โดยไม่มีเงื่อนไข = lost update:
+     ลูกสาวส่งรหัสต่อในกลุ่มไลน์ แล้วลูกสาวกับลูกชายพิมพ์พร้อมกัน ทั้งคู่ผ่าน SELECT
+     แล้วเขียนทับกัน ตอบ { ok:true, client_name } ทั้งคู่ ทั้งที่เป็นสมาชิกจริงแค่คนเดียว
+     คนที่แพ้จึงได้ชื่อผู้ป่วยไปด้วยโดยไม่มีสิทธิ์ (PDPA) · พิสูจน์แล้ว 30/30 รอบ
+     คืน 0 แถว = แพ้การแข่ง → 'used' และห้ามส่ง client_name กลับ (ฝั่ง chat มี JOIN_FAIL.used อยู่แล้ว) */
+  const won = await sql.one(
     `UPDATE case_family_links SET line_user_id = :uid, display_name = :name, accepted_at = now(), code_hash = NULL
-     WHERE link_id = :id`,
+     WHERE link_id = :id AND accepted_at IS NULL AND revoked_at IS NULL
+     RETURNING link_id`,
     { uid: lineUserId, name: displayName ? String(displayName).slice(0, 80) : null, id: link.link_id },
   );
+  if (!won) return { ok: false, reason: 'used' };
   return { ok: true, case_id: link.case_id, client_name: link.client_name, invited_by: link.invited_by, via_family: link.via_family, first: true };
 }
 

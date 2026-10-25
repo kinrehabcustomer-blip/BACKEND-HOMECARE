@@ -1,5 +1,9 @@
 import { sql } from '../db/index.js';
 import { BLOCKED_STATUSES } from './auth.js';
+/* case_family_links เป็นของ lib/family.js และไม่มีใน db/schema.sql — ไม่เรียกตัวสร้างของเจ้าของก่อน
+   คิวรีข้างล่างจะพังด้วย relation "case_family_links" does not exist บนฐานใหม่ (พิสูจน์แล้ว)
+   family.js ไม่ import ไฟล์นี้กลับ จึงไม่มี circular import */
+import { ensureFamilyTable } from './family.js';
 
 /**
  * ดาวสองทาง (ดร.ธงชัย 25 ต.ค. 2569 "ดาวพนักงานกับดาวลูกค้า … ไม่เห็นซึ่งกันและกัน ทำให้รู้ว่าปัญหาคืออะไร")
@@ -71,7 +75,7 @@ export function roundFor(c, today = todayBkk()) {
 
 /** เคสที่ถึงรอบถามดาววันนี้ + LINE ของญาติ/ผู้ดูแล — ฝั่ง chat กันถามซ้ำเอง (รอบเดิม คนเดิม ถามครั้งเดียว) */
 export async function dueRatings() {
-  await ensureRatingsTable();
+  await Promise.all([ensureRatingsTable(), ensureFamilyTable()]);
   const today = todayBkk();
   const rows = await sql.all(
     `SELECT c.case_id, c.client_name, c.status, c.start_date, c.assigned_to,
@@ -109,7 +113,7 @@ export async function dueRatings() {
  * คืน { ok, low } หรือ { error }
  */
 export async function submitRating({ caseId, round, kind, line, stars, reason }) {
-  await ensureRatingsTable();
+  await Promise.all([ensureRatingsTable(), ensureFamilyTable()]);
   const c = await sql.one(
     `SELECT c.case_id, c.assigned_to, a.first_name AS emp_first, a.nickname AS emp_nick
      FROM cases c LEFT JOIN employees a ON a.employee_id = c.assigned_to
