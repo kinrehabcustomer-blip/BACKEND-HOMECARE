@@ -772,7 +772,8 @@ integrationRouter.post(
   asyncRoute(async (req, res) => {
     const { token } = hireSchema.parse(req.body);
     const p = verifySigned(token, 'kin-shift-counts');
-    const ids = Array.isArray(p?.ids) ? p.ids.filter((x) => typeof x === 'string' && /^[A-Z0-9-]{3,20}$/i.test(x)).slice(0, 200) : null;
+    // dedup รหัสซ้ำ — unnest+JOIN จะนับกะซ้ำถ้ามี employee_id ซ้ำในรายการ
+    const ids = Array.isArray(p?.ids) ? [...new Set(p.ids.filter((x) => typeof x === 'string' && /^[A-Z0-9-]{3,20}$/i.test(x)))].slice(0, 200) : null;
     if (!ids) throw new ApiError(401, 'ลายเซ็นไม่ถูกต้องหรือหมดอายุ');
     if (!ids.length) return res.json({ counts: {} });
     // since {employee_id: 'YYYY-MM-DD'} = นับเฉพาะกะตั้งแต่วันสมัครผ่านลิงก์ชวน (พนักงานเดิมสมัครซ้ำ ห้ามได้แต้มจากกะเก่า)
