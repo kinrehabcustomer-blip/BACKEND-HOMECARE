@@ -45,7 +45,7 @@ export const ensureFamilyTable = () =>
         `CREATE TABLE IF NOT EXISTS case_family_messages (
            message_id    INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
            case_id       TEXT NOT NULL REFERENCES cases (case_id) ON DELETE CASCADE ON UPDATE CASCADE,
-           author_kind   TEXT NOT NULL CHECK (author_kind IN ('family', 'team')),
+           author_kind   TEXT NOT NULL CHECK (author_kind IN ('family', 'team', 'staff')),
            author_name   TEXT NOT NULL,
            line_user_id  TEXT,
            employee_id   TEXT,
@@ -57,6 +57,11 @@ export const ensureFamilyTable = () =>
          )`,
       ),
     )
+    // ตารางถูกสร้างไปแล้วก่อนมี 'staff' (ผู้ดูแล/นักกายภาพตอบแชทญาติ · ดร. 24 ต.ค.) — CREATE TABLE IF NOT EXISTS
+    // จึงไม่ช่วย ต้องปลด constraint เดิมแล้วใส่ใหม่ ไม่งั้นผู้ดูแลกดส่งแล้ว 500 ทุกครั้ง (เจอ 25 ต.ค.)
+    .then(() => sql.run('ALTER TABLE case_family_messages DROP CONSTRAINT IF EXISTS case_family_messages_author_kind_check'))
+    .then(() => sql.run(
+      "ALTER TABLE case_family_messages ADD CONSTRAINT case_family_messages_author_kind_check CHECK (author_kind IN ('family','team','staff'))"))
     .then(() => sql.run('CREATE INDEX IF NOT EXISTS idx_family_msg_case ON case_family_messages (case_id, created_at DESC)'))
     .then(() => sql.run('CREATE INDEX IF NOT EXISTS idx_family_case ON case_family_links (case_id)'))
     .then(() => sql.run('CREATE INDEX IF NOT EXISTS idx_family_line ON case_family_links (line_user_id) WHERE line_user_id IS NOT NULL'))
