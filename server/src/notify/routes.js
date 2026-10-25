@@ -81,7 +81,7 @@ async function collect() {
 /**
  * ส่งสรุปประจำวัน — ไม่มีของค้าง = ไม่ส่ง (เมลที่บอกว่า "ไม่มีอะไร" ทุกวันคือเมลที่คนเลิกเปิด)
  */
-const sendDigest = asyncRoute(async (req, res) => {
+const sendDigest = ({ once = false } = {}) => asyncRoute(async (req, res) => {
   const { date, sections } = await collect();
   if (sections.length === 0) {
     return res.json({ sent: false, reason: 'ไม่มีของค้าง', date, sections });
@@ -92,6 +92,13 @@ const sendDigest = asyncRoute(async (req, res) => {
     // เกณฑ์ผู้รับคือ "คนที่เข้าหลังบ้านได้" = ผู้จัดการ / HR / Admin HC (ดู digestRecipients) ต้องเขียนให้ตรง
     // ไม่งั้นคนอ่านจะไปตามหาว่าทำไมตั้งอีเมลผู้จัดการแล้วยังไม่ส่ง ทั้งที่ปัญหาอยู่คนละที่
     return res.json({ sent: false, reason: 'ไม่มีผู้จัดการ / HR / Admin HC ที่มีอีเมลในระบบ', date, sections });
+  }
+
+  /* ทาง cron ส่งได้วันละครั้ง — จองวันก่อนยิงอีเมล (ดู claimDigestDay)
+     Vercel ยิงซ้ำได้เมื่อครั้งแรก timeout และคนที่ถือ CRON_SECRET ก็ยิงรัวได้ (ตรวจรอบ 17)
+     ทาง POST ที่คนกดเองไม่ผ่านตรงนี้ เพราะ "ส่งซ้ำ" เป็นสิ่งที่ตั้งใจให้ทำได้ */
+  if (once && !(await repo.claimDigestDay(date))) {
+    return res.json({ sent: false, reason: `สรุปของวันที่ ${date} ถูกส่งไปแล้ว`, date, sections });
   }
 
   const sent = await sendDigestEmail({ to: recipients.map((r) => r.email), date, sections });
@@ -112,11 +119,11 @@ const sendDigest = asyncRoute(async (req, res) => {
  * กดลิงก์มาที่ URL นี้ จะสั่งให้ระบบส่งอีเมลออกไปทั้งชุดในนามของเขา
  * ตัดคุกกี้ออกจากเส้น GET แล้วย้ายปุ่มของคนไปที่ POST ด้านล่าง ช่องนี้จึงปิดสนิท
  */
-notifyRouter.get('/daily-digest', cronOnly, sendDigest);
+notifyRouter.get('/daily-digest', cronOnly, sendDigest({ once: true }));
 
 /** ทางของคน — ผู้จัดการ/HR กดจากหน้าเว็บเพื่อทดสอบว่าอีเมลออกจริงไหม หรือส่งซ้ำ */
 // บัญชีที่ยังใช้รหัสชั่วคราวต้องตั้งรหัสใหม่ก่อน — กติกาเดียวกับเส้นอื่นของหลังบ้าน (ดู app.js signedIn)
-notifyRouter.post('/daily-digest', requireAuth, requirePasswordChanged, requireAdmin, sendDigest);
+notifyRouter.post('/daily-digest', requireAuth, requirePasswordChanged, requireAdmin, sendDigest());
 
 /**
  * ของค้างทั้งระบบสำหรับกระดิ่งบนแถบเมนู — เรียกทุกครั้งที่เปิดหน้าเว็บ
