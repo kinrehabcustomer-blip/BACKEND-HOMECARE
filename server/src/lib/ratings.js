@@ -56,7 +56,8 @@ export async function dueRatings() {
               WHERE l.case_id = c.case_id AND l.accepted_at IS NOT NULL AND l.revoked_at IS NULL AND l.line_user_id IS NOT NULL) AS family
      FROM cases c JOIN employees e ON e.employee_id = c.assigned_to
      WHERE c.status IN ('assigned', 'in_progress')
-        OR (c.status = 'closed' AND left(c.updated_at, 10) >= :since)`,
+        OR (c.status = 'closed' AND COALESCE(NULLIF(c.end_date, ''), left(c.updated_at, 10)) >= :since)`,
+    // วันปิดเคส = end_date (ถ้ามี) — ไม่ใช้ updated_at ตรง ๆ เพราะเคสที่ปิดนานแล้วแต่มีคนแก้ข้อมูลวันนี้จะถูกถามดาวย้อนหลัง
     { since: new Date(Date.now() + 7 * 3.6e6 - 3 * 864e5).toISOString().slice(0, 10) },
   );
   return rows

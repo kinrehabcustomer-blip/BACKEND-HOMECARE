@@ -481,7 +481,7 @@ integrationRouter.post(
  */
 async function customerCaseOr404(cid, caseId) {
   const c = await sql.one(
-    `SELECT c.case_id, c.client_name, c.status, c.service_kind, c.start_date,
+    `SELECT c.case_id, c.client_name, c.status, c.service_kind, c.start_date, c.assigned_to,
             e.first_name AS a_first, e.last_name AS a_last, e.nickname AS a_nick, e.phone AS a_phone, e.position AS a_pos
      FROM cases c LEFT JOIN employees e ON e.employee_id = c.assigned_to
      WHERE c.case_id = :id AND c.customer_id = :cid`,
@@ -631,6 +631,51 @@ integrationRouter.post(
 const ROUND_RE = /^(d3|w\d{1,3}|end)$/;
 
 /**
+ * สรุปสุขภาพรายสัปดาห์ถึงญาติ (ดร.ธงชัย 25 ต.ค. 2569 ลูกค้า ข้อ 2) — ฝั่ง chat ส่งเข้า LINE Kin HomeCare ทุกวันอาทิตย์
+ *   ตั๋ว 'kin-family-weekly' {} → { week_from, week_to, cases: [{case_id, client_first, family, reports, shifts, this:{…}, prev:{…}}] }
+ *   เฉพาะเคสที่มีญาติผูก LINE และมีรายงานใน 7 วันล่าสุด · ส่งแค่ค่าเฉลี่ย/ต่ำสุด/สูงสุด ไม่ส่งข้อความอาการรายครั้ง
+ */
+integrationRouter.post(
+  '/family/weekly-summary',
+  asyncRoute(async (req, res) => {
+    const { token } = hireSchema.parse(req.body);
+    if (!verifySigned(token, 'kin-family-weekly')) throw new ApiError(401, 'ลายเซ็นไม่ถูกต้องหรือหมดอายุ');
+    await family.ensureFamilyTable();
+    const d = (off) => thDate(off);
+    const from = d(-6), to = d(0), pFrom = d(-13), pTo = d(-7);
+    const agg = (alias) => `
+      count(*)::int AS ${alias}_reports,
+      round(avg(NULLIF(r.bp_systolic, 0)))::int AS ${alias}_sys, round(avg(NULLIF(r.bp_diastolic, 0)))::int AS ${alias}_dia,
+      max(NULLIF(r.bp_systolic, 0))::int AS ${alias}_sys_max, min(NULLIF(r.bp_systolic, 0))::int AS ${alias}_sys_min,
+      round(avg(NULLIF(r.spo2, 0)))::int AS ${alias}_spo2, min(NULLIF(r.spo2, 0))::int AS ${alias}_spo2_min,
+      round(avg(NULLIF(r.pulse, 0)))::int AS ${alias}_pulse, max(NULLIF(r.temperature_c, 0))::float AS ${alias}_temp_max,
+      max(r.walk_distance_m)::float AS ${alias}_walk_max, round(avg(r.pain_score)::numeric, 1)::float AS ${alias}_pain`;
+    const rows = await sql.all(
+      `WITH fam AS (
+         SELECT case_id, array_agg(DISTINCT line_user_id) AS family FROM case_family_links
+         WHERE accepted_at IS NOT NULL AND revoked_at IS NULL AND line_user_id IS NOT NULL GROUP BY case_id),
+       w AS (SELECT r.case_id, ${agg('t')} FROM case_reports r WHERE r.report_date BETWEEN :from AND :to GROUP BY r.case_id),
+       p AS (SELECT r.case_id, ${agg('p')} FROM case_reports r WHERE r.report_date BETWEEN :pFrom AND :pTo GROUP BY r.case_id),
+       v AS (SELECT case_id, count(*)::int AS shifts FROM case_visits
+             WHERE visit_date BETWEEN :from AND :to AND (status = 'done' OR check_out_at IS NOT NULL) GROUP BY case_id)
+       SELECT c.case_id, split_part(COALESCE(c.client_name, ''), ' ', 1) AS client_first, fam.family, w.*, p.*, COALESCE(v.shifts, 0) AS shifts
+       FROM w JOIN fam ON fam.case_id = w.case_id JOIN cases c ON c.case_id = w.case_id
+       LEFT JOIN p ON p.case_id = w.case_id LEFT JOIN v ON v.case_id = w.case_id`,
+      { from, to, pFrom, pTo },
+    );
+    const pick = (r, a) => ({
+      reports: r[`${a}_reports`] || 0, sys: r[`${a}_sys`], dia: r[`${a}_dia`], sys_max: r[`${a}_sys_max`], sys_min: r[`${a}_sys_min`],
+      spo2: r[`${a}_spo2`], spo2_min: r[`${a}_spo2_min`], pulse: r[`${a}_pulse`], temp_max: r[`${a}_temp_max`],
+      walk_max: r[`${a}_walk_max`], pain: r[`${a}_pain`],
+    });
+    res.json({
+      week_from: from, week_to: to,
+      cases: rows.map((r) => ({ case_id: r.case_id, client_first: r.client_first, family: r.family, shifts: r.shifts, this: pick(r, 't'), prev: pick(r, 'p') })),
+    });
+  }),
+);
+
+/**
  * ป้ายผู้ดูแลบนการ์ดแนะนำตัวที่ส่งให้ญาติ (ดร.ธงชัย 25 ต.ค. 2569 ลูกค้า ข้อ 1) — ดาวเฉลี่ยจากครอบครัว + ระดับ + จำนวนกะ 90 วัน
  *   ตั๋ว 'kin-emp-badge' {employee_id} → { stars: {avg, n}, tier: {key, label}, shifts } · ไม่ส่งชื่อจริง/เบอร์/ข้อมูลอื่น
  */
@@ -759,10 +804,18 @@ integrationRouter.post(
     await ensureLineColumn();
     await ensureLinkCodeTables();
     const emp = await sql.one(
-      'SELECT employee_id, first_name, position, status, line_user_id FROM employees WHERE upper(employee_id) = upper(:id)',
+      'SELECT employee_id, first_name, position, status, line_user_id, phone FROM employees WHERE upper(employee_id) = upper(:id)',
       { id: p.employee_id.trim() },
     );
     if (!emp) throw new ApiError(404, `ไม่พบพนักงานรหัส ${p.employee_id} ในระบบงาน`);
+    // แอดมินพิมพ์รหัสพนักงานเอง → ต้องเป็นคนเดียวกับผู้สมัคร (เบอร์ 9 หลักท้ายตรงกัน) ก่อนออกรหัส
+    // กันพิมพ์ผิดเป็นรหัสคนอื่น แล้วรหัสของคนนั้นถูกส่งเข้า LINE ผู้สมัคร = ผูก LINE ผิดคน เห็นเคสคนอื่น (PDPA)
+    if (p.expect_phone) {
+      const tail = (x) => String(x || '').replace(/\D/g, '').slice(-9);
+      if (!tail(emp.phone) || tail(emp.phone) !== tail(p.expect_phone)) {
+        throw new ApiError(409, `รหัส ${emp.employee_id} เป็นของคุณ${emp.first_name} ซึ่งเบอร์ไม่ตรงกับผู้สมัครคนนี้ — ตรวจรหัสพนักงานอีกครั้ง`);
+      }
+    }
     if (BLOCKED_STATUSES[emp.status]) throw new ApiError(409, 'บัญชีพนักงานนี้ถูกปิดอยู่');
     if (!FRONT_POSITIONS.includes(emp.position)) throw new ApiError(403, 'ส่งรหัสทางนี้ได้เฉพาะพนักงานภาคสนาม — บัญชีสำนักงานออกรหัสที่หน้าพนักงานในระบบงาน');
     if (emp.line_user_id) return res.json({ linked: true, employee_id: emp.employee_id, first_name: emp.first_name });
