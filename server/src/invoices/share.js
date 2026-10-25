@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { sql } from '../db/index.js';
+import { sql, transaction } from '../db/index.js';
 import { ensureCustomerLineColumns } from '../lib/customerLine.js';
 
 /**
@@ -43,6 +43,8 @@ export const ensureShareTables = () =>
     )`);
     await sql.run(`CREATE INDEX IF NOT EXISTS idx_invoice_line_outbox_pending ON invoice_line_outbox (created_at) WHERE sent_at IS NULL`);
     await sql.run(`CREATE INDEX IF NOT EXISTS idx_invoice_line_outbox_invoice ON invoice_line_outbox (invoice_id, created_at DESC)`);
+    // จองแถวตอนดึงคิว — ส่ง LINE แล้วแต่ ack ไม่ถึง (ระบบงาน deploy/timeout) หรือ cron ทับกัน = ไม่ส่งซ้ำทุก 3 นาที
+    await sql.run(`ALTER TABLE invoice_line_outbox ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMPTZ`);
   })().catch((err) => {
     ready = null;
     throw err;
@@ -66,6 +68,12 @@ export async function lineTarget(invoice) {
 /** ออกลิงก์ + ใส่คิวส่ง · ใบเดิมที่ยังรอส่งอยู่ = ไม่ใส่ซ้ำ → { url, queued, pending_id } */
 export async function queueLineSend(invoice, customer, user) {
   await ensureShareTables();
+  return transaction(async (tx) => queueLineSendTx(tx, invoice, customer, user));
+}
+
+async function queueLineSendTx(sql, invoice, customer, user) {
+  // ล็อกแถวใบ — 2 คนกดส่งพร้อมกัน = เข้าคิวครั้งเดียว
+  await sql.one(`SELECT invoice_id FROM invoices WHERE invoice_id = :id FOR UPDATE`, { id: invoice.invoice_id });
   const pending = await sql.one(
     `SELECT id FROM invoice_line_outbox WHERE invoice_id = :id AND sent_at IS NULL AND attempts < 3 AND created_at > now() - interval '1 day'`,
     { id: invoice.invoice_id },
@@ -144,11 +152,22 @@ export function publicInvoice(inv) {
 /** คิวที่รอส่ง (ให้ระบบแชทดึง) + รับผลส่งกลับ */
 export async function outboxPending(limit = 20) {
   await ensureShareTables();
+  // ใบที่ถูกยกเลิกหลังกดส่ง = ไม่ส่ง (ลูกค้าจะได้ยอดผิด + ลิงก์ 404)
+  await sql.run(
+    `UPDATE invoice_line_outbox o SET error = 'ใบถูกยกเลิกก่อนส่ง', attempts = 3
+     FROM invoices i
+     WHERE i.invoice_id = o.invoice_id AND i.status = 'cancelled' AND o.sent_at IS NULL AND o.attempts < 3`,
+  );
+  // จองแถว (claimed_at + attempts) ก่อนส่งให้ระบบแชท — ack หาย/ cron ทับกัน = ไม่ส่งซ้ำ
+  // หยิบใหม่เฉพาะแถวที่ไม่เคยจอง หรือระบบแชทแจ้งว่าส่งไม่สำเร็จ (ล้างจองแล้ว) · จองค้างโดยไม่มีผล = อาจถึงลูกค้าแล้ว ไม่ส่งซ้ำ
   return sql.all(
-    `SELECT id, invoice_id, line_user_id, conversation_id, payload, created_by_name
-     FROM invoice_line_outbox
-     WHERE sent_at IS NULL AND attempts < 3 AND created_at > now() - interval '1 day'
-     ORDER BY id LIMIT :n`,
+    `UPDATE invoice_line_outbox o SET claimed_at = now(), attempts = attempts + 1
+     WHERE o.id IN (
+       SELECT id FROM invoice_line_outbox
+       WHERE sent_at IS NULL AND attempts < 3 AND created_at > now() - interval '1 day'
+         AND claimed_at IS NULL
+       ORDER BY id LIMIT :n FOR UPDATE SKIP LOCKED)
+     RETURNING o.id, o.invoice_id, o.line_user_id, o.conversation_id, o.payload, o.created_by_name`,
     { n: limit },
   );
 }
@@ -161,8 +180,9 @@ export async function outboxAck(results) {
     if (!Number.isInteger(id)) continue;
     n += await sql.run(
       r.ok
-        ? `UPDATE invoice_line_outbox SET sent_at = now(), error = NULL, attempts = attempts + 1 WHERE id = :id AND sent_at IS NULL`
-        : `UPDATE invoice_line_outbox SET error = :err, attempts = attempts + 1 WHERE id = :id AND sent_at IS NULL`,
+        ? `UPDATE invoice_line_outbox SET sent_at = now(), error = NULL WHERE id = :id AND sent_at IS NULL`
+        // ล้มเหลว = ปล่อยจองให้รอบหน้าลองใหม่ได้ทันที (attempts นับไปแล้วตอนจอง)
+        : `UPDATE invoice_line_outbox SET error = :err, claimed_at = NULL WHERE id = :id AND sent_at IS NULL`,
       { id, err: String(r.error || 'ส่งไม่สำเร็จ').slice(0, 300) },
     );
   }

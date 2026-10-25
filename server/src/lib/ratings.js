@@ -87,23 +87,30 @@ export async function submitRating({ caseId, round, kind, line, stars, reason })
     const ok = await sql.one('SELECT 1 AS ok FROM employees WHERE employee_id = :emp AND line_user_id = :line', { emp: c.assigned_to, line });
     if (!ok) return { error: 'not_assignee' };
   }
+  // ดาวจากญาติ = ของคนที่ทำกะจริงล่าสุดของเคส (คนแทน/เวรดึกคนละคน) · ยังไม่มีกะ = ผู้ดูแลหลัก
+  const worker = kind === 'family'
+    ? (await sql.one(
+      `SELECT checked_in_by FROM case_visits WHERE case_id = :id AND checked_in_by IS NOT NULL AND status <> 'cancelled'
+       ORDER BY check_in_at DESC NULLS LAST LIMIT 1`, { id: caseId }))?.checked_in_by
+    : null;
   await sql.run(
     `INSERT INTO case_ratings (case_id, round, rater_kind, rater_line, employee_id, stars, reason)
      VALUES (:id, :round, :kind, :line, :emp, :stars, :reason)
      ON CONFLICT (case_id, round, rater_kind, rater_line)
      DO UPDATE SET stars = EXCLUDED.stars, reason = COALESCE(EXCLUDED.reason, case_ratings.reason), updated_at = now()`,
-    { id: caseId, round, kind, line, emp: c.assigned_to, stars, reason: reason ? String(reason).slice(0, 200) : null },
+    { id: caseId, round, kind, line, emp: worker || c.assigned_to, stars, reason: reason ? String(reason).slice(0, 200) : null },
   );
   return { ok: true, low: stars <= 2 };
 }
 
-/** ดาวเฉลี่ยของผู้ดูแลจากญาติ → { avg, n } (n < MIN_SHOW = ไม่โชว์ avg) */
-export async function employeeStars(employeeId) {
+/** ดาวเฉลี่ยของผู้ดูแลจากญาติ → { avg, n } (n < MIN_SHOW = ไม่โชว์ avg) · days = นับเฉพาะช่วงล่าสุด (ระดับพนักงานใช้ 90 วัน) */
+export async function employeeStars(employeeId, days = null) {
   if (!employeeId) return { avg: null, n: 0 };
   await ensureRatingsTable();
   const r = await sql.one(
     `SELECT round(avg(stars)::numeric, 1)::float AS avg, count(*)::int AS n FROM case_ratings
-     WHERE employee_id = :emp AND rater_kind = 'family'`, { emp: employeeId });
+     WHERE employee_id = :emp AND rater_kind = 'family'${days ? ` AND COALESCE(updated_at, created_at) > now() - make_interval(days => ${Number(days) | 0})` : ''}`,
+    { emp: employeeId });
   return { avg: r.n >= MIN_SHOW ? r.avg : null, n: r.n };
 }
 

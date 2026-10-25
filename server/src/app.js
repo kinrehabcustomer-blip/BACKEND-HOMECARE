@@ -21,6 +21,8 @@ import { requireAuth, requireAdmin, requireBilling, requireCaseAccess, requireMa
 
 export function createApp() {
   const app = express();
+  // อยู่หลัง proxy ของ Vercel — req.ip = IP ผู้ใช้จริง (ตัวกันยิงถี่ /api/public/bill ไม่นับทุกคนเป็น IP เดียว)
+  app.set('trust proxy', 1);
 
   // credentials: true — เบราว์เซอร์ต้องส่งคุกกี้ session ข้าม origin (dev: 5173 -> 4000)
   app.use(cors({ origin: process.env.CORS_ORIGIN ?? 'http://localhost:5173', credentials: true }));

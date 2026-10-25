@@ -657,8 +657,10 @@ integrationRouter.post(
        w AS (SELECT r.case_id, ${agg('t')} FROM case_reports r WHERE r.report_date BETWEEN :from AND :to GROUP BY r.case_id),
        p AS (SELECT r.case_id, ${agg('p')} FROM case_reports r WHERE r.report_date BETWEEN :pFrom AND :pTo GROUP BY r.case_id),
        v AS (SELECT case_id, count(*)::int AS shifts FROM case_visits
-             WHERE visit_date BETWEEN :from AND :to AND (status = 'done' OR check_out_at IS NOT NULL) GROUP BY case_id)
-       SELECT c.case_id, split_part(COALESCE(c.client_name, ''), ' ', 1) AS client_first, fam.family, w.*, p.*, COALESCE(v.shifts, 0) AS shifts
+             WHERE visit_date BETWEEN :from AND :to AND check_out_at IS NOT NULL AND status <> 'cancelled' AND checked_in_by IS NOT NULL
+             GROUP BY case_id)
+       -- w.* / p.* มีคอลัมน์ case_id ซ้ำ (pg เอาตัวหลังทับ → p ไม่มีแถว = case_id null) จึงวาง c.case_id ไว้หลังสุด
+       SELECT w.*, p.*, split_part(COALESCE(c.client_name, ''), ' ', 1) AS client_first, fam.family, COALESCE(v.shifts, 0) AS shifts, c.case_id
        FROM w JOIN fam ON fam.case_id = w.case_id JOIN cases c ON c.case_id = w.case_id
        LEFT JOIN p ON p.case_id = w.case_id LEFT JOIN v ON v.case_id = w.case_id`,
       { from, to, pFrom, pTo },
@@ -773,12 +775,16 @@ integrationRouter.post(
     const ids = Array.isArray(p?.ids) ? p.ids.filter((x) => typeof x === 'string' && /^[A-Z0-9-]{3,20}$/i.test(x)).slice(0, 200) : null;
     if (!ids) throw new ApiError(401, 'ลายเซ็นไม่ถูกต้องหรือหมดอายุ');
     if (!ids.length) return res.json({ counts: {} });
+    // since {employee_id: 'YYYY-MM-DD'} = นับเฉพาะกะตั้งแต่วันสมัครผ่านลิงก์ชวน (พนักงานเดิมสมัครซ้ำ ห้ามได้แต้มจากกะเก่า)
+    const sinceOf = (id) => (typeof p.since?.[id] === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(p.since[id]) ? p.since[id] : '0000-00-00');
     const rows = await sql.all(
-      `SELECT COALESCE(v.checked_in_by, v.assigned_to) AS emp, count(*)::int AS n FROM case_visits v
-       WHERE COALESCE(v.checked_in_by, v.assigned_to) = ANY(:ids::text[])
-         AND (v.status = 'done' OR v.check_out_at IS NOT NULL)
-       GROUP BY 1`,
-      { ids },
+      // นิยามเดียวกับกะที่จ่ายค่าจ้าง (cases/repo.js WORKED_SHIFT): เช็คอิน-เอาต์จริง ไม่นับกะที่ยกเลิก นับให้คนที่เช็คอิน
+      `SELECT q.emp, count(v.visit_id)::int AS n
+       FROM unnest(:ids::text[], :sinces::text[]) AS q(emp, since)
+       JOIN case_visits v ON v.checked_in_by = q.emp AND v.visit_date >= q.since
+         AND v.check_out_at IS NOT NULL AND v.status <> 'cancelled'
+       GROUP BY q.emp`,
+      { ids, sinces: ids.map(sinceOf) },
     );
     res.json({ counts: Object.fromEntries(rows.map((r) => [r.emp, r.n])) });
   }),
@@ -848,7 +854,10 @@ integrationRouter.post(
     // กันพิมพ์ผิดเป็นรหัสคนอื่น แล้วรหัสของคนนั้นถูกส่งเข้า LINE ผู้สมัคร = ผูก LINE ผิดคน เห็นเคสคนอื่น (PDPA)
     if (p.expect_phone) {
       const tail = (x) => String(x || '').replace(/\D/g, '').slice(-9);
-      if (!tail(emp.phone) || tail(emp.phone) !== tail(p.expect_phone)) {
+      if (!tail(emp.phone)) {
+        throw new ApiError(409, `พนักงานรหัส ${emp.employee_id} (คุณ${emp.first_name}) ยังไม่มีเบอร์ในระบบงาน จึงยืนยันไม่ได้ว่าเป็นคนเดียวกับผู้สมัคร — ใส่เบอร์ในหน้าพนักงานก่อน แล้วลองใหม่`);
+      }
+      if (tail(emp.phone) !== tail(p.expect_phone)) {
         throw new ApiError(409, `รหัส ${emp.employee_id} เป็นของคุณ${emp.first_name} ซึ่งเบอร์ไม่ตรงกับผู้สมัครคนนี้ — ตรวจรหัสพนักงานอีกครั้ง`);
       }
     }

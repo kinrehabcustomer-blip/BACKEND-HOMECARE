@@ -133,7 +133,9 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
   useEffect(() => {
     setChatUrl(null);
     if (!caseId) return;
-    api.caseCustomerLine(caseId).then((d) => setChatUrl(d?.chat_url || null)).catch(() => {});
+    let cancelled = false; // สลับเคสเร็ว ๆ — คำตอบของเคสก่อนหน้าห้ามมาทับ
+    api.caseCustomerLine(caseId).then((d) => { if (!cancelled) setChatUrl(d?.chat_url || null); }).catch(() => {});
+    return () => { cancelled = true; };
   }, [caseId]);
   const [staff, setStaff] = useState([]);
   const [pick, setPick] = useState('');

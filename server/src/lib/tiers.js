@@ -22,14 +22,17 @@ export async function employeeMetrics(employeeId) {
   const v = await sql.one(
     `SELECT count(*)::int AS shifts,
             count(*) FILTER (WHERE COALESCE(v.check_in_late_minutes, 0) <= ${LATE_OK})::int AS on_time,
+            -- รายงานผูกกับกะ (visit_id) ก่อน · เวรดึกบันทึกหลังเที่ยงคืน report_date เป็นวันถัดไป จึงรับวันถัดไปด้วยเมื่อไม่มี visit_id
             count(*) FILTER (WHERE EXISTS (
-              SELECT 1 FROM case_reports r WHERE r.case_id = v.case_id AND r.report_date = v.visit_date AND r.reported_by = :emp))::int AS reported
+              SELECT 1 FROM case_reports r WHERE r.case_id = v.case_id AND r.reported_by = :emp
+                AND (r.visit_id = v.visit_id OR (r.visit_id IS NULL AND r.report_date IN (v.visit_date, to_char(v.visit_date::date + 1, 'YYYY-MM-DD'))))))::int AS reported
      FROM case_visits v
-     WHERE COALESCE(v.checked_in_by, v.assigned_to) = :emp AND v.visit_date >= :since
-       AND (v.status = 'done' OR v.check_out_at IS NOT NULL)`,
+     -- นิยามเดียวกับกะที่จ่ายค่าจ้าง (cases/repo.js WORKED_SHIFT): เช็คอิน-เอาต์จริง ไม่นับกะที่ยกเลิก นับให้คนที่เช็คอิน
+     WHERE v.checked_in_by = :emp AND v.visit_date >= :since
+       AND v.check_out_at IS NOT NULL AND v.status <> 'cancelled'`,
     { emp: employeeId, since },
   );
-  const st = await employeeStars(employeeId);
+  const st = await employeeStars(employeeId, 90);
   const shifts = v?.shifts || 0;
   return {
     shifts,

@@ -882,7 +882,10 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                 <span className="muted foot-note">
                   {!lineInfo.can_send ? lineInfo.reason
                     : lastSend.sent_at ? `ส่งเข้า LINE แล้ว ${new Date(lastSend.sent_at).toLocaleString('th-TH', { timeZone: 'Asia/Bangkok', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}${lastSend.created_by_name ? ` · ${lastSend.created_by_name}` : ''}`
-                    : lastSend.attempts >= 3 ? `ส่งไม่สำเร็จ: ${lastSend.error ?? ''}` : 'อยู่ในคิวส่ง…'}
+                    : lastSend.attempts >= 3 ? `ส่งไม่สำเร็จ: ${lastSend.error ?? ''}`
+                    // คิวหมดอายุ 1 วัน (ระบบแชทไม่หยิบแล้ว) — บอกให้กดส่งใหม่ ไม่ค้าง "อยู่ในคิว" ตลอดไป
+                    : Date.now() - new Date(lastSend.created_at).getTime() > 864e5 ? `ส่งไม่สำเร็จ (หมดเวลา)${lastSend.error ? `: ${lastSend.error}` : ''} — กดส่งใหม่ได้`
+                    : 'อยู่ในคิวส่ง…'}
                 </span>
               )}
 

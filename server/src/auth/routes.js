@@ -1,4 +1,4 @@
-import { randomInt, randomUUID } from 'node:crypto';
+import { createHash, randomInt, randomUUID } from 'node:crypto';
 import { Router } from 'express';
 import { z } from 'zod';
 import { sql } from '../db/index.js';
@@ -158,6 +158,14 @@ authRouter.get(
     const p = verifySigned(req.query.t, 'kin-admin-sso');
     const email = typeof p?.email === 'string' ? p.email.trim().toLowerCase() : '';
     if (!email) return res.redirect(302, '/login?sso_error=expired');
+    // ตั๋วใช้ได้ครั้งเดียว — URL หลุดไปในประวัติเบราว์เซอร์/log ภายใน 2 นาที เอามาเข้าซ้ำไม่ได้
+    await sql.run(`CREATE TABLE IF NOT EXISTS admin_sso_used (token_hash TEXT PRIMARY KEY, used_at TIMESTAMPTZ NOT NULL DEFAULT now())`);
+    await sql.run(`DELETE FROM admin_sso_used WHERE used_at < now() - interval '1 day'`);
+    const fresh = await sql.run(
+      `INSERT INTO admin_sso_used (token_hash) VALUES (:h) ON CONFLICT DO NOTHING`,
+      { h: createHash('sha256').update(String(req.query.t)).digest('hex') },
+    );
+    if (!fresh) return res.redirect(302, '/login?sso_error=expired');
     const to = typeof req.query.to === 'string' && /^\/(?!\/)[A-Za-z0-9/_?=&.-]*$/.test(req.query.to) ? req.query.to : '/';
     const employee = await sql.one('SELECT * FROM employees WHERE lower(email) = :email LIMIT 1', { email });
     if (!employee || !ADMIN_SSO_POSITIONS.includes(employee.position)) return res.redirect(302, '/login?sso_error=nomatch');
