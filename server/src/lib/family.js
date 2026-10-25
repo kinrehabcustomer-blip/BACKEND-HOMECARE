@@ -322,6 +322,8 @@ export const messagePhoto = (caseId, messageId) =>
     { case_id: caseId, id: messageId },
   );
 
+/* ลบ = ซ่อนแถว ไบต์รูปยังอยู่ในฐาน — ดร.ธงชัยเคาะ 25 ต.ค. 2569 ว่า "ไม่ต้องลบ เก็บไว้ก่อน"
+   (เคยพิจารณาให้ล้าง photo_data ทิ้งจริงเพื่อให้คำว่า "ลบแล้ว" ตรงกับความจริงในแง่ PDPA แล้วตัดสินใจคงของเดิม) */
 export const hideMessage = (caseId, messageId) =>
   sql.run('UPDATE case_family_messages SET deleted_at = now() WHERE case_id = :case_id AND message_id = :id AND deleted_at IS NULL', {
     case_id: caseId,
