@@ -626,6 +626,30 @@ integrationRouter.post(
  *   /ratings/submit ตั๋ว 'kin-rating-submit' {case_id, round, kind: family|staff, line, stars, reason?} → { ok, low }
  */
 const ROUND_RE = /^(d3|w\d{1,3}|end)$/;
+
+/**
+ * ชวนเพื่อนแบบแต้มสะสม (ดร.ธงชัย 25 ต.ค. 2569) — ฝั่ง chat ถามว่าเพื่อนที่ถูกชวนทำงานไปแล้วกี่กะ เพื่อให้แต้ม (กะแรก / ครบ 10 กะ)
+ *   ตั๋ว 'kin-shift-counts' {ids: [employee_id ≤200]} → { counts: { [employee_id]: จำนวนกะที่เสร็จแล้ว } }
+ *   นับกะที่เช็คเอาต์แล้วหรือสถานะเสร็จ (คนเช็คอินหรือคนที่ถูกจัดกะ) · ไม่ส่งข้อมูลอื่นของพนักงาน
+ */
+integrationRouter.post(
+  '/employees/shift-counts',
+  asyncRoute(async (req, res) => {
+    const { token } = hireSchema.parse(req.body);
+    const p = verifySigned(token, 'kin-shift-counts');
+    const ids = Array.isArray(p?.ids) ? p.ids.filter((x) => typeof x === 'string' && /^[A-Z0-9-]{3,20}$/i.test(x)).slice(0, 200) : null;
+    if (!ids) throw new ApiError(401, 'ลายเซ็นไม่ถูกต้องหรือหมดอายุ');
+    if (!ids.length) return res.json({ counts: {} });
+    const rows = await sql.all(
+      `SELECT COALESCE(v.checked_in_by, v.assigned_to) AS emp, count(*)::int AS n FROM case_visits v
+       WHERE COALESCE(v.checked_in_by, v.assigned_to) = ANY(:ids::text[])
+         AND (v.status = 'done' OR v.check_out_at IS NOT NULL)
+       GROUP BY 1`,
+      { ids },
+    );
+    res.json({ counts: Object.fromEntries(rows.map((r) => [r.emp, r.n])) });
+  }),
+);
 integrationRouter.post(
   '/ratings/due',
   asyncRoute(async (req, res) => {
