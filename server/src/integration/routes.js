@@ -30,6 +30,12 @@ import { ensureCustomerLineColumns as ensureCustomerLineColumnsSafe, findByPhone
  */
 export const integrationRouter = Router();
 
+/* สถานะที่ใช้ระบบไม่ได้ ในรูปที่เอาไปต่อท้าย NOT IN (...) ของ SQL ได้ — มาจากค่าคงที่ตัวเดียวกับที่ middleware ใช้
+   (lib/auth.js) จะได้ไม่มีวันหลุดจากกัน · ค่าเป็นคำที่เราเขียนเองทั้งหมด ไม่ได้มาจากผู้ใช้ */
+const BLOCKED_SQL = Object.keys(BLOCKED_STATUSES)
+  .map((s) => `'${s}'`)
+  .join(', ');
+
 const hireSchema = z.object({ token: z.string().min(1) });
 
 /**
@@ -84,9 +90,17 @@ integrationRouter.post(
     );
     if (!emp || BLOCKED_STATUSES[emp.status]) return res.json({ linked: false });
 
-    const all = (await cases.visitsForEmployeeOn(emp.employee_id, thDate(0))).filter(
-      (v) => v.state !== 'cancelled' && !['closed', 'cancelled'].includes(v.case_status),
-    );
+    const usable = (rows) => rows.filter((v) => v.state !== 'cancelled' && !['closed', 'cancelled'].includes(v.case_status));
+    let all = usable(await cases.visitsForWorkerOn(emp.employee_id, thDate(0)));
+    /* เวรดึกพิมพ์รายงานหลังเที่ยงคืน = วันที่เปลี่ยนไปแล้ว แต่กะยังเป็นของ "เมื่อวาน" (visit_date ของวันที่เริ่มกะ)
+       เดิมหาแค่กะของวันนี้ จึงตอบ "วันนี้ไม่พบกะของคุณ" แล้วรายงานหายไปทั้งใบ ญาติไม่ได้รับอะไรเลย
+       ถอยไปดูเมื่อวานเฉพาะกะที่ยังค้างอยู่จริง: ยังไม่เช็คเอาต์ และ (เช็คอินแล้ว หรือเป็นกะข้ามคืนตามแผน
+       คือเวลาจบ ≤ เวลาเริ่ม เช่น 20:00–08:00) — กะเมื่อวานที่จบไปแล้วไม่ถูกดึงกลับมารับรายงานย้อนหลัง */
+    if (!all.length) {
+      all = usable(await cases.visitsForWorkerOn(emp.employee_id, thDate(-1))).filter(
+        (v) => !v.check_out_at && (v.check_in_at || (v.planned_start && v.planned_end && v.planned_end <= v.planned_start)),
+      );
+    }
     const wanted = p.case_id ? all.filter((v) => v.case_id === p.case_id) : all;
     const working = wanted.filter((v) => v.state === 'working');
     const visit = wanted.length === 1 ? wanted[0] : working.length === 1 ? working[0] : null;
@@ -451,6 +465,8 @@ integrationRouter.post(
                 WHERE l.case_id = m.case_id AND l.accepted_at IS NOT NULL AND l.revoked_at IS NULL AND l.line_user_id IS NOT NULL) AS family,
               (SELECT array_agg(DISTINCT e.line_user_id) FROM employees e
                 WHERE e.line_user_id IS NOT NULL AND e.employee_id IS DISTINCT FROM m.employee_id
+                  -- คนที่ลาออก/ถูกพักงานต้องไม่ได้รับแจ้งเตือนข้อความของครอบครัวผู้ป่วยต่อ (ดู BLOCKED_STATUSES)
+                  AND COALESCE(e.status, '') NOT IN (${BLOCKED_SQL})
                   AND (e.employee_id = c.assigned_to
                        OR EXISTS (SELECT 1 FROM case_team t WHERE t.case_id = c.case_id AND t.employee_id = e.employee_id)
                        OR EXISTS (SELECT 1 FROM case_visits v WHERE v.case_id = c.case_id AND v.assigned_to = e.employee_id

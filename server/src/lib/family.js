@@ -133,16 +133,20 @@ export const revoke = (caseId, linkId) =>
 export async function accept(code, lineUserId, displayName) {
   const link = await sql.one(
     `SELECT l.link_id, l.case_id, l.accepted_at, l.line_user_id, l.invited_by, (l.invited_via IS NOT NULL) AS via_family,
-            (l.code_expires_at < now()) AS expired, c.client_name
+            (l.code_expires_at < now()) AS expired, c.client_name,
+            /* เคสปิด/ยกเลิกไปแล้วและพ้นช่วงผ่อนผัน = รับคำเชิญไม่ได้ เดิมไม่เช็คสถานะเคสเลย
+               ญาติจึงกดรับคำเชิญของเคสที่ปิดไปนานแล้วได้ (รหัสอายุ 7 วัน แต่เคสอาจปิดไปก่อน) */
+            (c.status IN ('closed', 'cancelled') AND NOT (${WITHIN_GRACE})) AS case_over
      FROM case_family_links l JOIN cases c ON c.case_id = l.case_id
      WHERE l.code_hash = :hash AND l.revoked_at IS NULL`,
-    { hash: hashCode(code) },
+    { hash: hashCode(code), grace: CLOSED_GRACE_DAYS },
   );
   if (!link) return { ok: false, reason: 'not_found' };
   if (link.accepted_at) {
     return link.line_user_id === lineUserId ? { ok: true, case_id: link.case_id, client_name: link.client_name } : { ok: false, reason: 'used' };
   }
   if (link.expired) return { ok: false, reason: 'expired' };
+  if (link.case_over) return { ok: false, reason: 'case_closed' };
   await sql.run(
     `UPDATE case_family_links SET line_user_id = :uid, display_name = :name, accepted_at = now(), code_hash = NULL
      WHERE link_id = :id`,
@@ -150,6 +154,16 @@ export async function accept(code, lineUserId, displayName) {
   );
   return { ok: true, case_id: link.case_id, client_name: link.client_name, invited_by: link.invited_by, via_family: link.via_family, first: true };
 }
+
+/**
+ * เคสที่ปิด/ยกเลิกแล้วยังอยู่ในช่วงผ่อนผัน 30 วันไหม (ต้องมี :grace เป็นพารามิเตอร์ของคำสั่งนั้น)
+ *
+ * ต้องดู cancelled_at ด้วย ไม่ใช่ closed_at อย่างเดียว — ตอนยกเลิกเคส cases/repo.js เซ็ต cancelled_at
+ * ไม่ได้เซ็ต closed_at เดิมจึงตกไปที่ now() ซึ่งแปลว่า "ยังไม่หมดอายุ" ตลอดกาล เคสที่ยกเลิกไปแล้ว
+ * ญาติดูข้อมูลผู้ป่วยได้ไม่สิ้นสุด · ไม่มีวันปิดบันทึกไว้เลย = ถือว่าหมดอายุ ('epoch') ปลอดภัยกว่าเปิดค้าง
+ */
+const WITHIN_GRACE = `coalesce(nullif(c.closed_at, ''), nullif(c.cancelled_at, ''), 'epoch')::timestamp
+            > now() - make_interval(days => :grace)`;
 
 const short = (s, n = 180) => {
   const t = String(s ?? '').replace(/\s+/g, ' ').trim();
@@ -162,8 +176,7 @@ export async function summaryFor(lineUserId) {
     `SELECT c.case_id, c.client_name, c.status, c.service_kind, c.start_date, c.end_date
      FROM case_family_links l JOIN cases c ON c.case_id = l.case_id
      WHERE l.line_user_id = :uid AND l.revoked_at IS NULL AND l.accepted_at IS NOT NULL
-       AND (c.status NOT IN ('closed', 'cancelled')
-            OR coalesce(nullif(c.closed_at, '')::timestamp, now()) > now() - make_interval(days => :grace))
+       AND (c.status NOT IN ('closed', 'cancelled') OR ${WITHIN_GRACE})
      ORDER BY c.case_id`,
     { uid: lineUserId, grace: CLOSED_GRACE_DAYS },
   );

@@ -389,9 +389,15 @@ myRouter.get(
 // แจ้งเตือน LINE ทั้งสองฝั่ง: ฝั่ง chat ดึงจาก /api/integration/family/message-feed · ที่นี่ไม่ยิง LINE เอง
 const isTherapist = (pos) => THERAPY_POSITIONS.includes(pos);
 
+/* เส้นแชทญาติแคบกว่าเส้นดูเคสทั่วไปโดยตั้งใจ (ดู hasFieldAccess ใน cases/repo.js):
+   นับกะย้อนหลังแค่ 30 วัน — คนที่ถูกสลับออกจากเคสหรือลาออกไปแล้วต้องเลิกอ่าน/เลิกตอบข้อความของครอบครัว
+   ผู้ป่วย ไม่ใช่มีสิทธิ์ค้างไว้ตลอดกาลเพราะเคยมีกะหนึ่งกะเมื่อหลายเดือนก่อน
+   ผู้รับผิดชอบหลัก/คนในทีมไม่ถูกกระทบ — สองอย่างนั้นแอดมินถอดออกได้ที่หน้าเคส */
+const CHAT_ACCESS_WINDOW_DAYS = 30;
+
 async function myCaseOr404(req) {
   const caseRow = await cases.findById(req.params.id);
-  if (!caseRow || !(await cases.hasFieldAccess(req.user.employee_id, req.params.id))) {
+  if (!caseRow || !(await cases.hasFieldAccess(req.user.employee_id, req.params.id, { windowDays: CHAT_ACCESS_WINDOW_DAYS }))) {
     throw notFound('ไม่พบเคสนี้ หรือไม่ใช่เคสที่คุณรับผิดชอบ');
   }
   return caseRow;

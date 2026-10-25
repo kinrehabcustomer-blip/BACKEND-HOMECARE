@@ -273,8 +273,16 @@ export function listForEmployee(employeeId) {
   );
 }
 
-/** พนักงานภาคสนามเข้าถึงเคสนี้ได้ไหม (ผู้รับผิดชอบหลัก / อยู่ในทีม / มีกะในเคส) — ใช้กันดูเคสคนอื่น */
-export async function hasFieldAccess(employeeId, caseId) {
+/**
+ * พนักงานภาคสนามเข้าถึงเคสนี้ได้ไหม (ผู้รับผิดชอบหลัก / อยู่ในทีม / มีกะในเคส) — ใช้กันดูเคสคนอื่น
+ *
+ * windowDays (ไม่ใส่ = ไม่จำกัดเวลา ตามพฤติกรรมเดิม): นับเฉพาะกะที่เกิดภายใน N วันล่าสุด
+ * ใช้กับเส้นที่ "เปิดค้างไว้ตลอดกาลแล้วเสียหาย" โดยเฉพาะแชทญาติ — คนที่ถูกสลับออกจากเคส
+ * หรือลาออกไปแล้วไม่ควรอ่าน/ตอบข้อความของครอบครัวผู้ป่วยต่อไปได้ไม่สิ้นสุด เพียงเพราะเคยมีกะเมื่อปีก่อน
+ * (ผู้รับผิดชอบหลักและคนในทีมยังผ่านตามเดิม เพราะสองอย่างนั้นคือ "สถานะปัจจุบัน" ที่แอดมินถอดออกได้)
+ */
+export async function hasFieldAccess(employeeId, caseId, { windowDays = null } = {}) {
+  const days = Number.isFinite(Number(windowDays)) && Number(windowDays) > 0 ? Math.trunc(Number(windowDays)) : null;
   const row = await sql.one(
     `SELECT 1 FROM cases c
      WHERE c.case_id = :cid
@@ -284,7 +292,12 @@ export async function hasFieldAccess(employeeId, caseId) {
                ที่อยู่ และข้อมูลสุขภาพของผู้ป่วยรายนั้นต่อไปตลอดกาล (เคสถูกยกเลิกทั้งใบก็เข้าข่ายเดียวกัน) */
             OR EXISTS (SELECT 1 FROM case_visits v
                        WHERE v.case_id = c.case_id AND v.assigned_to = :eid
-                         AND v.status <> 'cancelled'))`,
+                         AND v.status <> 'cancelled'${
+                           days
+                             ? `
+                         AND v.visit_date >= to_char(now() AT TIME ZONE 'Asia/Bangkok' - make_interval(days => ${days}), 'YYYY-MM-DD')`
+                             : ''
+                         }))`,
     { cid: caseId, eid: employeeId },
   );
   return Boolean(row);
@@ -1668,6 +1681,22 @@ export const visitsForEmployeeOn = (employeeId, date) =>
   sql
     .all(
       `${MY_VISIT} WHERE v.assigned_to = :emp AND v.visit_date = :date
+       ORDER BY v.planned_start NULLS FIRST, v.visit_id`,
+      { emp: employeeId, date },
+    )
+    .then((rows) => rows.map((v) => withVisitState(v)));
+
+/**
+ * กะของ "คนที่ทำงานกะนั้นจริง" ในวันที่กำหนด — คนที่ถูกจัดไว้ (assigned_to) หรือคนที่กดเช็คอินแทน (checked_in_by)
+ *
+ * แยกจาก visitsForEmployeeOn ที่หน้าตารางงานใช้อยู่ (ตรงนั้นต้องเป็น "กะของฉันตามที่ถูกจัด" เท่านั้น
+ * ไม่งั้นกะของคนอื่นที่เราไปช่วยเช็คอินจะโผล่ในตารางของเราด้วย) — ที่นี่ใช้กับเส้นรับรายงานจาก LINE
+ * ซึ่งต้องรับรายงานจากคนที่ไปทำจริงด้วย ไม่ใช่เฉพาะคนที่ชื่ออยู่บนใบนัด
+ */
+export const visitsForWorkerOn = (employeeId, date) =>
+  sql
+    .all(
+      `${MY_VISIT} WHERE v.visit_date = :date AND (v.assigned_to = :emp OR v.checked_in_by = :emp)
        ORDER BY v.planned_start NULLS FIRST, v.visit_id`,
       { emp: employeeId, date },
     )
