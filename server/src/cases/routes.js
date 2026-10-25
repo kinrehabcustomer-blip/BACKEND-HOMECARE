@@ -510,6 +510,10 @@ casesRouter.delete(
 casesRouter.post(
   '/:id/approve-pay',
   asyncRoute(async (req, res) => {
+    /* ประตูบานที่สองของการกระทำเดียวกับ /attendance/decide — ต้องใช้กติกาชุดเดียวกัน
+       เดิมบานนี้เปิดให้หมวด office ทั้งที่บานแรกปิด → HR กดรวดอนุมัติทั้งเคสได้ (ยิงจริงได้ 200 · ตรวจรอบ 10)
+       ซึ่งอันตรายกว่าบานแรกเพราะอนุมัติทีเดียวทุกกะในเคส */
+    ensureCanPay(req);
     const ids = await repo.pendingVisitIds(req.params.id);
     res.json(await repo.decideVisitPay(ids, { approve: true }, req.user));
   }),

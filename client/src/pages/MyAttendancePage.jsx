@@ -3,6 +3,7 @@ import { api } from '../api.js';
 import { serviceName } from '../components/MyCaseModal.jsx';
 import PageRefresh, { RefreshButton, useUpdatedAt } from '../components/PageRefresh.jsx';
 import { VISIT_STATE_LABELS, PAY_STATUS_LABELS, formatBaht, formatDate, timeText, durationText } from '../labels.js';
+import { thisMonth } from '../lib/attendanceUi.js';
 
 /**
  * การมาทำงาน + ค่าตอบแทนของพนักงานภาคสนามเอง
@@ -11,7 +12,9 @@ import { VISIT_STATE_LABELS, PAY_STATUS_LABELS, formatBaht, formatDate, timeText
  * จึงเห็นได้เฉพาะตัวเลขของตัวเอง ไม่เห็นของเพื่อนร่วมงาน (ต่างจากหน้า "การมาทำงาน" ของ admin ที่เห็นทุกคน)
  */
 export default function MyAttendancePage() {
-  const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  // 🔴 ต้องเป็นเดือนไทย ไม่ใช่ toISOString (UTC) — วันที่ 1 ช่วง 00:00–06:59 น. UTC ยังเป็นเดือนที่แล้ว
+  // พนักงานที่เปิด "ค่าตอบแทนของฉัน" ก่อนออกงานเช้าวันที่ 1 จะเห็นเดือนเก่าแล้วนึกว่าเงินหาย (ตรวจรอบ 10)
+  const [month, setMonth] = useState(thisMonth);
   const [report, setReport] = useState(null);
   const [rows, setRows] = useState(null);
   const [payslips, setPayslips] = useState([]);

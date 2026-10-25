@@ -31,7 +31,9 @@ export default function WorkHistory({ cases = [], limit, collapsible = false, em
     <>
       <p className="muted history-summary">
         กำลังดำเนินการ {active.length} เคส · ปิดแล้ว {closed.length} เคส
-        {earned > 0 && ` · รายได้จากเคสที่ปิดแล้ว ${formatBaht(earned)}`}
+        {/* c.fee = ค่าบริการที่เก็บจากลูกค้า ไม่ใช่ค่าจ้างของพนักงานคนนี้ — เรียกว่า "รายได้" ไม่ได้
+            (เคสหนึ่งค่าบริการ 2,000 แต่ค่าจ้างจริง 1,200 · คนอ่านคือ HR/Admin HC ที่ต้องตอบพนักงานเรื่องเงิน) */}
+        {earned > 0 && ` · มูลค่างานที่ปิดแล้ว ${formatBaht(earned)}`}
       </p>
 
       {shown.map((c) => (

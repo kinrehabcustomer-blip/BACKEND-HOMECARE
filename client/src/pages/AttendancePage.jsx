@@ -12,6 +12,7 @@ import { Approvals } from '../components/PayrollTabs.jsx';
 import { downloadCsv, thisMonth, LATE_MINUTES } from '../lib/attendanceUi.js';
 import { useSheetSwipe } from '../lib/sheetSwipe.js';
 import { useScrollLock } from '../lib/scrollLock.js';
+import { useCan } from '../auth.jsx';
 
 /* หน้านี้คือเรื่อง "เข้า–ออกงาน" ทั้งหมด — รวมการยืนยันกะกลับมาด้วย
 
@@ -49,7 +50,11 @@ export default function AttendancePage() {
   const [reloadKey, setReloadKey] = useState(0);
 
   const get = (key) => params.get(key) ?? '';
-  const tab = TABS[get('tab')] ? get('tab') : 'exceptions';
+  /* แท็บ "ยืนยันกะ" เป็นของหมวด money เท่านั้น (เส้น /attendance/decide ปิดไว้ด้วย ensureCanPay)
+     ถ้าไม่ซ่อน HR/Admin HC จะเห็นคิว ติ๊กเลือก กดอนุมัติ แล้วเจอแถบแดง — ปุ่มที่กดไม่ได้ไม่ควรมีอยู่ (ตรวจรอบ 10) */
+  const canPay = useCan('money');
+  const visibleTabs = canPay ? TABS : { exceptions: TABS.exceptions, log: TABS.log };
+  const tab = visibleTabs[get('tab')] ? get('tab') : 'exceptions';
   const employeeId = get('employee_id');
   // สรุปค่าตอบแทนปริยายเป็นเดือนที่แล้ว — เดือนปัจจุบันยังปิดเคสไม่ครบ ตัวเลขยังไม่ใช่ของจริง
   const month = /^\d{4}-(0[1-9]|1[0-2])$/.test(get('month')) ? get('month') : thisMonth();
@@ -108,7 +113,7 @@ export default function AttendancePage() {
       {/* แท็บ + ตัวกรอง + รายการ อยู่ในการ์ดขาวใบเดียว (โครงเดียวกับหน้ารายการอื่น — ดู .att-card) */}
       <div className="list-card att-card">
         <div className="att-tabs" role="tablist" aria-label="มุมมองการมาทำงาน">
-          {Object.entries(TABS).map(([key, label]) => (
+          {Object.entries(visibleTabs).map(([key, label]) => (
             <button
               key={key}
               role="tab"

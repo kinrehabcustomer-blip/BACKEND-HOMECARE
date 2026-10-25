@@ -588,7 +588,9 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
 
                 {/* ค่าจ้างของกะที่ทำไปแล้วยังไม่เข้าพนักงานจนกว่าจะอนุมัติ — อนุมัติทั้งเคสได้จากที่นี่
                     (ไล่ทีละกะได้ที่หน้า "การมาทำงาน → รออนุมัติค่าจ้าง") */}
-                {pendingPay.length > 0 && (
+                {/* seePay = หมวด money — ปุ่มนี้อนุมัติค่าจ้างทั้งเคสรวดเดียว เส้น API ก็ปิดไว้เหมือนกัน
+                    ถ้าไม่ซ่อน HR/Admin HC จะเห็นปุ่มแล้วกดเจอแถบแดง (ตรวจรอบ 10) */}
+                {seePay && pendingPay.length > 0 && (
                   <div className="visit-summary approve-row">
                     <p className="muted">
                       <strong>รออนุมัติ {pendingPay.length} กะ</strong>
