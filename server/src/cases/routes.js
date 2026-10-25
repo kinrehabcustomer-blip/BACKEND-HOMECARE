@@ -187,6 +187,11 @@ casesRouter.get(
 casesRouter.post(
   '/attendance/decide',
   asyncRoute(async (req, res) => {
+    /* เส้นพี่น้องทุกเส้นที่แตะค่าจ้าง (/:id/pay · /pay/shares · approve-pay) มี ensureCanPay ครบ เส้นนี้เส้นเดียวที่ลืม
+       ปุ่มนี้อยู่บนหน้า /payroll (หมวด money) เท่านั้น แต่ requireCaseAccess ปล่อยหมวด office ผ่านด้วย
+       → HR/Admin HC ที่ไม่มีปุ่มในจอ ยิง API ตรงแล้วอนุมัติกะได้จริง (ยิงจริงได้ 200 changed:1 · ตรวจรอบ 9)
+       "กะที่อนุมัติแล้ว" คือเงื่อนไขปลดให้เงินไหลเข้าสรุปค่าตอบแทน จึงต้องอยู่ในมือคนที่ดูแลเงินเท่านั้น */
+    ensureCanPay(req);
     const input = decidePaySchema.parse(req.body);
     res.json(await repo.decideVisitPay(input.visit_ids, input, req.user));
   }),

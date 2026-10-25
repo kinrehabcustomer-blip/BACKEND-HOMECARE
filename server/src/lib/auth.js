@@ -266,7 +266,10 @@ export const requireManager = requirePermission('money', 'เฉพาะผู�
  */
 const MONEY_CASE_ROUTES = [
   /^\/assignable-employees$/,
-  /^\/attendance\/(pending|decide|report)$/,
+  // exceptions = แถว "ยืนยันครบแล้ว แต่ยังมีกะขาด/ค้างเช็คเอาท์อีก n" บนหน้า /payroll
+  // เดิมไม่อยู่ในชุดนี้ ฝ่ายการเงินจึงได้ 403 แล้วหน้าจอกลืนทิ้งเงียบ ๆ เห็นแค่ "ยืนยันครบแล้ว"
+  // ซึ่งเป็นภาพที่ชวนให้ปิดรอบจ่ายทั้งที่ยังมีกะค้าง (ตรวจรอบ 9)
+  /^\/attendance\/(pending|decide|report|exceptions)$/,
   /^\/[^/]+\/pay(\/[^/]+)?$/,
   /^\/[^/]+\/approve-pay$/,
 ];
