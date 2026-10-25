@@ -337,6 +337,26 @@ function clearUnusedKind(input) {
  * หาที่ server ไม่รอให้หน้าเว็บส่งมา เพราะเป็นตัวเลขที่กลายเป็นรายได้ของพนักงาน
  * ปล่อยให้ client เป็นคนคัดลอก แล้ววันหนึ่งหน้าเว็บเวอร์ชันเก่า/หน้าอื่นเรียก API ตรงๆ เคสจะไม่มีค่าจ้างเงียบๆ
  */
+/**
+ * แพ็กกายภาพที่ "เพิ่งเลือกเข้ามา" ต้องมีจริงและยังเปิดขายอยู่ (ตรวจรอบ 15)
+ *
+ * หน้าเว็บโชว์เฉพาะแพ็กที่ active แต่ API รับรหัสอะไรก็ได้ — เปิดเคสด้วยแพ็กที่เลิกขายไปแล้ว
+ * หรือรหัสที่ไม่มีอยู่ ได้ 201 เงียบ ๆ แล้วเคสไม่มีค่าจ้างพนักงานเลย (payFromService คืน null)
+ * เช็คเฉพาะตอนที่ input ส่ง physio_package_id มาเอง — เคสเก่าที่แพ็กถูกปิดขายทีหลัง
+ * ต้องแก้ข้อมูลอื่นได้ตามปกติ ไม่ใช่ล็อกทั้งเคส
+ */
+async function assertPhysioPackageUsable(input, db = sql) {
+  if (!('physio_package_id' in input) || !input.physio_package_id) return;
+  const p = await db.one(
+    'SELECT name, active FROM physio_packages WHERE physio_package_id = :id',
+    { id: input.physio_package_id },
+  );
+  if (!p) throw new ApiError(400, `ไม่พบแพ็คเกจกายภาพรหัส ${input.physio_package_id}`);
+  if (!p.active) {
+    throw new ApiError(409, `แพ็ก "${p.name}" ปิดขายแล้ว เลือกใช้กับเคสใหม่ไม่ได้ — เลือกแพ็กที่ยังเปิดขายอยู่`);
+  }
+}
+
 async function payFromService(input, db = sql) {
   if (input.physio_package_id) {
     const p = await db.one(
@@ -416,6 +436,8 @@ export function assessStaffPayUpdate(targetStaffPay, releasedAmount) {
 export async function staffPayUpdateForTransaction(tx, caseId, input) {
   const current = await tx.one('SELECT * FROM cases WHERE case_id = :id FOR UPDATE', { id: caseId });
   if (!current) throw new ApiError(404, `ไม่พบเคสรหัส ${caseId}`);
+
+  await assertPhysioPackageUsable(input, tx);
 
   const mode = staffPayUpdateMode(current, input);
   if (mode === 'preserve') return { current, mode, staff_pay: current.staff_pay };
@@ -539,6 +561,8 @@ export function create(rawInput, actor) {
     values.pkg_english = input.pkg_english ?? false; // คอลัมน์ NOT NULL — ไม่ส่งมา = ไม่ได้ขอภาษาอังกฤษ
     // node-postgres แปลง array เป็น array ของ Postgres ไม่ใช่ JSON — ต้อง stringify เองก่อนลงคอลัมน์ JSONB
     values.addons = JSON.stringify(normalizeAddons(input.addons));
+
+    await assertPhysioPackageUsable(input, tx);
 
     // ไม่ได้ส่งค่าจ้างมา = ใช้ของแพ็คเกจ · ส่งตัวเลขมาเอง (รวม 0) = เคารพตามนั้น
     if (values.staff_pay == null) values.staff_pay = await payFromService(input, tx);

@@ -1,5 +1,10 @@
 import { z } from 'zod';
 
+/* เงินต้องมีทศนิยมไม่เกิน 2 ตำแหน่ง (ตรวจรอบ 15 — เดิม PATCH /api/packages/rates รับ 1500.567 ได้)
+   เรทที่มีเศษเกินสตางค์ถูกคัดลอกไปเป็นค่าบริการของเคสและยอดในใบแจ้งหนี้ ซึ่งปัด 2 ตำแหน่ง
+   ตัวเลขสองหน้าจอจึงต่างกันทีละสตางค์โดยหาที่มาไม่เจอ · เกณฑ์เดียวกับ invoices/schema.js */
+const money = (msg) => z.number().nonnegative(msg).multipleOf(0.01, 'จำนวนเงินต้องมีทศนิยมไม่เกิน 2 ตำแหน่ง');
+
 export const STAFF_TIERS = ['CG', 'NA', 'PN', 'RN'];
 export const FORMAT_CATEGORIES = ['daily', 'weekly', 'monthly'];
 
@@ -28,8 +33,8 @@ export const ratesSchema = z.object({
         format_id: z.number().int('format_id ต้องเป็นจำนวนเต็ม'),
         grade_id: z.number().int().nullable().optional(), // null = รูปแบบไม่อิงเกรด
         staff_tier: z.enum(STAFF_TIERS),
-        customer_price: z.number().nonnegative('ค่าบริการต้องไม่ติดลบ').nullable().optional(),
-        staff_pay: z.number().nonnegative('ค่าตอบแทนต้องไม่ติดลบ').nullable().optional(),
+        customer_price: money('ค่าบริการต้องไม่ติดลบ').nullable().optional(),
+        staff_pay: money('ค่าตอบแทนต้องไม่ติดลบ').nullable().optional(),
         // ส่วนลด: กรอกเป็น % หรือเป็นบาทก็ได้ — ใส่ % ไว้จะใช้ % ก่อน
         discount_percent: z
           .number()
@@ -37,7 +42,7 @@ export const ratesSchema = z.object({
           .max(100, 'ส่วนลดต้องไม่เกิน 100%')
           .nullable()
           .optional(),
-        discount_amount: z.number().nonnegative('ส่วนลดต้องไม่ติดลบ').nullable().optional(),
+        discount_amount: money('ส่วนลดต้องไม่ติดลบ').nullable().optional(),
         available: z.boolean().optional(),
       }),
     )

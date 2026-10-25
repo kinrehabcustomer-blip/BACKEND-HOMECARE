@@ -7,6 +7,29 @@ const COLUMNS = [
 ];
 
 /**
+ * ชื่อแพ็กห้ามซ้ำ (ตรวจรอบ 15) — เดิมเช็คไม่ได้เลย สองหน้าจอกดบันทึกชื่อเดียวกันพร้อมกัน
+ * หรือเปลี่ยนชื่อแพ็กคนละตัวให้ตรงกัน ได้สองแถวชื่อเหมือนกันเป๊ะ
+ * แล้วเจ้าหน้าที่เลือกจาก dropdown ไม่ออกว่าตัวไหนราคาไหน (ราคาถูกคัดลอกเข้าเคสทันที = ขายผิดราคา)
+ *
+ * เทียบแบบตัดช่องว่างหัวท้ายและไม่สนตัวพิมพ์ใหญ่เล็ก — "KIN 10 ครั้ง" กับ "kin 10 ครั้ง " คือตัวเดียวกัน
+ * ใช้ unique index ไม่ใช่ SELECT-ก่อน-INSERT เพราะสองคำขอพร้อมกันไม่มีทางเห็นกัน
+ * สร้างแบบไม่ล้มทั้งระบบถ้าของเดิมมีชื่อซ้ำอยู่แล้ว — จดไว้ให้คนมาเก็บ แล้วระบบเดินต่อได้
+ */
+let nameIndexReady = null;
+export const ensureUniquePackageName = () =>
+  (nameIndexReady ??= sql
+    .run(`CREATE UNIQUE INDEX IF NOT EXISTS uq_physio_packages_name
+          ON physio_packages (lower(btrim(name)))`)
+    .catch((err) => {
+      console.warn('[physio] สร้างดัชนีกันชื่อแพ็กซ้ำไม่ได้ (น่าจะมีชื่อซ้ำอยู่แล้วในฐาน) —', err.message);
+      nameIndexReady = Promise.resolve();  // ลองครั้งเดียวพอ ไม่ยิงซ้ำทุกคำขอ
+    }));
+
+/** ชนดัชนีชื่อซ้ำ → บอกให้ชัดว่าชื่อซ้ำ ไม่ใช่ 500 */
+export const isDuplicateNameError = (err) =>
+  err?.code === '23505' && String(err?.constraint ?? '').includes('uq_physio_packages_name');
+
+/**
  * ส่วนลดเป็นบาทจากค่าที่ผู้ใช้กรอก — กรอก % ไว้ให้ใช้ % ก่อน ไม่งั้นใช้จำนวนเงิน
  * ตัดไม่ให้เกินราคาเต็ม เพื่อไม่ให้ราคาสุทธิติดลบแม้กรอกส่วนลดมากเกินไป
  */
@@ -117,6 +140,23 @@ export async function updatePackage(id, input) {
   );
   return row ? withComputed(row) : null;
 }
+
+/**
+ * จำนวนเคสที่ผูกแพ็กนี้อยู่ — ใช้กั้นการแก้ "จำนวนครั้ง" และการลบทิ้ง (ตรวจรอบ 15)
+ *
+ * ราคาถูก snapshot ไว้ที่เคสแล้ว (cases.fee · cases.staff_pay) แก้ราคาต้นแบบจึงไม่ย้อนเคสเก่า
+ * แต่ "จำนวนครั้ง" ไม่ได้ snapshot — หน้าเคสอ่านสดจาก physio_packages.sessions ทุกครั้ง
+ * แก้ 10 เป็น 20 ที่ต้นแบบ ลูกค้าที่ซื้อ 10 ครั้งไปแล้วจึงกลายเป็นมีสิทธิ์ 20 ครั้งย้อนหลัง
+ * และลบต้นแบบทิ้ง (ON DELETE SET NULL) เคสเก่าจะไม่เหลือจำนวนครั้งเลย คำนวณคงเหลือไม่ได้
+ *
+ * กั้นที่ต้นทางแทนการ snapshot ย้อนหลัง — วิธีเดียวกับใบแจ้งหนี้ที่ชำระแล้วแก้ไม่ได้
+ * ต้องออกใบใหม่: แพ็กที่ขายไปแล้วคือข้อตกลงกับลูกค้า เปลี่ยนจำนวนครั้งทีหลังไม่ได้
+ * จะเปลี่ยนเงื่อนไขให้สร้างแพ็กใหม่ · เลิกขายให้ปิดขาย (active = false) ไม่ใช่ลบ
+ */
+export const casesUsingPackage = (id) =>
+  sql
+    .one('SELECT count(*)::int AS n FROM cases WHERE physio_package_id = :id', { id })
+    .then((r) => Number(r?.n ?? 0));
 
 export const removePackage = (id) =>
   sql.run('DELETE FROM physio_packages WHERE physio_package_id = :id', { id }).then((n) => n > 0);
