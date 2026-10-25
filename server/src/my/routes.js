@@ -438,7 +438,19 @@ myRouter.post(
   asyncRoute(async (req, res) => {
     const caseRow = await myCaseOr404(req);
     if (CLOSED_CASE.includes(caseRow.status)) throw new ApiError(409, 'เคสนี้ปิดแล้ว ส่งข้อความไม่ได้');
-    const body = typeof req.body?.body === 'string' ? req.body.body.trim().slice(0, 1000) : '';
+    /* ยาวเกินให้บอก ไม่ใช่ตัดทิ้งเงียบ ๆ (ตรวจรอบ 16)
+       ของเดิม .slice(0, 1000) แล้วตอบ 201 — ผู้ดูแลพิมพ์อาการยาว ๆ ส่งให้ครอบครัว
+       ท้ายข้อความหายไปโดยที่ทั้งคนส่งและครอบครัวไม่รู้ว่าขาด (หน้าจอขึ้นว่าส่งสำเร็จ)
+       บอกจำนวนตัวอักษรที่เกินไปด้วย จะได้ตัดเองถูกจุด */
+    const raw = typeof req.body?.body === 'string' ? req.body.body.trim() : '';
+    if (raw.length > 1000) {
+      throw new ApiError(
+        400,
+        `ข้อความยาว ${raw.length.toLocaleString('th-TH')} ตัวอักษร เกินที่ส่งได้ 1,000 ตัว` +
+          ` (เกินมา ${(raw.length - 1000).toLocaleString('th-TH')} ตัว) — แบ่งส่งเป็นสองข้อความได้ค่ะ`,
+      );
+    }
+    const body = raw;
     /* ตรวจด้วยตัวเดียวกับที่ทีมหลังบ้านใช้โพสต์รูปเข้าไทม์ไลน์เดียวกัน (family/routes.js)
        เดิมส่ง req.body.image ดิบเข้า decodeImage — ของที่ไม่ใช่ข้อความทำให้ผู้ใช้ได้ข้อความ error ภาษาอังกฤษ */
     const photo = toImage(imageSchema.optional().nullable().parse(req.body?.image ?? null));

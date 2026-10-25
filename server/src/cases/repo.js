@@ -1889,7 +1889,14 @@ export const checkOutVisit = (visitId, { lat, lng }) =>
            -- ไม่งั้นกะที่ยกเลิกแล้วจะกลับมานับชั่วโมงและสัดส่วนค่าจ้างเงียบๆ
            status = CASE WHEN status = 'cancelled' THEN status ELSE 'done' END,
            updated_at = ${NOW}
-       WHERE visit_id = :id AND check_in_at IS NOT NULL AND check_out_at IS NULL`,
+       WHERE visit_id = :id AND check_in_at IS NOT NULL AND check_out_at IS NULL
+         /* เวลาออกต้องมาหลังเวลาเข้าเสมอ — ไม่งั้นได้นาทีติดลบ ซึ่งไหลเข้าสรุปค่าตอบแทน
+            (SUM(check_out_at - check_in_at) ทั้งเดือนรวมเป็นก้อนเดียว กะเดียวลบ 60 นาที
+             ก็หักชั่วโมงของทั้งเดือนไปเงียบ ๆ)
+            เส้น /adjust ของหลังบ้านกันไว้แล้ว และเช็คอินล่วงหน้าก็กันแล้ว ตอนนี้จึงยังเกิดไม่ได้
+            แต่ที่นี่ไม่เคยมีด่าน — เขียน check_in_at ผิดจากทางไหนก็ตามในอนาคต
+            (นำเข้าข้อมูล · แก้ฐานมือ · เครื่องเวลาเพี้ยน) นาทีจะติดลบทันทีโดยไม่มีอะไรฟ้อง (ตรวจรอบ 16) */
+         AND check_in_at < now()`,
       { id: visitId, lat, lng },
     )
     .then((n) => (n > 0 ? findVisit(visitId) : null));
