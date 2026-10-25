@@ -725,6 +725,42 @@ integrationRouter.post(
 );
 
 /**
+ * แจ้งพนักงานทาง LINE เมื่อระดับเปลี่ยน + สรุปรายเดือน (ดร.ธงชัย 25 ต.ค. 2569 "ต่อทั้งหมดเลย" — แจ้ง 3 จังหวะ: รับเข้าทำงาน · ระดับเปลี่ยน · สรุปรายเดือน)
+ *   ตั๋ว 'kin-tier-roster' {month?: 'YYYY-MM'} → { employees: [{ employee_id, u, first_name, tier: {key,label,next}, month?: {shifts, pay, paid_pay, unpaid_pay} }] }
+ *   เฉพาะพนักงานที่ผูก LINE แล้วและไม่ถูกระงับ · ส่งชื่อเล่น/ชื่อต้นเท่านั้น ไม่ส่งเบอร์หรือข้อมูลอื่น
+ */
+integrationRouter.post(
+  '/employees/line-roster',
+  asyncRoute(async (req, res) => {
+    const { token } = hireSchema.parse(req.body);
+    const p = verifySigned(token, 'kin-tier-roster');
+    if (!p) throw new ApiError(401, 'ลายเซ็นไม่ถูกต้องหรือหมดอายุ');
+    const month = typeof p.month === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(p.month) ? p.month : null;
+    await ensureLineColumn();
+    const emps = (await sql.all(
+      `SELECT employee_id, first_name, status, line_user_id FROM employees WHERE line_user_id IS NOT NULL ORDER BY employee_id`,
+    )).filter((e) => !BLOCKED_STATUSES[e.status] && isLineUserId(e.line_user_id));
+    const report = month ? new Map((await cases.attendanceReport(month)).map((r) => [r.employee_id, r])) : null;
+    const out = [];
+    for (let i = 0; i < emps.length; i += 8) {
+      const part = emps.slice(i, i + 8);
+      const tiers = await Promise.all(part.map((e) => employeeTier(e.employee_id)));
+      part.forEach((e, k) => {
+        const t = tiers[k];
+        const r = report?.get(e.employee_id);
+        const n = (x) => Number(x || 0);
+        out.push({
+          employee_id: e.employee_id, u: e.line_user_id, first_name: e.first_name,
+          tier: { key: t.key, label: t.label, next: t.next },
+          ...(month ? { month: { shifts: n(r?.shifts), pay: n(r?.pay), paid_pay: n(r?.paid_pay), unpaid_pay: n(r?.unpaid_pay) } } : {}),
+        });
+      });
+    }
+    res.json({ employees: out });
+  }),
+);
+
+/**
  * ชวนเพื่อนแบบแต้มสะสม (ดร.ธงชัย 25 ต.ค. 2569) — ฝั่ง chat ถามว่าเพื่อนที่ถูกชวนทำงานไปแล้วกี่กะ เพื่อให้แต้ม (กะแรก / ครบ 10 กะ)
  *   ตั๋ว 'kin-shift-counts' {ids: [employee_id ≤200]} → { counts: { [employee_id]: จำนวนกะที่เสร็จแล้ว } }
  *   นับกะที่เช็คเอาต์แล้วหรือสถานะเสร็จ (คนเช็คอินหรือคนที่ถูกจัดกะ) · ไม่ส่งข้อมูลอื่นของพนักงาน
