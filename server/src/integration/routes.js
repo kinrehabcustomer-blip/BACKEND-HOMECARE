@@ -399,7 +399,7 @@ integrationRouter.post(
       return res.json({ cursor: last.id, reports: [] });
     }
     const rows = await sql.all(
-      `SELECT r.report_id, r.case_id, r.report_date, r.report_time,
+      `SELECT r.report_id, r.case_id, r.report_date, r.report_time, split_part(COALESCE(c.client_name, ''), ' ', 1) AS client_first,
               r.bp_systolic, r.bp_diastolic, r.pulse, r.respiratory_rate, r.spo2, r.temperature_c, r.blood_sugar,
               left(r.symptoms, 200) AS symptoms, left(r.care_given, 200) AS care_given, left(r.intake_output, 200) AS intake_output,
               -- รายงานกายภาพ (ดร. 23 ต.ค. 2569 "รายงานของนักกายภาพก็ลักษณะเดียวกัน") — ฝั่ง chat จัดข้อความแบบกายภาพเมื่อ is_physio
@@ -416,8 +416,10 @@ integrationRouter.post(
     );
     const cursor = rows.length ? rows[rows.length - 1].report_id : p.since;
     // ดาวสองทาง (25 ต.ค. 2569): ดาวเฉลี่ยของผู้บันทึกจากญาติ แนบไปกับรายงาน (โชว์เมื่อมี ≥3 รีวิว · lib/ratings.js)
-    const out = rows.filter((r) => r.family?.length);
-    for (const r of out) r.stars = await employeeStars(r.reported_by);
+    // แจ้งเตือนค่าผิดปกติ (25 ต.ค. 2569 ลูกค้า ข้อ 3): ส่งรายงานทุกเคส ไม่ใช่เฉพาะเคสที่มีญาติผูก — ฝั่ง chat ตรวจค่าแล้วแจ้งทีมพยาบาลได้ทุกเคส
+    //   เคสไม่มีญาติ (family ว่าง) ฝั่ง chat ไม่ส่งรายงานถึงใคร ใช้แค่ตรวจค่าผิดปกติ
+    const out = rows;
+    for (const r of out) r.stars = r.family?.length ? await employeeStars(r.reported_by) : null;
     res.json({ cursor, reports: out });
   }),
 );
