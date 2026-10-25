@@ -438,7 +438,11 @@ integrationRouter.post(
     // แจ้งเตือนค่าผิดปกติ (25 ต.ค. 2569 ลูกค้า ข้อ 3): ส่งรายงานทุกเคส ไม่ใช่เฉพาะเคสที่มีญาติผูก — ฝั่ง chat ตรวจค่าแล้วแจ้งทีมพยาบาลได้ทุกเคส
     //   เคสไม่มีญาติ (family ว่าง) ฝั่ง chat ไม่ส่งรายงานถึงใคร ใช้แค่ตรวจค่าผิดปกติ
     const out = rows;
-    for (const r of out) r.stars = r.family?.length ? await employeeStars(r.reported_by) : null;
+    // ดาวเป็นของประดับ — รายงานใบเดียวดึงดาวไม่ได้ ต้องไม่ทำให้ feed ทั้งก้อนล้ม 500
+    // (ฝั่ง chat ดึงทุก 10 นาที · feed ล้ม = cursor ไม่ขยับ ญาติ "ทุกเคส" ไม่ได้รับรายงานเลย)
+    for (const r of out) {
+      r.stars = r.family?.length ? await employeeStars(r.reported_by).catch(() => null) : null;
+    }
     res.json({ cursor, reports: out });
   }),
 );
