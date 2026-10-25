@@ -44,7 +44,13 @@ export function errorHandler(err, req, res, next) {
   // 23505 = unique_violation ของ Postgres (เช่น เลขบัตรประชาชนซ้ำ)
   // ทั้งพนักงานและลูกค้าห้ามเลขบัตรซ้ำ — ต้องบอกให้ตรงว่าไปชนกับใคร ไม่งั้นคนอ่านตามหาผิดที่
   if (err?.code === '23505' && err.constraint?.includes('national_id')) {
-    const who = err.constraint.includes('customer') ? 'ลูกค้ารายอื่น' : 'พนักงานคนอื่น';
+    /* ต้องไล่ทีละแฟ้ม ไม่ใช่ "ลูกค้า หรือไม่ก็พนักงาน" (ตรวจรอบ 18)
+       ดัชนีของผู้ป่วยคือ idx_patients_national_id ซึ่งไม่มีคำว่า customer
+       เลขบัตรผู้ป่วยซ้ำจึงเคยขึ้นว่า "ถูกใช้กับพนักงานคนอื่นแล้ว" — คนอ่านไปตามหาในรายชื่อพนักงานแล้วไม่เจอ */
+    const c = err.constraint;
+    const who = c.includes('customer') ? 'ลูกค้ารายอื่น'
+      : c.includes('patient') ? 'ผู้รับบริการรายอื่น'
+      : 'พนักงานคนอื่น';
     return res.status(409).json({ error: `เลขบัตรประชาชนนี้ถูกใช้กับ${who}แล้ว` });
   }
 

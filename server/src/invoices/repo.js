@@ -1,6 +1,7 @@
 import { sql, nextInvoiceId, transaction } from '../db/index.js';
 import { PATIENT_PENDING } from '../cases/schema.js';
 import { normalizeAddons, addonAmount, addonsTotal, addonsTotalSql } from '../lib/addons.js';
+import { ensureShareTables } from './share.js';
 
 const NOW = `to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')`;
 /* วันนี้ตามเวลาไทย ไม่ใช่ UTC — ใช้กับวันที่ออกใบ/วันรับชำระ/เกณฑ์เลยกำหนด
@@ -916,6 +917,8 @@ const OPEN_STATUSES = "('draft', 'issued')";
  */
 export async function syncOpenFromCase(caseRow, customer, { forceInvoiceId = null } = {}) {
   const price = priceParts(caseRow);
+  // ต้องมีตาราง invoice_shares ก่อนใช้ใน WHERE ข้างล่าง (สร้างแบบ lazy ตอนส่งลิงก์ครั้งแรก)
+  await ensureShareTables();
 
   /* ::double precision ในบรรทัด total ไม่ใช่ของประดับ — node-postgres ส่งพารามิเตอร์มาโดยไม่ระบุชนิด
      พอเขียน ":amount - :discount" ตรงๆ Postgres เจอ unknown ลบ unknown แล้วเลือกไม่ถูกว่าจะใช้
@@ -944,12 +947,28 @@ export async function syncOpenFromCase(caseRow, customer, { forceInvoiceId = nul
          manual_edit         = FALSE,
          updated_at          = ${NOW}
      WHERE case_id = :case_id AND status IN ${OPEN_STATUSES}
+       /* ซิงก์อัตโนมัติเฉพาะใบร่าง — ใบที่กด "ออกใบ" แล้วมีเลขที่เอกสารและถือเป็นเอกสารแล้ว
+          ห้ามเปลี่ยนว่าเก็บเงินจากใครเองเงียบ ๆ (ตรวจรอบ 18)
+          ย้ายผู้ป่วยไปอยู่ใต้ผู้ว่าจ้างคนใหม่ แล้วใบที่ออกไปแล้วเปลี่ยนชื่อ เลขผู้เสียภาษี
+          และที่อยู่ออกบิลเป็นของอีกบ้านทันที โดยไม่มีอะไรบอกคนทำงาน
+          ไม่ได้ปิดตาย — ใบที่ไม่ตรงจะขึ้นป้าย "ผู้จ่ายไม่ตรง" (payer_stale) ในรายการและในใบ
+          แล้วกดปุ่ม "ดึงข้อมูลจากเคส" เองได้ (เส้นนั้นส่ง force_id มา จึงผ่านเงื่อนไขนี้)
+          = ให้คนเห็นแล้วตัดสินใจ แทนที่ระบบจะเปลี่ยนเอกสารให้เอง */
+       AND (status = 'draft' OR invoice_id = :force_id::text)
        AND (NOT manual_edit OR invoice_id = :force_id::text)
        /* ใบมัดจำ/ใบส่วนที่เหลือมียอดของงวดนั้นโดยเฉพาะ ซิงก์ทับจะกลายเป็นยอดเต็มทั้งสองใบ
           (ผู้จ่าย/ที่อยู่ก็ไม่ทับด้วย เพราะคำสั่งเดียวกัน — แก้ที่ใบเองหรือลบแล้วแบ่งใหม่) */
        AND billing_kind IS DISTINCT FROM 'deposit'
        AND billing_kind IS DISTINCT FROM 'balance'
        AND NOT EXISTS (SELECT 1 FROM invoice_items ii WHERE ii.invoice_id = invoices.invoice_id)
+       /* ใบที่ส่งลิงก์ให้ลูกค้าไปแล้วไม่ซิงก์ทับอีก (ตรวจรอบ 18)
+          เกณฑ์เดิมคือ "สถานะ issued = เอกสารยังอยู่ในมือเรา ยังไม่ได้ส่งมอบ" ซึ่งจริงตอนที่ส่งมอบ
+          มีทางเดียวคือพิมพ์ออกมา · พอมีปุ่มส่งเข้า LINE ลูกค้า (24 ต.ค. 2569) ข้อสันนิษฐานนั้นไม่จริงแล้ว
+          ย้ายผู้ป่วยไปอยู่ใต้ผู้ว่าจ้างคนใหม่ แล้วใบที่ลูกค้าถือลิงก์อยู่เปลี่ยนชื่อ เลขผู้เสียภาษี
+          และที่อยู่ออกบิลเป็นของอีกบ้านทันที ทั้งที่เขาเปิดลิงก์เดิมดูได้ตลอด 90 วัน
+          (พิสูจน์แล้ว: ก่อนย้าย = บ้าน A/0105566000201 · หลังย้าย = บ้าน B/0105566000202 สถานะยัง issued)
+          มีแถวใน invoice_shares = เคยกดส่งให้ลูกค้าแล้ว · ต้องแก้ที่ใบเองหรือออกใบใหม่ */
+       AND NOT EXISTS (SELECT 1 FROM invoice_shares sh WHERE sh.invoice_id = invoices.invoice_id)
        /* ใบที่รับเงินมาแล้วบางส่วน ยอดของมันกลายเป็นข้อตกลงกับลูกค้าไปแล้ว — ซิงก์ทับอาจลดยอดให้ต่ำกว่า
           ที่จ่ายมา (ยอดค้างติดลบแต่สถานะยังเป็น issued) ซึ่ง update() กันไว้ด้วย amount_below_paid
           ทางนี้ต้องไม่เป็นประตูหลังให้เลี่ยงด่านนั้น — ถ้าต้องปรับยอดจริงให้แก้ที่ใบเอง */
