@@ -26,7 +26,15 @@ publicBillRouter.get(
   asyncRoute(async (req, res) => {
     const id = await invoiceIdForToken(req.params.token);
     const inv = id ? await repo.findById(id) : null;
-    if (!inv || !['issued', 'paid'].includes(inv.status)) throw notFound('ลิงก์นี้หมดอายุหรือเอกสารถูกยกเลิกแล้ว — สอบถามทีม KIN HomeCare ในแชท LINE ได้เลยค่ะ');
+    /* ใบที่ถูกยกเลิก "หลังจาก" ส่งลิงก์ไปแล้วยังเปิดได้ แต่หน้าเอกสารขึ้นว่ายกเลิกแล้ว (ตรวจรอบ 13)
+       เดิมปิดตาย 404 — ลูกค้าที่โอนเงินมาจริงแล้วถือลิงก์ใบเสร็จไว้ พอทีมยกเลิกใบ
+       (ออกใบผิด · ตกลงยอดใหม่ · คืนเงินบางส่วน) ลิงก์เดิมขึ้น "หมดอายุ" ทันที
+       = ลูกค้าไม่เหลือหลักฐานการจ่ายสักอย่าง ทั้งที่เงินยังอยู่กับบริษัท
+       ปิดบังไม่ได้ช่วยใคร — บอกตรง ๆ ว่ายกเลิกแล้วและให้เห็นงวดที่จ่ายมาดีกว่า
+       (ใบร่างยังเปิดไม่ได้เหมือนเดิม — ไม่เคยมี token ของใบร่างอยู่แล้ว ส่งได้เฉพาะ issued/paid) */
+    if (!inv || !['issued', 'paid', 'cancelled'].includes(inv.status)) {
+      throw notFound('ลิงก์นี้หมดอายุแล้ว — สอบถามทีม KIN HomeCare ในแชท LINE ได้เลยค่ะ');
+    }
     res.set('Cache-Control', 'no-store');
     res.json(publicInvoice(inv));
   }),

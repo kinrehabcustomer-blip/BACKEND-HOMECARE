@@ -13,10 +13,12 @@ import {
   revenueQuerySchema,
   INVOICE_STATUSES,
   slipSchema,
+  voidPaymentSchema,
 } from './schema.js';
 import { decodeImage } from '../employees/schema.js';
 import { ApiError, asyncRoute, notFound } from '../lib/errors.js';
 import { requireManager, can } from '../lib/auth.js';
+import { todayTh } from '../lib/dates.js';
 import { lineTarget, queueLineSend, sendHistory } from './share.js';
 
 export const invoicesRouter = Router();
@@ -431,6 +433,39 @@ invoicesRouter.post(
     }
     if (result.reason === 'invalid_amount') throw new ApiError(400, 'จำนวนเงินที่รับต้องมากกว่า 0');
 
+    res.json(result);
+  }),
+);
+
+/**
+ * ยกเลิกรายการรับชำระที่บันทึกผิด (ตรวจรอบ 13) — กรอก 500 แทน 5,000 หรือกดบันทึกซ้ำ
+ * เดิมไม่มีทางแก้เลย ต้องยกเลิกใบทั้งใบแล้วออกใหม่ ซึ่งทำให้เอกสารที่ส่งลูกค้าไปแล้วใช้ไม่ได้
+ *
+ * ใครทำได้: ผู้จัดการ/การเงิน (หมวด money) ยกเลิกได้ทุกรายการ ·
+ * HR/Admin HC ยกเลิกได้เฉพาะรายการที่ตัวเองบันทึกและบันทึกวันนี้ (ดู assessPaymentVoid)
+ * — คนกรอกแก้ของตัวเองที่เพิ่งพิมพ์ผิดได้ทันที แต่ลบรายได้ของเดือนก่อนย้อนหลังไม่ได้
+ * รายการที่ยกเลิกไม่หาย ย้ายไป invoice_payment_voids พร้อมเหตุผลและคนที่กด
+ */
+invoicesRouter.post(
+  '/:id/payments/:paymentId/void',
+  asyncRoute(async (req, res) => {
+    const paymentId = Number(req.params.paymentId);
+    if (!Number.isInteger(paymentId)) throw notFound('ไม่พบรายการรับชำระนี้');
+    const { reason } = voidPaymentSchema.parse(req.body ?? {});
+
+    const result = await repo.voidPayment(req.params.id, paymentId, { reason }, req.user, {
+      hasMoneyPermission: can(req.user?.position, 'money'),
+      today: todayTh(),
+    });
+    if (result?.reason === 'not_found') throw notFound('ไม่พบรายการรับชำระนี้');
+    if (result?.reason === 'forbidden') {
+      throw new ApiError(
+        403,
+        'ยกเลิกได้เฉพาะรายการที่คุณบันทึกเองในวันนี้ — รายการของวันก่อนหรือของคนอื่น' +
+          ' ต้องให้ผู้จัดการหรือฝ่ายการเงินเป็นคนยกเลิก',
+      );
+    }
+    throwIfInvoiceMoved(result);
     res.json(result);
   }),
 );

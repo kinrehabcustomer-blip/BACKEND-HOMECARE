@@ -17,10 +17,16 @@ export default function PublicBillPage() {
     api.publicBill(token).then(setItem).catch((e) => setError(e.message));
   }, [token]);
 
+  /* ชื่อเอกสาร — ใบที่ถูกยกเลิกยังเปิดได้ (ดู server/src/invoices/publicRoutes.js)
+     ลูกค้าที่จ่ายเงินมาแล้วต้องไม่เสียหลักฐานเพราะทีมยกเลิกใบ แต่ต้องรู้ด้วยว่ามันถูกยกเลิกแล้ว */
+  const docName = item?.status === 'cancelled'
+    ? (Number(item.paid_amount) > 0 ? 'หลักฐานการชำระเงิน (ใบถูกยกเลิก)' : 'ใบแจ้งหนี้ที่ถูกยกเลิก')
+    : item?.status === 'paid' ? 'ใบเสร็จรับเงิน' : 'ใบแจ้งหนี้';
+
   useEffect(() => {
     if (!item) return;
-    document.title = `${item.status === 'paid' ? 'ใบเสร็จรับเงิน' : 'ใบแจ้งหนี้'}_${item.invoice_id}`;
-  }, [item]);
+    document.title = `${docName}_${item.invoice_id}`;
+  }, [item, docName]);
 
   if (error) {
     return (
@@ -38,9 +44,21 @@ export default function PublicBillPage() {
   return (
     <div className="bill-page">
       <div className="bill-actions no-print">
-        <span>{item.status === 'paid' ? 'ใบเสร็จรับเงิน' : 'ใบแจ้งหนี้'} {item.invoice_id}</span>
+        <span>{docName} {item.invoice_id}</span>
         <button className="btn primary" onClick={() => window.print()}>บันทึก PDF / พิมพ์</button>
       </div>
+      {item.status === 'cancelled' && (
+        <div className="bill-cancelled">
+          <b>เอกสารฉบับนี้ถูกยกเลิกแล้ว</b>
+          <br />
+          {Number(item.paid_amount) > 0
+            ? `ยอดที่ชำระเข้ามาแล้ว ${Number(item.paid_amount).toLocaleString('th-TH')} บาท ยังบันทึกไว้ด้านล่างเป็นหลักฐาน — ` +
+              'ทีม KIN HomeCare จะติดต่อเรื่องเอกสารฉบับใหม่หรือการคืนเงินค่ะ'
+            : 'ไม่ต้องชำระยอดในเอกสารฉบับนี้ค่ะ — หากมีเอกสารฉบับใหม่ ทีมงานจะส่งให้ทางแชท LINE'}
+          <br />
+          สอบถามได้ที่แชท LINE KIN HomeCare หรือ 061-881-9399 ค่ะ
+        </div>
+      )}
       <div className="bill-scroll">
         <div className="invoice-doc">
           <CustomerInvoiceDoc item={item} signer={item.signer} />

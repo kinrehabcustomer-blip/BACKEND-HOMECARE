@@ -852,6 +852,9 @@ select option:checked {
   cursor: help;
 }
 :root[data-theme='dark'] .stale-flag { background: #34291a; color: #e0b877; }
+/* เคสต้นทางยกเลิกแล้ว — คนละเรื่องกับ "ข้อมูลไม่ตรง" (สีส้ม) จึงใช้สีแดงให้แยกออกจากกันในแถวเดียวกัน */
+.case-cancelled-flag { color: #8a2b2b; background: #fdf1f1; }
+:root[data-theme='dark'] .case-cancelled-flag { background: #3a1f1f; color: #e8a0a0; }
 
 /* แถบบอกว่ากำลังกรองมาจากลิงก์ของอีกหน้า (เช่น ผู้รับการดูแลของลูกค้ารายหนึ่ง) */
 .filter-chip { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
@@ -4145,6 +4148,13 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
 .pay-history li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.5rem; padding: 0.1875rem 0; font-size: 0.875rem; }
 .pay-history-date { min-width: 6.5rem; color: var(--muted); font-size: 0.8125rem; }
 .pay-history-amount { min-width: 6rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+/* ยกเลิกรายการรับชำระที่บันทึกผิด (ตรวจรอบ 13) — ช่องเหตุผลกางเต็มบรรทัดใต้รายการนั้น */
+.pay-void-form { display: flex; flex-wrap: wrap; gap: 0.5rem; width: 100%; margin: 0.25rem 0 0.5rem; }
+.pay-void-form input { flex: 1 1 14rem; min-width: 0; }
+.danger-link { color: var(--danger, #b3261e); }
+/* รายการที่ถูกยกเลิกไปแล้ว — จาง ขีดฆ่ายอด ให้อ่านออกทันทีว่าไม่นับเป็นเงินแล้ว */
+.pay-history-void { border-top-style: dashed; opacity: 0.75; }
+.pay-history-void .pay-history-amount { text-decoration: line-through; font-weight: 600; }
 .slip-block { margin-top: 0.875rem; padding-top: 0.75rem; border-top: 1px solid var(--divider); }
 .slip-list { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-top: 0.5rem; }
 .slip { margin: 0; width: 7.5rem; }
@@ -5562,8 +5572,15 @@ h1, h2, h3, h4, .page-hero-title, .cal-title, .login-heading h1 {
 .bill-scroll { overflow-x: auto; background: #fff; border: 1px solid var(--border, #e5e5e5); border-radius: 0.5rem; }
 .bill-scroll .invoice-doc { min-width: 40rem; }
 .bill-note { margin-top: 0.75rem; font-size: 0.875rem; color: var(--muted, #666); text-align: center; }
+/* ใบที่ถูกยกเลิกหลังส่งลิงก์ไปแล้ว — ยังเปิดได้เพื่อไม่ให้ลูกค้าเสียหลักฐานการจ่าย แต่ต้องเห็นชัดว่ายกเลิก
+   พิมพ์ติดไปกับเอกสารด้วย (ไม่ใช่ no-print) ไม่งั้น PDF ที่ลูกค้าเซฟไว้ดูเหมือนใบที่ยังใช้ได้ */
+.bill-cancelled {
+  margin-bottom: 0.75rem; padding: 0.75rem 1rem; border-radius: 0.5rem; line-height: 1.6;
+  background: #fdf1f1; border: 1px solid #e3b4b4; color: #8a2b2b; font-size: 0.9375rem;
+}
 @media print {
   .bill-page { padding: 0; }
   .bill-scroll { overflow: visible; border: 0; }
   .bill-scroll .invoice-doc { min-width: 0; }
+  .bill-cancelled { border-color: #8a2b2b; }
 }

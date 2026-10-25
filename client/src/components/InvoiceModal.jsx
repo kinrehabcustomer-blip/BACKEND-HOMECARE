@@ -61,6 +61,9 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
      server รู้ว่าเป็นคำขอเดิม จึงคืนรายการรับเงินใบเดิมแทนที่จะรับเงินซ้ำสองรอบ
      ออกรหัสใหม่ทุกครั้งที่เปิดฟอร์ม = การรับเงินรอบใหม่คือคำขอใหม่จริงๆ */
   const [payRequestId, setPayRequestId] = useState(null);
+  // รายการรับชำระที่กำลังจะยกเลิก + เหตุผล (ยกเลิกทีละรายการ จึงเก็บรหัสเดียวพอ)
+  const [voidFor, setVoidFor] = useState(null);
+  const [voidReason, setVoidReason] = useState('');
   /* ส่งใบเข้า LINE ลูกค้า (ดร.ธงชัย 24 ต.ค. 2569 ข้อ 4) — { can_send, reason, customer_name, history } · ดู server/src/invoices/share.js */
   const [lineInfo, setLineInfo] = useState(null);
   const lineStatus = item?.status;
@@ -463,6 +466,19 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                 </div>
               )}
 
+              {/* เคสต้นทางถูกยกเลิกแล้วแต่ใบยังเปิดค้างอยู่ — ไม่ใช่ "ข้อมูลไม่ตรง" ที่กดรีเฟรชแล้วจบ
+                  แต่เป็นคำถามว่ายังจะเก็บเงินใบนี้อยู่ไหม จึงแยกกล่องออกมา (ตรวจรอบ 13) */}
+              {item.case_cancelled && (
+                <div className="notice stale-notice no-print">
+                  <p>
+                    <LineIcon name="alert" className="text-ico" />
+                    <strong>เคสของใบนี้ถูกยกเลิกแล้ว</strong> แต่ใบยังเปิดค้างอยู่และยังนับอยู่ในยอดค้างรวม —
+                    ตรวจก่อนว่ายังต้องเก็บเงินใบนี้อยู่ไหม ถ้าไม่เก็บแล้วให้กด “ยกเลิกใบนี้”
+                    ถ้าเก็บตามกะที่ไปจริง ให้แก้ยอดก่อนส่งให้ลูกค้า
+                  </p>
+                </div>
+              )}
+
               {/* ข้อมูลในใบไม่ตรงกับเคสแล้ว — ทางแก้ต่างกันตามสถานะ ใบร่างดึงของใหม่ได้เลย ที่ออกไปแล้วต้องออกใบใหม่ */}
               {item.is_stale && item.status !== 'cancelled' && (
                 <div className="notice stale-notice no-print">
@@ -633,6 +649,60 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                             {pmt.is_deposit && <span className="badge deposit-tag">มัดจำ</span>}
                             {pmt.method ?? '—'}
                             {pmt.received_by_name && ` · รับโดย ${pmt.received_by_name}`}
+                          </span>
+                          {/* กรอกยอดผิด/บันทึกซ้ำ — เดิมแก้ไม่ได้เลย ต้องยกเลิกใบทั้งใบแล้วออกใหม่
+                              เซิร์ฟเวอร์เป็นคนตัดสินว่าใครยกเลิกได้ (ดู assessPaymentVoid) ที่นี่แค่เปิดช่องให้กรอกเหตุผล */}
+                          <button
+                            type="button"
+                            className="inline-link danger-link"
+                            disabled={busy}
+                            onClick={() => { setVoidFor(voidFor === pmt.payment_id ? null : pmt.payment_id); setVoidReason(''); }}
+                          >
+                            {voidFor === pmt.payment_id ? 'ไม่ยกเลิกแล้ว' : 'ยกเลิกรายการนี้'}
+                          </button>
+                          {voidFor === pmt.payment_id && (
+                            <div className="pay-void-form">
+                              <input
+                                type="text"
+                                value={voidReason}
+                                maxLength={300}
+                                placeholder="เหตุผล เช่น กรอกยอดผิด · บันทึกซ้ำ"
+                                onChange={(e) => setVoidReason(e.target.value)}
+                              />
+                              <button
+                                type="button"
+                                className="btn danger"
+                                disabled={busy || voidReason.trim().length < 3}
+                                onClick={() =>
+                                  run(async () => {
+                                    await api.voidInvoicePayment(item.invoice_id, pmt.payment_id, voidReason.trim());
+                                    setVoidFor(null);
+                                    setVoidReason('');
+                                    toast(`ยกเลิกรายการรับชำระ ${amountText(pmt.amount)} บาทแล้ว`);
+                                  })
+                                }
+                              >
+                                ยืนยันยกเลิกรายการ
+                              </button>
+                            </div>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+
+                  {/* รายการที่ถูกยกเลิกไปแล้ว — เงินที่เคยบันทึกแล้วหายต้องมีร่องรอย ไม่ใช่หายเฉย ๆ */}
+                  {item.payment_voids?.length > 0 && (
+                    <ul className="pay-history pay-history-void">
+                      {item.payment_voids.map((v) => (
+                        <li key={v.void_id}>
+                          <span className="pay-history-date">{docDate(v.paid_at)}</span>
+                          <span className="pay-history-amount">{amountText(v.amount)}</span>
+                          <span className="muted">
+                            <span className="badge">ยกเลิกแล้ว</span>
+                            {v.reason}
+                            {v.voided_by_name && ` · โดย ${v.voided_by_name}`}
+                            {v.voided_at && ` · ${v.voided_at.slice(0, 16)}`}
                           </span>
                         </li>
                       ))}

@@ -425,6 +425,9 @@ export const api = {
   invoicePlan: (id) => request(`/invoices/${id}/plan`),
   issueInvoice: (id) => request(`/invoices/${id}/issue`, { method: 'POST' }),
   payInvoice: (id, body) => request(`/invoices/${id}/pay`, { method: 'POST', body }),
+  /** ยกเลิกรายการรับชำระที่บันทึกผิด (กรอกยอดผิด/บันทึกซ้ำ) — ต้องบอกเหตุผล · คืนใบที่อัปเดตแล้ว */
+  voidInvoicePayment: (id, paymentId, reason) =>
+    request(`/invoices/${id}/payments/${paymentId}/void`, { method: 'POST', body: { reason } }),
   cancelInvoice: (id) => request(`/invoices/${id}/cancel`, { method: 'POST' }),
   deleteInvoice: (id) => request(`/invoices/${id}`, { method: 'DELETE' }),
   /** สลิปโอนเงินของลูกค้า — image เป็น data URL ที่ย่อแล้ว (compressImage) · คืนใบที่อัปเดตแล้ว */
