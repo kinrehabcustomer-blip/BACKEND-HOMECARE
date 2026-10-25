@@ -2,15 +2,18 @@ import { sql } from '../db/index.js';
 import { employeeStars } from './ratings.js';
 
 /**
- * ระดับพนักงาน ทอง / เงิน / ทองแดง (ดร.ธงชัย 25 ต.ค. 2569 "ระดับสูงได้เห็นงานก่อน หรือได้เรทดีกว่า … ทำได้เลย")
+ * ระดับพนักงาน Diamond / Gold / Silver / Bronze (ดร.ธงชัย 25 ต.ค. 2569 "ระดับสูงได้เห็นงานก่อน หรือได้เรทดีกว่า … ทำได้เลย")
  * คิดจาก 90 วันล่าสุด: จำนวนกะที่เสร็จ · เช็คอินตรงเวลา (สายไม่เกิน 15 นาที) · ส่งรายงานในวันที่เข้ากะ · ดาวเฉลี่ยจากครอบครัว (มี ≥3 ความเห็นจึงนับ)
  * เกณฑ์ตั้งต้น (ปรับได้ที่ TIERS) — สิทธิพิเศษของแต่ละระดับ (เห็นงานก่อน · เรท) เป็นนโยบายที่ ดร. เคาะแยก
  */
+// ชื่อระดับภาษาอังกฤษ (ดร. 25 ต.ค. 2569 "ใช้ชื่อภาษาอังกฤษ Gold, Silver, Diamond") · ยังไม่มีกะ = Starter
 export const TIERS = [
-  { key: 'gold', label: 'ทอง', minShifts: 20, onTime: 0.95, reports: 0.9, stars: 4.5 },
-  { key: 'silver', label: 'เงิน', minShifts: 8, onTime: 0.85, reports: 0.75, stars: 4.0 },
-  { key: 'bronze', label: 'ทองแดง', minShifts: 1, onTime: 0, reports: 0, stars: 0 },
+  { key: 'diamond', label: 'Diamond', minShifts: 40, onTime: 0.97, reports: 0.95, stars: 4.7 },
+  { key: 'gold', label: 'Gold', minShifts: 20, onTime: 0.95, reports: 0.9, stars: 4.5 },
+  { key: 'silver', label: 'Silver', minShifts: 8, onTime: 0.85, reports: 0.75, stars: 4.0 },
+  { key: 'bronze', label: 'Bronze', minShifts: 1, onTime: 0, reports: 0, stars: 0 },
 ];
+const LAST = TIERS.length - 1;
 const LATE_OK = 15;
 
 /** ตัวชี้วัด 90 วันของพนักงาน → { shifts, on_time, reports, stars, n_stars } (สัดส่วน 0–1 · null = ยังไม่มีข้อมูล) */
@@ -38,11 +41,11 @@ export async function employeeMetrics(employeeId) {
 
 /** ระดับจากตัวชี้วัด → { key, label, next: { label, missing: [ข้อความ] } | null } */
 export function tierOf(m) {
-  if (!m.shifts) return { key: 'new', label: 'เริ่มต้น', next: { label: TIERS[2].label, missing: ['ทำกะแรกให้เสร็จ'] } };
+  if (!m.shifts) return { key: 'starter', label: 'Starter', next: { label: TIERS[LAST].label, missing: ['ทำกะแรกให้เสร็จ'] } };
   const pass = (t) => m.shifts >= t.minShifts && (m.on_time ?? 0) >= t.onTime && (m.reports ?? 0) >= t.reports && (m.stars == null || m.stars >= t.stars);
   const idx = TIERS.findIndex(pass);
-  const cur = TIERS[idx === -1 ? 2 : idx];
-  const up = TIERS[(idx === -1 ? 2 : idx) - 1];
+  const cur = TIERS[idx === -1 ? LAST : idx];
+  const up = TIERS[(idx === -1 ? LAST : idx) - 1];
   const missing = [];
   if (up) {
     if (m.shifts < up.minShifts) missing.push(`ทำอีก ${up.minShifts - m.shifts} กะ`);

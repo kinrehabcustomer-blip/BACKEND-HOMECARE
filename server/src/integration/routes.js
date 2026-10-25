@@ -629,6 +629,21 @@ integrationRouter.post(
 const ROUND_RE = /^(d3|w\d{1,3}|end)$/;
 
 /**
+ * ป้ายผู้ดูแลบนการ์ดแนะนำตัวที่ส่งให้ญาติ (ดร.ธงชัย 25 ต.ค. 2569 ลูกค้า ข้อ 1) — ดาวเฉลี่ยจากครอบครัว + ระดับ + จำนวนกะ 90 วัน
+ *   ตั๋ว 'kin-emp-badge' {employee_id} → { stars: {avg, n}, tier: {key, label}, shifts } · ไม่ส่งชื่อจริง/เบอร์/ข้อมูลอื่น
+ */
+integrationRouter.post(
+  '/employees/badge',
+  asyncRoute(async (req, res) => {
+    const { token } = hireSchema.parse(req.body);
+    const p = verifySigned(token, 'kin-emp-badge');
+    if (!p || typeof p.employee_id !== 'string' || !/^[A-Z0-9-]{3,20}$/i.test(p.employee_id)) throw new ApiError(401, 'ลายเซ็นไม่ถูกต้องหรือหมดอายุ');
+    const t = await employeeTier(p.employee_id);
+    res.json({ stars: { avg: t.metrics.stars, n: t.metrics.n_stars }, tier: { key: t.key, label: t.label }, shifts: t.metrics.shifts });
+  }),
+);
+
+/**
  * รายได้ของฉัน + ระดับพนักงาน ใน LINE @kinjobs (ดร.ธงชัย 25 ต.ค. 2569 ข้อ 1 + ข้อ 3)
  *   ตั๋ว 'kin-my-earnings' {u} → เดือนนี้: กะ · ค่าตอบแทน (จ่ายแล้ว/ยังไม่จ่าย) · กะรออนุมัติ · สลิปล่าสุด · ระดับ + สิ่งที่ขาดถึงระดับถัดไป
  *   ตัวเลขชุดเดียวกับหน้า "ค่าตอบแทนของฉัน" (/my/attendance/report) — ไม่ส่งของคนอื่น
