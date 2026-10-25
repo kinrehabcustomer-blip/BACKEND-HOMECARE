@@ -1689,13 +1689,47 @@ export function withVisitState(v, now = new Date()) {
 export const findVisit = (visitId) =>
   sql.one(`${MY_VISIT} WHERE v.visit_id = :id`, { id: visitId }).then((v) => (v ? withVisitState(v) : null));
 
-/** กะของพนักงานคนหนึ่งในวันที่กำหนด — ตารางงาน "วันนี้" */
-export const visitsForEmployeeOn = (employeeId, date) =>
+/**
+ * กะข้ามเที่ยงคืนจะอยู่บนหน้า "งานวันนี้" ต่อได้อีกกี่ชั่วโมงหลังเช็คอิน
+ *
+ * กว้างกว่าเกณฑ์ 'stale' (16 ชม. ใน withVisitState) โดยตั้งใจ — ช่วงที่คาบเกี่ยวกันแปลว่า
+ * กะที่ค้างนานจนผิดปกติจะถูกเห็นทั้งสองทาง (พนักงานยังกดออกเองได้ และขึ้นในรายการต้องตรวจของ admin)
+ * ไม่ยาวกว่านี้เพราะ checkOutVisit บันทึกเวลาออกเป็น now() — กะที่ค้างมาหลายวันแล้วมากดออกเอง
+ * จะได้ชั่วโมงทำงานเป็นหลักร้อย ซึ่งไหลเข้าสรุปค่าตอบแทนทันที ต้องให้ผู้จัดการแก้เวลาให้แทน
+ */
+export const OPEN_SHIFT_CARRY_HOURS = 24;
+
+/**
+ * กะของพนักงานคนหนึ่งในวันที่กำหนด — ตารางงาน "วันนี้"
+ *
+ * carryOpen = เอากะของวันก่อนหน้าที่ "เช็คอินแล้วยังไม่เช็คเอาท์" ติดมาด้วย
+ *   เวรกลางคืน 20:00–08:00 ลงเป็นกะของวันที่เริ่ม พอเลยเที่ยงคืน กะนั้นหลุดจากรายการของวันใหม่
+ *   พนักงานจึงหาปุ่มเช็คเอาท์ไม่เจอทั้งที่ยังทำงานอยู่ — กะค้างเป็น "เช็คอินแล้วไม่เช็คเอาท์"
+ *   ซึ่งไม่ถูกนับเป็นชั่วโมง/จำนวนกะในสรุปค่าตอบแทนและในระดับพนักงานเลย (ดู DONE/WORKED_SHIFT)
+ *   การ์ดบนหน้าเว็บรองรับสถานะนี้อยู่แล้ว (มีคำเตือน "ค้างข้ามวัน") แค่ข้อมูลไม่เคยถูกส่งไปถึง
+ *
+ *   เปิดเฉพาะหน้าที่มีปุ่มเช็คเอาท์ (/my/today) — ห้ามเปิดให้รายการ "พรุ่งนี้"
+ *   เพราะ visit_date < พรุ่งนี้ จะลากกะที่ค้างของวันนี้ไปโผล่ในตารางวันพรุ่งนี้ด้วย
+ */
+export const visitsForEmployeeOn = (employeeId, date, { carryOpen = false } = {}) =>
   sql
     .all(
-      `${MY_VISIT} WHERE v.assigned_to = :emp AND v.visit_date = :date
-       ORDER BY v.planned_start NULLS FIRST, v.visit_id`,
-      { emp: employeeId, date },
+      `${MY_VISIT}
+       WHERE v.assigned_to = :emp
+         AND (
+           v.visit_date = :date
+           ${carryOpen
+             ? `OR (v.visit_date < :date
+                    AND ${NOT_CANCELLED}
+                    AND v.check_in_at IS NOT NULL
+                    AND v.check_out_at IS NULL
+                    AND v.check_in_at > now() - make_interval(hours => :carry_hours))`
+             : ''}
+         )
+       ORDER BY v.visit_date, v.planned_start NULLS FIRST, v.visit_id`,
+      carryOpen
+        ? { emp: employeeId, date, carry_hours: OPEN_SHIFT_CARRY_HOURS }
+        : { emp: employeeId, date },
     )
     .then((rows) => rows.map((v) => withVisitState(v)));
 
@@ -2861,9 +2895,26 @@ function applyChosenShares(shares, chosen, amount) {
   if (ids.size !== chosen.length) return { reason: 'duplicate_employee' };
 
   const sum = round(chosen.reduce((n, c) => n + c.amount, 0));
-  if (sum !== round(amount)) return { reason: 'share_sum_mismatch', sum };
+  const target = round(amount);
+  if (sum !== target) return { reason: 'share_sum_mismatch', sum };
 
-  return { rows: chosen.map((c) => ({ ...known.get(c.employee_id), amount: round(c.amount) })) };
+  const rows = chosen.map((c) => ({ ...known.get(c.employee_id), amount: round(c.amount) }));
+
+  /* ผลรวมที่ "ปัดรายคนแล้ว" ต้องเท่ายอดของงวดเป๊ะ ไม่ใช่แค่ผลรวมก่อนปัด
+     ตัวตรวจข้างบนดูผลรวมดิบ แต่สิ่งที่ลงฐานข้อมูลคือยอดของแต่ละคนที่ปัดแล้วทีละบรรทัด
+     กรอกเศษย่อยกว่าสตางค์ (0.125 สองบรรทัด = 0.25 ผ่านด่าน) ปัดแล้วได้ 0.13 + 0.13 = 0.26
+     ส่วนเกินนั้นเป็นเงินจริงที่ทำให้ยอดปล่อยสะสมทะลุค่าจ้างของเคส (remaining ติดลบ
+     แล้วเคสขึ้นว่า "จ่ายครบ" ทั้งที่จ่ายเกิน) ส่วนทางขาดก็เหลือเศษที่ปล่อยต่อไม่ได้
+     โยนส่วนต่างให้บรรทัดที่ได้มากที่สุดซึ่งได้เงินอยู่แล้ว — ไม่สร้างก้อนสตางค์ให้คนที่ไม่รับงวดนี้
+     ไม่มีใครได้เงินเลย (ทุกบรรทัดปัดลงเป็นศูนย์) = ปฏิเสธไปตรงๆ ดีกว่าเดาว่าจะยัดให้ใคร */
+  const drift = round(target - rows.reduce((n, r) => n + r.amount, 0));
+  if (drift !== 0) {
+    const biggest = rows.filter((r) => r.amount > 0).sort((a, b) => b.amount - a.amount)[0];
+    if (!biggest || round(biggest.amount + drift) <= 0) return { reason: 'share_sum_mismatch', sum };
+    biggest.amount = round(biggest.amount + drift);
+  }
+
+  return { rows };
 }
 
 /**

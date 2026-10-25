@@ -103,11 +103,16 @@ myRouter.get(
 
 // ---------- ตารางงาน ----------
 
-/** ตารางงานของฉันวันนี้ (กะทั้งหมด พร้อมสถานะเช็คอิน) — หน้าหลักของพนักงานภาคสนาม */
+/**
+ * ตารางงานของฉันวันนี้ (กะทั้งหมด พร้อมสถานะเช็คอิน) — หน้าหลักของพนักงานภาคสนาม
+ *
+ * carryOpen: เวรกลางคืนที่ยังไม่เช็คเอาท์ต้องอยู่ต่อหลังเที่ยงคืน ไม่งั้นพนักงานกดออกเองไม่ได้
+ * แล้วกะนั้นหายจากชั่วโมง/จำนวนกะในสรุปค่าตอบแทน (ดู visitsForEmployeeOn)
+ */
 myRouter.get(
   '/today',
   asyncRoute(async (req, res) => {
-    res.json(await cases.visitsForEmployeeOn(req.user.employee_id, todayTH()));
+    res.json(await cases.visitsForEmployeeOn(req.user.employee_id, todayTH(), { carryOpen: true }));
   }),
 );
 

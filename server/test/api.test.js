@@ -1115,6 +1115,30 @@ if (process.env.RUN_DB_TESTS !== '1') {
       assert.equal(reissued.items.length, 2);
     });
 
+    test('ใบรายครั้ง: กะที่ยกเลิกแล้วไม่ถูกเก็บเงิน และยอดรวมไม่ทะลุค่าบริการของเคส', async () => {
+      // พนักงานเช็คอิน-เอาท์ครบทั้ง 4 วัน แล้วผู้จัดการยกเลิกกะ 2 วันทีหลัง (ลงวันผิด/ลูกค้าไม่อยู่บ้าน)
+      // ตัวหารของราคาต่อครั้งนับเฉพาะกะที่ไม่ยกเลิก กะที่ยกเลิกจึงต้องไม่กลายเป็นบรรทัดในใบด้วย
+      // ไม่งั้นได้ 4 บรรทัด × (2000/2) = 4,000 = เก็บลูกค้าเป็นสองเท่าของค่าบริการที่ตกลงไว้
+      const c = await post('/api/cases', { case_type: 'other', client_name: 'Cancelled visit billing', fee: 2000 }, MANAGER, 201);
+      const auto = await draftOf(c.case_id);
+      assert.equal((await send('DELETE', `/api/invoices/${auto.invoice_id}`)).status, 200);
+      for (const [d, status] of [['2026-04-01', 'done'], ['2026-04-02', 'done'], ['2026-04-03', 'cancelled'], ['2026-04-04', 'cancelled']]) {
+        await sql.run(
+          `INSERT INTO case_visits (case_id, visit_date, status, check_in_at, check_out_at)
+           VALUES (:id, :d, :st, (:d || ' 08:00:00+07')::timestamptz, (:d || ' 16:00:00+07')::timestamptz)`,
+          { id: c.case_id, d, st: status },
+        );
+      }
+
+      const billed = await post('/api/invoices', { case_id: c.case_id, basis: 'visits' }, MANAGER, 201);
+      assert.equal(billed.items.length, 2, JSON.stringify(billed.items.map((i) => i.description)));
+      assert.equal(billed.total, 2000);
+      assert.ok(
+        billed.items.every((i) => !i.description.includes('2026-04-03') && !i.description.includes('2026-04-04')),
+        JSON.stringify(billed.items.map((i) => i.description)),
+      );
+    });
+
     test('ออกใบพร้อมกันสองคำขอ = ใบร่างใบเดียว', async () => {
       const c = await newCase();
       const auto = await draftOf(c.case_id);
@@ -1366,6 +1390,30 @@ if (process.env.RUN_DB_TESTS !== '1') {
       await post(`/api/cases/${solo.case_id}/pay/release`, { amount: 300 }, MANAGER, 201);
     });
 
+    test('ส่วนแบ่งที่กรอกเองมีเศษย่อยกว่าสตางค์: ยอดที่ลงฐานรวมแล้วต้องเท่ายอดของงวดเป๊ะ ไม่ปล่อยเกิน', async () => {
+      /* ผู้จัดการกรอก 450.125 กับ 449.875 (รวม 900 พอดี) — ด่านเดิมตรวจผลรวม "ก่อนปัด" อย่างเดียว
+         แต่สิ่งที่ลงฐานคือยอดรายคนที่ปัดแล้วทีละบรรทัด (450.13 + 449.88 = 900.01)
+         ส่วนเกินสตางค์นั้นเป็นเงินจริง ทำให้ยอดปล่อยสะสมทะลุค่าจ้างของเคสและยอดคงเหลือติดลบ */
+      const c = await newCase(); // staff_pay 1200
+      await post(`/api/cases/${c.case_id}/assign`, { employee_id: FIELD.employee_id });
+      await post(`/api/cases/${c.case_id}/team`, { employee_id: LEAD_A.employee_id });
+      await post(`/api/cases/${c.case_id}/pay/release`, {
+        amount: 900,
+        shares: [
+          { employee_id: FIELD.employee_id, amount: 450.125 },
+          { employee_id: LEAD_A.employee_id, amount: 449.875 },
+        ],
+      }, MANAGER, 201);
+
+      const { released } = await sql.one(
+        'SELECT COALESCE(SUM(amount), 0)::float AS released FROM case_payouts WHERE case_id = :id', { id: c.case_id },
+      );
+      assert.equal(Math.round(Number(released) * 100) / 100, 900);
+      const status = (await get(`/api/cases/${c.case_id}/pay`, MANAGER)).body;
+      assert.equal(status.released, 900);
+      assert.equal(status.remaining, 300);
+    });
+
     test('เปิดเคสใหม่: คืนกะข้างหน้าที่ระบบยกเลิกตอนปิด/ยกเลิกเคส แต่ไม่คืนกะที่คนกดยกเลิกเอง', async () => {
       const c = await newCase();
       await post(`/api/cases/${c.case_id}/assign`, { employee_id: FIELD.employee_id });
@@ -1421,6 +1469,48 @@ if (process.env.RUN_DB_TESTS !== '1') {
       // ชิดขอบพอดีไม่นับว่าชน
       assert.equal((await preview({ dates: [D], planned_start: '18:00', planned_end: '20:00' })).conflicts.length, 0);
       assert.equal((await preview({ dates: [D1], planned_start: '10:00', planned_end: '12:00' })).conflicts.length, 0);
+    });
+
+    test('เวรดึกที่ยังไม่เช็คเอาท์ตามข้ามเที่ยงคืนมาที่ "งานวันนี้" · ของเก่า/ที่ยกเลิก/ของพรุ่งนี้ไม่ตาม', async () => {
+      /* ผู้ดูแลเข้าเวร 20:00 ของเมื่อวาน ถึง 08:00 ของวันนี้ — พอเลยเที่ยงคืน กะเป็นของ "เมื่อวาน"
+         ถ้าหน้างานวันนี้ไม่แสดง เขาจะหาปุ่มเช็คเอาท์ไม่เจอ กะค้างเป็นเช็คอินแล้วไม่เช็คเอาท์
+         ซึ่งไม่ถูกนับเป็นชั่วโมง/จำนวนกะในสรุปค่าตอบแทนและในระดับพนักงานเลย */
+      const who = LEAD_B.employee_id;
+      const FIELD_B = emp(who, 'caregiver');
+      const c = await newCase();
+      await post(`/api/cases/${c.case_id}/assign`, { employee_id: who });
+
+      const openShift = async (date, hoursAgo, status = 'scheduled') =>
+        (await sql.one(
+          `INSERT INTO case_visits (case_id, visit_date, assigned_to, status, checked_in_by, check_in_at, planned_start, planned_end)
+           VALUES (:id, :d, :emp, :st, :emp, now() - make_interval(hours => :h), '20:00', '08:00')
+           RETURNING visit_id`,
+          { id: c.case_id, d: date, emp: who, st: status, h: hoursAgo },
+        )).visit_id;
+
+      const lastNight = await openShift(inDays(-1), 12);                  // เวรดึกที่ยังอยู่หน้างาน
+      const longStale = await openShift(inDays(-3), 60);                  // ลืมกดออกมาหลายวัน — ให้ผู้จัดการแก้เวลาให้แทน
+      const cancelled = await openShift(inDays(-1), 12, 'cancelled');     // กะที่ยกเลิกไปแล้ว ไม่ใช่งานที่ต้องปิด
+      const closed = (await sql.one(
+        `INSERT INTO case_visits (case_id, visit_date, assigned_to, status, checked_in_by, check_in_at, check_out_at)
+         VALUES (:id, :d, :emp, 'done', :emp, now() - make_interval(hours => 30), now() - make_interval(hours => 22))
+         RETURNING visit_id`,
+        { id: c.case_id, d: inDays(-1), emp: who },
+      )).visit_id;
+
+      const ids = (rows) => rows.map((v) => v.visit_id);
+      const today = (await get('/api/my/today', FIELD_B)).body;
+      assert.ok(ids(today).includes(lastNight), `เวรดึกต้องตามมา: ${JSON.stringify(ids(today))}`);
+      for (const [id, why] of [[longStale, 'ค้างเกิน 24 ชม.'], [cancelled, 'กะที่ยกเลิก'], [closed, 'กะที่ปิดแล้ว']]) {
+        assert.ok(!ids(today).includes(id), `${why} ต้องไม่ตามมา: ${JSON.stringify(ids(today))}`);
+      }
+      // ยังกดเช็คเอาท์เองได้ (สถานะต้องเป็น working/stale ไม่ใช่หายไปจากรายการ)
+      assert.ok(['working', 'stale'].includes(today.find((v) => v.visit_id === lastNight).state));
+
+      /* ตารางของ "พรุ่งนี้" (LINE งานของฉัน) ใช้ตัวเดียวกันแต่ห้ามลากกะค้างของวันนี้ไปด้วย
+         ไม่งั้นพนักงานจะเห็นงานที่ทำไปแล้วโผล่ในวันพรุ่งนี้ */
+      const tomorrow = await casesRepo.visitsForEmployeeOn(who, inDays(1));
+      assert.equal(ids(tomorrow).filter((id) => id === lastNight).length, 0);
     });
   });
 
