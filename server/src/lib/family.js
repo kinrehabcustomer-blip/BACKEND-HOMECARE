@@ -1,5 +1,6 @@
 import { createHash, randomInt } from 'node:crypto';
 import { sql } from '../db/index.js';
+import { ApiError } from './errors.js';
 
 /**
  * ญาติดูการดูแลผ่าน LINE OA KIN HomeCare หลัก (ดร.ธงชัย 22 ต.ค. 2569 · แบบร่าง coordination/family-line-page-design-20261022.md)
@@ -396,15 +397,29 @@ export async function summaryFor(lineUserId) {
   return out;
 }
 
+/** ความยาวข้อความสูงสุดในไทม์ไลน์เคส — ยาวกว่านี้ให้ตีกลับ ไม่ใช่ตัดทิ้ง */
+export const MESSAGE_MAX = 1000;
+
 /** โพสต์ลงไทม์ไลน์เคส — kind 'family' (ญาติจากหน้า LINE) หรือ 'team' (ทีมจากหน้าเคสใน staff) */
 export async function postMessage(caseId, { kind, name, lineUserId = null, employeeId = null, body = null, photo = null }) {
+  /* ยาวเกินให้บอก ไม่ใช่ตัดเงียบ ๆ (ตรวจรอบ 19 — เดิม .slice(0, 1000) แล้วตอบสำเร็จ)
+     ทั้งญาติและทีมพิมพ์อาการยาว ๆ ได้ ท้ายข้อความหายโดยไม่มีใครรู้ว่าขาด
+     กันที่นี่ที่เดียวเพราะทุกทางที่โพสต์ลงไทม์ไลน์ (หน้าญาติ · ทีมในระบบงาน · สะพานแชท) ผ่านฟังก์ชันนี้ */
+  const text = body == null ? null : String(body).trim();
+  if (text && text.length > MESSAGE_MAX) {
+    throw new ApiError(
+      400,
+      `ข้อความยาว ${text.length.toLocaleString('th-TH')} ตัวอักษร เกินที่ส่งได้ ${MESSAGE_MAX.toLocaleString('th-TH')} ตัว` +
+        ` (เกินมา ${(text.length - MESSAGE_MAX).toLocaleString('th-TH')} ตัว) — แบ่งส่งเป็นสองข้อความได้ค่ะ`,
+    );
+  }
   return sql.one(
     `INSERT INTO case_family_messages (case_id, author_kind, author_name, line_user_id, employee_id, body, photo_data, photo_mime)
      VALUES (:case_id, :kind, :name, :uid, :emp, :body, :data, :mime)
      RETURNING message_id, created_at`,
     {
       case_id: caseId, kind, name: String(name || 'ญาติ').slice(0, 80), uid: lineUserId, emp: employeeId,
-      body: body ? String(body).trim().slice(0, 1000) : null, data: photo?.data ?? null, mime: photo?.mime ?? null,
+      body: text || null, data: photo?.data ?? null, mime: photo?.mime ?? null,
     },
   );
 }

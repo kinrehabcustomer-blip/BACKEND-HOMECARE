@@ -149,7 +149,16 @@ export const codeOwner = (db, code, exceptId = null) =>
     { code, except: exceptId },
   );
 
-export function create(input) {
+/**
+ * สร้างพนักงาน · lineUserId ใส่ลงไปใน INSERT เดียวกันได้ (ตรวจรอบ 19)
+ *
+ * เดิม /hire สร้างแถวก่อนแล้วค่อย UPDATE ผูก LINE แยกคำสั่ง — สองคำขอที่ยิงพร้อมกัน
+ * ผ่านด่าน "ผูกไว้แล้วหรือยัง" ทั้งคู่ แล้วสร้างพนักงานสองแถว ตัวที่แพ้ดัชนี line_user_id
+ * ได้ 409 แต่แถวพนักงานของมันค้างอยู่โดยไม่มี LINE ผูก = พนักงานผีในระบบ
+ * (พิสูจน์แล้ว: A6901002 ผูก LINE · A6901003 line_user_id = null)
+ * ใส่ในคำสั่งเดียวกัน ดัชนีจึงปฏิเสธทั้ง INSERT ไม่เหลือแถวกำพร้า
+ */
+export function create(input, { lineUserId = null } = {}) {
   return transaction(async (tx) => {
     if (input.employee_id) await ensureEmployeeCodeFree(tx, input.employee_id);
     const employeeId = input.employee_id || (await nextEmployeeId(tx));
@@ -162,9 +171,12 @@ export function create(input) {
     values.password_hash = await hashPassword(tempPassword);
     values.temp_password_encrypted = encryptTempPassword(tempPassword, employeeId);
 
+    const extra = lineUserId ? ['line_user_id'] : [];
+    if (lineUserId) values.line_user_id = lineUserId;
+    const cols = [...COLUMNS, ...extra];
     const created = await tx.one(
-      `INSERT INTO employees (employee_id, password_hash, temp_password_encrypted, ${COLUMNS.join(', ')})
-       VALUES (:employee_id, :password_hash, :temp_password_encrypted, ${COLUMNS.map((c) => `:${c}`).join(', ')})
+      `INSERT INTO employees (employee_id, password_hash, temp_password_encrypted, ${cols.join(', ')})
+       VALUES (:employee_id, :password_hash, :temp_password_encrypted, ${cols.map((c) => `:${c}`).join(', ')})
        RETURNING ${PUBLIC}`,
       values,
     );

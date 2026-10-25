@@ -81,6 +81,11 @@ integrationRouter.post(
   asyncRoute(async (req, res) => {
     const { token } = hireSchema.parse(req.body);
     const p = verifySigned(token, 'kin-report');
+    /* ยาวเกินให้ตีกลับ ไม่ใช่ตัดทิ้งเงียบ ๆ (ตรวจรอบ 19 — เดิม slice(0, 2000) แล้วบันทึกต่อ)
+       พนักงานพิมพ์รายงานยาวใน LINE แล้วท้ายข้อความหาย โดยฝั่งแชทได้ ok กลับไป */
+    if (typeof p?.text === 'string' && p.text.trim().length > 2000) {
+      throw new ApiError(400, `รายงานยาว ${p.text.trim().length.toLocaleString('th-TH')} ตัวอักษร เกินที่บันทึกได้ 2,000 ตัว — แบ่งส่งเป็นสองใบได้ค่ะ`);
+    }
     if (!p || !isLineUserId(p.u) || typeof p.text !== 'string') throw new ApiError(401, 'ลายเซ็นไม่ถูกต้องหรือหมดอายุ');
     await ensureLineColumn();
 
@@ -110,7 +115,7 @@ integrationRouter.post(
 
     const report = await cases.addReport(
       visit.case_id,
-      { visit_id: visit.visit_id, report_type: 'routine', note: p.text.trim().slice(0, 2000) },
+      { visit_id: visit.visit_id, report_type: 'routine', note: p.text.trim() },
       { employee_id: emp.employee_id, name: `${emp.first_name} ${emp.last_name} (LINE)` },
     );
     /* ข้อ 4 (ดร.ธงชัย 23 ต.ค. 2569 "รายงานของผู้ดูแลเด้งเข้า LINE ญาติ"): ส่งรายชื่อ LINE ญาติที่ผูกเคสนี้แล้ว (ยังไม่ถูกปลด)
@@ -246,7 +251,13 @@ integrationRouter.post(
     const p = verifySigned(token, 'kin-cust-match');
     if (!p || !Array.isArray(p.phones)) throw new ApiError(401, 'ลายเซ็นไม่ถูกต้องหรือหมดอายุ');
     await ensureCustomerLineColumnsSafe();
-    res.json({ matches: await findByPhones(p.phones.slice(0, 500)) });
+    /* รับเฉพาะเบอร์ที่เป็นข้อความจริง (ตรวจรอบ 19) — เดิมส่ง object ปนมาในอาร์เรย์ได้
+       แล้วไหลลงไปถึงชั้นคิวรีเป็น [object Object] ซึ่งไม่มีวันตรงกับใคร แต่ก็ไม่มีอะไรฟ้องว่าข้อมูลเพี้ยน */
+    if (!p.phones.every((x) => typeof x === 'string')) {
+      throw new ApiError(400, 'phones ต้องเป็นรายการข้อความเบอร์โทรเท่านั้น');
+    }
+    const phones = p.phones.filter((x) => x.trim()).slice(0, 500);
+    res.json({ matches: await findByPhones(phones) });
   }),
 );
 
@@ -296,7 +307,14 @@ integrationRouter.post(
     if (!p || !p.d) throw new ApiError(401, 'ลายเซ็นไม่ถูกต้องหรือหมดอายุ');
     await ensureLineColumn();
 
-    const lineUserId = isLineUserId(p.d.line_user_id) ? p.d.line_user_id : null;
+    /* line_user_id ที่รูปไม่ถูกต้องเคยถูกปัดเป็น null เงียบ ๆ แล้วสร้างพนักงานต่อ (ตรวจรอบ 19)
+       คนใหม่เข้าแอปจาก LINE ไม่ได้ และไม่มีใครรู้ว่าทำไม เพราะฝั่งแชทได้ 201 ว่าสำเร็จ
+       ส่งมาแล้วต้องถูกรูป ไม่ส่งมาเลยยังสร้างได้ตามเดิม (บางคนสมัครทางอื่น) */
+    const rawLine = p.d.line_user_id;
+    if (rawLine != null && rawLine !== '' && !isLineUserId(rawLine)) {
+      throw new ApiError(400, 'line_user_id ไม่ถูกรูปแบบ — สร้างพนักงานไม่สำเร็จ');
+    }
+    const lineUserId = isLineUserId(rawLine) ? rawLine : null;
     if (lineUserId) {
       const linked = await sql.one(
         `SELECT employee_id, first_name || ' ' || last_name AS name FROM employees WHERE line_user_id = :uid`,
@@ -327,13 +345,8 @@ integrationRouter.post(
       throw new ApiError(400, 'สร้างได้เฉพาะตำแหน่งภาคสนาม');
     }
 
-    const created = await repo.create(input);
-    if (lineUserId) {
-      await sql.run('UPDATE employees SET line_user_id = :uid WHERE employee_id = :id', {
-        uid: lineUserId,
-        id: created.employee_id,
-      });
-    }
+    // ผูก LINE ใน INSERT เดียวกัน — ยิงพร้อมกันสองครั้งแล้วเหลือพนักงานใบเดียว ไม่ทิ้งแถวกำพร้า
+    const created = await repo.create(input, { lineUserId });
     res.status(201).json({
       employee_id: created.employee_id,
       name: `${created.first_name} ${created.last_name}`,
@@ -879,7 +892,8 @@ integrationRouter.post(
     const { token } = hireSchema.parse(req.body);
     const p = verifySigned(token, 'kin-team-post');
     if (!p || typeof p.cid !== 'string' || typeof p.case_id !== 'string') throw new ApiError(401, 'ลายเซ็นไม่ถูกต้องหรือหมดอายุ');
-    const body = typeof p.body === 'string' ? p.body.trim().slice(0, 1000) : '';
+    // ยาวเกินให้ postMessage ตีกลับพร้อมบอกจำนวนตัวที่เกิน (ตรวจรอบ 19) ไม่ตัดทิ้งที่นี่
+    const body = typeof p.body === 'string' ? p.body.trim() : '';
     if (!body) throw new ApiError(400, 'กรุณาพิมพ์ข้อความ');
     const c = await customerCaseOr404(p.cid, p.case_id);
     if (['closed', 'cancelled'].includes(c.status)) throw new ApiError(409, 'เคสนี้ปิดแล้ว');

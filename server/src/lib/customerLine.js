@@ -59,6 +59,9 @@ export async function linkFromChat(d, customerId = null) {
   let created = false;
   if (!customer) {
     customer = await customers.create({
+      /* ตัดความยาวที่นี่เป็น "กันของเสีย" ไม่ใช่ข้อความที่คนพิมพ์มาเพื่อให้ถึงปลายทาง (ตรวจรอบ 19)
+         ชื่อโปรไฟล์ LINE ยาวไม่เกิน 20 ตัว · referral/note ฝั่งแชทประกอบเอง ไม่ใช่สิ่งที่ลูกค้าพิมพ์
+         ต่างจากข้อความในไทม์ไลน์เคสที่เปลี่ยนเป็น "ตีกลับพร้อมบอกจำนวนตัวที่เกิน" แล้ว (lib/family.js) */
       name: String(d.name || d.line_name || 'ลูกค้า LINE').slice(0, 200),
       phone: d.phone ? String(d.phone).slice(0, 30) : null,
       referral_source: String(d.referral || 'LINE Kin HomeCare').slice(0, 200),

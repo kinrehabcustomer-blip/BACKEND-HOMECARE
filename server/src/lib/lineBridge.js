@@ -15,9 +15,16 @@ import { sql } from '../db/index.js';
  * ผูก LINE กับพนักงานครั้งแรกต้อง login ด้วยรหัสผ่านเดิม 1 ครั้ง (POST /api/auth/line-link)
  * — ตั๋วบอกแค่ว่า "เป็นเจ้าของ LINE นี้" ไม่ได้บอกว่าเป็นพนักงานคนไหน จึงห้ามจับคู่เองจากชื่อ/เบอร์
  */
-const PUBLIC_KEY = createPublicKey(`-----BEGIN PUBLIC KEY-----
+/* กุญแจสาธารณะของฝั่ง chat — ค่าปริยายคือกุญแจที่ใช้อยู่จริง ตั้ง env ทับได้
+   ทำให้ตั้งทับได้ด้วยเหตุผลสองข้อ: (ก) วันที่ต้องหมุนกุญแจ จะสลับได้โดยไม่ต้อง deploy โค้ดใหม่พร้อมกันสองฝั่ง
+   (ข) ชุดทดสอบสะพานเซ็นตั๋วเองด้วยกุญแจชั่วคราวได้ ไม่ต้องเอากุญแจลับตัวจริงมาไว้ในเครื่องที่รันเทส
+   ไม่ตั้ง env = พฤติกรรมเดิมทุกประการ */
+const PUBLIC_KEY = createPublicKey(process.env.STAFF_BRIDGE_PUBLIC_KEY ?? `-----BEGIN PUBLIC KEY-----
 MCowBQYDK2VwAyEAw+qNWMf5eVMSLX/i3xWn1x24NWlGvJSEeDBdqrl+lQc=
 -----END PUBLIC KEY-----`);
+
+/** เพดานอายุตั๋วที่ยอมรับ — ตั๋วจริงยาวสุด 10 นาที (kin-staff) ที่เหลือ 1–5 นาที */
+const MAX_TICKET_MS = 15 * 60 * 1000;
 
 /**
  * ตรวจตั๋วลงลายเซ็นจาก chat.kinorigin.com — purpose แยกงานกันไม่ให้ตั๋วชนิดหนึ่งเอาไปใช้แทนอีกชนิด
@@ -29,7 +36,13 @@ export function verifySigned(token, purpose) {
   try {
     if (!verify(null, Buffer.from(body), PUBLIC_KEY, Buffer.from(sig, 'base64url'))) return null;
     const p = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
-    return p.a === purpose && typeof p.e === 'number' && p.e >= Date.now() ? p : null;
+    if (p.a !== purpose || typeof p.e !== 'number' || p.e < Date.now()) return null;
+    /* เพดานอายุตั๋วฝั่งผู้ตรวจ (ตรวจรอบ 19) — เดิมเชื่อค่า e ที่ผู้เซ็นใส่มาล้วน ๆ
+       ตั๋วไปโผล่ใน URL ประวัติเบราว์เซอร์ ล็อก และห้องแชท LINE ได้ ยิ่งอายุยาวยิ่งเสี่ยง
+       ถ้าวันหนึ่งโค้ดฝั่ง chat เผลอตั้ง 24 ชั่วโมง ฝั่งนี้ต้องไม่รับตามไปด้วย
+       ตั๋วที่ฝั่ง chat ออกจริงยาวสุดคือ 10 นาที (kin-staff) ที่เหลือ 1–5 นาที — 15 นาทีจึงเหลือที่พอ */
+    if (p.e - Date.now() > MAX_TICKET_MS) return null;
+    return p;
   } catch {
     return null;
   }

@@ -13,7 +13,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, generateKeyPairSync } from 'node:crypto';
 
 const target = process.argv[2];
 if (!target) throw new Error('ต้องบอกไฟล์ที่จะรัน เช่น node test/_run_probe.mjs test/_qa_xxx.mjs');
@@ -25,6 +25,14 @@ await new Promise((res) => probe.close(res));
 const root = resolve(tmpdir());
 const directory = await mkdtemp(join(root, 'kin-api-test-'));
 const password = randomBytes(24).toString('hex');
+
+/* กุญแจคู่ชั่วคราวสำหรับชุดทดสอบสะพาน (integration) — สร้างใหม่ทุกครั้งที่รัน
+   ชุดทดสอบต้องเซ็นตั๋วเองเพื่อยิงเส้น /api/integration ซึ่งปกติเซ็นจากฝั่ง chat
+   ใช้กุญแจชั่วคราวแทนกุญแจลับตัวจริง — ของจริงไม่ต้องออกจากที่เก็บเลย
+   ฝั่ง server อ่าน public key จาก env ได้ (ดู lib/lineBridge.js) ค่าปริยายยังเป็นกุญแจจริงเหมือนเดิม */
+const bridge = generateKeyPairSync('ed25519');
+const BRIDGE_PUBLIC = bridge.publicKey.export({ type: 'spki', format: 'pem' }).toString().trim();
+const BRIDGE_PRIVATE = bridge.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString().trim();
 const logs = [];
 const postgres = new EmbeddedPostgres({
   databaseDir: join(directory, 'data'), port, user: 'postgres', password,
@@ -48,6 +56,8 @@ try {
         NODE_ENV: 'test', RUN_DB_TESTS: '1',
         DATABASE_URL: `postgresql://postgres:${password}@127.0.0.1:${port}/kin_api_test?sslmode=disable`,
         JWT_SECRET: randomBytes(48).toString('hex'),
+        STAFF_BRIDGE_PUBLIC_KEY: BRIDGE_PUBLIC,
+        STAFF_BRIDGE_PRIVATE_KEY: BRIDGE_PRIVATE,
       },
     });
     child.once('error', rej);
