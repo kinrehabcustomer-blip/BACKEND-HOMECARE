@@ -117,7 +117,7 @@ authRouter.post(
 // ---------- เข้าระบบด้วย LINE (ตั๋วจาก chat.kinorigin.com/me · ดู lib/lineBridge.js) ----------
 // ผูกแล้ว = ออกคุกกี้เหมือน login ปกติแล้วพาเข้าหน้าแรกตามสิทธิ์ · ยังไม่ผูก = พาไปหน้า login พร้อมตั๋ว
 // ให้ login ด้วยรหัสผ่านเดิม 1 ครั้ง หน้า login จะเรียก /line-link ต่อเอง
-const LINE_LANDING = new Set(['/', '/my-today', '/my-cases', '/my-calendar']);
+const LINE_LANDING = new Set(['/', '/my-today', '/my-cases', '/my-calendar', '/my-attendance']); // /my-attendance = ปุ่ม "รายได้ของฉัน" (25 ต.ค. 2569)
 
 authRouter.get(
   '/line',

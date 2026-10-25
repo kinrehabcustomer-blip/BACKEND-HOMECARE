@@ -9,6 +9,7 @@ import { FRONT_POSITIONS } from '../employees/schema.js';
 import { linkLineByCode } from '../lib/lineLinkCode.js';
 import { outboxAck, outboxPending } from '../invoices/share.js';
 import { caseRatings, dueRatings, employeeStars, submitRating } from '../lib/ratings.js';
+import { employeeTier } from '../lib/tiers.js';
 import { createEmployeeSchema, decodeImage } from '../employees/schema.js';
 import * as repo from '../employees/repo.js';
 import * as cases from '../cases/repo.js';
@@ -626,6 +627,40 @@ integrationRouter.post(
  *   /ratings/submit ตั๋ว 'kin-rating-submit' {case_id, round, kind: family|staff, line, stars, reason?} → { ok, low }
  */
 const ROUND_RE = /^(d3|w\d{1,3}|end)$/;
+
+/**
+ * รายได้ของฉัน + ระดับพนักงาน ใน LINE @kinjobs (ดร.ธงชัย 25 ต.ค. 2569 ข้อ 1 + ข้อ 3)
+ *   ตั๋ว 'kin-my-earnings' {u} → เดือนนี้: กะ · ค่าตอบแทน (จ่ายแล้ว/ยังไม่จ่าย) · กะรออนุมัติ · สลิปล่าสุด · ระดับ + สิ่งที่ขาดถึงระดับถัดไป
+ *   ตัวเลขชุดเดียวกับหน้า "ค่าตอบแทนของฉัน" (/my/attendance/report) — ไม่ส่งของคนอื่น
+ */
+integrationRouter.post(
+  '/my-earnings',
+  asyncRoute(async (req, res) => {
+    const { token } = hireSchema.parse(req.body);
+    const p = verifySigned(token, 'kin-my-earnings');
+    if (!p || !isLineUserId(p.u)) throw new ApiError(401, 'ลายเซ็นไม่ถูกต้องหรือหมดอายุ');
+    await ensureLineColumn();
+    const emp = await sql.one('SELECT employee_id, first_name, status FROM employees WHERE line_user_id = :uid', { uid: p.u });
+    if (!emp || BLOCKED_STATUSES[emp.status]) return res.json({ linked: false });
+    const ym = thDate(0).slice(0, 7);
+    const [[row], slip, tier] = await Promise.all([
+      cases.attendanceReport(ym, emp.employee_id),
+      sql.one(
+        `SELECT r.period_month, r.pay_date, i.total_pay FROM payroll_items i JOIN payroll_runs r ON r.run_id = i.run_id
+         WHERE i.employee_id = :emp AND r.status = 'paid' ORDER BY r.pay_date DESC, r.run_id DESC LIMIT 1`,
+        { emp: emp.employee_id }),
+      employeeTier(emp.employee_id),
+    ]);
+    const n = (x) => Number(x || 0);
+    res.json({
+      linked: true, first_name: emp.first_name, month: ym,
+      shifts: n(row?.shifts), approved_shifts: n(row?.approved_shifts), pending_shifts: n(row?.pending_shifts),
+      pay: n(row?.pay), paid_pay: n(row?.paid_pay), unpaid_pay: n(row?.unpaid_pay),
+      last_slip: slip ? { period_month: slip.period_month, pay_date: slip.pay_date, total_pay: n(slip.total_pay) } : null,
+      tier,
+    });
+  }),
+);
 
 /**
  * ชวนเพื่อนแบบแต้มสะสม (ดร.ธงชัย 25 ต.ค. 2569) — ฝั่ง chat ถามว่าเพื่อนที่ถูกชวนทำงานไปแล้วกี่กะ เพื่อให้แต้ม (กะแรก / ครบ 10 กะ)
