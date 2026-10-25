@@ -318,6 +318,11 @@ employeesRouter.put(
 employeesRouter.get(
   '/:id/photo',
   asyncRoute(async (req, res, next) => {
+    /* เอกสารในแฟ้มพนักงานคือบัตรประชาชน/ใบรับรองวิชาชีพ/รูปถ่าย — อ่านได้เฉพาะคนที่ "จัดการบัญชีนั้นได้"
+       เส้น *แก้* ใส่ด่านนี้ไปแล้วตอนตรวจรอบ 9 แต่เส้น *อ่าน* ยังเปิดให้ทุกคนที่มีสิทธิ์หลังบ้าน
+       = ฝ่ายบุคคล/Admin HC เปิดดูบัตรประชาชนของผู้จัดการและ Super Admin ได้ (ตรวจรอบ 10A)
+       ดร.ธงชัยเคาะ 25 ต.ค. 2569 ให้ปิด · HR ยังเปิดแฟ้มของพนักงานที่ตัวเองดูแลได้ตามเดิม */
+    ensureCanManageTarget(req, req.employee);
     const row = await repo.photo.find(req.params.id);
     if (!row) return next(notFound('พนักงานคนนี้ยังไม่มีรูป'));
 
@@ -373,6 +378,11 @@ employeesRouter.put(
 employeesRouter.get(
   '/:id/certificates/:certificateId/image',
   asyncRoute(async (req, res, next) => {
+    /* เอกสารในแฟ้มพนักงานคือบัตรประชาชน/ใบรับรองวิชาชีพ/รูปถ่าย — อ่านได้เฉพาะคนที่ "จัดการบัญชีนั้นได้"
+       เส้น *แก้* ใส่ด่านนี้ไปแล้วตอนตรวจรอบ 9 แต่เส้น *อ่าน* ยังเปิดให้ทุกคนที่มีสิทธิ์หลังบ้าน
+       = ฝ่ายบุคคล/Admin HC เปิดดูบัตรประชาชนของผู้จัดการและ Super Admin ได้ (ตรวจรอบ 10A)
+       ดร.ธงชัยเคาะ 25 ต.ค. 2569 ให้ปิด · HR ยังเปิดแฟ้มของพนักงานที่ตัวเองดูแลได้ตามเดิม */
+    ensureCanManageTarget(req, req.employee);
     const row = await repo.certificates.findImage(req.params.id, Number(req.params.certificateId));
     if (!row) return next(notFound('ไม่พบรูปของใบรับรองนี้'));
 
@@ -431,6 +441,11 @@ employeesRouter.patch(
 employeesRouter.get(
   '/:id/portfolio/:portfolioId/image',
   asyncRoute(async (req, res, next) => {
+    /* เอกสารในแฟ้มพนักงานคือบัตรประชาชน/ใบรับรองวิชาชีพ/รูปถ่าย — อ่านได้เฉพาะคนที่ "จัดการบัญชีนั้นได้"
+       เส้น *แก้* ใส่ด่านนี้ไปแล้วตอนตรวจรอบ 9 แต่เส้น *อ่าน* ยังเปิดให้ทุกคนที่มีสิทธิ์หลังบ้าน
+       = ฝ่ายบุคคล/Admin HC เปิดดูบัตรประชาชนของผู้จัดการและ Super Admin ได้ (ตรวจรอบ 10A)
+       ดร.ธงชัยเคาะ 25 ต.ค. 2569 ให้ปิด · HR ยังเปิดแฟ้มของพนักงานที่ตัวเองดูแลได้ตามเดิม */
+    ensureCanManageTarget(req, req.employee);
     const row = await repo.portfolio.findImage(req.params.id, Number(req.params.portfolioId));
     if (!row) return next(notFound('ไม่พบรูปผลงานนี้'));
 
