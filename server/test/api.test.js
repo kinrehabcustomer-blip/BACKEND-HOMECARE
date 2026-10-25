@@ -1777,6 +1777,118 @@ if (process.env.RUN_DB_TESTS !== '1') {
     });
   });
 
+  // ---------- ของที่ถูกย้อน แก้ หรือทำซ้ำ (ตรวจรอบ 11A) ----------
+  describe('วงจรที่ไม่ได้เดินเป็นเส้นตรง — ยกเลิกกลางคัน · เปิดรอบที่ยกเลิกกลับ · แก้ดาวรอบเดิม', () => {
+    test('ยกเลิกเคสที่พนักงานไปทำมาแล้ว — เงินยังต้องอยู่ในคิวปล่อยค่าจ้างและในตัวนับเตือน', async () => {
+      const { today } = await sql.one(`SELECT to_char(now() AT TIME ZONE 'Asia/Bangkok','YYYY-MM-DD') AS today`);
+      const worked = await newCase();
+      await post(`/api/cases/${worked.case_id}/assign`, { employee_id: FIELD.employee_id });
+      const sched = await post(`/api/cases/${worked.case_id}/visits/bulk`,
+        { dates: [today], assigned_to: FIELD.employee_id }, MANAGER, 201);
+      await sql.run(
+        `UPDATE case_visits SET checked_in_by = :emp, check_in_at = now() - interval '3 hours',
+         check_out_at = now() - interval '1 hour', status = 'done' WHERE visit_id = :id`,
+        { emp: FIELD.employee_id, id: sched.visits[0].visit_id },
+      );
+
+      // เคสที่ยกเลิก "ก่อนเริ่มงาน" ต้องไม่โผล่ในคิว — ตัวเทียบว่าด่านยังแคบอยู่
+      const untouched = await newCase();
+      await post(`/api/cases/${untouched.case_id}/assign`, { employee_id: FIELD.employee_id });
+
+      const inQueue = async (id) => (await get('/api/payroll/case-queue', MANAGER)).body.some((r) => r.case_id === id);
+      const unreleased = async () =>
+        (await get(`/api/payroll/preview?period_to=${today}`, MANAGER)).body.unreleased_cases;
+
+      assert.ok(await inQueue(worked.case_id), 'ก่อนยกเลิกต้องอยู่ในคิว');
+      const before = await unreleased();
+
+      await post(`/api/cases/${worked.case_id}/cancel`, { reason: 'ลูกค้ายกเลิกกลางคัน' });
+      await post(`/api/cases/${untouched.case_id}/cancel`, { reason: 'ยกเลิกก่อนเริ่ม' });
+
+      assert.ok(await inQueue(worked.case_id), 'ยกเลิกแล้วแต่มีกะที่ทำจริง เงินต้องยังอยู่ในคิว');
+      assert.equal(await inQueue(untouched.case_id), false, 'ยกเลิกก่อนเริ่มงาน ต้องไม่รกคิว');
+      assert.equal(await unreleased(), before + 1, 'กระดิ่งต้องนับเคสที่ยกเลิกทั้งที่มีคนไปทำมาแล้ว');
+    });
+
+    test('เปิดเคสรอบที่ยกเลิกกลับมา ไม่ได้ถ้าสายต่อเคสนั้นมีรอบใหม่เดินอยู่แล้ว', async () => {
+      const first = await newCase();
+      const second = await post('/api/cases',
+        { case_type: 'other', client_name: 'ต่อรอบสอง', fee: 2000, staff_pay: 1200, renewed_from: first.case_id },
+        MANAGER, 201);
+      assert.equal(second.round_no, 2);
+
+      await post(`/api/cases/${second.case_id}/cancel`, { reason: 'ลูกค้าบอกไม่ต่อ' });
+      const third = await post('/api/cases',
+        { case_type: 'other', client_name: 'ต่อรอบสองใหม่', fee: 2000, staff_pay: 1200, renewed_from: first.case_id },
+        MANAGER, 201);
+
+      await post(`/api/cases/${second.case_id}/reopen`, {}, MANAGER, 409);
+      assert.equal(
+        (await sql.one('SELECT status FROM cases WHERE case_id = :id', { id: second.case_id })).status,
+        'cancelled',
+      );
+      // ยกเลิกรอบที่เดินอยู่แล้วค่อยเปิดใบเดิมกลับ ยังทำได้ตามเดิม
+      await post(`/api/cases/${third.case_id}/cancel`, { reason: 'สลับกลับไปใช้ใบเดิม' });
+      await post(`/api/cases/${second.case_id}/reopen`, {}, MANAGER, 200);
+    });
+
+    test('ญาติแก้ดาวรอบเดิมหลังเปลี่ยนคนดูแล — ชื่อที่ส่งกลับต้องเป็นคนที่ดาวลงจริง · เคสปิดนานแล้วให้ดาวไม่ได้', async () => {
+      const ratings = await import('../src/lib/ratings.js');
+      const family = await import('../src/lib/family.js');
+      await family.ensureFamilyTable();
+
+      const { today } = await sql.one(`SELECT to_char(now() AT TIME ZONE 'Asia/Bangkok','YYYY-MM-DD') AS today`);
+      const kase = await newCase();
+      const uid = `U${'c'.repeat(32)}`;
+      await sql.run(
+        `INSERT INTO case_family_links (case_id, line_user_id, display_name, invited_by, consent_by, accepted_at, can_invite)
+         VALUES (:cid, :uid, 'ญาติ', 'test', 'test', now(), true)`,
+        { cid: kase.case_id, uid },
+      );
+      await post(`/api/cases/${kase.case_id}/assign`, { employee_id: FIELD.employee_id });
+      const first = await post(`/api/cases/${kase.case_id}/visits/bulk`,
+        { dates: [today], assigned_to: FIELD.employee_id }, MANAGER, 201);
+      await sql.run(
+        `UPDATE case_visits SET checked_in_by = :emp, check_in_at = now() - interval '5 hours',
+         check_out_at = now() - interval '4 hours', status = 'done' WHERE visit_id = :id`,
+        { emp: FIELD.employee_id, id: first.visits[0].visit_id },
+      );
+
+      const one = await ratings.submitRating({ caseId: kase.case_id, round: 'w1', kind: 'family', line: uid, stars: 5 });
+      assert.equal(one.employee_id, FIELD.employee_id);
+
+      // เปลี่ยนคนดูแลกลางรอบ แล้วคนใหม่เข้าเวร
+      const other = await post('/api/employees', { first_name: 'คนใหม่', last_name: 'เข้าเวร', position: 'caregiver' }, MANAGER, 201);
+      await post(`/api/cases/${kase.case_id}/assign`, { employee_id: other.employee_id });
+      const second = await post(`/api/cases/${kase.case_id}/visits/bulk`,
+        { dates: [today], assigned_to: other.employee_id, planned_start: '20:00' }, MANAGER, 201);
+      const night = second.visits.find((v) => v.planned_start === '20:00');
+      await sql.run(
+        `UPDATE case_visits SET checked_in_by = :emp, check_in_at = now() - interval '1 hour',
+         check_out_at = now(), status = 'done' WHERE visit_id = :id`,
+        { emp: other.employee_id, id: night.visit_id },
+      );
+
+      const again = await ratings.submitRating({ caseId: kase.case_id, round: 'w1', kind: 'family', line: uid, stars: 1 });
+      const stored = await sql.one(
+        `SELECT employee_id, stars FROM case_ratings WHERE case_id = :cid AND round = 'w1'`,
+        { cid: kase.case_id },
+      );
+      assert.equal(stored.stars, 1);
+      assert.equal(again.employee_id, stored.employee_id, 'ชื่อที่แจ้งทีมตอนดาวต่ำต้องเป็นคนที่ดาวลงจริง');
+
+      await sql.run(
+        `UPDATE cases SET status = 'closed', closed_at = to_char(now() - interval '200 days', 'YYYY-MM-DD') WHERE case_id = :cid`,
+        { cid: kase.case_id },
+      );
+      assert.deepEqual(
+        await ratings.submitRating({ caseId: kase.case_id, round: 'w9', kind: 'family', line: uid, stars: 1 }),
+        { error: 'not_family' },
+        'เคสปิดเกิน 30 วัน ญาติต้องยิงดาวเข้าบัญชีพนักงานไม่ได้อีก',
+      );
+    });
+  });
+
   // ---------- token ที่ออกในวินาทีเดียวกับการเปลี่ยนรหัส ----------
   describe('Password change revokes same-second tokens', () => {
     test('older token from the same second is rejected; the new session cookie keeps working', async () => {

@@ -1163,6 +1163,29 @@ export async function close(caseId, endDate, actor) {
 export async function reopen(caseId, actor) {
   await transaction(async (tx) => {
     await caseForTransition(tx, caseId, ['closed', 'cancelled']);
+
+    /* สายต่อเคสต้องมีรอบที่ยังไม่ถูกยกเลิกได้ทีละใบ — renewalSource บังคับตอนสร้าง แต่ตอนเปิดกลับไม่มีใครดู
+       เคสจริง: ลูกค้าบอกไม่ต่อ → ยกเลิกเคสรอบ 2 → อีกสองวันลูกค้าเปลี่ยนใจ → แอดมินเปิดเคสรอบใหม่
+       (ระบบยอมให้ต่อได้เพราะรอบเดิมถูกยกเลิกแล้ว) → แล้วมีคนไปกด "เปิดเคสใหม่" กับรอบที่ยกเลิกไว้
+       ผลคือเคสรอบ 2 ของสัญญาเดียวกันมีสองใบพร้อมกัน ทั้งคู่ลงกะได้ ออกใบแจ้งหนี้ได้ และ
+       renewed_to บนเคสแม่โชว์ใบที่สร้างทีหลังใบเดียว อีกใบจึงหายจากสายตาแต่ยังเดินอยู่จริง */
+    const twin = await tx.one(
+      `SELECT r.case_id FROM cases me
+       JOIN cases r ON r.renewed_from = me.renewed_from
+       WHERE me.case_id = :id AND me.renewed_from IS NOT NULL
+         AND r.case_id <> me.case_id AND r.status <> 'cancelled'
+       ORDER BY r.created_at DESC LIMIT 1`,
+      { id: caseId },
+    );
+    if (twin) {
+      throw new ApiError(
+        409,
+        `สายต่อเคสนี้มีรอบที่เปิดอยู่แล้ว (${twin.case_id}) — เปิดเคสนี้กลับมาจะกลายเป็นรอบซ้อนกันสองใบ` +
+          ' ถ้าจะใช้ใบนี้แทน ให้ยกเลิกใบนั้นก่อน',
+        { existing_case_id: twin.case_id },
+      );
+    }
+
     await tx.run(
       `UPDATE cases
        SET status = CASE WHEN assigned_to IS NULL THEN 'unassigned' ELSE 'assigned' END,
@@ -2429,11 +2452,27 @@ export function payoutCases(month, employeeId) {
  * เดิมเคยเรียงตามความเร่งแล้วเลิกไปเพราะอ่านไม่ออกว่าทำไมแถวนี้อยู่บนแถวนั้น —
  * รอบนี้จึงส่ง pay_priority กับ waiting_days กลับไปให้หน้าเว็บแสดงเหตุผลบนแถวด้วย
  */
+/**
+ * "เคสที่ยกเลิกแล้วแต่ยังมีเงินค้างพนักงาน" — ต้องมีกะที่เช็คอินจริง (ไม่นับกะที่ยกเลิก)
+ * หรือเคยปล่อยเงินของเคสนี้ไปแล้ว · ต้องใช้ในบริบทที่มี `FROM cases c`
+ *
+ * เขียนที่เดียวแล้วใช้ทั้งคิวปล่อยค่าจ้าง (payQueue) และตัวนับเตือน (payroll/repo.js unreleasedCases)
+ * — สองที่นี้ต้องนับเคสชุดเดียวกันเสมอ ไม่งั้นกระดิ่งบอกว่าไม่มีอะไรค้างแต่ในคิวมีแถวอยู่
+ */
+export const CANCELLED_WITH_WORK = `(
+  EXISTS (SELECT 1 FROM case_visits cw WHERE cw.case_id = c.case_id
+            AND cw.check_in_at IS NOT NULL AND cw.status <> 'cancelled')
+  OR EXISTS (SELECT 1 FROM case_payouts cp WHERE cp.case_id = c.case_id)
+)`;
+
+/* เคสที่ยกเลิกแล้วแต่มีคนไปทำงานมาจริง จัดชั้นเดียวกับเคสที่ปิด — งานจบไปแล้วทั้งคู่
+   และเงินของกะที่ทำจริงต้องออก ไม่ใช่ค้างอยู่ท้ายคิวปนกับเคสที่ยังไม่เริ่ม */
+const PAY_OVER = `q.status IN ('closed', 'cancelled')`;
 const PAY_PRIORITY = `
   CASE
     WHEN ROUND((q.staff_pay - q.released)::numeric, 2) <= 0 THEN 6
-    WHEN q.status = 'closed' AND q.released = 0             THEN 1
-    WHEN q.status = 'closed'                                THEN 2
+    WHEN ${PAY_OVER} AND q.released = 0                     THEN 1
+    WHEN ${PAY_OVER}                                        THEN 2
     WHEN q.released > 0                                     THEN 3
     WHEN q.status = 'in_progress'                            THEN 4
     ELSE 5
@@ -2449,8 +2488,9 @@ const PAY_PRIORITY = `
  */
 const WAITING_SINCE = `
   CASE
-    WHEN q.status = 'closed'
-      THEN COALESCE(LEFT(q.closed_at, 10), LEFT(q.end_date, 10))
+    WHEN ${PAY_OVER}
+      THEN COALESCE(LEFT(q.closed_at, 10), LEFT(q.cancelled_at, 10), LEFT(q.end_date, 10),
+                    LEFT(q.first_visit_date, 10))
     ELSE COALESCE(LEFT(q.first_visit_date, 10), LEFT(q.start_date, 10), LEFT(q.created_at, 10))
   END`;
 
@@ -2459,7 +2499,7 @@ export function payQueue() {
     .all(
       `WITH q AS (
         SELECT c.case_id, c.title, c.client_name, c.status, c.staff_pay, c.fee,
-              c.case_type, c.service_kind, c.closed_at, c.end_date,
+              c.case_type, c.service_kind, c.closed_at, c.cancelled_at, c.end_date,
               c.start_date, c.created_at,
               COALESCE(p.released, 0)     AS released,
               COALESCE(p.installments, 0) AS installments_used,
@@ -2517,10 +2557,17 @@ export function payQueue() {
        ) lv ON lv.case_id = c.case_id
 
        WHERE c.staff_pay IS NOT NULL
-         /* สามสถานะนี้เท่านั้น = เคสที่มีคนทำงานอยู่จริงหรือทำจบแล้ว
-            ตัด unassigned ทิ้งเพราะยังไม่มีใครรับงาน จ่ายไปก็ไม่รู้จะจ่ายให้ใคร
-            และตัด cancelled เพราะงานไม่ได้เกิดขึ้น */
-         AND c.status IN ('assigned', 'in_progress', 'closed')
+         /* ตัด unassigned ทิ้งเพราะยังไม่มีใครรับงาน จ่ายไปก็ไม่รู้จะจ่ายให้ใคร
+
+            เคสที่ยกเลิกเคยถูกตัดทิ้งทั้งหมดด้วยเหตุผลว่า "งานไม่ได้เกิดขึ้น" ซึ่งจริงแค่ครึ่งเดียว:
+            ลูกค้าโทรยกเลิกวันที่ 4 ทั้งที่ลงกะไว้ 10 วัน พนักงานไปทำมาแล้ว 3 วัน — cancel() ตั้งใจ
+            ไม่แตะกะที่เช็คอินไปแล้วเพราะงานนั้นเกิดขึ้นจริง และ releasePay ก็ยอมให้ปล่อยเงินของเคส
+            ที่ยกเลิกอยู่แล้ว แต่คิวนี้กลับไม่โชว์ → เงินค่าจ้างของกะที่ทำจริงหายจากสายตาผู้จัดการ
+            ทันทีที่กดยกเลิกเคส ไม่มี error ไม่มีกระดิ่ง (พนักงานเห็นในหน้าค่าตอบแทนของตัวเองอยู่
+            ฝ่ายเดียว) · เอากลับเข้าคิวเฉพาะใบที่มีคนไปทำจริงหรือเคยปล่อยเงินไปแล้ว
+            เคสที่ยกเลิกก่อนเริ่มงาน (ส่วนใหญ่) ยังไม่ขึ้นคิวเหมือนเดิม */
+         AND (c.status IN ('assigned', 'in_progress', 'closed')
+              OR (c.status = 'cancelled' AND (${CANCELLED_WITH_WORK})))
       )
       SELECT r.*,
              /* คิดฝั่ง server ด้วยวันที่ไทย — นาฬิกาเครื่องผู้ใช้ตั้งผิดแล้วตัวเลขนี้เพี้ยนทันที */
