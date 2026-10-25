@@ -162,7 +162,10 @@ export async function accept(code, lineUserId, displayName) {
                ญาติจึงกดรับคำเชิญของเคสที่ปิดไปนานแล้วได้ (รหัสอายุ 7 วัน แต่เคสอาจปิดไปก่อน) */
             (c.status IN ('closed', 'cancelled') AND NOT (${WITHIN_GRACE})) AS case_over
      FROM case_family_links l JOIN cases c ON c.case_id = l.case_id
-     WHERE l.code_hash = :hash AND l.revoked_at IS NULL`,
+     WHERE l.code_hash = :hash AND l.revoked_at IS NULL
+     /* รหัสเก็บเป็น hash และไม่ถูกล้างทิ้งหลังใช้ (ดูหมายเหตุที่ UPDATE ข้างล่าง) ใบที่ยังไม่มีคนรับ
+        จึงต้องมาก่อนเสมอ เผื่อวันหนึ่ง newCode() สุ่มได้ซ้ำกับใบเก่าที่ใช้ไปแล้ว (1 ใน 887 ล้าน) */
+     ORDER BY l.accepted_at NULLS FIRST, l.link_id DESC`,
     { hash: hashCode(code), grace: CLOSED_GRACE_DAYS },
   );
   if (!link) return { ok: false, reason: 'not_found' };
@@ -171,18 +174,35 @@ export async function accept(code, lineUserId, displayName) {
   }
   if (link.expired) return { ok: false, reason: 'expired' };
   if (link.case_over) return { ok: false, reason: 'case_closed' };
+  /* LINE นี้เป็นญาติของเคสนี้อยู่แล้ว แต่ได้ "รหัสใบใหม่" มา (ทีมออกให้ซ้ำเพราะไม่รู้ว่าเข้าไปแล้ว)
+     เดิมเดินหน้า UPDATE ต่อจนชน uq_family_case_line = 500 → ฝั่งแชทตอบ "ระบบขัดข้องชั่วคราว"
+     แล้วญาติพิมพ์ซ้ำกี่ครั้งก็เจอเหมือนเดิม (ตรวจรอบ 12A) · ถือว่าสำเร็จ ไม่กินรหัสใบใหม่
+     (ใบนั้นยังว่างไว้ให้ญาติคนอื่นใช้ได้) */
+  const already = await memberLink(lineUserId, link.case_id);
+  if (already) return { ok: true, case_id: link.case_id, client_name: link.client_name };
   /* 🔴 UPDATE เป็นตัวตัดสินว่าใครได้รหัสใบนี้ ไม่ใช่ SELECT ข้างบน
      เดิม SELECT ตรวจ accepted_at แล้วค่อย UPDATE โดยไม่มีเงื่อนไข = lost update:
      ลูกสาวส่งรหัสต่อในกลุ่มไลน์ แล้วลูกสาวกับลูกชายพิมพ์พร้อมกัน ทั้งคู่ผ่าน SELECT
      แล้วเขียนทับกัน ตอบ { ok:true, client_name } ทั้งคู่ ทั้งที่เป็นสมาชิกจริงแค่คนเดียว
      คนที่แพ้จึงได้ชื่อผู้ป่วยไปด้วยโดยไม่มีสิทธิ์ (PDPA) · พิสูจน์แล้ว 30/30 รอบ
-     คืน 0 แถว = แพ้การแข่ง → 'used' และห้ามส่ง client_name กลับ (ฝั่ง chat มี JOIN_FAIL.used อยู่แล้ว) */
-  const won = await sql.one(
-    `UPDATE case_family_links SET line_user_id = :uid, display_name = :name, accepted_at = now(), code_hash = NULL
-     WHERE link_id = :id AND accepted_at IS NULL AND revoked_at IS NULL
-     RETURNING link_id`,
-    { uid: lineUserId, name: displayName ? String(displayName).slice(0, 80) : null, id: link.link_id },
-  );
+     คืน 0 แถว = แพ้การแข่ง → 'used' และห้ามส่ง client_name กลับ (ฝั่ง chat มี JOIN_FAIL.used อยู่แล้ว)
+
+     code_hash ต้อง "ไม่" ถูกล้างเป็น NULL ตรงนี้ — เดิมล้างทิ้ง ทำให้การส่งรหัสเดิมซ้ำ
+     (เน็ตกระตุก/กดสองที) หาแถวไม่เจอแล้วตอบ "ไม่พบรหัสนี้" ทั้งที่เพิ่งผูกสำเร็จไปเมื่อครู่
+     และคนที่เอารหัสจากกลุ่มไลน์มาใช้ตามก็ได้ 'not_found' แทน 'used' (ตรวจรอบ 12A) */
+  let won = null;
+  try {
+    won = await sql.one(
+      `UPDATE case_family_links SET line_user_id = :uid, display_name = :name, accepted_at = now()
+       WHERE link_id = :id AND accepted_at IS NULL AND revoked_at IS NULL
+       RETURNING link_id`,
+      { uid: lineUserId, name: displayName ? String(displayName).slice(0, 80) : null, id: link.link_id },
+    );
+  } catch (err) {
+    // ชน uq_family_case_line = อีกคำขอของ LINE เดียวกันเข้าเคสนี้ไปก่อนเสี้ยววินาที — ผลลัพธ์ที่ญาติต้องการเกิดขึ้นแล้ว
+    if (err?.code !== '23505') throw err;
+    return { ok: true, case_id: link.case_id, client_name: link.client_name };
+  }
   if (!won) return { ok: false, reason: 'used' };
   return { ok: true, case_id: link.case_id, client_name: link.client_name, invited_by: link.invited_by, via_family: link.via_family, first: true };
 }
@@ -245,21 +265,34 @@ export async function summaryFor(lineUserId) {
         { id: c.case_id },
       ),
       sql.all(
-        `SELECT r.report_date, r.report_time, r.condition_change, r.bp_systolic, r.bp_diastolic, r.pulse, r.spo2,
+        /* "เวลาที่วัด" เว้นว่างได้ — ใบที่เว้นไว้เคยส่งเวลาเป็น null ออกไป แล้วหน้า /family เอาไปตีเป็น
+           00:00 ของวันนั้น รายงานเย็นจึงไปจมอยู่ใต้ข้อความแชทของเมื่อเช้าทั้งวัน (ตรวจรอบ 12A)
+           ใช้เวลาที่กดบันทึกแทนแบบเดียวกับรายการรายงานในระบบงาน (cases/repo.js) */
+        `SELECT r.report_id, r.report_date, COALESCE(r.report_time, substr(r.created_at, 12, 5)) AS report_time,
+                r.condition_change, r.bp_systolic, r.bp_diastolic, r.pulse, r.spo2,
                 r.temperature_c, r.pain_score, r.symptoms, r.care_given, r.note, r.follow_up,
                 e.first_name AS staff_first, e.nickname AS staff_nick
          FROM case_reports r LEFT JOIN employees e ON e.employee_id = r.reported_by
          WHERE r.case_id = :id
-         ORDER BY r.report_date DESC, r.report_id DESC LIMIT 10`,
+         ORDER BY r.report_date DESC, COALESCE(r.report_time, substr(r.created_at, 12, 5)) DESC, r.report_id DESC
+         LIMIT 10`,
         { id: c.case_id },
       ),
     ]);
     const staffName = (r) => (r.staff_nick ? `${r.staff_first} (${r.staff_nick})` : r.staff_first) || null;
-    const [me, family, messages] = await Promise.all([
+    const [me, family, pending, messages] = await Promise.all([
       memberLink(lineUserId, c.case_id),
       sql.all(
         `SELECT display_name FROM case_family_links
          WHERE case_id = :id AND revoked_at IS NULL AND accepted_at IS NOT NULL ORDER BY accepted_at`,
+        { id: c.case_id },
+      ),
+      /* คำเชิญที่ออกไปแล้วแต่ยังไม่มีใครกดรับ ก็กินที่ในเพดาน 5 คน (activeCount นับด้วย)
+         เดิมหน้า /family นับเฉพาะคนที่เชื่อมแล้ว จอจึงขึ้น "1/5" พร้อมปุ่มชวนต่อ แต่กดแล้วได้
+         "ครบ 5 คนแล้ว" เพราะอีก 4 ใบยังค้างอยู่ — ส่งตัวเลขนี้ไปให้จอพูดตรงกับระบบ (ตรวจรอบ 12A) */
+      sql.one(
+        `SELECT count(*)::int AS n FROM case_family_links
+         WHERE case_id = :id AND revoked_at IS NULL AND accepted_at IS NULL AND code_expires_at > now()`,
         { id: c.case_id },
       ),
       messagesFor(c.case_id),
@@ -267,6 +300,7 @@ export async function summaryFor(lineUserId) {
     out.push({
       can_invite: !!me?.can_invite,
       family: family.map((f) => f.display_name || 'ญาติ'),
+      family_pending: pending?.n || 0,
       family_max: FAMILY_MAX_PER_CASE,
       messages,
       case_id: c.case_id,
@@ -278,6 +312,7 @@ export async function summaryFor(lineUserId) {
       })),
       next_visit: next ? { date: next.visit_date, planned: next.planned_start, staff: staffName(next) } : null,
       reports: reports.map((r) => ({
+        id: r.report_id, // คีย์ของแถวในไทม์ไลน์ฝั่งหน้าเว็บ — วันเดียวกัน เวลาเดียวกัน คนเดียวกัน เคยชนกัน
         date: r.report_date,
         time: r.report_time,
         staff: staffName(r),
