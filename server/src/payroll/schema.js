@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { zodDate } from '../lib/dates.js';
+import { zodDate, zodPastDate } from '../lib/dates.js';
 
 export const PAYROLL_STATUSES = ['draft', 'paid', 'cancelled'];
 
@@ -23,9 +23,13 @@ export const createRunSchema = z.object({
   note: optionalText,
 });
 
-/** ปิดรอบเป็น "จ่ายแล้ว" — ไม่ส่งวันที่มา = วันนี้ (ปกติกดตอนโอนเงินเสร็จพอดี) */
+/* ปิดรอบเป็น "จ่ายแล้ว" — ไม่ส่งวันที่มา = วันนี้ (ปกติกดตอนโอนเงินเสร็จพอดี)
+   วันที่โอนเป็นอนาคตไม่ได้ (ตรวจรอบ 13 · เกณฑ์เดียวกับวันที่รับชำระของใบแจ้งหนี้)
+   รอบที่ขึ้นว่า "จ่ายแล้ว เมื่อ 31 ธ.ค. 2099" คือบันทึกว่าเงินออกไปแล้วในวันที่ยังมาไม่ถึง
+   และสลิปของพนักงานเรียงด้วย pay_date (ดู repo.js ORDER BY r.pay_date DESC) ใบนั้นจะค้าง
+   อยู่หัวรายการสลิปของเขาไปตลอด ทับใบจริงของเดือนปัจจุบัน */
 export const payRunSchema = z.object({
-  pay_date: date.optional(),
+  pay_date: zodPastDate(z).optional(),
   method: optionalText,
   note: optionalText,
 });
@@ -37,7 +41,7 @@ export const payRunSchema = z.object({
 export const payNowSchema = z.object({
   period_to: date,
   note: optionalText,
-  pay_date: date.optional(),
+  pay_date: zodPastDate(z).optional(),   // เหตุผลเดียวกับ payRunSchema
   method: optionalText,
   payout_ids: z.array(z.coerce.number().int().positive()).min(1, 'ไม่มีก้อนค่าจ้างให้จ่าย').max(10000),
 });
