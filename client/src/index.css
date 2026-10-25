@@ -852,6 +852,13 @@ select option:checked {
   cursor: help;
 }
 :root[data-theme='dark'] .stale-flag { background: #34291a; color: #e0b877; }
+/* นัดกายภาพเกินจำนวนครั้งที่ลูกค้าซื้อ (ตรวจรอบ 15) — ตัวเลข "15 / 10" อ่านผ่านตาได้ง่าย ต้องมีป้ายสะดุดตา */
+.over-quota-flag {
+  display: inline-block; margin-left: 0.5rem; padding: 1px 0.5rem; border-radius: 0.375rem;
+  font-size: 0.75rem; font-weight: 700; white-space: nowrap; color: #8a2b2b; background: #fdf1f1;
+}
+:root[data-theme='dark'] .over-quota-flag { background: #3a1f1f; color: #e8a0a0; }
+
 /* เคสต้นทางยกเลิกแล้ว — คนละเรื่องกับ "ข้อมูลไม่ตรง" (สีส้ม) จึงใช้สีแดงให้แยกออกจากกันในแถวเดียวกัน */
 .case-cancelled-flag { color: #8a2b2b; background: #fdf1f1; }
 :root[data-theme='dark'] .case-cancelled-flag { background: #3a1f1f; color: #e8a0a0; }

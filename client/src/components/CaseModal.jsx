@@ -337,6 +337,11 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
   // วันที่ยกเลิกไม่นับเป็นนัดที่จองไว้ แต่ยังเก็บไว้เป็นประวัติใน popup
   const bookedVisits = visits.filter((v) => v.status !== 'cancelled').length;
   const doneVisits = visits.filter((v) => v.status === 'done').length;
+  /* นัดเกินจำนวนครั้งที่ลูกค้าซื้อ (ตรวจรอบ 15) — ระบบไม่เคยกันและไม่เคยเตือน
+     ของเดิมขึ้นแค่ "นัดแล้ว 15 / 10 ครั้ง" ซึ่งเป็นตัวเลขสองตัววางคู่กันเฉย ๆ
+     เจ้าหน้าที่ต้องสังเกตเองว่าตัวซ้ายมากกว่าตัวขวา = บริษัทให้บริการเกินที่เก็บเงิน
+     ไม่บล็อก เพราะลูกค้าซื้อเพิ่มหรือชดเชยนัดที่ยกเลิกเป็นเรื่องปกติ — แค่ต้องเห็น */
+  const overQuota = isPhysio && item?.physio_sessions > 0 && bookedVisits > item.physio_sessions;
 
 
   /* กะที่ทำจบแล้วแต่ค่าจ้างยังไม่ได้อนุมัติ — ตอนปิดเคสคือจังหวะที่ผู้จัดการกำลังดูงานก้อนนี้อยู่พอดี
@@ -574,6 +579,11 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                         นัดแล้ว <strong>{bookedVisits}</strong>
                         {item.physio_sessions ? ` / ${item.physio_sessions}` : ''} ครั้ง
                         {' · '}ไปแล้ว {doneVisits} ครั้ง
+                        {overQuota && (
+                          <span className="over-quota-flag">
+                            เกินแพ็กที่ซื้อ {bookedVisits - item.physio_sessions} ครั้ง
+                          </span>
+                        )}
                       </>
                     ) : (
                       <>นัดไว้ <strong>{bookedVisits}</strong> กะ{' · '}ไปแล้ว {doneVisits} กะ</>
