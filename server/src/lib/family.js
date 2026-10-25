@@ -227,6 +227,73 @@ export const WITHIN_GRACE = `coalesce(nullif(c.closed_at, ''), nullif(c.cancelle
  */
 export const FAMILY_CASE_OPEN = `(c.status NOT IN ('closed', 'cancelled') OR ${WITHIN_GRACE})`;
 
+/**
+ * เวลาที่เคสปิด/ยกเลิกจริง (ต้องมี alias `c` = cases) — ใช้คำนวณ "วันสุดท้ายที่ญาติยังเปิดดูได้"
+ * เป็นชิ้นหัวชิ้นเดียวกับที่ WITHIN_GRACE ใช้เปรียบเทียบ · ถ้าสองตัวนี้หลุดจากกันเมื่อไร
+ * วันที่ที่บอกญาติจะไม่ตรงกับวันที่ระบบปิดประตูจริง จึงเตือนไว้ตรงนี้ (ตัวทดสอบตรวจซ้ำอีกชั้น)
+ */
+export const CASE_ENDED_AT = `coalesce(nullif(c.closed_at, ''), nullif(c.cancelled_at, ''), 'epoch')::timestamp`;
+if (!WITHIN_GRACE.startsWith(CASE_ENDED_AT)) {
+  console.warn('[family] CASE_ENDED_AT ไม่ตรงกับหัวของ WITHIN_GRACE แล้ว — วันหมดสิทธิ์ที่แจ้งญาติอาจเพี้ยน');
+}
+
+/**
+ * "เคสปิดมาแล้วยังไม่เกิน N วัน" แบบเลือกชื่อพารามิเตอร์ได้ — สร้างจาก WITHIN_GRACE ตัวเดิมโดยตรง ไม่ก๊อปสูตร
+ * มีไว้เพื่อให้คำสั่งเดียวถามได้หลายช่วงพร้อมกัน เช่น "ยังไม่เกิน 30 วัน แต่พ้น 27 วันแล้ว" = เหลือสิทธิ์อีก ≤3 วัน
+ * (ดร.ธงชัย 25 ต.ค. 2569 "ส่งข้อความปิดเคส เตือนก่อนหมดอีก 3 วัน")
+ */
+export const withinDays = (param = 'grace') => WITHIN_GRACE.replaceAll(':grace', `:${param}`);
+
+/**
+ * เคสที่ต้องส่งข้อความถึงญาติรอบนี้ (ดร.ธงชัย 25 ต.ค. 2569 "ส่งข้อความปิดเคส เตือนก่อนหมดอีก 3 วัน")
+ *   closed   = เพิ่งปิด/ยกเลิกภายใน closedWindowDays วัน → ข้อความขอบคุณ + บอกว่ายังเปิดดูย้อนหลังได้ถึงเมื่อไร
+ *   expiring = สิทธิ์เปิดดูเหลือ ≤ leadDays วัน          → ข้อความเตือนให้เปิดดู/บันทึกไว้ก่อน
+ * เฉพาะเคสที่มีญาติผูก LINE แล้ว · ส่งออกไปแค่ชื่อต้นของผู้ป่วย ไม่มีชื่อโรค/อาการ/นามสกุล
+ * (ข้อความเด้งขึ้นหน้าจอล็อกของญาติ คนข้าง ๆ เห็นได้)
+ *
+ * 🔴 หน้าต่าง closedWindowDays กันรอบแรกหลัง deploy ยิงย้อนหลังรวดเดียว — ถ้าเอา "ปิดแล้วและยังอยู่ใน
+ *    ผ่อนผัน" ตรง ๆ เคสที่ปิดไป 29 วันแล้วจะได้ข้อความขอบคุณพร้อมกันทั้งก้อน
+ */
+export async function lifecycleDue({ closedWindowDays = 2, leadDays = 3 } = {}) {
+  await ensureFamilyTable();
+  const grace = CLOSED_GRACE_DAYS;
+  // :lead = ช่วงที่ "ยังเหลือสิทธิ์เกิน leadDays วัน" → NOT (…) คือกลุ่มที่เหลือ ≤ leadDays วัน
+  const lead = Math.max(0, grace - leadDays);
+  const justClosed = `(${withinDays('fresh')})`;
+  const nearlyOver = `NOT (${withinDays('lead')})`;
+  const rows = await sql.all(
+    `WITH fam AS (
+       SELECT case_id, array_agg(DISTINCT line_user_id) AS family FROM case_family_links
+       WHERE accepted_at IS NOT NULL AND revoked_at IS NULL AND line_user_id IS NOT NULL GROUP BY case_id)
+     SELECT c.case_id, split_part(COALESCE(c.client_name, ''), ' ', 1) AS client_first, fam.family,
+            to_char(${CASE_ENDED_AT}, 'YYYY-MM-DD') AS ended_on,
+            to_char(${CASE_ENDED_AT} + make_interval(days => :grace), 'YYYY-MM-DD') AS access_until,
+            ceil(extract(epoch FROM (${CASE_ENDED_AT} + make_interval(days => :grace)) - now()) / 86400)::int AS days_left,
+            ${justClosed} AS just_closed, ${nearlyOver} AS nearly_over
+     FROM cases c JOIN fam ON fam.case_id = c.case_id
+     WHERE c.status IN ('closed', 'cancelled') AND ${WITHIN_GRACE}
+       AND (${justClosed} OR ${nearlyOver})
+     ORDER BY c.case_id`,
+    { grace, fresh: closedWindowDays, lead },
+  );
+  const brief = (r) => ({
+    case_id: r.case_id,
+    client_first: r.client_first || null,
+    family: r.family,
+    ended_on: r.ended_on,
+    access_until: r.access_until,
+    days_left: Number(r.days_left),
+  });
+  return {
+    grace_days: grace,
+    lead_days: leadDays,
+    closed_window_days: closedWindowDays,
+    closed: rows.filter((r) => r.just_closed).map(brief),
+    // เคสเดียวเข้าได้ทั้งสองกลุ่มเมื่อผ่อนผันสั้นมาก — ให้ข้อความปิดเคสมาก่อน ไม่ส่งสองใบในรอบเดียว
+    expiring: rows.filter((r) => r.nearly_over && !r.just_closed).map(brief),
+  };
+}
+
 const short = (s, n = 180) => {
   const t = String(s ?? '').replace(/\s+/g, ' ').trim();
   return t.length > n ? `${t.slice(0, n)}…` : t;
