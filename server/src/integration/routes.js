@@ -214,6 +214,7 @@ integrationRouter.post(
     const row = await family.messagePhoto(p.case_id, Number(p.message_id));
     if (!row) throw new ApiError(404, 'ไม่พบรูป');
     res.setHeader('Content-Type', row.mime);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Cache-Control', 'private, no-store');
     res.send(row.data);
   }),
@@ -646,6 +647,7 @@ integrationRouter.post(
     const row = await family.messagePhoto(p.case_id, p.message_id);
     if (!row) throw new ApiError(404, 'ไม่พบรูป');
     res.setHeader('Content-Type', row.mime || 'image/jpeg');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Cache-Control', 'private, no-store');
     res.send(row.data);
   }),

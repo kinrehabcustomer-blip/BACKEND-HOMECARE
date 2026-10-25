@@ -28,6 +28,19 @@ export function errorHandler(err, req, res, next) {
     return res.status(err.status).json({ error: err.message, details: err.details });
   }
 
+  /*
+   * body-parser ตีกลับตั้งแต่ก่อนถึง route — เดิมตกไปเป็น 500 "เกิดข้อผิดพลาดภายในระบบ"
+   * ซึ่งเป็นคำตอบที่คนหน้างานแก้เองไม่ได้ ทั้งที่สาเหตุคือ "รูปที่แนบใหญ่เกิน" ซึ่งแก้ได้ทันที
+   * เจอได้จริงกับรูปที่ไม่ได้ย่อ: เพดาน JSON คือ 8 MB แต่ data URL โตขึ้นจากไฟล์จริงราว 1.37 เท่า
+   * ไฟล์ราว 6 MB ขึ้นไปจึงถูกตัดทิ้งก่อนที่ด่าน 5 MB ใน decodeImage จะได้ทำงานและบอกเหตุผล
+   */
+  if (err?.type === 'entity.too.large') {
+    return res.status(413).json({ error: 'ไฟล์ที่แนบมาใหญ่เกินไป — รูปต้องไม่เกิน 5 MB ต่อใบ (ย่อรูปแล้วลองใหม่)' });
+  }
+  if (err?.type === 'entity.parse.failed') {
+    return res.status(400).json({ error: 'ข้อมูลที่ส่งมาไม่ใช่ JSON ที่ถูกต้อง' });
+  }
+
   // 23505 = unique_violation ของ Postgres (เช่น เลขบัตรประชาชนซ้ำ)
   // ทั้งพนักงานและลูกค้าห้ามเลขบัตรซ้ำ — ต้องบอกให้ตรงว่าไปชนกับใคร ไม่งั้นคนอ่านตามหาผิดที่
   if (err?.code === '23505' && err.constraint?.includes('national_id')) {

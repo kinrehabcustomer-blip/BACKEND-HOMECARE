@@ -1695,6 +1695,88 @@ if (process.env.RUN_DB_TESTS !== '1') {
     });
   });
 
+  // ---------- ไฟล์: ใครเปิดรูปได้ และใบที่มีแต่รูปยังแก้ได้ (ตรวจรอบ 10A) ----------
+  describe('รูปในระบบ — เจ้าของรูปคือคนที่ถ่าย ไม่ใช่คนที่ถือกะอยู่ตอนนี้', () => {
+    const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(32, 7)]);
+
+    test('สลับกะให้คนใหม่แล้ว คนใหม่ต้องเปิดเซลฟี่ของคนเดิมไม่ได้ (เจ้าของรูปยังเปิดได้)', async () => {
+      const other = await post('/api/employees', { first_name: 'Shift', last_name: 'Taker', position: 'caregiver' }, MANAGER, 201);
+      // บัญชีใหม่ติดด่าน "ต้องตั้งรหัสก่อน" (403) ซึ่งจะกลบผลของด่านที่ต้องการวัด
+      await sql.run('UPDATE employees SET must_change_password = FALSE WHERE employee_id = :id', { id: other.employee_id });
+      const kase = await newCase();
+      await post(`/api/cases/${kase.case_id}/assign`, { employee_id: FIELD.employee_id }, MANAGER);
+      const { visit_id } = await sql.one(
+        `INSERT INTO case_visits (case_id, visit_date, assigned_to, status, checked_in_by, check_in_at,
+           check_in_photo_data, check_in_photo_mime, check_in_photo_size)
+         VALUES (:cid, to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD'), :me, 'scheduled', :me, now(),
+                 :data, 'image/jpeg', :size)
+         RETURNING visit_id`,
+        { cid: kase.case_id, me: FIELD.employee_id, data: JPEG, size: JPEG.length },
+      );
+
+      assert.equal((await get(`/api/my/visits/${visit_id}/photo`, FIELD)).status, 200, 'เจ้าของรูปต้องยังเปิดได้');
+
+      // แอดมินสลับกะไปให้คนอื่นหลังคนแรกเช็คอินไปแล้ว — รูปยังเป็นหน้าของคนแรก
+      await sql.run('UPDATE case_visits SET assigned_to = :who WHERE visit_id = :id', { who: other.employee_id, id: visit_id });
+      const taker = emp(other.employee_id, 'caregiver');
+      assert.equal((await get(`/api/my/visits/${visit_id}/photo`, taker)).status, 404);
+      // ฝ่ายหลังบ้านยังเปิดตรวจได้ตามเดิม
+      assert.equal((await get(`/api/cases/${kase.case_id}/visits/${visit_id}/photo`, MANAGER)).status, 200);
+    });
+
+    test('รายงานที่มีแต่รูปแผล แก้ช่องอื่นได้ แต่สั่งลบรูปทิ้งจนใบว่างไม่ได้', async () => {
+      const kase = await newCase();
+      const { report_id } = await sql.one(
+        `INSERT INTO case_reports (case_id, report_date, report_type, wound_photo_data, wound_photo_mime, wound_photo_size)
+         VALUES (:cid, to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD'), 'routine', :data, 'image/jpeg', :size)
+         RETURNING report_id`,
+        { cid: kase.case_id, data: JPEG, size: JPEG.length },
+      );
+      const patch = (body) =>
+        fetch(`${base}/api/cases/${kase.case_id}/reports/${report_id}`, {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json', cookie: `${COOKIE_NAME}=${signToken(MANAGER)}` },
+          body: JSON.stringify(body),
+        });
+
+      // รูปที่เก็บไว้แล้วอยู่คอลัมน์ wound_photo_data — ถ้านับไม่เป็นเนื้อหา ใบนี้จะแก้อะไรไม่ได้เลย
+      assert.equal((await patch({ report_type: 'change' })).status, 200);
+      assert.equal((await patch({ wound_photo: null })).status, 400, 'ลบรูปเดียวที่มี = ใบว่าง ต้องไม่ให้ผ่าน');
+
+      // ตอบกลับต้องไม่มีไบต์รูปปนมา แม้เป็น PATCH ที่ไม่มีช่องไหนเปลี่ยนเลย
+      const noop = await (await patch({})).json();
+      assert.equal('wound_photo_data' in noop, false);
+      assert.equal(noop.has_wound_photo, true);
+    });
+  });
+
+  // ---------- ญาติ: เคสที่ปิดเกินช่วงผ่อนผันต้องเปิดอะไรไม่ได้อีก ----------
+  describe('สิทธิ์ญาติหมดพร้อมกันทุกเส้น (รวมเส้นที่ส่งไบต์ของรูป)', () => {
+    test('เคสปิดเกิน 30 วัน memberLink ต้องคืน null — ไม่ใช่แค่ซ่อนจากหน้าสรุป', async () => {
+      const family = await import('../src/lib/family.js');
+      await family.ensureFamilyTable();
+      const kase = await newCase();
+      const uid = `U${'b'.repeat(32)}`;
+      await sql.run(
+        `INSERT INTO case_family_links (case_id, line_user_id, display_name, invited_by, consent_by, accepted_at, can_invite)
+         VALUES (:cid, :uid, 'ญาติ', 'test', 'test', now(), true)`,
+        { cid: kase.case_id, uid },
+      );
+      assert.ok(await family.memberLink(uid, kase.case_id), 'เคสเปิดอยู่ต้องผ่าน');
+
+      const close = (days) =>
+        sql.run(
+          `UPDATE cases SET status = 'closed', closed_at = to_char(now() - make_interval(days => :d), 'YYYY-MM-DD')
+           WHERE case_id = :cid`,
+          { d: days, cid: kase.case_id },
+        );
+      await close(5);
+      assert.ok(await family.memberLink(uid, kase.case_id), 'ยังอยู่ในช่วงผ่อนผัน 30 วัน ต้องผ่าน');
+      await close(90);
+      assert.equal(await family.memberLink(uid, kase.case_id), null, 'พ้นช่วงผ่อนผันแล้วต้องเปิดรูป/โพสต์ไม่ได้');
+    });
+  });
+
   // ---------- token ที่ออกในวินาทีเดียวกับการเปลี่ยนรหัส ----------
   describe('Password change revokes same-second tokens', () => {
     test('older token from the same second is rejected; the new session cookie keeps working', async () => {

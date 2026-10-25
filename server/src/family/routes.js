@@ -143,9 +143,13 @@ familyRouter.delete(
 familyRouter.get(
   '/cases/:caseId/messages/:messageId/photo',
   asyncRoute(async (req, res, next) => {
+    // เส้นเดียวในกลุ่มนี้ที่ลืมเรียก ensureFamilyTable — บนฐานใหม่/หลังล้างข้อมูล รูปแรกที่กดเปิด
+    // จะได้ 500 "relation case_family_messages does not exist" แทน 404 (ตรวจรอบ 10A)
+    await family.ensureFamilyTable();
     const row = await family.messagePhoto(req.params.caseId, Number(req.params.messageId));
     if (!row) return next(notFound('ไม่พบรูป'));
     res.setHeader('Content-Type', row.mime);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Cache-Control', 'private, max-age=3600');
     res.send(row.data);
   }),

@@ -863,6 +863,7 @@ casesRouter.get(
     const row = await repo.findVisitPhoto(Number(req.params.visitId), req.params.id);
     if (!row) return next(notFound('กะนี้ไม่มีรูปเช็คอิน'));
     res.setHeader('Content-Type', row.mime);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Cache-Control', 'private, max-age=3600');
     res.send(row.data);
   }),
@@ -891,7 +892,13 @@ export async function ensureVisitInCase(caseId, visitId) {
 }
 
 export async function editReport(caseId, report, input) {
-  if (!hasReportContent({ ...report, ...input })) {
+  /* รูปแผลที่บันทึกไว้แล้วอยู่ในคอลัมน์ wound_photo_data/has_wound_photo — ไม่ใช่ช่อง `wound_photo`
+     ที่ hasReportContent มองหา (ช่องนั้นมีเฉพาะตอน "ส่งรูปใหม่เข้ามา")
+     ใบที่มีแต่รูปแผล ไม่มีข้อความเลย จึงถูกนับว่า "ว่าง" ตอนแก้ แล้วแก้วันที่/กะ/ประเภทไม่ได้
+     ทั้งที่รูปยังอยู่ — ระบบตอบว่า "รายงานต้องมีข้อมูลอย่างน้อยหนึ่งช่อง" ซึ่งไม่จริง
+     ส่ง wound_photo: null มาเอง (= สั่งลบรูป) ยังทับค่านี้และถูกนับว่าว่างตามเดิม ซึ่งถูกต้องแล้ว */
+  const withStoredPhoto = { ...report, wound_photo: report.has_wound_photo ? 'kept' : null };
+  if (!hasReportContent({ ...withStoredPhoto, ...input })) {
     throw new ApiError(400, 'รายงานต้องมีข้อมูลอย่างน้อยหนึ่งช่อง — ถ้าต้องการลบทั้งใบให้กดลบรายงาน');
   }
   return repo.updateReport(caseId, report.report_id, input);
@@ -939,6 +946,7 @@ casesRouter.get(
     const row = await repo.findReportPhoto(Number(req.params.reportId), req.params.id);
     if (!row) return next(notFound('รายงานนี้ไม่มีรูปแผล'));
     res.setHeader('Content-Type', row.mime);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Cache-Control', 'private, max-age=3600');
     res.send(row.data);
   }),

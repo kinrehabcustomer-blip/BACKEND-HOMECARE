@@ -116,12 +116,21 @@ export async function createInvite(caseId, actorName, { canInvite = true, via = 
   return { code, days: CODE_DAYS };
 }
 
-/** ลิงก์ของ LINE นี้ในเคสนี้ (เชื่อมแล้ว ยังไม่ถูกปลด) — ใช้ตรวจสิทธิ์ทุกเส้นฝั่งญาติ */
+/**
+ * ลิงก์ของ LINE นี้ในเคสนี้ (เชื่อมแล้ว ยังไม่ถูกปลด) — ใช้ตรวจสิทธิ์ทุกเส้นฝั่งญาติ
+ *
+ * ต้องผ่านกติกา 30 วันหลังเคสปิดด้วย (FAMILY_CASE_OPEN) เหมือนทุกเส้นของญาติ
+ * เดิมตรวจแค่ "ถูกเชิญและยังไม่ถูกปลด" — หน้า /family ซ่อนเคสที่ปิดเกิน 30 วันไปแล้ว (summaryFor กรองอยู่)
+ * แต่ /family/photo กับ /family/post รับ case_id มาจากคำขอตรงๆ ญาติที่เก็บลิงก์รูปเก่าไว้
+ * จึงยังดึงรูปในไทม์ไลน์ของเคสที่ปิดไปนานแล้วได้เรื่อยๆ ทั้งที่เปิดหน้าดูเองไม่ได้แล้ว (PDPA · ตรวจรอบ 10A)
+ */
 export const memberLink = (lineUserId, caseId) =>
   sql.one(
-    `SELECT link_id, display_name, can_invite, consent_by FROM case_family_links
-     WHERE line_user_id = :uid AND case_id = :case_id AND revoked_at IS NULL AND accepted_at IS NOT NULL`,
-    { uid: lineUserId, case_id: caseId },
+    `SELECT l.link_id, l.display_name, l.can_invite, l.consent_by
+     FROM case_family_links l JOIN cases c ON c.case_id = l.case_id
+     WHERE l.line_user_id = :uid AND l.case_id = :case_id AND l.revoked_at IS NULL AND l.accepted_at IS NOT NULL
+       AND ${FAMILY_CASE_OPEN}`,
+    { uid: lineUserId, case_id: caseId, grace: CLOSED_GRACE_DAYS },
   );
 
 /** ญาติคนแรกชวนญาติอีกคน (แบบ ข) — รวมทั้งเคสไม่เกิน 5 · ความยินยอมอ้างอิงจากที่แอดมินยืนยันไว้กับญาติคนแรก */

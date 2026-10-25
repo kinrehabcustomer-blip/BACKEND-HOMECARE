@@ -8,7 +8,7 @@ import {
 } from '../cases/schema.js';
 // กติกา "แก้แล้วต้องไม่เหลือใบเปล่า" ใช้ตัวเดียวกับฝั่งหลังบ้าน — เขียนแยกสองที่แล้ววันหนึ่งมันจะไม่ตรงกัน
 import { editReport, ensureVisitInCase } from '../cases/routes.js';
-import { decodeImage } from '../employees/schema.js';
+import { decodeImage, imageSchema } from '../employees/schema.js';
 import { distanceMeters, DEFAULT_GEOFENCE_M } from '../lib/geo.js';
 import * as payroll from '../payroll/repo.js';
 import { checkInSchema, checkOutSchema, attendanceQuerySchema } from './schema.js';
@@ -340,6 +340,7 @@ myRouter.get(
     const row = await cases.findReportPhoto(Number(req.params.reportId), req.params.id);
     if (!row) return next(notFound('รายงานนี้ไม่มีรูปแผล'));
     res.setHeader('Content-Type', row.mime);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Cache-Control', 'private, max-age=3600');
     res.send(row.data);
   }),
@@ -377,17 +378,27 @@ myRouter.post(
   }),
 );
 
-/** ส่งไฟล์รูปเซลฟี่ตอนเช็คอินออกไปตรงๆ — แท็ก <img> เรียกเส้นนี้ (คุกกี้ session ไปด้วยอัตโนมัติ) */
+/**
+ * ส่งไฟล์รูปเซลฟี่ตอนเช็คอินออกไปตรงๆ — แท็ก <img> เรียกเส้นนี้ (คุกกี้ session ไปด้วยอัตโนมัติ)
+ *
+ * เจ้าของรูปคือ "คนที่กดเช็คอิน" (checked_in_by) ไม่ใช่ "คนที่ถือกะอยู่ตอนนี้" (assigned_to)
+ * สองค่านี้แยกจากกันได้จริง: แอดมินสลับกะไปให้คนอื่นหลังจากคนแรกเช็คอินไปแล้ว
+ * เทียบแค่ assigned_to คนใหม่จึงเปิดรูปหน้าของเพื่อนร่วมงานได้ (พิสูจน์แล้ว ตรวจรอบ 10A)
+ * รูปใบหน้าเป็นข้อมูลส่วนบุคคล — ฝั่งภาคสนามให้ดูได้เฉพาะรูปของตัวเอง
+ * (ฝ่ายหลังบ้านยังเปิดตรวจได้ตามเดิมที่ /api/cases/:id/visits/:visitId/photo)
+ */
 myRouter.get(
   '/visits/:id/photo',
   asyncRoute(async (req, res, next) => {
     const visit = await myVisit(req);
     if (!visit) return next(notFound('ไม่พบกะนี้'));
+    if (visit.checked_in_by !== req.user.employee_id) return next(notFound('กะนี้ไม่มีรูปเช็คอินของคุณ'));
 
     const row = await cases.findVisitPhoto(visit.visit_id);
     if (!row) return next(notFound('กะนี้ไม่มีรูปเช็คอิน'));
 
     res.setHeader('Content-Type', row.mime);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Cache-Control', 'private, max-age=3600');
     res.send(row.data);
   }),
@@ -428,7 +439,9 @@ myRouter.post(
     const caseRow = await myCaseOr404(req);
     if (CLOSED_CASE.includes(caseRow.status)) throw new ApiError(409, 'เคสนี้ปิดแล้ว ส่งข้อความไม่ได้');
     const body = typeof req.body?.body === 'string' ? req.body.body.trim().slice(0, 1000) : '';
-    const photo = toImage(req.body?.image);
+    /* ตรวจด้วยตัวเดียวกับที่ทีมหลังบ้านใช้โพสต์รูปเข้าไทม์ไลน์เดียวกัน (family/routes.js)
+       เดิมส่ง req.body.image ดิบเข้า decodeImage — ของที่ไม่ใช่ข้อความทำให้ผู้ใช้ได้ข้อความ error ภาษาอังกฤษ */
+    const photo = toImage(imageSchema.optional().nullable().parse(req.body?.image ?? null));
     if (!body && !photo) throw new ApiError(400, 'กรุณาพิมพ์ข้อความหรือแนบรูป');
     await family.ensureFamilyTable();
     const emp = await sql.one('SELECT first_name, nickname FROM employees WHERE employee_id = :id', { id: req.user.employee_id });
@@ -448,6 +461,7 @@ myRouter.get(
     const row = await family.messagePhoto(req.params.id, Number(req.params.messageId));
     if (!row) throw notFound('ไม่พบรูป');
     res.setHeader('Content-Type', row.mime);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Cache-Control', 'private, no-store');
     res.send(row.data);
   }),

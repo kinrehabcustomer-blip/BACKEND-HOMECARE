@@ -322,6 +322,7 @@ employeesRouter.get(
     if (!row) return next(notFound('พนักงานคนนี้ยังไม่มีรูป'));
 
     res.setHeader('Content-Type', row.photo_mime);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
     // เป็นข้อมูลส่วนบุคคล — แคชได้เฉพาะเครื่องผู้ใช้ (private)
     // เปลี่ยนรูปแล้วไม่ค้างรูปเก่า เพราะหน้าเว็บต่อ ?v=updated_at ท้าย URL (ดู api.employeePhotoUrl)
     res.setHeader('Cache-Control', 'private, max-age=3600');
@@ -376,6 +377,7 @@ employeesRouter.get(
     if (!row) return next(notFound('ไม่พบรูปของใบรับรองนี้'));
 
     res.setHeader('Content-Type', row.image_mime);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
     // รูปใบรับรองไม่เปลี่ยนบ่อย แต่เป็นข้อมูลส่วนบุคคล — ให้เบราว์เซอร์แคชได้เฉพาะเครื่องผู้ใช้ (private)
     res.setHeader('Cache-Control', 'private, max-age=3600');
     res.send(row.image_data);
@@ -433,6 +435,7 @@ employeesRouter.get(
     if (!row) return next(notFound('ไม่พบรูปผลงานนี้'));
 
     res.setHeader('Content-Type', row.image_mime);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Cache-Control', 'private, max-age=3600');
     res.send(row.image_data);
   }),

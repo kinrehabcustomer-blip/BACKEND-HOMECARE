@@ -1625,7 +1625,7 @@ export async function removeVisit(caseId, visitId) {
 // SELECT นี้ไม่ดึง fee/ราคาใดๆ เลย — ฝั่ง field ไม่เห็นข้อมูลการเงิน (ไม่ต้อง strip ทีหลัง)
 const MY_VISIT = `
   SELECT v.visit_id, v.case_id, v.visit_date, v.status AS visit_status, v.note,
-         v.assigned_to, v.planned_start, v.planned_end,
+         v.assigned_to, v.checked_in_by, v.planned_start, v.planned_end,
          v.check_in_at, v.check_out_at, v.check_in_lat, v.check_in_lng,
          v.check_in_distance_m, v.location_flagged,
          v.check_in_late_minutes, v.off_schedule,
@@ -3304,7 +3304,7 @@ const REPORT_VISIT = `
 `;
 /* ไล่ชื่อคอลัมน์เองแทน r.* — r.* จะลากไบนารีรูปแผล (หลักแสนไบต์ต่อใบ) มาทุกแถวที่โหลดรายการ
    ประกอบจาก REPORT_COLUMNS ที่มาจาก schema อยู่แล้ว เพิ่มช่องใหม่จึงไม่ต้องมาต่อรายการที่นี่ซ้ำ */
-const REPORT_COLS = [
+const REPORT_BASE_COLS = [
   'r.report_id',
   'r.case_id',
   ...REPORT_COLUMNS.map((c) => `r.${c}`),
@@ -3315,10 +3315,9 @@ const REPORT_COLS = [
   'r.reported_by_name',
   'r.created_at',
   'r.updated_at',
-  'v.visit_date',
-  'v.planned_start',
-  'v.planned_end',
 ].join(', ');
+
+const REPORT_COLS = [REPORT_BASE_COLS, 'v.visit_date', 'v.planned_start', 'v.planned_end'].join(', ');
 
 /**
  * รูปแผลเป็นไบนารีหลักแสนไบต์ ส่งกลับไปกับ JSON ทุกครั้งที่โหลดรายการไม่ไหว
@@ -3396,10 +3395,16 @@ export function listReportsForVisit(visitId) {
   );
 }
 
-/** รายงานใบเดียว — กรองด้วย case_id ด้วยเสมอ ใบของเคสอื่นต้องไม่หลุดออกทาง path ของเคสนี้ */
+/**
+ * รายงานใบเดียว — กรองด้วย case_id ด้วยเสมอ ใบของเคสอื่นต้องไม่หลุดออกทาง path ของเคสนี้
+ *
+ * ไล่ชื่อคอลัมน์แทน `SELECT *` ด้วยเหตุผลเดียวกับตอนโหลดรายการ: `*` ลากไบนารีรูปแผล
+ * (หลักแสนไบต์) ออกจากฐานข้อมูลมาทุกครั้งที่กด "แก้รายงาน" ทั้งที่ไม่มีใครใช้ค่านั้นเลย
+ * สิ่งที่ผู้เรียกต้องรู้คือ "ใบนี้มีรูปอยู่ไหม" ซึ่ง has_wound_photo ตอบได้เท่ากัน
+ */
 export function findReport(caseId, reportId) {
   return sql.one(
-    'SELECT * FROM case_reports WHERE report_id = :rid AND case_id = :cid',
+    `SELECT ${REPORT_BASE_COLS} FROM case_reports r WHERE r.report_id = :rid AND r.case_id = :cid`,
     { rid: reportId, cid: caseId },
   );
 }

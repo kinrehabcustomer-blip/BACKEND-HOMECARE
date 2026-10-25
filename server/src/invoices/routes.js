@@ -466,6 +466,7 @@ invoicesRouter.get(
     const row = Number.isInteger(slipId) ? await repo.findSlipImage(req.params.id, slipId) : null;
     if (!row) return next(notFound('ไม่พบสลิปนี้'));
     res.setHeader('Content-Type', row.image_mime);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
     // ข้อมูลการเงินของลูกค้า — แคชได้เฉพาะเครื่องผู้ใช้ (private) · สลิปไม่ถูกแก้ทับ มีแต่ลบ
     res.setHeader('Cache-Control', 'private, max-age=3600');
     res.send(row.image_data);
