@@ -8,6 +8,7 @@ import { randomInt } from 'node:crypto';
 import { FRONT_POSITIONS } from '../employees/schema.js';
 import { linkLineByCode } from '../lib/lineLinkCode.js';
 import { outboxAck, outboxPending } from '../invoices/share.js';
+import { caseRatings, dueRatings, employeeStars, submitRating } from '../lib/ratings.js';
 import { createEmployeeSchema, decodeImage } from '../employees/schema.js';
 import * as repo from '../employees/repo.js';
 import * as cases from '../cases/repo.js';
@@ -404,7 +405,7 @@ integrationRouter.post(
               (c.service_kind = 'physio' OR c.physio_package_id IS NOT NULL OR c.case_type = 'physiotherapy') AS is_physio,
               r.physio_treatments, r.rehab_minutes, r.assist_level, r.walk_aid, r.walk_distance_m,
               r.pain_score, r.post_pain_score, r.post_bp_systolic, r.post_bp_diastolic, r.post_pulse, r.rehab_after,
-              split_part(COALESCE(r.reported_by_name, ''), ' ', 1) AS by_first,
+              split_part(COALESCE(r.reported_by_name, ''), ' ', 1) AS by_first, r.reported_by,
               (SELECT array_agg(DISTINCT l.line_user_id) FROM case_family_links l
                 WHERE l.case_id = r.case_id AND l.accepted_at IS NOT NULL AND l.revoked_at IS NULL AND l.line_user_id IS NOT NULL) AS family
        FROM case_reports r JOIN cases c ON c.case_id = r.case_id
@@ -413,7 +414,10 @@ integrationRouter.post(
       { since: p.since },
     );
     const cursor = rows.length ? rows[rows.length - 1].report_id : p.since;
-    res.json({ cursor, reports: rows.filter((r) => r.family?.length) });
+    // ดาวสองทาง (25 ต.ค. 2569): ดาวเฉลี่ยของผู้บันทึกจากญาติ แนบไปกับรายงาน (โชว์เมื่อมี ≥3 รีวิว · lib/ratings.js)
+    const out = rows.filter((r) => r.family?.length);
+    for (const r of out) r.stars = await employeeStars(r.reported_by);
+    res.json({ cursor, reports: out });
   }),
 );
 
@@ -527,6 +531,8 @@ integrationRouter.post(
         check_in: v.check_in, check_out: v.check_out, staff: nameOf(v.s_first, v.s_nick),
       })),
       reports, family_count: fam?.n || 0, messages,
+      // ดาวสองทาง (25 ต.ค. 2569) — ห้องแชท admin เป็นของทีม จึงเห็นคะแนนทั้งสองฝั่ง
+      assigned_stars: await employeeStars(c.assigned_to), ratings: await caseRatings(c.case_id),
     });
   }),
 );
@@ -611,6 +617,36 @@ integrationRouter.post(
     res.setHeader('Content-Type', row.mime || 'image/jpeg');
     res.setHeader('Cache-Control', 'private, no-store');
     res.send(row.data);
+  }),
+);
+
+/**
+ * ดาวสองทาง (ดร.ธงชัย 25 ต.ค. 2569 · lib/ratings.js) — ฝั่ง chat ถามดาวทาง LINE แล้วส่งคะแนนกลับมาเก็บที่นี่
+ *   /ratings/due    ตั๋ว 'kin-rating-due' {} → เคสที่ถึงรอบถามวันนี้ + LINE ญาติ/ผู้ดูแล
+ *   /ratings/submit ตั๋ว 'kin-rating-submit' {case_id, round, kind: family|staff, line, stars, reason?} → { ok, low }
+ */
+const ROUND_RE = /^(d3|w\d{1,3}|end)$/;
+integrationRouter.post(
+  '/ratings/due',
+  asyncRoute(async (req, res) => {
+    const { token } = hireSchema.parse(req.body);
+    if (!verifySigned(token, 'kin-rating-due')) throw new ApiError(401, 'ลายเซ็นไม่ถูกต้องหรือหมดอายุ');
+    res.json({ due: await dueRatings() });
+  }),
+);
+
+integrationRouter.post(
+  '/ratings/submit',
+  asyncRoute(async (req, res) => {
+    const { token } = hireSchema.parse(req.body);
+    const p = verifySigned(token, 'kin-rating-submit');
+    if (!p || typeof p.case_id !== 'string' || !ROUND_RE.test(String(p.round)) || !['family', 'staff'].includes(p.kind)
+      || !isLineUserId(p.line) || !Number.isInteger(p.stars) || p.stars < 1 || p.stars > 5) {
+      throw new ApiError(401, 'ลายเซ็นไม่ถูกต้องหรือข้อมูลไม่ครบ');
+    }
+    const r = await submitRating({ caseId: p.case_id, round: p.round, kind: p.kind, line: p.line, stars: p.stars, reason: p.reason });
+    if (r.error) throw new ApiError(r.error === 'not_found' ? 404 : 403, r.error);
+    res.json(r);
   }),
 );
 
