@@ -12,7 +12,7 @@ import { sql } from '../db/index.js';
  */
 export const FAMILY_MAX_PER_CASE = 5;
 const CODE_DAYS = 7;
-const CLOSED_GRACE_DAYS = 30;
+export const CLOSED_GRACE_DAYS = 30;
 const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // ตัด 0/O/1/I/L ที่อ่านสับสน
 
 export const hashCode = (code) => createHash('sha256').update(`kin-family:${String(code).toUpperCase()}`).digest('hex');
@@ -162,8 +162,18 @@ export async function accept(code, lineUserId, displayName) {
  * ไม่ได้เซ็ต closed_at เดิมจึงตกไปที่ now() ซึ่งแปลว่า "ยังไม่หมดอายุ" ตลอดกาล เคสที่ยกเลิกไปแล้ว
  * ญาติดูข้อมูลผู้ป่วยได้ไม่สิ้นสุด · ไม่มีวันปิดบันทึกไว้เลย = ถือว่าหมดอายุ ('epoch') ปลอดภัยกว่าเปิดค้าง
  */
-const WITHIN_GRACE = `coalesce(nullif(c.closed_at, ''), nullif(c.cancelled_at, ''), 'epoch')::timestamp
+export const WITHIN_GRACE = `coalesce(nullif(c.closed_at, ''), nullif(c.cancelled_at, ''), 'epoch')::timestamp
             > now() - make_interval(days => :grace)`;
+
+/**
+ * "เคสนี้ยังส่งข้อมูลถึงญาติได้ไหม" — ชิ้นส่วน SQL ที่ทุกเส้นของญาติต้องใช้ตัวเดียวกัน
+ * ต้องมี alias `c` = cases และพารามิเตอร์ `:grace` (= CLOSED_GRACE_DAYS) ในคำสั่งนั้นด้วย
+ *
+ * เดิมบังคับเฉพาะ "ทางดึง" (ญาติเปิดหน้า /family) ส่วน "ทางส่ง" เข้า LINE สามเส้นใน integration/routes.js
+ * ไม่เช็คเลย (ตรวจรอบ 7) — เคสที่ปิดเกิน 30 วันแล้วทีมลงรายงานย้อนหลัง cron จึงยังดึงไปส่งถึงญาติ
+ * ที่สิทธิ์หมดไปแล้วได้ ทั้งที่เจ้าตัวเปิดหน้าดูเองไม่ได้แล้ว (PDPA)
+ */
+export const FAMILY_CASE_OPEN = `(c.status NOT IN ('closed', 'cancelled') OR ${WITHIN_GRACE})`;
 
 const short = (s, n = 180) => {
   const t = String(s ?? '').replace(/\s+/g, ' ').trim();
@@ -176,7 +186,7 @@ export async function summaryFor(lineUserId) {
     `SELECT c.case_id, c.client_name, c.status, c.service_kind, c.start_date, c.end_date
      FROM case_family_links l JOIN cases c ON c.case_id = l.case_id
      WHERE l.line_user_id = :uid AND l.revoked_at IS NULL AND l.accepted_at IS NOT NULL
-       AND (c.status NOT IN ('closed', 'cancelled') OR ${WITHIN_GRACE})
+       AND ${FAMILY_CASE_OPEN}
      ORDER BY c.case_id`,
     { uid: lineUserId, grace: CLOSED_GRACE_DAYS },
   );

@@ -265,23 +265,36 @@ export function listForEmployee(employeeId) {
     `${SELECT_CASE}
      WHERE c.assigned_to = :id
         OR EXISTS (SELECT 1 FROM case_team t WHERE t.case_id = c.case_id AND t.employee_id = :id)
-        /* ไม่นับกะที่ยกเลิก — ให้ตรงกับ hasFieldAccess ไม่งั้นรายการโชว์เคสที่เปิดเข้าไปแล้วได้ 403 */
+        /* ไม่นับกะที่ยกเลิก และนับย้อนหลังแค่ในหน้าต่างเวลาเดียวกับ hasFieldAccess
+           ไม่งั้นรายการจะโชว์เคสที่เปิดเข้าไปแล้วได้ 404 (หรือกลับกัน ซ่อนเคสที่ยังเปิดได้) */
         OR EXISTS (SELECT 1 FROM case_visits v
-                   WHERE v.case_id = c.case_id AND v.assigned_to = :id AND v.status <> 'cancelled')
+                   WHERE v.case_id = c.case_id AND v.assigned_to = :id AND v.status <> 'cancelled'
+                     AND v.visit_date >= to_char(now() AT TIME ZONE 'Asia/Bangkok' - make_interval(days => :window), 'YYYY-MM-DD'))
      ORDER BY c.case_id DESC`,
-    { id: employeeId },
+    { id: employeeId, window: FIELD_ACCESS_WINDOW_DAYS },
   );
 }
 
 /**
+ * เขตกั้นเวลาของ "เคยมีกะในเคส" — 30 วันนับจากวันนี้ (กะในอนาคตผ่านเสมอ เพราะ visit_date ยัง >= เส้นนี้)
+ *
+ * ค่ากลางค่าเดียวของทั้งระบบ ใช้ทั้งรายการเคส · รายละเอียดเคส · รายงานอาการ/รูปแผล · แชทญาติ
+ * เดิมมีแต่แชทญาติที่กั้น ส่วนเส้น "รายงานอาการ + รูปแผล" เปิดตลอดกาล (ตรวจรอบ 7) ซึ่งกลับหัวกลับหาง
+ * เพราะบันทึกทางการแพทย์อ่อนไหวกว่าข้อความแชทเสียอีก — ผู้ดูแลที่ไปแทนเวรกะเดียวเมื่อหลายเดือนก่อน
+ * ไม่ควรอ่านรายงานทุกใบของเคสนั้นต่อไปได้ไม่สิ้นสุด รวมใบที่เขียนขึ้นหลังเขาออกไปแล้ว
+ */
+export const FIELD_ACCESS_WINDOW_DAYS = 30;
+
+/**
  * พนักงานภาคสนามเข้าถึงเคสนี้ได้ไหม (ผู้รับผิดชอบหลัก / อยู่ในทีม / มีกะในเคส) — ใช้กันดูเคสคนอื่น
  *
- * windowDays (ไม่ใส่ = ไม่จำกัดเวลา ตามพฤติกรรมเดิม): นับเฉพาะกะที่เกิดภายใน N วันล่าสุด
- * ใช้กับเส้นที่ "เปิดค้างไว้ตลอดกาลแล้วเสียหาย" โดยเฉพาะแชทญาติ — คนที่ถูกสลับออกจากเคส
- * หรือลาออกไปแล้วไม่ควรอ่าน/ตอบข้อความของครอบครัวผู้ป่วยต่อไปได้ไม่สิ้นสุด เพียงเพราะเคยมีกะเมื่อปีก่อน
+ * windowDays: นับเฉพาะกะที่เกิดภายใน N วันล่าสุด · ไม่ใส่ = ใช้ค่ากลาง FIELD_ACCESS_WINDOW_DAYS
+ * (ส่ง null มาเองเท่านั้นจึงจะไม่จำกัดเวลา — ตอนนี้ไม่มีเส้นไหนใช้ ตั้งใจให้ "ปลอดภัยไว้ก่อน" เป็นค่าตั้งต้น)
+ * เหตุผลที่ต้องมีหน้าต่างเวลา: คนที่ถูกสลับออกจากเคสหรือลาออกไปแล้วไม่ควรอ่านข้อมูลสุขภาพ
+ * และข้อความของครอบครัวผู้ป่วยต่อไปได้ไม่สิ้นสุด เพียงเพราะเคยมีกะหนึ่งกะเมื่อปีก่อน
  * (ผู้รับผิดชอบหลักและคนในทีมยังผ่านตามเดิม เพราะสองอย่างนั้นคือ "สถานะปัจจุบัน" ที่แอดมินถอดออกได้)
  */
-export async function hasFieldAccess(employeeId, caseId, { windowDays = null } = {}) {
+export async function hasFieldAccess(employeeId, caseId, { windowDays = FIELD_ACCESS_WINDOW_DAYS } = {}) {
   const days = Number.isFinite(Number(windowDays)) && Number(windowDays) > 0 ? Math.trunc(Number(windowDays)) : null;
   const row = await sql.one(
     `SELECT 1 FROM cases c

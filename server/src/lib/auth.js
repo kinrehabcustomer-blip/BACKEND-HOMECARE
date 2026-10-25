@@ -194,6 +194,23 @@ export function requireAuth(req, res, next) {
 }
 
 /**
+ * employee_id ของเซสชันที่ติดมากับคำขอ ถ้ามีและยังไม่หมดอายุ — ไม่โยน error ไม่แตะ DB ไม่ล้างคุกกี้
+ *
+ * ใช้กับเส้นที่ "ไม่ต้องล็อกอินก็เรียกได้ แต่ต้องรู้ว่าเป็นเบราว์เซอร์เดิมหรือเปล่า"
+ * ตอนนี้มีที่เดียวคือ GET /api/auth/line (ตั๋วใช้ครั้งเดียว แต่กดย้อนกลับ/โหลดซ้ำจากเครื่องเดิมต้องไม่พัง)
+ * ไม่ใช้แทน requireAuth เด็ดขาด — ตัวนี้เชื่อ token อย่างเดียว ไม่ได้เช็คว่าบัญชีถูกปิดหรือเปลี่ยนรหัสไปแล้ว
+ */
+export function sessionEmployeeId(req) {
+  const token = req.cookies?.[COOKIE_NAME];
+  if (!token) return null;
+  try {
+    return jwt.verify(token, SECRET).sub ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * ด่านตามหมวดสิทธิ์ — วางต่อจาก requireAuth เสมอ (ต้องมี req.user ก่อน)
  * ตำแหน่งถูกอ่านสดมาแล้วใน requireAuth จึงไม่ต้อง query ซ้ำ และลดสิทธิ์ระหว่าง session ได้ทันที
  */

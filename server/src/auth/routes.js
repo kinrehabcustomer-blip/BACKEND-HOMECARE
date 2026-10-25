@@ -12,11 +12,12 @@ import {
   requireAuth,
   roleForPosition,
   permissionsFor,
+  sessionEmployeeId,
   signToken,
   verifyPassword,
 } from '../lib/auth.js';
 import { sendOtpEmail } from '../lib/mailer.js';
-import { ensureLineColumn, verifyLineTicket, verifySigned } from '../lib/lineBridge.js';
+import { claimLineTicket, ensureLineColumn, verifyLineTicket, verifySigned } from '../lib/lineBridge.js';
 import { linkLineByCode } from '../lib/lineLinkCode.js';
 
 export const authRouter = Router();
@@ -133,6 +134,14 @@ authRouter.get(
     const employee = await sql.one('SELECT * FROM employees WHERE line_user_id = :uid', { uid: lineUserId });
     if (!employee) return res.redirect(302, `/login?line=${encodeURIComponent(req.query.t)}${to !== '/' ? `&to=${encodeURIComponent(to)}` : ''}`);
     if (BLOCKED_STATUSES[employee.status]) return res.redirect(302, '/login?line_error=blocked');
+
+    /* ตั๋วใบนี้ออกคุกกี้ได้ครั้งเดียว (ดู claimLineTicket ใน lib/lineBridge.js) — URL ของตั๋วหลุดไปอยู่ใน
+       ประวัติเบราว์เซอร์/log/แชทได้ตลอด 10 นาทีที่ตั๋วยังไม่หมดอายุ
+       ยกเว้นคำขอที่ถือคุกกี้ของพนักงานคนเดียวกันอยู่แล้ว = เบราว์เซอร์เดิมที่เพิ่งเข้าไปสำเร็จ
+       (กดย้อนกลับ · โหลดซ้ำ · prefetch) ปล่อยผ่านโดยไม่ต้องจองใหม่ ไม่งั้นคนทำถูกจะโดนเด้งออก */
+    if (sessionEmployeeId(req) !== employee.employee_id && !(await claimLineTicket(req.query.t, employee.employee_id))) {
+      return res.redirect(302, '/login?line_error=used');
+    }
 
     await sql.run(
       `UPDATE employees SET last_login_at = to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')

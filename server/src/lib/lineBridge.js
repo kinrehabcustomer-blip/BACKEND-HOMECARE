@@ -37,6 +37,44 @@ export function verifySigned(token, purpose) {
 
 export const isLineUserId = (u) => typeof u === 'string' && /^U[0-9a-f]{32}$/.test(u);
 
+/*
+ * ตั๋ว 'kin-staff' ใช้ออกคุกกี้ได้ครั้งเดียว (เหตุผลเดียวกับ admin_sso_used ใน auth/routes.js)
+ *
+ * ตั๋วเดินทางผ่าน LINE ไปถึงพนักงาน และไปโผล่เป็น URL ของหน้า /login?line=<ตั๋ว> ซึ่งเป็นหน้าที่
+ * ไม่ต้องล็อกอิน — มันจึงค้างอยู่ในประวัติเบราว์เซอร์ ใน log ของ proxy และในแชทที่ถูกส่งต่อ
+ * อายุตั๋ว 10 นาที (ยาวกว่า admin-sso 5 เท่า) คนที่เห็น URL ในช่วงนั้นเอาไปเข้าแทนเจ้าตัวได้ตลอด
+ *
+ * จองตอน "กำลังจะออกคุกกี้" เท่านั้น ไม่ใช่ตอนตรวจลายเซ็น — เพราะเส้นทางที่ LINE ยังไม่ผูกกับพนักงาน
+ * ส่งตั๋วใบเดิมต่อไปให้ POST /auth/line-link และ POST /auth/line-code ใช้ยืนยันความเป็นเจ้าของ LINE อีกครั้ง
+ * (ดู client/src/pages/LoginPage.jsx) ถ้าเผาตั๋วตั้งแต่ตอนตรวจ การผูกบัญชีครั้งแรกจะพังทั้งเส้น
+ */
+let usedReady = null;
+export const ensureTicketUsedTable = () =>
+  (usedReady ??= sql
+    .run(`CREATE TABLE IF NOT EXISTS line_ticket_used (
+            token_hash  TEXT PRIMARY KEY,
+            employee_id TEXT,
+            used_at     TIMESTAMPTZ NOT NULL DEFAULT now())`)
+    .catch((err) => {
+      usedReady = null;
+      throw err;
+    }));
+
+export const hashTicket = (token) => createHash('sha256').update(`kin-line-ticket:${String(token)}`).digest('hex');
+
+/** จองตั๋วใบนี้ — true = ยังไม่เคยถูกใช้ ออกคุกกี้ได้ · false = เคยใช้ไปแล้ว ต้องกดปุ่มใน LINE ใหม่ */
+export async function claimLineTicket(token, employeeId) {
+  await ensureTicketUsedTable();
+  // ตั๋วอายุ 10 นาที เก็บไว้ 1 วันก็เกินพอที่จะกันใช้ซ้ำ — ไม่ปล่อยให้ตารางโตไม่สิ้นสุด
+  await sql.run(`DELETE FROM line_ticket_used WHERE used_at < now() - interval '1 day'`);
+  return Boolean(
+    await sql.run('INSERT INTO line_ticket_used (token_hash, employee_id) VALUES (:h, :id) ON CONFLICT DO NOTHING', {
+      h: hashTicket(token),
+      id: employeeId,
+    }),
+  );
+}
+
 export function verifyLineTicket(token) {
   const p = verifySigned(token, 'kin-staff');
   return p && isLineUserId(p.u) ? p.u : null;

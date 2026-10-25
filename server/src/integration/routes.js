@@ -421,12 +421,17 @@ integrationRouter.post(
               r.physio_treatments, r.rehab_minutes, r.assist_level, r.walk_aid, r.walk_distance_m,
               r.pain_score, r.post_pain_score, r.post_bp_systolic, r.post_bp_diastolic, r.post_pulse, r.rehab_after,
               split_part(COALESCE(r.reported_by_name, ''), ' ', 1) AS by_first, r.reported_by,
-              (SELECT array_agg(DISTINCT l.line_user_id) FROM case_family_links l
-                WHERE l.case_id = r.case_id AND l.accepted_at IS NOT NULL AND l.revoked_at IS NULL AND l.line_user_id IS NOT NULL) AS family
+              /* เคสปิด/ยกเลิกเกินช่วงผ่อนผัน 30 วัน = ไม่มีญาติให้ส่งแล้ว (กติกาเดียวกับหน้า /family · lib/family.js)
+                 ตัดที่ "รายชื่อผู้รับ" ไม่ใช่ตัดทั้งแถว เพราะแถวนี้ยังต้องเดินทางไปให้ฝั่ง chat ตรวจค่าผิดปกติ
+                 แจ้งทีมพยาบาลอยู่ (เคสไม่มีญาติ = family ว่าง ฝั่ง chat ไม่ส่งหาใคร) และตัวชี้ cursor ต้องเดินต่อ */
+              (CASE WHEN ${family.FAMILY_CASE_OPEN} THEN
+                (SELECT array_agg(DISTINCT l.line_user_id) FROM case_family_links l
+                  WHERE l.case_id = r.case_id AND l.accepted_at IS NOT NULL AND l.revoked_at IS NULL AND l.line_user_id IS NOT NULL)
+              END) AS family
        FROM case_reports r JOIN cases c ON c.case_id = r.case_id
        WHERE r.report_id > :since AND COALESCE(r.reported_by_name, '') NOT LIKE '%(LINE)'
        ORDER BY r.report_id LIMIT 50`,
-      { since: p.since },
+      { since: p.since, grace: family.CLOSED_GRACE_DAYS },
     );
     const cursor = rows.length ? rows[rows.length - 1].report_id : p.since;
     // ดาวสองทาง (25 ต.ค. 2569): ดาวเฉลี่ยของผู้บันทึกจากญาติ แนบไปกับรายงาน (โชว์เมื่อมี ≥3 รีวิว · lib/ratings.js)
@@ -472,9 +477,12 @@ integrationRouter.post(
                        OR EXISTS (SELECT 1 FROM case_visits v WHERE v.case_id = c.case_id AND v.assigned_to = e.employee_id
                                     AND v.status <> 'cancelled' AND v.visit_date >= to_char(now() AT TIME ZONE 'Asia/Bangkok' - interval '14 days', 'YYYY-MM-DD')))) AS staff
        FROM case_family_messages m JOIN cases c ON c.case_id = m.case_id
-       WHERE m.message_id > :since AND m.deleted_at IS NULL AND c.status NOT IN ('cancelled')
+       /* เดิมกันแค่ 'cancelled' — เคสที่ปิดไปนานแล้วยังแจ้งเตือนญาติได้อยู่ ทั้งที่เปิดหน้า /family ไม่ได้แล้ว
+          ใช้กติกาเดียวกับทุกเส้นของญาติ: ปิด/ยกเลิกแล้วส่งต่อได้อีก 30 วัน (ตรวจรอบ 7)
+          แถวที่ถูกกรองออกไม่ทำให้ cursor ค้าง — cursor เดินตามแถวที่ส่งจริง แถวที่เก่ากว่านั้นถูกข้ามถาวร */
+       WHERE m.message_id > :since AND m.deleted_at IS NULL AND ${family.FAMILY_CASE_OPEN}
        ORDER BY m.message_id LIMIT 50`,
-      { since: p.since },
+      { since: p.since, grace: family.CLOSED_GRACE_DAYS },
     );
     const cursor = rows.length ? rows[rows.length - 1].message_id : p.since;
     res.json({
@@ -677,9 +685,10 @@ integrationRouter.post(
              GROUP BY case_id)
        -- w.* / p.* มีคอลัมน์ case_id ซ้ำ (pg เอาตัวหลังทับ → p ไม่มีแถว = case_id null) จึงวาง c.case_id ไว้หลังสุด
        SELECT w.*, p.*, split_part(COALESCE(c.client_name, ''), ' ', 1) AS client_first, fam.family, COALESCE(v.shifts, 0) AS shifts, c.case_id
-       FROM w JOIN fam ON fam.case_id = w.case_id JOIN cases c ON c.case_id = w.case_id
+       -- เคสปิด/ยกเลิกเกินช่วงผ่อนผัน 30 วัน ไม่ส่งสรุปรายสัปดาห์ถึงญาติอีก (กติกาเดียวกับหน้า /family · ตรวจรอบ 7)
+       FROM w JOIN fam ON fam.case_id = w.case_id JOIN cases c ON c.case_id = w.case_id AND ${family.FAMILY_CASE_OPEN}
        LEFT JOIN p ON p.case_id = w.case_id LEFT JOIN v ON v.case_id = w.case_id`,
-      { from, to, pFrom, pTo },
+      { from, to, pFrom, pTo, grace: family.CLOSED_GRACE_DAYS },
     );
     const pick = (r, a) => ({
       reports: r[`${a}_reports`] || 0, sys: r[`${a}_sys`], dia: r[`${a}_dia`], sys_max: r[`${a}_sys_max`], sys_min: r[`${a}_sys_min`],
