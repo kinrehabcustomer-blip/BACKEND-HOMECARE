@@ -34,6 +34,7 @@ const {
   staffPayUpdateForTransaction,
   payoutCancellationForUpdate,
   assessReleaseCapacity,
+  suggestedPay,
   MAX_INSTALLMENTS,
 } = await import('../src/cases/repo.js');
 const {
@@ -213,6 +214,84 @@ describe('assessReleaseCapacity — ห้ามปล่อยค่าจ้�
 
   test('staff_pay ถูกล้างระหว่างทำรายการ = ไม่เขียน payout', () => {
     assert.equal(assessReleaseCapacity(null, 7000, 1000).reason, 'staff_pay_not_set');
+  });
+
+  test('ส่งยอดที่ระบบเสนอมาด้วย: ไม่ระบุยอด = ปล่อยแค่ยอดที่เสนอ ไม่ใช่ยอดคงเหลือเต็ม', () => {
+    // เคสยกเลิก ยอดเหมา 20,000 · เสนอ 6,000 · ยังไม่เคยปล่อย
+    assert.deepEqual(assessReleaseCapacity(20000, 0, undefined, 6000), {
+      staff_pay: 20000,
+      released: 0,
+      remaining: 20000,
+      amount: 6000,
+    });
+  });
+
+  test('ยอดที่เสนอเป็นข้อเสนอ ไม่ใช่เพดาน — ผู้จัดการพิมพ์เกินได้ถึงยอดเหมา', () => {
+    assert.deepEqual(assessReleaseCapacity(20000, 0, 9000, 6000), {
+      staff_pay: 20000,
+      released: 0,
+      remaining: 20000,
+      amount: 9000,
+    });
+    assert.equal(assessReleaseCapacity(20000, 0, 20001, 6000).reason, 'amount_exceeds_remaining');
+  });
+
+  test('จ่ายครบตามกะที่ไปจริงแล้ว: กด "ปล่อยที่เหลือ" ต้องไม่เทยอดของกะที่ไม่มีใครไป', () => {
+    const verdict = assessReleaseCapacity(20000, 6000, undefined, 6000);
+    assert.equal(verdict.reason, 'prorated_fully_released');
+    assert.equal(verdict.remaining, 14000, 'ยอดเหมาคงเหลือยังรายงานตามจริง');
+    assert.equal(verdict.suggested_pay, 6000);
+    // แต่ถ้าผู้จัดการตั้งใจจ่ายเพิ่มเอง ยังทำได้
+    assert.equal(assessReleaseCapacity(20000, 6000, 1000, 6000).amount, 1000);
+  });
+
+  test('ไม่ส่งยอดที่เสนอมา = พฤติกรรมเดิมเป๊ะ', () => {
+    assert.deepEqual(
+      assessReleaseCapacity(20000, 7000, undefined),
+      assessReleaseCapacity(20000, 7000, undefined, 20000),
+    );
+  });
+});
+
+// ---------- ค่าจ้างตามสัดส่วนของเคสที่ถูกยกเลิกกลางคัน ----------
+describe('suggestedPay — เคสยกเลิก จ่ายตามกะที่ไปจริง กะที่เหลือไม่ต้องจ่าย', () => {
+  const kase = (over) => ({ status: 'cancelled', worked_shifts: 3, planned_shifts: 10, ...over });
+
+  test('ลงกะ 10 วัน ไปจริง 3 วัน แล้วลูกค้ายกเลิก = 3 ใน 10 ของยอดเหมา', () => {
+    assert.equal(suggestedPay(20000, kase()), 6000);
+  });
+
+  test('เคสที่ไม่ได้ยกเลิกได้ยอดเหมาเต็มทุกบาท — รวมเคสที่ปิดก่อนครบกะ', () => {
+    for (const status of ['assigned', 'in_progress', 'closed']) {
+      assert.equal(suggestedPay(20000, kase({ status })), 20000, status);
+    }
+  });
+
+  test('เคสยกเลิกที่ไม่เคยลงกะเลย (เหมาแบบไม่ลงตาราง) = เต็มยอด ไม่หารศูนย์', () => {
+    assert.equal(suggestedPay(20000, kase({ worked_shifts: 0, planned_shifts: 0 })), 20000);
+  });
+
+  test('ไปครบหรือเกินแผน = เต็มยอด ไม่คิดเกินยอดเหมา', () => {
+    assert.equal(suggestedPay(20000, kase({ worked_shifts: 10 })), 20000);
+    assert.equal(suggestedPay(20000, kase({ worked_shifts: 12 })), 20000);
+  });
+
+  test('ไม่ไปเลยแต่เคสถูกยกเลิก = ศูนย์', () => {
+    assert.equal(suggestedPay(20000, kase({ worked_shifts: 0 })), 0);
+  });
+
+  test('ห้ามเสนอต่ำกว่าที่ปล่อยไปแล้ว — ยอดคงเหลือต้องไม่ติดลบ', () => {
+    assert.equal(suggestedPay(20000, kase({ released: 9000 })), 9000);
+    // แต่ก็ไม่เกินยอดเหมา แม้จ่ายเกินไปแล้ว (เคสเก่าที่ปล่อยเกิน)
+    assert.equal(suggestedPay(20000, kase({ released: 25000 })), 20000);
+  });
+
+  test('ปัดเป็นสตางค์ ไม่ทิ้งทศนิยมที่สามไว้บนสลิป', () => {
+    assert.equal(suggestedPay(10000, kase({ worked_shifts: 1, planned_shifts: 3 })), 3333.33);
+  });
+
+  test('ยังไม่ได้ตั้งค่าจ้าง = ไม่มีอะไรให้เสนอ', () => {
+    assert.equal(suggestedPay(null, kase()), null);
   });
 });
 

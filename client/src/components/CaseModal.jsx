@@ -850,6 +850,15 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                 เหตุผลไม่บังคับ แต่เป็นสิ่งเดียวที่บอกได้ทีหลังว่าทำไมเคสนี้ถึงไม่ได้เกิดขึ้น */}
             {cancelOpen && (
               <div className="notice pay-form no-print">
+                {/* บอกผลเรื่องเงินก่อนกด ไม่ใช่ให้ไปเจอตัวเลขที่ไม่เท่าเดิมในคิวปล่อยค่าจ้างทีหลัง
+                    (ดร. 25 ต.ค. 2569 — เคสยกเลิก จ่ายตามกะที่ไปจริง กะที่ยังอยู่ไม่ต้องจ่าย) */}
+                {seePay && visits.length > 0 && (
+                  <p className="cell-sub">
+                    กะที่ยังไม่ได้ไปจะถูกยกเลิกและไม่ถูกนับเป็นค่าจ้าง — ระบบจะเสนอยอดตามกะที่ไปจริง{' '}
+                    {visits.filter((v) => v.check_in_at && v.status !== 'cancelled').length} จาก {visits.length} กะ
+                    {' '}(ผู้จัดการพิมพ์ยอดเองได้ตอนปล่อยค่าจ้าง)
+                  </p>
+                )}
                 <label>
                   เหตุผลที่ยกเลิก (ไม่บังคับ)
                   <input

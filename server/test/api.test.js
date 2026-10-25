@@ -1810,6 +1810,94 @@ if (process.env.RUN_DB_TESTS !== '1') {
       assert.equal(await unreleased(), before + 1, 'กระดิ่งต้องนับเคสที่ยกเลิกทั้งที่มีคนไปทำมาแล้ว');
     });
 
+    /* ดร.ธงชัย 25 ต.ค. 2569: "จ่ายบางส่วนแต่ก็คืนไม่ครบครับ เคสยกเลิก · ยกเลิกได้ครับ
+       กะที่ยังอยู่ไม่ต้องจ่าย" — เคสยกเลิกกลางคันต้องเสนอยอดตามกะที่ไปจริง ไม่ใช่ยอดเหมาเต็ม */
+    test('ยกเลิกกลางคัน: ลงกะ 10 วัน ไปจริง 3 วัน → ระบบเสนอ 3 ใน 10 ของยอดเหมา กะที่เหลือไม่เป็นเงิน', async () => {
+      const { today } = await sql.one(`SELECT to_char(now() AT TIME ZONE 'Asia/Bangkok','YYYY-MM-DD') AS today`);
+      const day = (i) => {
+        const d = new Date(`${today}T00:00:00Z`);
+        d.setUTCDate(d.getUTCDate() + i);
+        return d.toISOString().slice(0, 10);
+      };
+      const tenDays = Array.from({ length: 10 }, (_, i) => day(i));
+
+      /* เคสควบคุม: ลงกะและทำงานเท่ากันเป๊ะ แต่ "ปิด" ไม่ใช่ "ยกเลิก" — ต้องได้ยอดเหมาเต็มเหมือนเดิม
+         (ตัวพิสูจน์ว่าสัดส่วนไม่หลุดไปโดนเคสปกติ) */
+      const build = async () => {
+        const c = await post('/api/cases',
+          { case_type: 'other', client_name: 'ยกเลิกกลางคัน', fee: 30000, staff_pay: 20000 }, MANAGER, 201);
+        await post(`/api/cases/${c.case_id}/assign`, { employee_id: FIELD.employee_id });
+        const sched = await post(`/api/cases/${c.case_id}/visits/bulk`,
+          { dates: tenDays, assigned_to: FIELD.employee_id }, MANAGER, 201);
+        assert.equal(sched.visits.length, 10, 'ต้องลงกะได้ครบ 10 วัน');
+        for (const v of sched.visits.slice(0, 3)) {
+          await sql.run(
+            `UPDATE case_visits SET checked_in_by = :emp, check_in_at = now() - interval '3 hours',
+             check_out_at = now() - interval '1 hour', status = 'done' WHERE visit_id = :id`,
+            { emp: FIELD.employee_id, id: v.visit_id },
+          );
+        }
+        return c.case_id;
+      };
+
+      const cancelled = await build();
+      const closed = await build();
+
+      const payOf = async (id) => (await get(`/api/cases/${id}/pay`, MANAGER)).body;
+      const queueRow = async (id) =>
+        (await get('/api/payroll/case-queue', MANAGER)).body.find((r) => r.case_id === id);
+
+      // ก่อนยกเลิก ทั้งคู่ยังเป็นเคสเดินอยู่ = เสนอยอดเหมาเต็ม
+      assert.equal((await payOf(cancelled)).suggested_remaining, 20000, 'เคสที่ยังเดินอยู่ต้องเสนอเต็มยอด');
+      assert.equal((await payOf(cancelled)).prorated, false);
+
+      await post(`/api/cases/${cancelled}/cancel`, { reason: 'ลูกค้ายกเลิกกลางคัน' });
+      await post(`/api/cases/${closed}/close`, { force: true });
+
+      const pay = await payOf(cancelled);
+      assert.equal(pay.worked_shifts, 3, 'กะที่ไปจริง');
+      assert.equal(pay.planned_shifts, 10, 'กะที่วางไว้ทั้งหมด (กะที่ยกเลิกตามเคสต้องยังอยู่ในตัวหาร)');
+      assert.equal(pay.suggested_pay, 6000, '20,000 × 3/10');
+      assert.equal(pay.suggested_remaining, 6000);
+      assert.equal(pay.prorated, true);
+      assert.equal(pay.staff_pay, 20000, 'ยอดเหมาไม่ถูกแก้ — สัดส่วนเป็นข้อเสนอ ไม่ใช่การเขียนทับยอด');
+      assert.equal(pay.remaining, 20000, 'เพดานที่พิมพ์เองได้ยังเป็นยอดเหมาเต็ม');
+
+      // เคสที่ "ปิด" ด้วยตารางกะชุดเดียวกัน ต้องไม่ถูกแตะเลยสักบาท
+      const normal = await payOf(closed);
+      assert.equal(normal.suggested_pay, 20000, 'เคสปิดตามปกติ = ยอดเหมาเต็มเท่าเดิมเป๊ะ');
+      assert.equal(normal.suggested_remaining, 20000);
+      assert.equal(normal.prorated, false);
+
+      // คิวปล่อยค่าจ้างต้องบอกที่มาของยอด ไม่ใช่โชว์ยอดเหมาเต็มให้ผู้จัดการคิดสัดส่วนเอง
+      const row = await queueRow(cancelled);
+      assert.equal(row.worked_shifts, 3);
+      assert.equal(row.planned_shifts, 10);
+      assert.equal(row.suggested_remaining, 6000);
+      assert.equal(row.prorated, true);
+      assert.equal((await queueRow(closed)).suggested_remaining, 20000);
+
+      // กด "ปล่อยที่เหลือ" โดยไม่พิมพ์ยอด = ได้ยอดตามสัดส่วน ไม่ใช่ 20,000
+      await post(`/api/cases/${cancelled}/pay/release`, {}, MANAGER, 201);
+      const after = await payOf(cancelled);
+      assert.equal(after.released, 6000, 'กะที่ไม่มีใครไปต้องไม่ถูกเทออกมาเป็นเงิน');
+      assert.equal(after.suggested_remaining, 0);
+      assert.equal(after.remaining, 14000, 'ยอดเหมาคงเหลือยังรายงานตามจริง');
+
+      /* จ่ายครบตามสัดส่วนแล้วต้องตกไปกลุ่ม "จ่ายครบ" ของคิว — ถ้าสูตรฝั่ง SQL (PAY_BASIS)
+         กับฝั่ง JS (suggestedPay) เริ่มเพี้ยนจากกัน บรรทัดนี้จะล้มทันที */
+      assert.equal((await queueRow(cancelled)).pay_priority, 6, 'ต้องไม่ค้างหัวคิวด้วยยอดที่จะไม่มีวันจ่าย');
+
+      // กดซ้ำแบบไม่ระบุยอด = ปฏิเสธพร้อมบอกเหตุผล ไม่ใช่เงียบๆ ปล่อยอีก 14,000
+      const blocked = await post(`/api/cases/${cancelled}/pay/release`, {}, MANAGER, 409);
+      assert.match(blocked.error ?? JSON.stringify(blocked), /ยกเลิกกลางคัน/);
+
+      // แต่ผู้จัดการยังพิมพ์ยอดเองได้ (ข้อเสนอ ไม่ใช่เพดาน) และเพดานยอดเหมายังกันอยู่
+      await post(`/api/cases/${cancelled}/pay/release`, { amount: 1000 }, MANAGER, 201);
+      assert.equal((await payOf(cancelled)).released, 7000);
+      await post(`/api/cases/${cancelled}/pay/release`, { amount: 99999 }, MANAGER, 400);
+    });
+
     test('เปิดเคสรอบที่ยกเลิกกลับมา ไม่ได้ถ้าสายต่อเคสนั้นมีรอบใหม่เดินอยู่แล้ว', async () => {
       const first = await newCase();
       const second = await post('/api/cases',

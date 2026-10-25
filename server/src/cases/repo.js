@@ -2465,12 +2465,51 @@ export const CANCELLED_WITH_WORK = `(
   OR EXISTS (SELECT 1 FROM case_payouts cp WHERE cp.case_id = c.case_id)
 )`;
 
+/**
+ * ตัวเศษกับตัวหารของค่าจ้างตามสัดส่วน (เคสที่ถูกยกเลิกกลางคัน) — ต้องใช้ในบริบทที่มี `FROM cases c`
+ *
+ *   ตัวเศษ = กะที่ "ไปทำมาจริง" คือเช็คอินแล้วและกะนั้นไม่ถูกยกเลิก
+ *   ตัวหาร = กะที่ลงไว้ทั้งหมดของเคส รวมกะที่ถูกยกเลิกด้วย
+ *
+ * ตัวหารต้องนับกะที่ยกเลิกด้วย เพราะ cancel() ยกเลิกกะที่ยังไม่ได้ไปทุกกะทันทีที่กดยกเลิกเคส —
+ * ถ้าไม่นับ ตัวหารจะเหลือเท่ากับตัวเศษเสมอ แล้วทุกเคสที่ยกเลิกจะกลายเป็น "ทำครบ" จ่ายเต็มยอดเหมา
+ * ซึ่งตรงข้ามกับสิ่งที่ต้องการพอดี · กะที่คนยกเลิกเองระหว่างทาง (ลูกค้าขอข้ามวัน) ก็อยู่ในตัวหาร
+ * ตามเดิม — วันนั้นอยู่ในแผนและพนักงานไม่ได้ไป จึงไม่ใช่เงินของเขา
+ *
+ * ไม่ใช้ "จำนวนวันตามสัญญา" (start_date → end_date) เป็นตัวหาร เพราะเคสจริงไม่ได้ลงกะทุกวัน
+ * (สัปดาห์ละ 3 วันก็มี) ช่วงวันที่จึงไม่ใช่จำนวนงานที่ตกลงกันไว้ · ตารางกะคือแผนงานฉบับเดียว
+ * ที่ระบบมีจริงและเป็นตัวเดียวกับที่ผู้จัดการเห็นบนหน้าเคส
+ */
+export const WORKED_SHIFTS = `(SELECT COUNT(*) FROM case_visits wv
+   WHERE wv.case_id = c.case_id AND wv.check_in_at IS NOT NULL AND wv.status <> 'cancelled')`;
+export const PLANNED_SHIFTS = `(SELECT COUNT(*) FROM case_visits pv WHERE pv.case_id = c.case_id)`;
+
 /* เคสที่ยกเลิกแล้วแต่มีคนไปทำงานมาจริง จัดชั้นเดียวกับเคสที่ปิด — งานจบไปแล้วทั้งคู่
    และเงินของกะที่ทำจริงต้องออก ไม่ใช่ค้างอยู่ท้ายคิวปนกับเคสที่ยังไม่เริ่ม */
 const PAY_OVER = `q.status IN ('closed', 'cancelled')`;
+
+/**
+ * ยอดที่ระบบเสนอให้จ่ายทั้งเคส — ฝาแฝด SQL ของ suggestedPay() ด้านล่าง
+ *
+ * มีสองที่เพราะคนละงาน: ตัวนี้ใช้ "จัดลำดับ/คัดแถว" ในฐานข้อมูล ส่วน suggestedPay() เป็นตัวที่
+ * ผลิต "ตัวเลขเงิน" ที่ส่งออกไปจริง — ถ้าสองตัวนี้ให้ผลต่างกัน อย่างมากที่สุดคือแถวเรียงผิดที่
+ * ไม่ใช่เงินผิดก้อน · สูตรต้องตรงกัน แก้ที่ไหนต้องแก้อีกที่ (มีเทสคุมว่าแถวที่จ่ายครบตามสัดส่วนแล้ว
+ * ต้องตกไปอยู่กลุ่ม "จ่ายครบ" ซึ่งจะล้มทันทีถ้าสองสูตรนี้เริ่มเพี้ยนจากกัน)
+ */
+const PAY_BASIS = `
+  CASE
+    WHEN q.status <> 'cancelled'                                  THEN q.staff_pay
+    WHEN q.planned_shifts <= 0                                    THEN q.staff_pay
+    WHEN q.worked_shifts >= q.planned_shifts                      THEN q.staff_pay
+    ELSE GREATEST(
+           LEAST(q.staff_pay,
+                 ROUND((q.staff_pay * q.worked_shifts / q.planned_shifts)::numeric, 2)),
+           q.released)
+  END`;
+
 const PAY_PRIORITY = `
   CASE
-    WHEN ROUND((q.staff_pay - q.released)::numeric, 2) <= 0 THEN 6
+    WHEN ROUND(((${PAY_BASIS}) - q.released)::numeric, 2) <= 0 THEN 6
     WHEN ${PAY_OVER} AND q.released = 0                     THEN 1
     WHEN ${PAY_OVER}                                        THEN 2
     WHEN q.released > 0                                     THEN 3
@@ -2506,7 +2545,10 @@ export function payQueue() {
               COALESCE(w.workers, 0)      AS workers,
               w.worker_names,
               lv.last_visit_date,
-              lv.first_visit_date
+              lv.first_visit_date,
+              /* ฐานของ "ยอดที่ระบบเสนอ" ของเคสที่ยกเลิกกลางคัน — ดู WORKED_SHIFTS/PLANNED_SHIFTS */
+              ${WORKED_SHIFTS}            AS worked_shifts,
+              ${PLANNED_SHIFTS}           AS planned_shifts
        FROM cases c
        LEFT JOIN (
          SELECT case_id, SUM(amount) AS released, MAX(installment_no) AS installments
@@ -2579,6 +2621,8 @@ export function payQueue() {
         SELECT q.*, ${PAY_PRIORITY} AS pay_priority, ${WAITING_SINCE} AS waiting_since
         FROM q
       ) r
+      /* เรียงด้วยยอดที่ระบบเสนอ ไม่ใช่ยอดเหมา — เคสที่ยกเลิกแล้วจ่ายครบตามกะที่ไปจริง
+         ต้องตกไปอยู่กลุ่ม "จ่ายครบ" (6) ไม่ใช่ค้างอยู่หัวคิวตลอดไปด้วยยอดที่จะไม่มีวันจ่าย */
       /* ในกลุ่มเดียวกันเอาค้างนานที่สุดขึ้นก่อน · NULLS LAST = ยังไม่มีอะไรค้างให้เร่ง
          created_at ปิดท้ายให้ลำดับคงที่ ไม่สลับไปมาระหว่างการโหลดสองครั้ง */
       ORDER BY r.pay_priority,
@@ -2590,12 +2634,26 @@ export function payQueue() {
       rows.map((r) => {
         const total = Number(r.staff_pay);
         const released = Math.round(Number(r.released) * 100) / 100;
+        const worked_shifts = Number(r.worked_shifts);
+        const planned_shifts = Number(r.planned_shifts);
+        const suggested = suggestedPay(total, {
+          status: r.status,
+          worked_shifts,
+          planned_shifts,
+          released,
+        });
         return {
           ...r,
           staff_pay: total,
           fee: r.fee == null ? null : Number(r.fee),
           released,
+          // ยอดเหมาลบที่ปล่อยไปแล้ว = เพดานที่ผู้จัดการพิมพ์เองได้สูงสุด (ไม่ใช่ยอดที่ระบบเสนอ)
           remaining: Math.round((total - released) * 100) / 100,
+          worked_shifts,
+          planned_shifts,
+          suggested_pay: suggested,
+          suggested_remaining: Math.round((suggested - released) * 100) / 100,
+          prorated: suggested < total,
           installments_used: Number(r.installments_used),
           workers: Number(r.workers),
         };
@@ -2614,6 +2672,35 @@ export const MAX_INSTALLMENTS = 5;
 
 /** ปัดเป็นสตางค์ — เงินไม่มีทศนิยมที่สาม และ 0.1 + 0.2 ของ JS ก็ไม่ควรโผล่มาในสลิป */
 const round = (n) => Math.round(n * 100) / 100;
+
+/**
+ * ยอดค่าจ้างทั้งเคสที่ระบบเสนอ — "ข้อเสนอ" ไม่ใช่เพดาน (เพดานยังเป็นยอดเหมาเหมือนเดิม)
+ *
+ * ดร.ธงชัย 25 ต.ค. 2569: *"จ่ายบางส่วนแต่ก็คืนไม่ครบครับ เคสยกเลิก · ยกเลิกได้ครับ
+ * กะที่ยังอยู่ไม่ต้องจ่าย"* → เคสที่ถูกยกเลิกกลางคัน จ่ายตามกะที่พนักงานไปทำจริงเท่านั้น
+ * กะที่เหลือ (ถูกยกเลิกไปพร้อมเคส) ไม่เป็นเงินของใคร
+ *
+ * เคสที่ไม่ได้ยกเลิก (รวมเคสที่ปิดตามปกติ) ได้ยอดเหมาเต็มเหมือนเดิมทุกบาท — การปิดเคสคือ
+ * "งานจบตามที่ตกลง" ส่วนการยกเลิกคือ "งานไม่ได้เกิดจนครบ" สองอย่างนี้คนละเรื่องกัน
+ *
+ * กันพังสามทาง:
+ *   · ไม่มีกะลงไว้เลย (ตกลงเหมาแบบไม่ลงตาราง) = ไม่มีตัวหาร → จ่ายเต็มตามเดิม ไม่หารศูนย์
+ *   · ไปครบหรือเกินแผน → จ่ายเต็ม ไม่คิดสัดส่วนให้เกินยอดเหมา
+ *   · ห้ามเสนอต่ำกว่ายอดที่ปล่อยไปแล้ว — เงินที่ออกไปแล้วเรียกคืนผ่านระบบไม่ได้ ถ้าเสนอต่ำกว่า
+ *     ยอดคงเหลือจะติดลบแล้วหน้าจอจะอ่านเหมือนระบบคิดว่าพนักงานติดหนี้บริษัทอยู่
+ */
+export function suggestedPay(staffPay, { status, worked_shifts, planned_shifts, released = 0 } = {}) {
+  if (staffPay == null) return null;
+  const total = round(Number(staffPay));
+  if (status !== 'cancelled') return total;
+
+  const planned = Number(planned_shifts ?? 0);
+  const worked = Number(worked_shifts ?? 0);
+  if (!(planned > 0) || worked >= planned) return total;
+
+  const prorated = round((total * worked) / planned);
+  return Math.min(total, Math.max(prorated, round(Number(released ?? 0))));
+}
 
 /**
  * น้ำหนักของแต่ละคนในการแบ่งค่าจ้างของเคส
@@ -2701,7 +2788,9 @@ export async function payStatus(caseId) {
     sql.one(
       /* นับงวดจาก MAX ไม่ใช่ COUNT — ถอนงวดกลางคืนแล้วเลขงวดของงวดหลังต้องไม่เลื่อนตาม
          (ถ้านับจำนวนแถว งวดที่ 3 จะกลายเป็นงวดที่ 2 ทั้งที่บนสลิปที่ปล่อยไปแล้วเขียนว่า 3) */
-      `SELECT c.staff_pay, c.fee,
+      `SELECT c.staff_pay, c.fee, c.status,
+              ${WORKED_SHIFTS}  AS worked_shifts,
+              ${PLANNED_SHIFTS} AS planned_shifts,
               COALESCE((SELECT SUM(p.amount) FROM case_payouts p WHERE p.case_id = c.case_id), 0) AS released,
               COALESCE((SELECT MAX(p.installment_no) FROM case_payouts p WHERE p.case_id = c.case_id), 0) AS last_installment
        FROM cases c WHERE c.case_id = :id`,
@@ -2723,6 +2812,11 @@ export async function payStatus(caseId) {
   const agreedRows = split.filter((r) => r.share != null);
   const agreedTotal = agreedRows.length ? round(agreedRows.reduce((n, r) => n + r.share, 0)) : null;
 
+  /* ยอดที่ระบบเสนอ — เท่ากับยอดเหมาทุกเคส ยกเว้นเคสที่ยกเลิกกลางคัน (ดู suggestedPay) */
+  const worked_shifts = Number(row.worked_shifts);
+  const planned_shifts = Number(row.planned_shifts);
+  const suggested = suggestedPay(total, { status: row.status, worked_shifts, planned_shifts, released });
+
   return {
     staff_pay: total,
 
@@ -2738,7 +2832,18 @@ export async function payStatus(caseId) {
     agreement_matches: agreedTotal == null || total == null ? true : agreedTotal === round(total),
 
     released,
+    // เพดานที่พิมพ์เองได้สูงสุด — ยังเป็นยอดเหมาลบที่ปล่อยไปแล้วเหมือนเดิม ไม่ถูกตัดด้วยสัดส่วน
     remaining: total == null ? null : round(total - released),
+
+    /* ยอดที่ระบบเสนอให้ปล่อย (ค่าปริยายของช่อง "ยอดงวดนี้") กับที่มาของมัน —
+       หน้าจอต้องอธิบายได้ว่าทำไมยอดไม่เท่ายอดเหมา ไม่งั้นผู้จัดการจะคิดว่าตัวเลขเพี้ยน */
+    status: row.status,
+    worked_shifts,
+    planned_shifts,
+    suggested_pay: suggested,
+    suggested_remaining: suggested == null ? null : round(suggested - released),
+    prorated: suggested != null && total != null && suggested < total,
+
     shares: split,
     payouts,
 
@@ -2970,7 +3075,12 @@ function applyChosenShares(shares, chosen, amount) {
  * ต้องเรียกหลังล็อกแถว cases แล้วเท่านั้น: คำขอปล่อยเงินทุกคำขอของเคสเดียวกันจึงต่อคิวกัน
  * และอ่าน SUM(case_payouts) หลังคำขอก่อนหน้า commit แล้ว ไม่ใช้ remaining เก่าจากหน้าเว็บ
  */
-export function assessReleaseCapacity(staffPay, releasedAmount, requestedAmount) {
+/**
+ * suggestedTotal (ไม่บังคับ) = ยอดทั้งเคสที่ระบบเสนอ (ดู suggestedPay) ใช้เป็น "ค่าปริยาย"
+ * ตอนไม่ระบุยอดเท่านั้น — เพดานยังเป็นยอดเหมาเหมือนเดิม ผู้จัดการพิมพ์เกินยอดที่เสนอได้
+ * ไม่ส่งมา = พฤติกรรมเดิมทุกประการ (ค่าปริยาย = ยอดคงเหลือเต็ม)
+ */
+export function assessReleaseCapacity(staffPay, releasedAmount, requestedAmount, suggestedTotal) {
   const released = round(Number(releasedAmount ?? 0));
   if (staffPay == null) return { reason: 'staff_pay_not_set', staff_pay: null, released, remaining: null };
 
@@ -2978,8 +3088,16 @@ export function assessReleaseCapacity(staffPay, releasedAmount, requestedAmount)
   const remaining = round(staff_pay - released);
   if (remaining <= 0) return { reason: 'fully_released', staff_pay, released, remaining };
 
-  // ไม่ส่งยอดมา = ปล่อยยอดคงเหลือ "ล่าสุด" ที่เพิ่งอ่านภายใต้ lock ไม่ใช่ค่าจาก request ก่อนเข้า transaction
-  const amount = requestedAmount == null ? remaining : round(Number(requestedAmount));
+  /* เคสที่ยกเลิกกลางคันแล้วจ่ายครบตามกะที่ไปจริงไปแล้ว — "กดปล่อยที่เหลือ" ต้องไม่เทยอดของ
+     กะที่ไม่มีใครไปออกมาเงียบๆ · ยังจ่ายเพิ่มได้ถ้าผู้จัดการตั้งใจ แต่ต้องพิมพ์ยอดเองเท่านั้น */
+  const suggested = suggestedTotal == null ? staff_pay : round(Number(suggestedTotal));
+  const suggestedRemaining = Math.max(0, Math.min(remaining, round(suggested - released)));
+  if (requestedAmount == null && suggestedRemaining <= 0) {
+    return { reason: 'prorated_fully_released', staff_pay, released, remaining, suggested_pay: suggested };
+  }
+
+  // ไม่ส่งยอดมา = ปล่อยยอดที่ระบบเสนอ "ล่าสุด" ที่เพิ่งอ่านภายใต้ lock ไม่ใช่ค่าจาก request ก่อนเข้า transaction
+  const amount = requestedAmount == null ? suggestedRemaining : round(Number(requestedAmount));
   if (!Number.isFinite(amount) || amount <= 0) {
     return { reason: 'invalid_amount', staff_pay, released, remaining, amount };
   }
@@ -3007,7 +3125,21 @@ export async function releasePay(caseId, { amount: requestedAmount, note, due_da
       { id: caseId },
     );
 
-    const capacity = assessReleaseCapacity(lockedCase.staff_pay, releasedAmount, requestedAmount);
+    /* นับกะใหม่ในทรานแซกชันเดียวกัน ไม่ใช้เลขที่หน้าเว็บถือมา — ยกเลิกเคสหรือเพิ่ม/ลบกะ
+       ระหว่างที่ผู้จัดการเปิดหน้าค้างไว้ แล้วตัวหารเปลี่ยนไปโดยไม่มีใครเห็น */
+    const basis = await tx.one(
+      `SELECT c.status, ${WORKED_SHIFTS} AS worked_shifts, ${PLANNED_SHIFTS} AS planned_shifts
+       FROM cases c WHERE c.case_id = :id`,
+      { id: caseId },
+    );
+    const suggested = suggestedPay(lockedCase.staff_pay, {
+      status: basis?.status,
+      worked_shifts: basis?.worked_shifts,
+      planned_shifts: basis?.planned_shifts,
+      released: releasedAmount,
+    });
+
+    const capacity = assessReleaseCapacity(lockedCase.staff_pay, releasedAmount, requestedAmount, suggested);
     if (capacity.reason) return { released: [], ...capacity };
     const { amount } = capacity;
 

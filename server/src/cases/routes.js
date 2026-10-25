@@ -410,8 +410,18 @@ casesRouter.post(
       );
     }
 
-    const previewAmount = input.amount ?? status.remaining;
+    /* ไม่ระบุยอด = ปล่อย "ยอดที่ระบบเสนอ" ซึ่งเท่ากับยอดคงเหลือทุกเคส ยกเว้นเคสที่ยกเลิกกลางคัน
+       (เสนอตามกะที่ไปจริง — ดู suggestedPay) · เพดานด้านล่างยังเป็นยอดเหมาเหมือนเดิม */
+    const previewAmount = input.amount ?? status.suggested_remaining ?? status.remaining;
     if (previewAmount <= 0) {
+      if (input.amount == null && status.prorated) {
+        throw new ApiError(
+          409,
+          `เคสนี้ถูกยกเลิกกลางคัน — จ่ายครบ ${baht(status.released)} บาทตามกะที่ไปจริง` +
+            ` ${status.worked_shifts} จาก ${status.planned_shifts} กะแล้ว` +
+            ` (ยอดเหมาทั้งเคส ${baht(status.staff_pay)} บาท) — ถ้าตกลงจ่ายเพิ่ม ให้ระบุยอดเอง`,
+        );
+      }
       throw new ApiError(409, `เคสนี้ปล่อยค่าจ้างครบ ${baht(status.staff_pay)} บาทแล้ว ไม่เหลือยอดให้ปล่อย`);
     }
     if (previewAmount > status.remaining) {
@@ -439,6 +449,13 @@ casesRouter.post(
       throw new ApiError(
         409,
         `เคสนี้ปล่อยค่าจ้างครบแล้ว — ปล่อยไปรวม ${baht(result.released)} บาท จากยอดเหมา ${baht(result.staff_pay)}`,
+      );
+    }
+    if (result.reason === 'prorated_fully_released') {
+      throw new ApiError(
+        409,
+        `เคสนี้ถูกยกเลิกกลางคัน — จ่ายครบ ${baht(result.released)} บาทตามกะที่ไปจริงแล้ว` +
+          ` (ยอดเหมาทั้งเคส ${baht(result.staff_pay)} บาท) — ถ้าตกลงจ่ายเพิ่ม ให้ระบุยอดเอง`,
       );
     }
     if (result.reason === 'amount_exceeds_remaining') {

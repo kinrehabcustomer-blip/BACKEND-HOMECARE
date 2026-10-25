@@ -56,6 +56,12 @@ export default function CasePayPanel({ caseId, busy, run, toast }) {
     company_share: companyShare,
     released,
     remaining,
+    /* เคสที่ถูกยกเลิกกลางคัน: ระบบเสนอยอดตามกะที่ไปจริง (ดร. 25 ต.ค. 2569 "กะที่ยังอยู่ไม่ต้องจ่าย")
+       เป็น "ข้อเสนอ" เท่านั้น — เพดานที่พิมพ์เองได้ยังเป็น remaining (ยอดเหมา) เหมือนเดิม */
+    suggested_remaining: suggestedLeft,
+    worked_shifts: workedShifts,
+    planned_shifts: plannedShifts,
+    prorated,
     shares,
     payouts,
     has_agreement: hasAgreement,
@@ -74,9 +80,12 @@ export default function CasePayPanel({ caseId, busy, run, toast }) {
      ตกลงส่วนแบ่งของทั้งเคสไว้แล้ว = ใช้ข้อตกลงนั้นเติมให้ เพราะคนตัดสินใจไปแล้ว */
   const manual = manyHands && !hasAgreement;
 
-  /* ยอดของงวดนี้: เว้นว่าง = ยอดคงเหลือทั้งหมด (กรณีปกติ งานจบแล้วจ่ายให้ครบ) */
+  /* ยอดของงวดนี้: เว้นว่าง = ยอดที่ระบบเสนอ ซึ่งเท่ากับยอดคงเหลือทุกเคส
+     ยกเว้นเคสที่ยกเลิกกลางคัน (เสนอตามกะที่ไปจริง) — เพดานยังเป็นยอดคงเหลือเหมือนเดิม
+     ผู้จัดการพิมพ์เกินยอดที่เสนอได้ ถ้าตกลงกับพนักงานไว้เป็นอย่างอื่น */
+  const offered = prorated ? suggestedLeft : remaining;
   const text = amount.trim();
-  const value = text === '' ? remaining : Number(text);
+  const value = text === '' ? offered : Number(text);
   const validAmount = Number.isFinite(value) && value > 0 && value <= remaining;
 
   /* ส่วนแบ่งของงวดนี้ตามข้อตกลง (หรือหารเท่ากันถ้ายังไม่ได้ตกลงอะไร) พร้อมไล่ชดเชยงวดก่อน
@@ -117,13 +126,19 @@ export default function CasePayPanel({ caseId, busy, run, toast }) {
 
     /* เหลือค้างเท่าไหร่หลังงวดนี้ ต้องเห็นก่อนกดยืนยัน —
        "ปล่อย 7,000 เหลืออีก 8,000 จ่ายได้อีก 2 งวด" อ่านจบในบรรทัดเดียว */
-    const after = round(remaining - value);
+    /* เทียบกับยอดที่ระบบเสนอ ไม่ใช่ยอดเหมา — เคสยกเลิกที่จ่ายครบตามกะที่ไปจริงแล้ว
+       ต้องอ่านว่า "ครบพอดี" ไม่ใช่ "เหลืออีก 14,000" ที่จะไม่มีวันจ่าย */
+    const after = round(offered - value);
     const tail =
-      after === 0
-        ? 'ครบค่าจ้างของเคสพอดี'
-        : left - 1 === 0
-          ? `เหลือ ${formatBaht(after)} ที่จะปล่อยไม่ได้อีก (หมดงวดแล้ว)`
-          : `เหลืออีก ${formatBaht(after)} · จ่ายได้อีก ${left - 1} งวด`;
+      after < 0
+        ? `มากกว่ายอดที่ระบบเสนอ ${formatBaht(-after)} — ยืนยันว่าตกลงจ่ายเท่านี้จริง`
+        : after === 0
+          ? prorated
+            ? 'ครบตามกะที่ไปจริงพอดี'
+            : 'ครบค่าจ้างของเคสพอดี'
+          : left - 1 === 0
+            ? `เหลือ ${formatBaht(after)} ที่จะปล่อยไม่ได้อีก (หมดงวดแล้ว)`
+            : `เหลืออีก ${formatBaht(after)} · จ่ายได้อีก ${left - 1} งวด`;
 
     /* ยืนยันด้วยรายชื่อจริง ไม่ใช่ "ให้ 2 คน" — ตัวเลขรายคนคือสิ่งที่ผิดแล้วแก้ยากที่สุด
        (ถอนคืนได้เฉพาะก้อนที่ยังไม่ถูกจ่ายออกไปจริง) จึงต้องอ่านทวนได้ก่อนกด */
@@ -179,6 +194,15 @@ export default function CasePayPanel({ caseId, busy, run, toast }) {
                 ปล่อยแล้ว {formatBaht(released)} · เหลือ {formatBaht(remaining)}
                 {used > 0 && ` · แบ่งจ่ายแล้ว ${used} งวด`}
               </span>
+              {/* ยอดที่เสนอไม่เท่ายอดเหมา = ต้องบอกเหตุผลตรงนี้ ไม่งั้นผู้จัดการอ่านว่าตัวเลขเพี้ยน
+                  (ดร. 25 ต.ค. 2569 — เคสยกเลิกกลางคัน จ่ายตามกะที่ไปจริง กะที่เหลือไม่ต้องจ่าย) */}
+              {prorated && (
+                <span className="cell-sub">
+                  เคสยกเลิก — คิดตามกะที่ไปจริง {workedShifts} จาก {plannedShifts} กะ
+                  {' '}จึงเสนอให้ปล่อยอีก {formatBaht(suggestedLeft)} (ไม่ใช่ {formatBaht(remaining)})
+                  {' '}· พิมพ์ยอดเองได้ถ้าตกลงกันไว้เป็นอย่างอื่น
+                </span>
+              )}
               {/* จ่ายพนักงานมากกว่าที่เก็บลูกค้า = เคสขาดทุน ซึ่งเกิดได้จากพิมพ์ผิดหลักเดียว
                   ไม่ใช่หน้าที่ของระบบจะห้าม แต่ต้องไม่ปล่อยให้ผ่านตาไปเงียบๆ */}
               {companyShare != null && companyShare < 0 && (
@@ -245,7 +269,7 @@ export default function CasePayPanel({ caseId, busy, run, toast }) {
                         onChange={(e) => {
                           const n = Number(e.target.value);
                           setParts(n);
-                          setAmount(n === 1 ? '' : String(round(remaining / n)));
+                          setAmount(n === 1 ? '' : String(round(offered / n)));
                           setSplit(null);
                         }}
                       >
@@ -257,7 +281,7 @@ export default function CasePayPanel({ caseId, busy, run, toast }) {
                       </select>
                       {parts > 1 && (
                         <span className="muted">
-                          งวดละ {formatBaht(round(remaining / parts))} จาก {formatBaht(remaining)}
+                          งวดละ {formatBaht(round(offered / parts))} จาก {formatBaht(offered)}
                         </span>
                       )}
                     </label>
@@ -270,7 +294,7 @@ export default function CasePayPanel({ caseId, busy, run, toast }) {
                         type="number"
                         min="0"
                         step="100"
-                        placeholder={`฿${Math.round(remaining)}`}
+                        placeholder={`฿${Math.round(offered)}`}
                         value={amount}
                         disabled={busy}
                         /* เปลี่ยนยอดของงวด = ส่วนแบ่งที่แก้ไว้ใช้ไม่ได้แล้ว (ผลรวมไม่ตรง) จึงทิ้งแล้วเสนอใหม่
@@ -280,7 +304,11 @@ export default function CasePayPanel({ caseId, busy, run, toast }) {
                           setSplit(null);
                         }}
                       />
-                      <span className="cell-sub">เว้นว่าง = ปล่อยยอดคงเหลือทั้งหมด</span>
+                      <span className="cell-sub">
+                        {prorated
+                          ? `เว้นว่าง = ปล่อย ${formatBaht(suggestedLeft)} ตามกะที่ไปจริง ${workedShifts}/${plannedShifts} กะ`
+                          : 'เว้นว่าง = ปล่อยยอดคงเหลือทั้งหมด'}
+                      </span>
                     </label>
 
                     {/* วันที่นัดจ่ายของงวดนี้ — ติดไปกับงวด ไม่ใช่กับรอบโอน
@@ -304,6 +332,16 @@ export default function CasePayPanel({ caseId, busy, run, toast }) {
                   {text !== '' && !validAmount && (
                     <p className="muted flag-text">
                       ยอดของงวดต้องมากกว่า 0 และไม่เกินยอดคงเหลือ {formatBaht(remaining)}
+                    </p>
+                  )}
+
+                  {/* จ่ายครบตามกะที่ไปจริงแล้ว แต่ยอดเหมายังเหลือ — ปุ่มเทาเฉยๆ อ่านไม่ออกว่าทำไม
+                      ยอดที่เหลือเป็นของกะที่ไม่มีใครไป จะจ่ายต่อต้องเป็นการตัดสินใจที่พิมพ์เอง */}
+                  {prorated && suggestedLeft <= 0 && text === '' && (
+                    <p className="muted">
+                      จ่ายครบ {formatBaht(released)} ตามกะที่ไปจริง {workedShifts} จาก {plannedShifts} กะแล้ว —
+                      ยอดเหมาที่เหลือ {formatBaht(remaining)} เป็นของกะที่ถูกยกเลิก
+                      ถ้าตกลงจ่ายเพิ่ม ให้พิมพ์ยอดในช่องด้านบน
                     </p>
                   )}
 
