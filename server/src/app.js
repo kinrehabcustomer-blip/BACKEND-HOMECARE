@@ -17,9 +17,15 @@ import { familyRouter } from './family/routes.js';
 import { publicReviewsRouter, reviewsRouter } from './reviews/routes.js';
 import { publicBillRouter } from './invoices/publicRoutes.js';
 import { errorHandler } from './lib/errors.js';
-import { requireAuth, requireAdmin, requireBilling, requireCaseAccess, requireManager, requirePasswordChanged } from './lib/auth.js';
+import { requireAuth, requireAdmin, requireBilling, requireCaseAccess, requireManager, requirePasswordChanged, ensureRevokedSessions } from './lib/auth.js';
 
 export function createApp() {
+  /* ตาราง revoked_sessions ต้องมีก่อนคำขอแรก — requireAuth อ่านมันในคิวรีเดียวกับที่อ่านพนักงาน
+     และ Postgres ตรวจชื่อตารางตั้งแต่ตอนแปลคำสั่ง จะสร้างแบบ lazy ตอน logout ครั้งแรกไม่ได้
+     ไม่ await ที่นี่ (createApp ไม่ใช่ async) — คำขอแรก ๆ ที่มาก่อนตารางเสร็จจะได้ 500 หนึ่งครั้ง
+     แล้วหายเอง · บนของจริง schema.sql สร้างให้ตั้งแต่ migrate อยู่แล้ว */
+  ensureRevokedSessions().catch((err) => console.error('[auth] สร้างตาราง revoked_sessions ไม่ได้ —', err.message));
+
   const app = express();
   // อยู่หลัง proxy ของ Vercel — req.ip = IP ผู้ใช้จริง (ตัวกันยิงถี่ /api/public/bill ไม่นับทุกคนเป็น IP เดียว)
   app.set('trust proxy', 1);

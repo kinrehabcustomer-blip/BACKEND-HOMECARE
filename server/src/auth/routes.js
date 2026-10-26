@@ -10,6 +10,7 @@ import {
   cookieOptions,
   hashPassword,
   requireAuth,
+  revokeSession,
   roleForPosition,
   permissionsFor,
   sessionEmployeeId,
@@ -246,7 +247,12 @@ authRouter.post(
   }),
 );
 
-authRouter.post('/logout', (req, res) => {
+/* ออกจากระบบ = ตัดใบนี้ที่เซิร์ฟเวอร์ด้วย ไม่ใช่แค่ล้างคุกกี้ (ตรวจรอบ 20)
+   ตัดเฉพาะใบของเครื่องที่กด — มือถือกับคอมของคนเดียวกันเป็นคนละใบ อีกเครื่องยังใช้ต่อได้
+   ตัดไม่สำเร็จ (ฐานสะดุด) ก็ยังล้างคุกกี้และตอบ 204 — คนกดออกจากระบบต้องออกได้เสมอ
+   อย่างแย่ที่สุดคือกลับไปเป็นพฤติกรรมเดิม ไม่ใช่ค้างอยู่ในระบบ */
+authRouter.post('/logout', async (req, res) => {
+  await revokeSession(req.cookies?.[COOKIE_NAME]).catch(() => {});
   res.clearCookie(COOKIE_NAME, clearCookieOptions);
   res.status(204).end();
 });
