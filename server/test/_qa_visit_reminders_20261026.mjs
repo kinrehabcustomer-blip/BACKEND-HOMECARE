@@ -12,7 +12,7 @@ const { createApp } = await import('../src/app.js');
 const { signToken, COOKIE_NAME, hashPassword } = await import('../src/lib/auth.js');
 const { sql, pool } = await import('../src/db/index.js');
 const { seedFixtures } = await import('./fixtures.js');
-const { claimDueVisitReminders, claimDueFamilyReminders } = await import('../src/notify/visitReminders.js');
+const { claimDueVisitReminders, claimDueFamilyReminders, claimVisitChanges } = await import('../src/notify/visitReminders.js');
 const { ensureFamilyTable } = await import('../src/lib/family.js');
 const { expiryDate } = await import('../src/cases/physioQuota.js');
 const { datesByCount } = await import('../src/cases/schema.js');
@@ -103,6 +103,31 @@ ok(!(await claimDueFamilyReminders()).some((r) => r.visit_id === vB), 'ญาต
 await sql.run(`UPDATE case_visits SET remind_3h_at = NULL WHERE visit_id = :v`, { v: vA });
 await patch(`/api/cases/${id}/visits/${vA}`, { status: 'cancelled' });
 ok(!(await claimDueVisitReminders()).some((r) => r.visit_id === vA), 'นัดที่ยกเลิก ไม่เตือน');
+
+// ---- แจ้งทันทีเมื่อเลื่อน/ยกเลิก ----
+const age = () => sql.run(`UPDATE visit_change_outbox SET created_at = created_at - interval '5 minutes' WHERE claimed_at IS NULL`);
+await age();
+await claimVisitChanges(); // ล้างของค้างจากข้อก่อนหน้า (เลื่อนเวลา vA / ยกเลิก vA)
+const nd = dateAt(50), nt = '10:30';
+await sql.run(`UPDATE case_visits SET status = 'scheduled' WHERE visit_id = :v`, { v: vB });
+await patch(`/api/cases/${id}/visits/${vB}`, { visit_date: nd });
+await patch(`/api/cases/${id}/visits/${vB}`, { planned_start: nt });
+ok((await claimVisitChanges()).length === 0, 'เพิ่งแก้ไม่ถึง 2 นาที → รอก่อน (กันแก้วันแล้วแก้เวลาได้สองข้อความ)');
+await age();
+const ch = await claimVisitChanges();
+const m = ch.find((r) => r.visit_id === vB);
+ok(ch.length === 1 && m.kind === 'moved' && m.old.date === dateAt(26) && m.old.start === timeAt(26) && m.new.date === nd && m.new.start === nt,
+  'แก้สองรอบ → แจ้งครั้งเดียว ค่าเดิมจากรอบแรก ค่าใหม่จากรอบหลัง', ch);
+ok(m.new.staff?.line_user_id === 'Utestline0003' && m.family.includes('Ufamily0001'), 'ผู้รับ: พนักงาน (@kinjobs) + ญาติ (Kin HomeCare)', m);
+ok((await claimVisitChanges()).length === 0, 'ส่งแล้วไม่ส่งซ้ำ');
+await patch(`/api/cases/${id}/visits/${vB}`, { status: 'cancelled' });
+await age();
+const cx = (await claimVisitChanges()).find((r) => r.visit_id === vB);
+ok(cx && cx.kind === 'cancelled' && cx.old.date === nd, 'ยกเลิกนัด → แจ้งยกเลิกพร้อมวันเวลาเดิม', cx);
+const past = (await post(`/api/cases/${id}/visits`, { visit_date: '2026-01-05', assigned_to: 'EMP-0003' })).body.visits.find((v) => v.visit_date === '2026-01-05').visit_id;
+await patch(`/api/cases/${id}/visits/${past}`, { visit_date: '2026-01-06' });
+await age();
+ok(!(await claimVisitChanges()).some((r) => r.visit_id === past), 'แก้นัดในอดีต (แก้บันทึกย้อนหลัง) ไม่แจ้งใคร');
 
 console.log(`\nผ่าน ${pass} ข้อ`);
 await new Promise((r) => server.close(r));

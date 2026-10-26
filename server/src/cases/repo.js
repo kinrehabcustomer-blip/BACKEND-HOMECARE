@@ -7,7 +7,7 @@ import { ensurePatientCodeFree } from '../patients/repo.js';
 import { decodeImage, FRONT_POSITIONS } from '../employees/schema.js';
 import { ApiError } from '../lib/errors.js';
 import { physioQuota } from './physioQuota.js';
-import { ensureVisitReminderColumns } from '../notify/visitReminders.js';
+import { ensureVisitReminderColumns, ensureVisitChangeTable, recordVisitChange } from '../notify/visitReminders.js';
 export { physioQuota };
 import { normalizeAddons, addonsTotal } from '../lib/addons.js';
 
@@ -1590,6 +1590,7 @@ const LOCKED_AFTER_CHECK_IN = ['visit_date', 'assigned_to', 'planned_start', 'pl
 export async function updateVisit(caseId, visitId, input, actor) {
   // คอลัมน์เตือน LINE ต้องมีก่อนเข้า transaction — ALTER TABLE ระหว่างที่ล็อกกะไว้ = รอตัวเองค้าง
   await ensureVisitReminderColumns();
+  await ensureVisitChangeTable();
   const fields = [
     'visit_date', 'assigned_to', 'planned_start', 'planned_end', 'status', 'note',
     'staff_pay', // ตั้งค่าจ้างเฉพาะกะนี้ — ส่ง null = กลับไปเกลี่ยจากยอดเคสตามปกติ
@@ -1672,6 +1673,8 @@ export async function updateVisit(caseId, visitId, input, actor) {
       }
     }
     await logEvent(tx, caseId, 'visit_edited', `แก้กะวันที่ ${visit.visit_date} — ${parts.join(' · ')}`, actor);
+    // แจ้ง LINE พนักงาน + ญาติ เมื่อเลื่อน/ยกเลิก/เปลี่ยนคน (notify/visitReminders.js · cron chat.kinorigin.com ส่ง)
+    await recordVisitChange(tx, caseId, visitId, visit, input, changed);
   });
 
   return listVisits(caseId);

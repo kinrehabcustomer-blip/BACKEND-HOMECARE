@@ -137,3 +137,103 @@ export async function claimDueFamilyReminders() {
   );
 }
 
+/**
+ * แจ้งทันทีเมื่อเลื่อน/ยกเลิกนัด (ดร.ธงชัย 26 ต.ค. 2569 "หลังจากเลื่อนการนัดหมาย ส่งทางไลน์ให้กับลูกค้าและพนักงานทั้งคู่")
+ * cases/repo.js updateVisit จดลง visit_change_outbox ในธุรกรรมเดียวกับการแก้ → cron ของ chat.kinorigin.com มารับไปส่ง
+ *   moved     = เปลี่ยนวัน/เวลา (รวมเปลี่ยนคนพร้อมกัน) · cancelled = เปลี่ยนสถานะเป็นยกเลิก
+ *   reassigned = เปลี่ยนแค่คนไป — แจ้งเฉพาะพนักงานคนเก่า (ถอดงาน) และคนใหม่ (ได้งาน) ไม่แจ้งญาติ
+ * ผู้รับ: พนักงานคนเก่า+คนใหม่ที่ผูก LINE (@kinjobs) · ญาติที่ผูกเคส + ลูกค้าที่ทัก LINE (Kin HomeCare)
+ * แก้นัดเดียวกันหลายรอบก่อน cron มารับ = ส่งเฉพาะสถานะล่าสุด (เทียบจาก "ค่าเดิม" ของรอบแรก)
+ * นัดที่ผ่านไปแล้ว (ทั้งวันเดิมและวันใหม่อยู่ในอดีต) ไม่แจ้ง — เป็นการแก้บันทึกย้อนหลัง ไม่ใช่การเลื่อนนัดจริง
+ */
+let changeReady = null;
+export const ensureVisitChangeTable = () =>
+  (changeReady ??= sql
+    .run(
+      `CREATE TABLE IF NOT EXISTS visit_change_outbox (
+         change_id    INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+         visit_id     INTEGER NOT NULL,
+         case_id      TEXT NOT NULL,
+         kind         TEXT NOT NULL,
+         old_date     TEXT, old_start TEXT, old_end TEXT, old_assignee TEXT,
+         new_date     TEXT, new_start TEXT, new_end TEXT, new_assignee TEXT,
+         created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+         claimed_at   TIMESTAMPTZ
+       )`,
+    )
+    .then(() => sql.run('CREATE INDEX IF NOT EXISTS idx_visit_change_pending ON visit_change_outbox (created_at) WHERE claimed_at IS NULL'))
+    .catch((err) => {
+      changeReady = null;
+      throw err;
+    }));
+
+/** เรียกใน transaction ของ updateVisit หลัง UPDATE แล้ว — before = แถวกะก่อนแก้ · after = ค่าที่ส่งมาแก้ (เฉพาะช่องที่เปลี่ยน) */
+export async function recordVisitChange(tx, caseId, visitId, before, after, changed) {
+  const cancelled = changed.includes('status') && after.status === 'cancelled' && before.status !== 'cancelled';
+  const moved = changed.some((c) => ['visit_date', 'planned_start'].includes(c));
+  const reassigned = changed.includes('assigned_to');
+  if (!cancelled && !moved && !reassigned) return;
+  if (!cancelled && (before.status === 'cancelled' || (after.status && after.status !== 'scheduled'))) return;
+  const pick = (c) => (changed.includes(c) ? after[c] ?? null : before[c] ?? null);
+  const row = {
+    visit_id: visitId, case_id: caseId,
+    kind: cancelled ? 'cancelled' : moved ? 'moved' : 'reassigned',
+    old_date: before.visit_date, old_start: before.planned_start ?? null, old_end: before.planned_end ?? null, old_assignee: before.assigned_to ?? null,
+    new_date: pick('visit_date'), new_start: pick('planned_start'), new_end: pick('planned_end'), new_assignee: pick('assigned_to'),
+  };
+  const today = new Date(Date.now() + 7 * 3600e3).toISOString().slice(0, 10);
+  if (row.old_date < today && row.new_date < today) return;
+  await tx.run(
+    `INSERT INTO visit_change_outbox (visit_id, case_id, kind, old_date, old_start, old_end, old_assignee, new_date, new_start, new_end, new_assignee)
+     VALUES (:visit_id, :case_id, :kind, :old_date, :old_start, :old_end, :old_assignee, :new_date, :new_start, :new_end, :new_assignee)`,
+    row,
+  );
+}
+
+/** จองรายการแจ้งเลื่อน/ยกเลิกที่ยังไม่ส่ง → รวมเป็นหนึ่งรายการต่อนัด (ค่าเดิมจากรอบแรก ค่าใหม่จากรอบล่าสุด) พร้อมผู้รับ */
+export async function claimVisitChanges() {
+  await ensureVisitChangeTable();
+  await ensureFamilyTable();
+  await ensureCustomerLineColumns();
+  // รอ 2 นาทีหลังแก้ครั้งสุดท้าย — แอดมินมักแก้วันแล้วแก้เวลาต่อทันที ไม่ควรได้สองข้อความ
+  const rows = await sql.all(
+    `UPDATE visit_change_outbox o SET claimed_at = now()
+     WHERE o.claimed_at IS NULL
+       AND NOT EXISTS (SELECT 1 FROM visit_change_outbox n
+                        WHERE n.visit_id = o.visit_id AND n.claimed_at IS NULL AND n.created_at > now() - interval '2 minutes')
+     RETURNING o.*`,
+  );
+  if (!rows.length) return [];
+  const byVisit = new Map();
+  for (const r of rows.sort((a, b) => a.change_id - b.change_id)) {
+    const prev = byVisit.get(r.visit_id);
+    byVisit.set(r.visit_id, prev ? { ...r, old_date: prev.old_date, old_start: prev.old_start, old_end: prev.old_end, old_assignee: prev.old_assignee,
+      kind: r.kind === 'cancelled' ? 'cancelled' : prev.kind === 'moved' || r.kind === 'moved' ? 'moved' : r.kind } : r);
+  }
+  const out = [];
+  for (const r of byVisit.values()) {
+    // เลื่อนไปแล้วเลื่อนกลับที่เดิม = ไม่มีอะไรเปลี่ยน ไม่ต้องรบกวนใคร
+    if (r.kind !== 'cancelled' && r.old_date === r.new_date && (r.old_start ?? '') === (r.new_start ?? '') && r.old_assignee === r.new_assignee) continue;
+    const info = await sql.one(
+      `SELECT c.client_name, c.case_id,
+              ${FAMILY_IDS} AS family,
+              (SELECT json_agg(json_build_object('employee_id', e.employee_id, 'line_user_id', e.line_user_id,
+                       'name', COALESCE(NULLIF(e.nickname, ''), e.first_name), 'position', e.position))
+                 FROM employees e WHERE e.employee_id IN (:old_a, :new_a)) AS staff
+       FROM cases c WHERE c.case_id = :case_id`,
+      { case_id: r.case_id, old_a: r.old_assignee ?? '', new_a: r.new_assignee ?? '' },
+    );
+    if (!info) continue;
+    const staff = info.staff ?? [];
+    const find = (id) => staff.find((s) => s.employee_id === id) ?? null;
+    out.push({
+      kind: r.kind, visit_id: r.visit_id, case_id: r.case_id, client_name: info.client_name,
+      old: { date: r.old_date, start: r.old_start, end: r.old_end, staff: find(r.old_assignee) },
+      new: { date: r.new_date, start: r.new_start, end: r.new_end, staff: find(r.new_assignee) },
+      // เปลี่ยนแค่คน = เรื่องภายใน ไม่แจ้งญาติ
+      family: r.kind === 'reassigned' ? [] : info.family ?? [],
+    });
+  }
+  return out;
+}
+
