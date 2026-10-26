@@ -12,7 +12,8 @@ const { createApp } = await import('../src/app.js');
 const { signToken, COOKIE_NAME, hashPassword } = await import('../src/lib/auth.js');
 const { sql, pool } = await import('../src/db/index.js');
 const { seedFixtures } = await import('./fixtures.js');
-const { claimDueVisitReminders } = await import('../src/notify/visitReminders.js');
+const { claimDueVisitReminders, claimDueFamilyReminders } = await import('../src/notify/visitReminders.js');
+const { ensureFamilyTable } = await import('../src/lib/family.js');
 const { expiryDate } = await import('../src/cases/physioQuota.js');
 const { datesByCount } = await import('../src/cases/schema.js');
 
@@ -82,9 +83,21 @@ const r2 = await claimDueVisitReminders();
 ok(!r2.some((r) => r.visit_id === vA), 'รอบถัดไปไม่เตือนซ้ำ');
 
 // ย้ายเวลานัด = ล้างตรา เตือนใหม่
-await patch(`/api/cases/${id}/visits/${vA}`, { planned_start: timeAt(2.5) });
+await patch(`/api/cases/${id}/visits/${vA}`, { visit_date: dateAt(2.5), planned_start: timeAt(2.5) });
 const r3 = await claimDueVisitReminders();
 ok(r3.some((r) => r.visit_id === vA && r.kind === '3h'), 'ย้ายเวลานัด → เตือนใหม่ตามเวลาใหม่', r3);
+
+// ---- เตือนญาติ (วันก่อนนัด 08:00 · เคสกายภาพ · มีญาติผูก LINE) ----
+const f0 = await claimDueFamilyReminders();
+ok(!f0.some((r) => r.visit_id === vB), 'ยังไม่มีญาติผูก LINE → ไม่จอง ไม่เตือน');
+await ensureFamilyTable();
+await sql.run(`INSERT INTO case_family_links (case_id, line_user_id, display_name, invited_by, consent_by, accepted_at)
+  VALUES (:id, 'Ufamily0001', 'ลูกสาว', 'test', 'test', now())`, { id });
+const f1 = await claimDueFamilyReminders();
+const fb = f1.find((r) => r.visit_id === vB);
+ok(dayDue ? fb && fb.recipients.includes('Ufamily0001') && fb.planned_start === timeAt(26) && fb.employee_name : !fb,
+  `ญาติผูกแล้ว → เตือนวันก่อนนัดพร้อมเวลาและชื่อนักกายภาพ (${dayDue ? 'ถึงเวลาแล้ว' : 'ยังไม่ถึง 08:00'})`, f1);
+ok(!(await claimDueFamilyReminders()).some((r) => r.visit_id === vB), 'ญาติไม่ได้รับเตือนซ้ำ');
 
 // ยกเลิกนัด = ไม่เตือน · พนักงานไม่ผูก LINE = ไม่เตือน
 await sql.run(`UPDATE case_visits SET remind_3h_at = NULL WHERE visit_id = :v`, { v: vA });

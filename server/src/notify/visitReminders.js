@@ -1,4 +1,6 @@
 import { sql } from '../db/index.js';
+import { ensureFamilyTable } from '../lib/family.js';
+import { ensureCustomerLineColumns } from '../lib/customerLine.js';
 
 /**
  * เตือนนัดทาง LINE @kinjobs ให้พนักงานที่ถูกลงกะ (ดร.ธงชัย 26 ต.ค. 2569)
@@ -12,7 +14,7 @@ import { sql } from '../db/index.js';
  */
 let ready = null;
 export const ensureVisitReminderColumns = () =>
-  (ready ??= ['remind_day_at TEXT', 'remind_3h_at TEXT']
+  (ready ??= ['remind_day_at TEXT', 'remind_3h_at TEXT', 'remind_family_at TEXT']
     .reduce((p, col) => p.then(() => sql.run(`ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS ${col}`)), Promise.resolve())
     .catch((err) => {
       ready = null;
@@ -81,3 +83,57 @@ export async function claimDueVisitReminders() {
   }
   return out;
 }
+
+/**
+ * เตือนญาติ/ลูกค้าฝั่ง LINE Kin HomeCare วันก่อนนัด 08:00 ว่านักกายภาพจะไปถึงกี่โมง (ดร.ธงชัย 26 ต.ค. 2569)
+ * เฉพาะเคสกายภาพ (เคส Homecare มีกะทุกวัน เตือนญาติทุกวัน = รบกวน) และนัดที่ระบุเวลาเริ่มแล้วเท่านั้น
+ * ผู้รับ = ญาติที่ผูกเคสแล้ว (case_family_links ยอมรับแล้ว ยังไม่ถูกถอด) + ลูกค้าเจ้าของเคสที่ทักผ่าน LINE (customers.line_user_id)
+ * ไม่มีผู้รับเลย = ไม่จอง — ถ้าญาติมาผูกทีหลังก่อนถึงนัด ยังได้รับการเตือน
+ */
+const PHYSIO = `(c.physio_package_id IS NOT NULL OR c.service_kind = 'physio' OR c.case_type = 'physiotherapy')`;
+const FAMILY_IDS = `(SELECT array_agg(DISTINCT u) FROM (
+    SELECT l.line_user_id AS u FROM case_family_links l
+     WHERE l.case_id = c.case_id AND l.revoked_at IS NULL AND l.accepted_at IS NOT NULL AND l.line_user_id IS NOT NULL
+    UNION
+    SELECT cu.line_user_id FROM customers cu WHERE cu.customer_id = c.customer_id AND cu.line_user_id IS NOT NULL
+  ) x)`;
+
+export async function claimDueFamilyReminders() {
+  await ensureVisitReminderColumns();
+  await ensureFamilyTable();
+  await ensureCustomerLineColumns();
+  const ids = (
+    await sql.all(
+      `UPDATE case_visits v SET remind_family_at = ${NOW_TEXT}
+       FROM cases c
+       WHERE c.case_id = v.case_id AND v.remind_family_at IS NULL
+         AND v.status = 'scheduled' AND v.check_in_at IS NULL AND v.planned_start IS NOT NULL
+         AND c.status IN ('unassigned', 'assigned', 'in_progress') AND ${PHYSIO}
+         AND now() >= ${DAY_AT} AND ${START_AT} > now()
+         AND ${FAMILY_IDS} IS NOT NULL
+         AND v.visit_date BETWEEN to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD')
+                              AND to_char((now() AT TIME ZONE 'Asia/Bangkok') + interval '2 days', 'YYYY-MM-DD')
+       RETURNING v.visit_id`,
+    )
+  ).map((r) => r.visit_id);
+  if (!ids.length) return [];
+  const slots = ids.map((_, i) => `:v${i}`).join(', ');
+  const params = Object.fromEntries(ids.map((id, i) => [`v${i}`, id]));
+  return sql.all(
+    `SELECT 'family' AS kind, v.visit_id, v.case_id, v.visit_date, v.planned_start, v.planned_end,
+            c.client_name, pp.sessions AS package_sessions,
+            (SELECT COUNT(*) FROM case_visits o
+              WHERE o.case_id = v.case_id AND o.status <> 'cancelled'
+                AND (o.visit_date, COALESCE(o.planned_start, ''), o.visit_id)
+                    <= (v.visit_date, COALESCE(v.planned_start, ''), v.visit_id))::int AS session_no,
+            COALESCE(NULLIF(e.nickname, ''), e.first_name) AS employee_name, e.position AS employee_position,
+            ${FAMILY_IDS} AS recipients
+     FROM case_visits v
+     JOIN cases c ON c.case_id = v.case_id
+     LEFT JOIN employees e ON e.employee_id = v.assigned_to
+     LEFT JOIN physio_packages pp ON pp.physio_package_id = c.physio_package_id
+     WHERE v.visit_id IN (${slots})`,
+    params,
+  );
+}
+

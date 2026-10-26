@@ -15,7 +15,7 @@ import * as repo from '../employees/repo.js';
 import * as cases from '../cases/repo.js';
 import { BLOCKED_STATUSES } from '../lib/auth.js';
 import * as family from '../lib/family.js';
-import { claimDueVisitReminders } from '../notify/visitReminders.js';
+import { claimDueVisitReminders, claimDueFamilyReminders } from '../notify/visitReminders.js';
 import { ensureCustomerLineColumns as ensureCustomerLineColumnsSafe, findByPhones, linkFromChat } from '../lib/customerLine.js';
 
 /**
@@ -609,7 +609,7 @@ integrationRouter.post(
   asyncRoute(async (req, res) => {
     const { token } = hireSchema.parse(req.body);
     if (!verifySigned(token, 'kin-visit-remind')) throw new ApiError(401, 'ลายเซ็นไม่ถูกต้องหรือหมดอายุ');
-    res.json({ reminders: await claimDueVisitReminders() });
+    res.json({ reminders: await claimDueVisitReminders(), family: await claimDueFamilyReminders() });
   }),
 );
 

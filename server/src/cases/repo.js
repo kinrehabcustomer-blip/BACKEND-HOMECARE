@@ -1644,7 +1644,7 @@ export async function updateVisit(caseId, visitId, input, actor) {
     const sets = changed.map((c) => `${c} = :${c}`);
     // ย้ายวัน/เวลา/คน = นัดใหม่ → เตือน LINE ใหม่ตามนัดใหม่ (notify/visitReminders.js)
     if (changed.some((c) => ['visit_date', 'planned_start', 'assigned_to'].includes(c)) || (changed.includes('status') && input.status === 'scheduled')) {
-      sets.push('remind_day_at = NULL', 'remind_3h_at = NULL');
+      sets.push('remind_day_at = NULL', 'remind_3h_at = NULL', 'remind_family_at = NULL');
     }
     // คนเปลี่ยนสถานะเองแล้ว = ไม่ใช่กะที่ระบบยกเลิกให้อีกต่อไป ตอนเปิดเคสใหม่ต้องไม่ถูกคืนทับการตัดสินใจนี้
     if (changed.includes('status')) sets.push('auto_cancelled_at = NULL');
