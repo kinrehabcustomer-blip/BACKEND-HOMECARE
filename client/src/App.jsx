@@ -21,6 +21,7 @@ const ForgotPasswordPage = lazy(() => import('./pages/ForgotPasswordPage.jsx'));
 /* หน้าแบบประเมินของญาติ — lazy เหมือนหน้าอื่น และสำคัญกว่าหน้าอื่นด้วย
    คนที่เปิดคือญาติผู้ป่วยจากลิงก์ในไลน์ บนมือถือ ครั้งเดียวจบ ไม่ควรต้องโหลดระบบหลังบ้านทั้งก้อน */
 const ReviewFormPage = lazy(() => import('./pages/ReviewFormPage.jsx'));
+const PublicBillPage = lazy(() => import('./pages/PublicBillPage.jsx'));
 const ReviewsPage = lazy(() => import('./pages/ReviewsPage.jsx'));
 const ReviewDetailPage = lazy(() => import('./pages/ReviewDetailPage.jsx'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage.jsx'));
@@ -60,6 +61,7 @@ const NAV_ICONS = {
   today: (<><rect x="3" y="4" width="18" height="18" rx="2" /><path d="M3 10h18M8 2v4M16 2v4" /><path d="M9 15l2 2 4-4" /></>),
   wallet: (<><path d="M3 7a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><path d="M3 9h18" /><path d="M16 13.5h2.5" /></>),
   star: (<path d="M12 2.6l2.9 5.9 6.5.9-4.7 4.6 1.1 6.5-5.8-3.1-5.8 3.1 1.1-6.5L2.6 9.4l6.5-.9z" />),
+  play: (<><rect x="2" y="4" width="20" height="15" rx="2" /><path d="M10 9l5 2.5-5 2.5z" /></>),
 };
 
 function NavIcon({ name }) {
@@ -100,6 +102,14 @@ const navFor = (user) => {
 const homePath = (user) => {
   if (user.role !== 'admin') return '/my-today';
   return navFor(user)[0]?.to ?? '/no-access';
+};
+
+/* วิดีโอสอนใช้งาน (ดร.ธงชัย 25 ต.ค. 2569 "เมนูของตัวหลังบ้านผมก็ทำได้เลย … วิดีโอสอนการใช้งานอยู่ในตัว Dashboard ด้วย")
+   หน้าปลายทางอยู่ฝั่ง kin-chatbot (ค่าคงที่ต้นทาง src/lib/trainingVideos.js) เปิดได้โดยไม่ต้องล็อกอินและมี noindex
+   คนละเล่มกันจริง ๆ: ภาคสนามดู 6 ตอนจากมือถือ · หลังบ้านมีทีละขั้น 10 ตอน + งานหลังบ้านอีก 5 ตอน */
+const GUIDE_URL = {
+  field: 'https://chat.kinorigin.com/guide/bZA4kNe9g-b-',
+  admin: 'https://chat.kinorigin.com/guide/auUwvGgMN09d',
 };
 
 const FIELD_NAV = [
@@ -183,6 +193,11 @@ function Sidebar() {
               <NavLink to={i.to}><NavIcon name={i.icon} />{i.label}</NavLink>
             </Fragment>
           ))}
+          {/* ลิงก์ออกนอกระบบ ใช้ <a> ไม่ใช่ NavLink — เปิดแท็บใหม่ งานที่ค้างอยู่ในระบบจึงไม่หาย */}
+          <span className="nav-section-label">ช่วยเหลือ</span>
+          <a href={isAdmin ? GUIDE_URL.admin : GUIDE_URL.field} target="_blank" rel="noopener noreferrer">
+            <NavIcon name="play" />วิดีโอสอนใช้งาน
+          </a>
         </nav>
 
         <div className="sidebar-foot">
@@ -307,6 +322,8 @@ export default function App() {
             {/* แบบประเมินที่ญาติกรอก — ไม่มี AppLayout เพราะไม่มี login ไม่มีเมนู ไม่มีสิทธิ์อะไรให้ตรวจ
                 คนที่เปิดหน้านี้ไม่ใช่ผู้ใช้ของระบบ ความปลอดภัยอยู่ที่ token ในลิงก์ (ดู reviews/routes.js) */}
             <Route path="/review/:token" element={<ReviewFormPage />} />
+            {/* ใบแจ้งหนี้/ใบเสร็จที่ส่งเข้า LINE ลูกค้า — ไม่มี login แบบเดียวกับแบบประเมิน (server/src/invoices/share.js) */}
+            <Route path="/bill/:token" element={<PublicBillPage />} />
             <Route path="/settings" element={<AppLayout><SettingsPage /></AppLayout>} />
             {/* ลิงก์เดิมที่อาจถูก bookmark ไว้ ให้เด้งไปหน้าตั้งค่าแทน */}
             <Route path="/change-password" element={<Navigate to="/settings" replace />} />

@@ -1,4 +1,5 @@
 import { sql, transaction } from '../db/index.js';
+import { likeEscape } from '../lib/likeEscape.js';
 import { ApiError } from '../lib/errors.js';
 
 /** เจ้าของรหัสผู้ป่วยนี้ (ถ้ามี) — ใช้ทั้งตอนบันทึก และเส้นตรวจซ้ำที่หน้าฟอร์มเรียกระหว่างพิมพ์ */
@@ -68,7 +69,7 @@ export async function list({ q, customer_id, has_customer, status, page, per_pag
   if (q) {
     where.push(`(p.patient_id ILIKE :q OR p.name ILIKE :q OR p.nickname ILIKE :q
                  OR p.name_en ILIKE :q OR p.national_id ILIKE :q)`);
-    params.q = `%${q}%`;
+    params.q = `%${likeEscape(q)}%`;
   }
   if (customer_id) {
     where.push('p.customer_id = :customer_id');

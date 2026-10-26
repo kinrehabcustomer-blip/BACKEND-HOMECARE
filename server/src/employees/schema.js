@@ -126,6 +126,11 @@ export const imageSchema = z
  * เช็ค magic bytes ด้วย — ชนิดไฟล์ที่ browser บอกมาปลอมได้ (เปลี่ยนนามสกุลไฟล์เอา)
  */
 export function decodeImage(dataUrl) {
+  /* ไม่ใช่ข้อความ = .slice/.indexOf ไม่มีในของชิ้นนั้น แล้วหลุดออกไปเป็น TypeError
+     ซึ่งผู้เรียกบางเส้นแปลงเป็น 400 พร้อมข้อความอังกฤษ "dataUrl.indexOf is not a function"
+     ถึงหน้าจอพนักงาน (เส้นแชทเคสรับ image มาดิบๆ ไม่ผ่าน zod · ตรวจรอบ 10A) */
+  if (typeof dataUrl !== 'string') throw new Error('ไฟล์แนบต้องเป็นรูปภาพ (JPG, PNG หรือ WebP)');
+
   const mime = dataUrl.slice(5, dataUrl.indexOf(';'));
   const data = Buffer.from(dataUrl.slice(dataUrl.indexOf(',') + 1), 'base64');
 

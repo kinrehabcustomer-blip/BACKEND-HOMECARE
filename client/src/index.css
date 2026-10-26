@@ -852,6 +852,16 @@ select option:checked {
   cursor: help;
 }
 :root[data-theme='dark'] .stale-flag { background: #34291a; color: #e0b877; }
+/* นัดกายภาพเกินจำนวนครั้งที่ลูกค้าซื้อ (ตรวจรอบ 15) — ตัวเลข "15 / 10" อ่านผ่านตาได้ง่าย ต้องมีป้ายสะดุดตา */
+.over-quota-flag {
+  display: inline-block; margin-left: 0.5rem; padding: 1px 0.5rem; border-radius: 0.375rem;
+  font-size: 0.75rem; font-weight: 700; white-space: nowrap; color: #8a2b2b; background: #fdf1f1;
+}
+:root[data-theme='dark'] .over-quota-flag { background: #3a1f1f; color: #e8a0a0; }
+
+/* เคสต้นทางยกเลิกแล้ว — คนละเรื่องกับ "ข้อมูลไม่ตรง" (สีส้ม) จึงใช้สีแดงให้แยกออกจากกันในแถวเดียวกัน */
+.case-cancelled-flag { color: #8a2b2b; background: #fdf1f1; }
+:root[data-theme='dark'] .case-cancelled-flag { background: #3a1f1f; color: #e8a0a0; }
 
 /* แถบบอกว่ากำลังกรองมาจากลิงก์ของอีกหน้า (เช่น ผู้รับการดูแลของลูกค้ารายหนึ่ง) */
 .filter-chip { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
@@ -4145,6 +4155,13 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
 .pay-history li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.5rem; padding: 0.1875rem 0; font-size: 0.875rem; }
 .pay-history-date { min-width: 6.5rem; color: var(--muted); font-size: 0.8125rem; }
 .pay-history-amount { min-width: 6rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+/* ยกเลิกรายการรับชำระที่บันทึกผิด (ตรวจรอบ 13) — ช่องเหตุผลกางเต็มบรรทัดใต้รายการนั้น */
+.pay-void-form { display: flex; flex-wrap: wrap; gap: 0.5rem; width: 100%; margin: 0.25rem 0 0.5rem; }
+.pay-void-form input { flex: 1 1 14rem; min-width: 0; }
+.danger-link { color: var(--danger, #b3261e); }
+/* รายการที่ถูกยกเลิกไปแล้ว — จาง ขีดฆ่ายอด ให้อ่านออกทันทีว่าไม่นับเป็นเงินแล้ว */
+.pay-history-void { border-top-style: dashed; opacity: 0.75; }
+.pay-history-void .pay-history-amount { text-decoration: line-through; font-weight: 600; }
 .slip-block { margin-top: 0.875rem; padding-top: 0.75rem; border-top: 1px solid var(--divider); }
 .slip-list { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-top: 0.5rem; }
 .slip { margin: 0; width: 7.5rem; }
@@ -5536,4 +5553,41 @@ h1, h2, h3, h4, .page-hero-title, .cal-title, .login-heading h1 {
 @media (max-width: 600px) {
   .date-range { display: flex; width: 100%; flex-wrap: nowrap; }
   .date-range input[type="date"] { flex: 1; min-width: 0; }
+}
+
+/* ญาติที่ดูผ่าน LINE (FamilyAccess.jsx) */
+.family-access .history-item { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.family-invite { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
+.family-invite .checkbox { display: flex; gap: 6px; align-items: flex-start; font-size: 0.9em; flex: 1 1 260px; }
+.family-access .notice a { word-break: break-all; }
+.family-timeline { margin-top: 12px; border-top: 1px solid var(--border, #e5ddc8); padding-top: 8px; }
+.family-timeline h4 { margin: 4px 0 8px; }
+.family-post textarea { width: 100%; box-sizing: border-box; }
+.family-post-actions { display: flex; align-items: center; gap: 8px; margin: 6px 0 10px; }
+.family-thumb { width: 44px; height: 44px; object-fit: cover; border-radius: 6px; }
+.family-msg { padding: 8px 10px; border-radius: 10px; margin-bottom: 8px; background: #faf6ec; }
+.family-msg.team { background: #f1ead6; }
+.family-msg p { margin: 4px 0 0; }
+.family-photo { max-width: 220px; max-height: 220px; border-radius: 8px; margin-top: 6px; }
+.customer-line { background: #f6f1e3; border-radius: 10px; padding: 8px 10px; margin-bottom: 10px; }
+.customer-line p { margin: 2px 0 0; }
+
+/* ---------- ลิงก์ใบแจ้งหนี้/ใบเสร็จของลูกค้า (/bill/:token · PublicBillPage · 24 ต.ค. 2569) ----------
+   เปิดจากมือถือใน LINE เป็นหลัก — เอกสารกว้างเท่ากระดาษ จึงให้เลื่อนข้างได้ในกรอบ ไม่บีบตัวหนังสือจนอ่านไม่ออก */
+.bill-page { max-width: 60rem; margin: 0 auto; padding: 1rem; }
+.bill-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.75rem; font-weight: 600; }
+.bill-scroll { overflow-x: auto; background: #fff; border: 1px solid var(--border, #e5e5e5); border-radius: 0.5rem; }
+.bill-scroll .invoice-doc { min-width: 40rem; }
+.bill-note { margin-top: 0.75rem; font-size: 0.875rem; color: var(--muted, #666); text-align: center; }
+/* ใบที่ถูกยกเลิกหลังส่งลิงก์ไปแล้ว — ยังเปิดได้เพื่อไม่ให้ลูกค้าเสียหลักฐานการจ่าย แต่ต้องเห็นชัดว่ายกเลิก
+   พิมพ์ติดไปกับเอกสารด้วย (ไม่ใช่ no-print) ไม่งั้น PDF ที่ลูกค้าเซฟไว้ดูเหมือนใบที่ยังใช้ได้ */
+.bill-cancelled {
+  margin-bottom: 0.75rem; padding: 0.75rem 1rem; border-radius: 0.5rem; line-height: 1.6;
+  background: #fdf1f1; border: 1px solid #e3b4b4; color: #8a2b2b; font-size: 0.9375rem;
+}
+@media print {
+  .bill-page { padding: 0; }
+  .bill-scroll { overflow: visible; border: 0; }
+  .bill-scroll .invoice-doc { min-width: 0; }
+  .bill-cancelled { border-color: #8a2b2b; }
 }

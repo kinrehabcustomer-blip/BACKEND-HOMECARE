@@ -8,11 +8,14 @@ import {
 } from '../cases/schema.js';
 // กติกา "แก้แล้วต้องไม่เหลือใบเปล่า" ใช้ตัวเดียวกับฝั่งหลังบ้าน — เขียนแยกสองที่แล้ววันหนึ่งมันจะไม่ตรงกัน
 import { editReport, ensureVisitInCase } from '../cases/routes.js';
-import { decodeImage } from '../employees/schema.js';
+import { decodeImage, imageSchema } from '../employees/schema.js';
 import { distanceMeters, DEFAULT_GEOFENCE_M } from '../lib/geo.js';
 import * as payroll from '../payroll/repo.js';
 import { checkInSchema, checkOutSchema, attendanceQuerySchema } from './schema.js';
 import { ApiError, asyncRoute, notFound } from '../lib/errors.js';
+import * as family from '../lib/family.js';
+import { THERAPY_POSITIONS } from '../employees/schema.js';
+import { sql } from '../db/index.js';
 
 /**
  * ส่วนของ "พนักงานภาคสนาม" (field) — เห็น/แตะได้เฉพาะกะของตัวเอง
@@ -100,11 +103,16 @@ myRouter.get(
 
 // ---------- ตารางงาน ----------
 
-/** ตารางงานของฉันวันนี้ (กะทั้งหมด พร้อมสถานะเช็คอิน) — หน้าหลักของพนักงานภาคสนาม */
+/**
+ * ตารางงานของฉันวันนี้ (กะทั้งหมด พร้อมสถานะเช็คอิน) — หน้าหลักของพนักงานภาคสนาม
+ *
+ * carryOpen: เวรกลางคืนที่ยังไม่เช็คเอาท์ต้องอยู่ต่อหลังเที่ยงคืน ไม่งั้นพนักงานกดออกเองไม่ได้
+ * แล้วกะนั้นหายจากชั่วโมง/จำนวนกะในสรุปค่าตอบแทน (ดู visitsForEmployeeOn)
+ */
 myRouter.get(
   '/today',
   asyncRoute(async (req, res) => {
-    res.json(await cases.visitsForEmployeeOn(req.user.employee_id, todayTH()));
+    res.json(await cases.visitsForEmployeeOn(req.user.employee_id, todayTH(), { carryOpen: true }));
   }),
 );
 
@@ -268,8 +276,12 @@ myRouter.post(
 // ---------- รายงานอาการผู้ป่วย (เคสของฉัน) ----------
 
 /**
- * เคสที่ผู้เรียกเข้าถึงได้จริง (เป็นหัวหน้าเคส หรือมีกะในเคส) — ไม่ใช่ก็คืน null
- * เกณฑ์เดียวกับ GET /my/cases/:id เพื่อไม่ให้เส้นรายงานเปิดกว้างกว่าเส้นที่ดูรายละเอียดเคส
+ * เคสที่ผู้เรียกเข้าถึงได้จริง (เป็นหัวหน้าเคส อยู่ในทีม หรือมีกะในเคสภายใน 30 วัน) — ไม่ใช่ก็คืน null
+ * เกณฑ์เดียวกับ GET /my/cases/:id และแชทญาติ (hasFieldAccess ใน cases/repo.js ใช้ค่ากลางตัวเดียว)
+ *
+ * หน้าต่าง 30 วันสำคัญกับสองเส้นข้างล่างนี้เป็นพิเศษ: รายงานอาการทุกใบของเคสและรูปแผล
+ * เป็นบันทึกทางการแพทย์ที่เขียนเพิ่มเรื่อย ๆ — ถ้าไม่กั้น ผู้ดูแลที่ไปแทนเวรกะเดียวเมื่อหลายเดือนก่อน
+ * จะยังอ่านใบที่เขียนหลังเขาออกไปแล้วได้ตลอดกาล (PDPA)
  */
 async function myCaseRow(req) {
   const caseRow = await cases.findById(req.params.id);
@@ -328,6 +340,7 @@ myRouter.get(
     const row = await cases.findReportPhoto(Number(req.params.reportId), req.params.id);
     if (!row) return next(notFound('รายงานนี้ไม่มีรูปแผล'));
     res.setHeader('Content-Type', row.mime);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Cache-Control', 'private, max-age=3600');
     res.send(row.data);
   }),
@@ -365,18 +378,103 @@ myRouter.post(
   }),
 );
 
-/** ส่งไฟล์รูปเซลฟี่ตอนเช็คอินออกไปตรงๆ — แท็ก <img> เรียกเส้นนี้ (คุกกี้ session ไปด้วยอัตโนมัติ) */
+/**
+ * ส่งไฟล์รูปเซลฟี่ตอนเช็คอินออกไปตรงๆ — แท็ก <img> เรียกเส้นนี้ (คุกกี้ session ไปด้วยอัตโนมัติ)
+ *
+ * เจ้าของรูปคือ "คนที่กดเช็คอิน" (checked_in_by) ไม่ใช่ "คนที่ถือกะอยู่ตอนนี้" (assigned_to)
+ * สองค่านี้แยกจากกันได้จริง: แอดมินสลับกะไปให้คนอื่นหลังจากคนแรกเช็คอินไปแล้ว
+ * เทียบแค่ assigned_to คนใหม่จึงเปิดรูปหน้าของเพื่อนร่วมงานได้ (พิสูจน์แล้ว ตรวจรอบ 10A)
+ * รูปใบหน้าเป็นข้อมูลส่วนบุคคล — ฝั่งภาคสนามให้ดูได้เฉพาะรูปของตัวเอง
+ * (ฝ่ายหลังบ้านยังเปิดตรวจได้ตามเดิมที่ /api/cases/:id/visits/:visitId/photo)
+ */
 myRouter.get(
   '/visits/:id/photo',
   asyncRoute(async (req, res, next) => {
     const visit = await myVisit(req);
     if (!visit) return next(notFound('ไม่พบกะนี้'));
+    if (visit.checked_in_by !== req.user.employee_id) return next(notFound('กะนี้ไม่มีรูปเช็คอินของคุณ'));
 
     const row = await cases.findVisitPhoto(visit.visit_id);
     if (!row) return next(notFound('กะนี้ไม่มีรูปเช็คอิน'));
 
     res.setHeader('Content-Type', row.mime);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Cache-Control', 'private, max-age=3600');
+    res.send(row.data);
+  }),
+);
+
+// ---------- แชทเคสกับญาติ (ดร.ธงชัย 24 ต.ค. 2569 แบบ ก) ----------
+// ผู้ดูแล/นักกายภาพของเคสอ่านและตอบไทม์ไลน์เดียวกับที่ญาติเห็นในหน้า "ดูการดูแล" และทีมเห็นในหน้าเคส (lib/family.js)
+// แจ้งเตือน LINE ทั้งสองฝั่ง: ฝั่ง chat ดึงจาก /api/integration/family/message-feed · ที่นี่ไม่ยิง LINE เอง
+const isTherapist = (pos) => THERAPY_POSITIONS.includes(pos);
+
+/* นับกะย้อนหลังแค่ 30 วัน (cases.FIELD_ACCESS_WINDOW_DAYS — ค่ากลางเดียวกับทุกเส้นของพนักงานภาคสนาม):
+   คนที่ถูกสลับออกจากเคสหรือลาออกไปแล้วต้องเลิกอ่าน/เลิกตอบข้อความของครอบครัวผู้ป่วย
+   ไม่ใช่มีสิทธิ์ค้างไว้ตลอดกาลเพราะเคยมีกะหนึ่งกะเมื่อหลายเดือนก่อน
+   ผู้รับผิดชอบหลัก/คนในทีมไม่ถูกกระทบ — สองอย่างนั้นแอดมินถอดออกได้ที่หน้าเคส */
+
+async function myCaseOr404(req) {
+  const caseRow = await cases.findById(req.params.id);
+  if (!caseRow || !(await cases.hasFieldAccess(req.user.employee_id, req.params.id))) {
+    throw notFound('ไม่พบเคสนี้ หรือไม่ใช่เคสที่คุณรับผิดชอบ');
+  }
+  return caseRow;
+}
+
+myRouter.get(
+  '/cases/:id/family-messages',
+  asyncRoute(async (req, res) => {
+    await myCaseOr404(req);
+    await family.ensureFamilyTable();
+    const family_count = (await family.listForCase(req.params.id)).filter((f) => f.state === 'linked' || f.accepted_at).length;
+    res.set('Cache-Control', 'no-store');
+    res.json({ items: await family.messagesFor(req.params.id, 100), family_count });
+  }),
+);
+
+myRouter.post(
+  '/cases/:id/family-messages',
+  asyncRoute(async (req, res) => {
+    const caseRow = await myCaseOr404(req);
+    if (CLOSED_CASE.includes(caseRow.status)) throw new ApiError(409, 'เคสนี้ปิดแล้ว ส่งข้อความไม่ได้');
+    /* ยาวเกินให้บอก ไม่ใช่ตัดทิ้งเงียบ ๆ (ตรวจรอบ 16)
+       ของเดิม .slice(0, 1000) แล้วตอบ 201 — ผู้ดูแลพิมพ์อาการยาว ๆ ส่งให้ครอบครัว
+       ท้ายข้อความหายไปโดยที่ทั้งคนส่งและครอบครัวไม่รู้ว่าขาด (หน้าจอขึ้นว่าส่งสำเร็จ)
+       บอกจำนวนตัวอักษรที่เกินไปด้วย จะได้ตัดเองถูกจุด */
+    const raw = typeof req.body?.body === 'string' ? req.body.body.trim() : '';
+    if (raw.length > 1000) {
+      throw new ApiError(
+        400,
+        `ข้อความยาว ${raw.length.toLocaleString('th-TH')} ตัวอักษร เกินที่ส่งได้ 1,000 ตัว` +
+          ` (เกินมา ${(raw.length - 1000).toLocaleString('th-TH')} ตัว) — แบ่งส่งเป็นสองข้อความได้ค่ะ`,
+      );
+    }
+    const body = raw;
+    /* ตรวจด้วยตัวเดียวกับที่ทีมหลังบ้านใช้โพสต์รูปเข้าไทม์ไลน์เดียวกัน (family/routes.js)
+       เดิมส่ง req.body.image ดิบเข้า decodeImage — ของที่ไม่ใช่ข้อความทำให้ผู้ใช้ได้ข้อความ error ภาษาอังกฤษ */
+    const photo = toImage(imageSchema.optional().nullable().parse(req.body?.image ?? null));
+    if (!body && !photo) throw new ApiError(400, 'กรุณาพิมพ์ข้อความหรือแนบรูป');
+    await family.ensureFamilyTable();
+    const emp = await sql.one('SELECT first_name, nickname FROM employees WHERE employee_id = :id', { id: req.user.employee_id });
+    const who = emp ? `${emp.first_name}${emp.nickname ? ` (${emp.nickname})` : ''}` : req.user.name;
+    const row = await family.postMessage(req.params.id, {
+      kind: 'staff', name: `${who} · ${isTherapist(req.user.position) ? 'นักกายภาพ' : 'ผู้ดูแล'}`,
+      employeeId: req.user.employee_id, body, photo,
+    });
+    res.status(201).json(row);
+  }),
+);
+
+myRouter.get(
+  '/cases/:id/family-messages/:messageId/photo',
+  asyncRoute(async (req, res) => {
+    await myCaseOr404(req);
+    const row = await family.messagePhoto(req.params.id, Number(req.params.messageId));
+    if (!row) throw notFound('ไม่พบรูป');
+    res.setHeader('Content-Type', row.mime);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Cache-Control', 'private, no-store');
     res.send(row.data);
   }),
 );

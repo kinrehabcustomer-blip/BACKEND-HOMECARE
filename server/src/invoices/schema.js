@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { zodDate } from '../lib/dates.js';
+import { zodDate, zodPastDate } from '../lib/dates.js';
 import { imageSchema } from '../employees/schema.js';
 
 export const INVOICE_STATUSES = ['draft', 'issued', 'paid', 'cancelled'];
@@ -71,7 +71,10 @@ export const updateInvoiceSchema = z
 export const paySchema = z.object({
   request_id: z.string().uuid('รหัสคำขอรับชำระไม่ถูกต้อง'),
   amount: money.positive('จำนวนเงินที่รับต้องมากกว่า 0').optional().nullable(),
-  paid_at: date.optional(),          // ไม่ส่ง = วันนี้
+  /* ไม่ส่ง = วันนี้ · ส่งมาได้เฉพาะวันที่ผ่านมาแล้ว (ลูกค้าโอนเมื่อวาน เพิ่งมาลงวันนี้)
+     วันในอนาคตไม่ใช่ "เงินที่รับมาแล้ว" และกราฟรายได้กางถึงแค่วันนี้ (ดู revenue())
+     เงินก้อนนั้นจึงหายจากรายงานทุกช่วงเงียบ ๆ ทั้งที่ใบขึ้นว่าชำระครบ */
+  paid_at: zodPastDate(z).optional(),
   payment_method: optionalText,
   note: optionalText,
 });
@@ -130,4 +133,10 @@ export const listQuerySchema = z.object({
 });
 
 // ---------- สลิปโอนเงิน ----------
-export const slipSchema = z.object({ image: imageSchema });
+/* ยกเลิกรายการรับชำระที่บันทึกผิด — บังคับให้พิมพ์เหตุผล เพราะนี่คือการลบเงินออกจากรายได้
+   ข้อความนี้ไปอยู่ในประวัติ invoice_payment_voids ให้คนที่มาตรวจบัญชีทีหลังอ่าน */
+export const voidPaymentSchema = z.object({
+  reason: z.string().trim().min(3, 'กรุณาบอกเหตุผลที่ยกเลิกรายการนี้ (เช่น กรอกยอดผิด · บันทึกซ้ำ)').max(300),
+});
+
+export const slipSchema =z.object({ image: imageSchema });

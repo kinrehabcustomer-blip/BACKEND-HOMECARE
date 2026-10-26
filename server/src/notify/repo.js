@@ -100,3 +100,27 @@ export const digestRecipients = () =>
      ORDER BY employee_id`,
     { positions: Object.keys(POSITION_PERMISSIONS).filter((p) => POSITION_PERMISSIONS[p].includes('office')) },
   );
+
+/* กันสรุปรายวันถูกส่งซ้ำในวันเดียวกันจากทาง cron (ตรวจรอบ 17)
+   Vercel cron ยิงซ้ำได้เมื่อครั้งแรก timeout หรือ deploy คาบเกี่ยว และใครที่ถือ CRON_SECRET
+   ก็ยิงรัวได้ — ทีมจะได้อีเมลสรุปฉบับเดียวกันหลายรอบจนเลิกเปิด
+   จองวันไว้ก่อนส่ง: แถวแรกที่ INSERT ติดคือรอบที่ได้ส่ง ที่เหลือข้าม
+   ทาง POST (คนกดเอง) ไม่ผ่านตัวนี้ — "ส่งซ้ำ" เป็นสิ่งที่ตั้งใจให้ทำได้ */
+let digestLogReady = null;
+const ensureDigestLog = () =>
+  (digestLogReady ??= sql
+    .run(`CREATE TABLE IF NOT EXISTS notify_digest_sent (
+      day     TEXT PRIMARY KEY,
+      sent_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`)
+    .catch((err) => { digestLogReady = null; throw err; }));
+
+/** จองสิทธิ์ส่งของวันนี้ — true = รอบนี้ได้ส่ง · false = วันนี้ส่งไปแล้ว */
+export async function claimDigestDay(day) {
+  await ensureDigestLog();
+  const n = await sql.run(
+    `INSERT INTO notify_digest_sent (day) VALUES (:day) ON CONFLICT (day) DO NOTHING`,
+    { day },
+  );
+  return n > 0;
+}

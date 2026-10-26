@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { useAuth } from '../auth.jsx';
 import CaseReports from './CaseReports.jsx';
+import CaseFamilyChat from './CaseFamilyChat.jsx';
 import CaseLocationLink from './CaseLocationLink.jsx';
 import { useSheetSwipe } from '../lib/sheetSwipe.js';
 import { useScrollLock } from '../lib/scrollLock.js';
@@ -131,6 +132,12 @@ export default function MyCaseModal({ caseId, onClose }) {
               {/* ที่นี่คือ "ประวัติ" อย่างเดียว — อ่านของทุกคนในเคสได้ (ผลัดเวรต้องรู้ว่ากะก่อนหน้าเจออะไร)
                   แต่การบันทึกอยู่ที่หน้างานวันนี้ที่เดียว เพราะรายงานต้องผูกกับกะที่ไปทำจริงเสมอ
                   ถ้าเปิดให้กรอกจากตรงนี้ด้วย จะได้รายงานที่ไม่รู้ว่าเป็นของนัดไหน */}
+              {/* แชทกับญาติ (ดร. 24 ต.ค. 2569 แบบ ก) — ญาติ ทีม และผู้ดูแลของเคสเห็นเหมือนกัน */}
+              <section>
+                <h3>แชทกับญาติ</h3>
+                <CaseFamilyChat caseId={item.case_id} closed={['closed', 'cancelled'].includes(item.status)} />
+              </section>
+
               <section>
                 <h3>รายงานอาการผู้ป่วย</h3>
                 <p className="muted report-where">

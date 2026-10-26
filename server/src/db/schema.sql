@@ -1634,3 +1634,15 @@ ALTER TABLE cases ADD COLUMN IF NOT EXISTS renewed_from TEXT
   REFERENCES cases (case_id) ON DELETE SET NULL ON UPDATE CASCADE;
 ALTER TABLE cases ADD COLUMN IF NOT EXISTS round_no INTEGER NOT NULL DEFAULT 1;
 CREATE INDEX IF NOT EXISTS idx_cases_renewed_from ON cases (renewed_from) WHERE renewed_from IS NOT NULL;
+
+-- ---------- เข้าระบบด้วย LINE (22 ต.ค. 2569) ----------
+-- LINE userId ของพนักงาน ผูกครั้งแรกด้วยการ login รหัสผ่าน 1 ครั้ง (ดู server/src/lib/lineBridge.js)
+ALTER TABLE employees ADD COLUMN IF NOT EXISTS line_user_id TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_employees_line_user ON employees (line_user_id) WHERE line_user_id IS NOT NULL;
+
+-- เซสชันที่ถูกกดออกจากระบบ (ตรวจรอบ 20) — token เป็นแบบไม่เก็บสถานะ ล้างคุกกี้จึงหยุดได้แค่เบราว์เซอร์ตัวนั้น
+-- เก็บเฉพาะใบที่ถูกตัด อายุเท่าที่ token เหลือ (≤8 ชม.) · requireAuth อ่านในคิวรีเดียวกับที่อ่านพนักงาน
+CREATE TABLE IF NOT EXISTS revoked_sessions (
+  jti        TEXT PRIMARY KEY,
+  expires_at TIMESTAMPTZ NOT NULL
+);

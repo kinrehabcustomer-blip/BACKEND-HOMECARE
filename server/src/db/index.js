@@ -81,16 +81,35 @@ function executorFor(client) {
 /** ครอบ callback ด้วย transaction เดียวบน connection เดียว */
 export async function transaction(fn) {
   const client = await pool.connect();
+  let released = false;
   try {
     await client.query('BEGIN');
     const result = await fn(executorFor(client));
     await client.query('COMMIT');
     return result;
   } catch (err) {
-    await client.query('ROLLBACK');
+    /* ROLLBACK เองก็ล้มได้ (connection ขาด / เซิร์ฟเวอร์ปิดไปแล้ว) ถ้าปล่อยให้โยนออกไป
+       มันจะกลบ error ตัวจริงที่ทำให้ transaction ล้ม — คนอ่าน log เห็นแต่อาการปลายทาง
+       และ client ถูก release กลับ pool ทั้งที่ยังค้าง transaction อยู่ คำสั่งของคนถัดไป
+       ที่หยิบ connection นี้ไปจะไหลเข้า transaction ค้างนั้นต่อ · destroy ทิ้งปลอดภัยกว่า */
+    let rollbackFailed = false;
+    try {
+      await client.query('ROLLBACK');
+    } catch (rollbackErr) {
+      rollbackFailed = true;
+      console.error('ROLLBACK ล้มเหลว — ตัด connection ทิ้ง ไม่คืนเข้า pool:', rollbackErr.message);
+    }
+    if (rollbackFailed) {
+      try {
+        client.release(true); // true = destroy ไม่เอากลับเข้า pool
+      } catch {
+        /* release ซ้ำใน finally ไม่เป็นไร */
+      }
+      released = true;
+    }
     throw err;
   } finally {
-    client.release();
+    if (!released) client.release();
   }
 }
 

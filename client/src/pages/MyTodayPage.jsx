@@ -5,7 +5,7 @@ import VisitReportModal from '../components/VisitReportModal.jsx';
 import { serviceName } from '../components/MyCaseModal.jsx';
 import { getPosition } from '../lib/geo.js';
 import PageRefresh, { RefreshButton } from '../components/PageRefresh.jsx';
-import { SERVICE_KIND_LABELS, serviceKindOf, VISIT_STATE_LABELS, timeText, durationText } from '../labels.js';
+import { SERVICE_KIND_LABELS, serviceKindOf, VISIT_STATE_LABELS, timeText, durationText, formatDate, todayTH } from '../labels.js';
 import LineIcon from '../components/LineIcon.jsx';
 
 /** หน้าหลักของพนักงานภาคสนาม — กะงานวันนี้ พร้อมปุ่มเช็คอิน/เช็คเอาท์ */
@@ -136,6 +136,9 @@ export default function MyTodayPage() {
 function ShiftCard({ visit, busy, onCheckIn, onCheckOut, onReport }) {
   const planned = [visit.planned_start, visit.planned_end].filter(Boolean).join(' - ');
   const canCheckOut = visit.state === 'working' || visit.state === 'stale';
+  /* เวรกลางคืนที่ข้ามเที่ยงคืนมา — กะยังเป็นของเมื่อวาน ต้องบอกวันไว้บนการ์ด
+     ไม่งั้นมันจะดูเหมือนกะของวันนี้ที่เช็คอินไปแล้วโดยไม่มีใครรู้ว่ามาจากเวรคืนก่อน */
+  const carriedOver = !!visit.visit_date && visit.visit_date !== todayTH();
 
   /* เช็คเอาท์ต้องยืนยันก่อน — เดิมกดปุ่มเดียวจบกะทันที
      ฝั่งเช็คอินมี popup เต็มรูปแบบ (GPS + แผนที่ + เซลฟี่) ให้ทบทวนก่อนกดยืนยัน
@@ -175,6 +178,7 @@ function ShiftCard({ visit, busy, onCheckIn, onCheckOut, onReport }) {
       <div className="shift-main">
         <div className="shift-when">
           <span className="shift-time">{planned || 'ไม่ระบุเวลา'}</span>
+          {carriedOver && <span className="badge flag">เวรของ {formatDate(visit.visit_date)}</span>}
           <span className={`badge visit-${visit.state}`}>{VISIT_STATE_LABELS[visit.state]}</span>
         </div>
         <h2 className="shift-title">{visit.client_name}</h2>

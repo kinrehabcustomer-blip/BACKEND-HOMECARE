@@ -75,8 +75,12 @@ export default function PayQueue({ reloadKey, openCase, onOpenCase }) {
     }
   }
 
-  const pending = rows?.filter((r) => r.remaining > 0) ?? [];
-  const done = rows?.filter((r) => r.remaining <= 0) ?? [];
+  /* แบ่งด้วย "ยอดที่ระบบเสนอ" ไม่ใช่ยอดเหมา — เคสที่ยกเลิกกลางคันแล้วจ่ายครบตามกะที่ไปจริง
+     ต้องนับว่าจบ ไม่ใช่ค้างอยู่ในคิวตลอดไปด้วยยอดของกะที่ไม่มีใครไป (ดร. 25 ต.ค. 2569)
+     เคสปกติ suggested_remaining เท่ากับ remaining เป๊ะ การแบ่งจึงไม่เปลี่ยน */
+  const leftToPay = (r) => r.suggested_remaining ?? r.remaining;
+  const pending = rows?.filter((r) => leftToPay(r) > 0) ?? [];
+  const done = rows?.filter((r) => leftToPay(r) <= 0) ?? [];
   const inScope = showDone ? [...pending, ...done] : pending;
 
   const shown = inScope.filter((c) => {
@@ -258,9 +262,16 @@ export default function PayQueue({ reloadKey, openCase, onOpenCase }) {
                             อยู่แล้ว ติดป้ายซ้ำอีกอันคือทำให้สิ่งที่ต้องอ่านเยอะขึ้นโดยไม่ได้บอกอะไรใหม่
                             มีป้าย = มีเงินออกไปแล้ว จึงเป็นสัญญาณที่กวาดตาหาได้จริง */}
                         <td data-label="คงเหลือ">
-                          {c.remaining > 0 ? (
+                          {leftToPay(c) > 0 ? (
                             <>
-                              <strong>{formatBaht(c.remaining)}</strong>
+                              <strong>{formatBaht(leftToPay(c))}</strong>
+                              {/* ยอดไม่เท่า "ยอดเหมา − ปล่อยแล้ว" ต้องอธิบายตรงนี้
+                                  ไม่งั้นผู้จัดการเอาสองคอลัมน์ซ้ายมาลบกันแล้วคิดว่าระบบคำนวณผิด */}
+                              {c.prorated && (
+                                <span className="cell-sub">
+                                  เคสยกเลิก — คิดตามกะที่ไปจริง {c.worked_shifts} จาก {c.planned_shifts} กะ
+                                </span>
+                              )}
                               {c.released > 0 && (
                                 <span className="pay-state">
                                   <span className="badge payout-partial">ตามจ่ายอยู่</span>
@@ -269,7 +280,9 @@ export default function PayQueue({ reloadKey, openCase, onOpenCase }) {
                             </>
                           ) : (
                             <span className="pay-state">
-                              <span className="badge payout-full">จ่ายครบแล้ว</span>
+                              <span className="badge payout-full">
+                                {c.prorated ? 'จ่ายครบตามกะที่ไปจริง' : 'จ่ายครบแล้ว'}
+                              </span>
                             </span>
                           )}
                         </td>

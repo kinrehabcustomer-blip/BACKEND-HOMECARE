@@ -160,12 +160,21 @@ export default function CaseFormPage() {
      คิดจากช่องที่กรอกอยู่ตรงๆ ไม่เก็บเป็น state แยก — ช่องกับสิ่งที่จะบันทึกจึงไม่มีทางไม่ตรงกัน */
   const newPayer = !form.customer_id && payerQuery.trim() ? { name: payerQuery, phone: payerPhone } : null;
 
+  /* ข้อมูลประกอบของฟอร์ม — โหลดล้มแล้วต้องบอก ไม่ใช่กลืนเงียบ (ตรวจรอบ 20)
+     เดิมทั้งสามเส้นเป็น .catch(() => {}) · API ล่มแล้วผู้จัดการเห็นช่อง "รูปแบบบริการ" เหลือ
+     "— ไม่ระบุ —" ช่อง "ระดับพนักงาน" กดไม่ได้ และ "พนักงานที่รับเคส" ว่างเปล่า
+     โดยไม่มีอะไรบอกว่าระบบขัดข้อง — แยกไม่ออกว่า "ไม่มีข้อมูล" หรือ "โหลดไม่สำเร็จ"
+     แล้วอาจเปิดเคสทั้งที่ยังไม่มีบริการและคนรับผิดชอบ */
+  const [loadFailed, setLoadFailed] = useState([]);
   useEffect(() => {
-    api.assignableEmployees().then(setStaff).catch(() => {});
+    const load = (label, run, set) =>
+      run().then(set).catch(() => setLoadFailed((prev) => (prev.includes(label) ? prev : [...prev, label])));
+
+    load('พนักงานที่รับเคสได้', api.assignableEmployees, setStaff);
     // ตารางเรททั้งหมด (เกรด + รูปแบบ + ราคา) — ใช้ให้เลือกเรทตอนเปิดเคส
-    api.packageMatrix().then(setMatrix).catch(() => {});
+    load('รูปแบบบริการและเรท Homecare', api.packageMatrix, setMatrix);
     // แพ็คเกจกายภาพบำบัด (เหมาจำนวนครั้ง) — อีกสายที่เลือกได้แทน Homecare
-    api.listPhysioPackages().then(setPhysio).catch(() => {});
+    load('แพ็คเกจกายภาพบำบัด', api.listPhysioPackages, setPhysio);
   }, []);
 
   // ค่าที่เลือกอยู่ (แปลงเป็น number เพื่อเทียบกับ id ในตาราง)
@@ -902,6 +911,21 @@ export default function CaseFormPage() {
       </header>
 
       {error && <pre className="error">{error}</pre>}
+
+      {/* โหลดข้อมูลประกอบไม่สำเร็จ — ต้องรู้ก่อนกรอก ไม่ใช่มาเจอตอนช่องว่างเปล่า (ตรวจรอบ 20) */}
+      {loadFailed.length > 0 && (
+        <div className="notice stale-notice">
+          <p>
+            <b>โหลดข้อมูลบางส่วนไม่สำเร็จ:</b> {loadFailed.join(' · ')}
+            <br />
+            ช่องที่เกี่ยวข้องจะว่างหรือเลือกไม่ได้ — <b>ยังไม่ต้องเปิดเคส</b> ให้โหลดหน้านี้ใหม่ก่อน
+            ถ้ายังไม่หาย แปลว่าระบบขัดข้องอยู่ ไม่ใช่ว่าไม่มีข้อมูล
+          </p>
+          <button type="button" className="btn" onClick={() => window.location.reload()}>
+            โหลดหน้านี้ใหม่
+          </button>
+        </div>
+      )}
 
       <form className="card form" ref={formEl} onSubmit={handleSubmit}>
         {/* ผู้ว่าจ้าง (ผู้จ่ายเงิน) อยู่บนสุด — ต้องเห็นตั้งแต่แรกว่าเคสนี้ผูกกับลูกค้ารายไหน

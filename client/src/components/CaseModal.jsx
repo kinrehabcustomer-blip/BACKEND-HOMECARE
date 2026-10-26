@@ -7,6 +7,7 @@ import { useSheetSwipe } from '../lib/sheetSwipe.js';
 import { useScrollLock } from '../lib/scrollLock.js';
 import CaseVisitsModal from './CaseVisitsModal.jsx';
 import CaseReports from './CaseReports.jsx';
+import FamilyAccess from './FamilyAccess.jsx';
 import CaseLocationLink from './CaseLocationLink.jsx';
 import CaseReportDoc from './CaseReportDoc.jsx';
 import ReportArchiveModal from './ReportArchiveModal.jsx';
@@ -128,6 +129,15 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
   useSheetSwipe(onClose, boxRef);
   const [editing, setEditing] = useState(false);
   const [item, setItem] = useState(null);
+  // รวมหน้าหลังบ้าน ข้อ 3 (ดร. 24 ต.ค. 2569) — ปุ่มกลับไปห้องแชทลูกค้าในแดชบอร์ด admin (ลูกค้าที่ส่งมาจากแชท LINE Kin HomeCare)
+  const [chatUrl, setChatUrl] = useState(null);
+  useEffect(() => {
+    setChatUrl(null);
+    if (!caseId) return;
+    let cancelled = false; // สลับเคสเร็ว ๆ — คำตอบของเคสก่อนหน้าห้ามมาทับ
+    api.caseCustomerLine(caseId).then((d) => { if (!cancelled) setChatUrl(d?.chat_url || null); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [caseId]);
   const [staff, setStaff] = useState([]);
   const [pick, setPick] = useState('');
   const [error, setError] = useState(null);
@@ -328,6 +338,12 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
   // วันที่ยกเลิกไม่นับเป็นนัดที่จองไว้ แต่ยังเก็บไว้เป็นประวัติใน popup
   const bookedVisits = visits.filter((v) => v.status !== 'cancelled').length;
   const doneVisits = visits.filter((v) => v.status === 'done').length;
+  /* นัดเกินจำนวนครั้งที่ลูกค้าซื้อ (ตรวจรอบ 15) — ระบบไม่เคยกันและไม่เคยเตือน
+     ของเดิมขึ้นแค่ "นัดแล้ว 15 / 10 ครั้ง" ซึ่งเป็นตัวเลขสองตัววางคู่กันเฉย ๆ
+     เจ้าหน้าที่ต้องสังเกตเองว่าตัวซ้ายมากกว่าตัวขวา = บริษัทให้บริการเกินที่เก็บเงิน
+     🔴 ดร.ธงชัย 26 ต.ค. 2569: *"เตือนอย่างเดียวพอครับ อย่าบล็อก"* — ห้ามเปลี่ยนเป็นด่านกั้นการนัด
+     (ลูกค้าซื้อเพิ่มกลางคอร์ส หรือชดเชยนัดที่ยกเลิก เป็นเรื่องที่เกิดจริง) */
+  const overQuota = isPhysio && item?.physio_sessions > 0 && bookedVisits > item.physio_sessions;
 
 
   /* กะที่ทำจบแล้วแต่ค่าจ้างยังไม่ได้อนุมัติ — ตอนปิดเคสคือจังหวะที่ผู้จัดการกำลังดูงานก้อนนี้อยู่พอดี
@@ -408,6 +424,11 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                 </h2>
                 <p className="muted">{item.customer_name ?? item.client_name}</p>
                 <span className={`badge case-${item.status}`}>{CASE_STATUS_LABELS[item.status]}</span>
+                {chatUrl && (
+                  <a className="btn tiny primary" style={{ marginLeft: 8 }} href={chatUrl} target="_blank" rel="noreferrer">
+                    💬 เปิดห้องแชทลูกค้า (Admin)
+                  </a>
+                )}
                 {/* สายของเคสต่อเนื่อง — กดไปรอบก่อน/รอบถัดไปได้ */}
                 {(item.renewed_from || item.renewed_to || item.round_no > 1) && (
                   <p className="case-rounds muted">
@@ -560,6 +581,11 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                         นัดแล้ว <strong>{bookedVisits}</strong>
                         {item.physio_sessions ? ` / ${item.physio_sessions}` : ''} ครั้ง
                         {' · '}ไปแล้ว {doneVisits} ครั้ง
+                        {overQuota && (
+                          <span className="over-quota-flag">
+                            เกินแพ็กที่ซื้อ {bookedVisits - item.physio_sessions} ครั้ง
+                          </span>
+                        )}
                       </>
                     ) : (
                       <>นัดไว้ <strong>{bookedVisits}</strong> กะ{' · '}ไปแล้ว {doneVisits} กะ</>
@@ -574,7 +600,9 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
 
                 {/* ค่าจ้างของกะที่ทำไปแล้วยังไม่เข้าพนักงานจนกว่าจะอนุมัติ — อนุมัติทั้งเคสได้จากที่นี่
                     (ไล่ทีละกะได้ที่หน้า "การมาทำงาน → รออนุมัติค่าจ้าง") */}
-                {pendingPay.length > 0 && (
+                {/* seePay = หมวด money — ปุ่มนี้อนุมัติค่าจ้างทั้งเคสรวดเดียว เส้น API ก็ปิดไว้เหมือนกัน
+                    ถ้าไม่ซ่อน HR/Admin HC จะเห็นปุ่มแล้วกดเจอแถบแดง (ตรวจรอบ 10) */}
+                {seePay && pendingPay.length > 0 && (
                   <div className="visit-summary approve-row">
                     <p className="muted">
                       <strong>รออนุมัติ {pendingPay.length} กะ</strong>
@@ -644,6 +672,12 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                 />
                 {/* ใบที่จะถูกพิมพ์ — ซ่อนอยู่บนจอ โผล่เฉพาะตอนสั่งพิมพ์ (ดู .report-doc ใน index.css) */}
                 <CaseReportDoc caseItem={item} reports={printReports} />
+              </section>
+
+              {/* ญาติดูสรุปการดูแลผ่าน LINE OA Kin HomeCare — เชิญได้เท่านั้น (ดร. 22 ต.ค. 2569) */}
+              <section>
+                <h3>ญาติที่ดูผ่าน LINE</h3>
+                <FamilyAccess caseId={item.case_id} disabled={item.status === 'cancelled'} />
               </section>
 
               {/* ออกใบแจ้งหนี้จากเคสนี้ — ระบบคัดลอกผู้จ่าย/ที่อยู่/ค่าจ้างไปให้เอง */}
@@ -828,6 +862,15 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                 เหตุผลไม่บังคับ แต่เป็นสิ่งเดียวที่บอกได้ทีหลังว่าทำไมเคสนี้ถึงไม่ได้เกิดขึ้น */}
             {cancelOpen && (
               <div className="notice pay-form no-print">
+                {/* บอกผลเรื่องเงินก่อนกด ไม่ใช่ให้ไปเจอตัวเลขที่ไม่เท่าเดิมในคิวปล่อยค่าจ้างทีหลัง
+                    (ดร. 25 ต.ค. 2569 — เคสยกเลิก จ่ายตามกะที่ไปจริง กะที่ยังอยู่ไม่ต้องจ่าย) */}
+                {seePay && visits.length > 0 && (
+                  <p className="cell-sub">
+                    กะที่ยังไม่ได้ไปจะถูกยกเลิกและไม่ถูกนับเป็นค่าจ้าง — ระบบจะเสนอยอดตามกะที่ไปจริง{' '}
+                    {visits.filter((v) => v.check_in_at && v.status !== 'cancelled').length} จาก {visits.length} กะ
+                    {' '}(ผู้จัดการพิมพ์ยอดเองได้ตอนปล่อยค่าจ้าง)
+                  </p>
+                )}
                 <label>
                   เหตุผลที่ยกเลิก (ไม่บังคับ)
                   <input

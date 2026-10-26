@@ -1115,6 +1115,30 @@ if (process.env.RUN_DB_TESTS !== '1') {
       assert.equal(reissued.items.length, 2);
     });
 
+    test('ใบรายครั้ง: กะที่ยกเลิกแล้วไม่ถูกเก็บเงิน และยอดรวมไม่ทะลุค่าบริการของเคส', async () => {
+      // พนักงานเช็คอิน-เอาท์ครบทั้ง 4 วัน แล้วผู้จัดการยกเลิกกะ 2 วันทีหลัง (ลงวันผิด/ลูกค้าไม่อยู่บ้าน)
+      // ตัวหารของราคาต่อครั้งนับเฉพาะกะที่ไม่ยกเลิก กะที่ยกเลิกจึงต้องไม่กลายเป็นบรรทัดในใบด้วย
+      // ไม่งั้นได้ 4 บรรทัด × (2000/2) = 4,000 = เก็บลูกค้าเป็นสองเท่าของค่าบริการที่ตกลงไว้
+      const c = await post('/api/cases', { case_type: 'other', client_name: 'Cancelled visit billing', fee: 2000 }, MANAGER, 201);
+      const auto = await draftOf(c.case_id);
+      assert.equal((await send('DELETE', `/api/invoices/${auto.invoice_id}`)).status, 200);
+      for (const [d, status] of [['2026-04-01', 'done'], ['2026-04-02', 'done'], ['2026-04-03', 'cancelled'], ['2026-04-04', 'cancelled']]) {
+        await sql.run(
+          `INSERT INTO case_visits (case_id, visit_date, status, check_in_at, check_out_at)
+           VALUES (:id, :d, :st, (:d || ' 08:00:00+07')::timestamptz, (:d || ' 16:00:00+07')::timestamptz)`,
+          { id: c.case_id, d, st: status },
+        );
+      }
+
+      const billed = await post('/api/invoices', { case_id: c.case_id, basis: 'visits' }, MANAGER, 201);
+      assert.equal(billed.items.length, 2, JSON.stringify(billed.items.map((i) => i.description)));
+      assert.equal(billed.total, 2000);
+      assert.ok(
+        billed.items.every((i) => !i.description.includes('2026-04-03') && !i.description.includes('2026-04-04')),
+        JSON.stringify(billed.items.map((i) => i.description)),
+      );
+    });
+
     test('ออกใบพร้อมกันสองคำขอ = ใบร่างใบเดียว', async () => {
       const c = await newCase();
       const auto = await draftOf(c.case_id);
@@ -1366,6 +1390,30 @@ if (process.env.RUN_DB_TESTS !== '1') {
       await post(`/api/cases/${solo.case_id}/pay/release`, { amount: 300 }, MANAGER, 201);
     });
 
+    test('ส่วนแบ่งที่กรอกเองมีเศษย่อยกว่าสตางค์: ยอดที่ลงฐานรวมแล้วต้องเท่ายอดของงวดเป๊ะ ไม่ปล่อยเกิน', async () => {
+      /* ผู้จัดการกรอก 450.125 กับ 449.875 (รวม 900 พอดี) — ด่านเดิมตรวจผลรวม "ก่อนปัด" อย่างเดียว
+         แต่สิ่งที่ลงฐานคือยอดรายคนที่ปัดแล้วทีละบรรทัด (450.13 + 449.88 = 900.01)
+         ส่วนเกินสตางค์นั้นเป็นเงินจริง ทำให้ยอดปล่อยสะสมทะลุค่าจ้างของเคสและยอดคงเหลือติดลบ */
+      const c = await newCase(); // staff_pay 1200
+      await post(`/api/cases/${c.case_id}/assign`, { employee_id: FIELD.employee_id });
+      await post(`/api/cases/${c.case_id}/team`, { employee_id: LEAD_A.employee_id });
+      await post(`/api/cases/${c.case_id}/pay/release`, {
+        amount: 900,
+        shares: [
+          { employee_id: FIELD.employee_id, amount: 450.125 },
+          { employee_id: LEAD_A.employee_id, amount: 449.875 },
+        ],
+      }, MANAGER, 201);
+
+      const { released } = await sql.one(
+        'SELECT COALESCE(SUM(amount), 0)::float AS released FROM case_payouts WHERE case_id = :id', { id: c.case_id },
+      );
+      assert.equal(Math.round(Number(released) * 100) / 100, 900);
+      const status = (await get(`/api/cases/${c.case_id}/pay`, MANAGER)).body;
+      assert.equal(status.released, 900);
+      assert.equal(status.remaining, 300);
+    });
+
     test('เปิดเคสใหม่: คืนกะข้างหน้าที่ระบบยกเลิกตอนปิด/ยกเลิกเคส แต่ไม่คืนกะที่คนกดยกเลิกเอง', async () => {
       const c = await newCase();
       await post(`/api/cases/${c.case_id}/assign`, { employee_id: FIELD.employee_id });
@@ -1421,6 +1469,48 @@ if (process.env.RUN_DB_TESTS !== '1') {
       // ชิดขอบพอดีไม่นับว่าชน
       assert.equal((await preview({ dates: [D], planned_start: '18:00', planned_end: '20:00' })).conflicts.length, 0);
       assert.equal((await preview({ dates: [D1], planned_start: '10:00', planned_end: '12:00' })).conflicts.length, 0);
+    });
+
+    test('เวรดึกที่ยังไม่เช็คเอาท์ตามข้ามเที่ยงคืนมาที่ "งานวันนี้" · ของเก่า/ที่ยกเลิก/ของพรุ่งนี้ไม่ตาม', async () => {
+      /* ผู้ดูแลเข้าเวร 20:00 ของเมื่อวาน ถึง 08:00 ของวันนี้ — พอเลยเที่ยงคืน กะเป็นของ "เมื่อวาน"
+         ถ้าหน้างานวันนี้ไม่แสดง เขาจะหาปุ่มเช็คเอาท์ไม่เจอ กะค้างเป็นเช็คอินแล้วไม่เช็คเอาท์
+         ซึ่งไม่ถูกนับเป็นชั่วโมง/จำนวนกะในสรุปค่าตอบแทนและในระดับพนักงานเลย */
+      const who = LEAD_B.employee_id;
+      const FIELD_B = emp(who, 'caregiver');
+      const c = await newCase();
+      await post(`/api/cases/${c.case_id}/assign`, { employee_id: who });
+
+      const openShift = async (date, hoursAgo, status = 'scheduled') =>
+        (await sql.one(
+          `INSERT INTO case_visits (case_id, visit_date, assigned_to, status, checked_in_by, check_in_at, planned_start, planned_end)
+           VALUES (:id, :d, :emp, :st, :emp, now() - make_interval(hours => :h), '20:00', '08:00')
+           RETURNING visit_id`,
+          { id: c.case_id, d: date, emp: who, st: status, h: hoursAgo },
+        )).visit_id;
+
+      const lastNight = await openShift(inDays(-1), 12);                  // เวรดึกที่ยังอยู่หน้างาน
+      const longStale = await openShift(inDays(-3), 60);                  // ลืมกดออกมาหลายวัน — ให้ผู้จัดการแก้เวลาให้แทน
+      const cancelled = await openShift(inDays(-1), 12, 'cancelled');     // กะที่ยกเลิกไปแล้ว ไม่ใช่งานที่ต้องปิด
+      const closed = (await sql.one(
+        `INSERT INTO case_visits (case_id, visit_date, assigned_to, status, checked_in_by, check_in_at, check_out_at)
+         VALUES (:id, :d, :emp, 'done', :emp, now() - make_interval(hours => 30), now() - make_interval(hours => 22))
+         RETURNING visit_id`,
+        { id: c.case_id, d: inDays(-1), emp: who },
+      )).visit_id;
+
+      const ids = (rows) => rows.map((v) => v.visit_id);
+      const today = (await get('/api/my/today', FIELD_B)).body;
+      assert.ok(ids(today).includes(lastNight), `เวรดึกต้องตามมา: ${JSON.stringify(ids(today))}`);
+      for (const [id, why] of [[longStale, 'ค้างเกิน 24 ชม.'], [cancelled, 'กะที่ยกเลิก'], [closed, 'กะที่ปิดแล้ว']]) {
+        assert.ok(!ids(today).includes(id), `${why} ต้องไม่ตามมา: ${JSON.stringify(ids(today))}`);
+      }
+      // ยังกดเช็คเอาท์เองได้ (สถานะต้องเป็น working/stale ไม่ใช่หายไปจากรายการ)
+      assert.ok(['working', 'stale'].includes(today.find((v) => v.visit_id === lastNight).state));
+
+      /* ตารางของ "พรุ่งนี้" (LINE งานของฉัน) ใช้ตัวเดียวกันแต่ห้ามลากกะค้างของวันนี้ไปด้วย
+         ไม่งั้นพนักงานจะเห็นงานที่ทำไปแล้วโผล่ในวันพรุ่งนี้ */
+      const tomorrow = await casesRepo.visitsForEmployeeOn(who, inDays(1));
+      assert.equal(ids(tomorrow).filter((id) => id === lastNight).length, 0);
     });
   });
 
@@ -1602,6 +1692,288 @@ if (process.env.RUN_DB_TESTS !== '1') {
       const stored = await sql.one(`SELECT temp_password_encrypted FROM employees WHERE employee_id = 'A6800888'`);
       assert.equal(stored.temp_password_encrypted, null);
       assert.equal((await get('/api/employees/A6800888', MANAGER)).status, 200);
+    });
+  });
+
+  // ---------- ไฟล์: ใครเปิดรูปได้ และใบที่มีแต่รูปยังแก้ได้ (ตรวจรอบ 10A) ----------
+  describe('รูปในระบบ — เจ้าของรูปคือคนที่ถ่าย ไม่ใช่คนที่ถือกะอยู่ตอนนี้', () => {
+    const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(32, 7)]);
+
+    test('สลับกะให้คนใหม่แล้ว คนใหม่ต้องเปิดเซลฟี่ของคนเดิมไม่ได้ (เจ้าของรูปยังเปิดได้)', async () => {
+      const other = await post('/api/employees', { first_name: 'Shift', last_name: 'Taker', position: 'caregiver' }, MANAGER, 201);
+      // บัญชีใหม่ติดด่าน "ต้องตั้งรหัสก่อน" (403) ซึ่งจะกลบผลของด่านที่ต้องการวัด
+      await sql.run('UPDATE employees SET must_change_password = FALSE WHERE employee_id = :id', { id: other.employee_id });
+      const kase = await newCase();
+      await post(`/api/cases/${kase.case_id}/assign`, { employee_id: FIELD.employee_id }, MANAGER);
+      const { visit_id } = await sql.one(
+        `INSERT INTO case_visits (case_id, visit_date, assigned_to, status, checked_in_by, check_in_at,
+           check_in_photo_data, check_in_photo_mime, check_in_photo_size)
+         VALUES (:cid, to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD'), :me, 'scheduled', :me, now(),
+                 :data, 'image/jpeg', :size)
+         RETURNING visit_id`,
+        { cid: kase.case_id, me: FIELD.employee_id, data: JPEG, size: JPEG.length },
+      );
+
+      assert.equal((await get(`/api/my/visits/${visit_id}/photo`, FIELD)).status, 200, 'เจ้าของรูปต้องยังเปิดได้');
+
+      // แอดมินสลับกะไปให้คนอื่นหลังคนแรกเช็คอินไปแล้ว — รูปยังเป็นหน้าของคนแรก
+      await sql.run('UPDATE case_visits SET assigned_to = :who WHERE visit_id = :id', { who: other.employee_id, id: visit_id });
+      const taker = emp(other.employee_id, 'caregiver');
+      assert.equal((await get(`/api/my/visits/${visit_id}/photo`, taker)).status, 404);
+      // ฝ่ายหลังบ้านยังเปิดตรวจได้ตามเดิม
+      assert.equal((await get(`/api/cases/${kase.case_id}/visits/${visit_id}/photo`, MANAGER)).status, 200);
+    });
+
+    test('รายงานที่มีแต่รูปแผล แก้ช่องอื่นได้ แต่สั่งลบรูปทิ้งจนใบว่างไม่ได้', async () => {
+      const kase = await newCase();
+      const { report_id } = await sql.one(
+        `INSERT INTO case_reports (case_id, report_date, report_type, wound_photo_data, wound_photo_mime, wound_photo_size)
+         VALUES (:cid, to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD'), 'routine', :data, 'image/jpeg', :size)
+         RETURNING report_id`,
+        { cid: kase.case_id, data: JPEG, size: JPEG.length },
+      );
+      const patch = (body) =>
+        fetch(`${base}/api/cases/${kase.case_id}/reports/${report_id}`, {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json', cookie: `${COOKIE_NAME}=${signToken(MANAGER)}` },
+          body: JSON.stringify(body),
+        });
+
+      // รูปที่เก็บไว้แล้วอยู่คอลัมน์ wound_photo_data — ถ้านับไม่เป็นเนื้อหา ใบนี้จะแก้อะไรไม่ได้เลย
+      assert.equal((await patch({ report_type: 'change' })).status, 200);
+      assert.equal((await patch({ wound_photo: null })).status, 400, 'ลบรูปเดียวที่มี = ใบว่าง ต้องไม่ให้ผ่าน');
+
+      // ตอบกลับต้องไม่มีไบต์รูปปนมา แม้เป็น PATCH ที่ไม่มีช่องไหนเปลี่ยนเลย
+      const noop = await (await patch({})).json();
+      assert.equal('wound_photo_data' in noop, false);
+      assert.equal(noop.has_wound_photo, true);
+    });
+  });
+
+  // ---------- ญาติ: เคสที่ปิดเกินช่วงผ่อนผันต้องเปิดอะไรไม่ได้อีก ----------
+  describe('สิทธิ์ญาติหมดพร้อมกันทุกเส้น (รวมเส้นที่ส่งไบต์ของรูป)', () => {
+    test('เคสปิดเกิน 30 วัน memberLink ต้องคืน null — ไม่ใช่แค่ซ่อนจากหน้าสรุป', async () => {
+      const family = await import('../src/lib/family.js');
+      await family.ensureFamilyTable();
+      const kase = await newCase();
+      const uid = `U${'b'.repeat(32)}`;
+      await sql.run(
+        `INSERT INTO case_family_links (case_id, line_user_id, display_name, invited_by, consent_by, accepted_at, can_invite)
+         VALUES (:cid, :uid, 'ญาติ', 'test', 'test', now(), true)`,
+        { cid: kase.case_id, uid },
+      );
+      assert.ok(await family.memberLink(uid, kase.case_id), 'เคสเปิดอยู่ต้องผ่าน');
+
+      const close = (days) =>
+        sql.run(
+          `UPDATE cases SET status = 'closed', closed_at = to_char(now() - make_interval(days => :d), 'YYYY-MM-DD')
+           WHERE case_id = :cid`,
+          { d: days, cid: kase.case_id },
+        );
+      await close(5);
+      assert.ok(await family.memberLink(uid, kase.case_id), 'ยังอยู่ในช่วงผ่อนผัน 30 วัน ต้องผ่าน');
+      await close(90);
+      assert.equal(await family.memberLink(uid, kase.case_id), null, 'พ้นช่วงผ่อนผันแล้วต้องเปิดรูป/โพสต์ไม่ได้');
+    });
+  });
+
+  // ---------- ของที่ถูกย้อน แก้ หรือทำซ้ำ (ตรวจรอบ 11A) ----------
+  describe('วงจรที่ไม่ได้เดินเป็นเส้นตรง — ยกเลิกกลางคัน · เปิดรอบที่ยกเลิกกลับ · แก้ดาวรอบเดิม', () => {
+    test('ยกเลิกเคสที่พนักงานไปทำมาแล้ว — เงินยังต้องอยู่ในคิวปล่อยค่าจ้างและในตัวนับเตือน', async () => {
+      const { today } = await sql.one(`SELECT to_char(now() AT TIME ZONE 'Asia/Bangkok','YYYY-MM-DD') AS today`);
+      const worked = await newCase();
+      await post(`/api/cases/${worked.case_id}/assign`, { employee_id: FIELD.employee_id });
+      const sched = await post(`/api/cases/${worked.case_id}/visits/bulk`,
+        { dates: [today], assigned_to: FIELD.employee_id }, MANAGER, 201);
+      await sql.run(
+        `UPDATE case_visits SET checked_in_by = :emp, check_in_at = now() - interval '3 hours',
+         check_out_at = now() - interval '1 hour', status = 'done' WHERE visit_id = :id`,
+        { emp: FIELD.employee_id, id: sched.visits[0].visit_id },
+      );
+
+      // เคสที่ยกเลิก "ก่อนเริ่มงาน" ต้องไม่โผล่ในคิว — ตัวเทียบว่าด่านยังแคบอยู่
+      const untouched = await newCase();
+      await post(`/api/cases/${untouched.case_id}/assign`, { employee_id: FIELD.employee_id });
+
+      const inQueue = async (id) => (await get('/api/payroll/case-queue', MANAGER)).body.some((r) => r.case_id === id);
+      const unreleased = async () =>
+        (await get(`/api/payroll/preview?period_to=${today}`, MANAGER)).body.unreleased_cases;
+
+      assert.ok(await inQueue(worked.case_id), 'ก่อนยกเลิกต้องอยู่ในคิว');
+      const before = await unreleased();
+
+      await post(`/api/cases/${worked.case_id}/cancel`, { reason: 'ลูกค้ายกเลิกกลางคัน' });
+      await post(`/api/cases/${untouched.case_id}/cancel`, { reason: 'ยกเลิกก่อนเริ่ม' });
+
+      assert.ok(await inQueue(worked.case_id), 'ยกเลิกแล้วแต่มีกะที่ทำจริง เงินต้องยังอยู่ในคิว');
+      assert.equal(await inQueue(untouched.case_id), false, 'ยกเลิกก่อนเริ่มงาน ต้องไม่รกคิว');
+      assert.equal(await unreleased(), before + 1, 'กระดิ่งต้องนับเคสที่ยกเลิกทั้งที่มีคนไปทำมาแล้ว');
+    });
+
+    /* ดร.ธงชัย 25 ต.ค. 2569: "จ่ายบางส่วนแต่ก็คืนไม่ครบครับ เคสยกเลิก · ยกเลิกได้ครับ
+       กะที่ยังอยู่ไม่ต้องจ่าย" — เคสยกเลิกกลางคันต้องเสนอยอดตามกะที่ไปจริง ไม่ใช่ยอดเหมาเต็ม */
+    test('ยกเลิกกลางคัน: ลงกะ 10 วัน ไปจริง 3 วัน → ระบบเสนอ 3 ใน 10 ของยอดเหมา กะที่เหลือไม่เป็นเงิน', async () => {
+      const { today } = await sql.one(`SELECT to_char(now() AT TIME ZONE 'Asia/Bangkok','YYYY-MM-DD') AS today`);
+      const day = (i) => {
+        const d = new Date(`${today}T00:00:00Z`);
+        d.setUTCDate(d.getUTCDate() + i);
+        return d.toISOString().slice(0, 10);
+      };
+      const tenDays = Array.from({ length: 10 }, (_, i) => day(i));
+
+      /* เคสควบคุม: ลงกะและทำงานเท่ากันเป๊ะ แต่ "ปิด" ไม่ใช่ "ยกเลิก" — ต้องได้ยอดเหมาเต็มเหมือนเดิม
+         (ตัวพิสูจน์ว่าสัดส่วนไม่หลุดไปโดนเคสปกติ) */
+      const build = async () => {
+        const c = await post('/api/cases',
+          { case_type: 'other', client_name: 'ยกเลิกกลางคัน', fee: 30000, staff_pay: 20000 }, MANAGER, 201);
+        await post(`/api/cases/${c.case_id}/assign`, { employee_id: FIELD.employee_id });
+        const sched = await post(`/api/cases/${c.case_id}/visits/bulk`,
+          { dates: tenDays, assigned_to: FIELD.employee_id }, MANAGER, 201);
+        assert.equal(sched.visits.length, 10, 'ต้องลงกะได้ครบ 10 วัน');
+        for (const v of sched.visits.slice(0, 3)) {
+          await sql.run(
+            `UPDATE case_visits SET checked_in_by = :emp, check_in_at = now() - interval '3 hours',
+             check_out_at = now() - interval '1 hour', status = 'done' WHERE visit_id = :id`,
+            { emp: FIELD.employee_id, id: v.visit_id },
+          );
+        }
+        return c.case_id;
+      };
+
+      const cancelled = await build();
+      const closed = await build();
+
+      const payOf = async (id) => (await get(`/api/cases/${id}/pay`, MANAGER)).body;
+      const queueRow = async (id) =>
+        (await get('/api/payroll/case-queue', MANAGER)).body.find((r) => r.case_id === id);
+
+      // ก่อนยกเลิก ทั้งคู่ยังเป็นเคสเดินอยู่ = เสนอยอดเหมาเต็ม
+      assert.equal((await payOf(cancelled)).suggested_remaining, 20000, 'เคสที่ยังเดินอยู่ต้องเสนอเต็มยอด');
+      assert.equal((await payOf(cancelled)).prorated, false);
+
+      await post(`/api/cases/${cancelled}/cancel`, { reason: 'ลูกค้ายกเลิกกลางคัน' });
+      await post(`/api/cases/${closed}/close`, { force: true });
+
+      const pay = await payOf(cancelled);
+      assert.equal(pay.worked_shifts, 3, 'กะที่ไปจริง');
+      assert.equal(pay.planned_shifts, 10, 'กะที่วางไว้ทั้งหมด (กะที่ยกเลิกตามเคสต้องยังอยู่ในตัวหาร)');
+      assert.equal(pay.suggested_pay, 6000, '20,000 × 3/10');
+      assert.equal(pay.suggested_remaining, 6000);
+      assert.equal(pay.prorated, true);
+      assert.equal(pay.staff_pay, 20000, 'ยอดเหมาไม่ถูกแก้ — สัดส่วนเป็นข้อเสนอ ไม่ใช่การเขียนทับยอด');
+      assert.equal(pay.remaining, 20000, 'เพดานที่พิมพ์เองได้ยังเป็นยอดเหมาเต็ม');
+
+      // เคสที่ "ปิด" ด้วยตารางกะชุดเดียวกัน ต้องไม่ถูกแตะเลยสักบาท
+      const normal = await payOf(closed);
+      assert.equal(normal.suggested_pay, 20000, 'เคสปิดตามปกติ = ยอดเหมาเต็มเท่าเดิมเป๊ะ');
+      assert.equal(normal.suggested_remaining, 20000);
+      assert.equal(normal.prorated, false);
+
+      // คิวปล่อยค่าจ้างต้องบอกที่มาของยอด ไม่ใช่โชว์ยอดเหมาเต็มให้ผู้จัดการคิดสัดส่วนเอง
+      const row = await queueRow(cancelled);
+      assert.equal(row.worked_shifts, 3);
+      assert.equal(row.planned_shifts, 10);
+      assert.equal(row.suggested_remaining, 6000);
+      assert.equal(row.prorated, true);
+      assert.equal((await queueRow(closed)).suggested_remaining, 20000);
+
+      // กด "ปล่อยที่เหลือ" โดยไม่พิมพ์ยอด = ได้ยอดตามสัดส่วน ไม่ใช่ 20,000
+      await post(`/api/cases/${cancelled}/pay/release`, {}, MANAGER, 201);
+      const after = await payOf(cancelled);
+      assert.equal(after.released, 6000, 'กะที่ไม่มีใครไปต้องไม่ถูกเทออกมาเป็นเงิน');
+      assert.equal(after.suggested_remaining, 0);
+      assert.equal(after.remaining, 14000, 'ยอดเหมาคงเหลือยังรายงานตามจริง');
+
+      /* จ่ายครบตามสัดส่วนแล้วต้องตกไปกลุ่ม "จ่ายครบ" ของคิว — ถ้าสูตรฝั่ง SQL (PAY_BASIS)
+         กับฝั่ง JS (suggestedPay) เริ่มเพี้ยนจากกัน บรรทัดนี้จะล้มทันที */
+      assert.equal((await queueRow(cancelled)).pay_priority, 6, 'ต้องไม่ค้างหัวคิวด้วยยอดที่จะไม่มีวันจ่าย');
+
+      // กดซ้ำแบบไม่ระบุยอด = ปฏิเสธพร้อมบอกเหตุผล ไม่ใช่เงียบๆ ปล่อยอีก 14,000
+      const blocked = await post(`/api/cases/${cancelled}/pay/release`, {}, MANAGER, 409);
+      assert.match(blocked.error ?? JSON.stringify(blocked), /ยกเลิกกลางคัน/);
+
+      // แต่ผู้จัดการยังพิมพ์ยอดเองได้ (ข้อเสนอ ไม่ใช่เพดาน) และเพดานยอดเหมายังกันอยู่
+      await post(`/api/cases/${cancelled}/pay/release`, { amount: 1000 }, MANAGER, 201);
+      assert.equal((await payOf(cancelled)).released, 7000);
+      await post(`/api/cases/${cancelled}/pay/release`, { amount: 99999 }, MANAGER, 400);
+    });
+
+    test('เปิดเคสรอบที่ยกเลิกกลับมา ไม่ได้ถ้าสายต่อเคสนั้นมีรอบใหม่เดินอยู่แล้ว', async () => {
+      const first = await newCase();
+      const second = await post('/api/cases',
+        { case_type: 'other', client_name: 'ต่อรอบสอง', fee: 2000, staff_pay: 1200, renewed_from: first.case_id },
+        MANAGER, 201);
+      assert.equal(second.round_no, 2);
+
+      await post(`/api/cases/${second.case_id}/cancel`, { reason: 'ลูกค้าบอกไม่ต่อ' });
+      const third = await post('/api/cases',
+        { case_type: 'other', client_name: 'ต่อรอบสองใหม่', fee: 2000, staff_pay: 1200, renewed_from: first.case_id },
+        MANAGER, 201);
+
+      await post(`/api/cases/${second.case_id}/reopen`, {}, MANAGER, 409);
+      assert.equal(
+        (await sql.one('SELECT status FROM cases WHERE case_id = :id', { id: second.case_id })).status,
+        'cancelled',
+      );
+      // ยกเลิกรอบที่เดินอยู่แล้วค่อยเปิดใบเดิมกลับ ยังทำได้ตามเดิม
+      await post(`/api/cases/${third.case_id}/cancel`, { reason: 'สลับกลับไปใช้ใบเดิม' });
+      await post(`/api/cases/${second.case_id}/reopen`, {}, MANAGER, 200);
+    });
+
+    test('ญาติแก้ดาวรอบเดิมหลังเปลี่ยนคนดูแล — ชื่อที่ส่งกลับต้องเป็นคนที่ดาวลงจริง · เคสปิดนานแล้วให้ดาวไม่ได้', async () => {
+      const ratings = await import('../src/lib/ratings.js');
+      const family = await import('../src/lib/family.js');
+      await family.ensureFamilyTable();
+
+      const { today } = await sql.one(`SELECT to_char(now() AT TIME ZONE 'Asia/Bangkok','YYYY-MM-DD') AS today`);
+      const kase = await newCase();
+      const uid = `U${'c'.repeat(32)}`;
+      await sql.run(
+        `INSERT INTO case_family_links (case_id, line_user_id, display_name, invited_by, consent_by, accepted_at, can_invite)
+         VALUES (:cid, :uid, 'ญาติ', 'test', 'test', now(), true)`,
+        { cid: kase.case_id, uid },
+      );
+      await post(`/api/cases/${kase.case_id}/assign`, { employee_id: FIELD.employee_id });
+      const first = await post(`/api/cases/${kase.case_id}/visits/bulk`,
+        { dates: [today], assigned_to: FIELD.employee_id }, MANAGER, 201);
+      await sql.run(
+        `UPDATE case_visits SET checked_in_by = :emp, check_in_at = now() - interval '5 hours',
+         check_out_at = now() - interval '4 hours', status = 'done' WHERE visit_id = :id`,
+        { emp: FIELD.employee_id, id: first.visits[0].visit_id },
+      );
+
+      const one = await ratings.submitRating({ caseId: kase.case_id, round: 'w1', kind: 'family', line: uid, stars: 5 });
+      assert.equal(one.employee_id, FIELD.employee_id);
+
+      // เปลี่ยนคนดูแลกลางรอบ แล้วคนใหม่เข้าเวร
+      const other = await post('/api/employees', { first_name: 'คนใหม่', last_name: 'เข้าเวร', position: 'caregiver' }, MANAGER, 201);
+      await post(`/api/cases/${kase.case_id}/assign`, { employee_id: other.employee_id });
+      const second = await post(`/api/cases/${kase.case_id}/visits/bulk`,
+        { dates: [today], assigned_to: other.employee_id, planned_start: '20:00' }, MANAGER, 201);
+      const night = second.visits.find((v) => v.planned_start === '20:00');
+      await sql.run(
+        `UPDATE case_visits SET checked_in_by = :emp, check_in_at = now() - interval '1 hour',
+         check_out_at = now(), status = 'done' WHERE visit_id = :id`,
+        { emp: other.employee_id, id: night.visit_id },
+      );
+
+      const again = await ratings.submitRating({ caseId: kase.case_id, round: 'w1', kind: 'family', line: uid, stars: 1 });
+      const stored = await sql.one(
+        `SELECT employee_id, stars FROM case_ratings WHERE case_id = :cid AND round = 'w1'`,
+        { cid: kase.case_id },
+      );
+      assert.equal(stored.stars, 1);
+      assert.equal(again.employee_id, stored.employee_id, 'ชื่อที่แจ้งทีมตอนดาวต่ำต้องเป็นคนที่ดาวลงจริง');
+
+      await sql.run(
+        `UPDATE cases SET status = 'closed', closed_at = to_char(now() - interval '200 days', 'YYYY-MM-DD') WHERE case_id = :cid`,
+        { cid: kase.case_id },
+      );
+      assert.deepEqual(
+        await ratings.submitRating({ caseId: kase.case_id, round: 'w9', kind: 'family', line: uid, stars: 1 }),
+        { error: 'not_family' },
+        'เคสปิดเกิน 30 วัน ญาติต้องยิงดาวเข้าบัญชีพนักงานไม่ได้อีก',
+      );
     });
   });
 

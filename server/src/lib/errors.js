@@ -28,10 +28,29 @@ export function errorHandler(err, req, res, next) {
     return res.status(err.status).json({ error: err.message, details: err.details });
   }
 
+  /*
+   * body-parser ตีกลับตั้งแต่ก่อนถึง route — เดิมตกไปเป็น 500 "เกิดข้อผิดพลาดภายในระบบ"
+   * ซึ่งเป็นคำตอบที่คนหน้างานแก้เองไม่ได้ ทั้งที่สาเหตุคือ "รูปที่แนบใหญ่เกิน" ซึ่งแก้ได้ทันที
+   * เจอได้จริงกับรูปที่ไม่ได้ย่อ: เพดาน JSON คือ 8 MB แต่ data URL โตขึ้นจากไฟล์จริงราว 1.37 เท่า
+   * ไฟล์ราว 6 MB ขึ้นไปจึงถูกตัดทิ้งก่อนที่ด่าน 5 MB ใน decodeImage จะได้ทำงานและบอกเหตุผล
+   */
+  if (err?.type === 'entity.too.large') {
+    return res.status(413).json({ error: 'ไฟล์ที่แนบมาใหญ่เกินไป — รูปต้องไม่เกิน 5 MB ต่อใบ (ย่อรูปแล้วลองใหม่)' });
+  }
+  if (err?.type === 'entity.parse.failed') {
+    return res.status(400).json({ error: 'ข้อมูลที่ส่งมาไม่ใช่ JSON ที่ถูกต้อง' });
+  }
+
   // 23505 = unique_violation ของ Postgres (เช่น เลขบัตรประชาชนซ้ำ)
   // ทั้งพนักงานและลูกค้าห้ามเลขบัตรซ้ำ — ต้องบอกให้ตรงว่าไปชนกับใคร ไม่งั้นคนอ่านตามหาผิดที่
   if (err?.code === '23505' && err.constraint?.includes('national_id')) {
-    const who = err.constraint.includes('customer') ? 'ลูกค้ารายอื่น' : 'พนักงานคนอื่น';
+    /* ต้องไล่ทีละแฟ้ม ไม่ใช่ "ลูกค้า หรือไม่ก็พนักงาน" (ตรวจรอบ 18)
+       ดัชนีของผู้ป่วยคือ idx_patients_national_id ซึ่งไม่มีคำว่า customer
+       เลขบัตรผู้ป่วยซ้ำจึงเคยขึ้นว่า "ถูกใช้กับพนักงานคนอื่นแล้ว" — คนอ่านไปตามหาในรายชื่อพนักงานแล้วไม่เจอ */
+    const c = err.constraint;
+    const who = c.includes('customer') ? 'ลูกค้ารายอื่น'
+      : c.includes('patient') ? 'ผู้รับบริการรายอื่น'
+      : 'พนักงานคนอื่น';
     return res.status(409).json({ error: `เลขบัตรประชาชนนี้ถูกใช้กับ${who}แล้ว` });
   }
 

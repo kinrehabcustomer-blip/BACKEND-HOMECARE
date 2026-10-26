@@ -137,6 +137,10 @@ export const api = {
   // POST เดียวในระบบที่ตอบ 204 อย่างถูกต้อง (ล้างคุกกี้แล้วจบ ไม่มีอะไรให้คืน)
   logout: () => request('/auth/logout', { method: 'POST', empty: true }),
   me: () => request('/auth/me'),
+  // ผูก LINE กับบัญชีนี้ — ตั๋วมาจากปุ่มในหน้า "งานของฉัน" ใน LINE (ดู server/src/lib/lineBridge.js)
+  linkLine: (t) => request('/auth/line-link', { method: 'POST', body: { t } }),
+  // กรอกรหัสผูก LINE 6 หลักจากแอดมิน ในหน้าที่เปิดจาก LINE → ผูกแล้วเข้าระบบทันที ไม่ใช้รหัสผ่าน (คืน session)
+  lineCodeLogin: (t, code) => request('/auth/line-code', { method: 'POST', credentialCheck: true, body: { t, code } }),
 
   forgotPassword: (email) => request('/auth/forgot-password', { method: 'POST', body: { email } }),
   resetPassword: (body) => request('/auth/reset-password', { method: 'POST', body }),
@@ -164,6 +168,10 @@ export const api = {
   resignEmployee: (id, resign_date) =>
     request(`/employees/${id}`, { method: 'DELETE', body: { resign_date } }),
   deleteEmployee: (id) => request(`/employees/${id}?hard=true`, { method: 'DELETE' }),
+  // ปลด LINE ที่ผูกไว้ (เข้าระบบด้วย LINE) — เจ้าตัวต้อง login รหัสผ่าน 1 ครั้งเพื่อผูกใหม่
+  unlinkEmployeeLine: (id) => request(`/employees/${id}/line`, { method: 'DELETE' }),
+  // ออกรหัสผูก LINE 6 หลัก — เจ้าตัวพิมพ์รหัสใน LINE @kinjobs แล้วผูกทันที ไม่ต้องใช้รหัสผ่าน (คืน { code, expires_at })
+  createEmployeeLineCode: (id) => request(`/employees/${id}/line-code`, { method: 'POST' }),
 
   /** แนบรูปพนักงานทับของเดิม — ส่ง image: null เพื่อลบรูป (คืนข้อมูลพนักงานที่อัปเดตแล้ว) */
   setEmployeePhoto: (id, image) => request(`/employees/${id}/photo`, { method: 'PUT', body: { image } }),
@@ -244,6 +252,10 @@ export const api = {
   // ---------- ของฉัน (พนักงานภาคสนาม — เห็นเฉพาะเคส/กะตัวเอง) ----------
   myCases: () => request('/my/cases'),
   myCase: (id) => request(`/my/cases/${id}`),
+  // แชทเคสกับญาติ (24 ต.ค. 2569) — ไทม์ไลน์เดียวกับหน้า "ดูการดูแล" ของญาติและหน้าเคสของทีม
+  myFamilyMessages: (id) => request(`/my/cases/${id}/family-messages`),
+  postMyFamilyMessage: (id, body) => request(`/my/cases/${id}/family-messages`, { method: 'POST', body }),
+  myFamilyPhotoUrl: (id, mid) => `/api/my/cases/${id}/family-messages/${mid}/photo`,
   myCalendar: ({ year, month }) => request(`/my/calendar?${new URLSearchParams({ year, month })}`),
 
   // ตารางงาน + เช็คอิน/เอาท์
@@ -387,6 +399,10 @@ export const api = {
     return request(`/invoices/revenue?${params}`);
   },
   getInvoice: (id) => request(`/invoices/${id}`),
+  // ส่งใบเข้า LINE ลูกค้า (24 ต.ค. 2569) · ลิงก์สาธารณะของลูกค้า
+  invoiceLine: (id) => request(`/invoices/${id}/line`),
+  sendInvoiceLine: (id) => request(`/invoices/${id}/line`, { method: 'POST' }),
+  publicBill: (token) => request(`/public/bill/${encodeURIComponent(token)}`),
   createInvoice: (body) => request('/invoices', { method: 'POST', body }),
   /** เคสที่ไม่มีใบแจ้งหนี้เหลืออยู่ (ไม่นับใบที่ยกเลิก) — ไว้เสนอปุ่มออกใบ */
   casesWithoutInvoice: () => request('/invoices/cases-without-invoice'),
@@ -409,6 +425,9 @@ export const api = {
   invoicePlan: (id) => request(`/invoices/${id}/plan`),
   issueInvoice: (id) => request(`/invoices/${id}/issue`, { method: 'POST' }),
   payInvoice: (id, body) => request(`/invoices/${id}/pay`, { method: 'POST', body }),
+  /** ยกเลิกรายการรับชำระที่บันทึกผิด (กรอกยอดผิด/บันทึกซ้ำ) — ต้องบอกเหตุผล · คืนใบที่อัปเดตแล้ว */
+  voidInvoicePayment: (id, paymentId, reason) =>
+    request(`/invoices/${id}/payments/${paymentId}/void`, { method: 'POST', body: { reason } }),
   cancelInvoice: (id) => request(`/invoices/${id}/cancel`, { method: 'POST' }),
   deleteInvoice: (id) => request(`/invoices/${id}`, { method: 'DELETE' }),
   /** สลิปโอนเงินของลูกค้า — image เป็น data URL ที่ย่อแล้ว (compressImage) · คืนใบที่อัปเดตแล้ว */
@@ -469,6 +488,17 @@ export const api = {
    * คืน { data, page, per_page, total, has_more, months } — months ไว้ทำตัวเลือกดูย้อนหลัง
    */
   listCaseReports: (id, params = {}) => request(`/cases/${id}/reports?${new URLSearchParams(params)}`),
+  // ญาติที่ดูการดูแลผ่าน LINE (เชิญ/ปลด) — server/src/family/routes.js
+  familyLinks: (caseId) => request(`/family/cases/${caseId}`),
+  createFamilyInvite: (caseId) => request(`/family/cases/${caseId}/invites`, { method: 'POST', body: { consent: true } }),
+  revokeFamilyLink: (caseId, linkId) => request(`/family/cases/${caseId}/links/${linkId}`, { method: 'DELETE' }),
+  familyMessages: (caseId) => request(`/family/cases/${caseId}/messages`),
+  // LINE ของลูกค้าเจ้าของเคส (ทักสอบถามทาง OA Kin HomeCare) + ผูกเป็นญาติคนแรกโดยไม่ต้องส่งรหัส
+  caseCustomerLine: (caseId) => request(`/family/cases/${caseId}/customer-line`),
+  linkCustomerLine: (caseId) => request(`/family/cases/${caseId}/customer-line`, { method: 'POST', body: { consent: true } }),
+  postFamilyMessage: (caseId, body) => request(`/family/cases/${caseId}/messages`, { method: 'POST', body }),
+  hideFamilyMessage: (caseId, id) => request(`/family/cases/${caseId}/messages/${id}`, { method: 'DELETE' }),
+  familyPhotoUrl: (caseId, id) => `/api/family/cases/${caseId}/messages/${id}/photo`,
   caseReportPhotoUrl: (id, reportId) => `/api/cases/${id}/reports/${reportId}/photo`,
   addCaseReport: (id, body) => request(`/cases/${id}/reports`, { method: 'POST', body }),
   updateCaseReport: (id, reportId, body) =>

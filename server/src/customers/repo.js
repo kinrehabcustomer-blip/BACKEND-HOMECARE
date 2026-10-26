@@ -1,4 +1,5 @@
 import { sql, nextCustomerId, transaction } from '../db/index.js';
+import { likeEscape } from '../lib/likeEscape.js';
 
 const COLUMNS = [
   // ตัวตน
@@ -52,7 +53,7 @@ export async function list({ q, has_cases, page, per_page, sort, order }) {
     // ค้นจากทุกอย่างที่คนใช้เรียกลูกค้าจริง — ชื่อเล่นกับเลขบัตรถูกถามหาบ่อยพอๆ กับชื่อจริง
     where.push(`(customer_id ILIKE :q OR name ILIKE :q OR nickname ILIKE :q OR name_en ILIKE :q
                  OR phone ILIKE :q OR home_phone ILIKE :q OR national_id ILIKE :q OR line_id ILIKE :q)`);
-    params.q = `%${q}%`;
+    params.q = `%${likeEscape(q)}%`;
   }
 
   // "ยังไม่เคยเปิดเคส" = ลูกค้าที่ติดต่อเข้ามาแล้วแต่ยังไม่ได้ใช้บริการ — กลุ่มที่ต้องตามต่อ

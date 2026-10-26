@@ -1,6 +1,7 @@
 import { sql, nextInvoiceId, transaction } from '../db/index.js';
 import { PATIENT_PENDING } from '../cases/schema.js';
 import { normalizeAddons, addonAmount, addonsTotal, addonsTotalSql } from '../lib/addons.js';
+import { ensureShareTables } from './share.js';
 
 const NOW = `to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')`;
 /* วันนี้ตามเวลาไทย ไม่ใช่ UTC — ใช้กับวันที่ออกใบ/วันรับชำระ/เกณฑ์เลยกำหนด
@@ -335,6 +336,11 @@ const withComputed = (row) => {
     needs_plan: row.status === 'draft' && row.billing_kind == null,
     is_plan_part: isPart,
     is_overdue: row.status === 'issued' && row.due_date != null && row.due_date < TODAY(),
+    /* เคสต้นทางถูกยกเลิกไปแล้ว แต่ใบยังเปิดค้างอยู่ — ไม่ใช่ "ข้อมูลไม่ตรง" (is_stale) ที่กดรีเฟรชแล้วจบ
+       แต่เป็นคำถามว่ายังจะเก็บเงินใบนี้อยู่ไหม · คนตามเก็บเงินเห็นแต่ยอดค้างในรายการ
+       ไม่มีอะไรบอกว่าเคสล่มไปแล้ว แล้วโทรไปทวงลูกค้าที่ยกเลิกบริการไปแล้ว (ตรวจรอบ 13)
+       ใบที่ชำระ/ยกเลิกแล้วไม่ต้องเตือน — ไม่มีเงินให้ตามแล้ว */
+    case_cancelled: row.case_status === 'cancelled' && (row.status === 'draft' || row.status === 'issued'),
     fee_stale: feeStale,
     payer_stale: payerStale,
     service_stale: serviceStale,
@@ -492,8 +498,12 @@ export async function list({ q, status, customer_id, case_id, overdue, stale, dr
 export const findById = async (id) => {
   const row = await sql.one(`${SELECT_INVOICE} WHERE i.invoice_id = :id`, { id });
   if (!row) return null;
-  const [items, payments, slips] = await Promise.all([listItems(id), listPayments(id), listSlips(id)]);
-  return withComputed({ ...row, items, payments, slips });
+  /* รายการรับชำระที่ถูกยกเลิกไปแล้วมาด้วย — เงินที่เคยบันทึกแล้วหายไปจากใบต้องมีร่องรอยให้เห็น
+     ไม่งั้นคนที่เปิดใบทีหลังอ่านไม่ออกว่าทำไมยอดเปลี่ยน (ตรวจรอบ 13) */
+  const [items, payments, slips, payment_voids] = await Promise.all([
+    listItems(id), listPayments(id), listSlips(id), listPaymentVoids(id).catch(() => []),
+  ]);
+  return withComputed({ ...row, items, payments, slips, payment_voids });
 };
 
 /** หลัง commit อาจมีคำขออื่นลบใบก่อน SELECT ตอบกลับ — แปลงเป็น conflict แทนการคืน null/เกิด TypeError ที่ route */
@@ -549,6 +559,122 @@ export const listPayments = (invoiceId) =>
     { id: invoiceId },
   );
 
+/* ---------- ยกเลิกรายการรับชำระที่บันทึกผิด (ตรวจรอบ 13) ----------
+ *
+ * เดิมไม่มีทางแก้เลย: กรอก 500 แทน 5,000 หรือกดบันทึกซ้ำเป็นสองรายการ แล้วยอดค้างกับกราฟรายได้
+ * ผิดถาวร ทางเดียวคือยกเลิกใบทั้งใบแล้วออกใหม่ ซึ่งทำให้เลขที่เอกสารข้าม ใบที่ส่งลูกค้าไปแล้ว
+ * ใช้ไม่ได้ และลิงก์ใบเสร็จของลูกค้าเปลี่ยนเป็น "ยกเลิกแล้ว" ทั้งที่แค่พิมพ์เลขผิด
+ *
+ * ลบแถวจริงแทนการติดธง "ยกเลิก" โดยตั้งใจ — ยอดที่รับมาแล้วถูกคิดด้วย SUM(invoice_payments)
+ * อยู่ 6 ที่ (ใบ · สรุป · กราฟรายได้ · เพดานรับชำระ · แบ่งมัดจำ · แก้ยอดมัดจำ) ถ้าใช้ธง
+ * ต้องไปเติม WHERE ให้ครบทุกที่ พลาดที่เดียว = ตัวเลขเงินสองหน้าจอไม่ตรงกันแบบเงียบ ๆ
+ * หลักฐานไม่หาย — สำเนาทั้งแถวย้ายไป invoice_payment_voids พร้อมคนยกเลิกและเหตุผล
+ */
+let voidsReady = null;
+export const ensurePaymentVoidTable = () =>
+  (voidsReady ??= sql
+    .run(`CREATE TABLE IF NOT EXISTS invoice_payment_voids (
+      void_id        INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+      invoice_id     TEXT NOT NULL,
+      payment_id     INTEGER NOT NULL,
+      amount         DOUBLE PRECISION NOT NULL,
+      paid_at        TEXT NOT NULL,
+      method         TEXT,
+      note           TEXT,
+      received_by      TEXT,
+      received_by_name TEXT,
+      payment_created_at TEXT,
+      reason         TEXT NOT NULL,
+      voided_by      TEXT,
+      voided_by_name TEXT,
+      voided_at      TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')
+    )`)
+    .catch((err) => { voidsReady = null; throw err; }));
+
+/** ประวัติรายการรับชำระที่ถูกยกเลิกของใบ — โชว์ใต้รายการรับเงิน ไม่ให้เงินหายแบบไร้ร่องรอย */
+export async function listPaymentVoids(invoiceId) {
+  await ensurePaymentVoidTable();
+  return sql.all(
+    `SELECT void_id, payment_id, amount, paid_at, method, received_by_name, reason, voided_by_name, voided_at
+     FROM invoice_payment_voids WHERE invoice_id = :id ORDER BY void_id`,
+    { id: invoiceId },
+  );
+}
+
+/**
+ * ใครยกเลิกรายการไหนได้ — คิดจากข้อมูลล้วน แยกไว้เทสได้โดยไม่ต้องมีฐานข้อมูล
+ *   money (ผู้จัดการ/การเงิน/Super Admin) = ทุกรายการ
+ *   billing ล้วน (HR/Admin HC) = เฉพาะรายการที่ตัวเองบันทึก และบันทึกวันนี้
+ *     — คนกรอกต้องแก้ของตัวเองที่เพิ่งพิมพ์ผิดได้ทันที ไม่ต้องรอผู้จัดการ
+ *       แต่ต้องลบรายได้ของเดือนก่อนย้อนหลังไม่ได้
+ */
+export function assessPaymentVoid(payment, actor, { hasMoneyPermission, today }) {
+  if (!payment) return { reason: 'not_found' };
+  if (hasMoneyPermission) return { allowed: true };
+  if (payment.received_by && actor?.employee_id && payment.received_by === actor.employee_id
+      && String(payment.created_at ?? '').slice(0, 10) === today) {
+    return { allowed: true };
+  }
+  return { reason: 'forbidden' };
+}
+
+export async function voidPaymentForTransaction(tx, invoiceId, paymentId, { reason }, actor, opts) {
+  // ล็อกใบก่อน — สองคนกดยกเลิกรายการเดียวกันพร้อมกันต้องสำเร็จคนเดียว
+  const inv = await tx.one(
+    `SELECT invoice_id, total, status FROM invoices WHERE invoice_id = :id FOR UPDATE`,
+    { id: invoiceId },
+  );
+  if (!inv) return { reason: 'not_found' };
+
+  const payment = await tx.one(
+    `SELECT payment_id, amount, paid_at, method, note, received_by, received_by_name, created_at
+     FROM invoice_payments WHERE invoice_id = :id AND payment_id = :pid FOR UPDATE`,
+    { id: invoiceId, pid: paymentId },
+  );
+  const verdict = assessPaymentVoid(payment, actor, opts);
+  if (verdict.reason) return verdict;
+
+  await tx.run(
+    `INSERT INTO invoice_payment_voids
+       (invoice_id, payment_id, amount, paid_at, method, note, received_by, received_by_name,
+        payment_created_at, reason, voided_by, voided_by_name)
+     VALUES (:id, :pid, :amount, :paid_at, :method, :note, :rby, :rbyname, :pcreated, :reason, :vby, :vbyname)`,
+    {
+      id: invoiceId, pid: payment.payment_id, amount: payment.amount, paid_at: payment.paid_at,
+      method: payment.method ?? null, note: payment.note ?? null,
+      rby: payment.received_by ?? null, rbyname: payment.received_by_name ?? null,
+      pcreated: payment.created_at ?? null, reason,
+      vby: actor?.employee_id ?? null, vbyname: actor?.name ?? null,
+    },
+  );
+  await tx.run(`DELETE FROM invoice_payments WHERE invoice_id = :id AND payment_id = :pid`,
+    { id: invoiceId, pid: payment.payment_id });
+
+  /* ยอดที่เหลือหลังยกเลิก → สถานะต้องเดินถอยตาม ไม่งั้นใบขึ้น "ชำระแล้ว" ทั้งที่เงินไม่ครบ
+     ใบที่ยกเลิกไปแล้วคงสถานะ cancelled ไว้ (เงินคืนไปแล้ว ใบไม่กลับมามีชีวิต) */
+  const { paid } = await tx.one(
+    `SELECT COALESCE(SUM(amount), 0) AS paid FROM invoice_payments WHERE invoice_id = :id`,
+    { id: invoiceId },
+  );
+  const stillPaid = roundMoney(paid) >= roundMoney(inv.total);
+  if (inv.status !== 'cancelled' && !stillPaid) {
+    await tx.run(
+      `UPDATE invoices
+       SET status = CASE WHEN status = 'paid' THEN 'issued' ELSE status END,
+           paid_at = NULL, paid_by = NULL, paid_by_name = NULL, updated_at = ${NOW}
+       WHERE invoice_id = :id`,
+      { id: invoiceId },
+    );
+  }
+  return { invoice_id: invoiceId, voided_payment_id: payment.payment_id, amount: roundMoney(payment.amount) };
+}
+
+export async function voidPayment(invoiceId, paymentId, input, actor, opts) {
+  await ensurePaymentVoidTable();
+  const result = await transaction((tx) => voidPaymentForTransaction(tx, invoiceId, paymentId, input, actor, opts));
+  return invoiceMutationResult(result);
+}
+
 /** สลิปโอนเงินของใบ — เฉพาะข้อมูลประกอบ ตัวรูปดึงแยกทีละใบผ่าน findSlipImage (ใส่ใน <img src>) */
 export const listSlips = (invoiceId) =>
   sql.all(
@@ -602,6 +728,12 @@ export async function visitLines(caseRow, { from, to } = {}) {
   const where = [
     'v.case_id = :id',
     'v.check_out_at IS NOT NULL',
+    /* กะที่ถูกยกเลิกไม่ใช่ครั้งที่ให้บริการ จึงเก็บเงินไม่ได้ — เกณฑ์เดียวกับทุกที่ที่นับกะ
+       (NOT_CANCELLED ใน cases/repo.js) · กะที่ยกเลิก "หลังเช็คเอาท์ไปแล้ว" มีจริง: checkOutVisit
+       ยอมบันทึกเวลาออกของกะที่ admin เพิ่งยกเลิก และ /adjust ก็เปลี่ยนสถานะกะที่ทำไปแล้วได้
+       ถ้าไม่กรองตรงนี้ กะพวกนั้นจะโผล่เป็นบรรทัดในใบ ขณะที่ booked ข้างล่างไม่นับมันเป็นตัวหาร
+       → ราคาต่อครั้งสูงขึ้น แล้วยอดรวมของใบทะลุค่าบริการของเคส (ลูกค้าถูกเก็บเกิน) */
+    "v.status <> 'cancelled'",
     /* กะที่อยู่ในใบอื่นที่ยังไม่ยกเลิกแล้ว = เก็บเงินไปแล้ว ไม่เอามาเก็บซ้ำ
        (ออกใบตามกะเป็นรอบๆ ช่วงวันที่เลือกซ้อนกันได้ง่าย หรือกดออกซ้ำโดยไม่ได้ลบใบเดิม) */
     `NOT EXISTS (
@@ -785,6 +917,8 @@ const OPEN_STATUSES = "('draft', 'issued')";
  */
 export async function syncOpenFromCase(caseRow, customer, { forceInvoiceId = null } = {}) {
   const price = priceParts(caseRow);
+  // ต้องมีตาราง invoice_shares ก่อนใช้ใน WHERE ข้างล่าง (สร้างแบบ lazy ตอนส่งลิงก์ครั้งแรก)
+  await ensureShareTables();
 
   /* ::double precision ในบรรทัด total ไม่ใช่ของประดับ — node-postgres ส่งพารามิเตอร์มาโดยไม่ระบุชนิด
      พอเขียน ":amount - :discount" ตรงๆ Postgres เจอ unknown ลบ unknown แล้วเลือกไม่ถูกว่าจะใช้
@@ -813,12 +947,28 @@ export async function syncOpenFromCase(caseRow, customer, { forceInvoiceId = nul
          manual_edit         = FALSE,
          updated_at          = ${NOW}
      WHERE case_id = :case_id AND status IN ${OPEN_STATUSES}
+       /* ซิงก์อัตโนมัติเฉพาะใบร่าง — ใบที่กด "ออกใบ" แล้วมีเลขที่เอกสารและถือเป็นเอกสารแล้ว
+          ห้ามเปลี่ยนว่าเก็บเงินจากใครเองเงียบ ๆ (ตรวจรอบ 18)
+          ย้ายผู้ป่วยไปอยู่ใต้ผู้ว่าจ้างคนใหม่ แล้วใบที่ออกไปแล้วเปลี่ยนชื่อ เลขผู้เสียภาษี
+          และที่อยู่ออกบิลเป็นของอีกบ้านทันที โดยไม่มีอะไรบอกคนทำงาน
+          ไม่ได้ปิดตาย — ใบที่ไม่ตรงจะขึ้นป้าย "ผู้จ่ายไม่ตรง" (payer_stale) ในรายการและในใบ
+          แล้วกดปุ่ม "ดึงข้อมูลจากเคส" เองได้ (เส้นนั้นส่ง force_id มา จึงผ่านเงื่อนไขนี้)
+          = ให้คนเห็นแล้วตัดสินใจ แทนที่ระบบจะเปลี่ยนเอกสารให้เอง */
+       AND (status = 'draft' OR invoice_id = :force_id::text)
        AND (NOT manual_edit OR invoice_id = :force_id::text)
        /* ใบมัดจำ/ใบส่วนที่เหลือมียอดของงวดนั้นโดยเฉพาะ ซิงก์ทับจะกลายเป็นยอดเต็มทั้งสองใบ
           (ผู้จ่าย/ที่อยู่ก็ไม่ทับด้วย เพราะคำสั่งเดียวกัน — แก้ที่ใบเองหรือลบแล้วแบ่งใหม่) */
        AND billing_kind IS DISTINCT FROM 'deposit'
        AND billing_kind IS DISTINCT FROM 'balance'
        AND NOT EXISTS (SELECT 1 FROM invoice_items ii WHERE ii.invoice_id = invoices.invoice_id)
+       /* ใบที่ส่งลิงก์ให้ลูกค้าไปแล้วไม่ซิงก์ทับอีก (ตรวจรอบ 18)
+          เกณฑ์เดิมคือ "สถานะ issued = เอกสารยังอยู่ในมือเรา ยังไม่ได้ส่งมอบ" ซึ่งจริงตอนที่ส่งมอบ
+          มีทางเดียวคือพิมพ์ออกมา · พอมีปุ่มส่งเข้า LINE ลูกค้า (24 ต.ค. 2569) ข้อสันนิษฐานนั้นไม่จริงแล้ว
+          ย้ายผู้ป่วยไปอยู่ใต้ผู้ว่าจ้างคนใหม่ แล้วใบที่ลูกค้าถือลิงก์อยู่เปลี่ยนชื่อ เลขผู้เสียภาษี
+          และที่อยู่ออกบิลเป็นของอีกบ้านทันที ทั้งที่เขาเปิดลิงก์เดิมดูได้ตลอด 90 วัน
+          (พิสูจน์แล้ว: ก่อนย้าย = บ้าน A/0105566000201 · หลังย้าย = บ้าน B/0105566000202 สถานะยัง issued)
+          มีแถวใน invoice_shares = เคยกดส่งให้ลูกค้าแล้ว · ต้องแก้ที่ใบเองหรือออกใบใหม่ */
+       AND NOT EXISTS (SELECT 1 FROM invoice_shares sh WHERE sh.invoice_id = invoices.invoice_id)
        /* ใบที่รับเงินมาแล้วบางส่วน ยอดของมันกลายเป็นข้อตกลงกับลูกค้าไปแล้ว — ซิงก์ทับอาจลดยอดให้ต่ำกว่า
           ที่จ่ายมา (ยอดค้างติดลบแต่สถานะยังเป็น issued) ซึ่ง update() กันไว้ด้วย amount_below_paid
           ทางนี้ต้องไม่เป็นประตูหลังให้เลี่ยงด่านนั้น — ถ้าต้องปรับยอดจริงให้แก้ที่ใบเอง */

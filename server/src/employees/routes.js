@@ -11,6 +11,7 @@ import {
   portfolioSchema,
   portfolioUpdateSchema,
   POSITIONS,
+  BACK_POSITIONS,
   EMPLOYMENT_TYPES,
   STATUSES,
   EMPLOYEE_CODE_RE,
@@ -18,6 +19,8 @@ import {
 import { ApiError, asyncRoute, notFound } from '../lib/errors.js';
 import { sql } from '../db/index.js';
 import { canSeeStaffPay, BLOCKED_STATUSES, can } from '../lib/auth.js';
+import { ensureLineColumn, ensureLinkCodeTables, hashLinkCode, LINK_CODE_TTL_HOURS } from '../lib/lineBridge.js';
+import { randomInt } from 'node:crypto';
 
 export const employeesRouter = Router();
 
@@ -182,6 +185,15 @@ employeesRouter.patch(
   asyncRoute(async (req, res) => {
     const input = updateEmployeeSchema.parse(req.body);
     ensureCanManageTarget(req, req.employee);
+    /* เปลี่ยนอีเมลของบัญชีหลังบ้านคนอื่น แล้วกด "ลืมรหัสผ่าน" = ยึดบัญชีนั้นได้ใน 2 ขั้น (ยิงจริงแล้วได้ OTP จริง)
+       hr กับ admin สิทธิ์เท่ากัน ensureCanManageTarget จึงไม่กันกันเอง — ไม่ใช่การเลื่อนสิทธิ์
+       แต่ทำให้ไล่ย้อนไม่ได้ว่าใครลงมือ ซึ่งสำคัญขึ้นมากตั้งแต่มีบัญชีจริงหลายคน (ตรวจรอบ 9) */
+    if (input.email !== undefined && input.email !== req.employee.email
+        && BACK_POSITIONS.includes(req.employee.position)
+        && req.employee.employee_id !== req.user.employee_id
+        && !isTopAdmin(req.user.position)) {
+      throw new ApiError(403, 'เปลี่ยนอีเมลของบัญชีหลังบ้านคนอื่นได้เฉพาะผู้จัดการ');
+    }
 
     // รหัสพนักงานคือชื่อที่ใช้ login ด้วย — เปลี่ยนของตัวเองแล้ว session ปัจจุบันหลุดทันที ต้องให้คนอื่นเปลี่ยนให้
     if (input.employee_id && input.employee_id !== req.employee.employee_id
@@ -206,6 +218,53 @@ employeesRouter.patch(
     }
 
     res.json(await repo.update(req.params.id, input));
+  }),
+);
+
+/**
+ * ปลด LINE ที่ผูกไว้กับพนักงานคนนี้ (ดู lib/lineBridge.js) — ใช้ตอนเปลี่ยนเครื่อง/เปลี่ยน LINE หรือผูกผิดคน
+ * ปลดแล้วเจ้าตัวกดจาก LINE ครั้งหน้าจะต้อง login รหัสผ่านเดิม 1 ครั้งเพื่อผูกใหม่ · เซสชันที่เปิดอยู่ไม่ถูกตัด
+ */
+employeesRouter.delete(
+  '/:id/line',
+  asyncRoute(async (req, res) => {
+    ensureCanManageTarget(req, req.employee);
+    await ensureLineColumn();
+    await sql.run('UPDATE employees SET line_user_id = NULL WHERE employee_id = :id', { id: req.params.id });
+    res.json({ ok: true });
+  }),
+);
+
+/**
+ * ออกรหัสผูก LINE 6 หลักให้พนักงานคนนี้ (ดู lib/lineBridge.js) — พนักงานพิมพ์รหัสใน LINE @kinjobs แล้วผูกทันที ไม่ต้องใช้รหัสผ่าน
+ * ออกใหม่ = รหัสเก่าใช้ไม่ได้ · ผูก LINE อยู่แล้วก็ออกได้ (ใช้ตอนเปลี่ยนเครื่อง/เปลี่ยน LINE)
+ */
+employeesRouter.post(
+  '/:id/line-code',
+  asyncRoute(async (req, res) => {
+    ensureCanManageTarget(req, req.employee);
+    if (BLOCKED_STATUSES[req.employee.status]) throw new ApiError(400, 'บัญชีนี้ถูกปิดอยู่ ออกรหัสผูก LINE ไม่ได้');
+    await ensureLineColumn();
+    await ensureLinkCodeTables();
+    await sql.run('DELETE FROM line_link_codes WHERE expires_at < now()');
+    for (let i = 0; i < 5; i++) {
+      const code = String(randomInt(0, 1_000_000)).padStart(6, '0');
+      const taken = await sql.one(
+        'SELECT 1 AS x FROM line_link_codes WHERE code_hash = :h AND employee_id <> :id',
+        { h: hashLinkCode(code), id: req.params.id },
+      );
+      if (taken) continue;
+      const row = await sql.one(
+        `INSERT INTO line_link_codes (employee_id, code_hash, expires_at, created_by)
+         VALUES (:id, :h, now() + make_interval(hours => :ttl), :by)
+         ON CONFLICT (employee_id) DO UPDATE SET code_hash = EXCLUDED.code_hash, expires_at = EXCLUDED.expires_at,
+           created_by = EXCLUDED.created_by, created_at = now()
+         RETURNING to_char(expires_at AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI') AS expires_at`,
+        { id: req.params.id, h: hashLinkCode(code), ttl: LINK_CODE_TTL_HOURS, by: req.user.employee_id },
+      );
+      return res.json({ code, expires_at: row.expires_at, ttl_hours: LINK_CODE_TTL_HOURS });
+    }
+    throw new ApiError(500, 'ออกรหัสไม่สำเร็จ ลองกดใหม่อีกครั้ง');
   }),
 );
 
@@ -248,6 +307,8 @@ employeesRouter.delete(
 employeesRouter.put(
   '/:id/photo',
   asyncRoute(async (req, res) => {
+    // ด่านเดียวกับ PATCH/DELETE /:id — ไม่มีบรรทัดนี้ บัญชีหลังบ้านระดับล่างแก้แฟ้มของผู้จัดการได้ (ตรวจรอบ 9)
+    ensureCanManageTarget(req, req.employee);
     const { image } = employeePhotoSchema.parse(req.body);
     res.json(await repo.photo.set(req.params.id, toImage(image)));
   }),
@@ -257,10 +318,16 @@ employeesRouter.put(
 employeesRouter.get(
   '/:id/photo',
   asyncRoute(async (req, res, next) => {
+    /* เอกสารในแฟ้มพนักงานคือบัตรประชาชน/ใบรับรองวิชาชีพ/รูปถ่าย — อ่านได้เฉพาะคนที่ "จัดการบัญชีนั้นได้"
+       เส้น *แก้* ใส่ด่านนี้ไปแล้วตอนตรวจรอบ 9 แต่เส้น *อ่าน* ยังเปิดให้ทุกคนที่มีสิทธิ์หลังบ้าน
+       = ฝ่ายบุคคล/Admin HC เปิดดูบัตรประชาชนของผู้จัดการและ Super Admin ได้ (ตรวจรอบ 10A)
+       ดร.ธงชัยเคาะ 25 ต.ค. 2569 ให้ปิด · HR ยังเปิดแฟ้มของพนักงานที่ตัวเองดูแลได้ตามเดิม */
+    ensureCanManageTarget(req, req.employee);
     const row = await repo.photo.find(req.params.id);
     if (!row) return next(notFound('พนักงานคนนี้ยังไม่มีรูป'));
 
     res.setHeader('Content-Type', row.photo_mime);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
     // เป็นข้อมูลส่วนบุคคล — แคชได้เฉพาะเครื่องผู้ใช้ (private)
     // เปลี่ยนรูปแล้วไม่ค้างรูปเก่า เพราะหน้าเว็บต่อ ?v=updated_at ท้าย URL (ดู api.employeePhotoUrl)
     res.setHeader('Cache-Control', 'private, max-age=3600');
@@ -278,6 +345,8 @@ employeesRouter.get(
 employeesRouter.post(
   '/:id/certificates',
   asyncRoute(async (req, res) => {
+    // ด่านเดียวกับ PATCH/DELETE /:id — ไม่มีบรรทัดนี้ บัญชีหลังบ้านระดับล่างแก้แฟ้มของผู้จัดการได้ (ตรวจรอบ 9)
+    ensureCanManageTarget(req, req.employee);
     const { image, ...input } = certificateSchema.parse(req.body);
     const created = await repo.certificates.add(req.params.id, {
       ...input,
@@ -291,6 +360,8 @@ employeesRouter.post(
 employeesRouter.put(
   '/:id/certificates/:certificateId/image',
   asyncRoute(async (req, res, next) => {
+    // ด่านเดียวกับ PATCH/DELETE /:id — ไม่มีบรรทัดนี้ บัญชีหลังบ้านระดับล่างแก้แฟ้มของผู้จัดการได้ (ตรวจรอบ 9)
+    ensureCanManageTarget(req, req.employee);
     const { image } = certificateImageSchema.parse(req.body);
     const updated = await repo.certificates.setImage(
       req.params.id,
@@ -307,10 +378,16 @@ employeesRouter.put(
 employeesRouter.get(
   '/:id/certificates/:certificateId/image',
   asyncRoute(async (req, res, next) => {
+    /* เอกสารในแฟ้มพนักงานคือบัตรประชาชน/ใบรับรองวิชาชีพ/รูปถ่าย — อ่านได้เฉพาะคนที่ "จัดการบัญชีนั้นได้"
+       เส้น *แก้* ใส่ด่านนี้ไปแล้วตอนตรวจรอบ 9 แต่เส้น *อ่าน* ยังเปิดให้ทุกคนที่มีสิทธิ์หลังบ้าน
+       = ฝ่ายบุคคล/Admin HC เปิดดูบัตรประชาชนของผู้จัดการและ Super Admin ได้ (ตรวจรอบ 10A)
+       ดร.ธงชัยเคาะ 25 ต.ค. 2569 ให้ปิด · HR ยังเปิดแฟ้มของพนักงานที่ตัวเองดูแลได้ตามเดิม */
+    ensureCanManageTarget(req, req.employee);
     const row = await repo.certificates.findImage(req.params.id, Number(req.params.certificateId));
     if (!row) return next(notFound('ไม่พบรูปของใบรับรองนี้'));
 
     res.setHeader('Content-Type', row.image_mime);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
     // รูปใบรับรองไม่เปลี่ยนบ่อย แต่เป็นข้อมูลส่วนบุคคล — ให้เบราว์เซอร์แคชได้เฉพาะเครื่องผู้ใช้ (private)
     res.setHeader('Cache-Control', 'private, max-age=3600');
     res.send(row.image_data);
@@ -320,6 +397,8 @@ employeesRouter.get(
 employeesRouter.delete(
   '/:id/certificates/:certificateId',
   asyncRoute(async (req, res, next) => {
+    // ด่านเดียวกับ PATCH/DELETE /:id — ไม่มีบรรทัดนี้ บัญชีหลังบ้านระดับล่างแก้แฟ้มของผู้จัดการได้ (ตรวจรอบ 9)
+    ensureCanManageTarget(req, req.employee);
     const removed = await repo.certificates.remove(req.params.id, Number(req.params.certificateId));
     if (!removed) return next(notFound('ไม่พบใบรับรองนี้'));
     res.status(204).end();
@@ -337,6 +416,8 @@ employeesRouter.get(
 employeesRouter.post(
   '/:id/portfolio',
   asyncRoute(async (req, res) => {
+    // ด่านเดียวกับ PATCH/DELETE /:id — ไม่มีบรรทัดนี้ บัญชีหลังบ้านระดับล่างแก้แฟ้มของผู้จัดการได้ (ตรวจรอบ 9)
+    ensureCanManageTarget(req, req.employee);
     const { image, ...input } = portfolioSchema.parse(req.body);
     res.status(201).json(await repo.portfolio.add(req.params.id, { ...input, image: toImage(image) }));
   }),
@@ -346,6 +427,8 @@ employeesRouter.post(
 employeesRouter.patch(
   '/:id/portfolio/:portfolioId',
   asyncRoute(async (req, res, next) => {
+    // ด่านเดียวกับ PATCH/DELETE /:id — ไม่มีบรรทัดนี้ บัญชีหลังบ้านระดับล่างแก้แฟ้มของผู้จัดการได้ (ตรวจรอบ 9)
+    ensureCanManageTarget(req, req.employee);
     const input = portfolioUpdateSchema.parse(req.body);
     const updated = await repo.portfolio.update(req.params.id, Number(req.params.portfolioId), input);
 
@@ -358,10 +441,16 @@ employeesRouter.patch(
 employeesRouter.get(
   '/:id/portfolio/:portfolioId/image',
   asyncRoute(async (req, res, next) => {
+    /* เอกสารในแฟ้มพนักงานคือบัตรประชาชน/ใบรับรองวิชาชีพ/รูปถ่าย — อ่านได้เฉพาะคนที่ "จัดการบัญชีนั้นได้"
+       เส้น *แก้* ใส่ด่านนี้ไปแล้วตอนตรวจรอบ 9 แต่เส้น *อ่าน* ยังเปิดให้ทุกคนที่มีสิทธิ์หลังบ้าน
+       = ฝ่ายบุคคล/Admin HC เปิดดูบัตรประชาชนของผู้จัดการและ Super Admin ได้ (ตรวจรอบ 10A)
+       ดร.ธงชัยเคาะ 25 ต.ค. 2569 ให้ปิด · HR ยังเปิดแฟ้มของพนักงานที่ตัวเองดูแลได้ตามเดิม */
+    ensureCanManageTarget(req, req.employee);
     const row = await repo.portfolio.findImage(req.params.id, Number(req.params.portfolioId));
     if (!row) return next(notFound('ไม่พบรูปผลงานนี้'));
 
     res.setHeader('Content-Type', row.image_mime);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Cache-Control', 'private, max-age=3600');
     res.send(row.image_data);
   }),
@@ -370,6 +459,8 @@ employeesRouter.get(
 employeesRouter.delete(
   '/:id/portfolio/:portfolioId',
   asyncRoute(async (req, res, next) => {
+    // ด่านเดียวกับ PATCH/DELETE /:id — ไม่มีบรรทัดนี้ บัญชีหลังบ้านระดับล่างแก้แฟ้มของผู้จัดการได้ (ตรวจรอบ 9)
+    ensureCanManageTarget(req, req.employee);
     const removed = await repo.portfolio.remove(req.params.id, Number(req.params.portfolioId));
     if (!removed) return next(notFound('ไม่พบผลงานนี้'));
     res.status(204).end();

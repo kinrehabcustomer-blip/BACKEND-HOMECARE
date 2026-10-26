@@ -187,6 +187,11 @@ casesRouter.get(
 casesRouter.post(
   '/attendance/decide',
   asyncRoute(async (req, res) => {
+    /* เส้นพี่น้องทุกเส้นที่แตะค่าจ้าง (/:id/pay · /pay/shares · approve-pay) มี ensureCanPay ครบ เส้นนี้เส้นเดียวที่ลืม
+       ปุ่มนี้อยู่บนหน้า /payroll (หมวด money) เท่านั้น แต่ requireCaseAccess ปล่อยหมวด office ผ่านด้วย
+       → HR/Admin HC ที่ไม่มีปุ่มในจอ ยิง API ตรงแล้วอนุมัติกะได้จริง (ยิงจริงได้ 200 changed:1 · ตรวจรอบ 9)
+       "กะที่อนุมัติแล้ว" คือเงื่อนไขปลดให้เงินไหลเข้าสรุปค่าตอบแทน จึงต้องอยู่ในมือคนที่ดูแลเงินเท่านั้น */
+    ensureCanPay(req);
     const input = decidePaySchema.parse(req.body);
     res.json(await repo.decideVisitPay(input.visit_ids, input, req.user));
   }),
@@ -405,8 +410,18 @@ casesRouter.post(
       );
     }
 
-    const previewAmount = input.amount ?? status.remaining;
+    /* ไม่ระบุยอด = ปล่อย "ยอดที่ระบบเสนอ" ซึ่งเท่ากับยอดคงเหลือทุกเคส ยกเว้นเคสที่ยกเลิกกลางคัน
+       (เสนอตามกะที่ไปจริง — ดู suggestedPay) · เพดานด้านล่างยังเป็นยอดเหมาเหมือนเดิม */
+    const previewAmount = input.amount ?? status.suggested_remaining ?? status.remaining;
     if (previewAmount <= 0) {
+      if (input.amount == null && status.prorated) {
+        throw new ApiError(
+          409,
+          `เคสนี้ถูกยกเลิกกลางคัน — จ่ายครบ ${baht(status.released)} บาทตามกะที่ไปจริง` +
+            ` ${status.worked_shifts} จาก ${status.planned_shifts} กะแล้ว` +
+            ` (ยอดเหมาทั้งเคส ${baht(status.staff_pay)} บาท) — ถ้าตกลงจ่ายเพิ่ม ให้ระบุยอดเอง`,
+        );
+      }
       throw new ApiError(409, `เคสนี้ปล่อยค่าจ้างครบ ${baht(status.staff_pay)} บาทแล้ว ไม่เหลือยอดให้ปล่อย`);
     }
     if (previewAmount > status.remaining) {
@@ -434,6 +449,13 @@ casesRouter.post(
       throw new ApiError(
         409,
         `เคสนี้ปล่อยค่าจ้างครบแล้ว — ปล่อยไปรวม ${baht(result.released)} บาท จากยอดเหมา ${baht(result.staff_pay)}`,
+      );
+    }
+    if (result.reason === 'prorated_fully_released') {
+      throw new ApiError(
+        409,
+        `เคสนี้ถูกยกเลิกกลางคัน — จ่ายครบ ${baht(result.released)} บาทตามกะที่ไปจริงแล้ว` +
+          ` (ยอดเหมาทั้งเคส ${baht(result.staff_pay)} บาท) — ถ้าตกลงจ่ายเพิ่ม ให้ระบุยอดเอง`,
       );
     }
     if (result.reason === 'amount_exceeds_remaining') {
@@ -505,6 +527,10 @@ casesRouter.delete(
 casesRouter.post(
   '/:id/approve-pay',
   asyncRoute(async (req, res) => {
+    /* ประตูบานที่สองของการกระทำเดียวกับ /attendance/decide — ต้องใช้กติกาชุดเดียวกัน
+       เดิมบานนี้เปิดให้หมวด office ทั้งที่บานแรกปิด → HR กดรวดอนุมัติทั้งเคสได้ (ยิงจริงได้ 200 · ตรวจรอบ 10)
+       ซึ่งอันตรายกว่าบานแรกเพราะอนุมัติทีเดียวทุกกะในเคส */
+    ensureCanPay(req);
     const ids = await repo.pendingVisitIds(req.params.id);
     res.json(await repo.decideVisitPay(ids, { approve: true }, req.user));
   }),
@@ -858,6 +884,7 @@ casesRouter.get(
     const row = await repo.findVisitPhoto(Number(req.params.visitId), req.params.id);
     if (!row) return next(notFound('กะนี้ไม่มีรูปเช็คอิน'));
     res.setHeader('Content-Type', row.mime);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Cache-Control', 'private, max-age=3600');
     res.send(row.data);
   }),
@@ -886,7 +913,13 @@ export async function ensureVisitInCase(caseId, visitId) {
 }
 
 export async function editReport(caseId, report, input) {
-  if (!hasReportContent({ ...report, ...input })) {
+  /* รูปแผลที่บันทึกไว้แล้วอยู่ในคอลัมน์ wound_photo_data/has_wound_photo — ไม่ใช่ช่อง `wound_photo`
+     ที่ hasReportContent มองหา (ช่องนั้นมีเฉพาะตอน "ส่งรูปใหม่เข้ามา")
+     ใบที่มีแต่รูปแผล ไม่มีข้อความเลย จึงถูกนับว่า "ว่าง" ตอนแก้ แล้วแก้วันที่/กะ/ประเภทไม่ได้
+     ทั้งที่รูปยังอยู่ — ระบบตอบว่า "รายงานต้องมีข้อมูลอย่างน้อยหนึ่งช่อง" ซึ่งไม่จริง
+     ส่ง wound_photo: null มาเอง (= สั่งลบรูป) ยังทับค่านี้และถูกนับว่าว่างตามเดิม ซึ่งถูกต้องแล้ว */
+  const withStoredPhoto = { ...report, wound_photo: report.has_wound_photo ? 'kept' : null };
+  if (!hasReportContent({ ...withStoredPhoto, ...input })) {
     throw new ApiError(400, 'รายงานต้องมีข้อมูลอย่างน้อยหนึ่งช่อง — ถ้าต้องการลบทั้งใบให้กดลบรายงาน');
   }
   return repo.updateReport(caseId, report.report_id, input);
@@ -934,6 +967,7 @@ casesRouter.get(
     const row = await repo.findReportPhoto(Number(req.params.reportId), req.params.id);
     if (!row) return next(notFound('รายงานนี้ไม่มีรูปแผล'));
     res.setHeader('Content-Type', row.mime);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Cache-Control', 'private, max-age=3600');
     res.send(row.data);
   }),

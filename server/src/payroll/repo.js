@@ -1,4 +1,5 @@
 import { sql, transaction, nextPayrollId } from '../db/index.js';
+import { CANCELLED_WITH_WORK } from '../cases/repo.js';
 
 const NOW = `to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')`;
 
@@ -154,12 +155,19 @@ export async function unreleasedCases(periodTo) {
 
        "ยังไม่เคยปล่อยเลยสักบาท" ไม่ใช่ "ปล่อยยังไม่ครบยอด" เพราะเคสที่ปิดก่อนกำหนดจะเหลือยอดค้าง
        เป็นเรื่องปกติและถูกต้อง (ผู้จัดการจงใจจ่ายไม่เต็ม) ถ้านับด้วยยอดคงเหลือ เคสพวกนั้นจะค้าง
-       อยู่ในคำเตือนตลอดไปโดยไม่มีอะไรให้ทำ แล้วคำเตือนก็จะกลายเป็นตัวเลขที่ทุกคนเลิกอ่าน */
+       อยู่ในคำเตือนตลอดไปโดยไม่มีอะไรให้ทำ แล้วคำเตือนก็จะกลายเป็นตัวเลขที่ทุกคนเลิกอ่าน
+
+       เคสที่ "ยกเลิก" หลังจากพนักงานไปทำงานมาแล้วก็คืองานที่จบไปแล้วเหมือนกัน (ลูกค้ายกเลิกกลางคัน)
+       เดิมนับแต่ status = 'closed' เงินก้อนนั้นจึงไม่มีอะไรฟ้องเลยสักทาง — เกณฑ์ตัวเดียวกับคิว
+       ปล่อยค่าจ้าง (CANCELLED_WITH_WORK) เพื่อให้กระดิ่งกับรายการในคิวตรงกันเสมอ */
     `SELECT COUNT(*) AS n
      FROM cases c
      WHERE c.staff_pay IS NOT NULL
-       AND c.status = 'closed'
-       AND COALESCE(substr(c.closed_at, 1, 10), c.end_date) <= :period_to
+       AND (c.status = 'closed' OR (c.status = 'cancelled' AND ${CANCELLED_WITH_WORK}))
+       AND COALESCE(
+             substr(COALESCE(NULLIF(c.closed_at, ''), NULLIF(c.cancelled_at, '')), 1, 10),
+             NULLIF(c.end_date, '')
+           ) <= :period_to
        AND NOT EXISTS (SELECT 1 FROM case_payouts p WHERE p.case_id = c.case_id)`,
     { period_to: periodTo },
   );

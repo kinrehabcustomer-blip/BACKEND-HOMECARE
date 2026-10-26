@@ -94,6 +94,10 @@ export function signToken(employee) {
       role: roleForPosition(employee.position),
       name: `${employee.first_name} ${employee.last_name}`,
       iat_ms: Date.now(),
+      /* รหัสประจำใบของเซสชันนี้ — ใช้ตัดเฉพาะใบนี้ตอนกดออกจากระบบ (ดู revokeSession)
+         ต้องเป็นรายใบ ไม่ใช่ตัดทุกใบของคนนั้น: พนักงานใช้ทั้งมือถือและคอม
+         กดออกจากระบบที่เครื่องหนึ่งแล้วอีกเครื่องหลุดด้วยคือของเสีย ไม่ใช่ความปลอดภัย */
+      jti: randomBytes(16).toString('hex'),
     },
     SECRET,
     { expiresIn: TOKEN_TTL },
@@ -146,10 +150,14 @@ export function requireAuth(req, res, next) {
 
   sql
     .one(
-      `SELECT position, status, must_change_password,
-              EXTRACT(EPOCH FROM password_changed_at) AS password_changed_epoch
-       FROM employees WHERE employee_id = :id`,
-      { id: payload.sub },
+      /* เช็คใบที่ถูกตัดในคิวรีเดียวกับที่อ่านพนักงานอยู่แล้ว — ไม่เพิ่มรอบไปฐานข้อมูล
+         ตารางต้องมีอยู่ก่อนเสมอ (ensureRevokedSessions ด้านล่าง ถูกเรียกตั้งแต่ตอนสร้างแอป)
+         เพราะ Postgres ตรวจชื่อตารางตั้งแต่ตอนแปลคำสั่ง — to_regclass กันตรงนี้ไม่ได้ */
+      `SELECT e.position, e.status, e.must_change_password,
+              EXTRACT(EPOCH FROM e.password_changed_at) AS password_changed_epoch,
+              EXISTS (SELECT 1 FROM revoked_sessions r WHERE r.jti = :jti) AS revoked
+       FROM employees e WHERE e.employee_id = :id`,
+      { id: payload.sub, jti: payload.jti ?? '' },
     )
     .then((emp) => {
       /* เปลี่ยนรหัสผ่านแล้ว = เซสชันเก่าทุกตัวต้องตาย ไม่ใช่รอหมดอายุอีก 8 ชม.
@@ -175,6 +183,13 @@ export function requireAuth(req, res, next) {
         return next(new ApiError(401, 'รหัสผ่านถูกเปลี่ยนแล้ว กรุณาเข้าสู่ระบบใหม่'));
       }
 
+      /* ใบนี้ถูกกดออกจากระบบไปแล้ว — คุกกี้ถูกล้างที่เบราว์เซอร์ก็จริง แต่ใครที่คัดลอก token
+         เก็บไว้ก่อนหน้ายังใช้ได้จนครบ 8 ชม. ถ้าไม่ตัดฝั่งเซิร์ฟเวอร์ด้วย (ตรวจรอบ 20) */
+      if (emp?.revoked) {
+        res.clearCookie(COOKIE_NAME, clearCookieOptions);
+        return next(new ApiError(401, 'เซสชันนี้ถูกออกจากระบบแล้ว กรุณาเข้าสู่ระบบใหม่'));
+      }
+
       if (!emp || BLOCKED_STATUSES[emp.status]) {
         res.clearCookie(COOKIE_NAME, clearCookieOptions);
         return next(new ApiError(401, emp ? `${BLOCKED_STATUSES[emp.status]} — ติดต่อผู้ดูแลระบบ` : 'บัญชีนี้ใช้งานไม่ได้แล้ว'));
@@ -191,6 +206,23 @@ export function requireAuth(req, res, next) {
       next();
     })
     .catch(next);
+}
+
+/**
+ * employee_id ของเซสชันที่ติดมากับคำขอ ถ้ามีและยังไม่หมดอายุ — ไม่โยน error ไม่แตะ DB ไม่ล้างคุกกี้
+ *
+ * ใช้กับเส้นที่ "ไม่ต้องล็อกอินก็เรียกได้ แต่ต้องรู้ว่าเป็นเบราว์เซอร์เดิมหรือเปล่า"
+ * ตอนนี้มีที่เดียวคือ GET /api/auth/line (ตั๋วใช้ครั้งเดียว แต่กดย้อนกลับ/โหลดซ้ำจากเครื่องเดิมต้องไม่พัง)
+ * ไม่ใช้แทน requireAuth เด็ดขาด — ตัวนี้เชื่อ token อย่างเดียว ไม่ได้เช็คว่าบัญชีถูกปิดหรือเปลี่ยนรหัสไปแล้ว
+ */
+export function sessionEmployeeId(req) {
+  const token = req.cookies?.[COOKIE_NAME];
+  if (!token) return null;
+  try {
+    return jwt.verify(token, SECRET).sub ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -249,7 +281,10 @@ export const requireManager = requirePermission('money', 'เฉพาะผู�
  */
 const MONEY_CASE_ROUTES = [
   /^\/assignable-employees$/,
-  /^\/attendance\/(pending|decide|report)$/,
+  // exceptions = แถว "ยืนยันครบแล้ว แต่ยังมีกะขาด/ค้างเช็คเอาท์อีก n" บนหน้า /payroll
+  // เดิมไม่อยู่ในชุดนี้ ฝ่ายการเงินจึงได้ 403 แล้วหน้าจอกลืนทิ้งเงียบ ๆ เห็นแค่ "ยืนยันครบแล้ว"
+  // ซึ่งเป็นภาพที่ชวนให้ปิดรอบจ่ายทั้งที่ยังมีกะค้าง (ตรวจรอบ 9)
+  /^\/attendance\/(pending|decide|report|exceptions)$/,
   /^\/[^/]+\/pay(\/[^/]+)?$/,
   /^\/[^/]+\/approve-pay$/,
 ];
@@ -258,4 +293,44 @@ export function requireCaseAccess(req, res, next) {
   if (can(req.user.position, 'office')) return next();
   if (can(req.user.position, 'money') && MONEY_CASE_ROUTES.some((re) => re.test(req.path))) return next();
   return next(new ApiError(403, 'บัญชีของคุณไม่มีสิทธิ์เข้าถึงข้อมูลเคส'));
+}
+
+/* ---------- ตัดเซสชันรายใบตอนกดออกจากระบบ (ตรวจรอบ 20) ----------
+ *
+ * token เป็นแบบที่เซิร์ฟเวอร์ไม่ได้เก็บสถานะ ล้างคุกกี้จึงหยุดได้แค่เบราว์เซอร์ตัวนั้น
+ * ใครที่คัดลอก token ไว้ (ดูจาก DevTools · ล็อกของ proxy · เครื่องที่ยืมคนอื่นใช้)
+ * ยังเรียก API ได้ต่อจนครบ 8 ชั่วโมง — คนที่กด "ออกจากระบบ" เพราะกลัวว่ามีคนอื่นเข้าถึงบัญชีอยู่
+ * จึงไม่ได้อะไรเลยจากการกดในช่วงเวลาที่อันตรายที่สุด (เหตุผลเดียวกับที่เปลี่ยนรหัสแล้วตัดเซสชันเก่า)
+ *
+ * เก็บเฉพาะ "ใบที่ถูกตัด" ไม่ใช่ทุกใบที่ยังใช้ได้ — แถวมีอายุเท่าที่ token เหลือ (≤8 ชม.)
+ * ตารางจึงเล็กเสมอ และกวาดของหมดอายุทิ้งตอนเขียนแถวใหม่ ไม่ต้องมีงานตั้งเวลาเพิ่ม
+ */
+let revokedReady = null;
+export const ensureRevokedSessions = () =>
+  (revokedReady ??= sql
+    .run(`CREATE TABLE IF NOT EXISTS revoked_sessions (
+      jti        TEXT PRIMARY KEY,
+      expires_at TIMESTAMPTZ NOT NULL
+    )`)
+    .catch((err) => { revokedReady = null; throw err; }));
+
+/** ตัดเซสชันของ token ใบที่ส่งมา — เรียกตอน logout · ไม่มี jti (token รุ่นเก่า) = ไม่มีอะไรให้ตัด */
+export async function revokeSession(token) {
+  if (!token) return false;
+  let payload;
+  try {
+    payload = jwt.verify(token, SECRET);
+  } catch {
+    return false; // ใบเสีย/หมดอายุแล้ว ไม่ต้องจด
+  }
+  if (!payload?.jti) return false;
+
+  await ensureRevokedSessions();
+  await sql.run(
+    `INSERT INTO revoked_sessions (jti, expires_at)
+     VALUES (:jti, to_timestamp(:exp)) ON CONFLICT (jti) DO NOTHING`,
+    { jti: payload.jti, exp: payload.exp ?? Math.floor(Date.now() / 1000) + 8 * 3600 },
+  );
+  await sql.run('DELETE FROM revoked_sessions WHERE expires_at < now()').catch(() => {});
+  return true;
 }

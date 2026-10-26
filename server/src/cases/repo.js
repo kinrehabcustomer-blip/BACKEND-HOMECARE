@@ -265,16 +265,37 @@ export function listForEmployee(employeeId) {
     `${SELECT_CASE}
      WHERE c.assigned_to = :id
         OR EXISTS (SELECT 1 FROM case_team t WHERE t.case_id = c.case_id AND t.employee_id = :id)
-        /* ไม่นับกะที่ยกเลิก — ให้ตรงกับ hasFieldAccess ไม่งั้นรายการโชว์เคสที่เปิดเข้าไปแล้วได้ 403 */
+        /* ไม่นับกะที่ยกเลิก และนับย้อนหลังแค่ในหน้าต่างเวลาเดียวกับ hasFieldAccess
+           ไม่งั้นรายการจะโชว์เคสที่เปิดเข้าไปแล้วได้ 404 (หรือกลับกัน ซ่อนเคสที่ยังเปิดได้) */
         OR EXISTS (SELECT 1 FROM case_visits v
-                   WHERE v.case_id = c.case_id AND v.assigned_to = :id AND v.status <> 'cancelled')
+                   WHERE v.case_id = c.case_id AND v.assigned_to = :id AND v.status <> 'cancelled'
+                     AND v.visit_date >= to_char(now() AT TIME ZONE 'Asia/Bangkok' - make_interval(days => :window), 'YYYY-MM-DD'))
      ORDER BY c.case_id DESC`,
-    { id: employeeId },
+    { id: employeeId, window: FIELD_ACCESS_WINDOW_DAYS },
   );
 }
 
-/** พนักงานภาคสนามเข้าถึงเคสนี้ได้ไหม (ผู้รับผิดชอบหลัก / อยู่ในทีม / มีกะในเคส) — ใช้กันดูเคสคนอื่น */
-export async function hasFieldAccess(employeeId, caseId) {
+/**
+ * เขตกั้นเวลาของ "เคยมีกะในเคส" — 30 วันนับจากวันนี้ (กะในอนาคตผ่านเสมอ เพราะ visit_date ยัง >= เส้นนี้)
+ *
+ * ค่ากลางค่าเดียวของทั้งระบบ ใช้ทั้งรายการเคส · รายละเอียดเคส · รายงานอาการ/รูปแผล · แชทญาติ
+ * เดิมมีแต่แชทญาติที่กั้น ส่วนเส้น "รายงานอาการ + รูปแผล" เปิดตลอดกาล (ตรวจรอบ 7) ซึ่งกลับหัวกลับหาง
+ * เพราะบันทึกทางการแพทย์อ่อนไหวกว่าข้อความแชทเสียอีก — ผู้ดูแลที่ไปแทนเวรกะเดียวเมื่อหลายเดือนก่อน
+ * ไม่ควรอ่านรายงานทุกใบของเคสนั้นต่อไปได้ไม่สิ้นสุด รวมใบที่เขียนขึ้นหลังเขาออกไปแล้ว
+ */
+export const FIELD_ACCESS_WINDOW_DAYS = 30;
+
+/**
+ * พนักงานภาคสนามเข้าถึงเคสนี้ได้ไหม (ผู้รับผิดชอบหลัก / อยู่ในทีม / มีกะในเคส) — ใช้กันดูเคสคนอื่น
+ *
+ * windowDays: นับเฉพาะกะที่เกิดภายใน N วันล่าสุด · ไม่ใส่ = ใช้ค่ากลาง FIELD_ACCESS_WINDOW_DAYS
+ * (ส่ง null มาเองเท่านั้นจึงจะไม่จำกัดเวลา — ตอนนี้ไม่มีเส้นไหนใช้ ตั้งใจให้ "ปลอดภัยไว้ก่อน" เป็นค่าตั้งต้น)
+ * เหตุผลที่ต้องมีหน้าต่างเวลา: คนที่ถูกสลับออกจากเคสหรือลาออกไปแล้วไม่ควรอ่านข้อมูลสุขภาพ
+ * และข้อความของครอบครัวผู้ป่วยต่อไปได้ไม่สิ้นสุด เพียงเพราะเคยมีกะหนึ่งกะเมื่อปีก่อน
+ * (ผู้รับผิดชอบหลักและคนในทีมยังผ่านตามเดิม เพราะสองอย่างนั้นคือ "สถานะปัจจุบัน" ที่แอดมินถอดออกได้)
+ */
+export async function hasFieldAccess(employeeId, caseId, { windowDays = FIELD_ACCESS_WINDOW_DAYS } = {}) {
+  const days = Number.isFinite(Number(windowDays)) && Number(windowDays) > 0 ? Math.trunc(Number(windowDays)) : null;
   const row = await sql.one(
     `SELECT 1 FROM cases c
      WHERE c.case_id = :cid
@@ -284,7 +305,12 @@ export async function hasFieldAccess(employeeId, caseId) {
                ที่อยู่ และข้อมูลสุขภาพของผู้ป่วยรายนั้นต่อไปตลอดกาล (เคสถูกยกเลิกทั้งใบก็เข้าข่ายเดียวกัน) */
             OR EXISTS (SELECT 1 FROM case_visits v
                        WHERE v.case_id = c.case_id AND v.assigned_to = :eid
-                         AND v.status <> 'cancelled'))`,
+                         AND v.status <> 'cancelled'${
+                           days
+                             ? `
+                         AND v.visit_date >= to_char(now() AT TIME ZONE 'Asia/Bangkok' - make_interval(days => ${days}), 'YYYY-MM-DD')`
+                             : ''
+                         }))`,
     { cid: caseId, eid: employeeId },
   );
   return Boolean(row);
@@ -311,6 +337,26 @@ function clearUnusedKind(input) {
  * หาที่ server ไม่รอให้หน้าเว็บส่งมา เพราะเป็นตัวเลขที่กลายเป็นรายได้ของพนักงาน
  * ปล่อยให้ client เป็นคนคัดลอก แล้ววันหนึ่งหน้าเว็บเวอร์ชันเก่า/หน้าอื่นเรียก API ตรงๆ เคสจะไม่มีค่าจ้างเงียบๆ
  */
+/**
+ * แพ็กกายภาพที่ "เพิ่งเลือกเข้ามา" ต้องมีจริงและยังเปิดขายอยู่ (ตรวจรอบ 15)
+ *
+ * หน้าเว็บโชว์เฉพาะแพ็กที่ active แต่ API รับรหัสอะไรก็ได้ — เปิดเคสด้วยแพ็กที่เลิกขายไปแล้ว
+ * หรือรหัสที่ไม่มีอยู่ ได้ 201 เงียบ ๆ แล้วเคสไม่มีค่าจ้างพนักงานเลย (payFromService คืน null)
+ * เช็คเฉพาะตอนที่ input ส่ง physio_package_id มาเอง — เคสเก่าที่แพ็กถูกปิดขายทีหลัง
+ * ต้องแก้ข้อมูลอื่นได้ตามปกติ ไม่ใช่ล็อกทั้งเคส
+ */
+async function assertPhysioPackageUsable(input, db = sql) {
+  if (!('physio_package_id' in input) || !input.physio_package_id) return;
+  const p = await db.one(
+    'SELECT name, active FROM physio_packages WHERE physio_package_id = :id',
+    { id: input.physio_package_id },
+  );
+  if (!p) throw new ApiError(400, `ไม่พบแพ็คเกจกายภาพรหัส ${input.physio_package_id}`);
+  if (!p.active) {
+    throw new ApiError(409, `แพ็ก "${p.name}" ปิดขายแล้ว เลือกใช้กับเคสใหม่ไม่ได้ — เลือกแพ็กที่ยังเปิดขายอยู่`);
+  }
+}
+
 async function payFromService(input, db = sql) {
   if (input.physio_package_id) {
     const p = await db.one(
@@ -390,6 +436,8 @@ export function assessStaffPayUpdate(targetStaffPay, releasedAmount) {
 export async function staffPayUpdateForTransaction(tx, caseId, input) {
   const current = await tx.one('SELECT * FROM cases WHERE case_id = :id FOR UPDATE', { id: caseId });
   if (!current) throw new ApiError(404, `ไม่พบเคสรหัส ${caseId}`);
+
+  await assertPhysioPackageUsable(input, tx);
 
   const mode = staffPayUpdateMode(current, input);
   if (mode === 'preserve') return { current, mode, staff_pay: current.staff_pay };
@@ -513,6 +561,8 @@ export function create(rawInput, actor) {
     values.pkg_english = input.pkg_english ?? false; // คอลัมน์ NOT NULL — ไม่ส่งมา = ไม่ได้ขอภาษาอังกฤษ
     // node-postgres แปลง array เป็น array ของ Postgres ไม่ใช่ JSON — ต้อง stringify เองก่อนลงคอลัมน์ JSONB
     values.addons = JSON.stringify(normalizeAddons(input.addons));
+
+    await assertPhysioPackageUsable(input, tx);
 
     // ไม่ได้ส่งค่าจ้างมา = ใช้ของแพ็คเกจ · ส่งตัวเลขมาเอง (รวม 0) = เคารพตามนั้น
     if (values.staff_pay == null) values.staff_pay = await payFromService(input, tx);
@@ -1137,6 +1187,29 @@ export async function close(caseId, endDate, actor) {
 export async function reopen(caseId, actor) {
   await transaction(async (tx) => {
     await caseForTransition(tx, caseId, ['closed', 'cancelled']);
+
+    /* สายต่อเคสต้องมีรอบที่ยังไม่ถูกยกเลิกได้ทีละใบ — renewalSource บังคับตอนสร้าง แต่ตอนเปิดกลับไม่มีใครดู
+       เคสจริง: ลูกค้าบอกไม่ต่อ → ยกเลิกเคสรอบ 2 → อีกสองวันลูกค้าเปลี่ยนใจ → แอดมินเปิดเคสรอบใหม่
+       (ระบบยอมให้ต่อได้เพราะรอบเดิมถูกยกเลิกแล้ว) → แล้วมีคนไปกด "เปิดเคสใหม่" กับรอบที่ยกเลิกไว้
+       ผลคือเคสรอบ 2 ของสัญญาเดียวกันมีสองใบพร้อมกัน ทั้งคู่ลงกะได้ ออกใบแจ้งหนี้ได้ และ
+       renewed_to บนเคสแม่โชว์ใบที่สร้างทีหลังใบเดียว อีกใบจึงหายจากสายตาแต่ยังเดินอยู่จริง */
+    const twin = await tx.one(
+      `SELECT r.case_id FROM cases me
+       JOIN cases r ON r.renewed_from = me.renewed_from
+       WHERE me.case_id = :id AND me.renewed_from IS NOT NULL
+         AND r.case_id <> me.case_id AND r.status <> 'cancelled'
+       ORDER BY r.created_at DESC LIMIT 1`,
+      { id: caseId },
+    );
+    if (twin) {
+      throw new ApiError(
+        409,
+        `สายต่อเคสนี้มีรอบที่เปิดอยู่แล้ว (${twin.case_id}) — เปิดเคสนี้กลับมาจะกลายเป็นรอบซ้อนกันสองใบ` +
+          ' ถ้าจะใช้ใบนี้แทน ให้ยกเลิกใบนั้นก่อน',
+        { existing_case_id: twin.case_id },
+      );
+    }
+
     await tx.run(
       `UPDATE cases
        SET status = CASE WHEN assigned_to IS NULL THEN 'unassigned' ELSE 'assigned' END,
@@ -1599,7 +1672,7 @@ export async function removeVisit(caseId, visitId) {
 // SELECT นี้ไม่ดึง fee/ราคาใดๆ เลย — ฝั่ง field ไม่เห็นข้อมูลการเงิน (ไม่ต้อง strip ทีหลัง)
 const MY_VISIT = `
   SELECT v.visit_id, v.case_id, v.visit_date, v.status AS visit_status, v.note,
-         v.assigned_to, v.planned_start, v.planned_end,
+         v.assigned_to, v.checked_in_by, v.planned_start, v.planned_end,
          v.check_in_at, v.check_out_at, v.check_in_lat, v.check_in_lng,
          v.check_in_distance_m, v.location_flagged,
          v.check_in_late_minutes, v.off_schedule,
@@ -1663,11 +1736,61 @@ export function withVisitState(v, now = new Date()) {
 export const findVisit = (visitId) =>
   sql.one(`${MY_VISIT} WHERE v.visit_id = :id`, { id: visitId }).then((v) => (v ? withVisitState(v) : null));
 
-/** กะของพนักงานคนหนึ่งในวันที่กำหนด — ตารางงาน "วันนี้" */
-export const visitsForEmployeeOn = (employeeId, date) =>
+/**
+ * กะข้ามเที่ยงคืนจะอยู่บนหน้า "งานวันนี้" ต่อได้อีกกี่ชั่วโมงหลังเช็คอิน
+ *
+ * กว้างกว่าเกณฑ์ 'stale' (16 ชม. ใน withVisitState) โดยตั้งใจ — ช่วงที่คาบเกี่ยวกันแปลว่า
+ * กะที่ค้างนานจนผิดปกติจะถูกเห็นทั้งสองทาง (พนักงานยังกดออกเองได้ และขึ้นในรายการต้องตรวจของ admin)
+ * ไม่ยาวกว่านี้เพราะ checkOutVisit บันทึกเวลาออกเป็น now() — กะที่ค้างมาหลายวันแล้วมากดออกเอง
+ * จะได้ชั่วโมงทำงานเป็นหลักร้อย ซึ่งไหลเข้าสรุปค่าตอบแทนทันที ต้องให้ผู้จัดการแก้เวลาให้แทน
+ */
+export const OPEN_SHIFT_CARRY_HOURS = 24;
+
+/**
+ * กะของพนักงานคนหนึ่งในวันที่กำหนด — ตารางงาน "วันนี้"
+ *
+ * carryOpen = เอากะของวันก่อนหน้าที่ "เช็คอินแล้วยังไม่เช็คเอาท์" ติดมาด้วย
+ *   เวรกลางคืน 20:00–08:00 ลงเป็นกะของวันที่เริ่ม พอเลยเที่ยงคืน กะนั้นหลุดจากรายการของวันใหม่
+ *   พนักงานจึงหาปุ่มเช็คเอาท์ไม่เจอทั้งที่ยังทำงานอยู่ — กะค้างเป็น "เช็คอินแล้วไม่เช็คเอาท์"
+ *   ซึ่งไม่ถูกนับเป็นชั่วโมง/จำนวนกะในสรุปค่าตอบแทนและในระดับพนักงานเลย (ดู DONE/WORKED_SHIFT)
+ *   การ์ดบนหน้าเว็บรองรับสถานะนี้อยู่แล้ว (มีคำเตือน "ค้างข้ามวัน") แค่ข้อมูลไม่เคยถูกส่งไปถึง
+ *
+ *   เปิดเฉพาะหน้าที่มีปุ่มเช็คเอาท์ (/my/today) — ห้ามเปิดให้รายการ "พรุ่งนี้"
+ *   เพราะ visit_date < พรุ่งนี้ จะลากกะที่ค้างของวันนี้ไปโผล่ในตารางวันพรุ่งนี้ด้วย
+ */
+export const visitsForEmployeeOn = (employeeId, date, { carryOpen = false } = {}) =>
   sql
     .all(
-      `${MY_VISIT} WHERE v.assigned_to = :emp AND v.visit_date = :date
+      `${MY_VISIT}
+       WHERE v.assigned_to = :emp
+         AND (
+           v.visit_date = :date
+           ${carryOpen
+             ? `OR (v.visit_date < :date
+                    AND ${NOT_CANCELLED}
+                    AND v.check_in_at IS NOT NULL
+                    AND v.check_out_at IS NULL
+                    AND v.check_in_at > now() - make_interval(hours => :carry_hours))`
+             : ''}
+         )
+       ORDER BY v.visit_date, v.planned_start NULLS FIRST, v.visit_id`,
+      carryOpen
+        ? { emp: employeeId, date, carry_hours: OPEN_SHIFT_CARRY_HOURS }
+        : { emp: employeeId, date },
+    )
+    .then((rows) => rows.map((v) => withVisitState(v)));
+
+/**
+ * กะของ "คนที่ทำงานกะนั้นจริง" ในวันที่กำหนด — คนที่ถูกจัดไว้ (assigned_to) หรือคนที่กดเช็คอินแทน (checked_in_by)
+ *
+ * แยกจาก visitsForEmployeeOn ที่หน้าตารางงานใช้อยู่ (ตรงนั้นต้องเป็น "กะของฉันตามที่ถูกจัด" เท่านั้น
+ * ไม่งั้นกะของคนอื่นที่เราไปช่วยเช็คอินจะโผล่ในตารางของเราด้วย) — ที่นี่ใช้กับเส้นรับรายงานจาก LINE
+ * ซึ่งต้องรับรายงานจากคนที่ไปทำจริงด้วย ไม่ใช่เฉพาะคนที่ชื่ออยู่บนใบนัด
+ */
+export const visitsForWorkerOn = (employeeId, date) =>
+  sql
+    .all(
+      `${MY_VISIT} WHERE v.visit_date = :date AND (v.assigned_to = :emp OR v.checked_in_by = :emp)
        ORDER BY v.planned_start NULLS FIRST, v.visit_id`,
       { emp: employeeId, date },
     )
@@ -1766,7 +1889,14 @@ export const checkOutVisit = (visitId, { lat, lng }) =>
            -- ไม่งั้นกะที่ยกเลิกแล้วจะกลับมานับชั่วโมงและสัดส่วนค่าจ้างเงียบๆ
            status = CASE WHEN status = 'cancelled' THEN status ELSE 'done' END,
            updated_at = ${NOW}
-       WHERE visit_id = :id AND check_in_at IS NOT NULL AND check_out_at IS NULL`,
+       WHERE visit_id = :id AND check_in_at IS NOT NULL AND check_out_at IS NULL
+         /* เวลาออกต้องมาหลังเวลาเข้าเสมอ — ไม่งั้นได้นาทีติดลบ ซึ่งไหลเข้าสรุปค่าตอบแทน
+            (SUM(check_out_at - check_in_at) ทั้งเดือนรวมเป็นก้อนเดียว กะเดียวลบ 60 นาที
+             ก็หักชั่วโมงของทั้งเดือนไปเงียบ ๆ)
+            เส้น /adjust ของหลังบ้านกันไว้แล้ว และเช็คอินล่วงหน้าก็กันแล้ว ตอนนี้จึงยังเกิดไม่ได้
+            แต่ที่นี่ไม่เคยมีด่าน — เขียน check_in_at ผิดจากทางไหนก็ตามในอนาคต
+            (นำเข้าข้อมูล · แก้ฐานมือ · เครื่องเวลาเพี้ยน) นาทีจะติดลบทันทีโดยไม่มีอะไรฟ้อง (ตรวจรอบ 16) */
+         AND check_in_at < now()`,
       { id: visitId, lat, lng },
     )
     .then((n) => (n > 0 ? findVisit(visitId) : null));
@@ -2353,11 +2483,66 @@ export function payoutCases(month, employeeId) {
  * เดิมเคยเรียงตามความเร่งแล้วเลิกไปเพราะอ่านไม่ออกว่าทำไมแถวนี้อยู่บนแถวนั้น —
  * รอบนี้จึงส่ง pay_priority กับ waiting_days กลับไปให้หน้าเว็บแสดงเหตุผลบนแถวด้วย
  */
+/**
+ * "เคสที่ยกเลิกแล้วแต่ยังมีเงินค้างพนักงาน" — ต้องมีกะที่เช็คอินจริง (ไม่นับกะที่ยกเลิก)
+ * หรือเคยปล่อยเงินของเคสนี้ไปแล้ว · ต้องใช้ในบริบทที่มี `FROM cases c`
+ *
+ * เขียนที่เดียวแล้วใช้ทั้งคิวปล่อยค่าจ้าง (payQueue) และตัวนับเตือน (payroll/repo.js unreleasedCases)
+ * — สองที่นี้ต้องนับเคสชุดเดียวกันเสมอ ไม่งั้นกระดิ่งบอกว่าไม่มีอะไรค้างแต่ในคิวมีแถวอยู่
+ */
+export const CANCELLED_WITH_WORK = `(
+  EXISTS (SELECT 1 FROM case_visits cw WHERE cw.case_id = c.case_id
+            AND cw.check_in_at IS NOT NULL AND cw.status <> 'cancelled')
+  OR EXISTS (SELECT 1 FROM case_payouts cp WHERE cp.case_id = c.case_id)
+)`;
+
+/**
+ * ตัวเศษกับตัวหารของค่าจ้างตามสัดส่วน (เคสที่ถูกยกเลิกกลางคัน) — ต้องใช้ในบริบทที่มี `FROM cases c`
+ *
+ *   ตัวเศษ = กะที่ "ไปทำมาจริง" คือเช็คอินแล้วและกะนั้นไม่ถูกยกเลิก
+ *   ตัวหาร = กะที่ลงไว้ทั้งหมดของเคส รวมกะที่ถูกยกเลิกด้วย
+ *
+ * ตัวหารต้องนับกะที่ยกเลิกด้วย เพราะ cancel() ยกเลิกกะที่ยังไม่ได้ไปทุกกะทันทีที่กดยกเลิกเคส —
+ * ถ้าไม่นับ ตัวหารจะเหลือเท่ากับตัวเศษเสมอ แล้วทุกเคสที่ยกเลิกจะกลายเป็น "ทำครบ" จ่ายเต็มยอดเหมา
+ * ซึ่งตรงข้ามกับสิ่งที่ต้องการพอดี · กะที่คนยกเลิกเองระหว่างทาง (ลูกค้าขอข้ามวัน) ก็อยู่ในตัวหาร
+ * ตามเดิม — วันนั้นอยู่ในแผนและพนักงานไม่ได้ไป จึงไม่ใช่เงินของเขา
+ *
+ * ไม่ใช้ "จำนวนวันตามสัญญา" (start_date → end_date) เป็นตัวหาร เพราะเคสจริงไม่ได้ลงกะทุกวัน
+ * (สัปดาห์ละ 3 วันก็มี) ช่วงวันที่จึงไม่ใช่จำนวนงานที่ตกลงกันไว้ · ตารางกะคือแผนงานฉบับเดียว
+ * ที่ระบบมีจริงและเป็นตัวเดียวกับที่ผู้จัดการเห็นบนหน้าเคส
+ */
+export const WORKED_SHIFTS = `(SELECT COUNT(*) FROM case_visits wv
+   WHERE wv.case_id = c.case_id AND wv.check_in_at IS NOT NULL AND wv.status <> 'cancelled')`;
+export const PLANNED_SHIFTS = `(SELECT COUNT(*) FROM case_visits pv WHERE pv.case_id = c.case_id)`;
+
+/* เคสที่ยกเลิกแล้วแต่มีคนไปทำงานมาจริง จัดชั้นเดียวกับเคสที่ปิด — งานจบไปแล้วทั้งคู่
+   และเงินของกะที่ทำจริงต้องออก ไม่ใช่ค้างอยู่ท้ายคิวปนกับเคสที่ยังไม่เริ่ม */
+const PAY_OVER = `q.status IN ('closed', 'cancelled')`;
+
+/**
+ * ยอดที่ระบบเสนอให้จ่ายทั้งเคส — ฝาแฝด SQL ของ suggestedPay() ด้านล่าง
+ *
+ * มีสองที่เพราะคนละงาน: ตัวนี้ใช้ "จัดลำดับ/คัดแถว" ในฐานข้อมูล ส่วน suggestedPay() เป็นตัวที่
+ * ผลิต "ตัวเลขเงิน" ที่ส่งออกไปจริง — ถ้าสองตัวนี้ให้ผลต่างกัน อย่างมากที่สุดคือแถวเรียงผิดที่
+ * ไม่ใช่เงินผิดก้อน · สูตรต้องตรงกัน แก้ที่ไหนต้องแก้อีกที่ (มีเทสคุมว่าแถวที่จ่ายครบตามสัดส่วนแล้ว
+ * ต้องตกไปอยู่กลุ่ม "จ่ายครบ" ซึ่งจะล้มทันทีถ้าสองสูตรนี้เริ่มเพี้ยนจากกัน)
+ */
+const PAY_BASIS = `
+  CASE
+    WHEN q.status <> 'cancelled'                                  THEN q.staff_pay
+    WHEN q.planned_shifts <= 0                                    THEN q.staff_pay
+    WHEN q.worked_shifts >= q.planned_shifts                      THEN q.staff_pay
+    ELSE GREATEST(
+           LEAST(q.staff_pay,
+                 ROUND((q.staff_pay * q.worked_shifts / q.planned_shifts)::numeric, 2)),
+           q.released)
+  END`;
+
 const PAY_PRIORITY = `
   CASE
-    WHEN ROUND((q.staff_pay - q.released)::numeric, 2) <= 0 THEN 6
-    WHEN q.status = 'closed' AND q.released = 0             THEN 1
-    WHEN q.status = 'closed'                                THEN 2
+    WHEN ROUND(((${PAY_BASIS}) - q.released)::numeric, 2) <= 0 THEN 6
+    WHEN ${PAY_OVER} AND q.released = 0                     THEN 1
+    WHEN ${PAY_OVER}                                        THEN 2
     WHEN q.released > 0                                     THEN 3
     WHEN q.status = 'in_progress'                            THEN 4
     ELSE 5
@@ -2373,8 +2558,9 @@ const PAY_PRIORITY = `
  */
 const WAITING_SINCE = `
   CASE
-    WHEN q.status = 'closed'
-      THEN COALESCE(LEFT(q.closed_at, 10), LEFT(q.end_date, 10))
+    WHEN ${PAY_OVER}
+      THEN COALESCE(LEFT(q.closed_at, 10), LEFT(q.cancelled_at, 10), LEFT(q.end_date, 10),
+                    LEFT(q.first_visit_date, 10))
     ELSE COALESCE(LEFT(q.first_visit_date, 10), LEFT(q.start_date, 10), LEFT(q.created_at, 10))
   END`;
 
@@ -2383,14 +2569,17 @@ export function payQueue() {
     .all(
       `WITH q AS (
         SELECT c.case_id, c.title, c.client_name, c.status, c.staff_pay, c.fee,
-              c.case_type, c.service_kind, c.closed_at, c.end_date,
+              c.case_type, c.service_kind, c.closed_at, c.cancelled_at, c.end_date,
               c.start_date, c.created_at,
               COALESCE(p.released, 0)     AS released,
               COALESCE(p.installments, 0) AS installments_used,
               COALESCE(w.workers, 0)      AS workers,
               w.worker_names,
               lv.last_visit_date,
-              lv.first_visit_date
+              lv.first_visit_date,
+              /* ฐานของ "ยอดที่ระบบเสนอ" ของเคสที่ยกเลิกกลางคัน — ดู WORKED_SHIFTS/PLANNED_SHIFTS */
+              ${WORKED_SHIFTS}            AS worked_shifts,
+              ${PLANNED_SHIFTS}           AS planned_shifts
        FROM cases c
        LEFT JOIN (
          SELECT case_id, SUM(amount) AS released, MAX(installment_no) AS installments
@@ -2441,10 +2630,17 @@ export function payQueue() {
        ) lv ON lv.case_id = c.case_id
 
        WHERE c.staff_pay IS NOT NULL
-         /* สามสถานะนี้เท่านั้น = เคสที่มีคนทำงานอยู่จริงหรือทำจบแล้ว
-            ตัด unassigned ทิ้งเพราะยังไม่มีใครรับงาน จ่ายไปก็ไม่รู้จะจ่ายให้ใคร
-            และตัด cancelled เพราะงานไม่ได้เกิดขึ้น */
-         AND c.status IN ('assigned', 'in_progress', 'closed')
+         /* ตัด unassigned ทิ้งเพราะยังไม่มีใครรับงาน จ่ายไปก็ไม่รู้จะจ่ายให้ใคร
+
+            เคสที่ยกเลิกเคยถูกตัดทิ้งทั้งหมดด้วยเหตุผลว่า "งานไม่ได้เกิดขึ้น" ซึ่งจริงแค่ครึ่งเดียว:
+            ลูกค้าโทรยกเลิกวันที่ 4 ทั้งที่ลงกะไว้ 10 วัน พนักงานไปทำมาแล้ว 3 วัน — cancel() ตั้งใจ
+            ไม่แตะกะที่เช็คอินไปแล้วเพราะงานนั้นเกิดขึ้นจริง และ releasePay ก็ยอมให้ปล่อยเงินของเคส
+            ที่ยกเลิกอยู่แล้ว แต่คิวนี้กลับไม่โชว์ → เงินค่าจ้างของกะที่ทำจริงหายจากสายตาผู้จัดการ
+            ทันทีที่กดยกเลิกเคส ไม่มี error ไม่มีกระดิ่ง (พนักงานเห็นในหน้าค่าตอบแทนของตัวเองอยู่
+            ฝ่ายเดียว) · เอากลับเข้าคิวเฉพาะใบที่มีคนไปทำจริงหรือเคยปล่อยเงินไปแล้ว
+            เคสที่ยกเลิกก่อนเริ่มงาน (ส่วนใหญ่) ยังไม่ขึ้นคิวเหมือนเดิม */
+         AND (c.status IN ('assigned', 'in_progress', 'closed')
+              OR (c.status = 'cancelled' AND (${CANCELLED_WITH_WORK})))
       )
       SELECT r.*,
              /* คิดฝั่ง server ด้วยวันที่ไทย — นาฬิกาเครื่องผู้ใช้ตั้งผิดแล้วตัวเลขนี้เพี้ยนทันที */
@@ -2456,6 +2652,8 @@ export function payQueue() {
         SELECT q.*, ${PAY_PRIORITY} AS pay_priority, ${WAITING_SINCE} AS waiting_since
         FROM q
       ) r
+      /* เรียงด้วยยอดที่ระบบเสนอ ไม่ใช่ยอดเหมา — เคสที่ยกเลิกแล้วจ่ายครบตามกะที่ไปจริง
+         ต้องตกไปอยู่กลุ่ม "จ่ายครบ" (6) ไม่ใช่ค้างอยู่หัวคิวตลอดไปด้วยยอดที่จะไม่มีวันจ่าย */
       /* ในกลุ่มเดียวกันเอาค้างนานที่สุดขึ้นก่อน · NULLS LAST = ยังไม่มีอะไรค้างให้เร่ง
          created_at ปิดท้ายให้ลำดับคงที่ ไม่สลับไปมาระหว่างการโหลดสองครั้ง */
       ORDER BY r.pay_priority,
@@ -2467,12 +2665,26 @@ export function payQueue() {
       rows.map((r) => {
         const total = Number(r.staff_pay);
         const released = Math.round(Number(r.released) * 100) / 100;
+        const worked_shifts = Number(r.worked_shifts);
+        const planned_shifts = Number(r.planned_shifts);
+        const suggested = suggestedPay(total, {
+          status: r.status,
+          worked_shifts,
+          planned_shifts,
+          released,
+        });
         return {
           ...r,
           staff_pay: total,
           fee: r.fee == null ? null : Number(r.fee),
           released,
+          // ยอดเหมาลบที่ปล่อยไปแล้ว = เพดานที่ผู้จัดการพิมพ์เองได้สูงสุด (ไม่ใช่ยอดที่ระบบเสนอ)
           remaining: Math.round((total - released) * 100) / 100,
+          worked_shifts,
+          planned_shifts,
+          suggested_pay: suggested,
+          suggested_remaining: Math.round((suggested - released) * 100) / 100,
+          prorated: suggested < total,
           installments_used: Number(r.installments_used),
           workers: Number(r.workers),
         };
@@ -2491,6 +2703,35 @@ export const MAX_INSTALLMENTS = 5;
 
 /** ปัดเป็นสตางค์ — เงินไม่มีทศนิยมที่สาม และ 0.1 + 0.2 ของ JS ก็ไม่ควรโผล่มาในสลิป */
 const round = (n) => Math.round(n * 100) / 100;
+
+/**
+ * ยอดค่าจ้างทั้งเคสที่ระบบเสนอ — "ข้อเสนอ" ไม่ใช่เพดาน (เพดานยังเป็นยอดเหมาเหมือนเดิม)
+ *
+ * ดร.ธงชัย 25 ต.ค. 2569: *"จ่ายบางส่วนแต่ก็คืนไม่ครบครับ เคสยกเลิก · ยกเลิกได้ครับ
+ * กะที่ยังอยู่ไม่ต้องจ่าย"* → เคสที่ถูกยกเลิกกลางคัน จ่ายตามกะที่พนักงานไปทำจริงเท่านั้น
+ * กะที่เหลือ (ถูกยกเลิกไปพร้อมเคส) ไม่เป็นเงินของใคร
+ *
+ * เคสที่ไม่ได้ยกเลิก (รวมเคสที่ปิดตามปกติ) ได้ยอดเหมาเต็มเหมือนเดิมทุกบาท — การปิดเคสคือ
+ * "งานจบตามที่ตกลง" ส่วนการยกเลิกคือ "งานไม่ได้เกิดจนครบ" สองอย่างนี้คนละเรื่องกัน
+ *
+ * กันพังสามทาง:
+ *   · ไม่มีกะลงไว้เลย (ตกลงเหมาแบบไม่ลงตาราง) = ไม่มีตัวหาร → จ่ายเต็มตามเดิม ไม่หารศูนย์
+ *   · ไปครบหรือเกินแผน → จ่ายเต็ม ไม่คิดสัดส่วนให้เกินยอดเหมา
+ *   · ห้ามเสนอต่ำกว่ายอดที่ปล่อยไปแล้ว — เงินที่ออกไปแล้วเรียกคืนผ่านระบบไม่ได้ ถ้าเสนอต่ำกว่า
+ *     ยอดคงเหลือจะติดลบแล้วหน้าจอจะอ่านเหมือนระบบคิดว่าพนักงานติดหนี้บริษัทอยู่
+ */
+export function suggestedPay(staffPay, { status, worked_shifts, planned_shifts, released = 0 } = {}) {
+  if (staffPay == null) return null;
+  const total = round(Number(staffPay));
+  if (status !== 'cancelled') return total;
+
+  const planned = Number(planned_shifts ?? 0);
+  const worked = Number(worked_shifts ?? 0);
+  if (!(planned > 0) || worked >= planned) return total;
+
+  const prorated = round((total * worked) / planned);
+  return Math.min(total, Math.max(prorated, round(Number(released ?? 0))));
+}
 
 /**
  * น้ำหนักของแต่ละคนในการแบ่งค่าจ้างของเคส
@@ -2578,7 +2819,9 @@ export async function payStatus(caseId) {
     sql.one(
       /* นับงวดจาก MAX ไม่ใช่ COUNT — ถอนงวดกลางคืนแล้วเลขงวดของงวดหลังต้องไม่เลื่อนตาม
          (ถ้านับจำนวนแถว งวดที่ 3 จะกลายเป็นงวดที่ 2 ทั้งที่บนสลิปที่ปล่อยไปแล้วเขียนว่า 3) */
-      `SELECT c.staff_pay, c.fee,
+      `SELECT c.staff_pay, c.fee, c.status,
+              ${WORKED_SHIFTS}  AS worked_shifts,
+              ${PLANNED_SHIFTS} AS planned_shifts,
               COALESCE((SELECT SUM(p.amount) FROM case_payouts p WHERE p.case_id = c.case_id), 0) AS released,
               COALESCE((SELECT MAX(p.installment_no) FROM case_payouts p WHERE p.case_id = c.case_id), 0) AS last_installment
        FROM cases c WHERE c.case_id = :id`,
@@ -2600,6 +2843,11 @@ export async function payStatus(caseId) {
   const agreedRows = split.filter((r) => r.share != null);
   const agreedTotal = agreedRows.length ? round(agreedRows.reduce((n, r) => n + r.share, 0)) : null;
 
+  /* ยอดที่ระบบเสนอ — เท่ากับยอดเหมาทุกเคส ยกเว้นเคสที่ยกเลิกกลางคัน (ดู suggestedPay) */
+  const worked_shifts = Number(row.worked_shifts);
+  const planned_shifts = Number(row.planned_shifts);
+  const suggested = suggestedPay(total, { status: row.status, worked_shifts, planned_shifts, released });
+
   return {
     staff_pay: total,
 
@@ -2615,7 +2863,18 @@ export async function payStatus(caseId) {
     agreement_matches: agreedTotal == null || total == null ? true : agreedTotal === round(total),
 
     released,
+    // เพดานที่พิมพ์เองได้สูงสุด — ยังเป็นยอดเหมาลบที่ปล่อยไปแล้วเหมือนเดิม ไม่ถูกตัดด้วยสัดส่วน
     remaining: total == null ? null : round(total - released),
+
+    /* ยอดที่ระบบเสนอให้ปล่อย (ค่าปริยายของช่อง "ยอดงวดนี้") กับที่มาของมัน —
+       หน้าจอต้องอธิบายได้ว่าทำไมยอดไม่เท่ายอดเหมา ไม่งั้นผู้จัดการจะคิดว่าตัวเลขเพี้ยน */
+    status: row.status,
+    worked_shifts,
+    planned_shifts,
+    suggested_pay: suggested,
+    suggested_remaining: suggested == null ? null : round(suggested - released),
+    prorated: suggested != null && total != null && suggested < total,
+
     shares: split,
     payouts,
 
@@ -2819,9 +3078,26 @@ function applyChosenShares(shares, chosen, amount) {
   if (ids.size !== chosen.length) return { reason: 'duplicate_employee' };
 
   const sum = round(chosen.reduce((n, c) => n + c.amount, 0));
-  if (sum !== round(amount)) return { reason: 'share_sum_mismatch', sum };
+  const target = round(amount);
+  if (sum !== target) return { reason: 'share_sum_mismatch', sum };
 
-  return { rows: chosen.map((c) => ({ ...known.get(c.employee_id), amount: round(c.amount) })) };
+  const rows = chosen.map((c) => ({ ...known.get(c.employee_id), amount: round(c.amount) }));
+
+  /* ผลรวมที่ "ปัดรายคนแล้ว" ต้องเท่ายอดของงวดเป๊ะ ไม่ใช่แค่ผลรวมก่อนปัด
+     ตัวตรวจข้างบนดูผลรวมดิบ แต่สิ่งที่ลงฐานข้อมูลคือยอดของแต่ละคนที่ปัดแล้วทีละบรรทัด
+     กรอกเศษย่อยกว่าสตางค์ (0.125 สองบรรทัด = 0.25 ผ่านด่าน) ปัดแล้วได้ 0.13 + 0.13 = 0.26
+     ส่วนเกินนั้นเป็นเงินจริงที่ทำให้ยอดปล่อยสะสมทะลุค่าจ้างของเคส (remaining ติดลบ
+     แล้วเคสขึ้นว่า "จ่ายครบ" ทั้งที่จ่ายเกิน) ส่วนทางขาดก็เหลือเศษที่ปล่อยต่อไม่ได้
+     โยนส่วนต่างให้บรรทัดที่ได้มากที่สุดซึ่งได้เงินอยู่แล้ว — ไม่สร้างก้อนสตางค์ให้คนที่ไม่รับงวดนี้
+     ไม่มีใครได้เงินเลย (ทุกบรรทัดปัดลงเป็นศูนย์) = ปฏิเสธไปตรงๆ ดีกว่าเดาว่าจะยัดให้ใคร */
+  const drift = round(target - rows.reduce((n, r) => n + r.amount, 0));
+  if (drift !== 0) {
+    const biggest = rows.filter((r) => r.amount > 0).sort((a, b) => b.amount - a.amount)[0];
+    if (!biggest || round(biggest.amount + drift) <= 0) return { reason: 'share_sum_mismatch', sum };
+    biggest.amount = round(biggest.amount + drift);
+  }
+
+  return { rows };
 }
 
 /**
@@ -2830,7 +3106,12 @@ function applyChosenShares(shares, chosen, amount) {
  * ต้องเรียกหลังล็อกแถว cases แล้วเท่านั้น: คำขอปล่อยเงินทุกคำขอของเคสเดียวกันจึงต่อคิวกัน
  * และอ่าน SUM(case_payouts) หลังคำขอก่อนหน้า commit แล้ว ไม่ใช้ remaining เก่าจากหน้าเว็บ
  */
-export function assessReleaseCapacity(staffPay, releasedAmount, requestedAmount) {
+/**
+ * suggestedTotal (ไม่บังคับ) = ยอดทั้งเคสที่ระบบเสนอ (ดู suggestedPay) ใช้เป็น "ค่าปริยาย"
+ * ตอนไม่ระบุยอดเท่านั้น — เพดานยังเป็นยอดเหมาเหมือนเดิม ผู้จัดการพิมพ์เกินยอดที่เสนอได้
+ * ไม่ส่งมา = พฤติกรรมเดิมทุกประการ (ค่าปริยาย = ยอดคงเหลือเต็ม)
+ */
+export function assessReleaseCapacity(staffPay, releasedAmount, requestedAmount, suggestedTotal) {
   const released = round(Number(releasedAmount ?? 0));
   if (staffPay == null) return { reason: 'staff_pay_not_set', staff_pay: null, released, remaining: null };
 
@@ -2838,8 +3119,16 @@ export function assessReleaseCapacity(staffPay, releasedAmount, requestedAmount)
   const remaining = round(staff_pay - released);
   if (remaining <= 0) return { reason: 'fully_released', staff_pay, released, remaining };
 
-  // ไม่ส่งยอดมา = ปล่อยยอดคงเหลือ "ล่าสุด" ที่เพิ่งอ่านภายใต้ lock ไม่ใช่ค่าจาก request ก่อนเข้า transaction
-  const amount = requestedAmount == null ? remaining : round(Number(requestedAmount));
+  /* เคสที่ยกเลิกกลางคันแล้วจ่ายครบตามกะที่ไปจริงไปแล้ว — "กดปล่อยที่เหลือ" ต้องไม่เทยอดของ
+     กะที่ไม่มีใครไปออกมาเงียบๆ · ยังจ่ายเพิ่มได้ถ้าผู้จัดการตั้งใจ แต่ต้องพิมพ์ยอดเองเท่านั้น */
+  const suggested = suggestedTotal == null ? staff_pay : round(Number(suggestedTotal));
+  const suggestedRemaining = Math.max(0, Math.min(remaining, round(suggested - released)));
+  if (requestedAmount == null && suggestedRemaining <= 0) {
+    return { reason: 'prorated_fully_released', staff_pay, released, remaining, suggested_pay: suggested };
+  }
+
+  // ไม่ส่งยอดมา = ปล่อยยอดที่ระบบเสนอ "ล่าสุด" ที่เพิ่งอ่านภายใต้ lock ไม่ใช่ค่าจาก request ก่อนเข้า transaction
+  const amount = requestedAmount == null ? suggestedRemaining : round(Number(requestedAmount));
   if (!Number.isFinite(amount) || amount <= 0) {
     return { reason: 'invalid_amount', staff_pay, released, remaining, amount };
   }
@@ -2867,7 +3156,21 @@ export async function releasePay(caseId, { amount: requestedAmount, note, due_da
       { id: caseId },
     );
 
-    const capacity = assessReleaseCapacity(lockedCase.staff_pay, releasedAmount, requestedAmount);
+    /* นับกะใหม่ในทรานแซกชันเดียวกัน ไม่ใช้เลขที่หน้าเว็บถือมา — ยกเลิกเคสหรือเพิ่ม/ลบกะ
+       ระหว่างที่ผู้จัดการเปิดหน้าค้างไว้ แล้วตัวหารเปลี่ยนไปโดยไม่มีใครเห็น */
+    const basis = await tx.one(
+      `SELECT c.status, ${WORKED_SHIFTS} AS worked_shifts, ${PLANNED_SHIFTS} AS planned_shifts
+       FROM cases c WHERE c.case_id = :id`,
+      { id: caseId },
+    );
+    const suggested = suggestedPay(lockedCase.staff_pay, {
+      status: basis?.status,
+      worked_shifts: basis?.worked_shifts,
+      planned_shifts: basis?.planned_shifts,
+      released: releasedAmount,
+    });
+
+    const capacity = assessReleaseCapacity(lockedCase.staff_pay, releasedAmount, requestedAmount, suggested);
     if (capacity.reason) return { released: [], ...capacity };
     const { amount } = capacity;
 
@@ -3211,7 +3514,7 @@ const REPORT_VISIT = `
 `;
 /* ไล่ชื่อคอลัมน์เองแทน r.* — r.* จะลากไบนารีรูปแผล (หลักแสนไบต์ต่อใบ) มาทุกแถวที่โหลดรายการ
    ประกอบจาก REPORT_COLUMNS ที่มาจาก schema อยู่แล้ว เพิ่มช่องใหม่จึงไม่ต้องมาต่อรายการที่นี่ซ้ำ */
-const REPORT_COLS = [
+const REPORT_BASE_COLS = [
   'r.report_id',
   'r.case_id',
   ...REPORT_COLUMNS.map((c) => `r.${c}`),
@@ -3222,10 +3525,9 @@ const REPORT_COLS = [
   'r.reported_by_name',
   'r.created_at',
   'r.updated_at',
-  'v.visit_date',
-  'v.planned_start',
-  'v.planned_end',
 ].join(', ');
+
+const REPORT_COLS = [REPORT_BASE_COLS, 'v.visit_date', 'v.planned_start', 'v.planned_end'].join(', ');
 
 /**
  * รูปแผลเป็นไบนารีหลักแสนไบต์ ส่งกลับไปกับ JSON ทุกครั้งที่โหลดรายการไม่ไหว
@@ -3303,10 +3605,16 @@ export function listReportsForVisit(visitId) {
   );
 }
 
-/** รายงานใบเดียว — กรองด้วย case_id ด้วยเสมอ ใบของเคสอื่นต้องไม่หลุดออกทาง path ของเคสนี้ */
+/**
+ * รายงานใบเดียว — กรองด้วย case_id ด้วยเสมอ ใบของเคสอื่นต้องไม่หลุดออกทาง path ของเคสนี้
+ *
+ * ไล่ชื่อคอลัมน์แทน `SELECT *` ด้วยเหตุผลเดียวกับตอนโหลดรายการ: `*` ลากไบนารีรูปแผล
+ * (หลักแสนไบต์) ออกจากฐานข้อมูลมาทุกครั้งที่กด "แก้รายงาน" ทั้งที่ไม่มีใครใช้ค่านั้นเลย
+ * สิ่งที่ผู้เรียกต้องรู้คือ "ใบนี้มีรูปอยู่ไหม" ซึ่ง has_wound_photo ตอบได้เท่ากัน
+ */
 export function findReport(caseId, reportId) {
   return sql.one(
-    'SELECT * FROM case_reports WHERE report_id = :rid AND case_id = :cid',
+    `SELECT ${REPORT_BASE_COLS} FROM case_reports r WHERE r.report_id = :rid AND r.case_id = :cid`,
     { rid: reportId, cid: caseId },
   );
 }

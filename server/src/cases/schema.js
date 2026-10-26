@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { zodDate } from '../lib/dates.js';
+import { zodDate, zodPastDate } from '../lib/dates.js';
 // ตัวตรวจรูปแบบ data URL — ตัวเดียวกับรูปพนักงาน/ใบรับรอง/เซลฟี่เช็คอิน (รูปแผลในรายงานใช้ร่วม)
 import { imageSchema } from '../employees/schema.js';
 import { patientCode } from '../patients/schema.js';
@@ -19,6 +19,9 @@ export const CASE_STATUSES = ['unassigned', 'assigned', 'in_progress', 'closed',
 
 // วันที่ต้องมีอยู่จริงในปฏิทิน ไม่ใช่แค่รูปแบบถูก (2026-02-31 เคยผ่านได้ — ดู lib/dates.js)
 const date = zodDate(z);
+/* วันที่ของเหตุการณ์ที่เกิดไปแล้ว — ห้ามเป็นอนาคต (ตรวจรอบ 16)
+   ใช้กับวันที่ของรายงานการดูแล ไม่ใช่กับ visit_date ที่ต้องลงกะล่วงหน้าได้ตามปกติ */
+const pastDate = zodPastDate(z);
 const optionalText = z.string().trim().max(500).optional().nullable();
 const optionalLongText = z.string().trim().max(2000).optional().nullable(); // อาการ/โรคประจำตัว เขียนยาวได้
 
@@ -402,8 +405,12 @@ const reportFields = z.object({
   // ตัวเลขต้องอยู่ในเคสเดียวกันด้วย ซึ่ง zod ตรวจให้ไม่ได้ (ต้องถามฐานข้อมูล) — ดู ensureVisitInCase ที่ชั้น route
   visit_id: z.number().int().positive().optional().nullable(),
 
-  // เว้นว่างได้ = วันนี้ (เวลาไทย ฝั่ง server) — พนักงานหน้างานกดบันทึกได้เลยโดยไม่ต้องแตะช่องวันที่
-  report_date: date.optional().nullable(),
+  /* เว้นว่างได้ = วันนี้ (เวลาไทย ฝั่ง server) — พนักงานหน้างานกดบันทึกได้เลยโดยไม่ต้องแตะช่องวันที่
+     ห้ามเป็นอนาคต (ตรวจรอบ 16 — เดิมแก้ใบเก่าให้ลงวันที่ 2099 ได้ ได้ 200)
+     รายงานการดูแลคือบันทึกสิ่งที่เกิดไปแล้ว · ญาติเห็นรายงานเรียงตามวันที่
+     ใบที่ลงวันอนาคตจึงค้างอยู่หัวรายการของครอบครัวไปตลอด ทับใบจริงของวันนี้
+     (ปัญหาเดียวกับวันที่รับชำระใบแจ้งหนี้ รอบ 13 และวันที่จ่ายค่าจ้าง รอบ 14) */
+  report_date: pastDate.optional().nullable(),
   report_time: time.optional().nullable(),
   shift: choice(['day', 'night', 'other'], 'เวร'),
   report_type: choice(['routine', 'change', 'incident'], 'ประเภทรายงาน'),

@@ -1,11 +1,15 @@
 import { z } from 'zod';
-import { zodDate } from '../lib/dates.js';
+import { zodDate, zodPastDate } from '../lib/dates.js';
 
 const optionalText = z.string().trim().max(500).optional().nullable();
 const optionalShort = z.string().trim().max(100).optional().nullable();
+/* ต้องมีตัวเลขพอที่จะโทรออกได้จริง (ตรวจรอบ 18)
+   กฎเดิมดูแค่ "อักขระที่อนุญาต 8–20 ตัว" — "++++++++" กับเว้นวรรคแปดตัวจึงผ่านเข้าฐานเป็นเบอร์
+   แล้วคนที่เปิดแฟ้มมาเห็นช่องเบอร์มีค่าอยู่ แต่โทรไม่ได้และค้นไม่เจอ */
 const optionalPhone = z
   .string()
   .regex(/^[0-9+\-\s]{8,20}$/, 'เบอร์โทรไม่ถูกต้อง')
+  .refine((v) => (v.match(/\d/g) ?? []).length >= 8, 'เบอร์โทรต้องมีตัวเลขอย่างน้อย 8 หลัก')
   .optional()
   .nullable();
 
@@ -14,6 +18,9 @@ export const MARITAL_STATUSES = ['single', 'married', 'divorced', 'widowed'];
 
 // วันที่ต้องมีอยู่จริงในปฏิทิน ไม่ใช่แค่รูปแบบถูก (2026-02-31 เคยผ่านได้ — ดู lib/dates.js)
 const date = zodDate(z);
+/* วันเกิดเป็นอนาคตไม่ได้ (ตรวจรอบ 18 — เดิมรับ 2099 ได้ 201)
+   อายุถูกคำนวณจากช่องนี้ไปขึ้นในแฟ้มและรายงาน กรอกผิดแล้วได้อายุติดลบ */
+const birthDate = zodPastDate(z);
 
 /**
  * มีแต่ชื่อที่บังคับกรอก — เคสส่วนใหญ่รับทางโทรศัพท์ ได้ข้อมูลมาทีละนิด
@@ -34,7 +41,7 @@ export const createCustomerSchema = z.object({
     .optional()
     .nullable(),
   passport_no: optionalShort,
-  birth_date: date.optional().nullable(),
+  birth_date: birthDate.optional().nullable(),
   age: z
     .number()
     .int('อายุต้องเป็นจำนวนเต็ม')
