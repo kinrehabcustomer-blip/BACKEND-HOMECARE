@@ -1442,6 +1442,15 @@ CREATE INDEX IF NOT EXISTS idx_payroll_payout_lines_item ON payroll_payout_lines
 -- และโผล่อยู่ทุกหน้าจอ — ใครก็ไล่ยิงคะแนนใส่พนักงานทีละคนได้ครบทั้งบริษัทในคำสั่งเดียว
 -- token ยังเพิกถอนได้ด้วย (ออกใบใหม่ = ลิงก์เดิมตาย) ต่างจากรหัสพนักงานที่ห้ามแก้ตลอดอายุบัญชี
 ALTER TABLE employees ADD COLUMN IF NOT EXISTS review_token TEXT;
+-- วันออกลิงก์แยกจาก updated_at ของแฟ้มพนักงาน เพราะการแก้เบอร์/ที่อยู่ภายหลัง
+-- ต้องไม่ต่ออายุลิงก์สาธารณะที่แจกไปแล้วโดยไม่ตั้งใจ
+ALTER TABLE employees ADD COLUMN IF NOT EXISTS review_token_issued_at TEXT;
+
+-- ฐานเดิมไม่มีวันออกลิงก์ ใช้ updated_at เป็นหลักฐานเก่าที่ดีที่สุดเพียงครั้งเดียวตอน migrate
+-- จากนี้ทุกการออก/หมุน token จะเขียน review_token_issued_at เอง
+UPDATE employees
+SET review_token_issued_at = updated_at
+WHERE review_token IS NOT NULL AND review_token_issued_at IS NULL;
 
 -- partial index เพราะคนที่ยังไม่เคยออกลิงก์มีได้หลายคน (NULL ไม่ชนกัน) — เขาแค่ยังไม่มีลิงก์
 CREATE UNIQUE INDEX IF NOT EXISTS idx_employees_review_token

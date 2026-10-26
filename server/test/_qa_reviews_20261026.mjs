@@ -267,7 +267,7 @@ try {
     /* ระบบไม่มีเวลาออก/หมดอายุของ review_token จึงจำลองแถวที่ถือ token เดิมมาตั้งแต่ปี 2020
        ถ้ายัง POST ได้ แปลว่าลิงก์ที่หลุดไปใช้บิดคะแนนได้ตลอดจนกว่าจะมีคนหมุนด้วยมือ */
     await sql.run(
-      `UPDATE employees SET updated_at = '2020-01-01 00:00:00' WHERE employee_id = :id`,
+      `UPDATE employees SET review_token_issued_at = '2020-01-01 00:00:00' WHERE employee_id = :id`,
       { id: REVIEW_A.employee_id },
     );
     const tokenColumns = await sql.all(
@@ -275,13 +275,15 @@ try {
        WHERE table_schema = 'public' AND table_name = 'employees' AND column_name LIKE 'review_token%'
        ORDER BY column_name`,
     );
+    const oldLinkGet = await publicGet(tokenA);
     const oldLinkPost = await publicPost(tokenA, validReview(5), '198.51.100.12');
     probe(
-      oldLinkPost.status !== 201,
+      oldLinkGet.status === 404 && oldLinkPost.status === 404,
       'ลิงก์ประเมินไม่มีวันหมดอายุ — ลิงก์ที่หลุดใช้เขียนคะแนนได้ตลอด',
-      `คอลัมน์ token=${tokenColumns.map((r) => r.column_name).join(',')} · token บนแถวอายุเกิน 6 ปี POST=${oldLinkPost.status}`,
+      `คอลัมน์ token=${tokenColumns.map((r) => r.column_name).join(',')} · token บนแถวอายุเกิน 6 ปี GET=${oldLinkGet.status} POST=${oldLinkPost.status}`,
       'token เก่ามากถูกปฏิเสธ ไม่เปิดช่องให้ลิงก์ที่หลุดเขียนคะแนนได้ตลอด',
     );
+    tokenA = await issueToken(REVIEW_A.employee_id);
     await resetPublicReviews();
     info('ลิงก์สาธารณะเป็น token รายพนักงาน ไม่ใช่ token รายเคส; เจ้าของคะแนนถูกตัดสินจาก token ใน URL เท่านั้น');
   }
@@ -436,13 +438,13 @@ try {
     const leakedMarkers = Object.values(secrets).filter((v) => raw.includes(v));
     probe(
       form.status === 200 && leakedKeys.length === 0 && leakedMarkers.length === 0 &&
-        Object.keys(form.body).sort().join(',') === 'first_name,last_name,position',
+        Object.keys(form.body).sort().join(',') === 'first_name,nickname,position',
       'ฟอร์มสาธารณะเผยเบอร์/ที่อยู่/เลขบัตร/บัญชี/ค่าจ้างหรือข้อมูลภายใน',
       `HTTP=${form.status} keys=${leakedKeys.join(',') || '-'} markers=${leakedMarkers.join(',') || '-'} body=${brief(form.body)}`,
       'ฟอร์มสาธารณะไม่คืนรหัสพนักงาน เบอร์ ที่อยู่ เลขบัตร อีเมล รหัสผ่าน ราคา หรือค่าจ้าง',
     );
     probe(
-      form.body?.last_name !== REVIEW_A.last_name,
+      form.body?.last_name == null && form.body?.first_name === REVIEW_A.first_name,
       'ลิงก์สาธารณะเปิดเผยชื่อนามสกุลเต็มของพนักงาน',
       `ใครถือลิงก์เห็น first_name=${JSON.stringify(form.body?.first_name)} last_name=${JSON.stringify(form.body?.last_name)}`,
       'ฟอร์มสาธารณะไม่เปิดเผยนามสกุลเต็มของพนักงาน',
