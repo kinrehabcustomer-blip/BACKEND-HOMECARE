@@ -33,6 +33,9 @@ export const isDuplicateNameError = (err) =>
  * ส่วนลดเป็นบาทจากค่าที่ผู้ใช้กรอก — กรอก % ไว้ให้ใช้ % ก่อน ไม่งั้นใช้จำนวนเงิน
  * ตัดไม่ให้เกินราคาเต็ม เพื่อไม่ให้ราคาสุทธิติดลบแม้กรอกส่วนลดมากเกินไป
  */
+/* 🔴 สูตรนี้ซ้ำกับฝั่งหน้าเว็บ (client/src/pages/PhysioPackagesPage.jsx — preview())
+   ที่นั่นใช้โชว์ตัวเลขระหว่างพิมพ์ ที่นี่คือตัวที่บันทึกจริง
+   แก้ที่ไหนต้องแก้อีกที่ให้ตรงกันเสมอ ไม่งั้นผู้จัดการอ่านราคาต่อครั้งจากจอแล้วแจ้งลูกค้าผิด */
 function discountOf(price, percent, amount) {
   if (price == null || price <= 0) return 0;
   const raw = percent != null && percent > 0 ? (price * percent) / 100 : (amount ?? 0);

@@ -1,7 +1,7 @@
 import { createHash, randomInt, randomUUID } from 'node:crypto';
 import { Router } from 'express';
 import { z } from 'zod';
-import { sql } from '../db/index.js';
+import { sql, transaction } from '../db/index.js';
 import { ApiError, asyncRoute } from '../lib/errors.js';
 import {
   BLOCKED_STATUSES,
@@ -47,7 +47,10 @@ const clearLoginFailures = (email) =>
   sql.run('DELETE FROM login_failures WHERE email_key = lower(:email)', { email });
 
 const loginSchema = z.object({
-  email: z.string().trim().min(1, 'กรุณากรอกอีเมลหรือรหัสพนักงาน'),
+  /* จำกัดความยาว (ตรวจรอบ 20) — ชื่อบัญชีที่กรอกผิดถูกเก็บลง login_failures ทุกครั้ง
+     เดิมไม่มีเพดาน คนนอกยิงอีเมลยาวแสนตัวรัว ๆ ให้ตารางบวมได้โดยไม่ต้องมีบัญชี (พิสูจน์แล้ว 100,016 ตัว)
+     อีเมลจริงยาวสุดตามมาตรฐานคือ 254 ตัว */
+  email: z.string().trim().min(1, 'กรุณากรอกอีเมลหรือรหัสพนักงาน').max(254, 'อีเมลหรือรหัสพนักงานยาวเกินไป'),
   password: z.string().min(1, 'กรุณากรอกรหัสผ่าน'),
 });
 
@@ -78,7 +81,10 @@ authRouter.post(
   asyncRoute(async (req, res) => {
     const { email, password } = loginSchema.parse(req.body);
 
-    // นับตามชื่อที่ใช้เข้าสู่ระบบ แม้ไม่มีบัญชีนี้อยู่จริงก็โดนล็อกเหมือนกัน
+    /* นับตามชื่อที่ใช้เข้าสู่ระบบ แม้ไม่มีบัญชีนี้อยู่จริงก็โดนล็อกเหมือนกัน
+       🔴 ด่านนี้กันคำขอที่มา "ทีละใบ" · คำขอที่ยิงพร้อมกันเป็นร้อยตัวเห็นตัวนับเท่ากันหมด
+       จึงลอดไปได้ทั้งชุด (ตรวจรอบ 20) — ด่านจริงที่กันการยิงขนานอยู่หลัง bcrypt ด้านล่าง
+       ซึ่งนับจากแถวที่เขียนลงไปแล้วจริง ไม่ใช่จากค่าที่อ่านมาก่อนหน้า */
     if ((await recentLoginFailures(email)) >= LOGIN_MAX_FAILURES) {
       throw new ApiError(429, `กรอกรหัสผ่านผิดหลายครั้งเกินไป กรุณารอ ${LOGIN_LOCK_MINUTES} นาทีแล้วลองใหม่ หรือใช้ "ลืมรหัสผ่าน"`);
     }
@@ -97,6 +103,11 @@ authRouter.post(
       // ล้างแถวเก่าไปด้วย — อีเมลที่ไม่มีบัญชีไม่เคย login สำเร็จ แถวของมันจะไม่ถูกลบทางอื่น
       await sql.run(`DELETE FROM login_failures WHERE created_at < now() - interval '1 day'`);
       await sql.run('INSERT INTO login_failures (email_key) VALUES (lower(:email))', { email });
+      /* เทียบเพดาน "หลัง" เขียนแถวของตัวเองลงไปแล้ว — คำขอที่ยิงพร้อมกันจึงเห็นแถวของกันและกัน
+         และตัวที่เกินโควตาได้ 429 แทนที่จะลอดไปหมดทุกตัว (ตรวจรอบ 20) */
+      if ((await recentLoginFailures(email)) > LOGIN_MAX_FAILURES) {
+        throw new ApiError(429, `กรอกรหัสผ่านผิดหลายครั้งเกินไป กรุณารอ ${LOGIN_LOCK_MINUTES} นาทีแล้วลองใหม่ หรือใช้ "ลืมรหัสผ่าน"`);
+      }
       throw new ApiError(401, 'อีเมล รหัสพนักงาน หรือรหัสผ่านไม่ถูกต้อง');
     }
     await clearLoginFailures(email);
@@ -274,27 +285,39 @@ authRouter.post(
     const generic = { message: `ถ้าอีเมลนี้มีอยู่ในระบบ เราได้ส่งรหัสยืนยันไปให้แล้ว (ใช้ได้ภายใน ${OTP_TTL_MINUTES} นาที)` };
     if (!employee || BLOCKED_STATUSES[employee.status]) return res.json(generic);
 
-    const recent = await sql.one(
-      `SELECT created_at FROM password_reset_otps
-       WHERE employee_id = :id AND created_at > now() - make_interval(secs => :cooldown)
-       ORDER BY created_at DESC LIMIT 1`,
-      { id: employee.employee_id, cooldown: OTP_COOLDOWN_SECONDS },
-    );
-    if (recent) throw new ApiError(429, `เพิ่งส่งรหัสไปเมื่อครู่ กรุณารอ ${OTP_COOLDOWN_SECONDS} วินาทีก่อนขอใหม่`);
-
-    // ยกเลิกใบเก่าที่ยังไม่ได้ใช้ เพื่อให้มี OTP ที่ใช้ได้เพียงใบเดียวเสมอ
-    await sql.run(
-      `UPDATE password_reset_otps SET used_at = now()
-       WHERE employee_id = :id AND used_at IS NULL`,
-      { id: employee.employee_id },
-    );
-
     const code = String(randomInt(0, 1_000_000)).padStart(6, '0'); // randomInt = CSPRNG ไม่ใช่ Math.random
-    await sql.run(
-      `INSERT INTO password_reset_otps (employee_id, code_hash, expires_at)
-       VALUES (:id, :hash, now() + make_interval(mins => :ttl))`,
-      { id: employee.employee_id, hash: await hashPassword(code), ttl: OTP_TTL_MINUTES },
-    );
+    const codeHash = await hashPassword(code);
+
+    /* ล็อกแถวพนักงานก่อนทั้งก้อน (ตรวจรอบ 20) — เดิมเช็คคูลดาวน์ · ยกเลิกใบเก่า · ออกใบใหม่
+       เป็นสามคำสั่งแยกกัน คำขอที่ยิงพร้อมกันผ่านคูลดาวน์พร้อมกันแล้วออก OTP หลายใบที่ใช้ได้จริง
+       = คนเดาได้หลายรหัสพร้อมกันและเจ้าตัวได้อีเมลหลายฉบับ */
+    const issued = await transaction(async (tx) => {
+      await tx.one('SELECT employee_id FROM employees WHERE employee_id = :id FOR UPDATE', { id: employee.employee_id });
+      const recent = await tx.one(
+        `SELECT created_at FROM password_reset_otps
+         WHERE employee_id = :id AND created_at > now() - make_interval(secs => :cooldown)
+         ORDER BY created_at DESC LIMIT 1`,
+        { id: employee.employee_id, cooldown: OTP_COOLDOWN_SECONDS },
+      );
+      if (recent) return false;
+
+      // ยกเลิกใบเก่าที่ยังไม่ได้ใช้ เพื่อให้มี OTP ที่ใช้ได้เพียงใบเดียวเสมอ
+      await tx.run(
+        `UPDATE password_reset_otps SET used_at = now() WHERE employee_id = :id AND used_at IS NULL`,
+        { id: employee.employee_id },
+      );
+      await tx.run(
+        `INSERT INTO password_reset_otps (employee_id, code_hash, expires_at)
+         VALUES (:id, :hash, now() + make_interval(mins => :ttl))`,
+        { id: employee.employee_id, hash: codeHash, ttl: OTP_TTL_MINUTES },
+      );
+      return true;
+    });
+
+    /* อยู่ในช่วงคูลดาวน์ = ตอบข้อความกลางเหมือนเดิมทุกตัวอักษร ไม่ใช่ 429 (ตรวจรอบ 20)
+       เดิมอีเมลที่มีอยู่จริงได้ 429 ส่วนอีเมลที่ไม่มีได้ 200 เสมอ
+       กดขอซ้ำสองครั้งจึงแยกออกทันทีว่าอีเมลไหนเป็นพนักงานของเรา */
+    if (!issued) return res.json(generic);
 
     await sendOtpEmail({
       to: employee.email,
