@@ -241,8 +241,8 @@ export function resign(employeeId, resignDate) {
  * และค่าจ้างที่ปล่อยไว้แต่ยังไม่ได้จ่ายจะถูกตัดออกจากรอบจ่ายทุกอันตลอดไป
  * เพราะเงื่อนไข ELIGIBLE ของ payroll กรอง employee_id IS NULL ทิ้ง — เงินค้างอยู่แบบไม่มีใครเห็น
  */
-export async function removalBlockers(employeeId) {
-  const row = await sql.one(
+export async function removalBlockers(employeeId, db = sql) {
+  const row = await db.one(
     `SELECT
        (SELECT COUNT(*) FROM case_visits v WHERE v.checked_in_by = :id) AS worked_visits,
        (SELECT COUNT(*) FROM case_payouts p
@@ -251,15 +251,35 @@ export async function removalBlockers(employeeId) {
             SELECT 1 FROM payroll_payout_lines pl
             JOIN payroll_items i ON i.item_id = pl.item_id
             JOIN payroll_runs r  ON r.run_id  = i.run_id
-            WHERE pl.payout_id = p.payout_id AND r.status = 'paid'
-          )) AS unpaid_payouts`,
+             WHERE pl.payout_id = p.payout_id AND r.status = 'paid'
+           )) AS unpaid_payouts,
+       (SELECT COUNT(*) FROM case_payouts p WHERE p.employee_id = :id) AS payouts,
+       (SELECT COUNT(*) FROM payroll_items i WHERE i.employee_id = :id) AS payroll_items,
+       (SELECT COUNT(*) FROM case_reports r WHERE r.reported_by = :id) AS reports,
+       (SELECT COUNT(*) FROM cases c
+        WHERE c.assigned_to = :id AND c.status IN ('assigned', 'in_progress')) AS active_cases,
+       (SELECT COUNT(*) FROM case_team t WHERE t.employee_id = :id) AS team_cases,
+       (SELECT COUNT(*) FROM case_pay_shares s WHERE s.employee_id = :id) AS pay_shares,
+       (SELECT COUNT(*) FROM staff_reviews r WHERE r.employee_id = :id) AS reviews,
+       (SELECT COUNT(*) FROM employee_certificates c WHERE c.employee_id = :id) AS certificates,
+       (SELECT COUNT(*) FROM employee_portfolio p WHERE p.employee_id = :id) AS portfolio_items`,
     { id: employeeId },
   );
-  return { worked_visits: Number(row?.worked_visits ?? 0), unpaid_payouts: Number(row?.unpaid_payouts ?? 0) };
+  return Object.fromEntries(Object.entries(row ?? {}).map(([key, value]) => [key, Number(value ?? 0)]));
 }
 
 export async function remove(employeeId) {
   return transaction(async (tx) => {
+    const found = await tx.one('SELECT employee_id FROM employees WHERE employee_id = :id FOR UPDATE', { id: employeeId });
+    if (!found) return { removed: false };
+
+    /* ตรวจและลบขณะถือ row lock เดียวกัน — ไม่ให้มีเคส/รายงาน/เงินแทรกเข้ามาหลัง route ตรวจแล้ว
+       การลบถาวรมีไว้เฉพาะแถวที่สร้างผิดและยังว่างจริง ๆ เท่านั้น ประวัติทุกชนิดต้องใช้ลาออกแทน */
+    const blockers = await removalBlockers(employeeId, tx);
+    if (Object.values(blockers).some((n) => n > 0)) {
+      return { removed: false, reason: 'has_history', blockers };
+    }
+
     // ปลดเคสที่ถืออยู่ก่อนลบ: เคสที่ยังทำงานอยู่กลับไปเป็น 'ยังไม่จับคู่' รอหาคนใหม่
     // (ต้องทำเองก่อน DELETE เพราะ FK จะ SET NULL ให้ แต่จะไปชน CHECK ที่ห้ามเคส 'assigned' ไม่มีพนักงาน)
     await tx.run(
@@ -273,7 +293,7 @@ export async function remove(employeeId) {
     );
 
     const changes = await tx.run('DELETE FROM employees WHERE employee_id = :id', { id: employeeId });
-    return changes > 0;
+    return { removed: changes > 0 };
   });
 }
 

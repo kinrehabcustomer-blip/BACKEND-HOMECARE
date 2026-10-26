@@ -148,7 +148,32 @@ export async function update(customerId, input) {
 }
 
 export async function remove(customerId) {
-  // เคสของลูกค้าคนนี้ไม่หายไปด้วย — FK เป็น ON DELETE SET NULL และเคสคัดลอกข้อมูลลูกค้าไว้แล้ว
-  const changes = await sql.run('DELETE FROM customers WHERE customer_id = :id', { id: customerId });
-  return changes > 0;
+  return transaction(async (tx) => {
+    const found = await tx.one('SELECT customer_id FROM customers WHERE customer_id = :id FOR UPDATE', { id: customerId });
+    if (!found) return { removed: false };
+
+    const blockers = await tx.one(
+      `SELECT
+         (SELECT COUNT(*) FROM cases c
+          WHERE (c.customer_id = :id OR EXISTS (
+            SELECT 1 FROM patients p
+            WHERE p.patient_id = c.patient_id AND p.customer_id = :id
+          ))
+            AND c.status NOT IN ('closed', 'cancelled')) AS active_cases,
+         (SELECT COUNT(*) FROM invoices i
+          WHERE i.customer_id = :id AND i.status IN ('draft', 'issued')
+            AND i.total > COALESCE((
+              SELECT SUM(p.amount) FROM invoice_payments p WHERE p.invoice_id = i.invoice_id
+            ), 0)) AS unpaid_invoices`,
+      { id: customerId },
+    );
+    const normalized = Object.fromEntries(Object.entries(blockers).map(([key, value]) => [key, Number(value ?? 0)]));
+    if (normalized.active_cases > 0 || normalized.unpaid_invoices > 0) {
+      return { removed: false, reason: 'in_use', blockers: normalized };
+    }
+
+    // เคส/ใบเก่าที่จบแล้วไม่หายไปด้วย — FK เป็น SET NULL และมี snapshot ชื่อ/ที่อยู่อยู่บนเอกสาร
+    const changes = await tx.run('DELETE FROM customers WHERE customer_id = :id', { id: customerId });
+    return { removed: changes > 0 };
+  });
 }

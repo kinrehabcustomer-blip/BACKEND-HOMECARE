@@ -1577,6 +1577,19 @@ export async function removeInvoiceForTransaction(tx, invoiceId) {
     };
   }
 
+  /* เคยออกลิงก์ให้ลูกค้าแล้ว = เอกสารออกนอกระบบไปแล้ว แม้ยังไม่รับเงินก็ห้าม hard delete
+     ไม่เช่นนั้น invoice_shares/outbox จะ CASCADE หายและลิงก์ที่ลูกค้าเก็บไว้กลายเป็น 404 ทันที */
+  const shared = await tx.one(
+    `SELECT invoice_id FROM (
+       SELECT invoice_id FROM invoice_shares WHERE invoice_id = ANY(:ids::text[])
+       UNION ALL
+       SELECT invoice_id FROM invoice_line_outbox WHERE invoice_id = ANY(:ids::text[])
+     ) sent
+     LIMIT 1`,
+    { ids },
+  );
+  if (shared) return { reason: 'shared_with_customer', invoice_id: shared.invoice_id };
+
   const deleted = await tx.all(
     `DELETE FROM invoices
      WHERE invoice_id = ANY(:ids::text[])
@@ -1590,6 +1603,7 @@ export async function removeInvoiceForTransaction(tx, invoiceId) {
 }
 
 export async function remove(invoiceId) {
+  await ensureShareTables();
   return transaction((tx) => removeInvoiceForTransaction(tx, invoiceId));
 }
 

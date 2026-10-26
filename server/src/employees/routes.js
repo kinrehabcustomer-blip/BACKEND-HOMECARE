@@ -281,20 +281,24 @@ employeesRouter.delete(
     if (req.query.hard === 'true') {
       /* ลบถาวรได้เฉพาะคนที่ยังไม่มีอะไรผูกอยู่ (เช่น เพิ่งกดสร้างผิด) — คนที่เคยทำงานหรือมีเงินค้าง
          ต้องใช้ "บันทึกลาออก" แทน ซึ่งปิดบัญชีได้เหมือนกันแต่ประวัติยังอยู่ครบ */
-      const blockers = await repo.removalBlockers(req.params.id);
-      if (blockers.unpaid_payouts > 0) {
+      const result = await repo.remove(req.params.id);
+      if (result.reason === 'has_history') {
+        const labels = {
+          active_cases: 'เคสที่กำลังดูแล', team_cases: 'สมาชิกทีมเคส', worked_visits: 'กะที่เช็คอินแล้ว',
+          reports: 'รายงานการดูแล', payouts: 'ค่าจ้างที่ปล่อยแล้ว', payroll_items: 'สลิปรอบจ่าย',
+          pay_shares: 'ข้อตกลงแบ่งค่าจ้าง', reviews: 'คะแนนประเมิน', certificates: 'ใบรับรอง',
+          portfolio_items: 'ผลงาน',
+        };
+        const detail = Object.entries(result.blockers)
+          .filter(([key, value]) => value > 0 && key !== 'unpaid_payouts')
+          .map(([key, value]) => `${labels[key] ?? key} ${value}`)
+          .join(' · ');
         throw new ApiError(
           409,
-          `คนนี้มีค่าจ้างที่ปล่อยแล้วแต่ยังไม่ได้จ่าย ${blockers.unpaid_payouts} ก้อน — ลบถาวรแล้วเงินก้อนนั้นจะหลุดจากรอบจ่ายทุกรอบอย่างถาวร (จ่ายให้ครบก่อน หรือใช้ "บันทึกลาออก" แทน)`,
+          `คนนี้มีประวัติที่ต้องเก็บไว้: ${detail} — ใช้ "บันทึกลาออก" แทน เพื่อปิดบัญชีโดยไม่ทำลายหลักฐาน`,
+          { blockers: result.blockers },
         );
       }
-      if (blockers.worked_visits > 0) {
-        throw new ApiError(
-          409,
-          `คนนี้มีกะที่เช็คอินไปแล้ว ${blockers.worked_visits} กะ — ลบถาวรแล้วกะเหล่านั้นจะไม่มีเจ้าของและหายไปจากสรุปค่าตอบแทน (ใช้ "บันทึกลาออก" แทน)`,
-        );
-      }
-      await repo.remove(req.params.id);
       return res.status(204).end();
     }
     res.json(await repo.resign(req.params.id, req.body?.resign_date));

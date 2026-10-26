@@ -40,6 +40,7 @@ import { resolveMapLink } from '../lib/maplink.js';
 import { canSeeStaffPay, requireManager } from '../lib/auth.js';
 import { FRONT_POSITIONS } from '../employees/schema.js';
 import { ApiError, asyncRoute, notFound } from '../lib/errors.js';
+import { ensureFamilyTable } from '../lib/family.js';
 
 export const casesRouter = Router();
 
@@ -688,14 +689,19 @@ casesRouter.delete(
   '/:id',
   asyncRoute(async (req, res) => {
     if (req.query.force !== 'true') {
-      const [attended, bills] = await Promise.all([
-        repo.attendedVisitCount(req.params.id),
+      // ตารางญาติสร้างแบบ lazy จึงต้องรับประกันว่ามีอยู่ก่อนรวมยอดผลกระทบ
+      await ensureFamilyTable();
+      const [related, bills] = await Promise.all([
+        repo.deletionBlockers(req.params.id),
         invoices.listForCase(req.params.id),
       ]);
       const live = bills.filter((b) => b.status !== 'cancelled');
 
       const blockers = [
-        attended > 0 && `${attended} กะที่เช็คอินไปแล้ว (เวลาทำงาน รูปเช็คอิน และค่าจ้างจะหายไปด้วย)`,
+        related.attended_visits > 0 && `${related.attended_visits} กะที่เช็คอินไปแล้ว (เวลาทำงานและรูปเช็คอินจะหายไปด้วย)`,
+        related.reports > 0 && `${related.reports} รายงานการดูแล${related.report_photos > 0 ? ` (มีรูป ${related.report_photos} รายงาน)` : ''}`,
+        related.family_links > 0 && `สิทธิ์ญาติ ${related.family_links} ราย`,
+        related.family_messages > 0 && `ข้อความญาติ/ทีม ${related.family_messages} ข้อความ`,
         live.length > 0 && `ใบแจ้งหนี้ ${live.length} ใบที่ผูกกับเคสนี้`,
       ].filter(Boolean);
 
@@ -703,7 +709,7 @@ casesRouter.delete(
         throw new ApiError(
           409,
           `เคสนี้มีข้อมูลที่จะหายไปด้วย: ${blockers.join(' · ')} — แนะนำให้ "ยกเลิกเคส" แทน หรือยืนยันอีกครั้งถ้าต้องการลบจริง`,
-          { attended_visits: attended, invoices: live.length },
+          { ...related, invoices: live.length },
         );
       }
     }

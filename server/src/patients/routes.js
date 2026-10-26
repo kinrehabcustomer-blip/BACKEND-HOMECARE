@@ -5,7 +5,7 @@ import * as customers from '../customers/repo.js';
 import * as invoices from '../invoices/repo.js';
 import { createPatientSchema, updatePatientSchema, listQuerySchema, PATIENT_CODE_RE } from './schema.js';
 import { sql } from '../db/index.js';
-import { asyncRoute, notFound } from '../lib/errors.js';
+import { ApiError, asyncRoute, notFound } from '../lib/errors.js';
 
 export const patientsRouter = Router();
 
@@ -83,7 +83,14 @@ patientsRouter.patch(
 patientsRouter.delete(
   '/:id',
   asyncRoute(async (req, res) => {
-    await repo.remove(req.params.id);
+    const result = await repo.remove(req.params.id);
+    if (result.reason === 'in_use') {
+      throw new ApiError(
+        409,
+        `ผู้ป่วยรายนี้ยังมีเคสที่กำลังทำ ${result.active_cases} เคส — ลบแล้วทีมหน้างานจะเสียข้อมูลแพ้ยาและข้อมูลสุขภาพที่อ่านสดจากแฟ้ม`,
+        { active_cases: result.active_cases },
+      );
+    }
     res.status(204).end();
   }),
 );

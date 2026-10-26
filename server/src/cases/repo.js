@@ -1261,6 +1261,20 @@ export async function attendedVisitCount(caseId) {
   return Number(row.n);
 }
 
+/** ข้อมูลด้านการดูแล/ญาติที่ CASCADE หายไปกับเคส — ใช้ทำคำเตือนก่อนยืนยัน force */
+export async function deletionBlockers(caseId) {
+  const row = await sql.one(
+    `SELECT
+       (SELECT COUNT(*) FROM case_visits v WHERE v.case_id = :id AND v.check_in_at IS NOT NULL) AS attended_visits,
+       (SELECT COUNT(*) FROM case_reports r WHERE r.case_id = :id) AS reports,
+       (SELECT COUNT(*) FROM case_reports r WHERE r.case_id = :id AND r.wound_photo_data IS NOT NULL) AS report_photos,
+       (SELECT COUNT(*) FROM case_family_links l WHERE l.case_id = :id) AS family_links,
+       (SELECT COUNT(*) FROM case_family_messages m WHERE m.case_id = :id) AS family_messages`,
+    { id: caseId },
+  );
+  return Object.fromEntries(Object.entries(row ?? {}).map(([key, value]) => [key, Number(value ?? 0)]));
+}
+
 /**
  * ลบเคส — ยกเว้นเคสที่ปล่อยค่าจ้างไปแล้ว ซึ่ง ?force=true ก็ข้ามไม่ได้
  *
