@@ -9,6 +9,7 @@ import {
   CASE_STATUS_LABELS, SERVICE_KIND_LABELS, MONTH_LABELS,
   formatBaht, formatDate, toBuddhistYear,
 } from '../labels.js';
+import { formatPhone } from '../lib/phone.js';
 
 const PER_PAGE_OPTIONS = [20, 50, 100];
 
@@ -296,7 +297,7 @@ export default function CaseListPage() {
                     {c.client_phone ? (
                       // stopPropagation กันไม่ให้การกดเบอร์เปิด popup ตามไปด้วย
                       <a className="link mono" href={`tel:${c.client_phone}`} onClick={(e) => e.stopPropagation()}>
-                        {c.client_phone}
+                        {formatPhone(c.client_phone)}
                       </a>
                     ) : (
                       <span className="muted">—</span>

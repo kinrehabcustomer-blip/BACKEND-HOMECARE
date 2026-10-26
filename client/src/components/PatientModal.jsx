@@ -10,6 +10,7 @@ import {
 } from '../labels.js';
 import LineIcon from './LineIcon.jsx';
 import ConfirmButton from './ConfirmButton.jsx';
+import { formatPhone, formatPhoneInput } from '../lib/phone.js';
 
 const FOCUSABLE = 'a[href], button:not(:disabled), input, select, textarea, [tabindex]:not([tabindex="-1"])';
 
@@ -50,8 +51,8 @@ function QuickEdit({ patient, onDone, onCancel }) {
   const [error, setError] = useState(null);
 
   const field = (key) => ({
-    value: form[key],
-    onChange: (e) => setForm((prev) => ({ ...prev, [key]: e.target.value })),
+    value: key.endsWith('phone') ? formatPhoneInput(form[key]) : form[key],
+    onChange: (e) => setForm((prev) => ({ ...prev, [key]: key.endsWith('phone') ? formatPhoneInput(e.target.value) : e.target.value })),
   });
 
   async function handleSubmit(e) {
@@ -276,7 +277,7 @@ export default function PatientModal({ patientId, siblings = [], onNavigate, onC
                       label="เบอร์ผู้ว่าจ้าง"
                       value={
                         patient.customer?.phone &&
-                        <a className="link" href={`tel:${patient.customer.phone}`}>{patient.customer.phone}</a>
+                        <a className="link" href={`tel:${patient.customer.phone}`}>{formatPhone(patient.customer.phone)}</a>
                       }
                     />
                     <Field label="ชื่อผู้ติดต่อฉุกเฉิน" value={patient.emergency_contact_name} />
@@ -284,7 +285,7 @@ export default function PatientModal({ patientId, siblings = [], onNavigate, onC
                       label="เบอร์ผู้ติดต่อฉุกเฉิน"
                       value={
                         patient.emergency_contact_phone &&
-                        <a className="link" href={`tel:${patient.emergency_contact_phone}`}>{patient.emergency_contact_phone}</a>
+                        <a className="link" href={`tel:${patient.emergency_contact_phone}`}>{formatPhone(patient.emergency_contact_phone)}</a>
                       }
                     />
                     <Field label="ความสัมพันธ์กับผู้ติดต่อ" value={patient.emergency_contact_relation} />

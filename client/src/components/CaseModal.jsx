@@ -18,6 +18,7 @@ import {
 } from '../labels.js';
 import LineIcon from './LineIcon.jsx';
 import StaffPicker from './StaffPicker.jsx';
+import { formatPhone, formatPhoneInput } from '../lib/phone.js';
 
 /**
  * ชื่อบริการของเคส — สองสายเก็บคนละที่ (Homecare = รูปแบบ+เกรด, กายภาพ = ชื่อแพ็คเกจ)
@@ -71,8 +72,8 @@ function QuickEdit({ item, onDone, onCancel }) {
   const [error, setError] = useState(null);
 
   const field = (key) => ({
-    value: form[key],
-    onChange: (e) => setForm((prev) => ({ ...prev, [key]: e.target.value })),
+    value: key.endsWith('phone') ? formatPhoneInput(form[key]) : form[key],
+    onChange: (e) => setForm((prev) => ({ ...prev, [key]: key.endsWith('phone') ? formatPhoneInput(e.target.value) : e.target.value })),
   });
 
   async function handleSubmit(e) {
@@ -471,7 +472,7 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                 {(item.service_start_preference || item.client_phone) && (
                   <div className="field-grid">
                     {item.service_start_preference && <Field label="วัน/เวลาที่สะดวกเริ่มใช้บริการ" value={item.service_start_preference} />}
-                    {item.client_phone && <Field label="เบอร์ติดต่อคุณญาติ" value={item.client_phone} />}
+                    {item.client_phone && <Field label="เบอร์ติดต่อคุณญาติ" value={formatPhone(item.client_phone)} />}
                   </div>
                 )}
                 <Field label="ที่อยู่สถานที่ดูแล" value={item.address} />
@@ -755,7 +756,7 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                         <p className="muted">
                           <span className="mono">{m.employee_id}</span>
                           {' · '}{POSITION_LABELS[m.position]}
-                          {m.phone && ` · ${m.phone}`}
+                          {m.phone && ` · ${formatPhone(m.phone)}`}
                         </p>
                         <p className="muted">เพิ่มเมื่อ {formatDate(m.added_at)}</p>
                       </div>

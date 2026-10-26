@@ -7,6 +7,7 @@ import Avatar from '../components/Avatar.jsx';
 import ErrorBar from '../components/ErrorBar.jsx';
 import PageRefresh from '../components/PageRefresh.jsx';
 import { POSITION_LABELS, STATUS_LABELS, EMPLOYMENT_TYPE_LABELS } from '../labels.js';
+import { formatPhone } from '../lib/phone.js';
 
 const PER_PAGE_OPTIONS = [20, 50, 100];
 
@@ -205,7 +206,7 @@ export default function EmployeeListPage() {
                     {emp.phone ? (
                       // stopPropagation กันไม่ให้การกดเบอร์เปิด popup ตามไปด้วย
                       <a className="link mono" href={`tel:${emp.phone}`} onClick={(e) => e.stopPropagation()}>
-                        {emp.phone}
+                        {formatPhone(emp.phone)}
                       </a>
                     ) : (
                       <span className="muted">—</span>

@@ -15,6 +15,7 @@ import { isPatientCode, isCaseCode } from '../lib/patientCode.js';
 import { nextRoundDates, endDateFor } from '../lib/caseRounds.js';
 import { useCanSeeStaffPay } from '../auth.jsx';
 import { useScrollLock } from '../lib/scrollLock.js';
+import { formatPhone, formatPhoneInput } from '../lib/phone.js';
 
 const TIERS = ['CG', 'NA', 'PN', 'RN'];
 const CATEGORY_LABELS = { daily: 'รายวัน', weekly: 'รายสัปดาห์', monthly: 'รายเดือน' };
@@ -570,11 +571,11 @@ export default function CaseFormPage() {
        ข้อความแดงบนสุดแต่ไม่รู้ว่าต้องแก้ตรงไหน ทั้งที่ฟอร์มยาว 2,300px กว่า
        (ฟอร์มลูกค้า/ผู้ป่วย/พนักงานเขียน name ใส่ทีละช่องเอง จึงไม่เจอปัญหานี้) */
     name: key,
-    value: form[key],
+    value: key.endsWith('phone') ? formatPhoneInput(form[key]) : form[key],
     'data-empty': form[key] === '' ? '' : undefined, // ช่องวันที่ว่าง → ตัวอักษร วว/ดด/ปปปป สีเทา (ดู index.css)
     'aria-invalid': fieldErrors[key] ? true : undefined,
     onChange: (e) => {
-      setForm((prev) => ({ ...prev, [key]: e.target.value }));
+      setForm((prev) => ({ ...prev, [key]: key.endsWith('phone') ? formatPhoneInput(e.target.value) : e.target.value }));
       // แก้ช่องที่เพิ่งโดนทักแล้ว ข้อความเตือนควรหายไปทันที ไม่ใช่ค้างจนกว่าจะกดบันทึกอีกรอบ
       setFieldErrors((prev) => (prev[key] ? { ...prev, [key]: undefined } : prev));
     },
@@ -943,7 +944,7 @@ export default function CaseFormPage() {
                             <strong>{c.name}</strong>
                             <span className="muted">
                               <span className="mono">{c.customer_id}</span>
-                              {c.phone && ` · ${c.phone}`}
+                              {c.phone && ` · ${formatPhone(c.phone)}`}
                             </span>
                           </button>
                         </li>
@@ -961,7 +962,7 @@ export default function CaseFormPage() {
                   value={payerPhone}
                   aria-invalid={fieldErrors.payer_phone ? true : undefined}
                   onChange={(e) => {
-                    setPayerPhone(e.target.value);
+                    setPayerPhone(formatPhoneInput(e.target.value));
                     setFieldErrors((prev) => (prev.payer_phone ? { ...prev, payer_phone: undefined } : prev));
                   }}
                 />

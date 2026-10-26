@@ -10,6 +10,7 @@ import ConfirmButton from '../components/ConfirmButton.jsx';
 import {
   POSITION_LABELS, EMPLOYMENT_TYPE_LABELS, STATUS_LABELS, GENDER_LABELS, formatDate, todayTH,
 } from '../labels.js';
+import { formatPhone } from '../lib/phone.js';
 
 
 function Row({ label, children }) {
@@ -103,7 +104,7 @@ export default function EmployeeDetailPage() {
           <Row label="เลขบัตรประชาชน">{employee.national_id && <span className="mono">{employee.national_id}</span>}</Row>
           <Row label="เพศ">{GENDER_LABELS[employee.gender]}</Row>
           <Row label="วันเกิด">{formatDate(employee.birth_date)}</Row>
-          <Row label="เบอร์โทร">{employee.phone}</Row>
+          <Row label="เบอร์โทร">{formatPhone(employee.phone)}</Row>
           <Row label="อีเมล">{employee.email}</Row>
           <Row label="ที่อยู่">{employee.address}</Row>
           {/* ขึ้นบรรทัดใหม่ตามที่กรอกไว้ — ประวัติการศึกษามักมีหลายบรรทัด */}
@@ -112,7 +113,7 @@ export default function EmployeeDetailPage() {
           </Row>
           <Row label="ผู้ติดต่อฉุกเฉิน">
             {employee.emergency_contact_name &&
-              `${employee.emergency_contact_name} · ${employee.emergency_contact_phone ?? ''}`}
+              `${employee.emergency_contact_name} · ${formatPhone(employee.emergency_contact_phone) ?? ''}`}
           </Row>
         </section>
 

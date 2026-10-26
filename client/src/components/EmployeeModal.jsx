@@ -10,6 +10,7 @@ import {
   POSITION_LABELS, EMPLOYMENT_TYPE_LABELS, STATUS_LABELS, GENDER_LABELS, formatDate,
 } from '../labels.js';
 import LineIcon from './LineIcon.jsx';
+import { formatPhone, formatPhoneInput } from '../lib/phone.js';
 
 // popup เป็นตัวอย่างข้อมูลย่อ — โชว์ประวัติการทำงานแค่ 3 ครั้งล่าสุด ที่เหลือดูที่หน้าเต็ม
 const PREVIEW_HISTORY = 3;
@@ -56,8 +57,8 @@ function QuickEdit({ employee, onDone, onCancel }) {
   const [error, setError] = useState(null);
 
   const field = (key) => ({
-    value: form[key],
-    onChange: (e) => setForm((prev) => ({ ...prev, [key]: e.target.value })),
+    value: key.endsWith('phone') ? formatPhoneInput(form[key]) : form[key],
+    onChange: (e) => setForm((prev) => ({ ...prev, [key]: key.endsWith('phone') ? formatPhoneInput(e.target.value) : e.target.value })),
   });
 
   async function handleSubmit(e) {
@@ -259,7 +260,7 @@ export default function EmployeeModal({ employeeId, siblings = [], onNavigate, o
                   <div className="field-grid">
                     <Field
                       label="เบอร์โทร"
-                      value={employee.phone && <a className="link" href={`tel:${employee.phone}`}>{employee.phone}</a>}
+                      value={employee.phone && <a className="link" href={`tel:${employee.phone}`}>{formatPhone(employee.phone)}</a>}
                     />
                     <Field
                       label="อีเมล"
@@ -310,7 +311,7 @@ export default function EmployeeModal({ employeeId, siblings = [], onNavigate, o
                     label="เบอร์โทร"
                     value={
                       employee.emergency_contact_phone &&
-                      <a className="link" href={`tel:${employee.emergency_contact_phone}`}>{employee.emergency_contact_phone}</a>
+                      <a className="link" href={`tel:${employee.emergency_contact_phone}`}>{formatPhone(employee.emergency_contact_phone)}</a>
                     }
                   />
                 </div>

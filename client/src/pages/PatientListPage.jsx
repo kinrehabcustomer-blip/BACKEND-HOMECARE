@@ -7,6 +7,7 @@ import { GENDER_LABELS, PATIENT_STATUS_LABELS, ageFromBirthDate } from '../label
 import LineIcon from '../components/LineIcon.jsx';
 import ErrorBar from '../components/ErrorBar.jsx';
 import PageRefresh from '../components/PageRefresh.jsx';
+import { formatPhone } from '../lib/phone.js';
 
 const PER_PAGE_OPTIONS = [20, 50, 100];
 
@@ -225,7 +226,7 @@ export default function PatientListPage() {
                           {p.customer_phone && (
                             <span className="cell-sub">
                               <a className="link mono" href={`tel:${p.customer_phone}`} onClick={(e) => e.stopPropagation()}>
-                                {p.customer_phone}
+                                {formatPhone(p.customer_phone)}
                               </a>
                             </span>
                           )}

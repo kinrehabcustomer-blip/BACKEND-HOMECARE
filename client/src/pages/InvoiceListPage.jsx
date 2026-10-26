@@ -7,6 +7,7 @@ import ErrorBar from '../components/ErrorBar.jsx';
 import PageRefresh from '../components/PageRefresh.jsx';
 import { api } from '../api.js';
 import { CASE_STATUS_LABELS, INVOICE_STATUS_LABELS, formatBaht, formatDate } from '../labels.js';
+import { formatPhone } from '../lib/phone.js';
 
 const PER_PAGE_OPTIONS = [20, 50, 100];
 
@@ -269,7 +270,7 @@ export default function InvoiceListPage() {
                       <span className="cell-sub">
                         {/* stopPropagation กันไม่ให้การกดเบอร์เปิด popup ตามไปด้วย */}
                         <a className="link mono" href={`tel:${v.contact_phone}`} onClick={(e) => e.stopPropagation()}>
-                          {v.contact_phone}
+                          {formatPhone(v.contact_phone)}
                         </a>
                       </span>
                     )}

@@ -7,6 +7,7 @@ import { isPatientCode } from '../lib/patientCode.js';
 import {
   GENDER_LABELS, TITLE_LABELS, BLOOD_TYPE_LABELS, PATIENT_STATUS_LABELS, ageFromBirthDate,
 } from '../labels.js';
+import { formatPhoneInput } from '../lib/phone.js';
 
 const BLANK = {
   // รหัสผู้ป่วย KN + ปี พ.ศ. 2 หลัก + เลข 7 หลัก (กรอกเอง) — ตอนแก้คือรหัสเดิม (อาจยังเป็น PAT-xxxx)
@@ -157,7 +158,7 @@ export default function PatientFormPage() {
   }
 
   const setEmployerField = (key) => (e) => {
-    const value = e.target.value;
+    const value = key === 'phone' ? formatPhoneInput(e.target.value) : e.target.value;
     setEmployer((prev) => ({ ...prev, [key]: value }));
     setFieldErrors((prev) => (prev[`employer_${key}`] ? { ...prev, [`employer_${key}`]: undefined } : prev));
   };
@@ -198,10 +199,10 @@ export default function PatientFormPage() {
   }
 
   const field = (key) => ({
-    value: form[key],
+    value: key.endsWith('phone') ? formatPhoneInput(form[key]) : form[key],
     'aria-invalid': fieldErrors[key] ? true : undefined,
     onChange: (e) => {
-      setForm((prev) => ({ ...prev, [key]: e.target.value }));
+      setForm((prev) => ({ ...prev, [key]: key.endsWith('phone') ? formatPhoneInput(e.target.value) : e.target.value }));
       // แก้ช่องที่เพิ่งโดนทักแล้ว ข้อความเตือนควรหายไปทันที ไม่ใช่ค้างจนกว่าจะกดบันทึกอีกรอบ
       setFieldErrors((prev) => (prev[key] ? { ...prev, [key]: undefined } : prev));
     },

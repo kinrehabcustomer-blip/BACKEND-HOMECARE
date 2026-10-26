@@ -14,6 +14,7 @@ import {
   formatDate,
   timeText,
 } from '../labels.js';
+import { formatPhone } from '../lib/phone.js';
 
 /** ชื่อบริการของเคส — กายภาพใช้ชื่อแพ็คเกจ, Homecare ใช้รูปแบบ+เกรด (ใช้ร่วมกันหลายหน้าของ field) */
 export const serviceName = (c) => {
@@ -114,7 +115,7 @@ export default function MyCaseModal({ caseId, onClose }) {
                 <h3>สถานที่ / ติดต่อ</h3>
                 <Field label="ที่อยู่สถานที่ดูแล" value={item.address} />
                 <CaseLocationLink key={`${item.geo_lat},${item.geo_lng}`} item={item} />
-                <Field label="เบอร์ติดต่อญาติ" value={item.client_phone} />
+                <Field label="เบอร์ติดต่อญาติ" value={formatPhone(item.client_phone)} />
               </section>
 
               <section>

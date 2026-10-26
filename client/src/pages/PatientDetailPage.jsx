@@ -8,6 +8,7 @@ import {
 import LineIcon from '../components/LineIcon.jsx';
 import ErrorBar from '../components/ErrorBar.jsx';
 import ConfirmButton from '../components/ConfirmButton.jsx';
+import { formatPhone } from '../lib/phone.js';
 
 function Row({ label, children }) {
   return (
@@ -136,7 +137,7 @@ export default function PatientDetailPage() {
         <section className="card">
           <h2>ญาติ / ผู้ติดต่อกรณีฉุกเฉิน</h2>
           <Row label="ชื่อผู้ติดต่อ">{patient.emergency_contact_name}</Row>
-          <Row label="เบอร์ผู้ติดต่อ">{patient.emergency_contact_phone}</Row>
+          <Row label="เบอร์ผู้ติดต่อ">{formatPhone(patient.emergency_contact_phone)}</Row>
           <Row label="ความสัมพันธ์">{patient.emergency_contact_relation}</Row>
 
           <h2>อื่นๆ</h2>

@@ -9,6 +9,7 @@ import PhotoField from '../components/PhotoField.jsx';
 import EmployeeCodeField from '../components/EmployeeCodeField.jsx';
 import { EMPLOYEE_CODE_RE } from '../lib/employeeCode.js';
 import { POSITION_LABELS, EMPLOYMENT_TYPE_LABELS, STATUS_LABELS, GENDER_LABELS } from '../labels.js';
+import { formatPhoneInput } from '../lib/phone.js';
 
 const BLANK = {
   // รหัสที่กรอกเอง (add-on) — ว่าง = ให้ระบบออกรหัส / ตอนแก้ = ไม่เปลี่ยนรหัส
@@ -92,10 +93,10 @@ export default function EmployeeFormPage() {
   });
 
   const field = (key) => ({
-    value: form[key],
+    value: key.endsWith('phone') ? formatPhoneInput(form[key]) : form[key],
     'aria-invalid': fieldErrors[key] ? true : undefined,
     onChange: (e) => {
-      setForm((prev) => ({ ...prev, [key]: e.target.value }));
+      setForm((prev) => ({ ...prev, [key]: key.endsWith('phone') ? formatPhoneInput(e.target.value) : e.target.value }));
       // แก้ช่องที่เพิ่งโดนทักแล้ว ข้อความเตือนควรหายไปทันที ไม่ใช่ค้างจนกว่าจะกดบันทึกอีกรอบ
       setFieldErrors((prev) => (prev[key] ? { ...prev, [key]: undefined } : prev));
     },
