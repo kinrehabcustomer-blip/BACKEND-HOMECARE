@@ -759,6 +759,12 @@ casesRouter.get(
   asyncRoute(async (req, res) => res.json(await repo.listVisits(req.params.id))),
 );
 
+/** สิทธิ์แพ็กกายภาพของเคส — ซื้อกี่ครั้ง ลงนัดแล้ว/ไปแล้วกี่ครั้ง เหลือเท่าไร หมดอายุวันไหน · เคส Homecare = null */
+casesRouter.get(
+  '/:id/physio-quota',
+  asyncRoute(async (req, res) => res.json(await repo.physioQuota(req.params.id))),
+);
+
 casesRouter.post(
   '/:id/visits',
   asyncRoute(async (req, res) => {

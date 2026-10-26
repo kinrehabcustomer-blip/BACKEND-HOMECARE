@@ -455,6 +455,7 @@ export const api = {
 
   // วันนัดให้บริการของเคส — ทุกตัวคืน "รายการวันนัดล่าสุดทั้งหมด" กลับมา ไม่ต้องดึงซ้ำเอง
   listVisits: (id) => request(`/cases/${id}/visits`),
+  physioQuota: (id) => request(`/cases/${id}/physio-quota`),
   /** เพิ่มกะทีละวัน — คืน { visits, added, skipped, conflicts } */
   addVisit: (id, body) => request(`/cases/${id}/visits`, { method: 'POST', body }),
   /** ลงกะหลายวันในครั้งเดียว — ส่ง { dates: [...] } หรือ { from, to, weekdays } · คืนรูปแบบเดียวกับ addVisit */

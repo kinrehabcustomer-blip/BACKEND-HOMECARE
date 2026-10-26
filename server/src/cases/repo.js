@@ -6,6 +6,9 @@ import { REPORT_CONTENT_FIELDS, PATIENT_PENDING } from './schema.js';
 import { ensurePatientCodeFree } from '../patients/repo.js';
 import { decodeImage, FRONT_POSITIONS } from '../employees/schema.js';
 import { ApiError } from '../lib/errors.js';
+import { physioQuota } from './physioQuota.js';
+import { ensureVisitReminderColumns } from '../notify/visitReminders.js';
+export { physioQuota };
 import { normalizeAddons, addonsTotal } from '../lib/addons.js';
 
 const COLUMNS = [
@@ -1585,6 +1588,8 @@ const LOCKED_AFTER_CHECK_IN = ['visit_date', 'assigned_to', 'planned_start', 'pl
  * และสถานะเคสที่ตรวจต้องเป็นของหลังได้ล็อก (หน้าที่เปิดค้างไว้อาจเห็นเคสที่ถูกปิดไปแล้ว)
  */
 export async function updateVisit(caseId, visitId, input, actor) {
+  // คอลัมน์เตือน LINE ต้องมีก่อนเข้า transaction — ALTER TABLE ระหว่างที่ล็อกกะไว้ = รอตัวเองค้าง
+  await ensureVisitReminderColumns();
   const fields = [
     'visit_date', 'assigned_to', 'planned_start', 'planned_end', 'status', 'note',
     'staff_pay', // ตั้งค่าจ้างเฉพาะกะนี้ — ส่ง null = กลับไปเกลี่ยจากยอดเคสตามปกติ
@@ -1637,6 +1642,10 @@ export async function updateVisit(caseId, visitId, input, actor) {
     const values = { case_id: caseId, visit_id: visitId };
     for (const c of changed) values[c] = input[c] ?? null;
     const sets = changed.map((c) => `${c} = :${c}`);
+    // ย้ายวัน/เวลา/คน = นัดใหม่ → เตือน LINE ใหม่ตามนัดใหม่ (notify/visitReminders.js)
+    if (changed.some((c) => ['visit_date', 'planned_start', 'assigned_to'].includes(c)) || (changed.includes('status') && input.status === 'scheduled')) {
+      sets.push('remind_day_at = NULL', 'remind_3h_at = NULL');
+    }
     // คนเปลี่ยนสถานะเองแล้ว = ไม่ใช่กะที่ระบบยกเลิกให้อีกต่อไป ตอนเปิดเคสใหม่ต้องไม่ถูกคืนทับการตัดสินใจนี้
     if (changed.includes('status')) sets.push('auto_cancelled_at = NULL');
 

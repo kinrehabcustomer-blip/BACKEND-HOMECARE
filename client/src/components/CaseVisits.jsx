@@ -99,6 +99,9 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  // สิทธิ์แพ็กกายภาพ (ซื้อ/ลงแล้ว/หมดอายุ) + วันในสัปดาห์ของปุ่ม "ลงนัดทั้งแพ็ก" (ดร.ธงชัย 26 ต.ค. 2569)
+  const [quota, setQuota] = useState(null);
+  const [packDays, setPackDays] = useState([1, 4]);
 
   const mm = String(month).padStart(2, '0');
   const today = todayISO();
@@ -125,6 +128,7 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
     /* ลงกะให้ได้เฉพาะคนที่รับผิดชอบเคสนี้ — ผู้รับผิดชอบหลัก + คนในทีม
        เดิมเป็นรายชื่อพนักงานทั้งบริษัท ซึ่งเลือกผิดคนได้ง่ายมาก (ชื่อคล้ายกัน/เรียงติดกัน)
        และกะที่ลงให้คนนอกเคสจะไปโผล่ในตารางงานของเขาโดยที่เขาไม่เคยรู้จักเคสนี้เลย */
+    if (isAppt) api.physioQuota(caseId).then((q) => !cancelled && setQuota(q)).catch(() => {});
     Promise.all([api.listVisits(caseId), api.assignableEmployees(), api.listCaseTeam(caseId)])
       .then(([v, all, team]) => {
         if (cancelled) return;
@@ -218,6 +222,7 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
         }
       }
       if (clearPicked) setPicked(new Set());
+      if (isAppt) api.physioQuota(caseId).then(setQuota).catch(() => {});
     } catch (e) {
       setError(e.message);
     } finally {
@@ -241,7 +246,7 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
    * จุดตั้งต้นคือวันแรกที่ลงได้จริงของเดือนที่กำลังเปิดดู: เปิดเดือนนี้อยู่ก็เริ่มที่วันนี้
    * เปิดเดือนหน้าก็เริ่มวันที่ 1 ของเดือนนั้น — คนกดจึงได้ช่วงที่ตรงกับสิ่งที่เห็นตรงหน้าเสมอ
    */
-  function pickPattern(weekdays) {
+  function pickPattern(weekdays, { fill = false } = {}) {
     const monthStart = iso(year, month, 1);
     const monthEnd = iso(year, month, new Date(year, month, 0).getDate());
 
@@ -259,7 +264,11 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
 
     const keys = [];
     let cursor = anchor;
-    for (let i = 0; i < SPAN_DAYS && keys.length < room; i += 1) {
+    /* fill = ลงนัดทั้งแพ็ก: ไล่ต่อจนครบจำนวนครั้งที่เหลือ (ไม่จำกัด 30 วัน) แต่ไม่เลยวันหมดอายุแพ็ก */
+    const span = fill ? 400 : SPAN_DAYS;
+    const until = quota?.expires_on ?? null;
+    for (let i = 0; i < span && keys.length < room; i += 1) {
+      if (until && cursor > until) break;
       if (!weekdays || weekdays.includes(new Date(`${cursor}T00:00:00Z`).getUTCDay())) keys.push(cursor);
       cursor = nextDay(cursor);
     }
@@ -321,7 +330,10 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
       <div className="visit-head">
         <p className="muted">
           {isAppt ? (
-            <>นัดแล้ว <strong>{booked}</strong>{target ? ` / ${target}` : ''} ครั้ง · ไปแล้ว {doneCount} ครั้ง</>
+            <>
+              นัดแล้ว <strong>{booked}</strong>{target ? ` / ${target}` : ''} ครั้ง · ไปแล้ว {doneCount} ครั้ง
+              {quota?.expires_on && <> · ใช้แพ็กได้ถึง <strong>{formatDate(quota.expires_on)}</strong></>}
+            </>
           ) : (
             <>นัดไว้ <strong>{booked}</strong> กะ · เสร็จ {doneCount} กะ</>
           )}
@@ -333,6 +345,13 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
         </div>
       </div>
 
+      {/* เตือนอย่างเดียว ไม่บล็อก (ดร. 26 ต.ค. 2569) — นัดที่เลยวันหมดอายุแพ็ก */}
+      {quota?.expires_on && visits.some((v) => v.status !== 'cancelled' && v.visit_date > quota.expires_on) && (
+        <p className="notice">
+          มีนัดเลยวันหมดอายุแพ็ก ({formatDate(quota.expires_on)}){' '}
+          {visits.filter((v) => v.status !== 'cancelled' && v.visit_date > quota.expires_on).length} นัด — ตรวจกับลูกค้าก่อน
+        </p>
+      )}
       {target && booked > target && (
         <p className="notice">นัดเกินจำนวนครั้งของแพ็คเกจแล้ว ({booked} จาก {target} ครั้ง)</p>
       )}
@@ -402,6 +421,32 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
           {picked.size > 0 && (
             <button type="button" className="btn tiny" disabled={busy} onClick={() => setPicked(new Set())}>ล้าง</button>
           )}
+        </div>
+      )}
+
+      {/* ลงนัดทั้งแพ็กในครั้งเดียว — เลือกวันในสัปดาห์ แล้วระบบไล่วันให้ครบจำนวนครั้งที่เหลือ (ตรวจกับวันหมดอายุแพ็ก) */}
+      {!readOnly && isAppt && target && booked < target && (
+        <div className="pick-presets">
+          <span className="muted">ลงนัดทั้งแพ็ก:</span>
+          {['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'].map((label, d) => (
+            <label key={d} className="btn tiny" style={{ opacity: packDays.includes(d) ? 1 : 0.45 }}>
+              <input
+                type="checkbox"
+                style={{ display: 'none' }}
+                checked={packDays.includes(d)}
+                onChange={() => setPackDays((p) => (p.includes(d) ? p.filter((x) => x !== d) : [...p, d].sort()))}
+              />
+              {label}
+            </label>
+          ))}
+          <button
+            type="button"
+            className="btn tiny primary"
+            disabled={busy || packDays.length === 0}
+            onClick={() => pickPattern(packDays, { fill: true })}
+          >
+            เลือกให้ครบ {Math.max(0, target - booked - picked.size)} ครั้ง
+          </button>
         </div>
       )}
 

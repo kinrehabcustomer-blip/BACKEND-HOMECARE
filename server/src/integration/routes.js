@@ -15,6 +15,7 @@ import * as repo from '../employees/repo.js';
 import * as cases from '../cases/repo.js';
 import { BLOCKED_STATUSES } from '../lib/auth.js';
 import * as family from '../lib/family.js';
+import { claimDueVisitReminders } from '../notify/visitReminders.js';
 import { ensureCustomerLineColumns as ensureCustomerLineColumnsSafe, findByPhones, linkFromChat } from '../lib/customerLine.js';
 
 /**
@@ -598,6 +599,20 @@ integrationRouter.post(
  * รวมหน้าหลังบ้าน ข้อ 4 — คิวส่งใบแจ้งหนี้/ใบเสร็จเข้า LINE ลูกค้า (invoices/share.js)
  *   /invoices/line-outbox ตั๋ว 'kin-invoice-outbox' {ack?: [{id, ok, error}]} → จดผลส่งรอบก่อน แล้วคืนคิวที่ยังรอส่ง
  */
+/**
+ * เตือนนัดพนักงานทาง LINE (ดร.ธงชัย 26 ต.ค. 2569 · notify/visitReminders.js)
+ *   /visits/reminders ตั๋ว 'kin-visit-remind' → จองแล้วคืนรายการที่ถึงเวลาเตือน (วันก่อน 08:00 · ก่อนนัด 3 ชม.)
+ * chat.kinorigin.com เรียกทุก 15 นาทีแล้วส่งเข้า @kinjobs เอง · จองแล้วไม่คืนซ้ำ ส่งไม่ผ่านก็ไม่วนส่งอีก
+ */
+integrationRouter.post(
+  '/visits/reminders',
+  asyncRoute(async (req, res) => {
+    const { token } = hireSchema.parse(req.body);
+    if (!verifySigned(token, 'kin-visit-remind')) throw new ApiError(401, 'ลายเซ็นไม่ถูกต้องหรือหมดอายุ');
+    res.json({ reminders: await claimDueVisitReminders() });
+  }),
+);
+
 integrationRouter.post(
   '/invoices/line-outbox',
   asyncRoute(async (req, res) => {
