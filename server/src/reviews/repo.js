@@ -1,4 +1,19 @@
 import { randomBytes } from 'node:crypto';
+
+/* คอลัมน์ review_token_issued_at เพิ่งเพิ่ม (26 ต.ค. 2569) และถูกใช้ในคิวรีแบบตรง ๆ
+   schema.sql รันเฉพาะตอนสั่ง `npm run migrate` เอง — ถ้าขึ้นเว็บโดยยังไม่ได้รัน
+   ทุกคิวรีของหน้าประเมินจะล้มด้วย "column does not exist" ทันที
+   สร้างเองแบบเดียวกับตารางอื่นในโค้ดนี้ (ensureShareTables · ensureRevokedSessions)
+   ไม่ตั้ง = ไม่มีอะไรเปลี่ยน เพราะ ADD COLUMN IF NOT EXISTS ไม่ทำอะไรถ้ามีอยู่แล้ว */
+let reviewColsReady = null;
+export const ensureReviewColumns = () =>
+  (reviewColsReady ??= sql
+    .run(`ALTER TABLE employees ADD COLUMN IF NOT EXISTS review_token_issued_at TEXT`)
+    .then(() => sql.run(
+      `UPDATE employees SET review_token_issued_at = updated_at
+       WHERE review_token IS NOT NULL AND review_token_issued_at IS NULL`,
+    ))
+    .catch((err) => { reviewColsReady = null; throw err; }));
 import { sql, transaction } from '../db/index.js';
 import { FRONT_POSITIONS } from '../employees/schema.js';
 import { REVIEW_QUESTIONS } from './schema.js';
