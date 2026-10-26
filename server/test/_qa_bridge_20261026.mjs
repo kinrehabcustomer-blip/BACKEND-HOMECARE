@@ -488,7 +488,9 @@ try {
   const postBody = 'REPLAY_FAMILY_POST_BRIDGE_20261026';
   const postToken = ticket('kin-family-post', { u: LINE_FAM_A, case_id: CASE_A, body: postBody });
   const postReplay = await Promise.all([call('family/post', { token: postToken }), call('family/post', { token: postToken })]);
-  remember('family/post', postReplay[0]);
+  /* Promise.all คงลำดับคำขอ ไม่ใช่ลำดับที่ commit — คำขอใบแรกอาจแพ้ race ได้ 409
+     ต้องเก็บ response ที่สำเร็จจริง ไม่เช่นนั้น audit ตอนท้ายรายงานว่า endpoint หายทั้งที่แถวถูกสร้างครบ */
+  remember('family/post', postReplay.find((r) => r.status >= 200 && r.status < 300) ?? postReplay[0]);
   const postRows = (await sql.one('SELECT count(*)::int AS n FROM case_family_messages WHERE case_id = :id AND body = :body', {
     id: CASE_A, body: postBody,
   })).n;
