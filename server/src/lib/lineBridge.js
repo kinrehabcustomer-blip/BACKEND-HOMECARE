@@ -137,3 +137,77 @@ export const ensureLinkCodeTables = () =>
       codesReady = null;
       throw err;
     }));
+
+/* ---------- ยิงตั๋วใบเดิมซ้ำ ต้องไม่เกิดของซ้ำ (ตรวจรอบ 19 · ดร.ธงชัยสั่งแก้ 26 ต.ค. 2569) ----------
+ *
+ * ปัญหา: ฝั่งแชทยิงซ้ำด้วยตั๋วใบเดิมได้เป็นเรื่องปกติ (เน็ตหลุดตอนรอคำตอบ · ผู้ใช้กดสองที ·
+ * ตัวลองใหม่อัตโนมัติ) แล้วเกิดรายงานซ้ำ ข้อความซ้ำ รหัสเชิญญาติสองใบที่กินเพดาน 5 คนไปสองที่
+ *
+ * ทำไมใช้ "ตัวตั๋ว" เป็นกุญแจกันซ้ำ แทนที่จะให้ฝั่งแชทส่งรหัสคำขอมาใหม่:
+ * ตั๋วทุกใบที่ออกไม่ซ้ำกันอยู่แล้ว (เวลาหมดอายุเป็นมิลลิวินาที อยู่ใน payload ที่ถูกเซ็น)
+ * การลองใหม่ของจริงใช้ตั๋วใบเดิม ส่วนการส่งข้อความใหม่จริง ๆ ได้ตั๋วใบใหม่เสมอ
+ * จึงแยกสองกรณีนี้ออกจากกันได้โดยไม่ต้องแก้ฝั่งแชทและไม่ต้อง deploy พร้อมกันสองระบบ
+ *
+ * ทำไมคืนคำตอบเดิมแทนที่จะตอบ error:
+ * ถ้าปฏิเสธตั๋วซ้ำดื้อ ๆ คำขอที่ "ทำสำเร็จแล้วแต่คำตอบหายกลางทาง" จะกลายเป็นข้อความที่ส่งไม่ได้อีกเลย
+ * เก็บคำตอบของครั้งแรกไว้แล้วคืนให้เหมือนเดิม ฝั่งแชทจึงเดินต่อได้ถูกไม่ว่าคำตอบจะหายหรือไม่
+ *
+ * งานที่ล้มกลางคันปล่อยกุญแจคืน — การลองใหม่หลังระบบพังต้องทำงานได้จริง ไม่ใช่ถูกกันเพราะเคยลองแล้ว
+ */
+const ticketKey = (token) => createHash('sha256').update(`kin-bridge:${token}`).digest('hex');
+
+let ticketUseReady = null;
+const ensureTicketUse = () =>
+  (ticketUseReady ??= sql
+    .run(`CREATE TABLE IF NOT EXISTS bridge_ticket_use (
+      token_hash TEXT PRIMARY KEY,
+      purpose    TEXT NOT NULL,
+      status     INTEGER,
+      response   JSONB,
+      done_at    TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`)
+    .catch((err) => { ticketUseReady = null; throw err; }));
+
+/**
+ * ทำงานครั้งเดียวต่อหนึ่งตั๋ว — ยิงซ้ำได้คำตอบเดิมโดยไม่ทำงานซ้ำ
+ *   run() คืน { status, body } · คืนค่าออกไปเป็น { status, body, replayed }
+ */
+export async function onceByTicket(token, purpose, run) {
+  await ensureTicketUse();
+  const h = ticketKey(token);
+
+  const claimed = await sql.one(
+    `INSERT INTO bridge_ticket_use (token_hash, purpose) VALUES (:h, :p)
+     ON CONFLICT (token_hash) DO NOTHING RETURNING token_hash`,
+    { h, p: purpose },
+  );
+
+  if (!claimed) {
+    const prev = await sql.one('SELECT status, response, done_at FROM bridge_ticket_use WHERE token_hash = :h', { h });
+    /* จองไว้แล้วแต่ยังไม่มีคำตอบ = คำขอแรกยังทำงานค้างอยู่ (สองคำขอมาพร้อมกันพอดี)
+       ตอบ 409 ให้ฝั่งแชทลองใหม่อีกสักครู่ ดีกว่าทำซ้ำหรือคืนคำตอบเปล่า */
+    if (!prev?.done_at) {
+      return { status: 409, body: { error: 'คำขอเดิมกำลังทำงานอยู่ กรุณาลองใหม่อีกครั้ง' }, replayed: true };
+    }
+    return { status: prev.status ?? 200, body: prev.response ?? { ok: true }, replayed: true };
+  }
+
+  let result;
+  try {
+    result = await run();
+  } catch (err) {
+    // ล้มกลางคัน = ปล่อยกุญแจคืน ให้ลองใหม่ได้จริง
+    await sql.run('DELETE FROM bridge_ticket_use WHERE token_hash = :h', { h }).catch(() => {});
+    throw err;
+  }
+
+  await sql.run(
+    `UPDATE bridge_ticket_use SET status = :s, response = :r::jsonb, done_at = now() WHERE token_hash = :h`,
+    { h, s: result.status ?? 200, r: JSON.stringify(result.body ?? {}) },
+  );
+  /* เก็บไว้นานกว่าอายุตั๋วพอสมควรก็พอ — ตั๋วหมดอายุแล้วใช้ไม่ได้อีกอยู่แล้ว
+     กวาดของเก่าทิ้งตอนเขียนแถวใหม่ จะได้ไม่ต้องมีงานตั้งเวลาเพิ่มอีกตัว */
+  await sql.run(`DELETE FROM bridge_ticket_use WHERE created_at < now() - interval '2 days'`).catch(() => {});
+  return { ...result, replayed: false };
+}

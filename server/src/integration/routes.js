@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { sql } from '../db/index.js';
 import { ApiError, asyncRoute } from '../lib/errors.js';
-import { ensureLineColumn, ensureLinkCodeTables, hashLinkCode, isLineUserId, LINK_CODE_TTL_HOURS, verifySigned } from '../lib/lineBridge.js';
+import { ensureLineColumn, ensureLinkCodeTables, hashLinkCode, isLineUserId, LINK_CODE_TTL_HOURS, verifySigned, onceByTicket } from '../lib/lineBridge.js';
 import { randomInt } from 'node:crypto';
 import { FRONT_POSITIONS } from '../employees/schema.js';
 import { linkLineByCode } from '../lib/lineLinkCode.js';
@@ -113,24 +113,28 @@ integrationRouter.post(
       return res.json({ linked: true, saved: false, choices: [...new Set(all.map((v) => v.case_id))] });
     }
 
-    const report = await cases.addReport(
-      visit.case_id,
-      { visit_id: visit.visit_id, report_type: 'routine', note: p.text.trim() },
-      { employee_id: emp.employee_id, name: `${emp.first_name} ${emp.last_name} (LINE)` },
-    );
-    /* ข้อ 4 (ดร.ธงชัย 23 ต.ค. 2569 "รายงานของผู้ดูแลเด้งเข้า LINE ญาติ"): ส่งรายชื่อ LINE ญาติที่ผูกเคสนี้แล้ว (ยังไม่ถูกปลด)
-       กลับไปให้ฝั่ง chat ส่งสรุปเข้า OA KIN HomeCare — ที่นี่ไม่ยิง LINE เอง (โทเคน OA อยู่ฝั่ง chat ที่เดียว)
-       ส่งแค่ชื่อต้นของผู้ดูแล (ไม่ส่งนามสกุล/เบอร์) ตามหลักเดียวกับหน้า /family */
-    await family.ensureFamilyTable();
-    const relatives = await sql.all(
-      `SELECT DISTINCT line_user_id FROM case_family_links
-       WHERE case_id = :id AND accepted_at IS NOT NULL AND revoked_at IS NULL AND line_user_id IS NOT NULL`,
-      { id: visit.case_id },
-    );
-    res.status(201).json({
-      linked: true, saved: true, case_id: visit.case_id, report_id: report.report_id,
-      family_line_ids: relatives.map((r) => r.line_user_id), caregiver_first_name: emp.first_name,
+    /* ยิงซ้ำด้วยตั๋วใบเดิมต้องไม่ได้รายงานสองใบ — คืนคำตอบของครั้งแรก (ดู onceByTicket) */
+    const out = await onceByTicket(token, 'kin-report', async () => {
+      const report = await cases.addReport(
+        visit.case_id,
+        { visit_id: visit.visit_id, report_type: 'routine', note: p.text.trim() },
+        { employee_id: emp.employee_id, name: `${emp.first_name} ${emp.last_name} (LINE)` },
+      );
+      /* ข้อ 4 (ดร.ธงชัย 23 ต.ค. 2569 "รายงานของผู้ดูแลเด้งเข้า LINE ญาติ"): ส่งรายชื่อ LINE ญาติที่ผูกเคสนี้แล้ว (ยังไม่ถูกปลด)
+         กลับไปให้ฝั่ง chat ส่งสรุปเข้า OA KIN HomeCare — ที่นี่ไม่ยิง LINE เอง (โทเคน OA อยู่ฝั่ง chat ที่เดียว)
+         ส่งแค่ชื่อต้นของผู้ดูแล (ไม่ส่งนามสกุล/เบอร์) ตามหลักเดียวกับหน้า /family */
+      await family.ensureFamilyTable();
+      const relatives = await sql.all(
+        `SELECT DISTINCT line_user_id FROM case_family_links
+         WHERE case_id = :id AND accepted_at IS NOT NULL AND revoked_at IS NULL AND line_user_id IS NOT NULL`,
+        { id: visit.case_id },
+      );
+        return { status: 201, body: {
+        linked: true, saved: true, case_id: visit.case_id, report_id: report.report_id,
+        family_line_ids: relatives.map((r) => r.line_user_id), caregiver_first_name: emp.first_name,
+      } };
     });
+    res.status(out.status).json(out.body);
   }),
 );
 
@@ -169,7 +173,11 @@ integrationRouter.post(
     const p = verifySigned(token, 'kin-family-invite');
     if (!p || !isLineUserId(p.u) || typeof p.case_id !== 'string') throw new ApiError(401, 'ลายเซ็นไม่ถูกต้องหรือหมดอายุ');
     await family.ensureFamilyTable();
-    res.json(await family.familyInvite(p.u, p.case_id));
+    // ยิงตั๋วใบเดิมซ้ำต้องไม่ได้รหัสเชิญสองใบ (กินเพดาน 5 คนไปสองที่) — ดู onceByTicket
+    const out = await onceByTicket(token, 'kin-family-invite', async () => ({
+      status: 200, body: await family.familyInvite(p.u, p.case_id),
+    }));
+    res.status(out.status).json(out.body);
   }),
 );
 
@@ -200,10 +208,14 @@ integrationRouter.post(
     }
     const body = typeof p.body === 'string' ? p.body.trim() : '';
     if (!body && !photo) throw new ApiError(400, 'ไม่มีข้อความหรือรูป');
-    const row = await family.postMessage(p.case_id, {
-      kind: 'family', name: me.display_name || 'ญาติ', lineUserId: p.u, body, photo,
+    // ยิงซ้ำด้วยตั๋วใบเดิมต้องไม่ได้ข้อความสองอัน — คืนคำตอบของครั้งแรก
+    const out = await onceByTicket(token, 'kin-family-post', async () => {
+      const row = await family.postMessage(p.case_id, {
+        kind: 'family', name: me.display_name || 'ญาติ', lineUserId: p.u, body, photo,
+      });
+      return { status: 201, body: { ok: true, message_id: row.message_id, name: me.display_name || 'ญาติ' } };
     });
-    res.status(201).json({ ok: true, message_id: row.message_id, name: me.display_name || 'ญาติ' });
+    res.status(out.status).json(out.body);
   }),
 );
 
@@ -899,8 +911,12 @@ integrationRouter.post(
     if (['closed', 'cancelled'].includes(c.status)) throw new ApiError(409, 'เคสนี้ปิดแล้ว');
     await family.ensureFamilyTable();
     const by = String(p.by || 'ทีม').slice(0, 60);
-    const row = await family.postMessage(c.case_id, { kind: 'team', name: `${by} · ทีม KIN HomeCare`, body });
-    res.status(201).json(row);
+    // ยิงซ้ำด้วยตั๋วใบเดิมต้องไม่ได้ข้อความสองอัน — คืนคำตอบของครั้งแรก
+    const out = await onceByTicket(token, 'kin-team-post', async () => ({
+      status: 201,
+      body: await family.postMessage(c.case_id, { kind: 'team', name: `${by} · ทีม KIN HomeCare`, body }),
+    }));
+    res.status(out.status).json(out.body);
   }),
 );
 
