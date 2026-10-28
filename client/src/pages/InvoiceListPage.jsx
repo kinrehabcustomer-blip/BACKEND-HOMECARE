@@ -8,6 +8,7 @@ import PageRefresh from '../components/PageRefresh.jsx';
 import { api } from '../api.js';
 import { CASE_STATUS_LABELS, INVOICE_STATUS_LABELS, formatBaht, formatDate } from '../labels.js';
 import { formatPhone } from '../lib/phone.js';
+import { caseCode } from '../lib/patientCode.js';
 
 const PER_PAGE_OPTIONS = [20, 50, 100];
 
@@ -291,7 +292,7 @@ export default function InvoiceListPage() {
                     {v.case_id && (
                       <span className="cell-sub">
                         <OfficeLink className="link mono" to={`/cases?open=${v.case_id}`} onClick={(e) => e.stopPropagation()}>
-                          {v.case_id}
+                          {caseCode(v.case_id)}
                         </OfficeLink>
                       </span>
                     )}
@@ -384,7 +385,7 @@ export default function InvoiceListPage() {
               <div>
                 <strong>{c.client_name ?? c.title}</strong>
                 <p className="muted">
-                  <OfficeLink className="link mono" to={`/cases?open=${c.case_id}`}>{c.case_id}</OfficeLink>
+                  <OfficeLink className="link mono" to={`/cases?open=${c.case_id}`}>{caseCode(c.case_id)}</OfficeLink>
                   {' · '}{CASE_STATUS_LABELS[c.status] ?? c.status}
                   {' · '}ค่าบริการ {c.fee != null ? formatBaht(c.fee) : 'ยังไม่ระบุ'}
                 </p>

@@ -170,13 +170,24 @@ export async function update(patientId, input) {
     for (const col of fields) values[col] = input[col] ?? null;
     const sets = [...fields.map((c) => `${c} = :${c}`), 'patient_id = :next_id', `updated_at = ${NOW}`];
 
-    return tx.one(
+    const updated = await tx.one(
       `UPDATE patients
        SET ${sets.join(', ')}
        WHERE patient_id = :patient_id
        RETURNING *`,
       values,
     );
+
+    /* รหัสเคส = รหัสผู้รับบริการ (ดู cases/caseCode.js) — เปลี่ยนรหัสคนแล้วรหัสเคสต้องตาม
+       KN เดิม → KN ใหม่ · KN เดิม-R2 → KN ใหม่-R2 (อ้างเคสทุกตารางเป็น ON UPDATE CASCADE) */
+    if (nextId) {
+      await tx.run(
+        `UPDATE cases SET case_id = :next_id || substr(case_id, length(:patient_id) + 1)
+         WHERE patient_id = :next_id AND (case_id = :patient_id OR case_id LIKE :pattern)`,
+        { patient_id: patientId, next_id: nextId, pattern: `${patientId}-R%` },
+      );
+    }
+    return updated;
   });
 }
 

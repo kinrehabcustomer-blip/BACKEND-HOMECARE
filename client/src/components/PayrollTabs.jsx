@@ -10,6 +10,7 @@ import OfficeLink from './OfficeLink.jsx';
 import MonthPicker from './MonthPicker.jsx';
 import PayrollSummaryDoc from './PayrollSummaryDoc.jsx';
 import { LATE_MINUTES } from '../lib/attendanceUi.js';
+import { caseCode } from '../lib/patientCode.js';
 
 /**
  * สองแท็บของหน้า "รอบจ่ายค่าตอบแทน" ที่ย้ายมาจากหน้า "การมาทำงาน"
@@ -212,7 +213,7 @@ export function Approvals({ month, employeeId, patch, employeePicker, reloadKey 
                           to={`/cases?open=${v.case_id}`}
                           onClick={(e) => e.stopPropagation()}
                         >
-                          {v.case_id}
+                          {caseCode(v.case_id)}
                         </OfficeLink>
                       </span>
                     </td>
@@ -506,7 +507,7 @@ function EmployeeCasesModal({ month, row, onClose }) {
                       >
                         <td data-label="เคส / ผู้รับบริการ">
                           <span className="linkish">{c.client_name || c.title}</span>
-                          <span className="cell-sub mono">{c.case_id}</span>
+                          <span className="cell-sub mono">{caseCode(c.case_id)}</span>
                         </td>
                         <td data-label="จำนวนกะ">
                           {c.shifts}

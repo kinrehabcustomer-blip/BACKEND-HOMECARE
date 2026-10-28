@@ -37,7 +37,7 @@ export async function findByPhones(phones) {
      FROM (
        SELECT customer_id, ${d('phone')} AS phone_digits, 'ลูกค้า' AS source FROM customers
        UNION ALL
-       SELECT customer_id, ${d('client_phone')}, 'เคส ' || case_id FROM cases WHERE customer_id IS NOT NULL
+       SELECT customer_id, ${d('client_phone')}, 'เคส ' || regexp_replace(case_id, '-R[0-9]+$', '') FROM cases WHERE customer_id IS NOT NULL
        UNION ALL
        SELECT customer_id, ${d('emergency_contact_phone')}, 'ผู้รับบริการ ' || patient_id FROM patients WHERE customer_id IS NOT NULL
      ) m

@@ -11,6 +11,7 @@ import ConfirmButton from './ConfirmButton.jsx';
 import FinanceReceiptDoc from './FinanceReceiptDoc.jsx';
 import CustomerInvoiceDoc, { addonAmount, paidBy } from './CustomerInvoiceDoc.jsx';
 import { ACCEPTED, compressImage, formatFileSize } from '../lib/image.js';
+import { caseCode } from '../lib/patientCode.js';
 
 const FOCUSABLE = 'a[href], button:not(:disabled), input, select, textarea, [tabindex]:not([tabindex="-1"])';
 
@@ -1150,7 +1151,7 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
               <div className="modal-body confirm-body">
                 <h2>ลบ {reissue.deleted.join(' และ ')} แล้ว</h2>
                 <p className="muted">
-                  ออกใบร่างใหม่ตามข้อมูลปัจจุบันของเคส {reissue.caseId} เลยไหม? ระบบจะดึงยอดจากค่าบริการของเคส
+                  ออกใบร่างใหม่ตามข้อมูลปัจจุบันของเคส {caseCode(reissue.caseId)} เลยไหม? ระบบจะดึงยอดจากค่าบริการของเคส
                   แล้วให้เลือกวิธีเก็บเงิน (เต็มจำนวน / แบ่งมัดจำ) อีกครั้ง
                 </p>
               </div>

@@ -1690,3 +1690,37 @@ CREATE TABLE IF NOT EXISTS revoked_sessions (
   jti        TEXT PRIMARY KEY,
   expires_at TIMESTAMPTZ NOT NULL
 );
+
+-- ============================================================================
+-- รหัสเคส = รหัสผู้รับบริการ (KN) — เลิกใช้รหัสเคส VN ที่กรอกแยก (ดร.ธงชัย 28 ต.ค. 2569)
+-- เคสแรกของคน = KN690202463 · เคสถัดไป = KN690202463-R2, -R3 … (-R ใช้ภายใน หน้าจอแสดงแค่ KN)
+-- ดู server/src/cases/caseCode.js
+--
+-- แปลงเคสเก่า (VN… / CASE-xxxx) ที่ผูกผู้รับบริการแล้วให้เป็นรหัสแบบใหม่ ไล่ตามวันเปิดเคส
+-- เคสเก่าสุดของคนนั้นได้รหัส KN ตรงๆ (ถ้ายังว่าง) ที่เหลือเรียง -R2, -R3 ตามลำดับ
+-- ทุกตารางที่อ้างเคสเป็น ON UPDATE CASCADE กะ/ใบแจ้งหนี้/ค่าจ้าง/รายงาน/ญาติ จึงตามไปเอง
+-- รันซ้ำได้: เคสที่ใช้รหัสแบบใหม่อยู่แล้วไม่ถูกแตะ · เคสที่ยังไม่ผูกผู้รับบริการคงรหัสเดิม
+-- ============================================================================
+DO $$
+DECLARE
+  r      RECORD;
+  target TEXT;
+  n      INTEGER;
+BEGIN
+  FOR r IN
+    SELECT case_id, patient_id FROM cases
+    WHERE patient_id IS NOT NULL
+      AND case_id <> patient_id
+      AND case_id NOT LIKE patient_id || '-R%'
+    ORDER BY created_at, case_id
+  LOOP
+    target := r.patient_id;
+    n := 1;
+    WHILE EXISTS (SELECT 1 FROM cases WHERE case_id = target) LOOP
+      n := n + 1;
+      target := r.patient_id || '-R' || n;
+    END LOOP;
+    UPDATE cases SET case_id = target WHERE case_id = r.case_id;
+    RAISE NOTICE 'เปลี่ยนรหัสเคส % → %', r.case_id, target;
+  END LOOP;
+END $$;

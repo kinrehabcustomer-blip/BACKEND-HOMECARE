@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { useSheetSwipe } from '../lib/sheetSwipe.js';
 import { useScrollLock } from '../lib/scrollLock.js';
 import CaseReports from './CaseReports.jsx';
+import { caseCode } from '../lib/patientCode.js';
 
 /**
  * popup "ตารางรายงานทั้งหมด" ของเคสหนึ่งใบ
@@ -27,7 +28,7 @@ export default function ReportArchiveModal({ caseId, caseInfo, title, scope, cur
       <div className="modal modal-wide is-subsheet" ref={sheetRef} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
         <header className="modal-head">
           <div>
-            <p className="mono muted">{caseId}</p>
+            <p className="mono muted">{caseCode(caseId)}</p>
             <h2>รายงานอาการผู้รับบริการ</h2>
             {title && <p className="muted">{title}</p>}
           </div>

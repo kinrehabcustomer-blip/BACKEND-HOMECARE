@@ -1,5 +1,6 @@
 import { amountText, bahtText, docDate } from '../labels.js';
 import { ISSUER } from '../lib/issuer.js';
+import { caseCode } from '../lib/patientCode.js';
 
 /**
  * ใบเสร็จรับเงิน ส่วนที่ 2 สำหรับฝ่ายการเงิน / บัญชี — ออกได้เมื่อใบแจ้งหนี้ชำระครบแล้ว
@@ -45,7 +46,7 @@ export default function FinanceReceiptDoc({ item, lines, pay, cashier }) {
             <dt>ชื่อผู้ชำระ / Name :</dt><dd>{item.bill_to_name}</dd>
             {/* รหัสผู้รับบริการ (KN…) — ไม่ใช่รหัสผู้ว่าจ้าง ฝ่ายบัญชีค้นย้อนจากแฟ้มผู้รับบริการได้ตรงกว่า (ไม่มีหน้าลูกค้าแล้ว) */}
             <dt>รหัสผู้รับบริการ :</dt><dd className="mono">{item.patient_id ?? '—'}</dd>
-            <dt>เลขที่เคส :</dt><dd className="mono">{item.case_id ?? '—'}</dd>
+            <dt>เลขที่เคส :</dt><dd className="mono">{item.case_id ? caseCode(item.case_id) : '—'}</dd>
             <dt>ที่อยู่ :</dt><dd>{item.bill_to_address || '—'}</dd>
           </dl>
           <div className="fr-title">

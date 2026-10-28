@@ -13,6 +13,7 @@ import { downloadCsv, thisMonth, LATE_MINUTES } from '../lib/attendanceUi.js';
 import { useSheetSwipe } from '../lib/sheetSwipe.js';
 import { useScrollLock } from '../lib/scrollLock.js';
 import { useCan } from '../auth.jsx';
+import { caseCode } from '../lib/patientCode.js';
 
 /* หน้านี้คือเรื่อง "เข้า–ออกงาน" ทั้งหมด — รวมการยืนยันกะกลับมาด้วย
 
@@ -231,7 +232,7 @@ function WhoCell({ v }) {
       {v.employee_name ?? '—'}
       <span className="cell-sub">
         {v.client_name} ·{' '}
-        <Link className="link mono" to={`/cases?open=${v.case_id}`}>{v.case_id}</Link>
+        <Link className="link mono" to={`/cases?open=${v.case_id}`}>{caseCode(v.case_id)}</Link>
       </span>
     </>
   );
@@ -587,7 +588,7 @@ function Log({ month, employeeId, state, q, page, patch, employeePicker, reloadK
         'ห่างจากจุดเคส (ม.)', 'สาย (นาที)', 'นอกวันนัด'],
       // ส่งออก "ทุกแถวที่กรองอยู่" ไม่ใช่แค่หน้าปัจจุบัน — คนกด export ต้องการทั้งชุดไปตรวจ
       filteredRows.map((v) => [
-        v.visit_date, v.employee_name, v.client_name, v.case_id,
+        v.visit_date, v.employee_name, v.client_name, caseCode(v.case_id),
         v.check_in_at ? timeText(v.check_in_at) : '',
         v.check_out_at ? timeText(v.check_out_at) : '',
         v.worked_minutes != null ? (v.worked_minutes / 60).toFixed(1) : '',

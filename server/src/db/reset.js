@@ -156,7 +156,7 @@ await sql.run(`DELETE FROM id_counters WHERE name LIKE 'invoice:%'`);
 // (ถ้ารหัสของคนที่เก็บไว้ตรงกับเลขนั้นพอดี ตัวออกรหัสข้ามให้เอง)
 await sql.run(`DELETE FROM id_counters WHERE name LIKE 'employee:%'`);
 
-console.log('\nตั้งตัวนับรหัสใหม่แล้ว — ของถัดไปจะเป็น CUS-0001 · ใบแจ้งหนี้ HC-IV + วันที่ + 0001 (รหัสเคส VN / ผู้รับบริการ KN กรอกเอง)');
+console.log('\nตั้งตัวนับรหัสใหม่แล้ว — ของถัดไปจะเป็น CUS-0001 · ใบแจ้งหนี้ HC-IV + วันที่ + 0001 (รหัสผู้รับบริการ KN กรอกเอง · รหัสเคสใช้ KN ของผู้รับบริการ)');
 console.log('พนักงานคนถัดไปจะได้รหัส A + ปี พ.ศ. + 01001 (หรือกรอกรหัสเองในฟอร์ม)');
 
 if (superAdminEmail) {

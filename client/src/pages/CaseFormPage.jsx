@@ -10,8 +10,7 @@ import {
 import LineIcon from '../components/LineIcon.jsx';
 import StaffPicker from '../components/StaffPicker.jsx';
 import PatientCodeInput from '../components/PatientCodeInput.jsx';
-import YearCodeInput from '../components/YearCodeInput.jsx';
-import { isPatientCode, isCaseCode } from '../lib/patientCode.js';
+import { isPatientCode, caseCode } from '../lib/patientCode.js';
 import { nextRoundDates, endDateFor } from '../lib/caseRounds.js';
 import { useCanSeeStaffPay } from '../auth.jsx';
 import { useScrollLock } from '../lib/scrollLock.js';
@@ -21,8 +20,6 @@ const TIERS = ['CG', 'NA', 'PN', 'RN'];
 const CATEGORY_LABELS = { daily: 'รายวัน', weekly: 'รายสัปดาห์', monthly: 'รายเดือน' };
 
 const BLANK = {
-  // รหัสเคส VN + ปี พ.ศ. 2 หลัก + เลข 7 หลัก (กรอกเอง) — ตอนแก้: ว่าง = คงรหัสเดิม
-  case_code: '',
   customer_id: '',
   patient_id: '',
   service_kind: '',
@@ -526,7 +523,6 @@ export default function CaseFormPage() {
         const filled = { ...BLANK };
         for (const key of Object.keys(BLANK)) filled[key] = c[key] ?? '';
         if (filled.client_name === PATIENT_PENDING) filled.client_name = '';
-        filled.case_code = isCaseCode(c.case_id) ? c.case_id : ''; // รหัสเดิมแบบ CASE-xxxx = ช่องว่าง (กรอก VN เพื่อเปลี่ยน)
         filled.addons = (c.addons ?? []).map((a) => ({
           name: a.name, quantity: String(a.quantity), unit_price: String(a.unit_price),
         }));
@@ -800,15 +796,6 @@ export default function CaseFormPage() {
       return;
     }
 
-    /* รหัสเคส VN เป็นเลขที่เจ้าหน้าที่กรอก (ระบบออกเองไม่ได้) — เปิดเคส/ต่อเคสต้องกรอกให้ครบ
-       หน้าแก้: ว่าง/กรอกไม่ครบ = คงรหัสเดิม */
-    if (!isEdit && !isCaseCode(form.case_code)) {
-      setError('กรุณากรอกรหัสเคส (VN) ให้ครบ');
-      setFieldErrors((prev) => ({ ...prev, case_code: 'กรอกให้ครบ: VN + ปี พ.ศ. 2 หลัก + เลข 7 หลัก' }));
-      formEl.current?.querySelector('[name="case_code"]')?.scrollIntoView({ block: 'center', behavior: 'smooth' });
-      return;
-    }
-
     /* ต้องสร้างแฟ้มผู้รับบริการใหม่ = ต้องมีรหัส KN ครบ (เปิดเคสใหม่ที่ไม่ได้เลือกผู้รับบริการเดิม
        หรือแก้เคสที่เพิ่งใส่ชื่อผู้รับบริการให้ครั้งแรก) — ทักก่อนยิง จะได้ไม่สร้างผู้ว่าจ้างไปครึ่งทาง */
     const needsCode = form.client_name.trim() && !form.patient_id && (!isEdit || !original?.client_name);
@@ -826,10 +813,7 @@ export default function CaseFormPage() {
       payload.customer_id = await ensurePayer(payload);
       // รหัสแฟ้มใหม่ส่งไปที่ /patients (เปิดเคส) หรือแนบไปกับการแก้เคส (สร้างแฟ้มย้อนหลัง) เท่านั้น
       if (!(isEdit && needsCode)) delete payload.patient_code;
-      // รหัสเคส: เปิดเคส = บังคับส่ง · แก้เคส = ส่งเฉพาะตอนกรอกรหัสใหม่ที่ต่างจากเดิม (= เปลี่ยนรหัส)
-      delete payload.case_code;
-      if (!isEdit) payload.case_id = form.case_code;
-      else if (isCaseCode(form.case_code) && form.case_code !== id) payload.case_id = form.case_code;
+      // รหัสเคสไม่ต้องส่ง — server ตั้งจากรหัสผู้รับบริการ (KN) ของเคสเอง
 
       // เคสใหม่ต้องผูกแฟ้มผู้รับบริการเสมอ — เลือกไว้แล้วใช้เลย ไม่งั้นสร้างใหม่จากข้อมูลที่กรอก
       if (!isEdit) payload.patient_id = await ensurePatient(payload);
@@ -870,7 +854,7 @@ export default function CaseFormPage() {
           updated.invoice_sync_failed
             ? "บันทึกเคสแล้ว แต่ใบร่างยังไม่อัปเดต กด 'รีเฟรชใบ' ในหน้าใบแจ้งหนี้ค่ะ"
             : updated.case_id !== id
-            ? `บันทึกแล้ว · เปลี่ยนรหัสเคสเป็น ${updated.case_id}`
+            ? `บันทึกแล้ว · เปลี่ยนรหัสเคสเป็น ${caseCode(updated.case_id)}`
             : 'บันทึกการแก้ไขแล้ว',
         );
         navigate(`/cases?open=${updated.case_id}`); // เปลี่ยนรหัสแล้วเคสเดิมไม่มีอยู่ที่รหัสเก่า
@@ -880,10 +864,10 @@ export default function CaseFormPage() {
         await saveRelation(created.patient_id);
         toast(
           created.invoice_draft_created === false
-            ? `เปิดเคส ${created.case_id} แล้ว แต่ใบร่างยังไม่เกิด กรุณาไปหน้าใบแจ้งหนี้แล้วกด "สร้างใบร่าง" ค่ะ`
+            ? `เปิดเคส ${caseCode(created.case_id)} แล้ว แต่ใบร่างยังไม่เกิด กรุณาไปหน้าใบแจ้งหนี้แล้วกด "สร้างใบร่าง" ค่ะ`
             : renewFrom
-            ? `ต่อเคสเป็น ${created.case_id} (รอบที่ ${created.round_no}) แล้ว · ระบบออกใบแจ้งหนี้ (ร่าง) ของรอบนี้ให้เรียบร้อย`
-            : `เปิดเคส ${created.case_id} แล้ว · ระบบออกใบแจ้งหนี้ (ร่าง) ให้เรียบร้อย`,
+            ? `ต่อเคสเป็น ${caseCode(created.case_id)} (รอบที่ ${created.round_no}) แล้ว · ระบบออกใบแจ้งหนี้ (ร่าง) ของรอบนี้ให้เรียบร้อย`
+            : `เปิดเคส ${caseCode(created.case_id)} แล้ว · ระบบออกใบแจ้งหนี้ (ร่าง) ให้เรียบร้อย`,
         );
         // เด้งกลับรายการพร้อมเปิดเคสที่เพิ่งสร้าง — เห็นผลทันทีและกดจับคู่พนักงานต่อได้เลย
         navigate(`/cases?open=${created.case_id}`);
@@ -905,12 +889,12 @@ export default function CaseFormPage() {
     <>
       <header className="page-head">
         <div>
-          <h1>{isEdit ? `แก้ไขเคส ${id}` : renewFrom ? `ต่อเคส ${renewFrom}` : 'เปิดเคสใหม่'}</h1>
-          {!isEdit && !renewFrom && <p className="muted">กรอกรหัสเคส (VN) · ระบบออกใบแจ้งหนี้ (ร่าง) ให้หลังบันทึก</p>}
+          <h1>{isEdit ? `แก้ไขเคส ${caseCode(id)}` : renewFrom ? `ต่อเคส ${caseCode(renewFrom)}` : 'เปิดเคสใหม่'}</h1>
+          {!isEdit && !renewFrom && <p className="muted">รหัสเคส = รหัสผู้รับบริการ (KN) · ระบบออกใบแจ้งหนี้ (ร่าง) ให้หลังบันทึก</p>}
           {renewFrom && (
             <p className="muted">
               รอบที่ {(renewSource?.round_no ?? 1) + 1} — คัดลอกข้อมูลจากรอบก่อนมาให้แล้ว ตรวจ/แก้ได้ทุกช่องก่อนบันทึก
-              {' '}· กรอกรหัสเคส (VN) ของรอบนี้ แล้วระบบออกใบแจ้งหนี้ (ร่าง) ให้ ทีมดูแลรอบก่อนตามมาด้วย
+              {' '}· รหัสเคสใช้รหัสผู้รับบริการเดิม ระบบออกใบแจ้งหนี้ (ร่าง) ให้ ทีมดูแลรอบก่อนตามมาด้วย
             </p>
           )}
         </div>
@@ -1022,25 +1006,6 @@ export default function CaseFormPage() {
 
         <h2>รายละเอียดเคส</h2>
         <div className="grid">
-          <label>รหัสเคส (VN) {isEdit ? '' : '*'}
-            <YearCodeInput
-              prefix="VN"
-              name="case_code"
-              value={form.case_code}
-              invalid={Boolean(fieldErrors.case_code || fieldErrors.case_id)}
-              checker={(code) => (code === id ? Promise.resolve(null) : api.checkCaseId(code, isEdit ? id : null))}
-              takenLabel="รหัสนี้ถูกใช้กับเคสอื่นแล้ว"
-              onChange={(code) => {
-                setForm((prev) => ({ ...prev, case_code: code }));
-                setFieldErrors((prev) => (prev.case_code || prev.case_id ? { ...prev, case_code: undefined, case_id: undefined } : prev));
-              }}
-            />
-            {isEdit && !isCaseCode(id) && (
-              <span className="form-hint muted">รหัสเดิม {id} — กรอกรหัส VN เพื่อเปลี่ยน (กะ ใบแจ้งหนี้ และค่าจ้างที่ผูกอยู่ตามไปเอง)</span>
-            )}
-            {fieldError('case_code')}
-            {fieldError('case_id')}
-          </label>
           {/* ไม่มีช่องประเภทเคสแล้ว — server ตั้งให้เองจากประเภทบริการ (ใช้เลือกแบบบันทึกของพนักงาน) */}
           {serviceLocked && (
             <p className="form-hint muted span-2">
@@ -1303,7 +1268,7 @@ export default function CaseFormPage() {
             <div className="grid">
               <label>ชื่อผู้รับบริการ {payerKnown ? '(ว่างได้ — ยังไม่ทราบชื่อ)' : '*'}<input {...field('client_name')} />{fieldError('client_name')}</label>
               {!form.patient_id && !original?.client_name && (
-                <label>รหัสผู้รับบริการ (KN) *
+                <label>รหัสผู้รับบริการ (KN) — ใช้เป็นรหัสเคสด้วย *
                   <PatientCodeInput
                     name="patient_code"
                     checker={(code) => api.checkPatientId(code)}
@@ -1418,7 +1383,7 @@ export default function CaseFormPage() {
             <div className="grid">
               <label>ชื่อผู้รับบริการ {payerKnown ? '(ว่างได้ — ยังไม่ทราบชื่อ)' : '*'}<input {...field('client_name')} />{fieldError('client_name')}</label>
               {!form.patient_id && (
-                <label>รหัสผู้รับบริการ (KN) {payerKnown ? '(กรอกเมื่อมีชื่อผู้รับบริการ)' : '*'}
+                <label>รหัสผู้รับบริการ (KN) — ใช้เป็นรหัสเคสด้วย {payerKnown ? '(กรอกเมื่อมีชื่อผู้รับบริการ)' : '*'}
                   <PatientCodeInput
                     name="patient_code"
                     checker={(code) => api.checkPatientId(code)}

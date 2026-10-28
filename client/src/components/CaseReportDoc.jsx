@@ -4,6 +4,7 @@ import { formatDate } from '../labels.js';
 import { TEXTS, vitalChips } from './CaseReports.jsx';
 import DailyCareView from './DailyCareView.jsx';
 import { usesDailyRecord, usesPhysioRecord, DAILY_SECTIONS, PHYSIO_SECTIONS } from '../lib/dailyCare.js';
+import { caseCode } from '../lib/patientCode.js';
 
 /** ป้ายกำกับใบที่ไม่ใช่รอบปกติ — บนกระดาษไม่มีสีให้ดู จึงต้องเป็นคำ */
 const TYPE_LABELS = { incident: 'ผิดปกติ', change: 'มีการเปลี่ยนแปลง' };
@@ -60,7 +61,7 @@ export default function CaseReportDoc({ caseItem, reports }) {
         <tbody>
           <tr>
             <th>รหัสเคส</th>
-            <td className="mono">{caseItem.case_id}</td>
+            <td className="mono">{caseCode(caseItem.case_id)}</td>
             <th>บริการ</th>
             <td>{caseItem.title}</td>
           </tr>

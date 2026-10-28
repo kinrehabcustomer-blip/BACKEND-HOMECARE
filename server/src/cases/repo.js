@@ -1,4 +1,5 @@
-import { sql, transaction } from '../db/index.js';
+import { sql, transaction, nextCaseId } from '../db/index.js';
+import { caseCode, caseIdForPatient, isCaseOfPatient } from './caseCode.js';
 /* รายการช่องของรายงานมาจาก schema.js ที่เดียว — ฟอร์มมี 80 กว่าช่อง การก๊อปรายชื่อมาไว้สองที่
    แปลว่าวันหนึ่งจะมีช่องที่ผ่าน validation แล้วแต่ไม่ถูกเขียนลงตาราง (บันทึกสำเร็จแต่ข้อมูลหาย)
    ต่างจากตาราง cases ที่ยังประกาศ COLUMNS เอง เพราะช่องน้อยและมีคอลัมน์ที่ระบบเติมเองปนอยู่ */
@@ -471,7 +472,7 @@ export function assessStaffPayUpdate(targetStaffPay, releasedAmount) {
  */
 export async function staffPayUpdateForTransaction(tx, caseId, input) {
   const current = await tx.one('SELECT * FROM cases WHERE case_id = :id FOR UPDATE', { id: caseId });
-  if (!current) throw new ApiError(404, `ไม่พบเคสรหัส ${caseId}`);
+  if (!current) throw new ApiError(404, `ไม่พบเคสรหัส ${caseCode(caseId)}`);
 
   await assertPhysioPackageUsable(input, tx);
 
@@ -560,24 +561,6 @@ const caseTypeForService = (s) => (isPhysioService(s) ? 'physiotherapy' : 'elder
 /** สายกายภาพจริงของเคส — เคสเก่าที่ยังไม่มี service_kind ใช้ประเภทเคสที่ตั้งไว้ (เกณฑ์เดียวกับ serviceKindOf ฝั่งหน้าเว็บ) */
 const isPhysioCase = (s) => isPhysioService(s) || (!s.service_kind && s.case_type === 'physiotherapy');
 
-/** เจ้าของรหัสเคสนี้ (ถ้ามี) — ใช้ทั้งตอนบันทึก และเส้นตรวจซ้ำที่หน้าฟอร์มเรียกระหว่างพิมพ์ */
-export const caseCodeOwner = (db, code, exceptId = null) =>
-  db.one(
-    `SELECT case_id, client_name FROM cases
-     WHERE case_id = :code AND case_id IS DISTINCT FROM :except`,
-    { code, except: exceptId },
-  );
-
-/** รหัสเคสซ้ำ — เช็คก่อนเขียน จะได้บอกว่าซ้ำกับเคสของใคร (ชนกันพร้อมกันพอดียังมี PK กันอีกชั้น) */
-async function ensureCaseCodeFree(db, code, exceptId = null) {
-  const taken = await caseCodeOwner(db, code, exceptId);
-  if (taken) {
-    throw new ApiError(409, `รหัสเคส ${code} มีอยู่แล้ว (${taken.client_name})`, [
-      { field: 'case_id', message: `รหัสนี้ถูกใช้กับเคสของ ${taken.client_name} แล้ว` },
-    ]);
-  }
-}
-
 export async function create(rawInput, actor) {
   await ensureCasePriceSnapshots();
   const input = clearUnusedKind(rawInput);
@@ -586,8 +569,8 @@ export async function create(rawInput, actor) {
        (คำขอที่สองรอจนคำขอแรก commit แล้วจะเห็นรอบที่เพิ่งสร้าง) */
     const prev = input.renewed_from ? await renewalSource(tx, input.renewed_from) : null;
 
-    await ensureCaseCodeFree(tx, input.case_id);
-    const caseId = input.case_id;
+    // รหัสเคส = รหัสผู้รับบริการ (ดู caseCode.js) · ยังไม่มีแฟ้มผู้รับบริการ = รหัสชั่วคราว CASE-xxxx
+    const caseId = input.patient_id ? await caseIdForPatient(tx, input.patient_id) : await nextCaseId(tx);
     const values = { case_id: caseId };
     for (const col of COLUMNS) values[col] = input[col] ?? null;
     values.case_type = input.case_type ?? caseTypeForService(input);
@@ -658,8 +641,8 @@ export async function create(rawInput, actor) {
           assigned_to: values.assigned_to,
         },
       );
-      await logEvent(tx, caseId, 'renewed', `ต่อจาก ${prev.case_id} (รอบที่ ${values.round_no})`, actor);
-      await logEvent(tx, prev.case_id, 'renewed', `ต่อเป็น ${caseId} (รอบที่ ${values.round_no})`, actor);
+      await logEvent(tx, caseId, 'renewed', `ต่อจาก ${caseCode(prev.case_id)} (รอบที่ ${values.round_no})`, actor);
+      await logEvent(tx, prev.case_id, 'renewed', `ต่อเป็น ${caseCode(caseId)} (รอบที่ ${values.round_no})`, actor);
     }
 
     return caseId;
@@ -675,7 +658,7 @@ async function renewalSource(tx, caseId) {
     'SELECT case_id, status, round_no FROM cases WHERE case_id = :id FOR UPDATE',
     { id: caseId },
   );
-  if (!prev) throw new ApiError(400, `ไม่พบเคสรหัส ${caseId} ที่จะต่อ`);
+  if (!prev) throw new ApiError(400, `ไม่พบเคสรหัส ${caseCode(caseId)} ที่จะต่อ`);
   if (prev.status === 'cancelled') {
     throw new ApiError(409, 'เคสนี้ถูกยกเลิกไปแล้ว ต่อเคสไม่ได้ — เปิดเคสใหม่แทน');
   }
@@ -685,7 +668,7 @@ async function renewalSource(tx, caseId) {
     { id: caseId },
   );
   if (existing) {
-    throw new ApiError(409, `เคส ${caseId} ต่อไปแล้วเป็น ${existing.case_id}`, { existing_case_id: existing.case_id });
+    throw new ApiError(409, `เคส ${caseCode(caseId)} ต่อไปแล้ว (รอบที่เปิดอยู่)`, { existing_case_id: existing.case_id });
   }
   return prev;
 }
@@ -817,11 +800,9 @@ export async function update(caseId, rawInput, actor) {
   await ensureCasePriceSnapshots();
   // สลับสายบริการตอนแก้เคส ต้องล้างของสายเดิมด้วย ไม่งั้นค้างเป็นเคสที่มีทั้งเรท Homecare และแพ็คเกจกายภาพบำบัด
   const input = clearUnusedKind(rawInput);
-  /* เปลี่ยนรหัสเคส (เช่น CASE-0007 → VN690215209) — ทุกตารางที่อ้างเคสเป็น ON UPDATE CASCADE
-     กะ ใบแจ้งหนี้ ค่าจ้าง รายงาน ทีม ประวัติ และสายต่อเคส จึงตามรหัสใหม่ไปเองในคำสั่งเดียวกัน */
-  const nextId = input.case_id && input.case_id !== caseId ? input.case_id : null;
   const fields = COLUMNS.filter((col) => col in input);
-  if (fields.length === 0 && !nextId) return findById(caseId);
+  if (fields.length === 0) return findById(caseId);
+  let nextId = null;
 
   const values = { case_id: caseId };
   for (const col of fields) values[col] = input[col] ?? null;
@@ -871,9 +852,13 @@ export async function update(caseId, rawInput, actor) {
     }
     if (newPatient) details.push(`สร้างแฟ้มผู้รับบริการ ${newPatient}`);
 
-    if (nextId) {
-      await ensureCaseCodeFree(tx, nextId, caseId);
-      details.push(`เปลี่ยนรหัสเคส ${caseId} → ${nextId}`);
+    /* รหัสเคสตามผู้รับบริการ — เพิ่งผูกแฟ้ม/เปลี่ยนคน/เคสเก่าที่ยังเป็น VN หรือ CASE-xxxx = เปลี่ยนรหัสให้
+       ทุกตารางที่อ้างเคสเป็น ON UPDATE CASCADE กะ ใบแจ้งหนี้ ค่าจ้าง รายงาน ทีม ประวัติ และสายต่อเคส
+       จึงตามรหัสใหม่ไปเองในคำสั่งเดียวกัน · ถอดแฟ้มออก (patient_id ว่าง) = คงรหัสเดิม */
+    const patientId = 'patient_id' in values ? values.patient_id : current.patient_id;
+    if (patientId && !isCaseOfPatient(caseId, patientId)) {
+      nextId = await caseIdForPatient(tx, patientId, caseId);
+      details.push(`เปลี่ยนรหัสเคส ${caseCode(caseId)} → ${caseCode(nextId)}`);
     }
     values.next_case_id = nextId ?? caseId;
     const sets = [...fields.map((c) => `${c} = :${c}`), 'case_id = :next_case_id', `updated_at = ${NOW}`];
@@ -1253,7 +1238,7 @@ export async function reopen(caseId, actor) {
     if (twin) {
       throw new ApiError(
         409,
-        `สายต่อเคสนี้มีรอบที่เปิดอยู่แล้ว (${twin.case_id}) — เปิดเคสนี้กลับมาจะกลายเป็นรอบซ้อนกันสองใบ` +
+        `สายต่อเคสนี้มีรอบที่เปิดอยู่แล้ว (${caseCode(twin.case_id)}) — เปิดเคสนี้กลับมาจะกลายเป็นรอบซ้อนกันสองใบ` +
           ' ถ้าจะใช้ใบนี้แทน ให้ยกเลิกใบนั้นก่อน',
         { existing_case_id: twin.case_id },
       );

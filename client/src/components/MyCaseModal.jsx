@@ -16,6 +16,7 @@ import {
   timeText,
 } from '../labels.js';
 import { formatPhone } from '../lib/phone.js';
+import { caseCode } from '../lib/patientCode.js';
 
 /** ชื่อบริการของเคส — กายภาพใช้ชื่อแพ็คเกจ, Homecare ใช้รูปแบบ+เกรด (ใช้ร่วมกันหลายหน้าของ field) */
 export const serviceName = (c) => {
@@ -73,7 +74,7 @@ export default function MyCaseModal({ caseId, onClose }) {
           <>
             <header className="modal-head">
               <div>
-                <p className="mono muted">{item.case_id}</p>
+                <p className="mono muted">{caseCode(item.case_id)}</p>
                 <h2>{serviceName(item)}</h2>
                 <p className="muted">{item.client_name}</p>
                 <span className={`badge case-${item.status}`}>{CASE_STATUS_LABELS[item.status]}</span>

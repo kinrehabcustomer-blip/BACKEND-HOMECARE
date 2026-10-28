@@ -20,6 +20,7 @@ import {
 import LineIcon from './LineIcon.jsx';
 import StaffPicker from './StaffPicker.jsx';
 import { formatPhone, formatPhoneInput } from '../lib/phone.js';
+import { caseCode } from '../lib/patientCode.js';
 
 /**
  * ชื่อบริการของเคส — สองสายเก็บคนละที่ (Homecare = รูปแบบ+เกรด, กายภาพ = ชื่อแพ็คเกจ)
@@ -418,7 +419,7 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
           <>
             <header className="modal-head">
               <div>
-                <p className="mono muted">{item.case_id}</p>
+                <p className="mono muted">{caseCode(item.case_id)}</p>
                 <h2>
                   {serviceName(item) ?? <span className="muted">ไม่ระบุบริการ</span>}
                 </h2>
@@ -434,10 +435,10 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                   <p className="case-rounds muted">
                     รอบที่ {item.round_no ?? 1}
                     {item.renewed_from && (
-                      <> · ต่อจาก <Link className="link mono" to={`/cases?open=${item.renewed_from}`}>{item.renewed_from}</Link></>
+                      <> · ต่อจาก <Link className="link mono" to={`/cases?open=${item.renewed_from}`}>{caseCode(item.renewed_from)} (รอบที่ {(item.round_no ?? 1) - 1})</Link></>
                     )}
                     {item.renewed_to && (
-                      <> · ต่อเป็น <Link className="link mono" to={`/cases?open=${item.renewed_to}`}>{item.renewed_to}</Link></>
+                      <> · ต่อเป็น <Link className="link mono" to={`/cases?open=${item.renewed_to}`}>{caseCode(item.renewed_to)} (รอบที่ {(item.round_no ?? 1) + 1})</Link></>
                     )}
                   </p>
                 )}
@@ -889,7 +890,7 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                     ไม่ยกเลิกแล้ว
                   </button>
                   <button className="btn danger" disabled={busy} onClick={cancelCase}>
-                    ยืนยันยกเลิก {item.case_id}
+                    ยืนยันยกเลิก {caseCode(item.case_id)}
                   </button>
                 </div>
               </div>
@@ -964,7 +965,7 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                     ].filter(Boolean);
                     const pending = warn.length ? `\n\nยังมีของค้าง:\n${warn.join('\n')}` : '';
 
-                    if (!confirm(`ปิดเคส ${item.case_id}?${pay}${pending}\nเคสจะยังอยู่ในระบบเป็นประวัติ และเปิดใหม่ได้ภายหลัง`)) return;
+                    if (!confirm(`ปิดเคส ${caseCode(item.case_id)}?${pay}${pending}\nเคสจะยังอยู่ในระบบเป็นประวัติ และเปิดใหม่ได้ภายหลัง`)) return;
                     run(() => api.closeCase(item.case_id, today, warn.length > 0));
                   }}
                 >

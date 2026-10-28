@@ -10,6 +10,7 @@ import {
   formatBaht, formatDate, toBuddhistYear,
 } from '../labels.js';
 import { formatPhone } from '../lib/phone.js';
+import { caseCode } from '../lib/patientCode.js';
 
 const PER_PAGE_OPTIONS = [20, 50, 100];
 
@@ -275,7 +276,7 @@ export default function CaseListPage() {
                 >
                   {/* ลำดับนับต่อเนื่องข้ามหน้า — เป็นลำดับของ "รายการที่เห็นตอนนี้" ไม่ใช่เลขประจำตัว */}
                   <td className="row-index" data-label="ลำดับ">{(page - 1) * Number(perPage) + i + 1}</td>
-                  <td className="mono link" data-label="รหัสเคส">{c.case_id}</td>
+                  <td className="mono link" data-label="รหัสเคส">{caseCode(c.case_id)}</td>
                   <td data-label="บริการ">
                     {/* สองสายบริการเก็บชื่อคนละคอลัมน์ — กายภาพมาก่อนเพราะเคสที่ผูกแพ็คเกจไว้จะไม่มีเรท Homecare */}
                     {c.physio_package_name ? (
