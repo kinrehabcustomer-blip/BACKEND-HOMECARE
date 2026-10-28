@@ -1,5 +1,5 @@
 import { createHash, randomInt } from 'node:crypto';
-import { sql } from '../db/index.js';
+import { sql, transaction } from '../db/index.js';
 import { ApiError } from './errors.js';
 
 /**
@@ -119,11 +119,21 @@ export async function createInvite(caseId, actorName, { canInvite = true, via = 
   for (let attempt = 0; attempt < 8; attempt++) {
     const code = newCode();
     try {
-      await sql.run(
-        `INSERT INTO case_family_links (case_id, code_hash, code_expires_at, invited_by, consent_by, can_invite, invited_via)
-         VALUES (:case_id, :hash, now() + make_interval(days => :days), :actor, :consent, :can_invite, :via)`,
-        { case_id: caseId, hash: hashCode(code), days: CODE_DAYS, actor: actorName, consent: consentBy, can_invite: canInvite, via },
-      );
+      await transaction(async (tx) => {
+        // lock ต่อ case ทำให้ count + insert เป็นหน่วยเดียว คำขอพร้อมกันลอดเพดาน 5 ไม่ได้
+        await tx.one('SELECT pg_advisory_xact_lock(hashtext(:id)) AS locked', { id: caseId });
+        const { n } = await tx.one(
+          `SELECT count(*)::int AS n FROM case_family_links
+            WHERE case_id=:id AND revoked_at IS NULL AND (accepted_at IS NOT NULL OR code_expires_at > now())`,
+          { id: caseId },
+        );
+        if (n >= FAMILY_MAX_PER_CASE) throw new ApiError(409, `เชิญได้สูงสุด ${FAMILY_MAX_PER_CASE} คนต่อเคส — ปลดคนเดิมก่อน`);
+        await tx.run(
+          `INSERT INTO case_family_links (case_id, code_hash, code_expires_at, invited_by, consent_by, can_invite, invited_via)
+           VALUES (:case_id, :hash, now() + make_interval(days => :days), :actor, :consent, :can_invite, :via)`,
+          { case_id: caseId, hash: hashCode(code), days: CODE_DAYS, actor: actorName, consent: consentBy, can_invite: canInvite, via },
+        );
+      });
       return { code, days: CODE_DAYS };
     } catch (err) {
       if (err?.code !== '23505') throw err;
@@ -469,22 +479,30 @@ export const hideMessage = (caseId, messageId) =>
  * คืน { ok } · { ok:false, reason: 'no_line' | 'already' | 'full' }
  */
 export async function linkCustomerLine(caseId, actorName) {
-  const row = await sql.one(
-    `SELECT cu.line_user_id, cu.line_display_name FROM cases c JOIN customers cu ON cu.customer_id = c.customer_id
-     WHERE c.case_id = :id`,
-    { id: caseId },
-  );
-  if (!row?.line_user_id) return { ok: false, reason: 'no_line' };
-  const exists = await sql.one(
-    `SELECT 1 AS x FROM case_family_links WHERE case_id = :id AND line_user_id = :uid AND revoked_at IS NULL`,
-    { id: caseId, uid: row.line_user_id },
-  );
-  if (exists) return { ok: false, reason: 'already' };
-  if ((await activeCount(caseId)) >= FAMILY_MAX_PER_CASE) return { ok: false, reason: 'full' };
-  await sql.run(
-    `INSERT INTO case_family_links (case_id, line_user_id, display_name, invited_by, consent_by, accepted_at, can_invite)
-     VALUES (:id, :uid, :name, :actor, :actor, now(), true)`,
-    { id: caseId, uid: row.line_user_id, name: row.line_display_name || 'ลูกค้า (LINE)', actor: actorName },
-  );
-  return { ok: true };
+  return transaction(async (tx) => {
+    await tx.one('SELECT pg_advisory_xact_lock(hashtext(:id)) AS locked', { id: caseId });
+    const row = await tx.one(
+      `SELECT cu.line_user_id, cu.line_display_name FROM cases c JOIN customers cu ON cu.customer_id = c.customer_id
+       WHERE c.case_id = :id`,
+      { id: caseId },
+    );
+    if (!row?.line_user_id) return { ok: false, reason: 'no_line' };
+    const exists = await tx.one(
+      `SELECT 1 AS x FROM case_family_links WHERE case_id = :id AND line_user_id = :uid AND revoked_at IS NULL`,
+      { id: caseId, uid: row.line_user_id },
+    );
+    if (exists) return { ok: false, reason: 'already' };
+    const { n } = await tx.one(
+      `SELECT count(*)::int AS n FROM case_family_links
+        WHERE case_id=:id AND revoked_at IS NULL AND (accepted_at IS NOT NULL OR code_expires_at > now())`,
+      { id: caseId },
+    );
+    if (n >= FAMILY_MAX_PER_CASE) return { ok: false, reason: 'full' };
+    await tx.run(
+      `INSERT INTO case_family_links (case_id, line_user_id, display_name, invited_by, consent_by, accepted_at, can_invite)
+       VALUES (:id, :uid, :name, :actor, :actor, now(), true)`,
+      { id: caseId, uid: row.line_user_id, name: row.line_display_name || 'ลูกค้า (LINE)', actor: actorName },
+    );
+    return { ok: true };
+  });
 }

@@ -275,13 +275,15 @@ casesRouter.post(
 
        ใบล้มไม่ควรทำให้การเปิดเคสล้มตาม — เคสถูกสร้างไปแล้ว ตอบ error กลับไปจะกลายเป็น
        "เปิดเคสไม่สำเร็จ" ทั้งที่เคสอยู่ในระบบแล้ว · ปุ่มออกใบเองในหน้าเคสยังใช้ได้ตามเดิม */
+    let invoiceDraftCreated = true;
     try {
       await createDraftForCase(created, req.user);
     } catch (err) {
+      invoiceDraftCreated = false;
       console.error(`[POST /api/cases] ออกใบแจ้งหนี้อัตโนมัติให้ ${created.case_id} ไม่สำเร็จ:`, err.message);
     }
 
-    res.status(201).json(visible(req, created));
+    res.status(201).json({ ...visible(req, created), invoice_draft_created: invoiceDraftCreated });
   }),
 );
 
@@ -559,14 +561,20 @@ casesRouter.patch(
     // แก้เคสแล้วใบแจ้งหนี้ที่ยังแก้ได้ (ร่าง/ออกใบแล้ว) ต้องตามให้ทัน — ดู syncOpenFromCase
     // ส่ง updated ตัวเต็มเข้าไป ไม่ใช่ตัวที่ตัดค่าจ้างแล้ว — การซิงก์ใบต้องใช้ราคาจริงเสมอ
     // ซิงก์เฉพาะตอนสิ่งที่ใบใช้เปลี่ยนจริง (ราคา/บริการ/ผู้จ่าย) — แก้โน้ตหรือเวลานัดไม่ควรไปแตะใบ
+    let invoiceSyncFailed = false;
     if (invoices.billingSignature(req.case) !== invoices.billingSignature(updated)) {
       /* หาผู้จ่ายด้วย resolvePayer ตัวเดียวกับตอนออกใบ — ของเดิมดูแค่ customer_id ของเคส
          เคสที่ผูกผู้ว่าจ้างไว้ที่แฟ้มผู้ป่วยจึงถูกซิงก์ชื่อผู้จ่ายกลับเป็นชื่อผู้ป่วยทุกครั้งที่แก้เคส */
-      const customer = await resolvePayer(updated);
-      await invoices.syncOpenFromCase(updated, customer);
+      try {
+        const customer = await resolvePayer(updated);
+        await invoices.syncOpenFromCase(updated, customer);
+      } catch (err) {
+        invoiceSyncFailed = true;
+        console.error(`[PATCH /api/cases/${req.params.id}] บันทึกเคสแล้วแต่ซิงก์ใบร่างไม่สำเร็จ:`, err.message);
+      }
     }
 
-    res.json(visible(req, updated));
+    res.json({ ...visible(req, updated), invoice_sync_failed: invoiceSyncFailed });
   }),
 );
 

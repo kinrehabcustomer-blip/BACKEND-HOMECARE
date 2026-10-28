@@ -258,9 +258,11 @@ const SELECT_INVOICE = `
  * ว่าง = ไม่ได้ตั้งราคาเต็มไว้ (แพ็คที่ไม่ใช่โปรโมชัน / เคสที่ไม่ได้เลือกบริการ) = ไม่มีส่วนลดให้แสดง
  */
 const listPriceOf = (c) =>
-  c.service_kind === 'physio' || c.physio_package_id != null
-    ? c.physio_original_price
-    : c.rate_customer_price;
+  c.service_list_price_snapshot ?? (
+    c.service_kind === 'physio' || c.physio_package_id != null
+      ? c.physio_original_price
+      : c.rate_customer_price
+  );
 
 /**
  * แยกค่าจ้างของเคสเป็น "ยอดก่อนลด + ส่วนลด" เพื่อให้ใบแจ้งหนี้แสดงส่วนลดที่ลูกค้าได้รับ
@@ -272,7 +274,8 @@ const listPriceOf = (c) =>
  * ไม่มีราคาเต็ม หรือราคาเต็มไม่เกินค่าจ้าง (เช่น แก้ค่าจ้างเองให้สูงกว่าราคาตั้ง) = ไม่มีส่วนลด
  */
 function priceParts(caseRow) {
-  const net = caseRow.fee ?? 0;
+  // เคสใหม่ใช้ snapshot ณ วันที่เลือกบริการ; เคสเก่าที่ยังว่าง fallback ตารางราคาปัจจุบันเหมือนเดิม
+  const net = caseRow.service_customer_price_snapshot ?? caseRow.fee ?? 0;
   const list = listPriceOf(caseRow);
   // อุปกรณ์เสริมคิดเต็มราคาเสมอ ไม่มีส่วนลด — บวกเข้ายอดก่อนลด ส่วนลดยังเป็นของค่าบริการล้วนๆ
   const extra = addonsTotal(caseRow.addons);
@@ -900,7 +903,7 @@ export async function visitLines(caseRow, { from, to } = {}) {
     params.to = to;
   }
 
-  const [visits, booked] = await Promise.all([
+  const [visits, booked, billed, remaining] = await Promise.all([
     sql.all(
       `SELECT v.visit_id, v.visit_date, v.planned_start, v.planned_end,
               e.first_name || ' ' || e.last_name AS employee_name
@@ -914,6 +917,20 @@ export async function visitLines(caseRow, { from, to } = {}) {
       `SELECT COUNT(*) AS n FROM case_visits WHERE case_id = :id AND status <> 'cancelled'`,
       { id: caseRow.case_id },
     ),
+    sql.one(
+      `SELECT COALESCE(SUM(ii.amount), 0) AS amount
+         FROM invoice_items ii JOIN invoices i ON i.invoice_id = ii.invoice_id
+        WHERE i.case_id = :id AND i.status <> 'cancelled' AND ii.visit_id IS NOT NULL`,
+      { id: caseRow.case_id },
+    ),
+    sql.one(
+      `SELECT COUNT(*)::int AS n FROM case_visits v
+        WHERE v.case_id = :id AND v.status <> 'cancelled'
+          AND NOT EXISTS (
+            SELECT 1 FROM invoice_items ii JOIN invoices i ON i.invoice_id = ii.invoice_id
+             WHERE ii.visit_id = v.visit_id AND i.status <> 'cancelled')`,
+      { id: caseRow.case_id },
+    ),
   ]);
 
   if (visits.length === 0) return { lines: [], amount: 0 };
@@ -921,7 +938,11 @@ export async function visitLines(caseRow, { from, to } = {}) {
   const perVisit = Number(booked.n) > 0 ? (caseRow.fee ?? 0) / Number(booked.n) : 0;
   const rounded = Math.round(perVisit * 100) / 100;
   // เก็บเฉพาะครั้งที่ไปจริง — ยอดรวมจึงเป็นสัดส่วนของกะที่ทำ ไม่ใช่ทั้งแพ็คเกจ
-  const total = Math.round(rounded * visits.length * 100) / 100;
+  const isFinalUnbilledBatch = Number(remaining.n) === visits.length;
+  const outstanding = Math.max(0, Math.round(((caseRow.fee ?? 0) - Number(billed.amount ?? 0)) * 100) / 100);
+  const total = isFinalUnbilledBatch
+    ? outstanding
+    : Math.round(rounded * visits.length * 100) / 100;
 
   const lines = visits.map((v, i) => ({
     seq: i + 1,

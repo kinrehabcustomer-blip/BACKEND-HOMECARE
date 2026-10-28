@@ -212,7 +212,7 @@ authRouter.post(
     const { t, code } = lineCodeSchema.parse(req.body);
     const lineUserId = verifyLineTicket(t);
     if (!lineUserId) throw new ApiError(400, 'ลิงก์จาก LINE หมดอายุแล้ว กลับไปกดปุ่มในเมนู LINE @kinjobs ใหม่อีกครั้ง');
-    const employee = await linkLineByCode(lineUserId, code);
+    const employee = await linkLineByCode(lineUserId, code, { ticket: t });
     await sql.run(
       `UPDATE employees SET last_login_at = to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')
        WHERE employee_id = :id`,
@@ -233,6 +233,9 @@ authRouter.post(
     const { t } = lineLinkSchema.parse(req.body);
     const lineUserId = verifyLineTicket(t);
     if (!lineUserId) throw new ApiError(400, 'ลิงก์จาก LINE หมดอายุแล้ว กรุณากดปุ่มในหน้า "งานของฉัน" ใหม่อีกครั้ง');
+    if (!(await claimLineTicket(t, req.user.employee_id))) {
+      throw new ApiError(409, 'ลิงก์จาก LINE นี้ถูกใช้แล้ว กรุณากดปุ่มใน LINE @kinjobs เพื่อเปิดลิงก์ใหม่');
+    }
     await ensureLineColumn();
 
     const owner = await sql.one('SELECT employee_id FROM employees WHERE line_user_id = :uid', { uid: lineUserId });

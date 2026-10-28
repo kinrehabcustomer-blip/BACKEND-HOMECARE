@@ -16,7 +16,13 @@ import * as repo from '../employees/repo.js';
 import * as cases from '../cases/repo.js';
 import { BLOCKED_STATUSES } from '../lib/auth.js';
 import * as family from '../lib/family.js';
-import { claimDueVisitReminders, claimDueFamilyReminders, claimVisitChanges } from '../notify/visitReminders.js';
+import {
+  claimDueVisitReminders,
+  claimDueFamilyReminders,
+  claimVisitChanges,
+  claimVisitNotificationOutbox,
+  ackVisitNotificationOutbox,
+} from '../notify/visitReminders.js';
 import { ensureCustomerLineColumns as ensureCustomerLineColumnsSafe, findByPhones, linkFromChat } from '../lib/customerLine.js';
 
 /**
@@ -455,7 +461,8 @@ integrationRouter.post(
  * ข้อ 4 ต่อ (ดร.ธงชัย 23 ต.ค. 2569 ทาง ก "ปุ่มส่งรายงานวันนี้ → ฟอร์มเดิมในระบบงาน"):
  * รายงานอาการที่ผู้ดูแลบันทึกผ่านฟอร์มในระบบงาน → ฝั่ง chat ดึงไปส่งสรุปเข้า LINE OA Kin HomeCare ของญาติ
  *   ตั๋ว 'kin-family-feed' {since} — ฝั่ง chat (cron) ดึงรายงานใหม่กว่า report_id ที่ส่งไปแล้ว · ที่นี่ไม่ยิง LINE เอง
- *   ส่งเฉพาะเคสที่มีญาติผูกแล้ว · ข้ามรายงานที่มาจากแชท LINE ("(LINE)" — ฝั่ง chat ส่งไปแล้วตอนรับรายงาน)
+ *   ส่งเฉพาะเคสที่มีญาติผูกแล้ว · รวมรายงานที่มาจากแชท LINE ("(LINE)") ด้วย
+ *   ฝั่ง chat ใช้ outbox กุญแจ (report_id, line_user_id) จึงไม่ส่งซ้ำแม้เส้นตอบทันทีเคยส่งไปแล้ว
  *   ส่งแค่สัญญาณชีพหลัก + อาการ/การดูแล/อาหาร-ขับถ่ายแบบสั้น + ชื่อต้นผู้บันทึก — ไม่ส่งบันทึกภายใน/ติดตามต่อ/GPS
  */
 integrationRouter.post(
@@ -487,7 +494,7 @@ integrationRouter.post(
                   WHERE l.case_id = r.case_id AND l.accepted_at IS NOT NULL AND l.revoked_at IS NULL AND l.line_user_id IS NOT NULL)
               END) AS family
        FROM case_reports r JOIN cases c ON c.case_id = r.case_id
-       WHERE r.report_id > :since AND COALESCE(r.reported_by_name, '') NOT LIKE '%(LINE)'
+       WHERE r.report_id > :since
        ORDER BY r.report_id LIMIT 50`,
       { since: p.since, grace: family.CLOSED_GRACE_DAYS },
     );
@@ -632,15 +639,22 @@ integrationRouter.post(
  */
 /**
  * เตือนนัดพนักงานทาง LINE (ดร.ธงชัย 26 ต.ค. 2569 · notify/visitReminders.js)
- *   /visits/reminders ตั๋ว 'kin-visit-remind' → จองแล้วคืนรายการที่ถึงเวลาเตือน (วันก่อน 08:00 · ก่อนนัด 3 ชม.)
- * chat.kinorigin.com เรียกทุก 15 นาทีแล้วส่งเข้า @kinjobs เอง · จองแล้วไม่คืนซ้ำ ส่งไม่ผ่านก็ไม่วนส่งอีก
+ *   /visits/reminders ตั๋ว 'kin-visit-remind' {ack?: [{id,ok,error}]}
+ * → เข้าคิวรายผู้รับ · claim มี lease · จดส่งแล้วหลัง chat ack สำเร็จเท่านั้น · ล้มลองใหม่ได้ไม่เกิน 3 ครั้ง
  */
 integrationRouter.post(
   '/visits/reminders',
   asyncRoute(async (req, res) => {
     const { token } = hireSchema.parse(req.body);
-    if (!verifySigned(token, 'kin-visit-remind')) throw new ApiError(401, 'ลายเซ็นไม่ถูกต้องหรือหมดอายุ');
-    res.json({ reminders: await claimDueVisitReminders(), family: await claimDueFamilyReminders(), changes: await claimVisitChanges() });
+    const p = verifySigned(token, 'kin-visit-remind');
+    if (!p) throw new ApiError(401, 'ลายเซ็นไม่ถูกต้องหรือหมดอายุ');
+    if (Array.isArray(p.ack)) {
+      return res.json({ acked: await ackVisitNotificationOutbox(p.ack), pending: [] });
+    }
+    await claimDueVisitReminders();
+    await claimDueFamilyReminders();
+    await claimVisitChanges();
+    res.json({ acked: 0, pending: await claimVisitNotificationOutbox() });
   }),
 );
 

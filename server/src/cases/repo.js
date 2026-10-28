@@ -56,6 +56,39 @@ const COLUMNS = [
   'note',
 ];
 
+let priceSnapshotReady = null;
+export const ensureCasePriceSnapshots = () =>
+  (priceSnapshotReady ??= (async () => {
+    await sql.run('ALTER TABLE cases ADD COLUMN IF NOT EXISTS service_list_price_snapshot DOUBLE PRECISION');
+    await sql.run('ALTER TABLE cases ADD COLUMN IF NOT EXISTS service_customer_price_snapshot DOUBLE PRECISION');
+  })().catch((err) => { priceSnapshotReady = null; throw err; }));
+
+async function servicePriceSnapshot(db, s) {
+  if (s.physio_package_id) {
+    const p = await db.one(
+      'SELECT original_price, special_price FROM physio_packages WHERE physio_package_id = :id',
+      { id: s.physio_package_id },
+    );
+    return {
+      list: p?.original_price ?? null,
+      customer: s.fee ?? p?.special_price ?? p?.original_price ?? null,
+    };
+  }
+  if (s.pkg_format_id && s.pkg_staff_tier) {
+    const r = await db.one(
+      `SELECT customer_price, discount_percent, discount_amount FROM pkg_rates
+        WHERE format_id=:format AND grade_id IS NOT DISTINCT FROM :grade AND staff_tier=:tier`,
+      { format: s.pkg_format_id, grade: s.pkg_grade_id ?? null, tier: s.pkg_staff_tier },
+    );
+    const list = r?.customer_price ?? null;
+    const discount = r?.discount_percent != null
+      ? Number(list || 0) * Number(r.discount_percent) / 100
+      : Number(r?.discount_amount || 0);
+    return { list, customer: s.fee ?? (list == null ? null : Math.max(0, list - discount)) };
+  }
+  return { list: null, customer: s.fee ?? null };
+}
+
 const NOW = `to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')`;
 
 /**
@@ -545,7 +578,8 @@ async function ensureCaseCodeFree(db, code, exceptId = null) {
   }
 }
 
-export function create(rawInput, actor) {
+export async function create(rawInput, actor) {
+  await ensureCasePriceSnapshots();
   const input = clearUnusedKind(rawInput);
   return transaction(async (tx) => {
     /* ต่อเคส — ล็อกเคสรอบก่อนไว้ก่อนเช็ค เพื่อให้กดต่อพร้อมกันสองครั้งได้รอบใหม่แค่ใบเดียว
@@ -569,6 +603,9 @@ export function create(rawInput, actor) {
 
     // ไม่ได้ส่งค่าจ้างมา = ใช้ของแพ็คเกจ · ส่งตัวเลขมาเอง (รวม 0) = เคารพตามนั้น
     if (values.staff_pay == null) values.staff_pay = await payFromService(input, tx);
+    const priceSnapshot = await servicePriceSnapshot(tx, values);
+    values.service_list_price_snapshot = priceSnapshot.list;
+    values.service_customer_price_snapshot = priceSnapshot.customer;
 
     // ไม่มีช่องกรอกชื่อเคสแล้ว — ปกติหน้าเว็บส่งชื่อที่ประกอบจากแพ็คเกจ+ผู้ป่วยมาให้
     // ถ้าเรียก API ตรงๆ โดยไม่ส่ง title มา ใช้ชื่อผู้ป่วยแทน เพื่อไม่ให้ชน NOT NULL
@@ -588,9 +625,10 @@ export function create(rawInput, actor) {
     const assignedAt = values.assigned_to ? NOW : 'NULL';
 
     await tx.one(
-      `INSERT INTO cases (case_id, status, assigned_to, assigned_at, renewed_from, round_no, ${COLUMNS.join(', ')})
+      `INSERT INTO cases (case_id, status, assigned_to, assigned_at, renewed_from, round_no,
+                          service_list_price_snapshot, service_customer_price_snapshot, ${COLUMNS.join(', ')})
        VALUES (:case_id, :status, :assigned_to, ${assignedAt}, :renewed_from, :round_no,
-               ${COLUMNS.map((c) => `:${c}`).join(', ')})
+                :service_list_price_snapshot, :service_customer_price_snapshot, ${COLUMNS.map((c) => `:${c}`).join(', ')})
        RETURNING case_id`,
       values,
     );
@@ -776,6 +814,7 @@ async function patientForNamedCase(tx, current, values, patientCode) {
 }
 
 export async function update(caseId, rawInput, actor) {
+  await ensureCasePriceSnapshots();
   // สลับสายบริการตอนแก้เคส ต้องล้างของสายเดิมด้วย ไม่งั้นค้างเป็นเคสที่มีทั้งเรท Homecare และแพ็คเกจกายภาพบำบัด
   const input = clearUnusedKind(rawInput);
   /* เปลี่ยนรหัสเคส (เช่น CASE-0007 → VN690215209) — ทุกตารางที่อ้างเคสเป็น ON UPDATE CASCADE
@@ -805,6 +844,13 @@ export async function update(caseId, rawInput, actor) {
     if (payMode !== 'preserve') {
       if (!fields.includes('staff_pay')) fields.push('staff_pay');
       values.staff_pay = payState.staff_pay;
+    }
+
+    if (serviceChanged(current, values) || 'fee' in values) {
+      const priceSnapshot = await servicePriceSnapshot(tx, { ...current, ...values });
+      values.service_list_price_snapshot = priceSnapshot.list;
+      values.service_customer_price_snapshot = priceSnapshot.customer;
+      fields.push('service_list_price_snapshot', 'service_customer_price_snapshot');
     }
 
     // เคสที่เปิดโดยรู้แค่ผู้ว่าจ้าง เพิ่งได้ชื่อผู้ป่วย → สร้างแฟ้มผู้ป่วยแล้วผูกกับเคส (ทรานแซกชันเดียวกัน)

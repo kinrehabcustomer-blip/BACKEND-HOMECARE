@@ -9,7 +9,7 @@ import { ensureCustomerLineColumns } from '../lib/customerLine.js';
  *
  * ระบบนี้ไม่ส่ง LINE เอง — chat.kinorigin.com (cron ทุก 15 นาที) ยิงมาที่ /api/integration/visits/reminders
  * แล้วรับรายการไปส่งเอง (ทางเดียวกับใบแจ้งหนี้ invoices/share.js)
- * จองก่อนส่ง (UPDATE ... RETURNING) — cron สองรอบซ้อนกันได้รายการคนละชุด ไม่เตือนซ้ำ
+ * เข้าคิวรายผู้รับ แล้ว claim ด้วย lease + ack หลังส่งจริง — cron ซ้อนไม่หยิบแถวเดียวกัน
  * ย้ายวัน/เวลา/คนของกะ = ล้างตราเตือน (cases/repo.js updateVisit) จึงเตือนใหม่ตามนัดใหม่
  */
 let ready = null;
@@ -20,6 +20,88 @@ export const ensureVisitReminderColumns = () =>
       ready = null;
       throw err;
     }));
+
+let outboxReady = null;
+export const ensureVisitNotificationOutbox = () =>
+  (outboxReady ??= (async () => {
+    await sql.run(`CREATE TABLE IF NOT EXISTS visit_notification_outbox (
+      id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+      dedupe_key TEXT NOT NULL UNIQUE,
+      channel TEXT NOT NULL,
+      recipient_line_user_id TEXT NOT NULL,
+      event_kind TEXT NOT NULL,
+      visit_id INTEGER,
+      payload JSONB NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      attempts INTEGER NOT NULL DEFAULT 0,
+      claimed_at TIMESTAMPTZ,
+      sent_at TIMESTAMPTZ,
+      error TEXT
+    )`);
+    await sql.run(`CREATE INDEX IF NOT EXISTS idx_visit_notification_pending
+      ON visit_notification_outbox(created_at)
+      WHERE sent_at IS NULL AND attempts < 3`);
+  })().catch((err) => { outboxReady = null; throw err; }));
+
+async function queueVisitNotification({ key, channel, recipient, eventKind, visitId, payload }) {
+  if (!recipient) return;
+  await ensureVisitNotificationOutbox();
+  await sql.run(
+    `INSERT INTO visit_notification_outbox
+       (dedupe_key, channel, recipient_line_user_id, event_kind, visit_id, payload)
+     VALUES (:key, :channel, :recipient, :eventKind, :visitId, :payload::jsonb)
+     ON CONFLICT (dedupe_key) DO NOTHING`,
+    { key, channel, recipient, eventKind, visitId, payload: JSON.stringify(payload) },
+  );
+}
+
+/** lease 10 นาที + เพิ่ม attempts ตอน claim; แต่ละผู้รับเป็นคนละแถว */
+export async function claimVisitNotificationOutbox(limit = 120) {
+  await ensureVisitNotificationOutbox();
+  return sql.all(
+    `UPDATE visit_notification_outbox o
+        SET claimed_at = now(), attempts = attempts + 1
+       FROM (
+         SELECT id FROM visit_notification_outbox
+          WHERE sent_at IS NULL AND attempts < 3
+            AND (claimed_at IS NULL OR claimed_at < now() - interval '10 minutes')
+          ORDER BY created_at, id
+          LIMIT :limit FOR UPDATE SKIP LOCKED
+       ) q
+      WHERE o.id = q.id
+      RETURNING o.id, o.channel, o.recipient_line_user_id, o.event_kind, o.visit_id, o.payload, o.attempts`,
+    { limit },
+  );
+}
+
+export async function ackVisitNotificationOutbox(results) {
+  await ensureVisitNotificationOutbox();
+  let acked = 0;
+  for (const r of Array.isArray(results) ? results.slice(0, 200) : []) {
+    const id = Number(r?.id);
+    if (!Number.isSafeInteger(id)) continue;
+    if (r.ok === true) {
+      const row = await sql.one(
+        `UPDATE visit_notification_outbox SET sent_at = now(), claimed_at = NULL, error = NULL
+          WHERE id = :id AND sent_at IS NULL RETURNING visit_id, event_kind`,
+        { id },
+      );
+      if (row?.visit_id && ['day', '3h', 'family'].includes(row.event_kind)) {
+        const col = row.event_kind === 'day' ? 'remind_day_at' : row.event_kind === '3h' ? 'remind_3h_at' : 'remind_family_at';
+        await sql.run(`UPDATE case_visits SET ${col} = ${NOW_TEXT} WHERE visit_id = :visitId`, { visitId: row.visit_id });
+      }
+      if (row) acked++;
+    } else {
+      acked += await sql.run(
+        `UPDATE visit_notification_outbox
+            SET claimed_at = NULL, error = left(:error, 1000)
+          WHERE id = :id AND sent_at IS NULL`,
+        { id, error: String(r?.error || 'ส่งไม่สำเร็จ') },
+      );
+    }
+  }
+  return acked;
+}
 
 const NOW_TEXT = `to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')`;
 // เวลาเริ่มนัดเป็น timestamptz — ไม่ระบุเวลา ถือว่า 08:00 (ใช้กับรอบ day เท่านั้น)
@@ -39,15 +121,16 @@ async function claim(kind) {
         `now() >= ${DAY_AT} AND now() < ${START_AT} - interval '3 hours'`
       : `v.planned_start IS NOT NULL AND now() >= ${START_AT} - interval '3 hours'`;
   return sql.all(
-    `UPDATE case_visits v SET ${col} = ${NOW_TEXT}
-     FROM cases c, employees e
+    `SELECT v.visit_id
+     FROM case_visits v, cases c, employees e
      WHERE c.case_id = v.case_id AND e.employee_id = v.assigned_to
        AND v.${col} IS NULL AND ${ELIGIBLE} AND ${due}
        AND v.visit_id IN (
          SELECT v2.visit_id FROM case_visits v2
          WHERE v2.status = 'scheduled' AND v2.visit_date BETWEEN to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD')
-                                                           AND to_char((now() AT TIME ZONE 'Asia/Bangkok') + interval '2 days', 'YYYY-MM-DD'))
-     RETURNING v.visit_id`,
+                                                           AND to_char((now() AT TIME ZONE 'Asia/Bangkok') + interval '2 days', 'YYYY-MM-DD')
+       )
+     ORDER BY v.visit_id LIMIT 120`,
   );
 }
 
@@ -79,7 +162,15 @@ export async function claimDueVisitReminders() {
        WHERE v.visit_id IN (${slots})`,
       params,
     );
-    for (const r of rows) out.push({ kind, ...r });
+    for (const r of rows) {
+      const item = { kind, ...r };
+      out.push(item);
+      await queueVisitNotification({
+        key: `reminder:${kind}:${r.visit_id}:${r.visit_date}:${r.planned_start ?? ''}:${r.line_user_id}`,
+        channel: 'staff', recipient: r.line_user_id, eventKind: kind, visitId: r.visit_id,
+        payload: { type: 'staff_reminder', data: item },
+      });
+    }
   }
   return out;
 }
@@ -104,8 +195,8 @@ export async function claimDueFamilyReminders() {
   await ensureCustomerLineColumns();
   const ids = (
     await sql.all(
-      `UPDATE case_visits v SET remind_family_at = ${NOW_TEXT}
-       FROM cases c
+      `SELECT v.visit_id
+       FROM case_visits v, cases c
        WHERE c.case_id = v.case_id AND v.remind_family_at IS NULL
          AND v.status = 'scheduled' AND v.check_in_at IS NULL AND v.planned_start IS NOT NULL
          AND c.status IN ('unassigned', 'assigned', 'in_progress') AND ${PHYSIO}
@@ -113,13 +204,13 @@ export async function claimDueFamilyReminders() {
          AND ${FAMILY_IDS} IS NOT NULL
          AND v.visit_date BETWEEN to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD')
                               AND to_char((now() AT TIME ZONE 'Asia/Bangkok') + interval '2 days', 'YYYY-MM-DD')
-       RETURNING v.visit_id`,
+       ORDER BY v.visit_id LIMIT 120`,
     )
   ).map((r) => r.visit_id);
   if (!ids.length) return [];
   const slots = ids.map((_, i) => `:v${i}`).join(', ');
   const params = Object.fromEntries(ids.map((id, i) => [`v${i}`, id]));
-  return sql.all(
+  const rows = await sql.all(
     `SELECT 'family' AS kind, v.visit_id, v.case_id, v.visit_date, v.planned_start, v.planned_end,
             c.client_name, pp.sessions AS package_sessions,
             (SELECT COUNT(*) FROM case_visits o
@@ -135,6 +226,16 @@ export async function claimDueFamilyReminders() {
      WHERE v.visit_id IN (${slots})`,
     params,
   );
+  for (const r of rows) {
+    for (const uid of (r.recipients ?? []).slice(0, 6)) {
+      await queueVisitNotification({
+        key: `family-reminder:${r.visit_id}:${r.visit_date}:${r.planned_start ?? ''}:${uid}`,
+        channel: 'family', recipient: uid, eventKind: 'family', visitId: r.visit_id,
+        payload: { type: 'family_reminder', data: { ...r, recipients: undefined } },
+      });
+    }
+  }
+  return rows;
 }
 
 /**
@@ -197,11 +298,11 @@ export async function claimVisitChanges() {
   await ensureCustomerLineColumns();
   // รอ 2 นาทีหลังแก้ครั้งสุดท้าย — แอดมินมักแก้วันแล้วแก้เวลาต่อทันที ไม่ควรได้สองข้อความ
   const rows = await sql.all(
-    `UPDATE visit_change_outbox o SET claimed_at = now()
+    `SELECT o.* FROM visit_change_outbox o
      WHERE o.claimed_at IS NULL
        AND NOT EXISTS (SELECT 1 FROM visit_change_outbox n
                         WHERE n.visit_id = o.visit_id AND n.claimed_at IS NULL AND n.created_at > now() - interval '2 minutes')
-     RETURNING o.*`,
+     ORDER BY o.change_id LIMIT 120`,
   );
   if (!rows.length) return [];
   const byVisit = new Map();
@@ -226,13 +327,40 @@ export async function claimVisitChanges() {
     if (!info) continue;
     const staff = info.staff ?? [];
     const find = (id) => staff.find((s) => s.employee_id === id) ?? null;
-    out.push({
+    const change = {
       kind: r.kind, visit_id: r.visit_id, case_id: r.case_id, client_name: info.client_name,
       old: { date: r.old_date, start: r.old_start, end: r.old_end, staff: find(r.old_assignee) },
       new: { date: r.new_date, start: r.new_start, end: r.new_end, staff: find(r.new_assignee) },
       // เปลี่ยนแค่คน = เรื่องภายใน ไม่แจ้งญาติ
       family: r.kind === 'reassigned' ? [] : info.family ?? [],
-    });
+      change_id: r.change_id,
+    };
+    out.push(change);
+    const people = [change.old.staff, change.new.staff].filter(
+      (p, i, a) => p?.line_user_id && a.findIndex((q) => q?.employee_id === p.employee_id) === i,
+    );
+    for (const person of people) {
+      await queueVisitNotification({
+        key: `visit-change:${r.change_id}:staff:${person.line_user_id}`,
+        channel: 'staff', recipient: person.line_user_id, eventKind: r.kind, visitId: r.visit_id,
+        payload: { type: 'staff_change', data: change, recipient: person },
+      });
+    }
+    for (const uid of change.family.slice(0, 6)) {
+      await queueVisitNotification({
+        key: `visit-change:${r.change_id}:family:${uid}`,
+        channel: 'family', recipient: uid, eventKind: r.kind, visitId: r.visit_id,
+        payload: { type: 'family_change', data: change },
+      });
+    }
+  }
+  // mark แหล่งเหตุการณ์ว่า "เข้าคิวทนทานแล้ว" ไม่ใช่ "ส่งแล้ว"
+  for (const r of byVisit.values()) {
+    await sql.run(
+      `UPDATE visit_change_outbox SET claimed_at = now()
+        WHERE visit_id = :visitId AND change_id <= :changeId AND claimed_at IS NULL`,
+      { visitId: r.visit_id, changeId: r.change_id },
+    );
   }
   return out;
 }

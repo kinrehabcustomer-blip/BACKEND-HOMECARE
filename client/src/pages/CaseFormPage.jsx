@@ -866,14 +866,22 @@ export default function CaseFormPage() {
         const { assigned_to: _unused, ...rest } = payload;
         const updated = await api.updateCase(id, rest);
         await saveRelation(updated.patient_id);
-        toast(updated.case_id !== id ? `บันทึกแล้ว · เปลี่ยนรหัสเคสเป็น ${updated.case_id}` : 'บันทึกการแก้ไขแล้ว');
+        toast(
+          updated.invoice_sync_failed
+            ? "บันทึกเคสแล้ว แต่ใบร่างยังไม่อัปเดต กด 'รีเฟรชใบ' ในหน้าใบแจ้งหนี้ค่ะ"
+            : updated.case_id !== id
+            ? `บันทึกแล้ว · เปลี่ยนรหัสเคสเป็น ${updated.case_id}`
+            : 'บันทึกการแก้ไขแล้ว',
+        );
         navigate(`/cases?open=${updated.case_id}`); // เปลี่ยนรหัสแล้วเคสเดิมไม่มีอยู่ที่รหัสเก่า
       } else {
         if (renewFrom) payload.renewed_from = renewFrom;
         const created = await api.createCase(payload);
         await saveRelation(created.patient_id);
         toast(
-          renewFrom
+          created.invoice_draft_created === false
+            ? `เปิดเคส ${created.case_id} แล้ว แต่ใบร่างยังไม่เกิด กรุณาไปหน้าใบแจ้งหนี้แล้วกด "สร้างใบร่าง" ค่ะ`
+            : renewFrom
             ? `ต่อเคสเป็น ${created.case_id} (รอบที่ ${created.round_no}) แล้ว · ระบบออกใบแจ้งหนี้ (ร่าง) ของรอบนี้ให้เรียบร้อย`
             : `เปิดเคส ${created.case_id} แล้ว · ระบบออกใบแจ้งหนี้ (ร่าง) ให้เรียบร้อย`,
         );
