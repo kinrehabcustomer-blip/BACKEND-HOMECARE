@@ -2717,6 +2717,10 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
 .inv-words { text-align: center !important; font-weight: 600; }
 
 .inv-methods { display: flex; gap: 2.5rem; flex-wrap: wrap; margin-top: 0.75rem !important; }
+.inv-payment-channel {
+  display: grid; gap: 0.2rem; margin-top: 0.75rem; padding: 0.625rem 0.75rem;
+  border: 1px solid #000; border-radius: 0.25rem; break-inside: avoid;
+}
 .inv-line { margin-top: 0.5rem !important; }
 
 /* บล็อกลายเซ็น — ชิดขวาเหมือนฟอร์มตัวอย่าง */
@@ -4961,7 +4965,7 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
 .addons-field > .muted { margin: 0 0 0.75rem; }
 .addon-row {
   display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(0, 0.7fr) minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1.7fr) minmax(0, 0.8fr) minmax(0, 0.7fr) minmax(0, 1fr) auto auto;
   gap: 0.625rem;
   align-items: end;
   margin-bottom: 0.75rem;
@@ -4985,6 +4989,7 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
     border-radius: 8px;
   }
   .addon-row > label:first-child { grid-column: 1 / -1; }
+  .addon-row > label:nth-child(4) { grid-column: 1 / -1; }
   .addon-amount { padding-bottom: 0; align-self: center; font-size: 0.9375rem; }
   .addon-row .btn { justify-self: end; }
   .addon-foot { flex-direction: column; align-items: stretch; }

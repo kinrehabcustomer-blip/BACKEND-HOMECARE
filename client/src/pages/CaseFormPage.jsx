@@ -43,7 +43,7 @@ const BLANK = {
 
   // fee = ค่าบริการที่ลูกค้าจ่าย · staff_pay = ค่าจ้างที่พนักงานได้เมื่อปิดเคส (คนละตัวเลข)
   start_date: '', end_date: '', fee: '', staff_pay: '', note: '',
-  // อุปกรณ์เสริมที่คิดเงินเพิ่ม [{ name, quantity, unit_price }] — บวกเข้ายอดใบแจ้งหนี้ ไม่รวมในค่าบริการ
+  // อุปกรณ์เสริมที่คิดเงินเพิ่ม [{ name, kind, quantity, unit_price }] — บวกเข้ายอดใบแจ้งหนี้ ไม่รวมในค่าบริการ
   addons: [],
   // รหัสผู้รับบริการ (KN…) ของแฟ้มที่จะสร้างใหม่ — ไม่ใช่คอลัมน์ของเคส (ถูกตัดออกก่อนบันทึกเคส)
   patient_code: '',
@@ -54,7 +54,7 @@ const BLANK = {
    โหลดเคสมาแก้แล้วแปลงกลับเป็นช่องว่าง ให้กรอกชื่อจริงทับได้เลย ไม่ต้องลบคำนี้ออกเอง */
 const PATIENT_PENDING = 'ยังไม่ระบุผู้รับบริการ';
 
-const BLANK_ADDON = { name: '', quantity: '1', unit_price: '' };
+const BLANK_ADDON = { name: '', kind: 'rent', quantity: '1', unit_price: '' };
 
 /** ยอดของบรรทัด — ปัดสองตำแหน่งแบบเดียวกับ server/src/lib/addons.js ตัวเลขบนฟอร์มจะได้ตรงกับใบ */
 const addonAmount = (a) => Math.round(Number(a.quantity || 0) * Number(a.unit_price || 0) * 100) / 100;
@@ -66,6 +66,7 @@ const addonsPayload = (list) =>
     .filter((a) => String(a.name).trim() !== '' || String(a.unit_price) !== '')
     .map((a) => ({
       name: String(a.name).trim(),
+      kind: a.kind === 'sale' ? 'sale' : 'rent',
       quantity: Number(a.quantity === '' ? 1 : a.quantity),
       unit_price: Number(a.unit_price === '' ? 0 : a.unit_price),
     }));
@@ -456,7 +457,7 @@ export default function CaseFormPage() {
         for (const key of Object.keys(BLANK)) filled[key] = c[key] ?? '';
         if (filled.client_name === PATIENT_PENDING) filled.client_name = '';
         filled.addons = (c.addons ?? []).map((a) => ({
-          name: a.name, quantity: String(a.quantity), unit_price: String(a.unit_price),
+          name: a.name, kind: a.kind === 'sale' ? 'sale' : 'rent', quantity: String(a.quantity), unit_price: String(a.unit_price),
         }));
         if (!filled.service_kind) {
           if (filled.physio_package_id !== '') filled.service_kind = 'physio';
@@ -545,7 +546,7 @@ export default function CaseFormPage() {
         for (const key of Object.keys(BLANK)) filled[key] = c[key] ?? '';
         if (filled.client_name === PATIENT_PENDING) filled.client_name = '';
         filled.addons = (c.addons ?? []).map((a) => ({
-          name: a.name, quantity: String(a.quantity), unit_price: String(a.unit_price),
+          name: a.name, kind: a.kind === 'sale' ? 'sale' : 'rent', quantity: String(a.quantity), unit_price: String(a.unit_price),
         }));
 
         // เคสที่เปิดก่อนมีสองสายไม่มี service_kind — เดาจากสิ่งที่ผูกไว้จริง
@@ -1224,6 +1225,16 @@ export default function CaseFormPage() {
                   onChange={(e) => setAddon(i, 'name', e.target.value)}
                 />
                 {fieldError(`addons.${i}.name`)}
+              </label>
+              <label>รูปแบบ
+                <select
+                  name={`addons.${i}.kind`}
+                  value={a.kind}
+                  onChange={(e) => setAddon(i, 'kind', e.target.value)}
+                >
+                  <option value="rent">เช่า</option>
+                  <option value="sale">ซื้อขาด</option>
+                </select>
               </label>
               <label>จำนวน
                 <input

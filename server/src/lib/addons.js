@@ -1,5 +1,5 @@
 /**
- * อุปกรณ์เสริมของเคส — รายการที่คิดเงินเพิ่มจากค่าบริการ [{ name, quantity, unit_price }]
+ * อุปกรณ์เสริมของเคส — รายการที่คิดเงินเพิ่มจากค่าบริการ [{ name, kind, quantity, unit_price }]
  *
  * ยอดของแต่ละบรรทัดปัดสองตำแหน่งก่อนรวม ให้ตรงกับ addonsTotalSql ทุกสตางค์
  * (ป้าย "ไม่ตรงกับเคส" เทียบยอดจากสองฝั่งนี้ — ปัดคนละจังหวะแล้วจะขึ้นป้ายทั้งที่ยอดถูก)
@@ -10,6 +10,8 @@ const round2 = (n) => Math.round(Number(n) * 100) / 100;
 export const normalizeAddons = (addons) =>
   (Array.isArray(addons) ? addons : []).map((a) => ({
     name: String(a.name ?? '').trim(),
+    // ข้อมูลเก่าไม่มี kind และค่าที่ไม่รู้จักต้องตีเป็นเช่า — มีเพียง sale ที่แปลว่าซื้อขาด
+    kind: a.kind === 'sale' ? 'sale' : 'rent',
     quantity: Number(a.quantity ?? 1),
     unit_price: Number(a.unit_price ?? 0),
   }));

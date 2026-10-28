@@ -101,6 +101,7 @@ const caseFields = z.object({
     .array(
       z.object({
         name: z.string().trim().min(1, 'กรุณากรอกชื่ออุปกรณ์').max(200),
+        kind: z.enum(['rent', 'sale'], { errorMap: () => ({ message: 'กรุณาเลือกเช่าหรือซื้อขาด' }) }).optional(),
         quantity: z.number().positive('จำนวนต้องมากกว่า 0').max(10000),
         unit_price: z.number().nonnegative('ราคาต้องไม่ติดลบ').max(10_000_000),
       }),

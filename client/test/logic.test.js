@@ -15,6 +15,34 @@ import {
   distanceText, ageFromBirthDate, toBuddhistYear, formatPeriod, todayTH,
 } from '../src/labels.js';
 import { dayLabel, timeRange, CAL_STATES } from '../src/lib/calendarUi.js';
+import { ISSUER, TRANSFER_ACCOUNT_TEXT, TRANSFER_PAYMENT_INSTRUCTION } from '../src/lib/issuer.js';
+import { customerAddonDescription, customerItemDescription } from '../src/lib/customerInvoice.js';
+
+describe('เอกสารลูกค้า HomeCare', () => {
+  test('ข้อมูลผู้ออกและบัญชีรับโอนตรงกับบิลจริง', () => {
+    assert.equal(ISSUER.brand, 'คิน เวลเนส สหคลินิก');
+    assert.equal(ISSUER.name, 'บริษัท ทีทรี สโตรก เนอสซิ่งโฮม จำกัด (สำนักงานใหญ่)');
+    assert.equal(ISSUER.taxId, '0105561155236');
+    assert.equal(ISSUER.tel, '061-881-9399');
+    assert.equal(ISSUER.transfer.copyNumber, '0471475769');
+    assert.match(TRANSFER_ACCOUNT_TEXT, /047-1-47576-9/);
+    assert.match(TRANSFER_PAYMENT_INSTRUCTION, /LINE KIN HomeCare/);
+  });
+
+  test('เอกสารลูกค้าซ่อนชื่อบริการ/ของเช่า แต่ซื้อขาดคงชื่อสินค้าจริง', () => {
+    const item = {
+      items: [{ seq: 1 }, { seq: 2 }, { seq: 3 }],
+      addons: [
+        { name: 'เตียงผู้ป่วย', kind: 'rent' },
+        { name: 'เครื่องวัดความดัน', kind: 'sale' },
+      ],
+    };
+    assert.equal(customerItemDescription(item, 0), 'ค่าบริการทางการแพทย์');
+    assert.equal(customerItemDescription(item, 1), 'ค่าบริการทางการแพทย์');
+    assert.equal(customerItemDescription(item, 2), 'เครื่องวัดความดัน');
+    assert.equal(customerAddonDescription({ name: 'ของเก่าไม่มี kind' }), 'ค่าบริการทางการแพทย์');
+  });
+});
 
 describe('stampText — เวลาในประวัติการทำรายการ', () => {
   test('ค่าที่ไม่มีโซนเวลา = เวลาไทยอยู่แล้ว ห้ามบวกเพิ่มอีก 7 ชั่วโมง', () => {

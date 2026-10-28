@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { api } from '../api.js';
 import CustomerInvoiceDoc from '../components/CustomerInvoiceDoc.jsx';
+import { ISSUER } from '../lib/issuer.js';
 
 /**
  * ใบแจ้งหนี้/ใบเสร็จที่ส่งเข้า LINE ลูกค้า (ดร.ธงชัย 24 ต.ค. 2569 ข้อ 4) — /bill/:token
@@ -15,6 +16,8 @@ export default function PublicBillPage() {
   const [slipError, setSlipError] = useState(null);
   const [slipMessage, setSlipMessage] = useState('');
   const [uploading, setUploading] = useState(false);
+  const [accountCopyMessage, setAccountCopyMessage] = useState('');
+  const [accountCopyError, setAccountCopyError] = useState('');
 
   useEffect(() => {
     api.publicBill(token).then(setItem).catch((e) => setError(e.message));
@@ -45,6 +48,17 @@ export default function PublicBillPage() {
   if (!item) return <p className="muted app-loading">กำลังเปิดเอกสาร…</p>;
 
   const canAttachSlip = item.status === 'issued' && Number(item.balance) > 0;
+  const copyAccount = async () => {
+    setAccountCopyMessage('');
+    setAccountCopyError('');
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('clipboard unavailable');
+      await navigator.clipboard.writeText(ISSUER.transfer.copyNumber);
+      setAccountCopyMessage('คัดลอกเลขบัญชีแล้ว');
+    } catch {
+      setAccountCopyError(`คัดลอกอัตโนมัติไม่ได้ กรุณาคัดลอกเลข ${ISSUER.transfer.copyNumber}`);
+    }
+  };
   const uploadSlip = async (event) => {
     const file = event.target.files?.[0];
     event.target.value = '';
@@ -85,7 +99,7 @@ export default function PublicBillPage() {
               'ทีม KIN HomeCare จะติดต่อเรื่องเอกสารฉบับใหม่หรือการคืนเงินค่ะ'
             : 'ไม่ต้องชำระยอดในเอกสารฉบับนี้ค่ะ — หากมีเอกสารฉบับใหม่ ทีมงานจะส่งให้ทางแชท LINE'}
           <br />
-          สอบถามได้ที่แชท LINE KIN HomeCare หรือ 061-881-9399 ค่ะ
+          สอบถามได้ที่แชท LINE KIN HomeCare หรือ {ISSUER.tel} ค่ะ
         </div>
       )}
       <div className="bill-scroll">
@@ -95,6 +109,9 @@ export default function PublicBillPage() {
       </div>
       {canAttachSlip && (
         <section className="bill-slip-upload no-print" aria-live="polite">
+          <button className="btn" type="button" onClick={copyAccount}>คัดลอกเลขบัญชี</button>
+          {accountCopyMessage && <p className="success-msg">{accountCopyMessage}</p>}
+          {accountCopyError && <p className="error-msg">{accountCopyError}</p>}
           <b>โอนเงินแล้ว แนบสลิปได้ที่นี่</b>
           <p>รับรูป JPG, PNG หรือ WEBP ขนาดไม่เกิน 8 MB</p>
           <label className={`btn primary${uploading ? ' disabled' : ''}`}>
