@@ -16,6 +16,7 @@ import { integrationRouter } from './integration/routes.js';
 import { familyRouter } from './family/routes.js';
 import { publicReviewsRouter, reviewsRouter } from './reviews/routes.js';
 import { publicBillRouter } from './invoices/publicRoutes.js';
+import { ensureReviewColumns } from './reviews/repo.js';
 import { errorHandler } from './lib/errors.js';
 import { requireAuth, requireAdmin, requireBilling, requireCaseAccess, requireManager, requirePasswordChanged, ensureRevokedSessions } from './lib/auth.js';
 
@@ -25,6 +26,8 @@ export function createApp() {
      ไม่ await ที่นี่ (createApp ไม่ใช่ async) — คำขอแรก ๆ ที่มาก่อนตารางเสร็จจะได้ 500 หนึ่งครั้ง
      แล้วหายเอง · บนของจริง schema.sql สร้างให้ตั้งแต่ migrate อยู่แล้ว */
   ensureRevokedSessions().catch((err) => console.error('[auth] สร้างตาราง revoked_sessions ไม่ได้ —', err.message));
+  // คอลัมน์ของลิงก์ประเมิน — เหตุผลเดียวกัน (ดู reviews/repo.js)
+  ensureReviewColumns().catch((err) => console.error('[reviews] เพิ่มคอลัมน์ review_token_issued_at ไม่ได้ —', err.message));
 
   const app = express();
   // อยู่หลัง proxy ของ Vercel — req.ip = IP ผู้ใช้จริง (ตัวกันยิงถี่ /api/public/bill ไม่นับทุกคนเป็น IP เดียว)

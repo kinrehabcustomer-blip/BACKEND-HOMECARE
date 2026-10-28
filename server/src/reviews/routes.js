@@ -46,7 +46,7 @@ publicReviewsRouter.get(
       throw notFound('ลิงก์แบบประเมินนี้ปิดรับแล้ว — กรุณาสอบถามเจ้าหน้าที่');
     }
     // ตำแหน่งไว้ให้ฟอร์มเรียกชื่อให้ถูก ("นักกายภาพบำบัด" / "พยาบาลวิชาชีพ" ฯลฯ) — ไม่ใช่ข้อมูลลับ
-    res.json({ first_name: employee.first_name, last_name: employee.last_name, position: employee.position });
+    res.json({ first_name: employee.first_name, nickname: employee.nickname, position: employee.position });
   }),
 );
 
@@ -62,14 +62,22 @@ publicReviewsRouter.post(
     const input = reviewSubmitSchema.parse(req.body);
     const ipHash = fingerprint(req);
 
-    if (await repo.recentDuplicate(employee.employee_id, ipHash, DUPLICATE_WINDOW_MIN)) {
+    const result = await repo.submitProtected(
+      req.params.token,
+      input,
+      ipHash,
+      DUPLICATE_WINDOW_MIN,
+      DAILY_CAP,
+    );
+    if (result.reason === 'invalid_token' || result.reason === 'resigned') {
+      throw notFound('ลิงก์แบบประเมินนี้ใช้ไม่ได้แล้ว — กรุณาขอลิงก์ใหม่จากเจ้าหน้าที่');
+    }
+    if (result.reason === 'duplicate') {
       throw new ApiError(409, 'ระบบได้รับแบบประเมินจากเครื่องนี้แล้ว ขอบคุณมากค่ะ');
     }
-    if ((await repo.countRecent(employee.employee_id)) >= DAILY_CAP) {
+    if (result.reason === 'daily_cap') {
       throw new ApiError(429, 'วันนี้ระบบรับแบบประเมินของพนักงานท่านนี้ครบแล้ว — กรุณาลองใหม่พรุ่งนี้');
     }
-
-    await repo.submit(employee.employee_id, input, ipHash);
     // ไม่คืนอะไรกลับไปนอกจาก "สำเร็จ" — หน้าสาธารณะไม่ควรได้เลขใบหรือข้อมูลของพนักงานติดมือไป
     res.status(201).json({ ok: true });
   }),

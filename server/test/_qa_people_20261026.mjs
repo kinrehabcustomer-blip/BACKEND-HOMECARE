@@ -280,7 +280,7 @@ try {
   }
 
   // ---------------------------------------------------------------------------
-  head('2 · ลบแฟ้มที่ยังมีผู้รับบริการ เคส และใบแจ้งหนี้ผูกอยู่');
+  head('2 · แฟ้มที่กำลังใช้งานต้องลบไม่ได้; งานจบและเก็บเงินแล้วจึงลบแบบ SET NULL ได้');
   await resetTopic();
   {
     const customer = (await createCustomer({
@@ -314,12 +314,26 @@ try {
       total: Number(issued.total),
     };
 
+    const blockedCustomer = await del(`/api/customers/${customer.row.customer_id}`);
+    const blockedPatient = await del(`/api/patients/${patient.row.patient_id}`);
+    probe(
+      blockedCustomer.status === 409 && blockedPatient.status === 409,
+      'ลบลูกค้า/ผู้รับบริการระหว่างเคสเปิดหรือยังเก็บเงินไม่ครบได้ ทำให้ข้อมูลที่กำลังใช้หลุด',
+      `customer=${blockedCustomer.status}/${brief(blockedCustomer.body)} patient=${blockedPatient.status}/${brief(blockedPatient.body)}`,
+      'ระหว่างเคสเปิดและใบยังค้างรับ ลบทั้งผู้จ่ายและแฟ้มผู้รับบริการไม่ได้',
+    );
+
+    const paid = await post(`/api/invoices/${invoice.invoice_id}/pay`, { request_id: randomUUID() });
+    mustStatus(paid, 200, 'รับชำระใบให้ครบก่อนลบแฟ้มประวัติ');
+    const closed = await post(`/api/cases/${caseResult.row.case_id}/close`, {});
+    mustStatus(closed, 200, 'ปิดเคสก่อนลบแฟ้มประวัติ');
+
     const removedCustomer = await del(`/api/customers/${customer.row.customer_id}`);
     probe(
       removedCustomer.status === 204,
-      'ลบลูกค้าที่มีเอกสารผูกอยู่ไม่ได้ตาม FK ที่ออกแบบไว้',
+      'งานจบและเก็บเงินครบแล้ว แต่ลบแฟ้มลูกค้าเก่าไม่ได้',
       `DELETE /api/customers/:id -> ${removedCustomer.status} ${brief(removedCustomer.body)}`,
-      'ลบแฟ้มลูกค้าที่มีผู้รับบริการ/เคส/ใบแจ้งหนี้ผูกอยู่ได้ โดย FK ใช้ SET NULL',
+      'งานจบและเก็บเงินครบแล้ว ลบแฟ้มลูกค้าได้ โดยประวัติลูกยังอยู่ผ่าน FK SET NULL',
     );
 
     const patientAfterCustomerDelete = await get(`/api/patients/${patient.row.patient_id}`);

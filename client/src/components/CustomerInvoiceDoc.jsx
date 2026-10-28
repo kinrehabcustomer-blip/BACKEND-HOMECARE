@@ -25,16 +25,16 @@ export function channelOf(method) {
  *
  * ยังคงรวมเป็นก้อนต่อช่องทาง ไม่ใช่รายบรรทัด เพราะฟอร์มมีช่องละหนึ่งบรรทัดเท่านั้น
  */
-export function paidBy(payments, method, total, status) {
+export function paidBy(payments, method, total, status, paidAmount = null) {
   const blank = { cash: '', credit: '', transfer: '' };
-  if (status !== 'paid') return blank;
+  if (status !== 'paid' && !(status === 'cancelled' && Number(paidAmount) > 0)) return blank;
 
   const sums = { cash: 0, credit: 0, transfer: 0 };
   for (const pmt of payments ?? []) sums[channelOf(pmt.method)] += Number(pmt.amount ?? 0);
 
   // ใบเก่าที่รับเงินไว้ก่อนระบบเก็บรายการรับชำระแยกใบ — ไม่มีรายการให้บวก ใช้ของเดิมเป็นทางสำรอง
   const recorded = Object.values(sums).reduce((a, b) => a + b, 0);
-  if (recorded <= 0) return { ...blank, [channelOf(method)]: amountText(total) };
+  if (recorded <= 0) return { ...blank, [channelOf(method)]: amountText(paidAmount ?? total) };
 
   return {
     cash: sums.cash > 0 ? amountText(sums.cash) : '',
@@ -56,7 +56,10 @@ export function splitAddons(item) {
 
 export default function CustomerInvoiceDoc({ item, signer }) {
   const isReceipt = item.status === 'paid';
-  const pay = paidBy(item.payments, item.payment_method, item.total, item.status);
+  const isCancelled = item.status === 'cancelled';
+  const hasPayment = Number(item.paid_amount ?? 0) > 0;
+  const isPaymentProof = isReceipt || (isCancelled && hasPayment);
+  const pay = paidBy(item.payments, item.payment_method, item.total, item.status, item.paid_amount);
   const { addons, serviceAmount } = splitAddons(item);
   const printerName = signer ?? '';
   return (
@@ -69,9 +72,9 @@ export default function CustomerInvoiceDoc({ item, signer }) {
       </div>
 
       <h3 className="inv-title">
-        {isReceipt ? 'ใบเสร็จรับเงิน /Receipt' : 'ใบแจ้งหนี้ /Invoice'}
+        {isPaymentProof ? 'ใบเสร็จรับเงิน /Receipt' : isCancelled ? 'เอกสารยกเลิก /Cancelled' : 'ใบแจ้งหนี้ /Invoice'}
       </h3>
-      <p className="inv-copy">สำเนา</p>
+      <p className="inv-copy">{isCancelled ? 'ยกเลิกแล้ว' : 'สำเนา'}</p>
 
       <p className="inv-org">{ISSUER.name}</p>
       <p className="inv-org-line">{ISSUER.address}</p>
@@ -159,13 +162,13 @@ export default function CustomerInvoiceDoc({ item, signer }) {
         </tr>
         <tr>
           <td colSpan={3} className="inv-r">
-            {isReceipt ? 'จ่ายชำระทั้งสิ้น/Paid' : 'ยอดที่ต้องชำระ/Amount Due'}
+            {isPaymentProof ? 'รับชำระแล้ว/Paid' : isCancelled ? 'สถานะ/Status' : 'ยอดที่ต้องชำระ/Amount Due'}
           </td>
-          <td className="inv-r"><strong>{amountText(item.total)}</strong></td>
+          <td className="inv-r"><strong>{isPaymentProof ? amountText(item.paid_amount ?? item.total) : isCancelled ? 'ยกเลิกแล้ว' : amountText(item.total)}</strong></td>
         </tr>
         {/* ใบที่รับเงินมาบางส่วนแล้ว ต้องอ่านออกจากตัวเอกสารว่ารับไปเท่าไหร่และค้างเท่าไหร่
             ไม่งั้นลูกค้าถือใบที่เขียนยอดเต็มไว้ ทั้งที่จ่ายมัดจำไปแล้ว */}
-        {item.paid_amount > 0 && item.balance > 0 && (
+        {!isCancelled && item.paid_amount > 0 && item.balance > 0 && (
           <>
             <tr>
               <td colSpan={3} className="inv-r">รับชำระแล้ว/Paid</td>
@@ -177,11 +180,13 @@ export default function CustomerInvoiceDoc({ item, signer }) {
             </tr>
           </>
         )}
-        <tr>
-          <td colSpan={4} className="inv-r inv-words">
-            ( {bahtText(item.balance > 0 && item.paid_amount > 0 ? item.balance : item.total)} )
-          </td>
-        </tr>
+        {(!isCancelled || hasPayment) && (
+          <tr>
+            <td colSpan={4} className="inv-r inv-words">
+              ( {bahtText(isCancelled ? item.paid_amount : item.balance > 0 && item.paid_amount > 0 ? item.balance : item.total)} )
+            </td>
+          </tr>
+        )}
       </tfoot>
     </table>
 
@@ -191,7 +196,7 @@ export default function CustomerInvoiceDoc({ item, signer }) {
       <span>โอน/Transfer={pay.transfer}</span>
     </p>
 
-    {isReceipt && <p className="inv-line">ได้รับเงินจาก (Received from) คุณ {item.bill_to_name}</p>}
+    {isPaymentProof && <p className="inv-line">ได้รับเงินจาก (Received from) คุณ {item.bill_to_name}</p>}
     <p className="inv-line">หมายเหตุ : {item.note ?? ''}</p>
 
     <div className="inv-signs">

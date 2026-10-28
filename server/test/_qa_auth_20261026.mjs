@@ -846,7 +846,8 @@ try {
       && ![loginText, meText, tokenText, secretLogin.setCookie ?? ''].some((text) =>
         text.includes(SECRET_NATIONAL_ID) || text.includes(SECRET_TEMP_COPY) || text.includes(fixtureHash))
       && Object.keys(secretLogin.body).sort().join(',') === allowedSessionKeys.sort().join(',')
-      && Object.keys(tokenPayload).every((key) => ['sub', 'role', 'name', 'iat_ms', 'iat', 'exp'].includes(key)),
+      /* jti เป็นรหัสสุ่มของ session สำหรับตัด token ตอน logout ไม่ใช่ข้อมูลพนักงาน/credential */
+      && Object.keys(tokenPayload).every((key) => ['sub', 'role', 'name', 'jti', 'iat_ms', 'iat', 'exp'].includes(key)),
     'login/me/JWT ส่ง hash รหัสผ่าน เลขบัตร สำเนารหัสชั่วคราว หรือข้อมูลเกิน session',
     `loginKeys=${Object.keys(secretLogin.body).sort()} meKeys=${Object.keys(secretMe.body).sort()} tokenKeys=${Object.keys(tokenPayload).sort()} leaked=${[...leakedKeys(secretLogin.body), ...leakedKeys(secretMe.body)]}`,
     'login และ me ส่งเฉพาะ session fields; JWT ไม่มี hash/เลขบัตร/รหัสชั่วคราว',

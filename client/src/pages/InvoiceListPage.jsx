@@ -22,6 +22,7 @@ const SORTABLE = {
    ทั้งสามตัวมีตัวกรองจริงฝั่ง server รออยู่ และสองตัวเป็นปลายทางของกระดิ่งแจ้งเตือน
    (เกณฑ์เขียนไว้ที่เดียวใน invoices/repo.js ก้อนเดียวกับที่กระดิ่งใช้นับ) */
 const PSEUDO_STATUS = {
+  pending_slip: 'มีสลิปรอตรวจ',
   overdue: 'เกินกำหนดชำระ',
   draft_stale: 'ใบร่างค้างเกิน 7 วัน',
   stale: 'ข้อมูลไม่ตรงกับเคส',
@@ -304,6 +305,9 @@ export default function InvoiceListPage() {
                     <span className={`badge invoice-${v.is_overdue ? 'overdue' : v.status}`}>
                       {v.is_overdue ? 'เกินกำหนด' : INVOICE_STATUS_LABELS[v.status]}
                     </span>
+                    {Number(v.pending_slip_count) > 0 && (
+                      <span className="badge pending-slip-badge">📎 รอตรวจ {v.pending_slip_count}</span>
+                    )}
                   </td>
                 </tr>
               ))}

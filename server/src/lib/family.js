@@ -1,5 +1,5 @@
 import { createHash, randomInt } from 'node:crypto';
-import { sql } from '../db/index.js';
+import { sql, transaction } from '../db/index.js';
 import { ApiError } from './errors.js';
 
 /**
@@ -63,9 +63,16 @@ export const ensureFamilyTable = () =>
     .then(() => sql.run('ALTER TABLE case_family_messages DROP CONSTRAINT IF EXISTS case_family_messages_author_kind_check'))
     .then(() => sql.run(
       "ALTER TABLE case_family_messages ADD CONSTRAINT case_family_messages_author_kind_check CHECK (author_kind IN ('family','team','staff'))"))
+    .then(() => sql.run('ALTER TABLE case_family_messages ADD COLUMN IF NOT EXISTS source_ref TEXT'))
+    .then(() => sql.run('CREATE UNIQUE INDEX IF NOT EXISTS uq_family_message_source_ref ON case_family_messages (source_ref)'))
     .then(() => sql.run('CREATE INDEX IF NOT EXISTS idx_family_msg_case ON case_family_messages (case_id, created_at DESC)'))
     .then(() => sql.run('CREATE INDEX IF NOT EXISTS idx_family_case ON case_family_links (case_id)'))
     .then(() => sql.run('CREATE INDEX IF NOT EXISTS idx_family_line ON case_family_links (line_user_id) WHERE line_user_id IS NOT NULL'))
+    // รหัสที่ยังรอรับต้องไม่ชนกัน ส่วนรหัสที่รับแล้ว/ถูกปลดให้ใช้ค่าเดิมซ้ำได้
+    .then(() => sql.run(
+      `CREATE UNIQUE INDEX IF NOT EXISTS uq_family_pending_code ON case_family_links (code_hash)
+       WHERE code_hash IS NOT NULL AND accepted_at IS NULL AND revoked_at IS NULL`,
+    ))
     /* LINE เดียวกันผูกเคสเดียวกันได้ครั้งเดียว — linkCustomerLine() กับ accept() ต่างก็ตรวจด้วย SELECT
        ก่อน INSERT/UPDATE ซึ่งสองคำขอพร้อมกันลอดได้ทั้งคู่ · ดัชนีนี้คือด่านจริงที่ฐานข้อมูลบังคับเอง
        แยกเฉพาะแถวที่ยังไม่ถูกปลด (revoked_at IS NULL) เพราะปลดแล้วเชิญใหม่ต้องทำได้
@@ -108,13 +115,31 @@ export const activeCount = async (caseId) =>
 
 /** ออกรหัสเชิญ · canInvite = ญาติคนแรก (แอดมินเชิญ) ชวนต่อได้ · via = link_id ของญาติที่ชวน */
 export async function createInvite(caseId, actorName, { canInvite = true, via = null, consentBy = actorName } = {}) {
-  const code = newCode();
-  await sql.run(
-    `INSERT INTO case_family_links (case_id, code_hash, code_expires_at, invited_by, consent_by, can_invite, invited_via)
-     VALUES (:case_id, :hash, now() + make_interval(days => :days), :actor, :consent, :can_invite, :via)`,
-    { case_id: caseId, hash: hashCode(code), days: CODE_DAYS, actor: actorName, consent: consentBy, can_invite: canInvite, via },
-  );
-  return { code, days: CODE_DAYS };
+  await ensureFamilyTable();
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const code = newCode();
+    try {
+      await transaction(async (tx) => {
+        // lock ต่อ case ทำให้ count + insert เป็นหน่วยเดียว คำขอพร้อมกันลอดเพดาน 5 ไม่ได้
+        await tx.one('SELECT pg_advisory_xact_lock(hashtext(:id)) AS locked', { id: caseId });
+        const { n } = await tx.one(
+          `SELECT count(*)::int AS n FROM case_family_links
+            WHERE case_id=:id AND revoked_at IS NULL AND (accepted_at IS NOT NULL OR code_expires_at > now())`,
+          { id: caseId },
+        );
+        if (n >= FAMILY_MAX_PER_CASE) throw new ApiError(409, `เชิญได้สูงสุด ${FAMILY_MAX_PER_CASE} คนต่อเคส — ปลดคนเดิมก่อน`);
+        await tx.run(
+          `INSERT INTO case_family_links (case_id, code_hash, code_expires_at, invited_by, consent_by, can_invite, invited_via)
+           VALUES (:case_id, :hash, now() + make_interval(days => :days), :actor, :consent, :can_invite, :via)`,
+          { case_id: caseId, hash: hashCode(code), days: CODE_DAYS, actor: actorName, consent: consentBy, can_invite: canInvite, via },
+        );
+      });
+      return { code, days: CODE_DAYS };
+    } catch (err) {
+      if (err?.code !== '23505') throw err;
+    }
+  }
+  throw new ApiError(503, 'สร้างรหัสเชิญไม่สำเร็จชั่วคราว กรุณาลองใหม่');
 }
 
 /**
@@ -401,7 +426,7 @@ export async function summaryFor(lineUserId) {
 export const MESSAGE_MAX = 1000;
 
 /** โพสต์ลงไทม์ไลน์เคส — kind 'family' (ญาติจากหน้า LINE) หรือ 'team' (ทีมจากหน้าเคสใน staff) */
-export async function postMessage(caseId, { kind, name, lineUserId = null, employeeId = null, body = null, photo = null }) {
+export async function postMessage(caseId, { kind, name, lineUserId = null, employeeId = null, body = null, photo = null, sourceRef = null }) {
   /* ยาวเกินให้บอก ไม่ใช่ตัดเงียบ ๆ (ตรวจรอบ 19 — เดิม .slice(0, 1000) แล้วตอบสำเร็จ)
      ทั้งญาติและทีมพิมพ์อาการยาว ๆ ได้ ท้ายข้อความหายโดยไม่มีใครรู้ว่าขาด
      กันที่นี่ที่เดียวเพราะทุกทางที่โพสต์ลงไทม์ไลน์ (หน้าญาติ · ทีมในระบบงาน · สะพานแชท) ผ่านฟังก์ชันนี้ */
@@ -414,12 +439,13 @@ export async function postMessage(caseId, { kind, name, lineUserId = null, emplo
     );
   }
   return sql.one(
-    `INSERT INTO case_family_messages (case_id, author_kind, author_name, line_user_id, employee_id, body, photo_data, photo_mime)
-     VALUES (:case_id, :kind, :name, :uid, :emp, :body, :data, :mime)
+    `INSERT INTO case_family_messages (case_id, author_kind, author_name, line_user_id, employee_id, body, photo_data, photo_mime, source_ref)
+     VALUES (:case_id, :kind, :name, :uid, :emp, :body, :data, :mime, :source_ref)
+     ON CONFLICT (source_ref) DO UPDATE SET source_ref = EXCLUDED.source_ref
      RETURNING message_id, created_at`,
     {
       case_id: caseId, kind, name: String(name || 'ญาติ').slice(0, 80), uid: lineUserId, emp: employeeId,
-      body: text || null, data: photo?.data ?? null, mime: photo?.mime ?? null,
+      body: text || null, data: photo?.data ?? null, mime: photo?.mime ?? null, source_ref: sourceRef,
     },
   );
 }
@@ -453,22 +479,30 @@ export const hideMessage = (caseId, messageId) =>
  * คืน { ok } · { ok:false, reason: 'no_line' | 'already' | 'full' }
  */
 export async function linkCustomerLine(caseId, actorName) {
-  const row = await sql.one(
-    `SELECT cu.line_user_id, cu.line_display_name FROM cases c JOIN customers cu ON cu.customer_id = c.customer_id
-     WHERE c.case_id = :id`,
-    { id: caseId },
-  );
-  if (!row?.line_user_id) return { ok: false, reason: 'no_line' };
-  const exists = await sql.one(
-    `SELECT 1 AS x FROM case_family_links WHERE case_id = :id AND line_user_id = :uid AND revoked_at IS NULL`,
-    { id: caseId, uid: row.line_user_id },
-  );
-  if (exists) return { ok: false, reason: 'already' };
-  if ((await activeCount(caseId)) >= FAMILY_MAX_PER_CASE) return { ok: false, reason: 'full' };
-  await sql.run(
-    `INSERT INTO case_family_links (case_id, line_user_id, display_name, invited_by, consent_by, accepted_at, can_invite)
-     VALUES (:id, :uid, :name, :actor, :actor, now(), true)`,
-    { id: caseId, uid: row.line_user_id, name: row.line_display_name || 'ลูกค้า (LINE)', actor: actorName },
-  );
-  return { ok: true };
+  return transaction(async (tx) => {
+    await tx.one('SELECT pg_advisory_xact_lock(hashtext(:id)) AS locked', { id: caseId });
+    const row = await tx.one(
+      `SELECT cu.line_user_id, cu.line_display_name FROM cases c JOIN customers cu ON cu.customer_id = c.customer_id
+       WHERE c.case_id = :id`,
+      { id: caseId },
+    );
+    if (!row?.line_user_id) return { ok: false, reason: 'no_line' };
+    const exists = await tx.one(
+      `SELECT 1 AS x FROM case_family_links WHERE case_id = :id AND line_user_id = :uid AND revoked_at IS NULL`,
+      { id: caseId, uid: row.line_user_id },
+    );
+    if (exists) return { ok: false, reason: 'already' };
+    const { n } = await tx.one(
+      `SELECT count(*)::int AS n FROM case_family_links
+        WHERE case_id=:id AND revoked_at IS NULL AND (accepted_at IS NOT NULL OR code_expires_at > now())`,
+      { id: caseId },
+    );
+    if (n >= FAMILY_MAX_PER_CASE) return { ok: false, reason: 'full' };
+    await tx.run(
+      `INSERT INTO case_family_links (case_id, line_user_id, display_name, invited_by, consent_by, accepted_at, can_invite)
+       VALUES (:id, :uid, :name, :actor, :actor, now(), true)`,
+      { id: caseId, uid: row.line_user_id, name: row.line_display_name || 'ลูกค้า (LINE)', actor: actorName },
+    );
+    return { ok: true };
+  });
 }

@@ -181,7 +181,19 @@ export async function update(patientId, input) {
 }
 
 export async function remove(patientId) {
-  // เคสที่ผูกผู้รับบริการรายนี้ไม่หายไปด้วย — FK เป็น ON DELETE SET NULL และเคสคัดลอกข้อมูลผู้รับบริการไว้แล้ว
-  const changes = await sql.run('DELETE FROM patients WHERE patient_id = :id', { id: patientId });
-  return changes > 0;
+  return transaction(async (tx) => {
+    const found = await tx.one('SELECT patient_id FROM patients WHERE patient_id = :id FOR UPDATE', { id: patientId });
+    if (!found) return { removed: false };
+    const row = await tx.one(
+      `SELECT COUNT(*) AS active_cases FROM cases
+       WHERE patient_id = :id AND status NOT IN ('closed', 'cancelled')`,
+      { id: patientId },
+    );
+    const activeCases = Number(row?.active_cases ?? 0);
+    if (activeCases > 0) return { removed: false, reason: 'in_use', active_cases: activeCases };
+
+    // เคสเก่าที่จบแล้วไม่หายไปด้วย — FK เป็น SET NULL และมี snapshot ของผู้รับบริการอยู่ในเคส
+    const changes = await tx.run('DELETE FROM patients WHERE patient_id = :id', { id: patientId });
+    return { removed: changes > 0 };
+  });
 }

@@ -77,6 +77,8 @@ export const paySchema = z.object({
   paid_at: zodPastDate(z).optional(),
   payment_method: optionalText,
   note: optionalText,
+  // กรอกเมื่อทีมกด "ยืนยันรับเงินตามสลิปนี้" — server จะเปลี่ยนสลิป pending เป็น confirmed ใน transaction เดียวกัน
+  slip_id: z.number().int().positive().optional().nullable(),
 });
 
 /**
@@ -126,6 +128,8 @@ export const listQuerySchema = z.object({
   stale: z.enum(['yes']).optional(),
   // 'yes' = เฉพาะใบร่างที่ค้างเกินเกณฑ์วัน (ตัวกรองของกระดิ่ง — เกณฑ์อยู่ใน invoices/repo.js)
   draft_stale: z.enum(['yes']).optional(),
+  // 'yes' = ใบที่มีสลิปลูกค้ารอทีมการเงินตรวจอย่างน้อยหนึ่งใบ
+  pending_slip: z.enum(['yes']).optional(),
   page: z.coerce.number().int().min(1).default(1),
   per_page: z.coerce.number().int().min(1).max(100).default(20),
   sort: z.enum(['invoice_id', 'issue_date', 'total', 'created_at']).default('invoice_id'),
@@ -139,4 +143,8 @@ export const voidPaymentSchema = z.object({
   reason: z.string().trim().min(3, 'กรุณาบอกเหตุผลที่ยกเลิกรายการนี้ (เช่น กรอกยอดผิด · บันทึกซ้ำ)').max(300),
 });
 
-export const slipSchema =z.object({ image: imageSchema });
+export const slipSchema = z.object({ image: imageSchema });
+
+export const rejectSlipSchema = z.object({
+  reason: z.string().trim().min(3).max(300).optional().nullable(),
+});

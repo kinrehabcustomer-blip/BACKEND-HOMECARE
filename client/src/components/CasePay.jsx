@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { allocateShares, entitlements, round } from '../lib/payShare.js';
 import { formatBaht, formatDate, openDatePicker } from '../labels.js';
@@ -36,12 +36,15 @@ export default function CasePayPanel({ caseId, busy, run, toast }) {
      เก็บเป็นข้อความ ไม่ใช่ตัวเลข เพราะช่องที่กำลังพิมพ์อยู่อาจเป็น "" หรือ "7." ชั่วคราว
      ถ้าแปลงเป็นตัวเลขทุกครั้งที่พิมพ์ เคอร์เซอร์จะกระโดดและลบตัวเลขทิ้งไม่ได้ */
   const [split, setSplit] = useState(null);
+  // คงรหัสเดิมไว้เมื่อคำตอบหายหรือ retry เพื่อให้ server คืนงวดเดิมแทนการปล่อยเงินซ้ำ
+  const releaseRequestIdRef = useRef(null);
 
   useEffect(() => {
     let alive = true;
     setSplit(null);
     setDue('');
     setParts(1);
+    releaseRequestIdRef.current = null;
     api.casePayStatus(caseId).then((d) => alive && setPay(d)).catch(() => {});
     return () => {
       alive = false;
@@ -151,6 +154,8 @@ export default function CasePayPanel({ caseId, busy, run, toast }) {
 
   async function release() {
     if (!validAmount || !sumOk) return;
+    const requestId = releaseRequestIdRef.current || crypto.randomUUID();
+    releaseRequestIdRef.current = requestId;
 
     /* เคสคนเดียวส่งแค่ยอดไป ให้ฝั่ง server เป็นคนแบ่ง (ไม่มีอะไรให้แบ่งอยู่แล้ว)
        เคสหลายคนส่งส่วนแบ่งไปด้วยเสมอ แม้ไม่ได้แก้เอง — ตัวเลขที่เห็นบนจอตอนกด
@@ -164,9 +169,11 @@ export default function CasePayPanel({ caseId, busy, run, toast }) {
         ? {}
         : { amount: value };
     if (due) body.due_date = due;
+    body.request_id = requestId;
 
     return run(async () => {
       setPay(await api.releaseCasePay(caseId, body));
+      releaseRequestIdRef.current = null;
       setAmount('');
       setSplit(null);
       setDue('');

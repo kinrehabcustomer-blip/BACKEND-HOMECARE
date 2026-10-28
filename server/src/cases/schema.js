@@ -169,6 +169,7 @@ export const assignSchema = z.object({
  * ปล่อย 0 บาทไม่มีความหมาย มีแต่จะทำให้รายการค่าจ้างรก (เกณฑ์เดียวกับการรับชำระในใบแจ้งหนี้)
  */
 export const releasePaySchema = z.object({
+  request_id: z.string().uuid('รหัสป้องกันการปล่อยค่าจ้างซ้ำไม่ถูกต้อง'),
   amount: z.number().positive('ยอดที่ปล่อยต้องมากกว่า 0').optional().nullable(),
   note: optionalText,
 
@@ -267,6 +268,21 @@ function datesInRange(from, to, weekdays) {
 }
 
 /**
+ * ลงนัดตามจำนวนครั้ง — เริ่มวัน from แล้วไล่ไปตามวันในสัปดาห์ที่เลือกจนครบ count (ปุ่ม "ลงนัดทั้งแพ็ก" · ดร. 26 ต.ค. 2569)
+ * ไม่เลือกวันในสัปดาห์ = ทุกวัน · กันวนไม่จบด้วยเพดาน 3 ปี
+ */
+export function datesByCount(from, weekdays, count) {
+  const out = [];
+  const start = Date.parse(`${from}T00:00:00Z`);
+  for (let i = 0; out.length < count && i < 1100; i++) {
+    const d = new Date(start + i * 86_400_000);
+    if (weekdays?.length && !weekdays.includes(d.getUTCDay())) continue;
+    out.push(d.toISOString().slice(0, 10));
+  }
+  return out;
+}
+
+/**
  * ลงกะหลายวันในครั้งเดียว — รับได้สองแบบ:
  *   dates: ['2026-08-10', ...]           = วันที่เลือกไว้บนปฏิทิน (หน้าเว็บใช้แบบนี้)
  *   from/to (+weekdays)                  = ทั้งช่วง เช่น จันทร์–ศุกร์ ทั้งเดือน
@@ -278,6 +294,8 @@ export const bulkVisitSchema = z
     from: date.optional(),
     to: date.optional(),
     weekdays: z.array(z.number().int().min(0).max(6)).max(7).optional(),
+    // ลงตามจำนวนครั้ง (ใช้กับ from + weekdays แทน to) — ปุ่ม "ลงนัดทั้งแพ็ก"
+    count: z.number().int().positive().max(MAX_BULK_VISITS).optional(),
     assigned_to: z.string().trim().min(1).optional().nullable(),
     planned_start: time.optional().nullable(),
     planned_end: time.optional().nullable(),
@@ -285,6 +303,7 @@ export const bulkVisitSchema = z
   })
   .superRefine((v, ctx) => {
     const listed = v.dates?.length ?? 0;
+    if (listed === 0 && v.from && v.count) return;
     if (listed === 0 && !(v.from && v.to)) {
       ctx.addIssue({ code: 'custom', path: ['dates'], message: 'กรุณาเลือกวันที่จะลงกะ' });
       return;
@@ -312,7 +331,11 @@ export const bulkVisitSchema = z
   // ส่งวันซ้ำมาก็ลงครั้งเดียว และเรียงให้เสมอ ผลลัพธ์จะได้ไม่ขึ้นกับลำดับที่ผู้ใช้แตะปฏิทิน
   .transform((v) => ({
     ...v,
-    dates: v.dates?.length ? [...new Set(v.dates)].sort() : datesInRange(v.from, v.to, v.weekdays),
+    dates: v.dates?.length
+      ? [...new Set(v.dates)].sort()
+      : v.count && !v.to
+        ? datesByCount(v.from, v.weekdays, v.count)
+        : datesInRange(v.from, v.to, v.weekdays),
   }));
 
 /**

@@ -149,7 +149,7 @@ export default function ReviewFormPage() {
 
         <div className="review-who">
           <span className="muted">{role}</span>
-          <strong>{therapist.first_name} {therapist.last_name}</strong>
+          <strong>{therapist.first_name}{therapist.nickname ? ` (${therapist.nickname})` : ''}</strong>
         </div>
 
         <div className="review-fields">

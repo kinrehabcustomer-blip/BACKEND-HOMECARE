@@ -8,6 +8,7 @@ import { randomInt } from 'node:crypto';
 import { FRONT_POSITIONS } from '../employees/schema.js';
 import { linkLineByCode } from '../lib/lineLinkCode.js';
 import { outboxAck, outboxPending } from '../invoices/share.js';
+import * as invoiceRepo from '../invoices/repo.js';
 import { caseRatings, dueRatings, employeeStars, submitRating } from '../lib/ratings.js';
 import { employeeTier } from '../lib/tiers.js';
 import { createEmployeeSchema, decodeImage } from '../employees/schema.js';
@@ -15,6 +16,13 @@ import * as repo from '../employees/repo.js';
 import * as cases from '../cases/repo.js';
 import { BLOCKED_STATUSES } from '../lib/auth.js';
 import * as family from '../lib/family.js';
+import {
+  claimDueVisitReminders,
+  claimDueFamilyReminders,
+  claimVisitChanges,
+  claimVisitNotificationOutbox,
+  ackVisitNotificationOutbox,
+} from '../notify/visitReminders.js';
 import { ensureCustomerLineColumns as ensureCustomerLineColumnsSafe, findByPhones, linkFromChat } from '../lib/customerLine.js';
 
 /**
@@ -37,6 +45,36 @@ const BLOCKED_SQL = Object.keys(BLOCKED_STATUSES)
   .join(', ');
 
 const hireSchema = z.object({ token: z.string().min(1) });
+
+/** รับเฉพาะรูปที่ระบบแชทเพิ่งเก็บใน Vercel Blob — ปิดทาง SSRF ไป host ภายใน/URL อื่น */
+async function fetchChatImage(url, maxBytes = 8 * 1024 * 1024) {
+  let parsed;
+  try { parsed = new URL(url); } catch { throw new ApiError(400, 'ที่อยู่รูปไม่ถูกต้อง'); }
+  if (parsed.protocol !== 'https:' || !parsed.hostname.endsWith('.public.blob.vercel-storage.com')) {
+    throw new ApiError(400, 'รับรูปได้เฉพาะคลังรูปของระบบแชท');
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
+  try {
+    const response = await fetch(parsed, { signal: controller.signal, redirect: 'error' });
+    if (!response.ok) throw new Error(`image ${response.status}`);
+    const declared = Number(response.headers.get('content-length') || 0);
+    if (declared > maxBytes) throw new ApiError(413, 'รูปมีขนาดเกิน 8 MB');
+    const data = Buffer.from(await response.arrayBuffer());
+    if (!data.length || data.length > maxBytes) throw new ApiError(413, 'รูปมีขนาดเกิน 8 MB');
+    const mime = String(response.headers.get('content-type') || '').split(';')[0].toLowerCase();
+    const jpg = mime === 'image/jpeg' && data[0] === 0xff && data[1] === 0xd8 && data[2] === 0xff;
+    const png = mime === 'image/png' && data.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+    const webp = mime === 'image/webp' && data.subarray(0, 4).toString('ascii') === 'RIFF' && data.subarray(8, 12).toString('ascii') === 'WEBP';
+    if (!jpg && !png && !webp) throw new ApiError(400, 'รูปต้องเป็น JPG, PNG หรือ WEBP');
+    return { data, mime, size: data.length };
+  } catch (err) {
+    if (err instanceof ApiError) throw err;
+    throw new ApiError(502, 'ดึงรูปจากระบบแชทไม่สำเร็จ');
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 /**
  * ผูก LINE ด้วยรหัส 6 หลักที่แอดมินออกในหน้าพนักงาน (ดร.ธงชัย 23 ต.ค. 2569 · ดู lib/lineBridge.js)
@@ -423,7 +461,8 @@ integrationRouter.post(
  * ข้อ 4 ต่อ (ดร.ธงชัย 23 ต.ค. 2569 ทาง ก "ปุ่มส่งรายงานวันนี้ → ฟอร์มเดิมในระบบงาน"):
  * รายงานอาการที่ผู้ดูแลบันทึกผ่านฟอร์มในระบบงาน → ฝั่ง chat ดึงไปส่งสรุปเข้า LINE OA Kin HomeCare ของญาติ
  *   ตั๋ว 'kin-family-feed' {since} — ฝั่ง chat (cron) ดึงรายงานใหม่กว่า report_id ที่ส่งไปแล้ว · ที่นี่ไม่ยิง LINE เอง
- *   ส่งเฉพาะเคสที่มีญาติผูกแล้ว · ข้ามรายงานที่มาจากแชท LINE ("(LINE)" — ฝั่ง chat ส่งไปแล้วตอนรับรายงาน)
+ *   ส่งเฉพาะเคสที่มีญาติผูกแล้ว · รวมรายงานที่มาจากแชท LINE ("(LINE)") ด้วย
+ *   ฝั่ง chat ใช้ outbox กุญแจ (report_id, line_user_id) จึงไม่ส่งซ้ำแม้เส้นตอบทันทีเคยส่งไปแล้ว
  *   ส่งแค่สัญญาณชีพหลัก + อาการ/การดูแล/อาหาร-ขับถ่ายแบบสั้น + ชื่อต้นผู้บันทึก — ไม่ส่งบันทึกภายใน/ติดตามต่อ/GPS
  */
 integrationRouter.post(
@@ -455,7 +494,7 @@ integrationRouter.post(
                   WHERE l.case_id = r.case_id AND l.accepted_at IS NOT NULL AND l.revoked_at IS NULL AND l.line_user_id IS NOT NULL)
               END) AS family
        FROM case_reports r JOIN cases c ON c.case_id = r.case_id
-       WHERE r.report_id > :since AND COALESCE(r.reported_by_name, '') NOT LIKE '%(LINE)'
+       WHERE r.report_id > :since
        ORDER BY r.report_id LIMIT 50`,
       { since: p.since, grace: family.CLOSED_GRACE_DAYS },
     );
@@ -598,6 +637,27 @@ integrationRouter.post(
  * รวมหน้าหลังบ้าน ข้อ 4 — คิวส่งใบแจ้งหนี้/ใบเสร็จเข้า LINE ลูกค้า (invoices/share.js)
  *   /invoices/line-outbox ตั๋ว 'kin-invoice-outbox' {ack?: [{id, ok, error}]} → จดผลส่งรอบก่อน แล้วคืนคิวที่ยังรอส่ง
  */
+/**
+ * เตือนนัดพนักงานทาง LINE (ดร.ธงชัย 26 ต.ค. 2569 · notify/visitReminders.js)
+ *   /visits/reminders ตั๋ว 'kin-visit-remind' {ack?: [{id,ok,error}]}
+ * → เข้าคิวรายผู้รับ · claim มี lease · จดส่งแล้วหลัง chat ack สำเร็จเท่านั้น · ล้มลองใหม่ได้ไม่เกิน 3 ครั้ง
+ */
+integrationRouter.post(
+  '/visits/reminders',
+  asyncRoute(async (req, res) => {
+    const { token } = hireSchema.parse(req.body);
+    const p = verifySigned(token, 'kin-visit-remind');
+    if (!p) throw new ApiError(401, 'ลายเซ็นไม่ถูกต้องหรือหมดอายุ');
+    if (Array.isArray(p.ack)) {
+      return res.json({ acked: await ackVisitNotificationOutbox(p.ack), pending: [] });
+    }
+    await claimDueVisitReminders();
+    await claimDueFamilyReminders();
+    await claimVisitChanges();
+    res.json({ acked: 0, pending: await claimVisitNotificationOutbox() });
+  }),
+);
+
 integrationRouter.post(
   '/invoices/line-outbox',
   asyncRoute(async (req, res) => {
@@ -606,6 +666,59 @@ integrationRouter.post(
     if (!p) throw new ApiError(401, 'ลายเซ็นไม่ถูกต้องหรือหมดอายุ');
     const acked = Array.isArray(p.ack) ? await outboxAck(p.ack) : 0;
     res.json({ acked, pending: p.ack?.length ? [] : await outboxPending() });
+  }),
+);
+
+/** คิวแจ้งทีมเมื่อมีสลิปลูกค้ารอตรวจ — ใช้สะพานลงลายเซ็นแบบเดียวกับคิวส่งบิล */
+integrationRouter.post(
+  '/invoices/slip-outbox',
+  asyncRoute(async (req, res) => {
+    const { token } = hireSchema.parse(req.body);
+    const p = verifySigned(token, 'kin-slip-outbox');
+    if (!p) throw new ApiError(401, 'ลายเซ็นไม่ถูกต้องหรือหมดอายุ');
+    const acked = Array.isArray(p.ack) ? await invoiceRepo.slipOutboxAck(p.ack) : 0;
+    res.json({ acked, pending: p.ack?.length ? [] : await invoiceRepo.slipOutboxPending() });
+  }),
+);
+
+/** รูปสลิปที่ Gemini ตรวจจาก LINE HomeCare — เลือกใบยอดตรงก่อน ไม่ตรงใช้ใบครบกำหนดก่อนสุด */
+integrationRouter.post(
+  '/invoices/pending-slip',
+  asyncRoute(async (req, res) => {
+    const { token } = hireSchema.parse(req.body);
+    const p = verifySigned(token, 'kin-pending-slip');
+    if (!p || typeof p.cid !== 'string' || typeof p.image_url !== 'string' || typeof p.ref !== 'string') {
+      throw new ApiError(401, 'ลายเซ็นไม่ถูกต้องหรือหมดอายุ');
+    }
+    await invoiceRepo.ensureSlipSchema();
+    const amount = Number.isFinite(Number(p.amount)) && Number(p.amount) > 0 ? Math.round(Number(p.amount) * 100) / 100 : null;
+    const invoice = await sql.one(
+      `WITH open_bill AS (
+         SELECT i.invoice_id, i.due_date, i.issue_date,
+                GREATEST(i.total - COALESCE(SUM(x.amount), 0), 0) AS balance
+           FROM invoices i LEFT JOIN invoice_payments x ON x.invoice_id = i.invoice_id
+          WHERE i.customer_id = :cid AND i.status = 'issued'
+          GROUP BY i.invoice_id
+       )
+       SELECT invoice_id, balance FROM open_bill WHERE balance > 0
+       ORDER BY CASE WHEN :amount IS NOT NULL AND abs(balance - :amount) <= 0.01 THEN 0 ELSE 1 END,
+                due_date ASC NULLS LAST, issue_date ASC NULLS LAST, invoice_id ASC
+       LIMIT 1`,
+      { cid: p.cid, amount },
+    );
+    if (!invoice) return res.json({ attached: false, reason: 'no_open_invoice' });
+    const image = await fetchChatImage(p.image_url);
+    const row = await invoiceRepo.addSlip(invoice.invoice_id, image, { name: 'ลูกค้าจาก LINE' }, {
+      status: 'pending', source: 'line_auto', sourceRef: `line-slip:${p.ref}`,
+      extracted: {
+        amount,
+        date: typeof p.date === 'string' ? p.date.slice(0, 30) : null,
+        ref: typeof p.transfer_ref === 'string' ? p.transfer_ref.slice(0, 100) : null,
+        bank: typeof p.bank === 'string' ? p.bank.slice(0, 100) : null,
+      },
+      notify: true,
+    });
+    res.status(201).json({ attached: true, invoice_id: row.invoice_id, slip_id: row.slip_id });
   }),
 );
 
@@ -621,22 +734,41 @@ integrationRouter.post(
     const p = verifySigned(token, 'kin-billing-summary');
     if (!p || typeof p.cid !== 'string') throw new ApiError(401, 'ลายเซ็นไม่ถูกต้องหรือหมดอายุ');
     const today = new Date(Date.now() + 7 * 3.6e6).toISOString().slice(0, 10);
-    const rows = await sql.all(
-      `SELECT i.invoice_id, i.case_id, i.issue_date, i.due_date, i.status, i.total,
-              COALESCE((SELECT SUM(x.amount) FROM invoice_payments x WHERE x.invoice_id = i.invoice_id), 0) AS paid
-       FROM invoices i
-       WHERE i.customer_id = :cid AND i.status IN ('issued', 'paid')
-       ORDER BY i.issue_date DESC, i.invoice_id DESC LIMIT 200`,
-      { cid: p.cid },
-    );
     const money = (n) => Math.round(Number(n || 0) * 100) / 100;
-    const open = rows
-      .map((r) => ({ ...r, balance: r.status === 'paid' ? 0 : money(Number(r.total) - Number(r.paid)) }))
-      .filter((r) => r.balance > 0)
-      .map((r) => ({
-        invoice_id: r.invoice_id, case_id: r.case_id, issue_date: r.issue_date, due_date: r.due_date,
-        total: money(r.total), paid: money(r.paid), balance: r.balance, overdue: !!(r.due_date && r.due_date < today),
-      }));
+    await invoiceRepo.ensureSlipSchema();
+    const summary = await sql.one(
+      `WITH billed AS (
+         SELECT i.due_date,
+                CASE WHEN i.status = 'paid' THEN 0
+                     ELSE GREATEST(i.total - COALESCE(SUM(x.amount), 0), 0) END AS balance
+           FROM invoices i
+           LEFT JOIN invoice_payments x ON x.invoice_id = i.invoice_id
+          WHERE i.customer_id = :cid AND i.status IN ('issued', 'paid')
+          GROUP BY i.invoice_id
+       )
+       SELECT COUNT(*)::int AS invoice_count,
+              COALESCE(SUM(balance), 0) AS outstanding,
+              COALESCE(SUM(balance) FILTER (WHERE due_date IS NOT NULL AND due_date < :today), 0) AS overdue,
+              COUNT(*) FILTER (WHERE balance > 0)::int AS open_count
+         FROM billed`,
+      { cid: p.cid, today },
+    );
+    const open = await sql.all(
+      `WITH billed AS (
+         SELECT i.invoice_id, i.case_id, i.issue_date, i.due_date, i.total,
+                COALESCE(SUM(x.amount), 0) AS paid,
+                GREATEST(i.total - COALESCE(SUM(x.amount), 0), 0) AS balance
+           FROM invoices i
+           LEFT JOIN invoice_payments x ON x.invoice_id = i.invoice_id
+          WHERE i.customer_id = :cid AND i.status = 'issued'
+          GROUP BY i.invoice_id
+       )
+       SELECT invoice_id, case_id, issue_date, due_date, total, paid, balance,
+              (due_date IS NOT NULL AND due_date < :today) AS overdue
+         FROM billed WHERE balance > 0
+        ORDER BY issue_date DESC, invoice_id DESC LIMIT 5`,
+      { cid: p.cid, today },
+    );
     const lastPaid = await sql.one(
       `SELECT x.invoice_id, x.amount, x.paid_at
        FROM invoice_payments x JOIN invoices i ON i.invoice_id = x.invoice_id
@@ -646,13 +778,47 @@ integrationRouter.post(
     );
     res.json({
       today,
-      invoice_count: rows.length,
-      outstanding: money(open.reduce((t, r) => t + r.balance, 0)),
-      overdue: money(open.filter((r) => r.overdue).reduce((t, r) => t + r.balance, 0)),
-      open: open.slice(0, 5),
-      open_count: open.length,
+      invoice_count: summary.invoice_count,
+      outstanding: money(summary.outstanding),
+      overdue: money(summary.overdue),
+      open: open.map((r) => ({ ...r, total: money(r.total), paid: money(r.paid), balance: money(r.balance) })),
+      open_count: summary.open_count,
       last_paid: lastPaid ? { invoice_id: lastPaid.invoice_id, amount: money(lastPaid.amount), paid_at: lastPaid.paid_at } : null,
+      pending_slip_count: Number((await sql.one(
+        `SELECT COUNT(*)::int AS n FROM invoice_slips s JOIN invoices i ON i.invoice_id = s.invoice_id
+         WHERE i.customer_id = :cid AND s.status = 'pending'`,
+        { cid: p.cid },
+      )).n || 0),
     });
+  }),
+);
+
+/** ทีมกดส่งข้อความ/รูปของลูกค้าเข้า feed เคสในนามญาติ โดยมีป้ายผู้ส่งต่อและกันซ้ำด้วย source_ref */
+integrationRouter.post(
+  '/family/forward-customer',
+  asyncRoute(async (req, res) => {
+    const { token } = hireSchema.parse(req.body);
+    const p = verifySigned(token, 'kin-forward-customer');
+    if (!p || typeof p.cid !== 'string' || typeof p.case_id !== 'string' || typeof p.ref !== 'string') {
+      throw new ApiError(401, 'ลายเซ็นไม่ถูกต้องหรือหมดอายุ');
+    }
+    const c = await customerCaseOr404(p.cid, p.case_id);
+    if (['closed', 'cancelled'].includes(c.status)) throw new ApiError(409, 'เคสนี้ปิดแล้ว จึงส่งต่อข้อความไม่ได้');
+    const body = typeof p.body === 'string' && p.body.trim() ? p.body.trim() : null;
+    const photo = typeof p.image_url === 'string' && p.image_url ? await fetchChatImage(p.image_url) : null;
+    if (!body && !photo) throw new ApiError(400, 'ข้อความนี้ไม่มีเนื้อหาหรือรูปให้ส่งต่อ');
+    await family.ensureFamilyTable();
+    const customerName = String(p.line_name || 'ญาติ/ลูกค้า').slice(0, 50);
+    const adminName = String(p.by || 'ทีม').slice(0, 50);
+    const message = await family.postMessage(p.case_id, {
+      kind: 'family',
+      name: `${customerName} · ส่งต่อโดยทีม ${adminName}`,
+      lineUserId: isLineUserId(p.line_user_id) ? p.line_user_id : null,
+      body,
+      photo,
+      sourceRef: `chat-forward:${p.ref}`,
+    });
+    res.status(201).json({ forwarded: true, message_id: message.message_id, case_id: p.case_id });
   }),
 );
 

@@ -3,6 +3,7 @@
  *   node test/_run_probe.mjs test/_qa_payroll_20261026.mjs
  */
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
 
 assert.equal(process.env.NODE_ENV, 'test');
@@ -83,7 +84,7 @@ async function newCase({ staffPay = 1200, employeeId = FIELD.employee_id, label 
 }
 
 async function release(kase, amount, who = MANAGER, extra = {}) {
-  const body = { ...extra };
+  const body = { request_id: randomUUID(), ...extra };
   if (amount !== undefined) body.amount = amount;
   return post(`/api/cases/${kase.case_id}/pay/release`, body, who);
 }

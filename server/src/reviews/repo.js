@@ -1,5 +1,20 @@
 import { randomBytes } from 'node:crypto';
-import { sql } from '../db/index.js';
+
+/* คอลัมน์ review_token_issued_at เพิ่งเพิ่ม (26 ต.ค. 2569) และถูกใช้ในคิวรีแบบตรง ๆ
+   schema.sql รันเฉพาะตอนสั่ง `npm run migrate` เอง — ถ้าขึ้นเว็บโดยยังไม่ได้รัน
+   ทุกคิวรีของหน้าประเมินจะล้มด้วย "column does not exist" ทันที
+   สร้างเองแบบเดียวกับตารางอื่นในโค้ดนี้ (ensureShareTables · ensureRevokedSessions)
+   ไม่ตั้ง = ไม่มีอะไรเปลี่ยน เพราะ ADD COLUMN IF NOT EXISTS ไม่ทำอะไรถ้ามีอยู่แล้ว */
+let reviewColsReady = null;
+export const ensureReviewColumns = () =>
+  (reviewColsReady ??= sql
+    .run(`ALTER TABLE employees ADD COLUMN IF NOT EXISTS review_token_issued_at TEXT`)
+    .then(() => sql.run(
+      `UPDATE employees SET review_token_issued_at = updated_at
+       WHERE review_token IS NOT NULL AND review_token_issued_at IS NULL`,
+    ))
+    .catch((err) => { reviewColsReady = null; throw err; }));
+import { sql, transaction } from '../db/index.js';
 import { FRONT_POSITIONS } from '../employees/schema.js';
 import { REVIEW_QUESTIONS } from './schema.js';
 
@@ -17,6 +32,15 @@ import { REVIEW_QUESTIONS } from './schema.js';
  * เพิ่มตำแหน่งสายบำบัดใหม่ที่เดียวแล้วแบบประเมินตามมาเอง
  */
 export const REVIEW_POSITIONS = FRONT_POSITIONS;
+
+/** ลิงก์สาธารณะมีอายุจำกัด; หมดอายุแล้วหน้าหลังบ้านจะออกใบใหม่ให้อัตโนมัติ */
+export const REVIEW_TOKEN_TTL_DAYS = 90;
+
+const THAI_NOW = "to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')";
+const tokenCutoff = (prefix = '') =>
+  `${prefix}review_token_issued_at > to_char(` +
+  `(now() AT TIME ZONE 'Asia/Bangkok') - make_interval(days => :ttl_days), ` +
+  `'YYYY-MM-DD HH24:MI:SS')`;
 
 /** ผลรวมคะแนนทุกข้อของหนึ่งใบ — ใช้ทั้งค่าเฉลี่ยรวมและการแจกแจงจำนวนดาว */
 const scoreSum = (prefix = '') => REVIEW_QUESTIONS.map((q) => `${prefix}${q}`).join(' + ');
@@ -40,9 +64,10 @@ const newToken = () => randomBytes(16).toString('base64url');
  */
 export const findByToken = (token) =>
   sql.one(
-    `SELECT employee_id, first_name, last_name, position, status
-     FROM employees WHERE review_token = :token`,
-    { token },
+    `SELECT employee_id, first_name, nickname, position, status
+     FROM employees
+     WHERE review_token = :token AND ${tokenCutoff()}`,
+    { token, ttl_days: REVIEW_TOKEN_TTL_DAYS },
   );
 
 /**
@@ -53,10 +78,12 @@ export const findByToken = (token) =>
  */
 export async function ensureToken(employeeId) {
   const row = await sql.one(
-    `UPDATE employees SET review_token = :token
-     WHERE employee_id = :id AND review_token IS NULL
+    `UPDATE employees
+     SET review_token = :token, review_token_issued_at = ${THAI_NOW}
+     WHERE employee_id = :id
+       AND (review_token IS NULL OR review_token_issued_at IS NULL OR NOT (${tokenCutoff()}))
      RETURNING review_token`,
-    { token: newToken(), id: employeeId },
+    { token: newToken(), id: employeeId, ttl_days: REVIEW_TOKEN_TTL_DAYS },
   );
   if (row) return row.review_token;
 
@@ -70,7 +97,10 @@ export async function ensureToken(employeeId) {
 export const rotateToken = (employeeId) =>
   sql
     .one(
-      `UPDATE employees SET review_token = :token WHERE employee_id = :id RETURNING review_token`,
+      `UPDATE employees
+       SET review_token = :token, review_token_issued_at = ${THAI_NOW}
+       WHERE employee_id = :id
+       RETURNING review_token`,
       { token: newToken(), id: employeeId },
     )
     .then((r) => r?.review_token ?? null);
@@ -83,8 +113,8 @@ export const rotateToken = (employeeId) =>
  * เป็นด่านกันกดส่งซ้ำ ไม่ใช่ด่านกันโหวตซ้ำ — ญาติหลายคนในบ้านเดียวกันใช้ไวไฟตัวเดียวกัน
  * และควรประเมินได้คนละใบ ช่วงเวลาจึงสั้น (นาที) ไม่ใช่ล็อกทั้งวัน
  */
-export const recentDuplicate = (employeeId, ipHash, minutes) =>
-  sql
+const recentDuplicateWith = (db, employeeId, ipHash, minutes) =>
+  db
     .one(
       `SELECT 1 AS hit FROM staff_reviews
        WHERE employee_id = :id AND ip_hash = :ip_hash
@@ -96,9 +126,12 @@ export const recentDuplicate = (employeeId, ipHash, minutes) =>
     )
     .then(Boolean);
 
+export const recentDuplicate = (employeeId, ipHash, minutes) =>
+  recentDuplicateWith(sql, employeeId, ipHash, minutes);
+
 /** จำนวนใบที่พนักงานคนนี้ได้รับใน 24 ชม. ที่ผ่านมา — เพดานกันคนไล่ยิงใบปลอมรัวๆ */
-export const countRecent = (employeeId) =>
-  sql
+const countRecentWith = (db, employeeId) =>
+  db
     .one(
       `SELECT COUNT(*)::int AS n FROM staff_reviews
        WHERE employee_id = :id
@@ -108,6 +141,8 @@ export const countRecent = (employeeId) =>
       { id: employeeId },
     )
     .then((r) => r.n);
+
+export const countRecent = (employeeId) => countRecentWith(sql, employeeId);
 
 const INSERT_COLUMNS = [
   'patient_name',
@@ -119,18 +154,46 @@ const INSERT_COLUMNS = [
   'recommend',
 ];
 
-export async function submit(employeeId, input, ipHash) {
+async function insertReview(db, employeeId, input, ipHash) {
   const columns = ['employee_id', ...INSERT_COLUMNS, 'ip_hash'];
   const values = { employee_id: employeeId, ip_hash: ipHash };
   for (const c of INSERT_COLUMNS) values[c] = input[c] ?? null;
 
-  return sql.one(
+  return db.one(
     `INSERT INTO staff_reviews (${columns.join(', ')})
      VALUES (${columns.map((c) => `:${c}`).join(', ')})
      RETURNING review_id, submitted_at`,
     values,
   );
 }
+
+/**
+ * ตรวจ token + กันกดซ้ำ + เพดาน + INSERT ใน transaction เดียว
+ *
+ * ล็อกแถวพนักงานก่อนเพื่อให้คำขอของลิงก์เดียวกันเข้าคิวทีละใบ คำขอที่มาพร้อมกัน
+ * จึงเห็นใบที่คำขอก่อนหน้าเพิ่งเขียนจริง ไม่ผ่านด่านจาก snapshot เก่าพร้อมกันทั้งหมด
+ */
+export const submitProtected = (token, input, ipHash, duplicateWindowMin, dailyCap) =>
+  transaction(async (tx) => {
+    const employee = await tx.one(
+      `SELECT employee_id, status
+       FROM employees
+       WHERE review_token = :token AND ${tokenCutoff()}
+       FOR UPDATE`,
+      { token, ttl_days: REVIEW_TOKEN_TTL_DAYS },
+    );
+    if (!employee) return { reason: 'invalid_token' };
+    if (employee.status === 'resigned') return { reason: 'resigned' };
+
+    if (await recentDuplicateWith(tx, employee.employee_id, ipHash, duplicateWindowMin)) {
+      return { reason: 'duplicate' };
+    }
+    if ((await countRecentWith(tx, employee.employee_id)) >= dailyCap) {
+      return { reason: 'daily_cap' };
+    }
+
+    return { review: await insertReview(tx, employee.employee_id, input, ipHash) };
+  });
 
 // ---------- รายงานฝั่งหลังบ้าน ----------
 
@@ -210,7 +273,7 @@ const listReviews = (employeeId, limit) =>
 /** พนักงานหนึ่งคนเท่าที่ฝั่งรายงานต้องใช้ — ใช้ทั้งหน้ารายละเอียดและตอนออกลิงก์ */
 export const findEmployee = (employeeId) =>
   sql.one(
-    `SELECT employee_id, first_name, last_name, position, status, review_token
+    `SELECT employee_id, first_name, last_name, position, status, review_token, review_token_issued_at
      FROM employees WHERE employee_id = :id`,
     { id: employeeId },
   );

@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import * as repo from './repo.js';
 import { createCustomerSchema, updateCustomerSchema, listQuerySchema } from './schema.js';
-import { asyncRoute, notFound } from '../lib/errors.js';
+import { ApiError, asyncRoute, notFound } from '../lib/errors.js';
 
 export const customersRouter = Router();
 
@@ -52,7 +52,15 @@ customersRouter.patch(
 customersRouter.delete(
   '/:id',
   asyncRoute(async (req, res) => {
-    await repo.remove(req.params.id);
+    const result = await repo.remove(req.params.id);
+    if (result.reason === 'in_use') {
+      throw new ApiError(
+        409,
+        `ผู้ว่าจ้างรายนี้ยังมีเคสที่กำลังทำ ${result.blockers.active_cases} เคส หรือใบที่ยังรับเงินไม่ครบ ${result.blockers.unpaid_invoices} ใบ` +
+          ' — ลบแล้วงานกับเอกสารจะหลุดจากผู้จ่าย ให้ปิดงาน/เก็บเงินให้เรียบร้อยก่อน',
+        { blockers: result.blockers },
+      );
+    }
     res.status(204).end();
   }),
 );

@@ -13,13 +13,14 @@ import {
   revenueQuerySchema,
   INVOICE_STATUSES,
   slipSchema,
+  rejectSlipSchema,
   voidPaymentSchema,
 } from './schema.js';
 import { decodeImage } from '../employees/schema.js';
 import { ApiError, asyncRoute, notFound } from '../lib/errors.js';
 import { requireManager, can } from '../lib/auth.js';
 import { todayTh } from '../lib/dates.js';
-import { lineTarget, queueLineSend, sendHistory } from './share.js';
+import { createShareLink, lineTarget, queueLineSend, sendHistory } from './share.js';
 
 export const invoicesRouter = Router();
 
@@ -194,6 +195,19 @@ invoicesRouter.post(
 
 invoicesRouter.get('/:id', (req, res) => res.json(req.invoice));
 
+/** ออกลิงก์เอกสารให้ทีมคัดลอกไปส่งเอง — ใช้สิทธิ์เดียวกับการส่ง LINE แต่ไม่บังคับว่าลูกค้าต้องมี LINE */
+invoicesRouter.post(
+  '/:id/share-link',
+  asyncRoute(async (req, res) => {
+    const result = await createShareLink(req.params.id, req.user);
+    if (result.reason === 'not_found') throw notFound('ไม่พบใบแจ้งหนี้นี้');
+    if (result.reason === 'invalid_status') {
+      throw new ApiError(400, 'คัดลอกได้เฉพาะใบที่ออกแล้วหรือชำระแล้ว (ใบร่าง/ยกเลิกคัดลอกไม่ได้)');
+    }
+    res.status(201).json(result);
+  }),
+);
+
 /**
  * ส่งใบแจ้งหนี้/ใบเสร็จเข้า LINE ลูกค้า (ดร.ธงชัย 24 ต.ค. 2569 ข้อ 4 · ดู share.js)
  * GET = ส่งได้ไหม + ประวัติการส่ง · POST = ออกลิงก์ดูเอกสาร + ใส่คิว (ระบบแชทส่งออก OA Kin HomeCare ภายในไม่กี่นาที)
@@ -209,9 +223,13 @@ invoicesRouter.get(
 invoicesRouter.post(
   '/:id/line',
   asyncRoute(async (req, res) => {
-    const t = await lineTarget(req.invoice);
-    if (!t.ok) throw new ApiError(400, t.reason);
-    const r = await queueLineSend(req.invoice, t.customer, req.user);
+    const r = await queueLineSend(req.params.id, req.user);
+    if (r.reason === 'not_found') throw notFound('ไม่พบใบแจ้งหนี้นี้');
+    if (r.reason === 'invalid_status') throw new ApiError(400, 'ส่งได้เฉพาะใบที่ออกแล้วหรือชำระแล้ว (ใบร่าง/ยกเลิกส่งไม่ได้)');
+    if (r.reason === 'no_customer') throw new ApiError(400, 'ใบนี้ยังไม่ผูกลูกค้า');
+    if (r.reason === 'no_line') {
+      throw new ApiError(400, 'ลูกค้ารายนี้ยังไม่ได้เชื่อม LINE Kin HomeCare — ใช้ปุ่ม “คัดลอกบิล” เพื่อส่งทางช่องอื่นได้');
+    }
     res.status(r.queued ? 201 : 200).json({ ...r, history: await sendHistory(req.invoice.invoice_id) });
   }),
 );
@@ -397,6 +415,9 @@ invoicesRouter.post(
     if (result.reason === 'billing_plan_required') {
       throw new ApiError(409, 'กรุณาเลือกว่าจะเก็บเต็มจำนวนหรือแบ่งมัดจำก่อนออกใบ');
     }
+    if (result.reason === 'due_before_issue') {
+      throw new ApiError(400, `วันครบกำหนดต้องไม่ก่อนวันที่ออกใบ ${result.issue_date} — กรุณาแก้วันครบกำหนดก่อน`);
+    }
     if (result.reason === 'case_cancelled') {
       throw new ApiError(409, 'เคสของใบนี้ถูกยกเลิกแล้ว จึงออกใบไม่ได้ — ถ้าจะเก็บเงินต่อ ให้เปิดเคสอีกครั้งก่อน');
     }
@@ -424,6 +445,9 @@ invoicesRouter.post(
     }
     if (result.reason === 'idempotency_conflict') {
       throw new ApiError(409, 'คำขอรับชำระเดิมถูกส่งมาด้วยข้อมูลที่ต่างกัน กรุณาโหลดข้อมูลใหม่แล้วลองอีกครั้ง');
+    }
+    if (result.reason === 'slip_unavailable') {
+      throw new ApiError(409, 'สลิปนี้ถูกตรวจไปแล้ว กรุณาโหลดข้อมูลใหม่');
     }
     if (result.reason === 'amount_exceeds_balance') {
       throw new ApiError(
@@ -518,6 +542,18 @@ invoicesRouter.delete(
   }),
 );
 
+/** ปฏิเสธสลิปที่ลูกค้าส่ง — เก็บประวัติไว้ ไม่ลบรูป/หลักฐานออกจากฐาน */
+invoicesRouter.post(
+  '/:id/slips/:slipId/reject',
+  asyncRoute(async (req, res, next) => {
+    const slipId = Number(req.params.slipId);
+    const { reason } = rejectSlipSchema.parse(req.body ?? {});
+    const rejected = Number.isInteger(slipId) && (await repo.rejectSlip(req.params.id, slipId, req.user, reason));
+    if (!rejected) return next(new ApiError(409, 'สลิปนี้ถูกตรวจไปแล้ว กรุณาโหลดข้อมูลใหม่'));
+    res.json(await repo.findById(req.params.id));
+  }),
+);
+
 invoicesRouter.post(
   '/:id/cancel',
   asyncRoute(async (req, res) => {
@@ -558,6 +594,13 @@ invoicesRouter.delete(
         409,
         `ใบ ${result.invoice_id} ในแผนเดียวกันรับชำระมาแล้ว — ลบใบนี้ต้องลบทั้งแผนจึงทำไม่ได้ ` +
           'ให้กด "ยกเลิกใบนี้" แทน (ใบจะยังอยู่เป็นประวัติ)',
+      );
+    }
+    if (result.reason === 'shared_with_customer') {
+      throw new ApiError(
+        409,
+        `ใบ ${result.invoice_id} ถูกส่งลิงก์ให้ลูกค้าแล้ว — ลบถาวรจะทำให้ลิงก์ที่ลูกค้าได้รับเปิดไม่ได้ ` +
+          'ให้กด "ยกเลิกใบนี้" แทน เพื่อให้เอกสารและลิงก์เดิมยังตรวจสอบได้',
       );
     }
     // คืนรายการที่ลบจริงกลับไป หน้าเว็บจะได้บอกได้ว่าลบไปกี่ใบ (ลบใบมัดจำ = ใบส่วนที่เหลือหายไปด้วย)

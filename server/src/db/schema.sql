@@ -1166,6 +1166,8 @@ CREATE TABLE IF NOT EXISTS invoice_payments (
 -- NULL ยอมไว้เฉพาะข้อมูลเก่า/ข้อมูล migration ก่อนมีระบบ idempotency
 ALTER TABLE invoice_payments ADD COLUMN IF NOT EXISTS request_id UUID;
 ALTER TABLE invoice_payments ADD COLUMN IF NOT EXISTS request_payload JSONB;
+-- ถ้ารับเงินจากสลิปที่ลูกค้าส่งมา ให้ย้อนตรวจได้ว่างวดนี้ยืนยันจากสลิปใบไหน
+ALTER TABLE invoice_payments ADD COLUMN IF NOT EXISTS slip_id INTEGER;
 
 CREATE INDEX IF NOT EXISTS idx_invoice_payments_invoice ON invoice_payments (invoice_id, payment_id);
 
@@ -1182,7 +1184,35 @@ CREATE TABLE IF NOT EXISTS invoice_slips (
   uploaded_by_name TEXT,
   created_at   TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')
 );
+-- ของเดิมที่ทีมแนบหลังรับเงินถือว่ายืนยันแล้ว · ของลูกค้า/LINE ใส่ pending ตอน INSERT
+ALTER TABLE invoice_slips ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'confirmed';
+ALTER TABLE invoice_slips ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'staff';
+ALTER TABLE invoice_slips ADD COLUMN IF NOT EXISTS extracted_amount DOUBLE PRECISION;
+ALTER TABLE invoice_slips ADD COLUMN IF NOT EXISTS extracted_date TEXT;
+ALTER TABLE invoice_slips ADD COLUMN IF NOT EXISTS extracted_ref TEXT;
+ALTER TABLE invoice_slips ADD COLUMN IF NOT EXISTS extracted_bank TEXT;
+ALTER TABLE invoice_slips ADD COLUMN IF NOT EXISTS reviewed_at TEXT;
+ALTER TABLE invoice_slips ADD COLUMN IF NOT EXISTS reviewed_by TEXT REFERENCES employees (employee_id) ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE invoice_slips ADD COLUMN IF NOT EXISTS reviewed_by_name TEXT;
+ALTER TABLE invoice_slips ADD COLUMN IF NOT EXISTS rejection_reason TEXT;
+ALTER TABLE invoice_slips ADD COLUMN IF NOT EXISTS payment_id INTEGER;
+ALTER TABLE invoice_slips ADD COLUMN IF NOT EXISTS source_ref TEXT;
 CREATE INDEX IF NOT EXISTS idx_invoice_slips_invoice ON invoice_slips (invoice_id, slip_id);
+CREATE INDEX IF NOT EXISTS idx_invoice_slips_pending ON invoice_slips (invoice_id, slip_id) WHERE status = 'pending';
+CREATE UNIQUE INDEX IF NOT EXISTS uq_invoice_slips_source_ref ON invoice_slips (source_ref);
+
+-- คิวแจ้งทีม HomeCare เมื่อมีสลิปจากลูกค้า · ระบบแชทดึงไปส่ง LINE ทีมแบบเดียวกับคิวส่งบิล
+CREATE TABLE IF NOT EXISTS invoice_slip_outbox (
+  id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  slip_id     INTEGER NOT NULL UNIQUE REFERENCES invoice_slips (slip_id) ON DELETE CASCADE,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  attempts    INTEGER NOT NULL DEFAULT 0,
+  claimed_at  TIMESTAMPTZ,
+  sent_at     TIMESTAMPTZ,
+  error       TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_invoice_slip_outbox_pending
+  ON invoice_slip_outbox (created_at) WHERE sent_at IS NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_invoice_payments_request_id
   ON invoice_payments (request_id);
 
@@ -1387,6 +1417,11 @@ CREATE INDEX IF NOT EXISTS idx_case_payouts_installment ON case_payouts (case_id
 -- ว่างได้ = ยังไม่ได้นัด (ของเก่าที่ปล่อยก่อนมีช่องนี้ทั้งหมดเป็น NULL ซึ่งถูกต้องตามความจริง)
 ALTER TABLE case_payouts ADD COLUMN IF NOT EXISTS due_date TEXT;
 
+-- รหัสคำขอหนึ่งค่าแทนการกดปล่อยหนึ่งครั้ง (งวดหลายคนเก็บรหัสไว้ที่แถวแรกเพียงแถวเดียว)
+ALTER TABLE case_payouts ADD COLUMN IF NOT EXISTS request_id UUID;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_case_payouts_request_id
+  ON case_payouts (request_id) WHERE request_id IS NOT NULL;
+
 -- ============================================================================
 -- ส่วนแบ่งค่าจ้างที่ตกลงกันไว้ของเคส — "เคสนี้ ใครได้เท่าไหร่"
 --
@@ -1442,6 +1477,15 @@ CREATE INDEX IF NOT EXISTS idx_payroll_payout_lines_item ON payroll_payout_lines
 -- และโผล่อยู่ทุกหน้าจอ — ใครก็ไล่ยิงคะแนนใส่พนักงานทีละคนได้ครบทั้งบริษัทในคำสั่งเดียว
 -- token ยังเพิกถอนได้ด้วย (ออกใบใหม่ = ลิงก์เดิมตาย) ต่างจากรหัสพนักงานที่ห้ามแก้ตลอดอายุบัญชี
 ALTER TABLE employees ADD COLUMN IF NOT EXISTS review_token TEXT;
+-- วันออกลิงก์แยกจาก updated_at ของแฟ้มพนักงาน เพราะการแก้เบอร์/ที่อยู่ภายหลัง
+-- ต้องไม่ต่ออายุลิงก์สาธารณะที่แจกไปแล้วโดยไม่ตั้งใจ
+ALTER TABLE employees ADD COLUMN IF NOT EXISTS review_token_issued_at TEXT;
+
+-- ฐานเดิมไม่มีวันออกลิงก์ ใช้ updated_at เป็นหลักฐานเก่าที่ดีที่สุดเพียงครั้งเดียวตอน migrate
+-- จากนี้ทุกการออก/หมุน token จะเขียน review_token_issued_at เอง
+UPDATE employees
+SET review_token_issued_at = updated_at
+WHERE review_token IS NOT NULL AND review_token_issued_at IS NULL;
 
 -- partial index เพราะคนที่ยังไม่เคยออกลิงก์มีได้หลายคน (NULL ไม่ชนกัน) — เขาแค่ยังไม่มีลิงก์
 CREATE UNIQUE INDEX IF NOT EXISTS idx_employees_review_token

@@ -40,6 +40,7 @@ import { resolveMapLink } from '../lib/maplink.js';
 import { canSeeStaffPay, requireManager } from '../lib/auth.js';
 import { FRONT_POSITIONS } from '../employees/schema.js';
 import { ApiError, asyncRoute, notFound } from '../lib/errors.js';
+import { ensureFamilyTable } from '../lib/family.js';
 
 export const casesRouter = Router();
 
@@ -274,13 +275,15 @@ casesRouter.post(
 
        ใบล้มไม่ควรทำให้การเปิดเคสล้มตาม — เคสถูกสร้างไปแล้ว ตอบ error กลับไปจะกลายเป็น
        "เปิดเคสไม่สำเร็จ" ทั้งที่เคสอยู่ในระบบแล้ว · ปุ่มออกใบเองในหน้าเคสยังใช้ได้ตามเดิม */
+    let invoiceDraftCreated = true;
     try {
       await createDraftForCase(created, req.user);
     } catch (err) {
+      invoiceDraftCreated = false;
       console.error(`[POST /api/cases] ออกใบแจ้งหนี้อัตโนมัติให้ ${created.case_id} ไม่สำเร็จ:`, err.message);
     }
 
-    res.status(201).json(visible(req, created));
+    res.status(201).json({ ...visible(req, created), invoice_draft_created: invoiceDraftCreated });
   }),
 );
 
@@ -387,6 +390,14 @@ casesRouter.post(
     ensureCanPay(req);
     const input = releasePaySchema.parse(req.body ?? {});
 
+    const previous = await repo.findPayReleaseRequest(input.request_id);
+    if (previous) {
+      if (previous.case_id !== req.params.id) {
+        throw new ApiError(409, 'รหัสคำขอนี้ถูกใช้กับเคสอื่นแล้ว กรุณาโหลดข้อมูลใหม่แล้วลองอีกครั้ง');
+      }
+      return res.json(await repo.payStatus(req.params.id));
+    }
+
     const status = await repo.payStatus(req.params.id);
     if (status.staff_pay == null) {
       throw new ApiError(409, 'เคสนี้ยังไม่ได้ตั้งค่าจ้างพนักงาน — ตั้งยอดเหมาของเคสก่อนจึงจะปล่อยได้');
@@ -437,11 +448,15 @@ casesRouter.post(
        ส่ง input.amount ตรงๆ เพื่อให้กรณีไม่ระบุยอดคำนวณ remaining ใหม่หลังได้ row lock */
     const result = await repo.releasePay(
       req.params.id,
-      { amount: input.amount, note: input.note, due_date: input.due_date, shares: input.shares },
+      { request_id: input.request_id, amount: input.amount, note: input.note, due_date: input.due_date, shares: input.shares },
       req.user,
     );
 
     if (result.reason === 'not_found') throw notFound('ไม่พบเคสนี้');
+    if (result.reason === 'idempotency_conflict') {
+      throw new ApiError(409, 'รหัสคำขอนี้ถูกใช้กับเคสอื่นแล้ว กรุณาโหลดข้อมูลใหม่แล้วลองอีกครั้ง');
+    }
+    if (result.replayed) return res.json(await repo.payStatus(req.params.id));
     if (result.reason === 'staff_pay_not_set') {
       throw new ApiError(409, 'ค่าจ้างของเคสถูกล้างหรือเปลี่ยนระหว่างทำรายการ กรุณาโหลดข้อมูลใหม่');
     }
@@ -546,14 +561,20 @@ casesRouter.patch(
     // แก้เคสแล้วใบแจ้งหนี้ที่ยังแก้ได้ (ร่าง/ออกใบแล้ว) ต้องตามให้ทัน — ดู syncOpenFromCase
     // ส่ง updated ตัวเต็มเข้าไป ไม่ใช่ตัวที่ตัดค่าจ้างแล้ว — การซิงก์ใบต้องใช้ราคาจริงเสมอ
     // ซิงก์เฉพาะตอนสิ่งที่ใบใช้เปลี่ยนจริง (ราคา/บริการ/ผู้จ่าย) — แก้โน้ตหรือเวลานัดไม่ควรไปแตะใบ
+    let invoiceSyncFailed = false;
     if (invoices.billingSignature(req.case) !== invoices.billingSignature(updated)) {
       /* หาผู้จ่ายด้วย resolvePayer ตัวเดียวกับตอนออกใบ — ของเดิมดูแค่ customer_id ของเคส
          เคสที่ผูกผู้ว่าจ้างไว้ที่แฟ้มผู้รับบริการจึงถูกซิงก์ชื่อผู้จ่ายกลับเป็นชื่อผู้รับบริการทุกครั้งที่แก้เคส */
-      const customer = await resolvePayer(updated);
-      await invoices.syncOpenFromCase(updated, customer);
+      try {
+        const customer = await resolvePayer(updated);
+        await invoices.syncOpenFromCase(updated, customer);
+      } catch (err) {
+        invoiceSyncFailed = true;
+        console.error(`[PATCH /api/cases/${req.params.id}] บันทึกเคสแล้วแต่ซิงก์ใบร่างไม่สำเร็จ:`, err.message);
+      }
     }
 
-    res.json(visible(req, updated));
+    res.json({ ...visible(req, updated), invoice_sync_failed: invoiceSyncFailed });
   }),
 );
 
@@ -688,14 +709,19 @@ casesRouter.delete(
   '/:id',
   asyncRoute(async (req, res) => {
     if (req.query.force !== 'true') {
-      const [attended, bills] = await Promise.all([
-        repo.attendedVisitCount(req.params.id),
+      // ตารางญาติสร้างแบบ lazy จึงต้องรับประกันว่ามีอยู่ก่อนรวมยอดผลกระทบ
+      await ensureFamilyTable();
+      const [related, bills] = await Promise.all([
+        repo.deletionBlockers(req.params.id),
         invoices.listForCase(req.params.id),
       ]);
       const live = bills.filter((b) => b.status !== 'cancelled');
 
       const blockers = [
-        attended > 0 && `${attended} กะที่เช็คอินไปแล้ว (เวลาทำงาน รูปเช็คอิน และค่าจ้างจะหายไปด้วย)`,
+        related.attended_visits > 0 && `${related.attended_visits} กะที่เช็คอินไปแล้ว (เวลาทำงานและรูปเช็คอินจะหายไปด้วย)`,
+        related.reports > 0 && `${related.reports} รายงานการดูแล${related.report_photos > 0 ? ` (มีรูป ${related.report_photos} รายงาน)` : ''}`,
+        related.family_links > 0 && `สิทธิ์ญาติ ${related.family_links} ราย`,
+        related.family_messages > 0 && `ข้อความญาติ/ทีม ${related.family_messages} ข้อความ`,
         live.length > 0 && `ใบแจ้งหนี้ ${live.length} ใบที่ผูกกับเคสนี้`,
       ].filter(Boolean);
 
@@ -703,7 +729,7 @@ casesRouter.delete(
         throw new ApiError(
           409,
           `เคสนี้มีข้อมูลที่จะหายไปด้วย: ${blockers.join(' · ')} — แนะนำให้ "ยกเลิกเคส" แทน หรือยืนยันอีกครั้งถ้าต้องการลบจริง`,
-          { attended_visits: attended, invoices: live.length },
+          { ...related, invoices: live.length },
         );
       }
     }
@@ -751,6 +777,12 @@ async function ensureVisitAssignee(caseRow, assignedTo) {
 casesRouter.get(
   '/:id/visits',
   asyncRoute(async (req, res) => res.json(await repo.listVisits(req.params.id))),
+);
+
+/** สิทธิ์แพ็กกายภาพของเคส — ซื้อกี่ครั้ง ลงนัดแล้ว/ไปแล้วกี่ครั้ง เหลือเท่าไร หมดอายุวันไหน · เคส Homecare = null */
+casesRouter.get(
+  '/:id/physio-quota',
+  asyncRoute(async (req, res) => res.json(await repo.physioQuota(req.params.id))),
 );
 
 casesRouter.post(

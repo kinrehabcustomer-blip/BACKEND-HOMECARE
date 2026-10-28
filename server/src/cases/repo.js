@@ -6,6 +6,9 @@ import { REPORT_CONTENT_FIELDS, PATIENT_PENDING } from './schema.js';
 import { ensurePatientCodeFree } from '../patients/repo.js';
 import { decodeImage, FRONT_POSITIONS } from '../employees/schema.js';
 import { ApiError } from '../lib/errors.js';
+import { physioQuota } from './physioQuota.js';
+import { ensureVisitReminderColumns, ensureVisitChangeTable, recordVisitChange } from '../notify/visitReminders.js';
+export { physioQuota };
 import { normalizeAddons, addonsTotal } from '../lib/addons.js';
 
 const COLUMNS = [
@@ -52,6 +55,39 @@ const COLUMNS = [
 
   'note',
 ];
+
+let priceSnapshotReady = null;
+export const ensureCasePriceSnapshots = () =>
+  (priceSnapshotReady ??= (async () => {
+    await sql.run('ALTER TABLE cases ADD COLUMN IF NOT EXISTS service_list_price_snapshot DOUBLE PRECISION');
+    await sql.run('ALTER TABLE cases ADD COLUMN IF NOT EXISTS service_customer_price_snapshot DOUBLE PRECISION');
+  })().catch((err) => { priceSnapshotReady = null; throw err; }));
+
+async function servicePriceSnapshot(db, s) {
+  if (s.physio_package_id) {
+    const p = await db.one(
+      'SELECT original_price, special_price FROM physio_packages WHERE physio_package_id = :id',
+      { id: s.physio_package_id },
+    );
+    return {
+      list: p?.original_price ?? null,
+      customer: s.fee ?? p?.special_price ?? p?.original_price ?? null,
+    };
+  }
+  if (s.pkg_format_id && s.pkg_staff_tier) {
+    const r = await db.one(
+      `SELECT customer_price, discount_percent, discount_amount FROM pkg_rates
+        WHERE format_id=:format AND grade_id IS NOT DISTINCT FROM :grade AND staff_tier=:tier`,
+      { format: s.pkg_format_id, grade: s.pkg_grade_id ?? null, tier: s.pkg_staff_tier },
+    );
+    const list = r?.customer_price ?? null;
+    const discount = r?.discount_percent != null
+      ? Number(list || 0) * Number(r.discount_percent) / 100
+      : Number(r?.discount_amount || 0);
+    return { list, customer: s.fee ?? (list == null ? null : Math.max(0, list - discount)) };
+  }
+  return { list: null, customer: s.fee ?? null };
+}
 
 const NOW = `to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')`;
 
@@ -542,7 +578,8 @@ async function ensureCaseCodeFree(db, code, exceptId = null) {
   }
 }
 
-export function create(rawInput, actor) {
+export async function create(rawInput, actor) {
+  await ensureCasePriceSnapshots();
   const input = clearUnusedKind(rawInput);
   return transaction(async (tx) => {
     /* ต่อเคส — ล็อกเคสรอบก่อนไว้ก่อนเช็ค เพื่อให้กดต่อพร้อมกันสองครั้งได้รอบใหม่แค่ใบเดียว
@@ -566,6 +603,9 @@ export function create(rawInput, actor) {
 
     // ไม่ได้ส่งค่าจ้างมา = ใช้ของแพ็คเกจ · ส่งตัวเลขมาเอง (รวม 0) = เคารพตามนั้น
     if (values.staff_pay == null) values.staff_pay = await payFromService(input, tx);
+    const priceSnapshot = await servicePriceSnapshot(tx, values);
+    values.service_list_price_snapshot = priceSnapshot.list;
+    values.service_customer_price_snapshot = priceSnapshot.customer;
 
     // ไม่มีช่องกรอกชื่อเคสแล้ว — ปกติหน้าเว็บส่งชื่อที่ประกอบจากแพ็คเกจ+ผู้รับบริการมาให้
     // ถ้าเรียก API ตรงๆ โดยไม่ส่ง title มา ใช้ชื่อผู้รับบริการแทน เพื่อไม่ให้ชน NOT NULL
@@ -585,9 +625,10 @@ export function create(rawInput, actor) {
     const assignedAt = values.assigned_to ? NOW : 'NULL';
 
     await tx.one(
-      `INSERT INTO cases (case_id, status, assigned_to, assigned_at, renewed_from, round_no, ${COLUMNS.join(', ')})
+      `INSERT INTO cases (case_id, status, assigned_to, assigned_at, renewed_from, round_no,
+                          service_list_price_snapshot, service_customer_price_snapshot, ${COLUMNS.join(', ')})
        VALUES (:case_id, :status, :assigned_to, ${assignedAt}, :renewed_from, :round_no,
-               ${COLUMNS.map((c) => `:${c}`).join(', ')})
+                :service_list_price_snapshot, :service_customer_price_snapshot, ${COLUMNS.map((c) => `:${c}`).join(', ')})
        RETURNING case_id`,
       values,
     );
@@ -773,6 +814,7 @@ async function patientForNamedCase(tx, current, values, patientCode) {
 }
 
 export async function update(caseId, rawInput, actor) {
+  await ensureCasePriceSnapshots();
   // สลับสายบริการตอนแก้เคส ต้องล้างของสายเดิมด้วย ไม่งั้นค้างเป็นเคสที่มีทั้งเรท Homecare และแพ็คเกจกายภาพบำบัด
   const input = clearUnusedKind(rawInput);
   /* เปลี่ยนรหัสเคส (เช่น CASE-0007 → VN690215209) — ทุกตารางที่อ้างเคสเป็น ON UPDATE CASCADE
@@ -802,6 +844,13 @@ export async function update(caseId, rawInput, actor) {
     if (payMode !== 'preserve') {
       if (!fields.includes('staff_pay')) fields.push('staff_pay');
       values.staff_pay = payState.staff_pay;
+    }
+
+    if (serviceChanged(current, values) || 'fee' in values) {
+      const priceSnapshot = await servicePriceSnapshot(tx, { ...current, ...values });
+      values.service_list_price_snapshot = priceSnapshot.list;
+      values.service_customer_price_snapshot = priceSnapshot.customer;
+      fields.push('service_list_price_snapshot', 'service_customer_price_snapshot');
     }
 
     // เคสที่เปิดโดยรู้แค่ผู้ว่าจ้าง เพิ่งได้ชื่อผู้รับบริการ → สร้างแฟ้มผู้รับบริการแล้วผูกกับเคส (ทรานแซกชันเดียวกัน)
@@ -1261,6 +1310,20 @@ export async function attendedVisitCount(caseId) {
   return Number(row.n);
 }
 
+/** ข้อมูลด้านการดูแล/ญาติที่ CASCADE หายไปกับเคส — ใช้ทำคำเตือนก่อนยืนยัน force */
+export async function deletionBlockers(caseId) {
+  const row = await sql.one(
+    `SELECT
+       (SELECT COUNT(*) FROM case_visits v WHERE v.case_id = :id AND v.check_in_at IS NOT NULL) AS attended_visits,
+       (SELECT COUNT(*) FROM case_reports r WHERE r.case_id = :id) AS reports,
+       (SELECT COUNT(*) FROM case_reports r WHERE r.case_id = :id AND r.wound_photo_data IS NOT NULL) AS report_photos,
+       (SELECT COUNT(*) FROM case_family_links l WHERE l.case_id = :id) AS family_links,
+       (SELECT COUNT(*) FROM case_family_messages m WHERE m.case_id = :id) AS family_messages`,
+    { id: caseId },
+  );
+  return Object.fromEntries(Object.entries(row ?? {}).map(([key, value]) => [key, Number(value ?? 0)]));
+}
+
 /**
  * ลบเคส — ยกเว้นเคสที่ปล่อยค่าจ้างไปแล้ว ซึ่ง ?force=true ก็ข้ามไม่ได้
  *
@@ -1571,6 +1634,9 @@ const LOCKED_AFTER_CHECK_IN = ['visit_date', 'assigned_to', 'planned_start', 'pl
  * และสถานะเคสที่ตรวจต้องเป็นของหลังได้ล็อก (หน้าที่เปิดค้างไว้อาจเห็นเคสที่ถูกปิดไปแล้ว)
  */
 export async function updateVisit(caseId, visitId, input, actor) {
+  // คอลัมน์เตือน LINE ต้องมีก่อนเข้า transaction — ALTER TABLE ระหว่างที่ล็อกกะไว้ = รอตัวเองค้าง
+  await ensureVisitReminderColumns();
+  await ensureVisitChangeTable();
   const fields = [
     'visit_date', 'assigned_to', 'planned_start', 'planned_end', 'status', 'note',
     'staff_pay', // ตั้งค่าจ้างเฉพาะกะนี้ — ส่ง null = กลับไปเกลี่ยจากยอดเคสตามปกติ
@@ -1623,6 +1689,10 @@ export async function updateVisit(caseId, visitId, input, actor) {
     const values = { case_id: caseId, visit_id: visitId };
     for (const c of changed) values[c] = input[c] ?? null;
     const sets = changed.map((c) => `${c} = :${c}`);
+    // ย้ายวัน/เวลา/คน = นัดใหม่ → เตือน LINE ใหม่ตามนัดใหม่ (notify/visitReminders.js)
+    if (changed.some((c) => ['visit_date', 'planned_start', 'assigned_to'].includes(c)) || (changed.includes('status') && input.status === 'scheduled')) {
+      sets.push('remind_day_at = NULL', 'remind_3h_at = NULL', 'remind_family_at = NULL');
+    }
     // คนเปลี่ยนสถานะเองแล้ว = ไม่ใช่กะที่ระบบยกเลิกให้อีกต่อไป ตอนเปิดเคสใหม่ต้องไม่ถูกคืนทับการตัดสินใจนี้
     if (changed.includes('status')) sets.push('auto_cancelled_at = NULL');
 
@@ -1649,6 +1719,8 @@ export async function updateVisit(caseId, visitId, input, actor) {
       }
     }
     await logEvent(tx, caseId, 'visit_edited', `แก้กะวันที่ ${visit.visit_date} — ${parts.join(' · ')}`, actor);
+    // แจ้ง LINE พนักงาน + ญาติ เมื่อเลื่อน/ยกเลิก/เปลี่ยนคน (notify/visitReminders.js · cron chat.kinorigin.com ส่ง)
+    await recordVisitChange(tx, caseId, visitId, visit, input, changed);
   });
 
   return listVisits(caseId);
@@ -3139,8 +3211,30 @@ export function assessReleaseCapacity(staffPay, releasedAmount, requestedAmount,
   return { staff_pay, released, remaining, amount };
 }
 
-export async function releasePay(caseId, { amount: requestedAmount, note, due_date, shares: chosen }, actor) {
-  return transaction(async (tx) => {
+let payReleaseRequestReady = null;
+export function ensurePayReleaseRequestSchema() {
+  return (payReleaseRequestReady ??= (async () => {
+    await sql.run(`ALTER TABLE case_payouts ADD COLUMN IF NOT EXISTS request_id UUID`);
+    await sql.run(`CREATE UNIQUE INDEX IF NOT EXISTS uq_case_payouts_request_id
+      ON case_payouts (request_id) WHERE request_id IS NOT NULL`);
+  })().catch((err) => {
+    payReleaseRequestReady = null;
+    throw err;
+  }));
+}
+
+export async function findPayReleaseRequest(requestId) {
+  await ensurePayReleaseRequestSchema();
+  return sql.one(
+    `SELECT case_id, installment_no FROM case_payouts WHERE request_id = :request_id`,
+    { request_id: requestId },
+  );
+}
+
+export async function releasePay(caseId, { request_id, amount: requestedAmount, note, due_date, shares: chosen }, actor) {
+  await ensurePayReleaseRequestSchema();
+  try {
+    return await transaction(async (tx) => {
     /* จองแถวเคสก่อนอ่านทั้งยอดและเลขงวด — case_payouts เป็น "แถวที่ยังไม่มี" จึงล็อกตรงๆ ไม่ได้
        คำขอของเคสเดียวกันทุกคำขอต้องผ่าน lock นี้ แล้ว statement ถัดไปจึงเห็น payout ที่คำขอก่อนหน้า commit */
     const lockedCase = await tx.one(
@@ -3148,6 +3242,16 @@ export async function releasePay(caseId, { amount: requestedAmount, note, due_da
       { id: caseId },
     );
     if (!lockedCase) return { released: [], reason: 'not_found' };
+
+    const existing = await tx.one(
+      `SELECT case_id, installment_no FROM case_payouts WHERE request_id = :request_id`,
+      { request_id },
+    );
+    if (existing) {
+      return existing.case_id === caseId
+        ? { released: [], replayed: true, installment_no: existing.installment_no }
+        : { released: [], reason: 'idempotency_conflict' };
+    }
 
     const { last, released: releasedAmount } = await tx.one(
       `SELECT COALESCE(MAX(installment_no), 0) AS last,
@@ -3199,13 +3303,13 @@ export async function releasePay(caseId, { amount: requestedAmount, note, due_da
     if (rows.length === 0) return { released: [], reason: 'nothing_to_pay' };
 
     const released = [];
-    for (const r of rows) {
+    for (const [index, r] of rows.entries()) {
       const { payout_id } = await tx.one(
         `INSERT INTO case_payouts
            (case_id, installment_no, employee_id, employee_name, amount, shifts, minutes,
-            due_date, released_by, released_by_name, note)
+            due_date, released_by, released_by_name, note, request_id)
          VALUES (:case_id, :installment, :employee_id, :employee_name, :amount, :shifts, :minutes,
-                 :due_date, :by, :by_name, :note)
+                 :due_date, :by, :by_name, :note, :request_id)
          RETURNING payout_id`,
         {
           case_id: caseId,
@@ -3219,6 +3323,7 @@ export async function releasePay(caseId, { amount: requestedAmount, note, due_da
           by: actor?.employee_id ?? null,
           by_name: actor?.name ?? null,
           note: note ?? null,
+          request_id: index === 0 ? request_id : null,
         },
       );
       released.push({ ...r, payout_id, installment_no: installment });
@@ -3238,7 +3343,15 @@ export async function releasePay(caseId, { amount: requestedAmount, note, due_da
     );
 
     return { released, installment_no: installment };
-  });
+    });
+  } catch (err) {
+    if (err?.code !== '23505') throw err;
+    const existing = await findPayReleaseRequest(request_id);
+    if (!existing) throw err;
+    return existing.case_id === caseId
+      ? { released: [], replayed: true, installment_no: existing.installment_no }
+      : { released: [], reason: 'idempotency_conflict' };
+  }
 }
 
 /**

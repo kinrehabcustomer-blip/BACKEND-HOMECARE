@@ -140,6 +140,7 @@ export function assessPaymentReplay(payment, input, actor) {
     method: input.payment_method ?? null,
     note: input.note ?? null,
     received_by: actor?.employee_id ?? null,
+    slip_id: input.slip_id ?? null,
   };
   const recorded = {
     amount: roundMoney(payment.amount),
@@ -147,6 +148,7 @@ export function assessPaymentReplay(payment, input, actor) {
     method: payment.method ?? null,
     note: payment.note ?? null,
     received_by: payment.received_by ?? null,
+    slip_id: payment.slip_id ?? null,
   };
 
   const changed_fields = Object.keys(recorded).filter((field) => requested[field] !== recorded[field]);
@@ -166,7 +168,7 @@ export async function paymentRequestForUpdate(tx, invoiceId, input, actor) {
   if (!invoice) return { reason: 'not_found' };
 
   const existing = await tx.one(
-    `SELECT payment_id, amount, paid_at, method, note, received_by
+    `SELECT payment_id, amount, paid_at, method, note, received_by, slip_id
      FROM invoice_payments
      WHERE invoice_id = :invoice_id AND request_id = :request_id`,
     { invoice_id: invoiceId, request_id: input.request_id },
@@ -174,6 +176,16 @@ export async function paymentRequestForUpdate(tx, invoiceId, input, actor) {
   if (existing) {
     const replay = assessPaymentReplay(existing, input, actor);
     return replay.reason ? replay : { invoice, payment: existing, ...replay };
+  }
+
+  if (input.slip_id != null) {
+    const slip = await tx.one(
+      `SELECT slip_id FROM invoice_slips
+       WHERE invoice_id = :invoice_id AND slip_id = :slip_id AND status = 'pending'
+       FOR UPDATE`,
+      { invoice_id: invoiceId, slip_id: input.slip_id },
+    );
+    if (!slip) return { reason: 'slip_unavailable' };
   }
 
   return capacityForLockedPayment(tx, invoice, input.amount);
@@ -213,6 +225,8 @@ const serviceKeySql = (c) => `concat_ws('|',
 const SELECT_INVOICE = `
   SELECT i.*,
          EXISTS (SELECT 1 FROM invoice_items ii WHERE ii.invoice_id = i.invoice_id) AS has_items,
+         (SELECT COUNT(*)::int FROM invoice_slips s
+           WHERE s.invoice_id = i.invoice_id AND s.status = 'pending') AS pending_slip_count,
          /* ยอดที่รับมาแล้วจริง คิดสดจากรายการรับเงินทุกครั้ง ไม่เก็บยอดสะสมซ้ำไว้บนใบ
             (เก็บสองที่แล้ววันหนึ่งจะไม่ตรงกัน เช่น ลบรายการรับเงินแล้วลืมหักยอดสะสม) */
          COALESCE((SELECT SUM(p.amount) FROM invoice_payments p WHERE p.invoice_id = i.invoice_id), 0) AS paid_amount,
@@ -244,9 +258,11 @@ const SELECT_INVOICE = `
  * ว่าง = ไม่ได้ตั้งราคาเต็มไว้ (แพ็คที่ไม่ใช่โปรโมชัน / เคสที่ไม่ได้เลือกบริการ) = ไม่มีส่วนลดให้แสดง
  */
 const listPriceOf = (c) =>
-  c.service_kind === 'physio' || c.physio_package_id != null
-    ? c.physio_original_price
-    : c.rate_customer_price;
+  c.service_list_price_snapshot ?? (
+    c.service_kind === 'physio' || c.physio_package_id != null
+      ? c.physio_original_price
+      : c.rate_customer_price
+  );
 
 /**
  * แยกค่าจ้างของเคสเป็น "ยอดก่อนลด + ส่วนลด" เพื่อให้ใบแจ้งหนี้แสดงส่วนลดที่ลูกค้าได้รับ
@@ -258,7 +274,8 @@ const listPriceOf = (c) =>
  * ไม่มีราคาเต็ม หรือราคาเต็มไม่เกินค่าจ้าง (เช่น แก้ค่าจ้างเองให้สูงกว่าราคาตั้ง) = ไม่มีส่วนลด
  */
 function priceParts(caseRow) {
-  const net = caseRow.fee ?? 0;
+  // เคสใหม่ใช้ snapshot ณ วันที่เลือกบริการ; เคสเก่าที่ยังว่าง fallback ตารางราคาปัจจุบันเหมือนเดิม
+  const net = caseRow.service_customer_price_snapshot ?? caseRow.fee ?? 0;
   const list = listPriceOf(caseRow);
   // อุปกรณ์เสริมคิดเต็มราคาเสมอ ไม่มีส่วนลด — บวกเข้ายอดก่อนลด ส่วนลดยังเป็นของค่าบริการล้วนๆ
   const extra = addonsTotal(caseRow.addons);
@@ -427,7 +444,7 @@ export async function alertCounts() {
  * เงื่อนไขกรองที่ใช้ร่วมกันระหว่างรายการกับยอดสรุป — ต้องเป็นก้อนเดียวกันจริงๆ
  * ไม่งั้นตัวเลขสรุปด้านบนจะไม่ตรงกับรายการที่เห็นข้างล่าง (เช่น กรอง "ชำระแล้ว" แต่ยังขึ้น "รอชำระ 5 ใบ")
  */
-function buildWhere({ q, status, customer_id, case_id, overdue, stale, draft_stale }) {
+function buildWhere({ q, status, customer_id, case_id, overdue, stale, draft_stale, pending_slip }) {
   const where = [];
   const params = {};
 
@@ -464,12 +481,16 @@ function buildWhere({ q, status, customer_id, case_id, overdue, stale, draft_sta
     where.push(`(${DRAFT_STALE_SQL})`);
     params.draft_cutoff = draftStaleCutoff();
   }
+  if (pending_slip === 'yes') {
+    where.push("EXISTS (SELECT 1 FROM invoice_slips ps WHERE ps.invoice_id = i.invoice_id AND ps.status = 'pending')");
+  }
 
   return { clause: where.length ? `WHERE ${where.join(' AND ')}` : '', params };
 }
 
-export async function list({ q, status, customer_id, case_id, overdue, stale, draft_stale, page, per_page, sort, order }) {
-  const { clause, params } = buildWhere({ q, status, customer_id, case_id, overdue, stale, draft_stale });
+export async function list({ q, status, customer_id, case_id, overdue, stale, draft_stale, pending_slip, page, per_page, sort, order }) {
+  await ensureSlipSchema();
+  const { clause, params } = buildWhere({ q, status, customer_id, case_id, overdue, stale, draft_stale, pending_slip });
   const { total } = await sql.one(`SELECT COUNT(*) AS total FROM invoices i ${clause}`, params);
 
   // NULLS LAST — due_date/paid_at ว่างได้ ถ้าไม่ใส่ การเรียงจากมากไปน้อยจะเอาใบที่ยังไม่ได้ระบุขึ้นก่อน
@@ -496,6 +517,7 @@ export async function list({ q, status, customer_id, case_id, overdue, stale, dr
  * items ว่าง = ใบแบบแพ็คเกจบรรทัดเดียว (ส่วนใหญ่เป็นแบบนี้)
  */
 export const findById = async (id) => {
+  await ensureSlipSchema();
   const row = await sql.one(`${SELECT_INVOICE} WHERE i.invoice_id = :id`, { id });
   if (!row) return null;
   /* รายการรับชำระที่ถูกยกเลิกไปแล้วมาด้วย — เงินที่เคยบันทึกแล้วหายไปจากใบต้องมีร่องรอยให้เห็น
@@ -531,10 +553,12 @@ export const casesWithoutInvoice = () =>
   );
 
 /** ใบแจ้งหนี้ของเคสหนึ่งใบ — เคสหนึ่งออกได้ใบเดียว แต่ถ้ายกเลิกแล้วออกใหม่ได้ จึงคืนเป็นรายการ */
-export const listForCase = (caseId) =>
-  sql
+export const listForCase = async (caseId) => {
+  await ensureSlipSchema();
+  return sql
     .all(`${SELECT_INVOICE} WHERE i.case_id = :id ORDER BY i.created_at DESC, i.invoice_id DESC`, { id: caseId })
     .then((rows) => rows.map(withComputed));
+};
 
 /**
  * ใบร่างที่ยังค้างอยู่ของเคส — เคสหนึ่งมีใบร่างได้ทีละใบเท่านั้น
@@ -675,39 +699,167 @@ export async function voidPayment(invoiceId, paymentId, input, actor, opts) {
   return invoiceMutationResult(result);
 }
 
-/** สลิปโอนเงินของใบ — เฉพาะข้อมูลประกอบ ตัวรูปดึงแยกทีละใบผ่าน findSlipImage (ใส่ใน <img src>) */
-export const listSlips = (invoiceId) =>
-  sql.all(
-    `SELECT slip_id, image_size, uploaded_by_name, created_at
+/* ---------- สลิปโอนเงิน ----------
+ * ตารางเดิมเก็บรูปอย่างเดียว รอบนี้เพิ่มสถานะ/แหล่งที่มา/ค่าที่ AI อ่าน โดยรันซ้ำได้ทุกคำสั่ง
+ * ค่า default confirmed+staff ทำให้สลิปเก่ากับปุ่มแนบของทีมยังทำงานเหมือนเดิมทุกใบ
+ */
+let slipReady = null;
+export const ensureSlipSchema = () =>
+  (slipReady ??= (async () => {
+    await sql.run("ALTER TABLE invoice_slips ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'confirmed'");
+    await sql.run("ALTER TABLE invoice_slips ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'staff'");
+    await sql.run('ALTER TABLE invoice_slips ADD COLUMN IF NOT EXISTS extracted_amount DOUBLE PRECISION');
+    await sql.run('ALTER TABLE invoice_slips ADD COLUMN IF NOT EXISTS extracted_date TEXT');
+    await sql.run('ALTER TABLE invoice_slips ADD COLUMN IF NOT EXISTS extracted_ref TEXT');
+    await sql.run('ALTER TABLE invoice_slips ADD COLUMN IF NOT EXISTS extracted_bank TEXT');
+    await sql.run('ALTER TABLE invoice_slips ADD COLUMN IF NOT EXISTS reviewed_at TEXT');
+    await sql.run('ALTER TABLE invoice_slips ADD COLUMN IF NOT EXISTS reviewed_by TEXT REFERENCES employees (employee_id) ON DELETE SET NULL ON UPDATE CASCADE');
+    await sql.run('ALTER TABLE invoice_slips ADD COLUMN IF NOT EXISTS reviewed_by_name TEXT');
+    await sql.run('ALTER TABLE invoice_slips ADD COLUMN IF NOT EXISTS rejection_reason TEXT');
+    await sql.run('ALTER TABLE invoice_slips ADD COLUMN IF NOT EXISTS payment_id INTEGER');
+    await sql.run('ALTER TABLE invoice_slips ADD COLUMN IF NOT EXISTS source_ref TEXT');
+    await sql.run('ALTER TABLE invoice_payments ADD COLUMN IF NOT EXISTS slip_id INTEGER');
+    await sql.run("CREATE INDEX IF NOT EXISTS idx_invoice_slips_pending ON invoice_slips (invoice_id, slip_id) WHERE status = 'pending'");
+    await sql.run('CREATE UNIQUE INDEX IF NOT EXISTS uq_invoice_slips_source_ref ON invoice_slips (source_ref)');
+    await sql.run(`CREATE TABLE IF NOT EXISTS invoice_slip_outbox (
+      id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+      slip_id INTEGER NOT NULL UNIQUE REFERENCES invoice_slips (slip_id) ON DELETE CASCADE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      attempts INTEGER NOT NULL DEFAULT 0,
+      claimed_at TIMESTAMPTZ,
+      sent_at TIMESTAMPTZ,
+      error TEXT
+    )`);
+    await sql.run('CREATE INDEX IF NOT EXISTS idx_invoice_slip_outbox_pending ON invoice_slip_outbox (created_at) WHERE sent_at IS NULL');
+  })().catch((err) => {
+    slipReady = null;
+    throw err;
+  }));
+
+/** สลิปของใบ — รูปดึงแยกทีละใบผ่าน findSlipImage เพื่อไม่ให้ JSON ก้อนใหญ่ */
+export async function listSlips(invoiceId) {
+  await ensureSlipSchema();
+  return sql.all(
+    `SELECT slip_id, image_size, uploaded_by_name, status, source,
+            extracted_amount, extracted_date, extracted_ref, extracted_bank,
+            reviewed_at, reviewed_by_name, rejection_reason, payment_id, created_at
      FROM invoice_slips WHERE invoice_id = :id ORDER BY slip_id`,
     { id: invoiceId },
   );
+}
 
-export const findSlipImage = (invoiceId, slipId) =>
-  sql.one(
+export async function findSlipImage(invoiceId, slipId) {
+  await ensureSlipSchema();
+  return sql.one(
     'SELECT image_data, image_mime FROM invoice_slips WHERE invoice_id = :id AND slip_id = :slip_id',
     { id: invoiceId, slip_id: slipId },
   );
+}
 
-export const addSlip = (invoiceId, image, actor) =>
-  sql.one(
-    `INSERT INTO invoice_slips (invoice_id, image_data, image_mime, image_size, uploaded_by, uploaded_by_name)
-     VALUES (:id, :data, :mime, :size, :by, :by_name)
-     RETURNING slip_id`,
-    {
-      id: invoiceId,
-      data: image.data,
-      mime: image.mime,
-      size: image.size,
-      by: actor?.employee_id ?? null,
-      by_name: actor?.name ?? null,
-    },
-  );
+const actorName = (actor) =>
+  actor?.name || [actor?.first_name, actor?.last_name].filter(Boolean).join(' ') || null;
 
-export const removeSlip = (invoiceId, slipId) =>
-  sql
+/** เพิ่มสลิปในตารางเดิม · pending จากลูกค้าถูกใส่คิวแจ้งทีมใน transaction เดียวกัน */
+export async function addSlip(invoiceId, image, actor, {
+  status = 'confirmed', source = 'staff', sourceRef = null, extracted = {}, notify = false,
+} = {}) {
+  await ensureSlipSchema();
+  return transaction(async (tx) => {
+    const row = await tx.one(
+      `INSERT INTO invoice_slips
+         (invoice_id, image_data, image_mime, image_size, uploaded_by, uploaded_by_name,
+          status, source, source_ref, extracted_amount, extracted_date, extracted_ref, extracted_bank)
+       VALUES (:id, :data, :mime, :size, :by, :by_name,
+               :status, :source, :source_ref, :amount, :date, :ref, :bank)
+       ON CONFLICT (source_ref) DO UPDATE SET source_ref = EXCLUDED.source_ref
+       RETURNING slip_id, invoice_id`,
+      {
+        id: invoiceId, data: image.data, mime: image.mime, size: image.size,
+        by: actor?.employee_id ?? null, by_name: actorName(actor), status, source, source_ref: sourceRef,
+        amount: extracted.amount ?? null, date: extracted.date ?? null,
+        ref: extracted.ref ?? null, bank: extracted.bank ?? null,
+      },
+    );
+    if (notify) {
+      await tx.run(
+        'INSERT INTO invoice_slip_outbox (slip_id) VALUES (:id) ON CONFLICT (slip_id) DO NOTHING',
+        { id: row.slip_id },
+      );
+    }
+    return row;
+  });
+}
+
+export async function rejectSlip(invoiceId, slipId, actor, reason = null) {
+  await ensureSlipSchema();
+  return transaction(async (tx) => {
+    const changed = await tx.run(
+      `UPDATE invoice_slips
+          SET status = 'rejected', reviewed_at = ${NOW}, reviewed_by = :by,
+              reviewed_by_name = :by_name, rejection_reason = :reason
+        WHERE invoice_id = :id AND slip_id = :slip_id AND status = 'pending'`,
+      {
+        id: invoiceId, slip_id: slipId, by: actor?.employee_id ?? null,
+        by_name: actorName(actor), reason: reason || 'ไม่ใช่สลิป/ปฏิเสธโดยทีม',
+      },
+    );
+    if (changed) {
+      await tx.run(
+        "UPDATE invoice_slip_outbox SET sent_at = now(), error = 'ข้าม: ทีมตรวจสลิปแล้ว' WHERE slip_id = :id AND sent_at IS NULL",
+        { id: slipId },
+      );
+    }
+    return changed > 0;
+  });
+}
+
+export async function removeSlip(invoiceId, slipId) {
+  await ensureSlipSchema();
+  return sql
     .run('DELETE FROM invoice_slips WHERE invoice_id = :id AND slip_id = :slip_id', { id: invoiceId, slip_id: slipId })
     .then((n) => n > 0);
+}
+
+/** คิวสลิปรอตรวจให้ระบบแชทดึงไปแจ้งทีม HomeCare */
+export async function slipOutboxPending(limit = 20) {
+  await ensureSlipSchema();
+  return transaction(async (tx) => {
+    const rows = await tx.all(
+      `SELECT o.id, s.slip_id, s.invoice_id, s.source, s.extracted_amount, s.extracted_date,
+              s.extracted_ref, s.extracted_bank, i.customer_id, i.case_id, i.bill_to_name
+         FROM invoice_slip_outbox o
+         JOIN invoice_slips s ON s.slip_id = o.slip_id
+         JOIN invoices i ON i.invoice_id = s.invoice_id
+        WHERE o.sent_at IS NULL AND o.attempts < 3 AND s.status = 'pending'
+          AND (o.claimed_at IS NULL OR o.claimed_at < now() - interval '10 minutes')
+        ORDER BY o.id LIMIT :limit FOR UPDATE OF o SKIP LOCKED`,
+      { limit },
+    );
+    for (const row of rows) {
+      await tx.run(
+        'UPDATE invoice_slip_outbox SET claimed_at = now(), attempts = attempts + 1 WHERE id = :id',
+        { id: row.id },
+      );
+    }
+    return rows;
+  });
+}
+
+export async function slipOutboxAck(results) {
+  await ensureSlipSchema();
+  let n = 0;
+  for (const r of results.slice(0, 50)) {
+    const id = Number(r?.id);
+    if (!Number.isInteger(id)) continue;
+    n += await sql.run(
+      r.ok
+        ? 'UPDATE invoice_slip_outbox SET sent_at = now(), error = NULL WHERE id = :id AND sent_at IS NULL'
+        : 'UPDATE invoice_slip_outbox SET error = :error, claimed_at = NULL WHERE id = :id AND sent_at IS NULL',
+      { id, error: String(r.error || 'แจ้งทีมไม่สำเร็จ').slice(0, 300) },
+    );
+  }
+  return n;
+}
 
 /** รายการย่อยของใบ (ว่าง = ใบแบบแพ็คเกจบรรทัดเดียวตามปกติ) */
 export const listItems = (invoiceId) =>
@@ -751,7 +903,7 @@ export async function visitLines(caseRow, { from, to } = {}) {
     params.to = to;
   }
 
-  const [visits, booked] = await Promise.all([
+  const [visits, booked, billed, remaining] = await Promise.all([
     sql.all(
       `SELECT v.visit_id, v.visit_date, v.planned_start, v.planned_end,
               e.first_name || ' ' || e.last_name AS employee_name
@@ -765,6 +917,20 @@ export async function visitLines(caseRow, { from, to } = {}) {
       `SELECT COUNT(*) AS n FROM case_visits WHERE case_id = :id AND status <> 'cancelled'`,
       { id: caseRow.case_id },
     ),
+    sql.one(
+      `SELECT COALESCE(SUM(ii.amount), 0) AS amount
+         FROM invoice_items ii JOIN invoices i ON i.invoice_id = ii.invoice_id
+        WHERE i.case_id = :id AND i.status <> 'cancelled' AND ii.visit_id IS NOT NULL`,
+      { id: caseRow.case_id },
+    ),
+    sql.one(
+      `SELECT COUNT(*)::int AS n FROM case_visits v
+        WHERE v.case_id = :id AND v.status <> 'cancelled'
+          AND NOT EXISTS (
+            SELECT 1 FROM invoice_items ii JOIN invoices i ON i.invoice_id = ii.invoice_id
+             WHERE ii.visit_id = v.visit_id AND i.status <> 'cancelled')`,
+      { id: caseRow.case_id },
+    ),
   ]);
 
   if (visits.length === 0) return { lines: [], amount: 0 };
@@ -772,7 +938,11 @@ export async function visitLines(caseRow, { from, to } = {}) {
   const perVisit = Number(booked.n) > 0 ? (caseRow.fee ?? 0) / Number(booked.n) : 0;
   const rounded = Math.round(perVisit * 100) / 100;
   // เก็บเฉพาะครั้งที่ไปจริง — ยอดรวมจึงเป็นสัดส่วนของกะที่ทำ ไม่ใช่ทั้งแพ็คเกจ
-  const total = Math.round(rounded * visits.length * 100) / 100;
+  const isFinalUnbilledBatch = Number(remaining.n) === visits.length;
+  const outstanding = Math.max(0, Math.round(((caseRow.fee ?? 0) - Number(billed.amount ?? 0)) * 100) / 100);
+  const total = isFinalUnbilledBatch
+    ? outstanding
+    : Math.round(rounded * visits.length * 100) / 100;
 
   const lines = visits.map((v, i) => ({
     seq: i + 1,
@@ -965,7 +1135,7 @@ export async function syncOpenFromCase(caseRow, customer, { forceInvoiceId = nul
           เกณฑ์เดิมคือ "สถานะ issued = เอกสารยังอยู่ในมือเรา ยังไม่ได้ส่งมอบ" ซึ่งจริงตอนที่ส่งมอบ
           มีทางเดียวคือพิมพ์ออกมา · พอมีปุ่มส่งเข้า LINE ลูกค้า (24 ต.ค. 2569) ข้อสันนิษฐานนั้นไม่จริงแล้ว
           ย้ายผู้รับบริการไปอยู่ใต้ผู้ว่าจ้างคนใหม่ แล้วใบที่ลูกค้าถือลิงก์อยู่เปลี่ยนชื่อ เลขผู้เสียภาษี
-          และที่อยู่ออกบิลเป็นของอีกบ้านทันที ทั้งที่เขาเปิดลิงก์เดิมดูได้ตลอด 90 วัน
+          และที่อยู่ออกบิลเป็นของอีกบ้านทันที ทั้งที่เขาเปิดลิงก์เดิมดูได้ตลอด 6 เดือน
           (พิสูจน์แล้ว: ก่อนย้าย = บ้าน A/0105566000201 · หลังย้าย = บ้าน B/0105566000202 สถานะยัง issued)
           มีแถวใน invoice_shares = เคยกดส่งให้ลูกค้าแล้ว · ต้องแก้ที่ใบเองหรือออกใบใหม่ */
        AND NOT EXISTS (SELECT 1 FROM invoice_shares sh WHERE sh.invoice_id = invoices.invoice_id)
@@ -1132,6 +1302,10 @@ export async function issueInvoiceForTransaction(tx, invoiceId) {
   const locked = await invoiceForUpdate(tx, invoiceId, 'issue');
   if (locked.reason) return locked;
   if (locked.invoice.billing_kind == null) return { reason: 'billing_plan_required' };
+  const issueDate = TODAY();
+  if (locked.invoice.due_date && locked.invoice.due_date < issueDate) {
+    return { reason: 'due_before_issue', issue_date: issueDate, due_date: locked.invoice.due_date };
+  }
   // เคสถูกยกเลิกไปแล้ว — ใบของเคสนั้นไม่ควรถูกส่งให้ลูกค้า (ใบร่างเก่าที่หลุดรอดมาก่อนมีการยกเลิกตาม)
   if (locked.invoice.case_id) {
     const caseRow = await tx.one('SELECT status FROM cases WHERE case_id = :id', { id: locked.invoice.case_id });
@@ -1140,9 +1314,9 @@ export async function issueInvoiceForTransaction(tx, invoiceId) {
 
   const changed = await tx.run(
     `UPDATE invoices
-     SET status = 'issued', updated_at = ${NOW}
+     SET status = 'issued', issue_date = :issue_date, updated_at = ${NOW}
      WHERE invoice_id = :id AND status = 'draft'`,
-    { id: invoiceId },
+    { id: invoiceId, issue_date: issueDate },
   );
   return changed === 1 ? { invoice_id: invoiceId } : { reason: 'state_changed' };
 }
@@ -1173,10 +1347,11 @@ export async function payInvoiceForTransaction(tx, invoiceId, input, actor) {
   // ใบมัดจำทั้งใบคือเงินมัดจำ — ธงนี้ใช้แยกในใบเสร็จและรายงาน
   const isDeposit = inv.billing_kind === 'deposit';
 
-  await tx.run(
+  const payment = await tx.one(
     `INSERT INTO invoice_payments
-       (invoice_id, request_id, amount, paid_at, is_deposit, method, note, received_by, received_by_name)
-     VALUES (:id, :request_id, :amount, :paid_at, :is_deposit, :method, :note, :by, :by_name)`,
+       (invoice_id, request_id, amount, paid_at, is_deposit, method, note, received_by, received_by_name, slip_id)
+     VALUES (:id, :request_id, :amount, :paid_at, :is_deposit, :method, :note, :by, :by_name, :slip_id)
+     RETURNING payment_id`,
     {
       id: invoiceId,
       request_id: input.request_id,
@@ -1187,8 +1362,27 @@ export async function payInvoiceForTransaction(tx, invoiceId, input, actor) {
       note: input.note ?? null,
       by: actor?.employee_id ?? null,
       by_name: actor?.name ?? null,
+      slip_id: input.slip_id ?? null,
     },
   );
+
+  if (input.slip_id != null) {
+    const changed = await tx.run(
+      `UPDATE invoice_slips
+          SET status = 'confirmed', reviewed_at = ${NOW}, reviewed_by = :by,
+              reviewed_by_name = :by_name, payment_id = :payment_id
+        WHERE invoice_id = :id AND slip_id = :slip_id AND status = 'pending'`,
+      {
+        id: invoiceId, slip_id: input.slip_id, by: actor?.employee_id ?? null,
+        by_name: actorName(actor), payment_id: payment.payment_id,
+      },
+    );
+    if (changed !== 1) return { reason: 'slip_unavailable' };
+    await tx.run(
+      "UPDATE invoice_slip_outbox SET sent_at = now(), error = 'ข้าม: ทีมตรวจสลิปแล้ว' WHERE slip_id = :id AND sent_at IS NULL",
+      { id: input.slip_id },
+    );
+  }
 
   const settled = received >= request.balance;
 
@@ -1224,6 +1418,7 @@ export async function payInvoiceForTransaction(tx, invoiceId, input, actor) {
 }
 
 export async function pay(invoiceId, input, actor) {
+  await ensureSlipSchema();
   let result;
   try {
     result = await transaction((tx) => payInvoiceForTransaction(tx, invoiceId, input, actor));
@@ -1577,6 +1772,19 @@ export async function removeInvoiceForTransaction(tx, invoiceId) {
     };
   }
 
+  /* เคยออกลิงก์ให้ลูกค้าแล้ว = เอกสารออกนอกระบบไปแล้ว แม้ยังไม่รับเงินก็ห้าม hard delete
+     ไม่เช่นนั้น invoice_shares/outbox จะ CASCADE หายและลิงก์ที่ลูกค้าเก็บไว้กลายเป็น 404 ทันที */
+  const shared = await tx.one(
+    `SELECT invoice_id FROM (
+       SELECT invoice_id FROM invoice_shares WHERE invoice_id = ANY(:ids::text[])
+       UNION ALL
+       SELECT invoice_id FROM invoice_line_outbox WHERE invoice_id = ANY(:ids::text[])
+     ) sent
+     LIMIT 1`,
+    { ids },
+  );
+  if (shared) return { reason: 'shared_with_customer', invoice_id: shared.invoice_id };
+
   const deleted = await tx.all(
     `DELETE FROM invoices
      WHERE invoice_id = ANY(:ids::text[])
@@ -1590,6 +1798,7 @@ export async function removeInvoiceForTransaction(tx, invoiceId) {
 }
 
 export async function remove(invoiceId) {
+  await ensureShareTables();
   return transaction((tx) => removeInvoiceForTransaction(tx, invoiceId));
 }
 
@@ -1598,6 +1807,7 @@ export async function remove(invoiceId) {
  * ไม่ส่งตัวกรองมา = นับทั้งระบบเหมือนเดิม
  */
 export async function summary(filters = {}) {
+  await ensureSlipSchema();
   const { clause, params } = buildWhere(filters);
   const rows = await sql.all(
     /* outstanding = เงินที่ยังไม่ได้รับจริง (ยอดสุทธิ − ที่รับมาแล้ว)
