@@ -96,6 +96,36 @@ export const CASE_STATUS_LABELS = {
   cancelled: 'ยกเลิก',
 };
 
+/**
+ * สถานะที่แสดงของเคสที่จับคู่แล้ว — คิดจากวันเริ่ม/วันสิ้นสุดที่กรอก ไม่มีปุ่ม "เริ่มให้บริการ" แล้ว
+ * (ดร.ธงชัย 28 ต.ค. 2569) · ต้องตรงกับ CASE_STAGE_SQL ใน server/src/cases/repo.js
+ *   ยังไม่ถึงวันเริ่ม = รอเริ่ม (ไม่ได้กรอกวันเริ่ม = รอเริ่ม จนกว่ากะแรกจะเช็คอิน)
+ *   ถึงวันเริ่มแล้ว = กำลังให้บริการ · ถึงวันสิ้นสุดแล้ว (นับวันนั้นด้วย) = รอยืนยันปิดเคส
+ */
+export const CASE_STAGE_LABELS = {
+  pending_start: 'รอเริ่ม',
+  active: 'กำลังให้บริการ',
+  awaiting_close: 'รอยืนยันปิดเคส',
+};
+
+/** สถานะที่แสดงบนจอ { key, label } — key ใช้เป็นคลาส badge (case-<key>) · สถานะอื่นใช้ของ DB ตามเดิม */
+export function caseStage(c, today = todayTH()) {
+  if (c?.status !== 'assigned' && c?.status !== 'in_progress') {
+    return { key: c?.status, label: CASE_STATUS_LABELS[c?.status] ?? c?.status };
+  }
+  const pending = c.start_date ? c.start_date > today : c.status === 'assigned';
+  const key = pending ? 'pending_start' : c.end_date && c.end_date <= today ? 'awaiting_close' : 'active';
+  return { key, label: CASE_STAGE_LABELS[key] };
+}
+
+/** ตัวเลือกในช่องกรองสถานะของหน้าเคส — แทน assigned/in_progress ด้วยสถานะตามวันที่ ให้ตรงกับป้ายในตาราง */
+export const CASE_STATUS_FILTER_LABELS = {
+  unassigned: CASE_STATUS_LABELS.unassigned,
+  ...CASE_STAGE_LABELS,
+  closed: CASE_STATUS_LABELS.closed,
+  cancelled: CASE_STATUS_LABELS.cancelled,
+};
+
 export const INVOICE_STATUS_LABELS = {
   draft: 'ร่าง',
   issued: 'ออกใบแล้ว',

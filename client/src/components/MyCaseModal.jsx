@@ -6,15 +6,7 @@ import CaseFamilyChat from './CaseFamilyChat.jsx';
 import CaseLocationLink from './CaseLocationLink.jsx';
 import { useSheetSwipe } from '../lib/sheetSwipe.js';
 import { useScrollLock } from '../lib/scrollLock.js';
-import {
-  SERVICE_KIND_LABELS,
-  serviceKindOf,
-  CASE_STATUS_LABELS,
-  GENDER_LABELS,
-  VISIT_STATE_LABELS,
-  formatDate,
-  timeText,
-} from '../labels.js';
+import { SERVICE_KIND_LABELS, serviceKindOf, GENDER_LABELS, VISIT_STATE_LABELS, formatDate, timeText, caseStage } from '../labels.js';
 import { formatPhone } from '../lib/phone.js';
 import { caseCode } from '../lib/patientCode.js';
 
@@ -77,7 +69,7 @@ export default function MyCaseModal({ caseId, onClose }) {
                 <p className="mono muted">{caseCode(item.case_id)}</p>
                 <h2>{serviceName(item)}</h2>
                 <p className="muted">{item.client_name}</p>
-                <span className={`badge case-${item.status}`}>{CASE_STATUS_LABELS[item.status]}</span>
+                <span className={`badge case-${caseStage(item).key}`}>{caseStage(item).label}</span>
               </div>
               <button className="modal-close" onClick={onClose} aria-label="ปิด">×</button>
             </header>

@@ -5,10 +5,7 @@ import CaseModal from '../components/CaseModal.jsx';
 import SortHead from '../components/SortHead.jsx';
 import ErrorBar from '../components/ErrorBar.jsx';
 import PageRefresh from '../components/PageRefresh.jsx';
-import {
-  CASE_STATUS_LABELS, SERVICE_KIND_LABELS, MONTH_LABELS,
-  formatBaht, formatDate, toBuddhistYear,
-} from '../labels.js';
+import { SERVICE_KIND_LABELS, MONTH_LABELS, formatBaht, formatDate, toBuddhistYear, caseStage, CASE_STATUS_FILTER_LABELS } from '../labels.js';
 import { formatPhone } from '../lib/phone.js';
 import { caseCode } from '../lib/patientCode.js';
 
@@ -56,7 +53,7 @@ export default function CaseListPage() {
      ตัวกรองที่ผู้ใช้เลือกเองจึงหายทุกครั้งที่รีเฟรช และปุ่มย้อนกลับพาออกจากหน้าแทนที่จะปิด popup */
   const get = (key) => params.get(key) ?? DEFAULTS[key] ?? '';
   const q = get('q');
-  const status = CASE_STATUS_LABELS[get('status')] ? get('status') : '';
+  const status = CASE_STATUS_FILTER_LABELS[get('status')] ? get('status') : '';
   const serviceKind = SERVICE_KIND_LABELS[get('service_kind')] ? get('service_kind') : '';
   // ตัวกรองเทียมที่เปิดอยู่ (ถ้ามี) — ทีละตัวเท่านั้น เพราะมันใช้ช่อง dropdown ร่วมกัน
   const pseudo = PSEUDO_KEYS.find((key) => get(key) === 'yes') ?? '';
@@ -206,7 +203,8 @@ export default function CaseListPage() {
           </select>
           <select value={statusValue} onChange={(e) => setStatusFilter(e.target.value)} aria-label="สถานะ">
             <option value="">ทุกสถานะ</option>
-            {Object.entries(CASE_STATUS_LABELS).map(([value, label]) => (
+            {/* สถานะตามวันที่ (รอเริ่ม/กำลังให้บริการ/รอยืนยันปิดเคส) แทนสถานะใน DB — ตรงกับป้ายในตาราง */}
+            {Object.entries(CASE_STATUS_FILTER_LABELS).map(([value, label]) => (
               <option key={value} value={value}>{label}</option>
             ))}
             {/* ไม่ใช่สถานะใน DB — ของค้างที่คิดจากข้อมูลอื่นของเคส (ดู PSEUDO_STATUS) */}
@@ -317,7 +315,7 @@ export default function CaseListPage() {
                     )}
                   </td>
                   <td data-label="สถานะ">
-                    <span className={`badge case-${c.status}`}>{CASE_STATUS_LABELS[c.status]}</span>
+                    <span className={`badge case-${caseStage(c).key}`}>{caseStage(c).label}</span>
                   </td>
                 </tr>
               ))}

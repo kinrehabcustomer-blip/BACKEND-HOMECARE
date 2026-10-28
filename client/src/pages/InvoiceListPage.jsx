@@ -6,7 +6,7 @@ import OfficeLink from '../components/OfficeLink.jsx';
 import ErrorBar from '../components/ErrorBar.jsx';
 import PageRefresh from '../components/PageRefresh.jsx';
 import { api } from '../api.js';
-import { CASE_STATUS_LABELS, INVOICE_STATUS_LABELS, formatBaht, formatDate } from '../labels.js';
+import { INVOICE_STATUS_LABELS, formatBaht, formatDate, caseStage } from '../labels.js';
 import { formatPhone } from '../lib/phone.js';
 import { caseCode } from '../lib/patientCode.js';
 
@@ -390,7 +390,7 @@ export default function InvoiceListPage() {
                 <strong>{c.client_name ?? c.title}</strong>
                 <p className="muted">
                   <OfficeLink className="link mono" to={`/cases?open=${c.case_id}`}>{caseCode(c.case_id)}</OfficeLink>
-                  {' · '}{CASE_STATUS_LABELS[c.status] ?? c.status}
+                  {' · '}{caseStage(c).label}
                   {' · '}ค่าบริการ {c.fee != null ? formatBaht(c.fee) : 'ยังไม่ระบุ'}
                 </p>
               </div>

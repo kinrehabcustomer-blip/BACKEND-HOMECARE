@@ -17,6 +17,11 @@ export const CASE_TYPES = [
 
 export const CASE_STATUSES = ['unassigned', 'assigned', 'in_progress', 'closed', 'cancelled'];
 
+/* สถานะที่แสดงของเคสที่จับคู่แล้ว — คิดจากวันเริ่ม/วันสิ้นสุดที่กรอก ไม่ได้กดปุ่มเริ่มเอง (ดร.ธงชัย 28 ต.ค. 2569)
+   ไม่ใช่สถานะใน DB (assigned/in_progress ยังอยู่เหมือนเดิม — server หลายจุดใช้สองค่านี้ร่วมกัน)
+   เกณฑ์อยู่ที่ CASE_STAGE_SQL ใน cases/repo.js · ฝั่งหน้าเว็บคือ caseStage ใน client/src/labels.js */
+export const CASE_STAGES = ['pending_start', 'active', 'awaiting_close'];
+
 // วันที่ต้องมีอยู่จริงในปฏิทิน ไม่ใช่แค่รูปแบบถูก (2026-02-31 เคยผ่านได้ — ดู lib/dates.js)
 const date = zodDate(z);
 /* วันที่ของเหตุการณ์ที่เกิดไปแล้ว — ห้ามเป็นอนาคต (ตรวจรอบ 16)
@@ -685,7 +690,8 @@ export const calendarQuerySchema = z.object({
 
 export const listQuerySchema = z.object({
   q: z.string().trim().optional(),
-  status: z.enum(CASE_STATUSES).optional(),
+  // สถานะจริงใน DB หรือสถานะตามวันที่ของเคสที่จับคู่แล้ว (CASE_STAGES) — ช่องเดียวกันในหน้ารายการเคส
+  status: z.enum([...CASE_STATUSES, ...CASE_STAGES]).optional(),
   case_type: z.enum(CASE_TYPES).optional(),
   // ประเภทบริการ — เกณฑ์เดียวกับกราฟหน้าภาพรวม (ดู PHYSIO_CASE_SQL ใน cases/repo.js)
   service_kind: z.enum(SERVICE_KINDS).optional(),

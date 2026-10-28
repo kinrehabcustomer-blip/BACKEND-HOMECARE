@@ -64,7 +64,6 @@ const NAV_ICONS = {
   today: (<><rect x="3" y="4" width="18" height="18" rx="2" /><path d="M3 10h18M8 2v4M16 2v4" /><path d="M9 15l2 2 4-4" /></>),
   wallet: (<><path d="M3 7a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><path d="M3 9h18" /><path d="M16 13.5h2.5" /></>),
   star: (<path d="M12 2.6l2.9 5.9 6.5.9-4.7 4.6 1.1 6.5-5.8-3.1-5.8 3.1 1.1-6.5L2.6 9.4l6.5-.9z" />),
-  play: (<><rect x="2" y="4" width="20" height="15" rx="2" /><path d="M10 9l5 2.5-5 2.5z" /></>),
 };
 
 function NavIcon({ name }) {
@@ -108,13 +107,6 @@ const homePath = (user) => {
   return navFor(user)[0]?.to ?? '/no-access';
 };
 
-/* วิดีโอสอนใช้งาน (ดร.ธงชัย 25 ต.ค. 2569 "เมนูของตัวหลังบ้านผมก็ทำได้เลย … วิดีโอสอนการใช้งานอยู่ในตัว Dashboard ด้วย")
-   หน้าปลายทางอยู่ฝั่ง kin-chatbot (ค่าคงที่ต้นทาง src/lib/trainingVideos.js) เปิดได้โดยไม่ต้องล็อกอินและมี noindex
-   คนละเล่มกันจริง ๆ: ภาคสนามดู 6 ตอนจากมือถือ · หลังบ้านมีทีละขั้น 10 ตอน + งานหลังบ้านอีก 5 ตอน */
-const GUIDE_URL = {
-  field: 'https://chat.kinorigin.com/guide/bZA4kNe9g-b-',
-  admin: 'https://chat.kinorigin.com/guide/auUwvGgMN09d',
-};
 
 const FIELD_NAV = [
   { to: '/my-today', icon: 'today', label: 'งานวันนี้' },
@@ -197,11 +189,7 @@ function Sidebar() {
               <NavLink to={i.to}><NavIcon name={i.icon} />{i.label}</NavLink>
             </Fragment>
           ))}
-          {/* ลิงก์ออกนอกระบบ ใช้ <a> ไม่ใช่ NavLink — เปิดแท็บใหม่ งานที่ค้างอยู่ในระบบจึงไม่หาย */}
-          <span className="nav-section-label">ช่วยเหลือ</span>
-          <a href={isAdmin ? GUIDE_URL.admin : GUIDE_URL.field} target="_blank" rel="noopener noreferrer">
-            <NavIcon name="play" />วิดีโอสอนใช้งาน
-          </a>
+          {/* วิดีโอสอนใช้งานย้ายไปอยู่ในหน้าตั้งค่าแล้ว (ส่วน "ช่วยเหลือ" — ดู SettingsPage) */}
         </nav>
 
         <div className="sidebar-foot">

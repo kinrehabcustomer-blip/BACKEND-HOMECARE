@@ -182,6 +182,19 @@ const OVERDUE_CLOSE_SQL = `
   c.status IN ('assigned', 'in_progress')
   AND c.end_date IS NOT NULL AND c.end_date < :today`;
 
+/** สถานะตามวันที่ของเคสที่จับคู่แล้ว — ต้องตรงกับ caseStage ใน client/src/labels.js · ต้องส่ง :today
+    รอเริ่ม = ยังไม่ถึงวันเริ่ม (ไม่ได้กรอกวันเริ่ม = รอเริ่ม จนกว่าจะมีกะแรกเช็คอินแล้วเคสเป็น in_progress)
+    รอยืนยันปิดเคส = ถึงวันสิ้นสุดแล้ว (นับวันสิ้นสุดเองด้วย) · ที่เหลือ = กำลังให้บริการ
+    COALESCE กัน NULL: วันเริ่มว่าง → ใช้สถานะใน DB ตัดสินแทน NOT (...) จะได้ไม่หลุดทั้งแถว */
+const STAGE_PENDING_SQL = `COALESCE(c.start_date > :today, c.status = 'assigned')`;
+const CASE_STAGE_SQL = {
+  pending_start: `c.status IN ('assigned', 'in_progress') AND ${STAGE_PENDING_SQL}`,
+  awaiting_close: `c.status IN ('assigned', 'in_progress') AND NOT ${STAGE_PENDING_SQL}
+    AND c.end_date IS NOT NULL AND c.end_date <= :today`,
+  active: `c.status IN ('assigned', 'in_progress') AND NOT ${STAGE_PENDING_SQL}
+    AND (c.end_date IS NULL OR c.end_date > :today)`,
+};
+
 /** ใกล้ครบกำหนด (ภายใน ENDING_SOON_DAYS วัน) และยังไม่ได้ต่อเคส — ถามลูกค้าว่าจะใช้บริการต่อไหม
     เลยวันสิ้นสุดไปแล้วอยู่ใน OVERDUE_CLOSE_SQL แทน ไม่นับซ้ำ · ต้องส่ง :today และ :soon มาด้วย */
 export const ENDING_SOON_DAYS = 7;
@@ -223,7 +236,10 @@ export async function list({ q, status, case_type, service_kind, assigned_to, no
     )`);
     params.q = `%${q}%`;
   }
-  if (status) {
+  if (CASE_STAGE_SQL[status]) {
+    where.push(`(${CASE_STAGE_SQL[status]})`);
+    params.today = isoDateTH(new Date());
+  } else if (status) {
     where.push('c.status = :status');
     params.status = status;
   }

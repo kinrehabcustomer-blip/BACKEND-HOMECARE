@@ -537,7 +537,6 @@ export const api = {
   addCaseTeam: (id, employee_id) => request(`/cases/${id}/team`, { method: 'POST', body: { employee_id } }),
   removeCaseTeam: (id, employee_id) => request(`/cases/${id}/team/${employee_id}`, { method: 'DELETE' }),
   unassignCase: (id) => request(`/cases/${id}/unassign`, { method: 'POST' }),
-  startCase: (id) => request(`/cases/${id}/start`, { method: 'POST' }),
   /** ปิดเคส — force = ยืนยันแล้วว่ารู้ว่ายังมีกะค้าง (ไม่ส่ง = server จะตอบ 409 พร้อมบอกว่าค้างอะไร) */
   closeCase: (id, end_date, force = false) =>
     request(`/cases/${id}/close`, { method: 'POST', body: { end_date, force } }),

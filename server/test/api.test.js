@@ -665,6 +665,30 @@ if (process.env.RUN_DB_TESTS !== '1') {
       assert.deepEqual(draft.addons.filter((a) => a.kind === 'procedure').map((a) => a.vn), procs.map((a) => a.vn));
     });
 
+    test('สถานะตามวันที่: รอเริ่ม · กำลังให้บริการ · รอยืนยันปิดเคส (กรองในรายการเคสได้)', async () => {
+      const day = (offset) => new Date(Date.now() + 7 * 3.6e6 + offset * 86_400_000).toISOString().slice(0, 10);
+      const make = async (label, start, end, status = 'assigned') => {
+        const c = await post('/api/cases', { case_type: 'other', client_name: label, start_date: start, end_date: end }, MANAGER, 201);
+        await sql.run(`UPDATE cases SET status = :status, assigned_to = 'EMP-0003' WHERE case_id = :id`, { status, id: c.case_id });
+        return c.case_id;
+      };
+      const future = await make('สถานะ รอเริ่ม', day(3), day(30));
+      const noStart = await make('สถานะ ไม่มีวันเริ่ม', null, null);
+      const running = await make('สถานะ กำลังให้บริการ', day(-3), day(10));
+      const endsToday = await make('สถานะ ครบวันนี้', day(-30), day(0));
+      const overdue = await make('สถานะ เลยกำหนด', day(-30), day(-2), 'in_progress');
+      const checkedIn = await make('สถานะ เช็คอินแล้ว ไม่มีวันเริ่ม', null, null, 'in_progress');
+
+      const ids = async (status) =>
+        (await get(`/api/cases?status=${status}&q=${encodeURIComponent('สถานะ')}&per_page=100`, MANAGER)).body.data.map((c) => c.case_id).sort();
+      assert.deepEqual(await ids('pending_start'), [future, noStart].sort());
+      assert.deepEqual(await ids('active'), [running, checkedIn].sort());
+      assert.deepEqual(await ids('awaiting_close'), [endsToday, overdue].sort());
+      // สถานะใน DB ยังกรองได้ตามเดิม
+      assert.ok((await ids('in_progress')).includes(overdue));
+      assert.equal((await get('/api/cases?status=bogus', MANAGER)).status, 400);
+    });
+
     test('ยกเลิกเคส: ใบร่างถูกยกเลิกตาม · ใบของเคสที่ยกเลิกแล้วออกใบไม่ได้', async () => {
       const c = await newCase();
       const draft = (await get(`/api/invoices?case_id=${c.case_id}`, MANAGER)).body.data[0];

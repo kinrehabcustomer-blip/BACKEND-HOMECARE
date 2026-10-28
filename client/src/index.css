@@ -713,6 +713,11 @@ select option:checked {
 .badge.case-in_progress, .cal-chip.case-in_progress { background: #e3f5ec; color: #1c7a4d; }
 .badge.case-closed,      .cal-chip.case-closed      { background: #eef0f2; color: #6b7280; }
 .badge.case-cancelled,   .cal-chip.case-cancelled   { background: #fbe4e4; color: #a83232; }
+/* สถานะตามวันที่ของเคสที่จับคู่แล้ว (caseStage ใน labels.js) — รอเริ่ม = สีเดียวกับ "จับคู่แล้ว" (ฟ้า)
+   · กำลังให้บริการ = เขียว · รอยืนยันปิดเคส = ถึงวันสิ้นสุดแล้ว ต้องมีคนกดปิด (ม่วง — ไม่ชนกับส้มของ "ยังไม่จับคู่") */
+.badge.case-pending_start  { background: #e4eefb; color: #1d5fa8; }
+.badge.case-active         { background: #e3f5ec; color: #1c7a4d; }
+.badge.case-awaiting_close { background: #efe7fb; color: #6a3fb0; }
 
 /* สถานะใบแจ้งหนี้ — ร่าง (เทา) · ออกแล้วรอชำระ (ฟ้า) · ชำระแล้ว (เขียว) · เกินกำหนด (แดง) · ยกเลิก (แดงจาง) */
 .badge.invoice-draft     { background: #eef0f2; color: #6b7280; }
