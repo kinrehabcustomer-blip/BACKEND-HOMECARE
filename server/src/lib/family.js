@@ -63,6 +63,8 @@ export const ensureFamilyTable = () =>
     .then(() => sql.run('ALTER TABLE case_family_messages DROP CONSTRAINT IF EXISTS case_family_messages_author_kind_check'))
     .then(() => sql.run(
       "ALTER TABLE case_family_messages ADD CONSTRAINT case_family_messages_author_kind_check CHECK (author_kind IN ('family','team','staff'))"))
+    .then(() => sql.run('ALTER TABLE case_family_messages ADD COLUMN IF NOT EXISTS source_ref TEXT'))
+    .then(() => sql.run('CREATE UNIQUE INDEX IF NOT EXISTS uq_family_message_source_ref ON case_family_messages (source_ref)'))
     .then(() => sql.run('CREATE INDEX IF NOT EXISTS idx_family_msg_case ON case_family_messages (case_id, created_at DESC)'))
     .then(() => sql.run('CREATE INDEX IF NOT EXISTS idx_family_case ON case_family_links (case_id)'))
     .then(() => sql.run('CREATE INDEX IF NOT EXISTS idx_family_line ON case_family_links (line_user_id) WHERE line_user_id IS NOT NULL'))
@@ -414,7 +416,7 @@ export async function summaryFor(lineUserId) {
 export const MESSAGE_MAX = 1000;
 
 /** โพสต์ลงไทม์ไลน์เคส — kind 'family' (ญาติจากหน้า LINE) หรือ 'team' (ทีมจากหน้าเคสใน staff) */
-export async function postMessage(caseId, { kind, name, lineUserId = null, employeeId = null, body = null, photo = null }) {
+export async function postMessage(caseId, { kind, name, lineUserId = null, employeeId = null, body = null, photo = null, sourceRef = null }) {
   /* ยาวเกินให้บอก ไม่ใช่ตัดเงียบ ๆ (ตรวจรอบ 19 — เดิม .slice(0, 1000) แล้วตอบสำเร็จ)
      ทั้งญาติและทีมพิมพ์อาการยาว ๆ ได้ ท้ายข้อความหายโดยไม่มีใครรู้ว่าขาด
      กันที่นี่ที่เดียวเพราะทุกทางที่โพสต์ลงไทม์ไลน์ (หน้าญาติ · ทีมในระบบงาน · สะพานแชท) ผ่านฟังก์ชันนี้ */
@@ -427,12 +429,13 @@ export async function postMessage(caseId, { kind, name, lineUserId = null, emplo
     );
   }
   return sql.one(
-    `INSERT INTO case_family_messages (case_id, author_kind, author_name, line_user_id, employee_id, body, photo_data, photo_mime)
-     VALUES (:case_id, :kind, :name, :uid, :emp, :body, :data, :mime)
+    `INSERT INTO case_family_messages (case_id, author_kind, author_name, line_user_id, employee_id, body, photo_data, photo_mime, source_ref)
+     VALUES (:case_id, :kind, :name, :uid, :emp, :body, :data, :mime, :source_ref)
+     ON CONFLICT (source_ref) DO UPDATE SET source_ref = EXCLUDED.source_ref
      RETURNING message_id, created_at`,
     {
       case_id: caseId, kind, name: String(name || 'ญาติ').slice(0, 80), uid: lineUserId, emp: employeeId,
-      body: text || null, data: photo?.data ?? null, mime: photo?.mime ?? null,
+      body: text || null, data: photo?.data ?? null, mime: photo?.mime ?? null, source_ref: sourceRef,
     },
   );
 }

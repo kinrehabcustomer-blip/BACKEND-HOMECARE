@@ -61,6 +61,7 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
      server รู้ว่าเป็นคำขอเดิม จึงคืนรายการรับเงินใบเดิมแทนที่จะรับเงินซ้ำสองรอบ
      ออกรหัสใหม่ทุกครั้งที่เปิดฟอร์ม = การรับเงินรอบใหม่คือคำขอใหม่จริงๆ */
   const [payRequestId, setPayRequestId] = useState(null);
+  const [paySlipId, setPaySlipId] = useState(null); // มีค่าเมื่อเปิดฟอร์มจากปุ่มยืนยันสลิปรอตรวจ
   // รายการรับชำระที่กำลังจะยกเลิก + เหตุผล (ยกเลิกทีละรายการ จึงเก็บรหัสเดียวพอ)
   const [voidFor, setVoidFor] = useState(null);
   const [voidReason, setVoidReason] = useState('');
@@ -152,6 +153,8 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
     let cancelled = false;
     setItem(null);
     setError(null);
+    setPayOpen(false);
+    setPaySlipId(null);
     Promise.all([api.getInvoice(invoiceId), api.invoicePlan(invoiceId)])
       .then(([v, sib]) => {
         if (cancelled) return;
@@ -230,6 +233,15 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
     } finally {
       setBusy(false);
     }
+  }
+
+  function openPaymentForm(slip = null) {
+    setPayAmount(String(slip?.extracted_amount ?? item.balance));
+    setPayDate(/^\d{4}-\d{2}-\d{2}$/.test(slip?.extracted_date || '') ? slip.extracted_date : todayTH);
+    setPayMethod(slip ? 'โอน' : PAYMENT_METHODS[0]);
+    setPaySlipId(slip?.slip_id ?? null);
+    setPayRequestId(crypto.randomUUID());
+    setPayOpen(true);
   }
 
   // ชำระแล้วถือเป็น "ใบเสร็จรับเงิน" ตามธรรมเนียมเอกสารไทย · ยังไม่ชำระคือ "ใบแจ้งหนี้"
@@ -389,14 +401,14 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
 
           {/* สลิปโอนเงินแนบท้ายเอกสาร — มีเฉพาะในสำเนาที่พิมพ์ แต่ละใบขึ้นแผ่นใหม่ต่อจากตัวใบ
               บนจอไม่ต้องเห็นซ้ำ ส่วน "สลิปโอนเงิน" ด้านบนโชว์อยู่แล้ว (รูปเป็น URL เดียวกัน จึงโหลดค้างไว้แล้วตอนกดพิมพ์) */}
-          {item.slips?.length > 0 && (
+          {item.slips?.some((s) => s.status === 'confirmed') && (
             <div className="inv-slips">
               {/* หนึ่งสลิปต่อหนึ่งแผ่น — หัวข้ออยู่ในแต่ละแผ่น หยิบแผ่นไหนขึ้นมาก็รู้ว่าเป็นของใบไหน */}
-              {item.slips.map((slip, i) => (
+              {item.slips.filter((s) => s.status === 'confirmed').map((slip, i, printed) => (
                 <figure className="inv-slip" key={slip.slip_id}>
                   <p className="inv-slips-title">
                     เอกสารแนบ: หลักฐานการโอนเงิน (Payment slip) — {item.invoice_id}
-                    {item.slips.length > 1 && ` · ${i + 1}/${item.slips.length}`}
+                    {printed.length > 1 && ` · ${i + 1}/${printed.length}`}
                   </p>
                   <img src={api.invoiceSlipUrl(item.invoice_id, slip.slip_id)} alt={`สลิป ${i + 1}`} />
                   <figcaption>แนบเมื่อ {docDate(slip.created_at.slice(0, 10))}</figcaption>
@@ -460,6 +472,45 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
             <div className="modal-body">
               {error && <p className="error no-print">{error}</p>}
 
+              {item.slips?.some((s) => s.status === 'pending') && (
+                <section className="pending-slips no-print" aria-label="สลิปรอตรวจ">
+                  <h3>สลิปรอตรวจจากลูกค้า</h3>
+                  {item.slips.filter((s) => s.status === 'pending').map((slip) => (
+                    <article className="pending-slip-card" key={slip.slip_id}>
+                      <a href={api.invoiceSlipUrl(item.invoice_id, slip.slip_id)} target="_blank" rel="noreferrer">
+                        <img src={api.invoiceSlipUrl(item.invoice_id, slip.slip_id)} alt={`สลิปรอตรวจ #${slip.slip_id}`} />
+                      </a>
+                      <div>
+                        <span className="badge pending-slip-badge">รอตรวจ · จากลูกค้า</span>
+                        <p className="muted">
+                          {slip.source === 'line_auto' ? 'ส่งทาง LINE HomeCare' : 'แนบจากหน้าบิล'}
+                          {' · '}{docDate(slip.created_at.slice(0, 10))}
+                        </p>
+                        {slip.extracted_amount != null && <p>ยอดที่ AI อ่าน: <strong>{amountText(slip.extracted_amount)} บาท</strong></p>}
+                        {slip.extracted_date && <p>วันที่โอนที่ AI อ่าน: {docDate(slip.extracted_date)}</p>}
+                        {slip.extracted_ref && <p>เลขอ้างอิง: <span className="mono">{slip.extracted_ref}</span></p>}
+                        {slip.extracted_bank && <p>ธนาคาร: {slip.extracted_bank}</p>}
+                        <div className="pending-slip-actions">
+                          <button className="btn primary" disabled={busy} onClick={() => openPaymentForm(slip)}>
+                            ยืนยันรับเงินตามสลิปนี้
+                          </button>
+                          <ConfirmButton
+                            className="btn danger"
+                            disabled={busy}
+                            title="ไม่ใช่สลิป/ปฏิเสธรายการนี้?"
+                            detail="รายการจะถูกเก็บเป็นประวัติการปฏิเสธ และไม่บันทึกรับเงิน"
+                            confirmLabel="ยืนยันปฏิเสธ"
+                            onConfirm={() => run(() => api.rejectInvoiceSlip(item.invoice_id, slip.slip_id, 'ไม่ใช่สลิป/ปฏิเสธโดยทีม'))}
+                          >
+                            ไม่ใช่สลิป/ปฏิเสธ
+                          </ConfirmButton>
+                        </div>
+                      </div>
+                    </article>
+                  ))}
+                </section>
+              )}
+
               {/* ใบร่างระบบอัปเดตตามเคสให้เอง จึงเตือนเฉพาะใบที่ออกไปแล้วและตัวเลขไม่ตรงกับเคส */}
               {/* ฟอร์มรับชำระ — เปิดจากปุ่มท้าย popup */}
               {payOpen && (
@@ -486,7 +537,7 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                     </select>
                   </label>
                   <div className="pay-form-actions">
-                    <button className="btn" disabled={busy} onClick={() => setPayOpen(false)}>ยกเลิก</button>
+                    <button className="btn" disabled={busy} onClick={() => { setPayOpen(false); setPaySlipId(null); }}>ยกเลิก</button>
                     <button
                       className="btn primary"
                       disabled={
@@ -502,11 +553,13 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                             amount: received,
                             paid_at: payDate,
                             payment_method: payMethod,
+                            slip_id: paySlipId,
                           });
                           toast(`รับชำระ ${amountText(received)} บาท แล้ว`);
                           setPayOpen(false);
                           // สำเร็จแล้ว = คำขอนี้จบ · รอบหน้าต้องเป็นรหัสใหม่ ไม่ใช่ replay ของรอบนี้
                           setPayRequestId(null);
+                          setPaySlipId(null);
                         })
                       }
                     >
@@ -764,7 +817,7 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                     <div className="slip-block">
                       <span className="field-label">สลิปโอนเงิน</span>
                       <div className="slip-list">
-                        {item.slips?.map((slip) => (
+                        {item.slips?.filter((slip) => slip.status === 'confirmed').map((slip) => (
                           <figure className="slip" key={slip.slip_id}>
                             <a
                               className="slip-thumb"
@@ -1068,14 +1121,8 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                   className={`btn ${item.status === 'issued' ? 'primary' : ''}`}
                   disabled={busy}
                   onClick={() => {
-    /* เติมยอดที่ค้างของใบนี้ให้เลย — เงินมัดจำเป็น "ใบของตัวเอง" แล้ว ยอดค้างจึงคือยอดที่ควรรับ
-                       แก้ตัวเลขเองได้เสมอ (ลูกค้าโอนมาไม่ครบตามที่ตกลงก็มี) */
-                    setPayAmount(String(item.balance));
-                    setPayOpen((v) => {
-                      // เปิดฟอร์ม = เริ่มคำขอรับชำระใหม่ จึงออกรหัสกันบันทึกซ้ำใบใหม่
-                      if (!v) setPayRequestId(crypto.randomUUID());
-                      return !v;
-                    });
+                    if (payOpen) { setPayOpen(false); setPaySlipId(null); }
+                    else openPaymentForm();
                   }}
                 >
                   บันทึกการชำระเงิน

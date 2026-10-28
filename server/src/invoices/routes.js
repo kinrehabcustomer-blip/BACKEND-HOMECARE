@@ -13,6 +13,7 @@ import {
   revenueQuerySchema,
   INVOICE_STATUSES,
   slipSchema,
+  rejectSlipSchema,
   voidPaymentSchema,
 } from './schema.js';
 import { decodeImage } from '../employees/schema.js';
@@ -445,6 +446,9 @@ invoicesRouter.post(
     if (result.reason === 'idempotency_conflict') {
       throw new ApiError(409, 'คำขอรับชำระเดิมถูกส่งมาด้วยข้อมูลที่ต่างกัน กรุณาโหลดข้อมูลใหม่แล้วลองอีกครั้ง');
     }
+    if (result.reason === 'slip_unavailable') {
+      throw new ApiError(409, 'สลิปนี้ถูกตรวจไปแล้ว กรุณาโหลดข้อมูลใหม่');
+    }
     if (result.reason === 'amount_exceeds_balance') {
       throw new ApiError(
         409,
@@ -534,6 +538,18 @@ invoicesRouter.delete(
     const slipId = Number(req.params.slipId);
     const removed = Number.isInteger(slipId) && (await repo.removeSlip(req.params.id, slipId));
     if (!removed) return next(notFound('ไม่พบสลิปนี้'));
+    res.json(await repo.findById(req.params.id));
+  }),
+);
+
+/** ปฏิเสธสลิปที่ลูกค้าส่ง — เก็บประวัติไว้ ไม่ลบรูป/หลักฐานออกจากฐาน */
+invoicesRouter.post(
+  '/:id/slips/:slipId/reject',
+  asyncRoute(async (req, res, next) => {
+    const slipId = Number(req.params.slipId);
+    const { reason } = rejectSlipSchema.parse(req.body ?? {});
+    const rejected = Number.isInteger(slipId) && (await repo.rejectSlip(req.params.id, slipId, req.user, reason));
+    if (!rejected) return next(new ApiError(409, 'สลิปนี้ถูกตรวจไปแล้ว กรุณาโหลดข้อมูลใหม่'));
     res.json(await repo.findById(req.params.id));
   }),
 );

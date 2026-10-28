@@ -12,6 +12,9 @@ export default function PublicBillPage() {
   const { token } = useParams();
   const [item, setItem] = useState(null);
   const [error, setError] = useState(null);
+  const [slipError, setSlipError] = useState(null);
+  const [slipMessage, setSlipMessage] = useState('');
+  const [uploading, setUploading] = useState(false);
 
   useEffect(() => {
     api.publicBill(token).then(setItem).catch((e) => setError(e.message));
@@ -41,6 +44,32 @@ export default function PublicBillPage() {
   }
   if (!item) return <p className="muted app-loading">กำลังเปิดเอกสาร…</p>;
 
+  const canAttachSlip = item.status === 'issued' && Number(item.balance) > 0;
+  const uploadSlip = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    setSlipError(null);
+    setSlipMessage('');
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+      setSlipError('รับเฉพาะรูป JPG, PNG หรือ WEBP ค่ะ');
+      return;
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      setSlipError('รูปสลิปต้องมีขนาดไม่เกิน 8 MB ค่ะ');
+      return;
+    }
+    setUploading(true);
+    try {
+      const result = await api.publicBillSlip(token, file);
+      setSlipMessage(result.message);
+    } catch (e) {
+      setSlipError(e.message);
+    } finally {
+      setUploading(false);
+    }
+  };
+
   return (
     <div className="bill-page">
       <div className="bill-actions no-print">
@@ -64,6 +93,24 @@ export default function PublicBillPage() {
           <CustomerInvoiceDoc item={item} signer={item.signer} />
         </div>
       </div>
+      {canAttachSlip && (
+        <section className="bill-slip-upload no-print" aria-live="polite">
+          <b>โอนเงินแล้ว แนบสลิปได้ที่นี่</b>
+          <p>รับรูป JPG, PNG หรือ WEBP ขนาดไม่เกิน 8 MB</p>
+          <label className={`btn primary${uploading ? ' disabled' : ''}`}>
+            {uploading ? 'กำลังส่งสลิป…' : 'แนบสลิปการโอน'}
+            <input
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              onChange={uploadSlip}
+              disabled={uploading}
+              hidden
+            />
+          </label>
+          {slipMessage && <p className="success-msg">{slipMessage}</p>}
+          {slipError && <p className="error-msg">{slipError}</p>}
+        </section>
+      )}
       <p className="bill-note no-print">สอบถามเรื่องเอกสารหรือการชำระเงิน พิมพ์ในแชท LINE KIN HomeCare ได้เลยค่ะ</p>
     </div>
   );

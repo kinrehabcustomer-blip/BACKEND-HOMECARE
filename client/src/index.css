@@ -4172,6 +4172,15 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
 .slip-thumb.empty { border-style: dashed; cursor: pointer; color: var(--muted); font-size: 0.875rem; }
 .slip-thumb.empty:hover { border-color: currentColor; }
 .slip-thumb.is-busy { cursor: progress; opacity: 0.6; }
+.pending-slips { margin: 0.75rem 0; padding: 0.875rem; border: 2px solid #d69d18; border-radius: 0.75rem; background: #fff9e8; }
+.pending-slips h3 { margin: 0 0 0.625rem; color: #704e00; }
+.pending-slip-card { display: grid; grid-template-columns: 7.5rem 1fr; gap: 0.875rem; padding: 0.75rem 0; border-top: 1px solid #ead49b; }
+.pending-slip-card:first-of-type { border-top: 0; }
+.pending-slip-card img { width: 7.5rem; height: 10rem; object-fit: cover; border-radius: 0.5rem; border: 1px solid #d7bd7a; }
+.pending-slip-card p { margin: 0.25rem 0; }
+.pending-slip-badge { background: #fff0bd; color: #704e00; border: 1px solid #d69d18; margin-left: 0.25rem; }
+.pending-slip-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.625rem; }
+@media (max-width: 36rem) { .pending-slip-card { grid-template-columns: 1fr; } }
 
 /* ป้ายบอกว่างวดนั้นคือเงินมัดจำ */
 .badge.deposit-tag { margin-right: 0.35rem; background: var(--divider); color: var(--muted); }
@@ -5579,6 +5588,11 @@ h1, h2, h3, h4, .page-hero-title, .cal-title, .login-heading h1 {
 .bill-scroll { overflow-x: auto; background: #fff; border: 1px solid var(--border, #e5e5e5); border-radius: 0.5rem; }
 .bill-scroll .invoice-doc { min-width: 40rem; }
 .bill-note { margin-top: 0.75rem; font-size: 0.875rem; color: var(--muted, #666); text-align: center; }
+.bill-slip-upload { margin-top: 0.75rem; padding: 1rem; border: 1px solid #d6bd75; border-radius: 0.75rem; background: #fff9e8; text-align: center; }
+.bill-slip-upload p { margin: 0.35rem 0 0.75rem; }
+.bill-slip-upload .success-msg { color: #1c6b3c; font-weight: 600; }
+.bill-slip-upload .error-msg { color: #a52b2b; font-weight: 600; }
+.btn.disabled { pointer-events: none; opacity: 0.6; }
 /* ใบที่ถูกยกเลิกหลังส่งลิงก์ไปแล้ว — ยังเปิดได้เพื่อไม่ให้ลูกค้าเสียหลักฐานการจ่าย แต่ต้องเห็นชัดว่ายกเลิก
    พิมพ์ติดไปกับเอกสารด้วย (ไม่ใช่ no-print) ไม่งั้น PDF ที่ลูกค้าเซฟไว้ดูเหมือนใบที่ยังใช้ได้ */
 .bill-cancelled {

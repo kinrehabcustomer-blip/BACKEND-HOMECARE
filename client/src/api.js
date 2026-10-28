@@ -131,6 +131,30 @@ async function request(path, { empty = false, credentialCheck = false, ...option
   return data;
 }
 
+/** public upload ใช้ multipart เพื่อให้รูป 8 MB ไม่พองเป็น base64 จนชนเพดาน JSON */
+async function uploadPublicImage(path, file) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  try {
+    const form = new FormData();
+    form.append('file', file, file.name);
+    const res = await fetch(`/api${path}`, {
+      method: 'POST',
+      body: form,
+      signal: controller.signal,
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) throw new Error(data?.error ?? `แนบสลิปไม่สำเร็จ (HTTP ${res.status})`);
+    return data;
+  } catch (err) {
+    if (err.name === 'AbortError') throw new Error('อัปโหลดนานเกินไป กรุณาตรวจสัญญาณแล้วลองใหม่ค่ะ');
+    if (err instanceof TypeError) throw new Error('เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ กรุณาตรวจสัญญาณแล้วลองใหม่ค่ะ');
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export const api = {
   login: (email, password) =>
     request('/auth/login', { method: 'POST', credentialCheck: true, body: { email, password } }),
@@ -404,6 +428,7 @@ export const api = {
   sendInvoiceLine: (id) => request(`/invoices/${id}/line`, { method: 'POST' }),
   invoiceShareLink: (id) => request(`/invoices/${id}/share-link`, { method: 'POST' }),
   publicBill: (token) => request(`/public/bill/${encodeURIComponent(token)}`),
+  publicBillSlip: (token, file) => uploadPublicImage(`/public/bill/${encodeURIComponent(token)}/slip`, file),
   createInvoice: (body) => request('/invoices', { method: 'POST', body }),
   /** เคสที่ไม่มีใบแจ้งหนี้เหลืออยู่ (ไม่นับใบที่ยกเลิก) — ไว้เสนอปุ่มออกใบ */
   casesWithoutInvoice: () => request('/invoices/cases-without-invoice'),
@@ -434,6 +459,8 @@ export const api = {
   /** สลิปโอนเงินของลูกค้า — image เป็น data URL ที่ย่อแล้ว (compressImage) · คืนใบที่อัปเดตแล้ว */
   addInvoiceSlip: (id, image) => request(`/invoices/${id}/slips`, { method: 'POST', body: { image } }),
   deleteInvoiceSlip: (id, slipId) => request(`/invoices/${id}/slips/${slipId}`, { method: 'DELETE' }),
+  rejectInvoiceSlip: (id, slipId, reason) =>
+    request(`/invoices/${id}/slips/${slipId}/reject`, { method: 'POST', body: { reason } }),
   /** URL รูปสลิป — ใส่ตรงๆ ใน <img src> ได้ (เบราว์เซอร์แนบคุกกี้ session ไปเอง) */
   invoiceSlipUrl: (id, slipId) => `/api/invoices/${id}/slips/${slipId}/image`,
 

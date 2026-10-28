@@ -1166,6 +1166,8 @@ CREATE TABLE IF NOT EXISTS invoice_payments (
 -- NULL ยอมไว้เฉพาะข้อมูลเก่า/ข้อมูล migration ก่อนมีระบบ idempotency
 ALTER TABLE invoice_payments ADD COLUMN IF NOT EXISTS request_id UUID;
 ALTER TABLE invoice_payments ADD COLUMN IF NOT EXISTS request_payload JSONB;
+-- ถ้ารับเงินจากสลิปที่ลูกค้าส่งมา ให้ย้อนตรวจได้ว่างวดนี้ยืนยันจากสลิปใบไหน
+ALTER TABLE invoice_payments ADD COLUMN IF NOT EXISTS slip_id INTEGER;
 
 CREATE INDEX IF NOT EXISTS idx_invoice_payments_invoice ON invoice_payments (invoice_id, payment_id);
 
@@ -1182,7 +1184,35 @@ CREATE TABLE IF NOT EXISTS invoice_slips (
   uploaded_by_name TEXT,
   created_at   TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')
 );
+-- ของเดิมที่ทีมแนบหลังรับเงินถือว่ายืนยันแล้ว · ของลูกค้า/LINE ใส่ pending ตอน INSERT
+ALTER TABLE invoice_slips ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'confirmed';
+ALTER TABLE invoice_slips ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'staff';
+ALTER TABLE invoice_slips ADD COLUMN IF NOT EXISTS extracted_amount DOUBLE PRECISION;
+ALTER TABLE invoice_slips ADD COLUMN IF NOT EXISTS extracted_date TEXT;
+ALTER TABLE invoice_slips ADD COLUMN IF NOT EXISTS extracted_ref TEXT;
+ALTER TABLE invoice_slips ADD COLUMN IF NOT EXISTS extracted_bank TEXT;
+ALTER TABLE invoice_slips ADD COLUMN IF NOT EXISTS reviewed_at TEXT;
+ALTER TABLE invoice_slips ADD COLUMN IF NOT EXISTS reviewed_by TEXT REFERENCES employees (employee_id) ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE invoice_slips ADD COLUMN IF NOT EXISTS reviewed_by_name TEXT;
+ALTER TABLE invoice_slips ADD COLUMN IF NOT EXISTS rejection_reason TEXT;
+ALTER TABLE invoice_slips ADD COLUMN IF NOT EXISTS payment_id INTEGER;
+ALTER TABLE invoice_slips ADD COLUMN IF NOT EXISTS source_ref TEXT;
 CREATE INDEX IF NOT EXISTS idx_invoice_slips_invoice ON invoice_slips (invoice_id, slip_id);
+CREATE INDEX IF NOT EXISTS idx_invoice_slips_pending ON invoice_slips (invoice_id, slip_id) WHERE status = 'pending';
+CREATE UNIQUE INDEX IF NOT EXISTS uq_invoice_slips_source_ref ON invoice_slips (source_ref);
+
+-- คิวแจ้งทีม HomeCare เมื่อมีสลิปจากลูกค้า · ระบบแชทดึงไปส่ง LINE ทีมแบบเดียวกับคิวส่งบิล
+CREATE TABLE IF NOT EXISTS invoice_slip_outbox (
+  id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  slip_id     INTEGER NOT NULL UNIQUE REFERENCES invoice_slips (slip_id) ON DELETE CASCADE,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  attempts    INTEGER NOT NULL DEFAULT 0,
+  claimed_at  TIMESTAMPTZ,
+  sent_at     TIMESTAMPTZ,
+  error       TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_invoice_slip_outbox_pending
+  ON invoice_slip_outbox (created_at) WHERE sent_at IS NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_invoice_payments_request_id
   ON invoice_payments (request_id);
 
