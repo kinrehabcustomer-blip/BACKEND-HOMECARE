@@ -2700,6 +2700,8 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
 .inv-logo { display: flex; flex-direction: column; align-items: center; margin: 0.5rem 0 0.75rem; }
 /* โลโก้ไฟล์เดียวกับแถบเมนู — กำหนดความสูงไว้ ไม่งั้นตอนสั่งพิมพ์รูปจะกินพื้นที่ตามขนาดจริงของไฟล์ */
 .inv-logo img { height: 3.25rem; width: auto; max-width: 60%; object-fit: contain; }
+/* โลโก้ KIN แนวตั้ง (ทอง 2 ขีด + ตัวอักษร) ต้องสูงกว่าโลโก้แถบเมนูแนวนอนถึงจะอ่านตัวหนังสือใต้โลโก้ออก */
+.inv-logo img.inv-logo-kin { height: 5.5rem; }
 .inv-title { margin: 0; font-size: 1.25rem; }
 .inv-copy { font-weight: 600; }
 .inv-org { margin-top: 0.25rem !important; }

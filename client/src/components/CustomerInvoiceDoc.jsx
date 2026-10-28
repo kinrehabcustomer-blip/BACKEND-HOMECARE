@@ -69,7 +69,7 @@ export default function CustomerInvoiceDoc({ item, signer }) {
 
     <div className="inv-header">
       <div className="inv-logo">
-        <img src={ISSUER.logo} alt={ISSUER.brand} />
+        <img className="inv-logo-kin" src={ISSUER.docLogo} alt={ISSUER.brand} />
       </div>
 
       <h3 className="inv-title">
