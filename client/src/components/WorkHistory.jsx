@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import WorkHistoryModal from './WorkHistoryModal.jsx';
-import { SERVICE_KIND_LABELS, serviceKindOf, CASE_STATUS_LABELS, formatBaht, formatDate } from '../labels.js';
+import { SERVICE_KIND_LABELS, serviceKindOf, formatBaht, formatDate, caseStage } from '../labels.js';
 import { caseCode } from '../lib/patientCode.js';
 
 /**
@@ -54,7 +54,7 @@ export default function WorkHistory({ cases = [], limit, collapsible = false, em
               {c.fee != null && ` · ${formatBaht(c.fee)}`}
             </p>
           </div>
-          <span className={`badge case-${c.status}`}>{CASE_STATUS_LABELS[c.status]}</span>
+          <span className={`badge case-${caseStage(c).key}`}>{caseStage(c).label}</span>
         </div>
       ))}
 

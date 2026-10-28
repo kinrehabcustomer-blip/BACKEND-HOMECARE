@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { useToast } from '../toast.jsx';
-import { CASE_STATUS_LABELS, formatBaht, formatDate, monthText, timeText, durationText } from '../labels.js';
+import { formatBaht, formatDate, monthText, timeText, durationText, caseStage } from '../labels.js';
 import { useSheetSwipe } from '../lib/sheetSwipe.js';
 import { useScrollLock } from '../lib/scrollLock.js';
 import LineIcon from './LineIcon.jsx';
@@ -518,7 +518,7 @@ function EmployeeCasesModal({ month, row, onClose }) {
                           {c.installments && <span className="cell-sub">งวดที่ {c.installments}</span>}
                         </td>
                         <td data-label="สถานะเคส">
-                          <span className={`badge case-${c.status}`}>{CASE_STATUS_LABELS[c.status] ?? c.status}</span>
+                          <span className={`badge case-${caseStage(c).key}`}>{caseStage(c).label}</span>
                         </td>
                       </tr>
                     ))}

@@ -6,7 +6,7 @@ import OfficeLink from '../components/OfficeLink.jsx';
 import ErrorBar from '../components/ErrorBar.jsx';
 import PageRefresh from '../components/PageRefresh.jsx';
 import { api } from '../api.js';
-import { CASE_STATUS_LABELS, INVOICE_STATUS_LABELS, formatBaht, formatDate } from '../labels.js';
+import { INVOICE_STATUS_LABELS, formatBaht, formatDate, caseStage } from '../labels.js';
 import { formatPhone } from '../lib/phone.js';
 import { caseCode } from '../lib/patientCode.js';
 
@@ -303,12 +303,16 @@ export default function InvoiceListPage() {
                   </td>
                   <td data-label="ยอดสุทธิ">{formatBaht(v.total)}</td>
                   <td data-label="สถานะ">
-                    <span className={`badge invoice-${v.is_overdue ? 'overdue' : v.status}`}>
-                      {v.is_overdue ? 'เกินกำหนด' : INVOICE_STATUS_LABELS[v.status]}
+                    {/* ป้ายสลิปรอตรวจซ้อนเป็นบรรทัดที่สองใต้สถานะ — เดิมอยู่บรรทัดเดียวกันแล้วโดนตัดเป็น "…"
+                        เพราะเซลล์ตารางไม่ตัดบรรทัด (คอลัมน์สถานะแคบ ป้ายสองอันวางคู่กันไม่พอ) */}
+                    <span className="status-stack">
+                      <span className={`badge invoice-${v.is_overdue ? 'overdue' : v.status}`}>
+                        {v.is_overdue ? 'เกินกำหนด' : INVOICE_STATUS_LABELS[v.status]}
+                      </span>
+                      {Number(v.pending_slip_count) > 0 && (
+                        <span className="badge pending-slip-badge">สลิปรอตรวจ {v.pending_slip_count}</span>
+                      )}
                     </span>
-                    {Number(v.pending_slip_count) > 0 && (
-                      <span className="badge pending-slip-badge">📎 รอตรวจ {v.pending_slip_count}</span>
-                    )}
                   </td>
                 </tr>
               ))}
@@ -386,7 +390,7 @@ export default function InvoiceListPage() {
                 <strong>{c.client_name ?? c.title}</strong>
                 <p className="muted">
                   <OfficeLink className="link mono" to={`/cases?open=${c.case_id}`}>{caseCode(c.case_id)}</OfficeLink>
-                  {' · '}{CASE_STATUS_LABELS[c.status] ?? c.status}
+                  {' · '}{caseStage(c).label}
                   {' · '}ค่าบริการ {c.fee != null ? formatBaht(c.fee) : 'ยังไม่ระบุ'}
                 </p>
               </div>

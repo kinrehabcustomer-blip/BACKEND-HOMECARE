@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import CaseModal from './CaseModal.jsx';
 import { useSheetSwipe } from '../lib/sheetSwipe.js';
 import { useScrollLock } from '../lib/scrollLock.js';
-import { SERVICE_KIND_LABELS, serviceKindOf, CASE_STATUS_LABELS, formatBaht, formatDate } from '../labels.js';
+import { SERVICE_KIND_LABELS, serviceKindOf, formatBaht, formatDate, caseStage } from '../labels.js';
 import { caseCode } from '../lib/patientCode.js';
 
 /**
@@ -98,7 +98,7 @@ export default function WorkHistoryModal({ employeeName, cases = [], onClose }) 
                         {c.fee != null && <span className="cell-sub">{formatBaht(c.fee)}</span>}
                       </td>
                       <td>
-                        <span className={`badge case-${c.status}`}>{CASE_STATUS_LABELS[c.status]}</span>
+                        <span className={`badge case-${caseStage(c).key}`}>{caseStage(c).label}</span>
                       </td>
                     </tr>
                   ))}

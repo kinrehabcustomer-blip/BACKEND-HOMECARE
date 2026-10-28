@@ -47,7 +47,8 @@ UPDATE employees SET position = 'admin' WHERE position = 'admin_ipd';
 ALTER TABLE employees ADD CONSTRAINT employees_position_check
   CHECK (position IN ('caregiver', 'assistant_nurse', 'practical_nurse', 'nurse',
                       'therapist', 'occupational_therapist', 'speech_therapist',
-                      'manager', 'hr', 'admin', 'finance', 'super_admin'));
+                      'manager', 'hr', 'admin', 'finance', 'super_admin',
+                      'unassigned'));  -- "ว่าง" = ยังไม่ได้กำหนดตำแหน่ง (นำเข้ารายชื่อ 28 ต.ค. 2569)
 
 -- ใบรับรอง / ใบประกอบวิชาชีพ ผูกกับพนักงานผ่าน employee_id
 CREATE TABLE IF NOT EXISTS employee_certificates (
@@ -1725,3 +1726,15 @@ BEGIN
     RAISE NOTICE 'เปลี่ยนรหัสเคส % → %', r.case_id, target;
   END LOOP;
 END $$;
+
+-- ============================================================================
+-- เลข VN (visit number) = เลขของครั้งที่ให้บริการ — ระบบออกเอง (ดร.ธงชัย 28 ต.ค. 2569)
+-- รูปแบบเดิม VN + ปี พ.ศ. 2 หลัก + เลขรัน 7 หลัก · ตัวนับ id_counters 'vn:YY'
+--   กายภาพ  = หนึ่งนัดหนึ่ง VN (case_visits.vn) · Homecare = หนึ่งเคสหนึ่ง VN (cases.vn)
+--   หัตถการ = หนึ่งรายการหนึ่ง VN (อยู่ในรายการ addons ของเคส kind = 'procedure')
+-- ดู server/src/cases/visitNumbers.js · ของเก่าเติมย้อนหลังใน db/migrate.js
+-- ============================================================================
+ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS vn TEXT;
+ALTER TABLE cases ADD COLUMN IF NOT EXISTS vn TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_case_visits_vn ON case_visits (vn) WHERE vn IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_cases_vn ON cases (vn) WHERE vn IS NOT NULL;

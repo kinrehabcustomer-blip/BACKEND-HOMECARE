@@ -1,6 +1,6 @@
 import { sql, nextInvoiceId, transaction } from '../db/index.js';
 import { PATIENT_PENDING } from '../cases/schema.js';
-import { normalizeAddons, addonAmount, addonsTotal, addonsTotalSql } from '../lib/addons.js';
+import { normalizeAddons, addonAmount, addonsTotal, addonsTotalSql, addonLabel } from '../lib/addons.js';
 import { ensureShareTables } from './share.js';
 
 const NOW = `to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')`;
@@ -284,11 +284,11 @@ function priceParts(caseRow) {
     : { amount: net + extra, discount: 0 };
 }
 
-/** บรรทัดอุปกรณ์เสริมในรูปเดียวกับ invoice_items — ใช้ต่อท้ายใบที่แตกเป็นรายครั้ง */
+/** บรรทัดอุปกรณ์เสริม/หัตถการในรูปเดียวกับ invoice_items — ใช้ต่อท้ายใบที่แตกเป็นรายครั้ง */
 export const addonLines = (addons, startSeq = 1) =>
   normalizeAddons(addons).map((a, i) => ({
     seq: startSeq + i,
-    description: `อุปกรณ์เสริม: ${a.name}`,
+    description: addonLabel(a),
     quantity: a.quantity,
     unit_price: a.unit_price,
     amount: addonAmount(a),
@@ -905,7 +905,7 @@ export async function visitLines(caseRow, { from, to } = {}) {
 
   const [visits, booked, billed, remaining] = await Promise.all([
     sql.all(
-      `SELECT v.visit_id, v.visit_date, v.planned_start, v.planned_end,
+      `SELECT v.visit_id, v.vn, v.visit_date, v.planned_start, v.planned_end,
               e.first_name || ' ' || e.last_name AS employee_name
        FROM case_visits v
        LEFT JOIN employees e ON e.employee_id = v.checked_in_by
@@ -948,6 +948,7 @@ export async function visitLines(caseRow, { from, to } = {}) {
     seq: i + 1,
     visit_id: v.visit_id, // จดไว้ในบรรทัด กันกะนี้ถูกเก็บซ้ำในใบถัดไป (ดู NOT EXISTS ข้างบน)
     description: [
+      v.vn, // กายภาพ: หนึ่งนัด = หนึ่ง VN — ใส่ไว้ในบรรทัดให้ลูกค้า/การเงินอ้างอิงครั้งที่ให้บริการได้
       `${v.visit_date}`,
       [v.planned_start, v.planned_end].filter(Boolean).join('-'),
       v.employee_name,

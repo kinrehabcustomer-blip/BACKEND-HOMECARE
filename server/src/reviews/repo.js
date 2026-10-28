@@ -205,7 +205,7 @@ export const submitProtected = (token, input, ipHash, duplicateWindowMin, dailyC
  */
 export const summary = () =>
   sql.all(
-    `SELECT e.employee_id, e.first_name, e.last_name, e.position, e.status,
+    `SELECT e.employee_id, e.first_name, e.last_name, e.nickname, e.position, e.status,
             e.review_token IS NOT NULL AS has_link,
             COUNT(r.review_id)::int          AS review_count,
             AVG(${perReviewAvg('r.')})::float8 AS avg_score,

@@ -162,6 +162,26 @@ export async function nextEmployeeId(tx, now = new Date()) {
     if (!taken) return id;
   }
 }
+/**
+ * เลข VN (visit number) = VN + ปี พ.ศ. 2 หลัก + เลขรัน 7 หลัก  เช่น VN690000001
+ * ออกให้ "ครั้งที่ให้บริการ" หนึ่งครั้ง (ดู cases/visitNumbers.js) — ตัวนับแยกรายปีใน id_counters ชื่อ 'vn:YY'
+ * ข้ามเลขที่ถูกใช้เป็นรหัสเคสอยู่แล้ว (เคสเก่าที่เคยกรอก VN เป็นรหัสเคสเอง) จะได้ไม่มีเลขเดียวกันสองความหมาย
+ */
+export async function nextVisitNumber(tx, now = new Date()) {
+  const yy = beYear2(now);
+  for (;;) {
+    const { value } = await tx.one(
+      `INSERT INTO id_counters (name, value) VALUES (:counter, 1)
+       ON CONFLICT (name) DO UPDATE SET value = id_counters.value + 1
+       RETURNING value`,
+      { counter: `vn:${yy}` },
+    );
+    if (value > 9_999_999) throw new Error(`เลข VN ของปี ${yy} เต็มแล้ว`);
+    const vn = `VN${yy}${String(value).padStart(7, '0')}`;
+    const taken = await tx.one('SELECT 1 AS taken FROM cases WHERE case_id = :vn', { vn });
+    if (!taken) return vn;
+  }
+}
 export const nextCaseId = (tx) => nextId(tx, 'case', 'CASE');
 export const nextCustomerId = (tx) => nextId(tx, 'customer', 'CUS');
 export const nextPatientId = (tx) => nextId(tx, 'patient', 'PAT');

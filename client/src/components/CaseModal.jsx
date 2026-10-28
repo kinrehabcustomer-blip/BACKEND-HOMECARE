@@ -12,15 +12,12 @@ import CaseLocationLink from './CaseLocationLink.jsx';
 import CaseReportDoc from './CaseReportDoc.jsx';
 import ReportArchiveModal from './ReportArchiveModal.jsx';
 import InvoiceModal from './InvoiceModal.jsx';
-import {
-  CASE_STATUS_LABELS, POSITION_LABELS, GENDER_LABELS, SERVICE_KIND_LABELS,
-  INVOICE_STATUS_LABELS, CASE_EVENT_LABELS, formatBaht, formatDate, stampText, positionsForCase,
-  todayTH,
-} from '../labels.js';
+import { POSITION_LABELS, GENDER_LABELS, SERVICE_KIND_LABELS, INVOICE_STATUS_LABELS, CASE_EVENT_LABELS, formatBaht, formatDate, stampText, positionsForCase, todayTH, caseStage } from '../labels.js';
 import LineIcon from './LineIcon.jsx';
 import StaffPicker from './StaffPicker.jsx';
 import { formatPhone, formatPhoneInput } from '../lib/phone.js';
 import { caseCode } from '../lib/patientCode.js';
+import { isProcedure } from '../lib/addons.js';
 
 /**
  * ชื่อบริการของเคส — สองสายเก็บคนละที่ (Homecare = รูปแบบ+เกรด, กายภาพ = ชื่อแพ็คเกจ)
@@ -424,7 +421,7 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                   {serviceName(item) ?? <span className="muted">ไม่ระบุบริการ</span>}
                 </h2>
                 <p className="muted">{item.customer_name ?? item.client_name}</p>
-                <span className={`badge case-${item.status}`}>{CASE_STATUS_LABELS[item.status]}</span>
+                <span className={`badge case-${caseStage(item).key}`}>{caseStage(item).label}</span>
                 {chatUrl && (
                   <a className="btn tiny primary" style={{ marginLeft: 8 }} href={chatUrl} target="_blank" rel="noreferrer">
                     💬 เปิดห้องแชทลูกค้า (Admin)
@@ -542,14 +539,26 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                     />
                   )}
                   <Field label="ค่าบริการที่ได้รับ" value={item.fee != null && formatBaht(item.fee)} />
-                  {item.addons?.length > 0 && (
+                  {item.addons?.some((x) => !isProcedure(x)) && (
                     <Field
                       label="อุปกรณ์เสริม (คิดเพิ่มในใบแจ้งหนี้)"
                       value={item.addons
+                        .filter((x) => !isProcedure(x))
                         .map((x) => `${x.name}${x.quantity !== 1 ? ` ×${x.quantity}` : ''} ${formatBaht(x.quantity * x.unit_price)}`)
                         .join(' · ')}
                     />
                   )}
+                  {item.addons?.some(isProcedure) && (
+                    <Field
+                      label="หัตถการ (คิดเพิ่มในใบแจ้งหนี้)"
+                      value={item.addons
+                        .filter(isProcedure)
+                        .map((x) => `${x.name} ${formatBaht(x.unit_price)}${x.vn ? ` (${x.vn})` : ''}`)
+                        .join(' · ')}
+                    />
+                  )}
+                  {/* Homecare ได้ VN เคสละหนึ่งเลข (ออกตอนลงนัดครั้งแรก) · กายภาพมี VN รายนัดในตารางนัด */}
+                  {item.vn && <Field label="เลข VN" value={item.vn} mono />}
                   {/* ยอดที่พนักงานจะเห็นเป็นรายได้ของตัวเองเมื่อปิดเคส — ต้องเห็นก่อนกดปิด (เฉพาะผู้จัดการ) */}
                   {seePay && (
                     <Field label="ค่าจ้างพนักงาน" value={item.staff_pay != null && formatBaht(item.staff_pay)} />
@@ -926,21 +935,13 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                 </button>
               )}
 
-              {/* จับคู่แล้ว รอเริ่ม — ปุ่มหลักคือเริ่มให้บริการ */}
-              {status === 'assigned' && (
-                <button
-                  className="btn primary"
-                  disabled={busy}
-                  onClick={() => run(() => api.startCase(item.case_id))}
-                >
-                  เริ่มให้บริการ
-                </button>
-              )}
+              {/* ไม่มีปุ่ม "เริ่มให้บริการ" แล้ว — สถานะเปลี่ยนเองตามวันเริ่ม/วันสิ้นสุด (ดู caseStage ใน labels.js)
+                  กะแรกที่เช็คอินยังดันเคสเป็น in_progress ให้เองเหมือนเดิม */}
 
               {/* กำลัง/พร้อมให้บริการ — ปิดเคสได้ (จบตามปกติ) */}
               {(status === 'assigned' || status === 'in_progress') && (
                 <button
-                  className={`btn ${status === 'in_progress' ? 'primary' : ''}`}
+                  className={`btn ${caseStage(item).key === 'awaiting_close' ? 'primary' : ''}`}
                   disabled={busy}
                   onClick={() => {
                     /* ปิดเคส = ตรึงค่าจ้างของกะที่ทำไปแล้ว — บอกให้รู้ตัวก่อนกด

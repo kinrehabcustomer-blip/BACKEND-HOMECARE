@@ -11,6 +11,7 @@ import LineIcon from '../components/LineIcon.jsx';
 import StaffPicker from '../components/StaffPicker.jsx';
 import PatientCodeInput from '../components/PatientCodeInput.jsx';
 import { isPatientCode, caseCode } from '../lib/patientCode.js';
+import { PROCEDURE, isProcedure } from '../lib/addons.js';
 import { nextRoundDates, endDateFor } from '../lib/caseRounds.js';
 import { useCanSeeStaffPay } from '../auth.jsx';
 import { useScrollLock } from '../lib/scrollLock.js';
@@ -45,6 +46,8 @@ const BLANK = {
   start_date: '', end_date: '', fee: '', staff_pay: '', note: '',
   // อุปกรณ์เสริมที่คิดเงินเพิ่ม [{ name, kind, quantity, unit_price }] — บวกเข้ายอดใบแจ้งหนี้ ไม่รวมในค่าบริการ
   addons: [],
+  // หัตถการเพิ่มเติม [{ name, unit_price, vn }] — ส่งไปรวมใน addons (kind 'procedure') แต่ละรายการได้ VN แยก
+  procedures: [],
   // รหัสผู้รับบริการ (KN…) ของแฟ้มที่จะสร้างใหม่ — ไม่ใช่คอลัมน์ของเคส (ถูกตัดออกก่อนบันทึกเคส)
   patient_code: '',
   assigned_to: '',
@@ -55,6 +58,7 @@ const BLANK = {
 const PATIENT_PENDING = 'ยังไม่ระบุผู้รับบริการ';
 
 const BLANK_ADDON = { name: '', kind: 'rent', quantity: '1', unit_price: '' };
+const BLANK_PROCEDURE = { name: '', unit_price: '', vn: null };
 
 /** ยอดของบรรทัด — ปัดสองตำแหน่งแบบเดียวกับ server/src/lib/addons.js ตัวเลขบนฟอร์มจะได้ตรงกับใบ */
 const addonAmount = (a) => Math.round(Number(a.quantity || 0) * Number(a.unit_price || 0) * 100) / 100;
@@ -66,10 +70,33 @@ const addonsPayload = (list) =>
     .filter((a) => String(a.name).trim() !== '' || String(a.unit_price) !== '')
     .map((a) => ({
       name: String(a.name).trim(),
-      kind: a.kind === 'sale' ? 'sale' : 'rent',
+      // เช่าคงรูปเดิม { name, quantity, unit_price } — เติมคีย์ให้ทุกบรรทัดแล้วใบเก่าทั้งระบบจะขึ้นป้าย "แพ็คเกจไม่ตรง"
+      ...(a.kind === 'sale' ? { kind: 'sale' } : {}),
       quantity: Number(a.quantity === '' ? 1 : a.quantity),
       unit_price: Number(a.unit_price === '' ? 0 : a.unit_price),
     }));
+
+/** หัตถการ → รายการ addons แบบ kind 'procedure' (ส่ง vn เดิมกลับไป server จะคงเลขเดิมให้) */
+const proceduresPayload = (list) =>
+  list
+    .filter((p) => String(p.name).trim() !== '' || String(p.unit_price) !== '')
+    .map((p) => ({
+      kind: PROCEDURE,
+      name: String(p.name).trim(),
+      quantity: 1,
+      unit_price: Number(p.unit_price === '' ? 0 : p.unit_price),
+      vn: p.vn ?? null,
+    }));
+
+/** แยก addons ของเคสเป็นสองช่องของฟอร์ม — keepVn = false ตอนต่อเคส (รอบใหม่ได้ VN ใหม่) */
+const splitAddons = (addons, { keepVn = true } = {}) => ({
+  addons: (addons ?? []).filter((a) => !isProcedure(a)).map((a) => ({
+    name: a.name, kind: a.kind === 'sale' ? 'sale' : 'rent', quantity: String(a.quantity), unit_price: String(a.unit_price),
+  })),
+  procedures: (addons ?? []).filter(isProcedure).map((a) => ({
+    name: a.name, unit_price: String(a.unit_price), vn: keepVn ? a.vn ?? null : null,
+  })),
+});
 
 /* ตัวเลือกที่ระบุแพ็คเกจ/เรทจริง — ไม่รวม service_kind เพราะเคสเก่าที่ยังว่างถูกเดาให้ตอนโหลด
    (ต้องตรงกับ SERVICE_ID_FIELDS ใน server/src/cases/repo.js) */
@@ -456,9 +483,7 @@ export default function CaseFormPage() {
         const filled = { ...BLANK };
         for (const key of Object.keys(BLANK)) filled[key] = c[key] ?? '';
         if (filled.client_name === PATIENT_PENDING) filled.client_name = '';
-        filled.addons = (c.addons ?? []).map((a) => ({
-          name: a.name, kind: a.kind === 'sale' ? 'sale' : 'rent', quantity: String(a.quantity), unit_price: String(a.unit_price),
-        }));
+        Object.assign(filled, splitAddons(c.addons, { keepVn: false }));
         if (!filled.service_kind) {
           if (filled.physio_package_id !== '') filled.service_kind = 'physio';
           else if (filled.pkg_format_id !== '') filled.service_kind = 'homecare';
@@ -545,9 +570,7 @@ export default function CaseFormPage() {
         const filled = { ...BLANK };
         for (const key of Object.keys(BLANK)) filled[key] = c[key] ?? '';
         if (filled.client_name === PATIENT_PENDING) filled.client_name = '';
-        filled.addons = (c.addons ?? []).map((a) => ({
-          name: a.name, kind: a.kind === 'sale' ? 'sale' : 'rent', quantity: String(a.quantity), unit_price: String(a.unit_price),
-        }));
+        Object.assign(filled, splitAddons(c.addons));
 
         // เคสที่เปิดก่อนมีสองสายไม่มี service_kind — เดาจากสิ่งที่ผูกไว้จริง
         // ไม่เดา ชุด dropdown จะถูกซ่อนแล้วบริการที่เลือกไว้จะหายไปจากสายตา (และโดนล้างทิ้งตอนกดบันทึก)
@@ -627,6 +650,23 @@ export default function CaseFormPage() {
     setFieldErrors((prev) =>
       Object.fromEntries(Object.entries(prev).filter(([k]) => !k.startsWith('addons.'))));
   };
+
+  /* ---------- หัตถการ: เพิ่ม/แก้/ลบทีละแถว (เหมือนอุปกรณ์เสริม แต่ไม่มีจำนวน) ---------- */
+  const setProcedure = (i, key, value) => {
+    setForm((prev) => ({
+      ...prev,
+      procedures: prev.procedures.map((p, j) => (j === i ? { ...p, [key]: value } : p)),
+    }));
+    const errKey = `procedures.${i}.${key}`;
+    setFieldErrors((prev) => (prev[errKey] ? { ...prev, [errKey]: undefined } : prev));
+  };
+  const addProcedure = () => setForm((prev) => ({ ...prev, procedures: [...prev.procedures, { ...BLANK_PROCEDURE }] }));
+  const removeProcedure = (i) => {
+    setForm((prev) => ({ ...prev, procedures: prev.procedures.filter((_, j) => j !== i) }));
+    setFieldErrors((prev) =>
+      Object.fromEntries(Object.entries(prev).filter(([k]) => !k.startsWith('procedures.'))));
+  };
+  const extrasTotal = addonsTotal(form.addons) + addonsTotal(form.procedures.map((p) => ({ ...p, quantity: 1 })));
 
   /** ข้อความเตือนใต้ช่อง — มาจาก details ของ zod ที่ server ส่งกลับมา
       ต้องมีคู่กับ aria-invalid เสมอ ไม่ใช้ขอบแดงสื่อความหมายอย่างเดียว (คนตาบอดสีจะไม่เห็น
@@ -830,6 +870,7 @@ export default function CaseFormPage() {
 
     setSaving(true);
     setError(null);
+    let equipmentCount = 0; // จำนวนแถวอุปกรณ์ที่ส่งไป — ใช้แยกข้อความเตือนของแถวหัตถการตอน server ทัก
     try {
       const payload = toPayload(form);
       payload.customer_id = await ensurePayer(payload);
@@ -862,7 +903,11 @@ export default function CaseFormPage() {
          (หรือหายเป็น null เลยถ้าเคสนั้นไม่ได้เลือกแพ็คเกจไว้) — กติกาเดียวกับหน้าแพ็คเกจ/กายภาพ */
       if (!seePay) delete payload.staff_pay;
 
-      payload.addons = addonsPayload(form.addons);
+      // หัตถการต่อท้ายอุปกรณ์เสริมในรายการเดียวกัน — ข้อความเตือนของ addons.N เกินจำนวนอุปกรณ์ = แถวหัตถการ
+      const equipment = addonsPayload(form.addons);
+      equipmentCount = equipment.length;
+      payload.addons = [...equipment, ...proceduresPayload(form.procedures)];
+      delete payload.procedures;
 
       // ล้างสถานะ "ยังไม่บันทึก" ก่อนเปลี่ยนหน้า ไม่งั้น beforeunload จะเตือนทั้งที่บันทึกสำเร็จแล้ว
       initial.current = JSON.stringify(form);
@@ -899,8 +944,12 @@ export default function CaseFormPage() {
 
       // zod บอกมาเป็นรายช่อง — เอาไปแปะใต้ช่องที่ผิด แล้วเลื่อนไปหาช่องแรกให้เลย
       if (err.fields) {
-        setFieldErrors(Object.fromEntries(err.fields.map((f) => [f.field, f.message])));
-        const first = err.fields[0]?.field;
+        const fieldOf = (field) => {
+          const m = /^addons\.(\d+)\.(.+)$/.exec(field);
+          return m && Number(m[1]) >= equipmentCount ? `procedures.${Number(m[1]) - equipmentCount}.${m[2]}` : field;
+        };
+        setFieldErrors(Object.fromEntries(err.fields.map((f) => [fieldOf(f.field), f.message])));
+        const first = fieldOf(err.fields[0]?.field ?? '');
         formEl.current?.querySelector(`[name="${first}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
       }
       setSaving(false);
@@ -1272,8 +1321,55 @@ export default function CaseFormPage() {
             {form.addons.length > 0 && (
               <p className="form-hint muted">
                 รวมอุปกรณ์เสริม <strong>{formatBaht(addonsTotal(form.addons))}</strong>
-                {' '}· ยอดในใบแจ้งหนี้ = ค่าบริการ + อุปกรณ์เสริม ={' '}
-                <strong>{formatBaht(Number(form.fee || 0) + addonsTotal(form.addons))}</strong>
+              </p>
+            )}
+          </div>
+        </section>
+
+        {/* หัตถการเพิ่มเติม — คิดเงินแยก บวกเข้ายอดใบแจ้งหนี้เหมือนอุปกรณ์เสริม
+            แต่ละรายการได้เลข VN แยกของตัวเอง (ระบบออกให้ตอนบันทึก) */}
+        <section className="addons-field" aria-labelledby="procedures-title">
+          <h3 id="procedures-title">หัตถการ <span className="muted">(คิดเงินเพิ่ม · ได้ VN แยกรายการละหนึ่งเลข)</span></h3>
+          {form.procedures.length === 0 && <p className="muted">ยังไม่มีหัตถการ</p>}
+          {form.procedures.map((p, i) => (
+            <div className="addon-row procedure-row" key={i}>
+              <label>ชื่อหัตถการ
+                <input
+                  name={`procedures.${i}.name`}
+                  value={p.name}
+                  placeholder="เช่น ทำแผล, เปลี่ยนสายให้อาหาร"
+                  aria-invalid={fieldErrors[`procedures.${i}.name`] ? true : undefined}
+                  onChange={(e) => setProcedure(i, 'name', e.target.value)}
+                />
+                {fieldError(`procedures.${i}.name`)}
+              </label>
+              <label>ราคาหัตถการ (บาท)
+                <input
+                  type="number" min="0" step="0.01"
+                  name={`procedures.${i}.unit_price`}
+                  value={p.unit_price}
+                  aria-invalid={fieldErrors[`procedures.${i}.unit_price`] ? true : undefined}
+                  onChange={(e) => setProcedure(i, 'unit_price', e.target.value)}
+                />
+                {fieldError(`procedures.${i}.unit_price`)}
+              </label>
+              <span className="addon-amount mono">{p.vn ?? 'VN ออกตอนบันทึก'}</span>
+              <button
+                type="button"
+                className="btn danger-ghost"
+                aria-label={`ลบ ${p.name || 'หัตถการแถวนี้'}`}
+                onClick={() => removeProcedure(i)}
+              >
+                ลบ
+              </button>
+            </div>
+          ))}
+          <div className="addon-foot">
+            <button type="button" className="btn addon-add" onClick={addProcedure}>+ เพิ่มหัตถการ</button>
+            {(form.addons.length > 0 || form.procedures.length > 0) && (
+              <p className="form-hint muted">
+                ยอดในใบแจ้งหนี้ = ค่าบริการ + อุปกรณ์เสริม + หัตถการ ={' '}
+                <strong>{formatBaht(Number(form.fee || 0) + extrasTotal)}</strong>
               </p>
             )}
           </div>

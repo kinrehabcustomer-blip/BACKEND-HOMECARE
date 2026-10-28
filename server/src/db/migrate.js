@@ -57,4 +57,10 @@ console.log(
     : 'เลขงวดของค่าจ้างทุกก้อนถูกต้องอยู่แล้ว',
 );
 
+/* ---------- เลข VN ย้อนหลัง ----------
+ * นัดที่ลงไว้ก่อนมีระบบ VN — กายภาพได้ VN ทุกนัด Homecare ได้เคสละหนึ่ง (ดู cases/visitNumbers.js) */
+const { backfillVisitNumbers } = await import('../cases/visitNumbers.js');
+const vnIssued = await backfillVisitNumbers();
+console.log(vnIssued ? `ออกเลข VN ย้อนหลัง ${vnIssued} เลข` : 'นัดทุกนัดมีเลข VN แล้ว');
+
 await pool.end();

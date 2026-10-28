@@ -3,7 +3,7 @@ import { api } from '../api.js';
 import MyCaseModal, { serviceName } from '../components/MyCaseModal.jsx';
 import ErrorBar from '../components/ErrorBar.jsx';
 import PageRefresh from '../components/PageRefresh.jsx';
-import { CASE_STATUS_LABELS, formatDate } from '../labels.js';
+import { formatDate, caseStage } from '../labels.js';
 import { caseCode } from '../lib/patientCode.js';
 
 export default function MyCasesPage() {
@@ -90,7 +90,7 @@ export default function MyCasesPage() {
                     <span className="cell-sub">{serviceName(c)}</span>
                   </td>
                   <td data-label="วันเริ่ม">{c.start_date ? formatDate(c.start_date) : '—'}</td>
-                  <td data-label="สถานะ"><span className={`badge case-${c.status}`}>{CASE_STATUS_LABELS[c.status]}</span></td>
+                  <td data-label="สถานะ"><span className={`badge case-${caseStage(c).key}`}>{caseStage(c).label}</span></td>
                 </tr>
               ))}
             </tbody>

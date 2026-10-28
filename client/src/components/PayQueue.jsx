@@ -3,7 +3,7 @@ import { api } from '../api.js';
 import { useSheetSwipe } from '../lib/sheetSwipe.js';
 import { useScrollLock } from '../lib/scrollLock.js';
 import { useToast } from '../toast.jsx';
-import { CASE_STATUS_LABELS, formatBaht, formatDate, openDatePicker } from '../labels.js';
+import { formatBaht, formatDate, openDatePicker, caseStage } from '../labels.js';
 import CasePayPanel from './CasePay.jsx';
 import LineIcon from './LineIcon.jsx';
 import { caseCode } from '../lib/patientCode.js';
@@ -230,7 +230,7 @@ export default function PayQueue({ reloadKey, openCase, onOpenCase }) {
                           <span className="run-id">
                             <strong>{c.worker_names || 'ยังไม่มีพนักงาน'}</strong>
                             <span className={`badge case-${c.status}`}>
-                              {CASE_STATUS_LABELS[c.status] ?? c.status}
+                              {caseStage(c).label}
                             </span>
                             {/* ตัวเลขเดียวกับที่ใช้เรียงลำดับ — ไม่โชว์ ลำดับก็กลายเป็นกติกาที่มองไม่เห็น */}
                             {URGENT_TIERS.includes(c.pay_priority) && c.waiting_days > 0 && (
@@ -369,7 +369,7 @@ function PayModal({ row, busy, run, toast, onClose }) {
               {row.client_name && ` · ${row.client_name}`}
             </p>
             <h2>{row.worker_names || 'ยังไม่มีพนักงาน'}</h2>
-            <span className={`badge case-${row.status}`}>{CASE_STATUS_LABELS[row.status] ?? row.status}</span>
+            <span className={`badge case-${caseStage(row).key}`}>{caseStage(row).label}</span>
           </div>
           <div className="modal-head-actions">
             <button className="modal-close" onClick={onClose} aria-label="ปิด">×</button>

@@ -2086,7 +2086,7 @@ describe('แบบประเมิน — ตำแหน่งที่เ�
     const { FRONT_POSITIONS, BACK_POSITIONS, POSITIONS } = await import('../src/employees/schema.js');
     assert.deepEqual(REVIEW_POSITIONS, FRONT_POSITIONS);
     assert.deepEqual([...FRONT_POSITIONS].sort(), [
-      'assistant_nurse', 'caregiver', 'nurse', 'occupational_therapist', 'practical_nurse', 'speech_therapist', 'therapist',
+      'assistant_nurse', 'caregiver', 'nurse', 'occupational_therapist', 'practical_nurse', 'speech_therapist', 'therapist', 'unassigned',
     ]);
     for (const p of THERAPY_POSITIONS) assert.ok(FRONT_POSITIONS.includes(p), `${p} ต้องอยู่กลุ่ม front`);
     // สองกลุ่มรวมกันได้ทุกตำแหน่งพอดี ไม่ซ้อนกัน
@@ -2153,11 +2153,13 @@ describe('อุปกรณ์เสริมของเคส', () => {
       ]),
       3741,
     );
+    // เช่าคงรูปเดิม (ไม่ติด kind) · ซื้อขาดเท่านั้นที่ติด kind: 'sale'
     assert.deepEqual(normalizeAddons([{ name: 'เตียง', quantity: 1, unit_price: 500 }]), [
-      { name: 'เตียง', kind: 'rent', quantity: 1, unit_price: 500 },
+      { name: 'เตียง', quantity: 1, unit_price: 500 },
     ]);
     assert.equal(normalizeAddons([{ name: 'รถเข็น', kind: 'sale' }])[0].kind, 'sale');
-    assert.equal(normalizeAddons([{ name: 'รถเข็น', kind: 'อื่น' }])[0].kind, 'rent');
+    assert.equal(normalizeAddons([{ name: 'รถเข็น', kind: 'อื่น' }])[0].kind, undefined);
+    assert.equal(normalizeAddons([{ name: 'เตียง', kind: 'rent' }])[0].kind, undefined);
   });
 
   test('บรรทัดใบรายครั้งต่อเลขลำดับจากกะ และยอดตรงกับ addonsTotal', async () => {
