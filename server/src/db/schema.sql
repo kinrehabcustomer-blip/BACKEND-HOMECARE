@@ -1387,6 +1387,11 @@ CREATE INDEX IF NOT EXISTS idx_case_payouts_installment ON case_payouts (case_id
 -- ว่างได้ = ยังไม่ได้นัด (ของเก่าที่ปล่อยก่อนมีช่องนี้ทั้งหมดเป็น NULL ซึ่งถูกต้องตามความจริง)
 ALTER TABLE case_payouts ADD COLUMN IF NOT EXISTS due_date TEXT;
 
+-- รหัสคำขอหนึ่งค่าแทนการกดปล่อยหนึ่งครั้ง (งวดหลายคนเก็บรหัสไว้ที่แถวแรกเพียงแถวเดียว)
+ALTER TABLE case_payouts ADD COLUMN IF NOT EXISTS request_id UUID;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_case_payouts_request_id
+  ON case_payouts (request_id) WHERE request_id IS NOT NULL;
+
 -- ============================================================================
 -- ส่วนแบ่งค่าจ้างที่ตกลงกันไว้ของเคส — "เคสนี้ ใครได้เท่าไหร่"
 --

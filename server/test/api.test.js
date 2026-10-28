@@ -1,5 +1,6 @@
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
 
 // Reject direct execution against any inherited/shared database before importing the app.
@@ -981,10 +982,12 @@ if (process.env.RUN_DB_TESTS !== '1') {
       assert.equal((await casesRepo.payStatus(c.case_id)).released, 0);
       await post(`/api/cases/${c.case_id}/close`, {});
       assert.equal((await casesRepo.payStatus(c.case_id)).released, 0);
-      await post(`/api/cases/${c.case_id}/pay/release`, { amount: 1200 }, HR, 403);
-      await post(`/api/cases/${c.case_id}/pay/release`, { amount: 1200 }, MANAGER, 201);
+      await post(`/api/cases/${c.case_id}/pay/release`, { request_id: randomUUID(), amount: 1200 }, HR, 403);
+      const releaseRequestId = randomUUID();
+      await post(`/api/cases/${c.case_id}/pay/release`, { request_id: releaseRequestId, amount: 1200 }, MANAGER, 201);
+      await post(`/api/cases/${c.case_id}/pay/release`, { request_id: releaseRequestId, amount: 1200 }, MANAGER, 200);
       assert.equal((await casesRepo.payStatus(c.case_id)).released, 1200);
-      await post(`/api/cases/${c.case_id}/pay/release`, { amount: 1 }, MANAGER, 400);
+      await post(`/api/cases/${c.case_id}/pay/release`, { request_id: randomUUID(), amount: 1 }, MANAGER, 400);
       const run = await post('/api/payroll', { period_to: today }, MANAGER, 201);
       assert.equal(Number(run.total_pay), 1200);
       assert.equal((await post(`/api/payroll/${run.run_id}/pay`, {})).status, 'paid');
@@ -996,7 +999,7 @@ if (process.env.RUN_DB_TESTS !== '1') {
     test('employee-cases lists a case paid this month even without shifts this month', async () => {
       const c = await newCase();
       await post(`/api/cases/${c.case_id}/assign`, { employee_id: FIELD.employee_id });
-      await post(`/api/cases/${c.case_id}/pay/release`, { amount: 900 }, MANAGER, 201);
+      await post(`/api/cases/${c.case_id}/pay/release`, { request_id: randomUUID(), amount: 900 }, MANAGER, 201);
       const { month } = await sql.one(`SELECT to_char(now() AT TIME ZONE 'Asia/Bangkok','YYYY-MM') AS month`);
       const res = await get(`/api/payroll/employee-cases?month=${month}&employee_id=${FIELD.employee_id}`, MANAGER);
       assert.equal(res.status, 200);
@@ -1030,6 +1033,24 @@ if (process.env.RUN_DB_TESTS !== '1') {
       (await get(`/api/invoices?case_id=${caseId}`, MANAGER)).body.data.find((v) => v.status === 'draft');
     const invoice = async (id) => (await get(`/api/invoices/${id}`, MANAGER)).body;
     const pay = (id, body) => post(`/api/invoices/${id}/pay`, { request_id: crypto.randomUUID(), ...body });
+
+    test('ออกใบจริงลงวันที่วันนี้ และไม่ยอมให้วันครบกำหนดก่อนวันออกใบ', async () => {
+      const c = await newCase();
+      const draft = await draftOf(c.case_id);
+      await post(`/api/invoices/${draft.invoice_id}/billing-plan`, { mode: 'full' });
+      await sql.run(
+        `UPDATE invoices SET issue_date = '2000-01-01', due_date = '2000-01-02' WHERE invoice_id = :id`,
+        { id: draft.invoice_id },
+      );
+      const blocked = await send('POST', `/api/invoices/${draft.invoice_id}/issue`, {});
+      assert.equal(blocked.status, 400);
+      assert.match(blocked.body.error, /วันครบกำหนด/);
+
+      const { today } = await sql.one(`SELECT to_char(now() AT TIME ZONE 'Asia/Bangkok','YYYY-MM-DD') AS today`);
+      await send('PATCH', `/api/invoices/${draft.invoice_id}`, { due_date: today });
+      assert.equal((await send('POST', `/api/invoices/${draft.invoice_id}/issue`, {})).status, 200);
+      assert.equal((await invoice(draft.invoice_id)).issue_date, today);
+    });
 
     test('แก้เคส: ซิงก์เฉพาะตอนราคา/ผู้จ่ายเปลี่ยน · ใบที่แก้มือไม่ถูกทับ · รีเฟรชเองทับและล้างธง · ผู้จ่ายจากแฟ้มผู้ป่วย', async () => {
       const customer = await post('/api/customers', { name: 'ผู้จ่ายจากแฟ้มผู้ป่วย' }, MANAGER, 201);
@@ -1301,7 +1322,7 @@ if (process.env.RUN_DB_TESTS !== '1') {
 
       // ปล่อยเงินแล้ว: เปลี่ยนสถานะกะไม่ได้ (กติกาเดียวกับ /adjust)
       await post(`/api/cases/${c.case_id}/reopen`, {});
-      await post(`/api/cases/${c.case_id}/pay/release`, { amount: 100 }, MANAGER, 201);
+      await post(`/api/cases/${c.case_id}/pay/release`, { request_id: randomUUID(), amount: 100 }, MANAGER, 201);
       assert.match((await call('PATCH', futurePath, { status: 'cancelled' }, MANAGER, 409)).error, /ปล่อยค่าจ้าง/);
     });
 
@@ -1362,6 +1383,7 @@ if (process.env.RUN_DB_TESTS !== '1') {
         shares: [{ employee_id: FIELD.employee_id, share: 700 }, { employee_id: LEAD_A.employee_id, share: 500 }],
       });
       const released = await post(`/api/cases/${c.case_id}/pay/release`, {
+        request_id: randomUUID(),
         amount: 500, shares: [{ employee_id: LEAD_A.employee_id, amount: 500 }],
       }, MANAGER, 201);
       assert.ok(released);
@@ -1374,10 +1396,11 @@ if (process.env.RUN_DB_TESTS !== '1') {
       await post(`/api/cases/${c.case_id}/assign`, { employee_id: FIELD.employee_id });
       await post(`/api/cases/${c.case_id}/team`, { employee_id: LEAD_A.employee_id });
 
-      const refused = await post(`/api/cases/${c.case_id}/pay/release`, { amount: 600 }, MANAGER, 400);
+      const refused = await post(`/api/cases/${c.case_id}/pay/release`, { request_id: randomUUID(), amount: 600 }, MANAGER, 400);
       assert.match(refused.error, /ระบุยอดของแต่ละคน/);
 
       await post(`/api/cases/${c.case_id}/pay/release`, {
+        request_id: randomUUID(),
         amount: 600,
         shares: [{ employee_id: FIELD.employee_id, amount: 600 }, { employee_id: LEAD_A.employee_id, amount: 0 }],
       }, MANAGER, 201);
@@ -1387,7 +1410,7 @@ if (process.env.RUN_DB_TESTS !== '1') {
       // เคสคนเดียวยังปล่อยได้โดยไม่ต้องระบุ (ไม่มีอะไรให้แบ่ง)
       const solo = await newCase();
       await post(`/api/cases/${solo.case_id}/assign`, { employee_id: FIELD.employee_id });
-      await post(`/api/cases/${solo.case_id}/pay/release`, { amount: 300 }, MANAGER, 201);
+      await post(`/api/cases/${solo.case_id}/pay/release`, { request_id: randomUUID(), amount: 300 }, MANAGER, 201);
     });
 
     test('ส่วนแบ่งที่กรอกเองมีเศษย่อยกว่าสตางค์: ยอดที่ลงฐานรวมแล้วต้องเท่ายอดของงวดเป๊ะ ไม่ปล่อยเกิน', async () => {
@@ -1398,6 +1421,7 @@ if (process.env.RUN_DB_TESTS !== '1') {
       await post(`/api/cases/${c.case_id}/assign`, { employee_id: FIELD.employee_id });
       await post(`/api/cases/${c.case_id}/team`, { employee_id: LEAD_A.employee_id });
       await post(`/api/cases/${c.case_id}/pay/release`, {
+        request_id: randomUUID(),
         amount: 900,
         shares: [
           { employee_id: FIELD.employee_id, amount: 450.125 },
@@ -1583,7 +1607,7 @@ if (process.env.RUN_DB_TESTS !== '1') {
     const releaseFor = async (amount) => {
       const c = await newCase();
       await post(`/api/cases/${c.case_id}/assign`, { employee_id: FIELD.employee_id });
-      await post(`/api/cases/${c.case_id}/pay/release`, { amount }, MANAGER, 201);
+      await post(`/api/cases/${c.case_id}/pay/release`, { request_id: randomUUID(), amount }, MANAGER, 201);
       return c;
     };
     const previewIds = async (today) =>
@@ -1878,7 +1902,7 @@ if (process.env.RUN_DB_TESTS !== '1') {
       assert.equal((await queueRow(closed)).suggested_remaining, 20000);
 
       // กด "ปล่อยที่เหลือ" โดยไม่พิมพ์ยอด = ได้ยอดตามสัดส่วน ไม่ใช่ 20,000
-      await post(`/api/cases/${cancelled}/pay/release`, {}, MANAGER, 201);
+      await post(`/api/cases/${cancelled}/pay/release`, { request_id: randomUUID() }, MANAGER, 201);
       const after = await payOf(cancelled);
       assert.equal(after.released, 6000, 'กะที่ไม่มีใครไปต้องไม่ถูกเทออกมาเป็นเงิน');
       assert.equal(after.suggested_remaining, 0);
@@ -1889,13 +1913,13 @@ if (process.env.RUN_DB_TESTS !== '1') {
       assert.equal((await queueRow(cancelled)).pay_priority, 6, 'ต้องไม่ค้างหัวคิวด้วยยอดที่จะไม่มีวันจ่าย');
 
       // กดซ้ำแบบไม่ระบุยอด = ปฏิเสธพร้อมบอกเหตุผล ไม่ใช่เงียบๆ ปล่อยอีก 14,000
-      const blocked = await post(`/api/cases/${cancelled}/pay/release`, {}, MANAGER, 409);
+      const blocked = await post(`/api/cases/${cancelled}/pay/release`, { request_id: randomUUID() }, MANAGER, 409);
       assert.match(blocked.error ?? JSON.stringify(blocked), /ยกเลิกกลางคัน/);
 
       // แต่ผู้จัดการยังพิมพ์ยอดเองได้ (ข้อเสนอ ไม่ใช่เพดาน) และเพดานยอดเหมายังกันอยู่
-      await post(`/api/cases/${cancelled}/pay/release`, { amount: 1000 }, MANAGER, 201);
+      await post(`/api/cases/${cancelled}/pay/release`, { request_id: randomUUID(), amount: 1000 }, MANAGER, 201);
       assert.equal((await payOf(cancelled)).released, 7000);
-      await post(`/api/cases/${cancelled}/pay/release`, { amount: 99999 }, MANAGER, 400);
+      await post(`/api/cases/${cancelled}/pay/release`, { request_id: randomUUID(), amount: 99999 }, MANAGER, 400);
     });
 
     test('เปิดเคสรอบที่ยกเลิกกลับมา ไม่ได้ถ้าสายต่อเคสนั้นมีรอบใหม่เดินอยู่แล้ว', async () => {

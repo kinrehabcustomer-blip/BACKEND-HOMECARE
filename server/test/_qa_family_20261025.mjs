@@ -74,6 +74,17 @@ try {
   ok((await family.accept('ZZZZZZ', STRANGER, 'คนแปลกหน้า')).reason === 'not_found', 'รหัสมั่ว = not_found');
 
   const expInv = await family.createInvite(c1, 'แอดมิน');
+  let collision = null;
+  try {
+    await sql.run(
+      `INSERT INTO case_family_links (case_id, code_hash, code_expires_at, invited_by, consent_by)
+       VALUES (:id, :hash, now() + interval '7 days', 'ทดสอบชน', 'ทดสอบชน')`,
+      { id: c1, hash: family.hashCode(expInv.code) },
+    );
+  } catch (error) {
+    collision = error;
+  }
+  ok(collision?.code === '23505', 'รหัสเชิญที่ยังใช้ได้ต้องมี unique index กันชนที่ฐานข้อมูล', collision?.message);
   await sql.run(`UPDATE case_family_links SET code_expires_at = now() - interval '1 day' WHERE code_hash = :h`,
     { h: family.hashCode(expInv.code) });
   ok((await family.accept(expInv.code, SON, 'ลูกชาย')).reason === 'expired', 'รหัสเกิน 7 วัน = expired');

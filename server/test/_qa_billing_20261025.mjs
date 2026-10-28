@@ -12,6 +12,7 @@ assert.equal(new URL(process.env.DATABASE_URL).hostname, '127.0.0.1');
 const { createApp } = await import('../src/app.js');
 const { signToken, COOKIE_NAME, hashPassword } = await import('../src/lib/auth.js');
 const { sql, pool } = await import('../src/db/index.js');
+const { outboxAck, outboxPending } = await import('../src/invoices/share.js');
 const { seedFixtures } = await import('./fixtures.js');
 
 const MANAGER = { employee_id: 'EMP-0001', position: 'manager', name: 'ผู้จัดการ ทดสอบ' };
@@ -70,6 +71,20 @@ head('1 · ลิงก์เอกสารที่ส่งเข้า LINE 
   await post(`/api/invoices/${invoice.invoice_id}/billing-plan`, { mode: 'full' });
   await post(`/api/invoices/${invoice.invoice_id}/issue`);
 
+  const copied = await post(`/api/invoices/${invoice.invoice_id}/share-link`);
+  assert.equal(copied.status, 201, JSON.stringify(copied.body));
+  assert.match(copied.body.url, /\/bill\//);
+  const shareAudit = await sql.one(
+    `SELECT purpose, created_by,
+            extract(epoch FROM (expires_at - created_at)) / 86400 AS days
+       FROM invoice_shares WHERE invoice_id = :id ORDER BY created_at DESC LIMIT 1`,
+    { id: invoice.invoice_id },
+  );
+  assert.equal(shareAudit.purpose, 'copy');
+  assert.equal(shareAudit.created_by, MANAGER.employee_id);
+  assert.ok(Number(shareAudit.days) >= 179.9 && Number(shareAudit.days) <= 180.1, `ลิงก์ต้องมีอายุ 180 วัน ไม่ใช่ ${shareAudit.days}`);
+  ok('ปุ่มคัดลอกออกลิงก์ได้แม้ยังไม่มี LINE และบันทึกผู้สร้าง/อายุ 180 วัน');
+
   // ผูก LINE ให้ลูกค้าเพื่อให้ส่งได้ (คอลัมน์ถูกเพิ่มแบบ lazy ตอนเรียกเส้น /line ครั้งแรก)
   await get(`/api/invoices/${invoice.invoice_id}/line`);
   await sql.run(`UPDATE customers SET line_user_id = 'Utest0001' WHERE customer_id = (SELECT customer_id FROM invoices WHERE invoice_id = :id)`, { id: invoice.invoice_id });
@@ -78,6 +93,14 @@ head('1 · ลิงก์เอกสารที่ส่งเข้า LINE 
   assert.equal(sent.status, 201, JSON.stringify(sent.body));
   const url = sent.body.url;
   const token = url.split('/bill/')[1];
+
+  await sql.run(
+    `UPDATE invoice_line_outbox SET claimed_at = now() - interval '11 minutes' WHERE id = :id`,
+    { id: sent.body.pending_id },
+  );
+  const reclaimed = (await outboxPending()).find((row) => Number(row.id) === Number(sent.body.pending_id));
+  assert.ok(reclaimed, 'คิวที่ lease เกิน 10 นาทีต้องถูก claim ใหม่ได้');
+  await outboxAck([{ id: reclaimed.id, ok: false, error: 'QA ปล่อยกลับเข้าคิว' }]);
 
   const r1 = await fetch(`${base}/api/public/bill/${token}`);
   if (r1.status !== 200) hit('ลิงก์ที่เพิ่งออกเปิดไม่ได้', `GET /api/public/bill/<token> ได้ ${r1.status}`);
@@ -104,6 +127,13 @@ head('1 · ลิงก์เอกสารที่ส่งเข้า LINE 
 
   // ใบที่ "ชำระแล้ว" = ใบเสร็จของลูกค้า · ถ้าทีมยกเลิกใบทีหลัง (คืนเงิน/ออกใบผิด) ลูกค้าเปิดใบเสร็จเดิมไม่ได้
   await post(`/api/invoices/${invoice.invoice_id}/pay`, { request_id: rid() });
+  const receiptQueued = await post(`/api/invoices/${invoice.invoice_id}/line`);
+  assert.equal(receiptQueued.status, 201, JSON.stringify(receiptQueued.body));
+  assert.equal(receiptQueued.body.replaced, true, 'คิวใบแจ้งหนี้เดิมต้องถูกแทนด้วยใบเสร็จ');
+  const claimed = (await outboxPending()).find((row) => row.invoice_id === invoice.invoice_id);
+  assert.equal(claimed?.payload?.kind, 'receipt');
+  assert.equal(Number(claimed?.payload?.paid), 20000, 'ยอดในคิวต้องอ่านใหม่ตอน claim หลังรับเงิน');
+  await outboxAck([{ id: claimed.id, ok: true }]);
   const paidDoc = await (await fetch(`${base}/api/public/bill/${token}`)).json();
   if (paidDoc.status !== 'paid') hit('ลิงก์ไม่กลายเป็นใบเสร็จหลังชำระ', `status = ${paidDoc.status}`);
   else ok('ชำระแล้วลิงก์เดิมกลายเป็นใบเสร็จ ไม่ต้องส่งลิงก์ใหม่');

@@ -66,16 +66,31 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
   const [voidReason, setVoidReason] = useState('');
   /* ส่งใบเข้า LINE ลูกค้า (ดร.ธงชัย 24 ต.ค. 2569 ข้อ 4) — { can_send, reason, customer_name, history } · ดู server/src/invoices/share.js */
   const [lineInfo, setLineInfo] = useState(null);
+  const [lineInfoError, setLineInfoError] = useState(null);
+  const [copyText, setCopyText] = useState(null);
   const lineStatus = item?.status;
   useEffect(() => {
     setLineInfo(null);
+    setLineInfoError(null);
+    setCopyText(null);
     if (lineStatus !== 'issued' && lineStatus !== 'paid') return;
     let cancelled = false;
-    api.invoiceLine(invoiceId).then((v) => !cancelled && setLineInfo(v)).catch(() => {});
+    api.invoiceLine(invoiceId)
+      .then((v) => !cancelled && setLineInfo(v))
+      .catch(() => !cancelled && setLineInfoError('ตรวจสถานะ LINE ไม่ได้'));
     return () => {
       cancelled = true;
     };
   }, [invoiceId, lineStatus]);
+
+  async function retryLineInfo() {
+    setLineInfoError(null);
+    try {
+      setLineInfo(await api.invoiceLine(invoiceId));
+    } catch {
+      setLineInfoError('ตรวจสถานะ LINE ไม่ได้');
+    }
+  }
 
   async function sendLine() {
     setBusy(true);
@@ -84,6 +99,41 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
       const r = await api.sendInvoiceLine(invoiceId);
       setLineInfo((v) => ({ ...v, history: r.history }));
       toast(r.already ? 'ใบนี้อยู่ในคิวส่งแล้ว รอระบบส่งสักครู่' : `ใส่คิวส่งเข้า LINE ${lineInfo?.customer_name ?? 'ลูกค้า'} แล้ว — ถึงลูกค้าภายในประมาณ 3 นาที`);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function copyBill() {
+    setBusy(true);
+    setError(null);
+    try {
+      const bill = await api.invoiceShareLink(invoiceId);
+      const amountLine = bill.kind === 'receipt'
+        ? 'ชำระแล้ว'
+        : bill.paid > 0
+          ? `ยอดคงเหลือ ${amountText(bill.balance)} บาท`
+          : `ยอดที่ต้องชำระ ${amountText(bill.balance)} บาท`;
+      const text = [
+        `${bill.kind === 'receipt' ? 'ใบเสร็จ' : 'ใบแจ้งหนี้'}จาก KIN HomeCare`,
+        `เลขที่ ${bill.invoice_id}`,
+        `ชื่อผู้รับบริการ ${bill.patient_name ?? '—'}`,
+        amountLine,
+        bill.due_date ? `วันครบกำหนด ${docDate(bill.due_date)}` : null,
+        bill.url,
+        'ลิงก์ใช้ได้ 6 เดือน',
+      ].filter(Boolean).join('\n');
+      try {
+        if (!navigator.clipboard?.writeText) throw new Error('clipboard unavailable');
+        await navigator.clipboard.writeText(text);
+        setCopyText(null);
+        toast('คัดลอกข้อความบิลแล้ว — นำไปวางส่งให้ผู้จ่ายเงินได้เลย');
+      } catch {
+        setCopyText(text);
+        toast('คัดลอกอัตโนมัติไม่ได้ — เลือกข้อความในกล่องแล้วคัดลอกเอง');
+      }
     } catch (e) {
       setError(e.message);
     } finally {
@@ -281,7 +331,7 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
   const depositValue = Number(depositEdit);
   const depositValid = depositValue > 0 && depositValue < planTotal;
 
-  const pay = item ? paidBy(item.payments, item.payment_method, item.total, item.status) : {};
+  const pay = item ? paidBy(item.payments, item.payment_method, item.total, item.status, item.paid_amount) : {};
 
   /* อุปกรณ์เสริม — เก็บแยกในคอลัมน์ addons แต่บวกอยู่ใน amount แล้ว
      แตกเป็นบรรทัดของตัวเอง แล้วบรรทัดแพ็คเกจเหลือเฉพาะส่วนที่เป็นค่าบริการ (ยอดรวมยังเท่า amount)
@@ -940,7 +990,7 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                   className="btn"
                   disabled={busy || !lineInfo.can_send}
                   title={`ส่ง${isReceipt ? 'ใบเสร็จ' : 'ใบแจ้งหนี้'} ${item.invoice_id} เข้า LINE ${lineInfo.customer_name ?? 'ลูกค้า'}?`}
-                  detail="ลูกค้าได้ข้อความสรุปยอด + ลิงก์เปิดดู/บันทึกเอกสาร (ลิงก์ใช้ได้ 90 วัน) · ข้อความขึ้นในห้องแชทของลูกค้าในแดชบอร์ด admin ด้วย"
+                  detail="ลูกค้าได้ข้อความสรุปยอด + ลิงก์เปิดดู/บันทึกเอกสาร (ลิงก์ใช้ได้ 6 เดือน) · ข้อความขึ้นในห้องแชทของลูกค้าในแดชบอร์ด admin ด้วย"
                   confirmLabel="ส่งเข้า LINE"
                   cancelLabel="ยังไม่ส่ง"
                   onConfirm={sendLine}
@@ -948,15 +998,41 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                   <span title={lineInfo.can_send ? undefined : lineInfo.reason}>ส่งเข้า LINE ลูกค้า</span>
                 </ConfirmButton>
               )}
+              {(item.status === 'issued' || item.status === 'paid') && (
+                <button className="btn" disabled={busy} onClick={copyBill}>
+                  คัดลอกบิล
+                </button>
+              )}
+              {lineInfoError && (
+                <button className="btn danger-ghost" disabled={busy} onClick={retryLineInfo}>
+                  ตรวจสถานะ LINE ไม่ได้ · ลองใหม่
+                </button>
+              )}
               {lineInfo && (lastSend || !lineInfo.can_send) && (
                 <span className="muted foot-note">
                   {!lineInfo.can_send ? lineInfo.reason
+                    : lastSend.error?.startsWith('ข้าม:') ? lastSend.error
                     : lastSend.sent_at ? `ส่งเข้า LINE แล้ว ${new Date(lastSend.sent_at).toLocaleString('th-TH', { timeZone: 'Asia/Bangkok', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}${lastSend.created_by_name ? ` · ${lastSend.created_by_name}` : ''}`
                     : lastSend.attempts >= 3 ? `ส่งไม่สำเร็จ: ${lastSend.error ?? ''}`
                     // คิวหมดอายุ 1 วัน (ระบบแชทไม่หยิบแล้ว) — บอกให้กดส่งใหม่ ไม่ค้าง "อยู่ในคิว" ตลอดไป
                     : Date.now() - new Date(lastSend.created_at).getTime() > 864e5 ? `ส่งไม่สำเร็จ (หมดเวลา)${lastSend.error ? `: ${lastSend.error}` : ''} — กดส่งใหม่ได้`
                     : 'อยู่ในคิวส่ง…'}
                 </span>
+              )}
+
+              {copyText && (
+                <div className="notice warn" style={{ width: '100%' }}>
+                  <strong>คัดลอกอัตโนมัติไม่ได้</strong> · เลือกข้อความด้านล่างแล้วคัดลอกเอง
+                  <textarea
+                    readOnly
+                    value={copyText}
+                    rows={8}
+                    onFocus={(e) => e.currentTarget.select()}
+                    onClick={(e) => e.currentTarget.select()}
+                    style={{ width: '100%', marginTop: '.5rem' }}
+                    aria-label="ข้อความบิลสำหรับคัดลอก"
+                  />
+                </div>
               )}
 
               {!item.needs_plan && (

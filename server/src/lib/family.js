@@ -66,6 +66,11 @@ export const ensureFamilyTable = () =>
     .then(() => sql.run('CREATE INDEX IF NOT EXISTS idx_family_msg_case ON case_family_messages (case_id, created_at DESC)'))
     .then(() => sql.run('CREATE INDEX IF NOT EXISTS idx_family_case ON case_family_links (case_id)'))
     .then(() => sql.run('CREATE INDEX IF NOT EXISTS idx_family_line ON case_family_links (line_user_id) WHERE line_user_id IS NOT NULL'))
+    // รหัสที่ยังรอรับต้องไม่ชนกัน ส่วนรหัสที่รับแล้ว/ถูกปลดให้ใช้ค่าเดิมซ้ำได้
+    .then(() => sql.run(
+      `CREATE UNIQUE INDEX IF NOT EXISTS uq_family_pending_code ON case_family_links (code_hash)
+       WHERE code_hash IS NOT NULL AND accepted_at IS NULL AND revoked_at IS NULL`,
+    ))
     /* LINE เดียวกันผูกเคสเดียวกันได้ครั้งเดียว — linkCustomerLine() กับ accept() ต่างก็ตรวจด้วย SELECT
        ก่อน INSERT/UPDATE ซึ่งสองคำขอพร้อมกันลอดได้ทั้งคู่ · ดัชนีนี้คือด่านจริงที่ฐานข้อมูลบังคับเอง
        แยกเฉพาะแถวที่ยังไม่ถูกปลด (revoked_at IS NULL) เพราะปลดแล้วเชิญใหม่ต้องทำได้
@@ -108,13 +113,21 @@ export const activeCount = async (caseId) =>
 
 /** ออกรหัสเชิญ · canInvite = ญาติคนแรก (แอดมินเชิญ) ชวนต่อได้ · via = link_id ของญาติที่ชวน */
 export async function createInvite(caseId, actorName, { canInvite = true, via = null, consentBy = actorName } = {}) {
-  const code = newCode();
-  await sql.run(
-    `INSERT INTO case_family_links (case_id, code_hash, code_expires_at, invited_by, consent_by, can_invite, invited_via)
-     VALUES (:case_id, :hash, now() + make_interval(days => :days), :actor, :consent, :can_invite, :via)`,
-    { case_id: caseId, hash: hashCode(code), days: CODE_DAYS, actor: actorName, consent: consentBy, can_invite: canInvite, via },
-  );
-  return { code, days: CODE_DAYS };
+  await ensureFamilyTable();
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const code = newCode();
+    try {
+      await sql.run(
+        `INSERT INTO case_family_links (case_id, code_hash, code_expires_at, invited_by, consent_by, can_invite, invited_via)
+         VALUES (:case_id, :hash, now() + make_interval(days => :days), :actor, :consent, :can_invite, :via)`,
+        { case_id: caseId, hash: hashCode(code), days: CODE_DAYS, actor: actorName, consent: consentBy, can_invite: canInvite, via },
+      );
+      return { code, days: CODE_DAYS };
+    } catch (err) {
+      if (err?.code !== '23505') throw err;
+    }
+  }
+  throw new ApiError(503, 'สร้างรหัสเชิญไม่สำเร็จชั่วคราว กรุณาลองใหม่');
 }
 
 /**

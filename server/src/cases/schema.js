@@ -169,6 +169,7 @@ export const assignSchema = z.object({
  * ปล่อย 0 บาทไม่มีความหมาย มีแต่จะทำให้รายการค่าจ้างรก (เกณฑ์เดียวกับการรับชำระในใบแจ้งหนี้)
  */
 export const releasePaySchema = z.object({
+  request_id: z.string().uuid('รหัสป้องกันการปล่อยค่าจ้างซ้ำไม่ถูกต้อง'),
   amount: z.number().positive('ยอดที่ปล่อยต้องมากกว่า 0').optional().nullable(),
   note: optionalText,
 

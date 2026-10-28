@@ -965,7 +965,7 @@ export async function syncOpenFromCase(caseRow, customer, { forceInvoiceId = nul
           เกณฑ์เดิมคือ "สถานะ issued = เอกสารยังอยู่ในมือเรา ยังไม่ได้ส่งมอบ" ซึ่งจริงตอนที่ส่งมอบ
           มีทางเดียวคือพิมพ์ออกมา · พอมีปุ่มส่งเข้า LINE ลูกค้า (24 ต.ค. 2569) ข้อสันนิษฐานนั้นไม่จริงแล้ว
           ย้ายผู้ป่วยไปอยู่ใต้ผู้ว่าจ้างคนใหม่ แล้วใบที่ลูกค้าถือลิงก์อยู่เปลี่ยนชื่อ เลขผู้เสียภาษี
-          และที่อยู่ออกบิลเป็นของอีกบ้านทันที ทั้งที่เขาเปิดลิงก์เดิมดูได้ตลอด 90 วัน
+          และที่อยู่ออกบิลเป็นของอีกบ้านทันที ทั้งที่เขาเปิดลิงก์เดิมดูได้ตลอด 6 เดือน
           (พิสูจน์แล้ว: ก่อนย้าย = บ้าน A/0105566000201 · หลังย้าย = บ้าน B/0105566000202 สถานะยัง issued)
           มีแถวใน invoice_shares = เคยกดส่งให้ลูกค้าแล้ว · ต้องแก้ที่ใบเองหรือออกใบใหม่ */
        AND NOT EXISTS (SELECT 1 FROM invoice_shares sh WHERE sh.invoice_id = invoices.invoice_id)
@@ -1132,6 +1132,10 @@ export async function issueInvoiceForTransaction(tx, invoiceId) {
   const locked = await invoiceForUpdate(tx, invoiceId, 'issue');
   if (locked.reason) return locked;
   if (locked.invoice.billing_kind == null) return { reason: 'billing_plan_required' };
+  const issueDate = TODAY();
+  if (locked.invoice.due_date && locked.invoice.due_date < issueDate) {
+    return { reason: 'due_before_issue', issue_date: issueDate, due_date: locked.invoice.due_date };
+  }
   // เคสถูกยกเลิกไปแล้ว — ใบของเคสนั้นไม่ควรถูกส่งให้ลูกค้า (ใบร่างเก่าที่หลุดรอดมาก่อนมีการยกเลิกตาม)
   if (locked.invoice.case_id) {
     const caseRow = await tx.one('SELECT status FROM cases WHERE case_id = :id', { id: locked.invoice.case_id });
@@ -1140,9 +1144,9 @@ export async function issueInvoiceForTransaction(tx, invoiceId) {
 
   const changed = await tx.run(
     `UPDATE invoices
-     SET status = 'issued', updated_at = ${NOW}
+     SET status = 'issued', issue_date = :issue_date, updated_at = ${NOW}
      WHERE invoice_id = :id AND status = 'draft'`,
-    { id: invoiceId },
+    { id: invoiceId, issue_date: issueDate },
   );
   return changed === 1 ? { invoice_id: invoiceId } : { reason: 'state_changed' };
 }

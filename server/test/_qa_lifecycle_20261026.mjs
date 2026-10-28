@@ -132,7 +132,7 @@ try {
   const invoice = await invoiceForCase(main.case_id);
 
   const startTooSoon = await post(`/api/cases/${main.case_id}/start`);
-  const payWithoutWorker = await post(`/api/cases/${main.case_id}/pay/release`, { amount: 100 });
+  const payWithoutWorker = await post(`/api/cases/${main.case_id}/pay/release`, { request_id: randomUUID(), amount: 100 });
   probe(
     startTooSoon.status === 409 && payWithoutWorker.status === 409,
     'เริ่มงานหรือปล่อยค่าจ้างได้ทั้งที่ยังไม่มีพนักงานรับเคส',
@@ -186,7 +186,7 @@ try {
   mustStatus(await post(`/api/invoices/${invoice.invoice_id}/pay`, {
     request_id: randomUUID(), amount: 2000, payment_method: 'โอน',
   }), 200, 'รับชำระครบ');
-  const released = mustStatus(await post(`/api/cases/${main.case_id}/pay/release`, { amount: 1200 }), 201, 'ปล่อยค่าจ้าง');
+  const released = mustStatus(await post(`/api/cases/${main.case_id}/pay/release`, { request_id: randomUUID(), amount: 1200 }), 201, 'ปล่อยค่าจ้าง');
   assert.equal(released.released, 1200, `ยอดปล่อยค่าจ้างไม่ตรง: ${brief(released)}`);
   const payout = await sql.one(
     'SELECT payout_id, employee_id, amount FROM case_payouts WHERE case_id = :id',
@@ -284,7 +284,7 @@ try {
     const future = scheduled.visits.find((row) => row.visit_date === dateTH(1));
     mustStatus(await post(`/api/my/visits/${worked.visit_id}/check-in`, { photo: PHOTO }, FIELD_A), 200, 'คนเดิมเช็คอิน');
     mustStatus(await post(`/api/my/visits/${worked.visit_id}/check-out`, {}, FIELD_A), 200, 'คนเดิมเช็คเอาท์');
-    mustStatus(await post(`/api/cases/${kase.case_id}/pay/release`, { amount: 300 }), 201, 'ปล่อยค่าจ้างก้อนเก่า');
+    mustStatus(await post(`/api/cases/${kase.case_id}/pay/release`, { request_id: randomUUID(), amount: 300 }), 201, 'ปล่อยค่าจ้างก้อนเก่า');
     const oldPayout = await sql.one(
       'SELECT payout_id, employee_id, amount FROM case_payouts WHERE case_id = :id ORDER BY payout_id LIMIT 1',
       { id: kase.case_id },

@@ -3165,8 +3165,30 @@ export function assessReleaseCapacity(staffPay, releasedAmount, requestedAmount,
   return { staff_pay, released, remaining, amount };
 }
 
-export async function releasePay(caseId, { amount: requestedAmount, note, due_date, shares: chosen }, actor) {
-  return transaction(async (tx) => {
+let payReleaseRequestReady = null;
+export function ensurePayReleaseRequestSchema() {
+  return (payReleaseRequestReady ??= (async () => {
+    await sql.run(`ALTER TABLE case_payouts ADD COLUMN IF NOT EXISTS request_id UUID`);
+    await sql.run(`CREATE UNIQUE INDEX IF NOT EXISTS uq_case_payouts_request_id
+      ON case_payouts (request_id) WHERE request_id IS NOT NULL`);
+  })().catch((err) => {
+    payReleaseRequestReady = null;
+    throw err;
+  }));
+}
+
+export async function findPayReleaseRequest(requestId) {
+  await ensurePayReleaseRequestSchema();
+  return sql.one(
+    `SELECT case_id, installment_no FROM case_payouts WHERE request_id = :request_id`,
+    { request_id: requestId },
+  );
+}
+
+export async function releasePay(caseId, { request_id, amount: requestedAmount, note, due_date, shares: chosen }, actor) {
+  await ensurePayReleaseRequestSchema();
+  try {
+    return await transaction(async (tx) => {
     /* จองแถวเคสก่อนอ่านทั้งยอดและเลขงวด — case_payouts เป็น "แถวที่ยังไม่มี" จึงล็อกตรงๆ ไม่ได้
        คำขอของเคสเดียวกันทุกคำขอต้องผ่าน lock นี้ แล้ว statement ถัดไปจึงเห็น payout ที่คำขอก่อนหน้า commit */
     const lockedCase = await tx.one(
@@ -3174,6 +3196,16 @@ export async function releasePay(caseId, { amount: requestedAmount, note, due_da
       { id: caseId },
     );
     if (!lockedCase) return { released: [], reason: 'not_found' };
+
+    const existing = await tx.one(
+      `SELECT case_id, installment_no FROM case_payouts WHERE request_id = :request_id`,
+      { request_id },
+    );
+    if (existing) {
+      return existing.case_id === caseId
+        ? { released: [], replayed: true, installment_no: existing.installment_no }
+        : { released: [], reason: 'idempotency_conflict' };
+    }
 
     const { last, released: releasedAmount } = await tx.one(
       `SELECT COALESCE(MAX(installment_no), 0) AS last,
@@ -3225,13 +3257,13 @@ export async function releasePay(caseId, { amount: requestedAmount, note, due_da
     if (rows.length === 0) return { released: [], reason: 'nothing_to_pay' };
 
     const released = [];
-    for (const r of rows) {
+    for (const [index, r] of rows.entries()) {
       const { payout_id } = await tx.one(
         `INSERT INTO case_payouts
            (case_id, installment_no, employee_id, employee_name, amount, shifts, minutes,
-            due_date, released_by, released_by_name, note)
+            due_date, released_by, released_by_name, note, request_id)
          VALUES (:case_id, :installment, :employee_id, :employee_name, :amount, :shifts, :minutes,
-                 :due_date, :by, :by_name, :note)
+                 :due_date, :by, :by_name, :note, :request_id)
          RETURNING payout_id`,
         {
           case_id: caseId,
@@ -3245,6 +3277,7 @@ export async function releasePay(caseId, { amount: requestedAmount, note, due_da
           by: actor?.employee_id ?? null,
           by_name: actor?.name ?? null,
           note: note ?? null,
+          request_id: index === 0 ? request_id : null,
         },
       );
       released.push({ ...r, payout_id, installment_no: installment });
@@ -3264,7 +3297,15 @@ export async function releasePay(caseId, { amount: requestedAmount, note, due_da
     );
 
     return { released, installment_no: installment };
-  });
+    });
+  } catch (err) {
+    if (err?.code !== '23505') throw err;
+    const existing = await findPayReleaseRequest(request_id);
+    if (!existing) throw err;
+    return existing.case_id === caseId
+      ? { released: [], replayed: true, installment_no: existing.installment_no }
+      : { released: [], reason: 'idempotency_conflict' };
+  }
 }
 
 /**

@@ -213,6 +213,14 @@ await sql.run(
     }),
   },
 );
+await sql.run(
+  `INSERT INTO invoices
+     (invoice_id, case_id, customer_id, issue_date, due_date, status, bill_to_name, service_description, amount, discount, total)
+   SELECT 'INV-BRIDGE-BULK-' || lpad(n::text, 3, '0'), :case_id, :customer, :today, :today,
+          'issued', 'ผู้ว่าจ้าง A', 'รายการทดสอบเกิน 200 ใบ', 1, 0, 1
+     FROM generate_series(1, 205) AS n`,
+  { case_id: CASE_A, customer: CUSTOMER_A, today: bkkDate() },
+);
 
 const server = createServer(createApp());
 await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -723,7 +731,17 @@ probe(rejected(longCustomer) || longCustomer.status === 200, 'customers/link ล
   remember('family/message-feed', await postTicket('family/message-feed', 'kin-family-msg-feed', { since: Math.max(1, feedMessage.message_id - 1) }));
   remember('customers/case-overview', await postTicket('customers/case-overview', 'kin-case-overview', { cid: CUSTOMER_A, case_id: CASE_A }));
   remember('invoices/line-outbox', await postTicket('invoices/line-outbox', 'kin-invoice-outbox'));
-  remember('customers/billing', await postTicket('customers/billing', 'kin-billing-summary', { cid: CUSTOMER_A }));
+  const billing = remember('customers/billing', await postTicket('customers/billing', 'kin-billing-summary', { cid: CUSTOMER_A }));
+  probe(
+    billing.status === 200
+      && billing.body.invoice_count === 206
+      && billing.body.open_count === 206
+      && billing.body.open?.length === 5
+      && Number(billing.body.outstanding) === INVOICE_TOTAL + 205,
+    'ป้ายบิลรวมยอดจากแค่ 200 ใบล่าสุด',
+    JSON.stringify(billing.body),
+    'ป้ายบิลรวมยอด/จำนวนจากทุกใบ และจำกัดเฉพาะรายการที่แสดงไว้ 5 ใบ',
+  );
   remember('family/message-photo', await postTicket('family/message-photo', 'kin-case-photo', {
     cid: CUSTOMER_B, case_id: CASE_B, message_id: photoB.message_id,
   }));

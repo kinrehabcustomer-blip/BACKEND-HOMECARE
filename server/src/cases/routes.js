@@ -388,6 +388,14 @@ casesRouter.post(
     ensureCanPay(req);
     const input = releasePaySchema.parse(req.body ?? {});
 
+    const previous = await repo.findPayReleaseRequest(input.request_id);
+    if (previous) {
+      if (previous.case_id !== req.params.id) {
+        throw new ApiError(409, 'รหัสคำขอนี้ถูกใช้กับเคสอื่นแล้ว กรุณาโหลดข้อมูลใหม่แล้วลองอีกครั้ง');
+      }
+      return res.json(await repo.payStatus(req.params.id));
+    }
+
     const status = await repo.payStatus(req.params.id);
     if (status.staff_pay == null) {
       throw new ApiError(409, 'เคสนี้ยังไม่ได้ตั้งค่าจ้างพนักงาน — ตั้งยอดเหมาของเคสก่อนจึงจะปล่อยได้');
@@ -438,11 +446,15 @@ casesRouter.post(
        ส่ง input.amount ตรงๆ เพื่อให้กรณีไม่ระบุยอดคำนวณ remaining ใหม่หลังได้ row lock */
     const result = await repo.releasePay(
       req.params.id,
-      { amount: input.amount, note: input.note, due_date: input.due_date, shares: input.shares },
+      { request_id: input.request_id, amount: input.amount, note: input.note, due_date: input.due_date, shares: input.shares },
       req.user,
     );
 
     if (result.reason === 'not_found') throw notFound('ไม่พบเคสนี้');
+    if (result.reason === 'idempotency_conflict') {
+      throw new ApiError(409, 'รหัสคำขอนี้ถูกใช้กับเคสอื่นแล้ว กรุณาโหลดข้อมูลใหม่แล้วลองอีกครั้ง');
+    }
+    if (result.replayed) return res.json(await repo.payStatus(req.params.id));
     if (result.reason === 'staff_pay_not_set') {
       throw new ApiError(409, 'ค่าจ้างของเคสถูกล้างหรือเปลี่ยนระหว่างทำรายการ กรุณาโหลดข้อมูลใหม่');
     }

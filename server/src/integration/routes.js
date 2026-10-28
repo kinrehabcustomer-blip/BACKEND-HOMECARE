@@ -636,22 +636,40 @@ integrationRouter.post(
     const p = verifySigned(token, 'kin-billing-summary');
     if (!p || typeof p.cid !== 'string') throw new ApiError(401, 'ลายเซ็นไม่ถูกต้องหรือหมดอายุ');
     const today = new Date(Date.now() + 7 * 3.6e6).toISOString().slice(0, 10);
-    const rows = await sql.all(
-      `SELECT i.invoice_id, i.case_id, i.issue_date, i.due_date, i.status, i.total,
-              COALESCE((SELECT SUM(x.amount) FROM invoice_payments x WHERE x.invoice_id = i.invoice_id), 0) AS paid
-       FROM invoices i
-       WHERE i.customer_id = :cid AND i.status IN ('issued', 'paid')
-       ORDER BY i.issue_date DESC, i.invoice_id DESC LIMIT 200`,
-      { cid: p.cid },
-    );
     const money = (n) => Math.round(Number(n || 0) * 100) / 100;
-    const open = rows
-      .map((r) => ({ ...r, balance: r.status === 'paid' ? 0 : money(Number(r.total) - Number(r.paid)) }))
-      .filter((r) => r.balance > 0)
-      .map((r) => ({
-        invoice_id: r.invoice_id, case_id: r.case_id, issue_date: r.issue_date, due_date: r.due_date,
-        total: money(r.total), paid: money(r.paid), balance: r.balance, overdue: !!(r.due_date && r.due_date < today),
-      }));
+    const summary = await sql.one(
+      `WITH billed AS (
+         SELECT i.due_date,
+                CASE WHEN i.status = 'paid' THEN 0
+                     ELSE GREATEST(i.total - COALESCE(SUM(x.amount), 0), 0) END AS balance
+           FROM invoices i
+           LEFT JOIN invoice_payments x ON x.invoice_id = i.invoice_id
+          WHERE i.customer_id = :cid AND i.status IN ('issued', 'paid')
+          GROUP BY i.invoice_id
+       )
+       SELECT COUNT(*)::int AS invoice_count,
+              COALESCE(SUM(balance), 0) AS outstanding,
+              COALESCE(SUM(balance) FILTER (WHERE due_date IS NOT NULL AND due_date < :today), 0) AS overdue,
+              COUNT(*) FILTER (WHERE balance > 0)::int AS open_count
+         FROM billed`,
+      { cid: p.cid, today },
+    );
+    const open = await sql.all(
+      `WITH billed AS (
+         SELECT i.invoice_id, i.case_id, i.issue_date, i.due_date, i.total,
+                COALESCE(SUM(x.amount), 0) AS paid,
+                GREATEST(i.total - COALESCE(SUM(x.amount), 0), 0) AS balance
+           FROM invoices i
+           LEFT JOIN invoice_payments x ON x.invoice_id = i.invoice_id
+          WHERE i.customer_id = :cid AND i.status = 'issued'
+          GROUP BY i.invoice_id
+       )
+       SELECT invoice_id, case_id, issue_date, due_date, total, paid, balance,
+              (due_date IS NOT NULL AND due_date < :today) AS overdue
+         FROM billed WHERE balance > 0
+        ORDER BY issue_date DESC, invoice_id DESC LIMIT 5`,
+      { cid: p.cid, today },
+    );
     const lastPaid = await sql.one(
       `SELECT x.invoice_id, x.amount, x.paid_at
        FROM invoice_payments x JOIN invoices i ON i.invoice_id = x.invoice_id
@@ -661,11 +679,11 @@ integrationRouter.post(
     );
     res.json({
       today,
-      invoice_count: rows.length,
-      outstanding: money(open.reduce((t, r) => t + r.balance, 0)),
-      overdue: money(open.filter((r) => r.overdue).reduce((t, r) => t + r.balance, 0)),
-      open: open.slice(0, 5),
-      open_count: open.length,
+      invoice_count: summary.invoice_count,
+      outstanding: money(summary.outstanding),
+      overdue: money(summary.overdue),
+      open: open.map((r) => ({ ...r, total: money(r.total), paid: money(r.paid), balance: money(r.balance) })),
+      open_count: summary.open_count,
       last_paid: lastPaid ? { invoice_id: lastPaid.invoice_id, amount: money(lastPaid.amount), paid_at: lastPaid.paid_at } : null,
     });
   }),
