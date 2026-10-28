@@ -518,6 +518,27 @@ export default function CaseFormPage() {
     }).catch(() => {});
   }, [isEdit]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  /* เปิดเคสใหม่จากผลการขายที่กรอกไว้แล้วในแดชบอร์ด kin-chatbot
+     (?service_kind=homecare|physio&start_date=&end_date=&fee=&staff_pay=) — เติมให้เลย ไม่ต้องพิมพ์ซ้ำ
+     ไม่ทำตอนแก้เคสเดิม/ต่อเคส (renew) — สองทางนั้นมีค่าของเคสจริงอยู่แล้ว ห้ามทับ */
+  useEffect(() => {
+    if (isEdit || renewFrom) return;
+    const kind = searchParams.get('service_kind');
+    const startDate = searchParams.get('start_date');
+    const endDate = searchParams.get('end_date');
+    const fee = searchParams.get('fee');
+    const staffPay = searchParams.get('staff_pay');
+    if (!kind && !startDate && !endDate && !fee && !staffPay) return;
+    setForm((prev) => ({
+      ...prev,
+      ...((kind === 'homecare' || kind === 'physio') ? { service_kind: kind } : null),
+      ...(startDate ? { start_date: startDate } : null),
+      ...(endDate ? { end_date: endDate } : null),
+      ...(fee ? { fee } : null),
+      ...(staffPay ? { staff_pay: staffPay } : null),
+    }));
+  }, [isEdit, renewFrom]); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     if (!isEdit) return;
     api
