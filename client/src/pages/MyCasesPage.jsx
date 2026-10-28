@@ -4,6 +4,7 @@ import MyCaseModal, { serviceName } from '../components/MyCaseModal.jsx';
 import ErrorBar from '../components/ErrorBar.jsx';
 import PageRefresh from '../components/PageRefresh.jsx';
 import { CASE_STATUS_LABELS, formatDate } from '../labels.js';
+import { caseCode } from '../lib/patientCode.js';
 
 export default function MyCasesPage() {
   const [list, setList] = useState(null);
@@ -83,7 +84,7 @@ export default function MyCasesPage() {
                     }
                   }}
                 >
-                  <td className="mono link" data-label="รหัสเคส">{c.case_id}</td>
+                  <td className="mono link" data-label="รหัสเคส">{caseCode(c.case_id)}</td>
                   <td data-label="ผู้รับการดูแล">
                     {c.client_name}
                     <span className="cell-sub">{serviceName(c)}</span>

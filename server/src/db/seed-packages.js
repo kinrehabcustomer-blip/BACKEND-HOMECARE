@@ -12,7 +12,7 @@ if (Number(n) > 0) {
 const GRADES = [
   { key: 'g1', name: 'เกรด 1', description: 'ดูแลผู้สูงอายุทั่วไปที่ช่วยเหลือตัวเองได้บ้าง ประคองเดิน เตรียมอาหาร ยาพื้นฐาน พยุงเข้าห้องน้ำ', sort_order: 1 },
   { key: 'g2', name: 'เกรด 2', description: 'ดูแลเคสที่ให้อาหารทางสายยาง (NG Tube), ดูดเสมหะ (Suction)', sort_order: 2 },
-  { key: 'g3', name: 'เกรด 3', description: 'ดูแลผู้ป่วยติดเตียง (Bedridden) ทำแผลกดทับเบื้องต้น ดูแลเคสใช้อุปกรณ์การแพทย์', sort_order: 3 },
+  { key: 'g3', name: 'เกรด 3', description: 'ดูแลผู้รับบริการติดเตียง (Bedridden) ทำแผลกดทับเบื้องต้น ดูแลเคสใช้อุปกรณ์การแพทย์', sort_order: 3 },
 ];
 
 const FORMATS = [

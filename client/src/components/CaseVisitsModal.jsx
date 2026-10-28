@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { useSheetSwipe } from '../lib/sheetSwipe.js';
 import { useScrollLock } from '../lib/scrollLock.js';
 import CaseVisits from './CaseVisits.jsx';
+import { caseCode } from '../lib/patientCode.js';
 
 /**
  * popup เฉพาะสำหรับลงวันนัดให้บริการ — เปิดซ้อนบน CaseModal อีกที
@@ -22,7 +23,7 @@ export default function CaseVisitsModal({ caseItem, readOnly = false, mode = 'sh
       <div className="modal modal-narrow is-subsheet" ref={sheetRef} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
         <header className="modal-head">
           <div>
-            <p className="mono muted">{caseItem.case_id}</p>
+            <p className="mono muted">{caseCode(caseItem.case_id)}</p>
             <h2>{title}</h2>
             <p className="muted">{caseItem.client_name}</p>
           </div>

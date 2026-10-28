@@ -10,6 +10,7 @@ import PageRefresh from '../components/PageRefresh.jsx';
 import ConfirmButton from '../components/ConfirmButton.jsx';
 import LineIcon from '../components/LineIcon.jsx';
 import { firstAvailablePayrollRound, MAX_PAYROLL_ROUNDS } from '../lib/payrollUi.js';
+import { caseCode } from '../lib/patientCode.js';
 
 /** ป้ายสถานะรอบ — ใช้สีชุดเดียวกับใบแจ้งหนี้ (ร่าง/จ่ายแล้ว/ยกเลิก มีความหมายเดียวกัน) */
 const STATUS = {
@@ -236,7 +237,7 @@ function Runs({ reloadKey }) {
                             <Link className="link" to={`/payroll?tab=release&open=${c.case_id}`}>
                               {c.client_name ?? c.case_title ?? 'เคสที่ถูกลบแล้ว'}
                             </Link>
-                            <span className="cell-sub mono">{c.case_id}</span>
+                            <span className="cell-sub mono">{caseCode(c.case_id)}</span>
                           </span>
                           <span>
                             {formatBaht(c.amount)}

@@ -98,9 +98,9 @@ export default function PatientDetailPage() {
             {patient.birth_date && `${formatDate(patient.birth_date)}${age != null ? ` (อายุ ${age} ปี)` : ''}`}
           </Row>
           {!patient.birth_date && <Row label="อายุ">{age != null && `${age} ปี`}</Row>}
-          <Row label="ผู้ว่าจ้างเป็นอะไรกับผู้ป่วย">{patient.employer_relation}</Row>
+          <Row label="ผู้ว่าจ้างเป็นอะไรกับผู้รับบริการ">{patient.employer_relation}</Row>
           {patient.relation_to_customer && (
-            <Row label="ผู้ป่วยเป็นอะไรกับผู้ว่าจ้าง (ข้อมูลเดิม)">{patient.relation_to_customer}</Row>
+            <Row label="ผู้รับบริการเป็นอะไรกับผู้ว่าจ้าง (ข้อมูลเดิม)">{patient.relation_to_customer}</Row>
           )}
           <Row label="เลขบัตรประชาชน">
             {patient.national_id && <span className="mono">{patient.national_id}</span>}
@@ -168,7 +168,7 @@ export default function PatientDetailPage() {
         <ConfirmButton
           className="btn danger"
           title={`ลบแฟ้มผู้รับการดูแล ${id} ออกจากฐานข้อมูลถาวร?`}
-          detail="เคสที่เคยผูกไว้จะยังอยู่ (ข้อมูลผู้ป่วยถูกบันทึกในเคสแล้ว) แต่จะไม่เชื่อมกับแฟ้มนี้อีก"
+          detail="เคสที่เคยผูกไว้จะยังอยู่ (ข้อมูลผู้รับบริการถูกบันทึกในเคสแล้ว) แต่จะไม่เชื่อมกับแฟ้มนี้อีก"
           confirmLabel="ลบถาวร"
           onConfirm={handleDelete}
         >

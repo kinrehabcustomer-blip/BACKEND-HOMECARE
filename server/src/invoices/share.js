@@ -73,7 +73,7 @@ async function invoiceSnapshot(tx, invoiceId, { lock = true } = {}) {
   return tx.one(
     `SELECT i.invoice_id, i.customer_id, i.status, i.total, i.issue_date, i.due_date,
             COALESCE((SELECT SUM(p.amount) FROM invoice_payments p WHERE p.invoice_id = i.invoice_id), 0) AS paid_amount,
-            COALESCE(NULLIF(NULLIF(c.client_name, ''), 'ยังไม่ระบุผู้ป่วย'), i.bill_to_name) AS patient_name
+            COALESCE(NULLIF(NULLIF(c.client_name, ''), 'ยังไม่ระบุผู้รับบริการ'), i.bill_to_name) AS patient_name
        FROM invoices i
        LEFT JOIN cases c ON c.case_id = i.case_id
       WHERE i.invoice_id = :id

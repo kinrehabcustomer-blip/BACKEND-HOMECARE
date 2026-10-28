@@ -9,6 +9,7 @@ import { serviceName } from './MyCaseModal.jsx';
 import LocationMap from './LocationMap.jsx';
 import { SERVICE_KIND_LABELS, serviceKindOf } from '../labels.js';
 import LineIcon from './LineIcon.jsx';
+import { caseCode } from '../lib/patientCode.js';
 
 /**
  * popup ยืนยันเช็คอินกะ — ขอ GPS ตอนเปิด และ "ต้องถ่ายเซลฟี่" ก่อนถึงจะกดยืนยันได้
@@ -88,7 +89,7 @@ export default function CheckInModal({ visit, onDone, onClose }) {
       <div className="modal modal-narrow" ref={sheetRef} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
         <header className="modal-head">
           <div>
-            <p className="mono muted">{visit.case_id}</p>
+            <p className="mono muted">{caseCode(visit.case_id)}</p>
             <h2>เช็คอินเข้างาน</h2>
             <p className="muted">{visit.client_name} · {serviceName(visit) || SERVICE_KIND_LABELS[serviceKindOf(visit)]}</p>
           </div>

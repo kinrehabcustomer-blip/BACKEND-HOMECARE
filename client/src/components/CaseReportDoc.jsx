@@ -4,6 +4,7 @@ import { formatDate } from '../labels.js';
 import { TEXTS, vitalChips } from './CaseReports.jsx';
 import DailyCareView from './DailyCareView.jsx';
 import { usesDailyRecord, usesPhysioRecord, DAILY_SECTIONS, PHYSIO_SECTIONS } from '../lib/dailyCare.js';
+import { caseCode } from '../lib/patientCode.js';
 
 /** ป้ายกำกับใบที่ไม่ใช่รอบปกติ — บนกระดาษไม่มีสีให้ดู จึงต้องเป็นคำ */
 const TYPE_LABELS = { incident: 'ผิดปกติ', change: 'มีการเปลี่ยนแปลง' };
@@ -12,7 +13,7 @@ const TYPE_LABELS = { incident: 'ผิดปกติ', change: 'มีกา�
 const rowTime = (r) => r.report_time ?? r.created_at?.slice(11, 16) ?? '—';
 
 /**
- * แบบฟอร์มรายงานอาการผู้ป่วยของเคสหนึ่งใบ สำหรับพิมพ์ / บันทึกเป็น PDF
+ * แบบฟอร์มรายงานอาการผู้รับบริการของเคสหนึ่งใบ สำหรับพิมพ์ / บันทึกเป็น PDF
  *
  * ใบนี้คือของที่ต้องส่งออกนอกระบบ — ญาติขอดูย้อนหลัง แพทย์ขอประวัติการดูแลไปประกอบการตรวจ
  * หรือเก็บเข้าแฟ้มเคสตอนปิดเคส ซึ่งทั้งหมดทำจากหน้าจอไม่ได้ (ต้องมีหัวเอกสาร ชื่อศูนย์ และลายเซ็น)
@@ -48,7 +49,7 @@ export default function CaseReportDoc({ caseItem, reports }) {
         <div className="inv-logo">
           <img src={ISSUER.logo} alt={ISSUER.name} />
         </div>
-        <h3 className="inv-title">แบบฟอร์มรายงานอาการผู้ป่วย /Patient Care Report</h3>
+        <h3 className="inv-title">แบบฟอร์มรายงานอาการผู้รับบริการ /Patient Care Report</h3>
         <p className="inv-org">{ISSUER.name}</p>
         <p className="inv-org-line">{ISSUER.address}</p>
         <p className="inv-org-line">Tel. {ISSUER.tel}</p>
@@ -60,12 +61,12 @@ export default function CaseReportDoc({ caseItem, reports }) {
         <tbody>
           <tr>
             <th>รหัสเคส</th>
-            <td className="mono">{caseItem.case_id}</td>
+            <td className="mono">{caseCode(caseItem.case_id)}</td>
             <th>บริการ</th>
             <td>{caseItem.title}</td>
           </tr>
           <tr>
-            <th>ชื่อผู้ป่วย</th>
+            <th>ชื่อผู้รับบริการ</th>
             <td>{caseItem.client_name ?? '—'}</td>
             <th>ผู้ดูแลที่รับเคส</th>
             <td>{caseItem.assigned_name ?? '—'}</td>

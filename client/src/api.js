@@ -178,12 +178,6 @@ export const api = {
   createEmployee: (body) => request('/employees', { method: 'POST', body }),
   updateEmployee: (id, body) => request(`/employees/${id}`, { method: 'PATCH', body }),
   /** ตรวจรหัสพนักงานที่กรอกเองว่าว่างไหม — except = รหัสของคนที่กำลังแก้ (ไม่นับว่าซ้ำกับตัวเอง) */
-  /** ตรวจรหัสเคส (VN…) ว่าว่างไหม — except = รหัสของเคสที่กำลังแก้ (ไม่นับว่าซ้ำกับตัวเอง) */
-  checkCaseId: (id, except) => {
-    const params = new URLSearchParams({ id });
-    if (except) params.set('except', except);
-    return request(`/cases/check-id?${params}`);
-  },
   checkEmployeeId: (id, except) => {
     const params = new URLSearchParams({ id });
     if (except) params.set('except', except);
@@ -264,7 +258,7 @@ export const api = {
   listPatients: (params) => request(`/patients?${new URLSearchParams(params)}`),
   getPatient: (id) => request(`/patients/${id}`),
   createPatient: (body) => request('/patients', { method: 'POST', body }),
-  /** ตรวจรหัสผู้ป่วย (KN…) ว่าว่างไหม — except = รหัสของแฟ้มที่กำลังแก้ (ไม่นับว่าซ้ำกับตัวเอง) */
+  /** ตรวจรหัสผู้รับบริการ (KN…) ว่าว่างไหม — except = รหัสของแฟ้มที่กำลังแก้ (ไม่นับว่าซ้ำกับตัวเอง) */
   checkPatientId: (id, except) => {
     const params = new URLSearchParams({ id });
     if (except) params.set('except', except);
@@ -292,7 +286,7 @@ export const api = {
   checkIn: (visitId, body) => request(`/my/visits/${visitId}/check-in`, { method: 'POST', body }),
   checkOut: (visitId, body) => request(`/my/visits/${visitId}/check-out`, { method: 'POST', body }),
   /**
-   * รายงานอาการผู้ป่วยของเคสที่ฉันเข้าถึงได้ — เห็นของทุกคนในเคส (ผลัดเวรต้องอ่านของกะก่อนหน้า)
+   * รายงานอาการผู้รับบริการของเคสที่ฉันเข้าถึงได้ — เห็นของทุกคนในเคส (ผลัดเวรต้องอ่านของกะก่อนหน้า)
    * แต่แก้ได้เฉพาะใบที่ตัวเองบันทึก และลบไม่ได้ (ให้ผู้จัดการลบจากหลังบ้าน)
    */
   myCaseReports: (id, params = {}) => request(`/my/cases/${id}/reports?${new URLSearchParams(params)}`),
@@ -393,7 +387,7 @@ export const api = {
 
   // ---------- แบบประเมินความพึงพอใจจากญาติผู้รับบริการ ----------
   /* สองเส้นแรกเป็นของหน้าสาธารณะ (/review/:token) — ไม่ต้อง login และห้ามต้อง
-     คนกรอกคือญาติผู้ป่วย ไม่ใช่พนักงาน จึงไม่มีบัญชีในระบบให้ใช้ตั้งแต่ต้น */
+     คนกรอกคือญาติผู้รับบริการ ไม่ใช่พนักงาน จึงไม่มีบัญชีในระบบให้ใช้ตั้งแต่ต้น */
   /** ชื่อพนักงานเจ้าของลิงก์ — ใช้โชว์บนหัวฟอร์มว่ากำลังประเมินใครอยู่ */
   reviewForm: (token) => request(`/reviews/form/${encodeURIComponent(token)}`),
   submitReview: (token, body) =>
@@ -510,7 +504,7 @@ export const api = {
   /** ถอนก้อนที่ปล่อยผิดคืน (ได้เฉพาะก้อนที่ยังไม่ถูกจ่ายออกไป) */
   cancelCasePayout: (id, payoutId) => request(`/cases/${id}/pay/${payoutId}`, { method: 'DELETE' }),
   deleteVisit: (id, visitId) => request(`/cases/${id}/visits/${visitId}`, { method: 'DELETE' }),
-  // ---------- รายงานอาการผู้ป่วย (บันทึกทีละครั้งในเคส) ----------
+  // ---------- รายงานอาการผู้รับบริการ (บันทึกทีละครั้งในเคส) ----------
   /**
    * คลังรายงานของเคส — ล่าสุดอยู่บน แบ่งหน้าเสมอ
    * params: { month: 'YYYY-MM', type: 'abnormal'|'incident'|…, page, per_page }

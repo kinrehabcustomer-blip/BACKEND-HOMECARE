@@ -8,6 +8,7 @@ import PageRefresh from '../components/PageRefresh.jsx';
 import { api } from '../api.js';
 import { CASE_STATUS_LABELS, INVOICE_STATUS_LABELS, formatBaht, formatDate } from '../labels.js';
 import { formatPhone } from '../lib/phone.js';
+import { caseCode } from '../lib/patientCode.js';
 
 const PER_PAGE_OPTIONS = [20, 50, 100];
 
@@ -183,7 +184,7 @@ export default function InvoiceListPage() {
         <div className="toolbar">
           <input
             className="search search-compact"
-            placeholder="ค้นหา เลขที่ใบ / ชื่อผู้ป่วย / ผู้จ่าย / รหัสเคส"
+            placeholder="ค้นหา เลขที่ใบ / ชื่อผู้รับบริการ / ผู้จ่าย / รหัสเคส"
             value={q}
             onChange={(e) => setFilter('q', e.target.value)}
           />
@@ -221,7 +222,7 @@ export default function InvoiceListPage() {
               <tr>
                 <th>#</th>
                 <th><SortHead column="invoice_id" {...SORTABLE.invoice_id} sort={sort} order={order} onSort={sortBy} /></th>
-                <th>ผู้ป่วย / เบอร์</th>
+                <th>ผู้รับบริการ / เบอร์</th>
                 <th className="cell-text">รายการ / เคส</th>
                 <th><SortHead column="issue_date" {...SORTABLE.issue_date} sort={sort} order={order} onSort={sortBy} /></th>
                 <th><SortHead column="total" {...SORTABLE.total} sort={sort} order={order} onSort={sortBy} /></th>
@@ -270,9 +271,9 @@ export default function InvoiceListPage() {
                       </span>
                     )}
                   </td>
-                  {/* ชื่อผู้ป่วยของเคส (คนที่ทีมรู้จักและใช้เรียกเคส) — เคสที่ยังไม่รู้ชื่อผู้ป่วยใช้ชื่อผู้จ่ายแทน
+                  {/* ชื่อผู้รับบริการของเคส (คนที่ทีมรู้จักและใช้เรียกเคส) — เคสที่ยังไม่รู้ชื่อผู้รับบริการใช้ชื่อผู้จ่ายแทน
                       ผู้จ่ายตัวจริงยังอยู่ในใบแจ้งหนี้ (หัวใบ/ช่องลงนาม) ไม่ได้หายไปไหน */}
-                  <td data-label="ผู้ป่วย" title={v.patient_name || v.bill_to_name || undefined}>
+                  <td data-label="ผู้รับบริการ" title={v.patient_name || v.bill_to_name || undefined}>
                     {v.patient_name || v.bill_to_name}
                     {v.contact_phone && (
                       <span className="cell-sub">
@@ -291,7 +292,7 @@ export default function InvoiceListPage() {
                     {v.case_id && (
                       <span className="cell-sub">
                         <OfficeLink className="link mono" to={`/cases?open=${v.case_id}`} onClick={(e) => e.stopPropagation()}>
-                          {v.case_id}
+                          {caseCode(v.case_id)}
                         </OfficeLink>
                       </span>
                     )}
@@ -384,7 +385,7 @@ export default function InvoiceListPage() {
               <div>
                 <strong>{c.client_name ?? c.title}</strong>
                 <p className="muted">
-                  <OfficeLink className="link mono" to={`/cases?open=${c.case_id}`}>{c.case_id}</OfficeLink>
+                  <OfficeLink className="link mono" to={`/cases?open=${c.case_id}`}>{caseCode(c.case_id)}</OfficeLink>
                   {' · '}{CASE_STATUS_LABELS[c.status] ?? c.status}
                   {' · '}ค่าบริการ {c.fee != null ? formatBaht(c.fee) : 'ยังไม่ระบุ'}
                 </p>

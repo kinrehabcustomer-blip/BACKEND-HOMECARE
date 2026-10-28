@@ -186,13 +186,7 @@ if (process.env.RUN_DB_TESTS !== '1') {
   });
 
 
-  /* รหัสเคสเป็นเลขที่เจ้าหน้าที่กรอก (VN…) — เทสที่เปิดเคสโดยไม่ได้สนใจรหัส ได้รหัสไม่ซ้ำไปอัตโนมัติ
-     เทสที่ส่ง case_id มาเอง (ตรวจรูปแบบ/ซ้ำ) ใช้ค่าที่ส่งมาตามเดิม */
-  let vnSeq = 0;
-  const nextVN = () => `VN69${String(++vnSeq).padStart(7, '0')}`;
-
   async function post(path, body, who = MANAGER, expected = 200) {
-    if (path === '/api/cases' && body && !('case_id' in body)) body = { case_id: nextVN(), ...body };
     const res = await fetch(`${base}${path}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', cookie: `${COOKIE_NAME}=${signToken(who)}` },
@@ -565,7 +559,7 @@ if (process.env.RUN_DB_TESTS !== '1') {
       assert.equal((await get('/api/cases?service_kind=other', MANAGER)).status, 400);
     });
 
-    test('รหัสเคส VN: กรอกเอง · ตรวจซ้ำ · เปลี่ยนรหัสเคสเดิมแล้วกะ/ใบแจ้งหนี้/ประวัติตามไป', async () => {
+    test('รหัสเคส = รหัสผู้รับบริการ (KN): เคสแรกได้ KN · เคสถัดไป -R2 · ผูกแฟ้มแล้วเคสเดิมเปลี่ยนรหัสตาม', async () => {
       const patch = async (path, body) => {
         const res = await fetch(`${base}${path}`, {
           method: 'PATCH',
@@ -574,34 +568,39 @@ if (process.env.RUN_DB_TESTS !== '1') {
         });
         return { status: res.status, body: await res.json() };
       };
-      const c = await post('/api/cases', { case_id: 'VN690215209', client_name: 'รหัสเคส VN', fee: 1000 }, MANAGER, 201);
-      assert.equal(c.case_id, 'VN690215209');
-      const dup = await post('/api/cases', { case_id: 'VN690215209', client_name: 'ซ้ำ' }, MANAGER, 409);
-      assert.match(dup.error, /มีอยู่แล้ว/);
-      assert.ok(dup.details.some((d) => d.field === 'case_id'));
-      await post('/api/cases', { case_id: 'CASE-9999', client_name: 'รูปแบบเก่า' }, MANAGER, 400);
+      await post('/api/patients', { patient_id: 'KN690215209', name: 'รหัสเคส KN' }, MANAGER, 201);
 
-      assert.deepEqual((await get('/api/cases/check-id?id=VN690215209', MANAGER)).body, { valid: true, available: false, taken_by: 'รหัสเคส VN' });
-      assert.equal((await get('/api/cases/check-id?id=VN690215209&except=VN690215209', MANAGER)).body.available, true);
-      assert.equal((await get('/api/cases/check-id?id=VN699999999', MANAGER)).body.available, true);
-      assert.equal((await get('/api/cases/check-id?id=CASE-1', MANAGER)).body.valid, false);
+      // เปิดเคสให้ผู้รับบริการ = รหัสเคสคือ KN ของคนนั้น · case_id ที่ส่งมาเองไม่ถูกใช้
+      const first = await post('/api/cases', { case_id: 'VN690000009', patient_id: 'KN690215209', client_name: 'รหัสเคส KN', fee: 1000 }, MANAGER, 201);
+      assert.equal(first.case_id, 'KN690215209');
+      const second = await post('/api/cases', { patient_id: 'KN690215209', client_name: 'รหัสเคส KN', fee: 1000 }, MANAGER, 201);
+      assert.equal(second.case_id, 'KN690215209-R2');
+      // ยังไม่มีแฟ้มผู้รับบริการ (รู้แค่ชื่อ) = รหัสชั่วคราว CASE-xxxx
+      const loose = await post('/api/cases', { client_name: 'ยังไม่มีแฟ้ม', fee: 1000 }, MANAGER, 201);
+      assert.match(loose.case_id, /^CASE-\d{4}$/);
 
-      // เคสเก่าแบบ CASE-FIXTURE (มีกะและใบแจ้งหนี้ผูกอยู่) → เปลี่ยนเป็น VN แล้วทุกอย่างตามไป
+      // เคสเก่า CASE-FIXTURE (มีกะและใบแจ้งหนี้ผูกอยู่) ผูกแฟ้ม KN แล้วรหัสเคสเปลี่ยนตาม ทุกอย่างตามไป
       await post('/api/invoices', { case_id: 'CASE-FIXTURE' }, MANAGER, 201).catch(() => {});
       const before = (await get('/api/invoices?case_id=CASE-FIXTURE', MANAGER)).body.pagination.total;
-      const renamed = await patch('/api/cases/CASE-FIXTURE', { case_id: 'VN680000001' });
-      assert.equal(renamed.status, 200, JSON.stringify(renamed.body));
-      assert.equal(renamed.body.case_id, 'VN680000001');
+      const { patient_id: originalPatient } = (await get('/api/cases/CASE-FIXTURE', MANAGER)).body;
+      const linked = await patch('/api/cases/CASE-FIXTURE', { patient_id: 'KN690215209' });
+      assert.equal(linked.status, 200, JSON.stringify(linked.body));
+      assert.equal(linked.body.case_id, 'KN690215209-R3');
       assert.equal((await get('/api/cases/CASE-FIXTURE', MANAGER)).status, 404);
-      assert.ok((await get('/api/cases/VN680000001/visits', MANAGER)).body.length >= 1, 'กะตามไป');
-      assert.equal((await get('/api/invoices?case_id=VN680000001', MANAGER)).body.pagination.total, before, 'ใบแจ้งหนี้ตามไป');
-      const events = (await get('/api/cases/VN680000001/events', MANAGER)).body;
-      assert.ok(events.some((e) => /เปลี่ยนรหัสเคส CASE-FIXTURE → VN680000001/.test(e.detail)));
+      assert.ok((await get('/api/cases/KN690215209-R3/visits', MANAGER)).body.length >= 1, 'กะตามไป');
+      assert.equal((await get('/api/invoices?case_id=KN690215209-R3', MANAGER)).body.pagination.total, before, 'ใบแจ้งหนี้ตามไป');
+      const events = (await get('/api/cases/KN690215209-R3/events', MANAGER)).body;
+      assert.ok(events.some((e) => /เปลี่ยนรหัสเคส CASE-FIXTURE → KN690215209/.test(e.detail)));
 
-      // ชนรหัสเคสอื่นไม่ได้
-      assert.equal((await patch('/api/cases/VN680000001', { case_id: 'VN690215209' })).status, 409);
-      // คืนรหัสเดิมให้เทสอื่นที่อ้าง CASE-FIXTURE
-      await sql.run(`UPDATE cases SET case_id = 'CASE-FIXTURE' WHERE case_id = 'VN680000001'`);
+      // เปลี่ยนรหัสผู้รับบริการ = รหัสเคสทุกใบของคนนั้นเปลี่ยนตาม (คง -R เดิม)
+      const renamed = await patch('/api/patients/KN690215209', { patient_id: 'KN690215210' });
+      assert.equal(renamed.status, 200, JSON.stringify(renamed.body));
+      assert.equal((await get('/api/cases/KN690215210', MANAGER)).status, 200);
+      assert.equal((await get('/api/cases/KN690215210-R2', MANAGER)).status, 200);
+      assert.equal((await get('/api/cases/KN690215209', MANAGER)).status, 404);
+
+      // คืนสภาพให้เทสอื่นที่อ้าง CASE-FIXTURE
+      await sql.run(`UPDATE cases SET case_id = 'CASE-FIXTURE', patient_id = :p WHERE case_id = 'KN690215210-R3'`, { p: originalPatient ?? null });
     });
 
     test('ยกเลิกเคส: ใบร่างถูกยกเลิกตาม · ใบของเคสที่ยกเลิกแล้วออกใบไม่ได้', async () => {
@@ -622,7 +621,7 @@ if (process.env.RUN_DB_TESTS !== '1') {
       assert.match(issued.error, /ถูกยกเลิกแล้ว/);
     });
 
-    test('รายการในใบ: ไม่ซ้ำชื่อผู้ป่วยเมื่อหัวรายการเป็นชื่อผู้ป่วยอยู่แล้ว', async () => {
+    test('รายการในใบ: ไม่ซ้ำชื่อผู้รับบริการเมื่อหัวรายการเป็นชื่อผู้รับบริการอยู่แล้ว', async () => {
       const c = await post('/api/cases', { case_type: 'other', client_name: 'Grandpa Later', title: 'Grandpa Later', fee: 1000, staff_pay: 500 }, MANAGER, 201);
       const inv = (await get(`/api/invoices?case_id=${c.case_id}`, MANAGER)).body.data[0];
       const full = (await get(`/api/invoices/${inv.invoice_id}`, MANAGER)).body;
@@ -731,17 +730,17 @@ if (process.env.RUN_DB_TESTS !== '1') {
       await post('/api/cases', { case_type: 'other', client_name: 'x', renewed_from: second.case_id }, MANAGER, 409);
     });
 
-    test('เปิดเคสด้วยผู้ว่าจ้างอย่างเดียว (ยังไม่รู้ชื่อผู้ป่วย) ได้ — ไม่มีทั้งคู่ไม่ได้', async () => {
+    test('เปิดเคสด้วยผู้ว่าจ้างอย่างเดียว (ยังไม่รู้ชื่อผู้รับบริการ) ได้ — ไม่มีทั้งคู่ไม่ได้', async () => {
       const customer = await post('/api/customers', { name: 'ญาติโทรมาจอง', phone: '0812345678' }, MANAGER, 201);
       const c = await post('/api/cases', { case_type: 'other', customer_id: customer.customer_id, fee: 1500 }, MANAGER, 201);
-      assert.equal(c.client_name, 'ยังไม่ระบุผู้ป่วย');
+      assert.equal(c.client_name, 'ยังไม่ระบุผู้รับบริการ');
       assert.equal(c.patient_id, null);
       assert.equal(c.customer_id, customer.customer_id);
 
       const [draft] = (await get(`/api/invoices?case_id=${c.case_id}`, MANAGER)).body.data;
       assert.equal(draft.bill_to_name, 'ญาติโทรมาจอง');
       assert.equal(draft.total, 1500);
-      assert.doesNotMatch(draft.service_description, /ยังไม่ระบุผู้ป่วย/, 'ห้ามพิมพ์คำแทนชื่อลงใบที่ส่งลูกค้า');
+      assert.doesNotMatch(draft.service_description, /ยังไม่ระบุผู้รับบริการ/, 'ห้ามพิมพ์คำแทนชื่อลงใบที่ส่งลูกค้า');
       assert.equal(draft.patient_name, null, 'หัวใบโชว์ — ไม่ใช่คำแทนชื่อ');
       assert.equal(draft.patient_id, null);
       assert.equal(draft.is_stale, false);
@@ -753,13 +752,13 @@ if (process.env.RUN_DB_TESTS !== '1') {
         body: JSON.stringify({ client_name: null }),
       });
       assert.equal(res.status, 200);
-      assert.equal((await res.json()).client_name, 'ยังไม่ระบุผู้ป่วย');
+      assert.equal((await res.json()).client_name, 'ยังไม่ระบุผู้รับบริการ');
 
       const bad = await post('/api/cases', { case_type: 'other', fee: 1500 }, MANAGER, 400);
       assert.ok(bad.details.some((d) => d.field === 'client_name'));
     });
 
-    test('รหัสผู้ป่วย KN: ต้องกรอกตอนสร้าง · รูปแบบผิด/ซ้ำถูกปฏิเสธ · เปลี่ยนรหัสเดิมแล้วเคสตาม', async () => {
+    test('รหัสผู้รับบริการ KN: ต้องกรอกตอนสร้าง · รูปแบบผิด/ซ้ำถูกปฏิเสธ · เปลี่ยนรหัสเดิมแล้วเคสตาม', async () => {
       const patch = async (path, body) => {
         const res = await fetch(`${base}${path}`, {
           method: 'PATCH',
@@ -773,14 +772,14 @@ if (process.env.RUN_DB_TESTS !== '1') {
       for (const bad of ['KN69020246', 'KN6902024630', 'kn690202463', 'PAT-0099', 'KN69O202463']) {
         await post('/api/patients', { patient_id: bad, name: 'รหัสผิด' }, MANAGER, 400);
       }
-      const p = await post('/api/patients', { patient_id: 'KN691111111', name: 'ผู้ป่วย KN' }, MANAGER, 201);
+      const p = await post('/api/patients', { patient_id: 'KN691111111', name: 'ผู้รับบริการ KN' }, MANAGER, 201);
       assert.equal(p.patient_id, 'KN691111111');
       const dup = await post('/api/patients', { patient_id: 'KN691111111', name: 'ชื่ออื่น' }, MANAGER, 409);
-      // ความสัมพันธ์ของผู้ว่าจ้างกับผู้ป่วย — คอลัมน์ใหม่ บันทึกและอ่านกลับได้
+      // ความสัมพันธ์ของผู้ว่าจ้างกับผู้รับบริการ — คอลัมน์ใหม่ บันทึกและอ่านกลับได้
       const rel = await patch('/api/patients/KN691111111', { employer_relation: 'บุตร' });
       assert.equal(rel.body.employer_relation, 'บุตร');
-      // ตรวจซ้ำระหว่างกรอก (ฟอร์มผู้ป่วย / เปิดเคส)
-      assert.deepEqual((await get('/api/patients/check-id?id=KN691111111', MANAGER)).body, { valid: true, available: false, taken_by: 'ผู้ป่วย KN' });
+      // ตรวจซ้ำระหว่างกรอก (ฟอร์มผู้รับบริการ / เปิดเคส)
+      assert.deepEqual((await get('/api/patients/check-id?id=KN691111111', MANAGER)).body, { valid: true, available: false, taken_by: 'ผู้รับบริการ KN' });
       assert.equal((await get('/api/patients/check-id?id=KN691111111&except=KN691111111', MANAGER)).body.available, true);
       assert.equal((await get('/api/patients/check-id?id=KN699999999', MANAGER)).body.available, true);
       assert.equal((await get('/api/patients/check-id?id=PAT-1', MANAGER)).body.valid, false);
@@ -792,9 +791,12 @@ if (process.env.RUN_DB_TESTS !== '1') {
       const renamed = await patch('/api/patients/PAT-0901', { patient_id: 'KN680000001', note: 'เปลี่ยนรหัส' });
       assert.equal(renamed.status, 200);
       assert.equal(renamed.body.patient_id, 'KN680000001');
-      assert.equal((await get(`/api/cases/${c.case_id}`, MANAGER)).body.patient_id, 'KN680000001');
-      // หัวใบแจ้งหนี้ของเคสนี้ขึ้นรหัส/ชื่อผู้ป่วย (ตามรหัสใหม่ด้วย)
-      const [caseInvoice] = (await get(`/api/invoices?case_id=${c.case_id}`, MANAGER)).body.data;
+      // รหัสเคส = รหัสผู้รับบริการ — เคสเดิม PAT-0901 ตามมาเป็น KN680000001
+      assert.equal(c.case_id, 'PAT-0901');
+      assert.equal((await get('/api/cases/PAT-0901', MANAGER)).status, 404);
+      assert.equal((await get('/api/cases/KN680000001', MANAGER)).body.patient_id, 'KN680000001');
+      // หัวใบแจ้งหนี้ของเคสนี้ขึ้นรหัส/ชื่อผู้รับบริการ (ตามรหัสใหม่ด้วย)
+      const [caseInvoice] = (await get('/api/invoices?case_id=KN680000001', MANAGER)).body.data;
       assert.equal(caseInvoice.patient_id, 'KN680000001');
       assert.equal(caseInvoice.patient_name, 'แฟ้มเก่า');
       assert.equal((await get('/api/patients/PAT-0901', MANAGER)).status, 404);
@@ -805,7 +807,7 @@ if (process.env.RUN_DB_TESTS !== '1') {
       assert.equal((await patch('/api/patients/KN691111111', { nickname: 'น้อย' })).body.patient_id, 'KN691111111');
     });
 
-    test('ใส่ชื่อผู้ป่วยย้อนหลังในหน้าแก้เคส → สร้างแฟ้มผู้ป่วยและผูกกับเคส (ครั้งเดียว)', async () => {
+    test('ใส่ชื่อผู้รับบริการย้อนหลังในหน้าแก้เคส → สร้างแฟ้มผู้รับบริการและผูกกับเคส (ครั้งเดียว)', async () => {
       const patchCase = async (id, body) => {
         const res = await fetch(`${base}/api/cases/${id}`, {
           method: 'PATCH',
@@ -816,7 +818,7 @@ if (process.env.RUN_DB_TESTS !== '1') {
         assert.equal(res.status, 200, JSON.stringify(data));
         return data;
       };
-      const customer = await post('/api/customers', { name: 'ลูกชายผู้ป่วย' }, MANAGER, 201);
+      const customer = await post('/api/customers', { name: 'ลูกชายผู้รับบริการ' }, MANAGER, 201);
       const c = await post('/api/cases', { case_type: 'other', customer_id: customer.customer_id }, MANAGER, 201);
       assert.equal(c.patient_id, null);
 
@@ -831,13 +833,16 @@ if (process.env.RUN_DB_TESTS !== '1') {
       });
       assert.equal(noCode.status, 400);
       assert.ok((await noCode.json()).details.some((d) => d.field === 'patient_code'));
-      assert.equal((await get(`/api/cases/${c.case_id}`, MANAGER)).body.client_name, 'ยังไม่ระบุผู้ป่วย');
+      assert.equal((await get(`/api/cases/${c.case_id}`, MANAGER)).body.client_name, 'ยังไม่ระบุผู้รับบริการ');
 
       const named = await patchCase(c.case_id, {
         client_name: 'เจโค', patient_gender: 'male', patient_age: 81, medical_history: 'เบาหวาน', address: 'บางนา',
         patient_code: 'KN690202463',
       });
       assert.equal(named.patient_id, 'KN690202463');
+      // ได้แฟ้มแล้ว รหัสเคสชั่วคราว CASE-xxxx เปลี่ยนเป็น KN ของผู้รับบริการ
+      assert.equal(named.case_id, 'KN690202463');
+      assert.equal((await get(`/api/cases/${c.case_id}`, MANAGER)).status, 404);
       const patient = await sql.one('SELECT * FROM patients WHERE patient_id = :id', { id: named.patient_id });
       assert.equal(patient.name, 'เจโค');
       assert.equal(patient.gender, 'male');
@@ -845,11 +850,11 @@ if (process.env.RUN_DB_TESTS !== '1') {
       assert.equal(patient.medical_history, 'เบาหวาน');
       assert.equal(patient.customer_id, customer.customer_id);
 
-      const events = (await get(`/api/cases/${c.case_id}/events`, MANAGER)).body;
-      assert.match(events.find((e) => e.event === 'edited').detail, new RegExp(`สร้างแฟ้มผู้ป่วย ${named.patient_id}`));
+      const events = (await get(`/api/cases/${named.case_id}/events`, MANAGER)).body;
+      assert.match(events.find((e) => e.event === 'edited').detail, new RegExp(`สร้างแฟ้มผู้รับบริการ ${named.patient_id}`));
 
       // แก้ชื่ออีกรอบ = แก้ snapshot ในเคสเฉยๆ ไม่สร้างแฟ้มซ้ำ
-      const renamed = await patchCase(c.case_id, { client_name: 'เจโค ใจดี' });
+      const renamed = await patchCase(named.case_id, { client_name: 'เจโค ใจดี' });
       assert.equal(renamed.patient_id, named.patient_id);
       const { n } = await sql.one("SELECT COUNT(*)::int AS n FROM patients WHERE name LIKE 'เจโค%'");
       assert.equal(n, 1);
@@ -1052,21 +1057,21 @@ if (process.env.RUN_DB_TESTS !== '1') {
       assert.equal((await invoice(draft.invoice_id)).issue_date, today);
     });
 
-    test('แก้เคส: ซิงก์เฉพาะตอนราคา/ผู้จ่ายเปลี่ยน · ใบที่แก้มือไม่ถูกทับ · รีเฟรชเองทับและล้างธง · ผู้จ่ายจากแฟ้มผู้ป่วย', async () => {
-      const customer = await post('/api/customers', { name: 'ผู้จ่ายจากแฟ้มผู้ป่วย' }, MANAGER, 201);
+    test('แก้เคส: ซิงก์เฉพาะตอนราคา/ผู้จ่ายเปลี่ยน · ใบที่แก้มือไม่ถูกทับ · รีเฟรชเองทับและล้างธง · ผู้จ่ายจากแฟ้มผู้รับบริการ', async () => {
+      const customer = await post('/api/customers', { name: 'ผู้จ่ายจากแฟ้มผู้รับบริการ' }, MANAGER, 201);
       await sql.run(
-        `INSERT INTO patients (patient_id, name, status, customer_id) VALUES ('KN690000951', 'ผู้ป่วยซิงก์', 'active', :cu)`,
+        `INSERT INTO patients (patient_id, name, status, customer_id) VALUES ('KN690000951', 'ผู้รับบริการซิงก์', 'active', :cu)`,
         { cu: customer.customer_id },
       );
-      const c = await post('/api/cases', { case_type: 'other', client_name: 'ผู้ป่วยซิงก์', patient_id: 'KN690000951', fee: 3000 }, MANAGER, 201);
-      // เคสไม่มีผู้ว่าจ้างของตัวเอง — ผู้จ่ายต้องไล่ไปที่แฟ้มผู้ป่วย
+      const c = await post('/api/cases', { case_type: 'other', client_name: 'ผู้รับบริการซิงก์', patient_id: 'KN690000951', fee: 3000 }, MANAGER, 201);
+      // เคสไม่มีผู้ว่าจ้างของตัวเอง — ผู้จ่ายต้องไล่ไปที่แฟ้มผู้รับบริการ
       await sql.run('UPDATE cases SET customer_id = NULL WHERE case_id = :id', { id: c.case_id });
 
-      // แก้ค่าบริการ → ใบร่างตาม และชื่อผู้จ่ายยังเป็นลูกค้าของผู้ป่วย (ของเดิมกลายเป็นชื่อผู้ป่วย)
+      // แก้ค่าบริการ → ใบร่างตาม และชื่อผู้จ่ายยังเป็นลูกค้าของผู้รับบริการ (ของเดิมกลายเป็นชื่อผู้รับบริการ)
       assert.equal((await send('PATCH', `/api/cases/${c.case_id}`, { fee: 3500 })).status, 200);
       let draft = await draftOf(c.case_id);
       assert.equal(draft.total, 3500);
-      assert.equal(draft.bill_to_name, 'ผู้จ่ายจากแฟ้มผู้ป่วย');
+      assert.equal(draft.bill_to_name, 'ผู้จ่ายจากแฟ้มผู้รับบริการ');
       assert.equal(draft.payer_stale, false);
 
       // ฝ่ายบัญชีให้ส่วนลดในใบเอง
@@ -1089,7 +1094,7 @@ if (process.env.RUN_DB_TESTS !== '1') {
       const refreshed = await post(`/api/invoices/${draft.invoice_id}/refresh`, {});
       assert.equal(refreshed.total, 4000);
       assert.equal(refreshed.discount, 0);
-      assert.equal(refreshed.bill_to_name, 'ผู้จ่ายจากแฟ้มผู้ป่วย');
+      assert.equal(refreshed.bill_to_name, 'ผู้จ่ายจากแฟ้มผู้รับบริการ');
       assert.equal(refreshed.manual_edit, false);
       await send('PATCH', `/api/cases/${c.case_id}`, { fee: 4200 });
       assert.equal((await invoice(draft.invoice_id)).total, 4200);

@@ -16,6 +16,7 @@ import {
   timeText,
 } from '../labels.js';
 import { formatPhone } from '../lib/phone.js';
+import { caseCode } from '../lib/patientCode.js';
 
 /** ชื่อบริการของเคส — กายภาพใช้ชื่อแพ็คเกจ, Homecare ใช้รูปแบบ+เกรด (ใช้ร่วมกันหลายหน้าของ field) */
 export const serviceName = (c) => {
@@ -73,7 +74,7 @@ export default function MyCaseModal({ caseId, onClose }) {
           <>
             <header className="modal-head">
               <div>
-                <p className="mono muted">{item.case_id}</p>
+                <p className="mono muted">{caseCode(item.case_id)}</p>
                 <h2>{serviceName(item)}</h2>
                 <p className="muted">{item.client_name}</p>
                 <span className={`badge case-${item.status}`}>{CASE_STATUS_LABELS[item.status]}</span>
@@ -85,10 +86,10 @@ export default function MyCaseModal({ caseId, onClose }) {
               <section>
                 <h3>ผู้รับการดูแล</h3>
                 <div className="field-grid">
-                  <Field label="ชื่อผู้ป่วย" value={item.client_name} />
+                  <Field label="ชื่อผู้รับบริการ" value={item.client_name} />
                   <Field label="เพศ / อายุ" value={genderAge} />
                 </div>
-                {/* แพ้ยา/แพ้อาหาร/หมู่เลือด อ่านสดจากแฟ้มผู้ป่วย — ไม่มีสำเนาในเคส
+                {/* แพ้ยา/แพ้อาหาร/หมู่เลือด อ่านสดจากแฟ้มผู้รับบริการ — ไม่มีสำเนาในเคส
                     ถ้ารอให้เคสคัดลอกไว้ ข้อมูลที่พยาบาลเพิ่งอัปเดตจะไปไม่ถึงคนที่กำลังจะเข้าบ้าน */}
                 {(item.patient_allergies || item.patient_food_allergies) && (
                   <p className="allergy-alert">
@@ -99,10 +100,10 @@ export default function MyCaseModal({ caseId, onClose }) {
                 )}
 
                 <Field label="โรคประจำตัว" value={item.patient_medical_history ?? item.medical_history} />
-                {/* แฟ้มผู้ป่วยถูกแก้หลังเปิดเคส — โชว์ของล่าสุด แต่บอกด้วยว่าตอนเปิดเคสบันทึกไว้ว่าอะไร */}
+                {/* แฟ้มผู้รับบริการถูกแก้หลังเปิดเคส — โชว์ของล่าสุด แต่บอกด้วยว่าตอนเปิดเคสบันทึกไว้ว่าอะไร */}
                 {item.medical_history_stale && (
                   <p className="notice">
-                    ข้อมูลโรคประจำตัวเป็นของล่าสุดจากแฟ้มผู้ป่วย (ตอนเปิดเคสบันทึกไว้ว่า:{' '}
+                    ข้อมูลโรคประจำตัวเป็นของล่าสุดจากแฟ้มผู้รับบริการ (ตอนเปิดเคสบันทึกไว้ว่า:{' '}
                     {item.medical_history || 'ไม่ได้ระบุ'})
                   </p>
                 )}
@@ -139,7 +140,7 @@ export default function MyCaseModal({ caseId, onClose }) {
               </section>
 
               <section>
-                <h3>รายงานอาการผู้ป่วย</h3>
+                <h3>รายงานอาการผู้รับบริการ</h3>
                 <p className="muted report-where">
                   บันทึกรายงานได้ที่หน้า <strong>งานวันนี้</strong> ของกะนั้น — ตรงนี้ดูย้อนหลังได้อย่างเดียว
                 </p>

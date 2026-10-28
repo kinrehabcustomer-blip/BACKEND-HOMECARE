@@ -170,7 +170,7 @@ CREATE INDEX IF NOT EXISTS idx_customers_province ON customers (province);
 -- ---------- ผู้รับการดูแล (Patient) ----------
 -- แฟ้ม "คนที่ถูกดูแล" แยกจาก customers ("คนที่ว่าจ้าง/จ่ายเงิน") — ลูกค้าหนึ่งคนดูแลได้หลายคน (พ่อ+แม่)
 -- จึงต้องเป็นตารางของตัวเอง ไม่ใช่คัดลอกประวัติลงทุกเคส เปิดเคสรอบใหม่ก็อ้างแฟ้มเดิมได้
--- customer_id เป็น FK แบบ SET NULL: เปลี่ยนผู้ว่าจ้างได้ และลบลูกค้าแล้วแฟ้มผู้ป่วยไม่หายตาม
+-- customer_id เป็น FK แบบ SET NULL: เปลี่ยนผู้ว่าจ้างได้ และลบลูกค้าแล้วแฟ้มผู้รับบริการไม่หายตาม
 -- เก็บเฉพาะข้อมูล "คงที่" (ตัวตน/โรคประจำตัว/แพ้ยา/ที่อยู่) — อาการ/ADL ที่เปลี่ยนตามเวลาอยู่ที่เคส/การประเมิน
 CREATE TABLE IF NOT EXISTS patients (
   patient_id   TEXT PRIMARY KEY,
@@ -203,7 +203,7 @@ CREATE TABLE IF NOT EXISTS patients (
   province     TEXT,
   postal_code  TEXT,
 
-  -- ญาติ/ผู้ติดต่อกรณีฉุกเฉิน (ที่ตัวผู้ป่วย — อาจไม่ใช่คนเดียวกับผู้ว่าจ้าง)
+  -- ญาติ/ผู้ติดต่อกรณีฉุกเฉิน (ที่ตัวผู้รับบริการ — อาจไม่ใช่คนเดียวกับผู้ว่าจ้าง)
   emergency_contact_name     TEXT,
   emergency_contact_phone    TEXT,
   emergency_contact_relation TEXT,
@@ -219,7 +219,7 @@ CREATE TABLE IF NOT EXISTS patients (
 CREATE INDEX IF NOT EXISTS idx_patients_customer ON patients (customer_id);
 CREATE INDEX IF NOT EXISTS idx_patients_name     ON patients (name);
 CREATE INDEX IF NOT EXISTS idx_patients_status   ON patients (status);
--- เลขบัตรซ้ำ = สร้างแฟ้มผู้ป่วยคนเดิมซ้ำ; partial index เพราะผู้ป่วยที่ยังไม่กรอกเลขบัตรมีได้หลายคน
+-- เลขบัตรซ้ำ = สร้างแฟ้มผู้รับบริการคนเดิมซ้ำ; partial index เพราะผู้รับบริการที่ยังไม่กรอกเลขบัตรมีได้หลายคน
 CREATE UNIQUE INDEX IF NOT EXISTS idx_patients_national_id
   ON patients (national_id) WHERE national_id IS NOT NULL;
 
@@ -230,7 +230,7 @@ ALTER TABLE patients DROP CONSTRAINT IF EXISTS patients_status_check;
 ALTER TABLE patients ADD CONSTRAINT patients_status_check
   CHECK (status IN ('active', 'inactive'));
 
--- น้ำหนัก/ส่วนสูง อยู่ที่แฟ้มผู้ป่วย (ย้ายมาจากเคส) — เพิ่มด้วย ALTER เพราะตาราง patients ถูกสร้างไปแล้ว
+-- น้ำหนัก/ส่วนสูง อยู่ที่แฟ้มผู้รับบริการ (ย้ายมาจากเคส) — เพิ่มด้วย ALTER เพราะตาราง patients ถูกสร้างไปแล้ว
 ALTER TABLE patients ADD COLUMN IF NOT EXISTS weight_kg DOUBLE PRECISION CHECK (weight_kg > 0);
 ALTER TABLE patients ADD COLUMN IF NOT EXISTS height_cm DOUBLE PRECISION CHECK (height_cm > 0);
 
@@ -239,8 +239,8 @@ ALTER TABLE patients ADD COLUMN IF NOT EXISTS height_cm DOUBLE PRECISION CHECK (
 -- ข้อมูลเดิมยังอยู่ในช่องแพ้ยาทั้งก้อน แยกอัตโนมัติไม่ได้เพราะเป็นข้อความอิสระ ต้องให้คนมาแยกเอง
 ALTER TABLE patients ADD COLUMN IF NOT EXISTS food_allergies TEXT;
 
--- ความสัมพันธ์ของผู้ว่าจ้างกับผู้ป่วย เช่น 'บุตร' (ผู้ว่าจ้างเป็นลูกของผู้ป่วย) — กรอกตรงส่วนผู้ว่าจ้าง
--- กลับด้านกับ relation_to_customer เดิม (ผู้ป่วยเป็นอะไรกับผู้ว่าจ้าง) จึงแยกคอลัมน์ ไม่ปนกับข้อมูลเก่า
+-- ความสัมพันธ์ของผู้ว่าจ้างกับผู้รับบริการ เช่น 'บุตร' (ผู้ว่าจ้างเป็นลูกของผู้รับบริการ) — กรอกตรงส่วนผู้ว่าจ้าง
+-- กลับด้านกับ relation_to_customer เดิม (ผู้รับบริการเป็นอะไรกับผู้ว่าจ้าง) จึงแยกคอลัมน์ ไม่ปนกับข้อมูลเก่า
 -- relation_to_customer เลิกกรอกแล้ว เก็บไว้ให้ดูย้อนหลังเท่านั้น
 ALTER TABLE patients ADD COLUMN IF NOT EXISTS employer_relation TEXT;
 
@@ -252,7 +252,7 @@ CREATE TABLE IF NOT EXISTS cases (
                   'elderly_care', 'bedridden_care', 'post_op_care', 'physiotherapy',
                   'wound_care', 'hospital_watch', 'medical_escort', 'other')),
 
-  -- ผู้รับบริการ (โมดูลผู้ป่วยยังไม่มี จึงเก็บไว้ในเคสไปก่อน)
+  -- ผู้รับบริการ (โมดูลผู้รับบริการยังไม่มี จึงเก็บไว้ในเคสไปก่อน)
   client_name   TEXT NOT NULL,
   client_phone  TEXT,
   address       TEXT,
@@ -304,13 +304,13 @@ ALTER TABLE cases ADD COLUMN IF NOT EXISTS customer_id TEXT
 CREATE INDEX IF NOT EXISTS idx_cases_customer ON cases (customer_id);
 
 -- ผู้รับการดูแลของเคสนี้ (แฟ้มถาวรใน patients) — ต่างจาก customer_id ที่เป็น "ผู้ว่าจ้าง"
--- SET NULL แบบเดียวกับ customer_id: ลบแฟ้มผู้ป่วยแล้วเคสไม่หาย ข้อมูลผู้ป่วยที่คัดลอกไว้ในเคสยังอยู่
+-- SET NULL แบบเดียวกับ customer_id: ลบแฟ้มผู้รับบริการแล้วเคสไม่หาย ข้อมูลผู้รับบริการที่คัดลอกไว้ในเคสยังอยู่
 ALTER TABLE cases ADD COLUMN IF NOT EXISTS patient_id TEXT
   REFERENCES patients (patient_id) ON DELETE SET NULL ON UPDATE CASCADE;
 CREATE INDEX IF NOT EXISTS idx_cases_patient ON cases (patient_id);
 
--- ---------- รายละเอียดผู้ป่วย ----------
--- (client_name = ชื่อผู้ป่วย, client_phone = เบอร์ติดต่อญาติ, address = ที่อยู่สถานที่ดูแล — มีอยู่แล้วด้านบน)
+-- ---------- รายละเอียดผู้รับบริการ ----------
+-- (client_name = ชื่อผู้รับบริการ, client_phone = เบอร์ติดต่อญาติ, address = ที่อยู่สถานที่ดูแล — มีอยู่แล้วด้านบน)
 ALTER TABLE cases ADD COLUMN IF NOT EXISTS patient_gender    TEXT CHECK (patient_gender IN ('male', 'female', 'other'));
 ALTER TABLE cases ADD COLUMN IF NOT EXISTS patient_age       INTEGER CHECK (patient_age BETWEEN 0 AND 130);
 ALTER TABLE cases ADD COLUMN IF NOT EXISTS weight_kg         DOUBLE PRECISION CHECK (weight_kg > 0);
@@ -585,7 +585,7 @@ CREATE TABLE IF NOT EXISTS id_counters (
 );
 
 -- ============================================================================
--- ระบบเช็คอินพนักงานภาคสนาม (homecare) — พนักงานไปทำงานที่บ้านผู้ป่วยตามวันนัด
+-- ระบบเช็คอินพนักงานภาคสนาม (homecare) — พนักงานไปทำงานที่บ้านผู้รับบริการตามวันนัด
 -- ยกระดับ case_visits จาก "วันนัด" เป็น "กะงาน": แต่ละแถว = งาน 1 กะ ของพนักงาน 1 คน
 -- เก็บทั้งแผน (ใครไป/เวลานัด) และของจริง (เช็คอิน/เอาท์ พิกัด รูป) ไว้บนแถวเดียวกัน
 -- ============================================================================
@@ -709,7 +709,7 @@ CREATE INDEX IF NOT EXISTS idx_case_visits_checkin ON case_visits (checked_in_by
 -- ประวัติการทำรายการของเคส (audit log)
 --
 -- คอลัมน์เวลาบนตาราง cases (assigned_at/closed_at/...) เก็บได้แค่ "ครั้งล่าสุด" และไม่บอกว่าใครกด
--- สลับพนักงาน 3 รอบแล้วปิดเคส เหลือร่องรอยแค่รอบสุดท้าย — ธุรกิจดูแลผู้ป่วยมีข้อพิพาทได้
+-- สลับพนักงาน 3 รอบแล้วปิดเคส เหลือร่องรอยแค่รอบสุดท้าย — ธุรกิจดูแลผู้รับบริการมีข้อพิพาทได้
 -- (ญาติแจ้งว่าไม่มีคนมา / ใครสั่งเปลี่ยนคนดูแล / ใครยกเลิกเคส) จึงต้องมีบันทึกทีละครั้ง
 --
 -- actor_name เก็บชื่อ ณ ตอนนั้นคู่กับรหัส แบบเดียวกับ issued_by_name ของใบแจ้งหนี้:
@@ -838,11 +838,11 @@ BEGIN
 END $$;
 
 -- ============================================================================
--- รายงานอาการผู้ป่วย (case_reports)
+-- รายงานอาการผู้รับบริการ (case_reports)
 --
 -- ของเดิมเคสมีช่องอาการอยู่ช่องเดียว (cases.current_symptoms) ซึ่งเป็น "อาการ ณ วันเปิดเคส"
 -- แก้ทับได้อย่างเดียว ย้อนดูไม่ได้ว่าเมื่อวานความดันเท่าไหร่ อาทิตย์ก่อนกินได้ไหม
--- ทั้งที่งานดูแลผู้ป่วยตัดสินใจจากแนวโน้ม ไม่ใช่จากค่าล่าสุดค่าเดียว
+-- ทั้งที่งานดูแลผู้รับบริการตัดสินใจจากแนวโน้ม ไม่ใช่จากค่าล่าสุดค่าเดียว
 --
 -- ตารางนี้คือ "บันทึกทีละครั้ง" ของเคสหนึ่งใบ กรอกกี่ครั้งก็ได้ ไม่ผูกกับกะ (case_visits)
 -- เพราะเคสกายภาพ/เคสที่ไม่ได้ลงกะรายวันก็ต้องบันทึกอาการได้เหมือนกัน
@@ -927,7 +927,7 @@ ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS report_type TEXT NOT NULL DEFA
 
 -- ---------- 2. สภาพทั่วไป ----------
 -- คำถามแรกของฟอร์ม: เทียบกับรายงานครั้งก่อนแล้วเป็นอย่างไร
--- การจับ "การเปลี่ยนแปลงจากเดิม" มีค่ากว่าตัวเลขดิบ เพราะค่าปกติของผู้ป่วยแต่ละคนไม่เท่ากัน
+-- การจับ "การเปลี่ยนแปลงจากเดิม" มีค่ากว่าตัวเลขดิบ เพราะค่าปกติของผู้รับบริการแต่ละคนไม่เท่ากัน
 ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS condition_change TEXT
   CHECK (condition_change IN ('same', 'better', 'worse', 'new_issue'));
 ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS consciousness TEXT
@@ -1064,7 +1064,7 @@ CREATE INDEX IF NOT EXISTS idx_case_reports_incident
 --
 -- เคสกายภาพไม่ได้ "ดูแลต่อเนื่องทั้งเวร" แต่เป็นการรักษาเป็นครั้ง ครั้งละ 45–60 นาที
 -- ฟอร์มดูแลประจำวันจึงใช้ไม่ได้: ไม่มี NG/ขับถ่าย/เปลี่ยนผ้าอ้อมให้กรอก
--- ส่วนสิ่งที่ต้องบันทึกจริง (ทำท่าอะไร ผู้ป่วยทำได้แค่ไหน ปวดเปลี่ยนไปไหม ทนได้หรือไม่)
+-- ส่วนสิ่งที่ต้องบันทึกจริง (ทำท่าอะไร ผู้รับบริการทำได้แค่ไหน ปวดเปลี่ยนไปไหม ทนได้หรือไม่)
 -- กลับไม่มีช่องอยู่เลย ที่ผ่านมาจึงถูกยัดลงช่องข้อความอิสระ ซึ่งเทียบข้ามครั้งไม่ได้
 --
 -- ใช้ตาราง case_reports เดิมเหมือนกัน (เป็น "บันทึกหนึ่งครั้ง" แบบเดียวกัน ต่างแค่ชุดช่องที่กรอก)
@@ -1135,7 +1135,7 @@ CREATE INDEX IF NOT EXISTS idx_case_team_employee ON case_team (employee_id);
 -- เงินมัดจำ + การรับชำระหลายงวด
 --
 -- ของเดิมใบแจ้งหนี้จ่ายได้ครั้งเดียวจบ (กดชำระ = สถานะเป็น paid ทั้งใบ)
--- แต่งานดูแลผู้ป่วยเก็บมัดจำก่อนเริ่มงานเป็นเรื่องปกติ แล้วเก็บส่วนที่เหลือทีหลัง
+-- แต่งานดูแลผู้รับบริการเก็บมัดจำก่อนเริ่มงานเป็นเรื่องปกติ แล้วเก็บส่วนที่เหลือทีหลัง
 -- ที่ผ่านมาจึงต้องออกใบสองใบแยกกัน ซึ่งทำให้ยอดรวมของเคสอ่านไม่ออกว่าตกลงกันเท่าไหร่
 --
 -- เงินที่รับจริงแต่ละครั้งอยู่ในตาราง invoice_payments — ไม่เก็บยอดสะสมซ้ำไว้บนใบ
@@ -1497,7 +1497,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_employees_review_token
 -- รายหัวข้อด้วย AVG() ตรงๆ และ CHECK ระดับฐานข้อมูลกันคะแนนนอกช่วง 1–5 ให้ทุกข้อเท่ากันหมด
 --
 -- ไม่ผูกกับเคส/กะ โดยตั้งใจ: ญาติที่กรอกไม่รู้จักรหัสเคส และแบบประเมินเป็นความเห็นต่อ "คน"
--- ไม่ใช่ต่อ "งานชิ้นนั้น" — ชื่อผู้ป่วย/วันที่รับบริการจึงเป็นข้อความอิสระไว้อ้างอิงเท่านั้น
+-- ไม่ใช่ต่อ "งานชิ้นนั้น" — ชื่อผู้รับบริการ/วันที่รับบริการจึงเป็นข้อความอิสระไว้อ้างอิงเท่านั้น
 CREATE TABLE IF NOT EXISTS staff_reviews (
   review_id    INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
 
@@ -1519,7 +1519,7 @@ CREATE TABLE IF NOT EXISTS staff_reviews (
   q_adapt         SMALLINT NOT NULL CHECK (q_adapt         BETWEEN 1 AND 5),  -- [เลิกใช้] ยุบเข้า q_professional
   q_home_advice   SMALLINT NOT NULL CHECK (q_home_advice   BETWEEN 1 AND 5),  -- [เลิกใช้] ยุบเข้า q_communication
   q_progress      SMALLINT NOT NULL CHECK (q_progress      BETWEEN 1 AND 5),  -- [เลิกใช้] ยุบเข้า q_overall
-  q_overall       SMALLINT NOT NULL CHECK (q_overall       BETWEEN 1 AND 5),  -- พึงพอใจโดยรวม + พัฒนาการผู้ป่วย
+  q_overall       SMALLINT NOT NULL CHECK (q_overall       BETWEEN 1 AND 5),  -- พึงพอใจโดยรวม + พัฒนาการผู้รับบริการ
 
   impressed  TEXT,  -- สิ่งที่ประทับใจ
   improve    TEXT,  -- สิ่งที่อยากให้ปรับปรุง
@@ -1608,8 +1608,8 @@ BEGIN
       SELECT 1 FROM information_schema.columns
       WHERE table_schema = 'public' AND table_name = 'customers' AND column_name = col
     ) THEN
-      /* เติมเฉพาะช่องที่แฟ้มผู้ป่วยยังว่าง — ของที่กรอกใหม่ในแฟ้มถือว่าใหม่กว่าและถูกกว่าเสมอ
-         ผู้ว่าจ้างหนึ่งคนมีผู้ป่วยได้หลายคน (พ่อ+แม่) ข้อมูลชุดเดิมจึงถูกก๊อปให้ทุกแฟ้มที่ผูกอยู่
+      /* เติมเฉพาะช่องที่แฟ้มผู้รับบริการยังว่าง — ของที่กรอกใหม่ในแฟ้มถือว่าใหม่กว่าและถูกกว่าเสมอ
+         ผู้ว่าจ้างหนึ่งคนมีผู้รับบริการได้หลายคน (พ่อ+แม่) ข้อมูลชุดเดิมจึงถูกก๊อปให้ทุกแฟ้มที่ผูกอยู่
          ซึ่งถูกกว่าการเดาว่าเป็นของใครคนเดียวแล้วทิ้งของที่เหลือ */
       EXECUTE format(
         'UPDATE patients p SET %1$I = c.%1$I
@@ -1619,7 +1619,7 @@ BEGIN
       );
       GET DIAGNOSTICS moved = ROW_COUNT;
       IF moved > 0 THEN
-        RAISE NOTICE 'ย้าย customers.% เข้าแฟ้มผู้ป่วย % แถว', col, moved;
+        RAISE NOTICE 'ย้าย customers.% เข้าแฟ้มผู้รับบริการ % แถว', col, moved;
       END IF;
 
       EXECUTE format('ALTER TABLE customers DROP COLUMN %I', col);
@@ -1690,3 +1690,37 @@ CREATE TABLE IF NOT EXISTS revoked_sessions (
   jti        TEXT PRIMARY KEY,
   expires_at TIMESTAMPTZ NOT NULL
 );
+
+-- ============================================================================
+-- รหัสเคส = รหัสผู้รับบริการ (KN) — เลิกใช้รหัสเคส VN ที่กรอกแยก (ดร.ธงชัย 28 ต.ค. 2569)
+-- เคสแรกของคน = KN690202463 · เคสถัดไป = KN690202463-R2, -R3 … (-R ใช้ภายใน หน้าจอแสดงแค่ KN)
+-- ดู server/src/cases/caseCode.js
+--
+-- แปลงเคสเก่า (VN… / CASE-xxxx) ที่ผูกผู้รับบริการแล้วให้เป็นรหัสแบบใหม่ ไล่ตามวันเปิดเคส
+-- เคสเก่าสุดของคนนั้นได้รหัส KN ตรงๆ (ถ้ายังว่าง) ที่เหลือเรียง -R2, -R3 ตามลำดับ
+-- ทุกตารางที่อ้างเคสเป็น ON UPDATE CASCADE กะ/ใบแจ้งหนี้/ค่าจ้าง/รายงาน/ญาติ จึงตามไปเอง
+-- รันซ้ำได้: เคสที่ใช้รหัสแบบใหม่อยู่แล้วไม่ถูกแตะ · เคสที่ยังไม่ผูกผู้รับบริการคงรหัสเดิม
+-- ============================================================================
+DO $$
+DECLARE
+  r      RECORD;
+  target TEXT;
+  n      INTEGER;
+BEGIN
+  FOR r IN
+    SELECT case_id, patient_id FROM cases
+    WHERE patient_id IS NOT NULL
+      AND case_id <> patient_id
+      AND case_id NOT LIKE patient_id || '-R%'
+    ORDER BY created_at, case_id
+  LOOP
+    target := r.patient_id;
+    n := 1;
+    WHILE EXISTS (SELECT 1 FROM cases WHERE case_id = target) LOOP
+      n := n + 1;
+      target := r.patient_id || '-R' || n;
+    END LOOP;
+    UPDATE cases SET case_id = target WHERE case_id = r.case_id;
+    RAISE NOTICE 'เปลี่ยนรหัสเคส % → %', r.case_id, target;
+  END LOOP;
+END $$;

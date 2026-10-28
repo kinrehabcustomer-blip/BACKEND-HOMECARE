@@ -10,7 +10,7 @@ import {
 import { formatPhoneInput } from '../lib/phone.js';
 
 const BLANK = {
-  // รหัสผู้ป่วย KN + ปี พ.ศ. 2 หลัก + เลข 7 หลัก (กรอกเอง) — ตอนแก้คือรหัสเดิม (อาจยังเป็น PAT-xxxx)
+  // รหัสผู้รับบริการ KN + ปี พ.ศ. 2 หลัก + เลข 7 หลัก (กรอกเอง) — ตอนแก้คือรหัสเดิม (อาจยังเป็น PAT-xxxx)
   patient_id: '',
   // ผู้ว่าจ้าง (ลูกค้า) ที่แฟ้มนี้อยู่ใต้
   customer_id: '',
@@ -142,7 +142,7 @@ export default function PatientFormPage() {
     setForm((prev) => ({ ...prev, customer_id: c.customer_id }));
   }
 
-  /** ไม่เจอในระบบ — เพิ่มเป็นผู้ว่าจ้างรายใหม่จากชื่อที่พิมพ์ (บันทึกจริงตอนกดบันทึกแฟ้มผู้ป่วย) */
+  /** ไม่เจอในระบบ — เพิ่มเป็นผู้ว่าจ้างรายใหม่จากชื่อที่พิมพ์ (บันทึกจริงตอนกดบันทึกแฟ้มผู้รับบริการ) */
   function newEmployer() {
     setEmployer(employerFields({ name: query.trim() }));
     employerInitial.current = null;
@@ -164,8 +164,8 @@ export default function PatientFormPage() {
   };
 
   /**
-   * บันทึกผู้ว่าจ้างก่อนแฟ้มผู้ป่วย — รายใหม่ = สร้าง · ที่ผูกอยู่แล้วแก้ข้อมูล = แก้กลับ
-   * คืน customer_id ที่จะผูกกับแฟ้ม · error ของช่องผู้ว่าจ้างย้ายชื่อเป็น employer_* ไม่ให้ชนช่องของผู้ป่วย
+   * บันทึกผู้ว่าจ้างก่อนแฟ้มผู้รับบริการ — รายใหม่ = สร้าง · ที่ผูกอยู่แล้วแก้ข้อมูล = แก้กลับ
+   * คืน customer_id ที่จะผูกกับแฟ้ม · error ของช่องผู้ว่าจ้างย้ายชื่อเป็น employer_* ไม่ให้ชนช่องของผู้รับบริการ
    */
   async function saveEmployer() {
     if (!employer) return form.customer_id || null;
@@ -183,7 +183,7 @@ export default function PatientFormPage() {
     try {
       if (!employer.customer_id) {
         const created = await api.createCustomer(body);
-        // สลับเป็น "ผูกอยู่แล้ว" ทันที — ถ้าขั้นบันทึกผู้ป่วยล้ม กดบันทึกซ้ำจะไม่สร้างผู้ว่าจ้างซ้ำ
+        // สลับเป็น "ผูกอยู่แล้ว" ทันที — ถ้าขั้นบันทึกผู้รับบริการล้ม กดบันทึกซ้ำจะไม่สร้างผู้ว่าจ้างซ้ำ
         pickCustomer(created);
         return created.customer_id;
       }
@@ -228,12 +228,12 @@ export default function PatientFormPage() {
     setFieldErrors({});
     try {
       const payload = toPayload(form);
-      /* รหัสผู้ป่วย: เพิ่มใหม่ต้องมีรหัส KN ครบ · แก้ไข = ส่งเฉพาะตอนกรอกรหัส KN ใหม่ที่ต่างจากเดิม
+      /* รหัสผู้รับบริการ: เพิ่มใหม่ต้องมีรหัส KN ครบ · แก้ไข = ส่งเฉพาะตอนกรอกรหัส KN ใหม่ที่ต่างจากเดิม
          (แฟ้มเก่าที่ยังเป็น PAT-xxxx ไม่บังคับเปลี่ยน — ช่องว่างไว้ = คงรหัสเดิม) */
       if (!isPatientCode(form.patient_id) || (isEdit && form.patient_id === id)) {
         delete payload.patient_id;
         if (!isEdit) {
-          setFieldErrors({ patient_id: 'กรอกรหัสผู้ป่วยให้ครบ: KN + ปี พ.ศ. 2 หลัก + เลข 7 หลัก' });
+          setFieldErrors({ patient_id: 'กรอกรหัสผู้รับบริการให้ครบ: KN + ปี พ.ศ. 2 หลัก + เลข 7 หลัก' });
           formEl.current?.querySelector('[name="patient_id"]')?.scrollIntoView({ block: 'center', behavior: 'smooth' });
           setSaving(false);
           return;
@@ -273,7 +273,7 @@ export default function PatientFormPage() {
           <p className="muted">
             {isEdit
               ? 'มีแต่ชื่อที่บังคับกรอก — ช่องที่เหลือเว้นว่างไว้ก่อนแล้วมาเติมทีหลังได้'
-              : 'กรอกรหัสผู้ป่วย (KN) และชื่อ — ช่องที่เหลือเว้นว่างไว้ก่อนแล้วมาเติมทีหลังได้'}
+              : 'กรอกรหัสผู้รับบริการ (KN) และชื่อ — ช่องที่เหลือเว้นว่างไว้ก่อนแล้วมาเติมทีหลังได้'}
           </p>
         </div>
         {/* ไม่มีปุ่มยกเลิกตรงนี้ — แถบล่างเป็น sticky ติดขอบจอตลอด ปุ่มยกเลิกที่นั่นกดถึงได้เสมอ */}
@@ -292,7 +292,7 @@ export default function PatientFormPage() {
                 <span className="muted">
                   {employer.customer_id
                     ? <>ผูกกับผู้ว่าจ้าง <span className="mono">{employer.customer_id}</span> · แก้ข้อมูลด้านล่างได้เลย</>
-                    : 'ผู้ว่าจ้างรายใหม่ — บันทึกพร้อมแฟ้มผู้ป่วย'}
+                    : 'ผู้ว่าจ้างรายใหม่ — บันทึกพร้อมแฟ้มผู้รับบริการ'}
                 </span>
                 <button type="button" className="btn" onClick={unpickCustomer}>เปลี่ยน / ไม่ผูก</button>
               </div>
@@ -309,17 +309,17 @@ export default function PatientFormPage() {
                   <input name="employer_tax_id" inputMode="numeric" value={employer.tax_id} aria-invalid={fieldErrors.employer_tax_id ? true : undefined} onChange={setEmployerField('tax_id')} />
                   {fieldError('employer_tax_id')}
                 </label>
-                <label>ความสัมพันธ์กับผู้ป่วย
+                <label>ความสัมพันธ์กับผู้รับบริการ
                   <input name="employer_relation" placeholder="เช่น บุตร หลาน คู่สมรส" {...field('employer_relation')} />
                   {fieldError('employer_relation')}
                 </label>
-                <label className="span-2">ที่อยู่ออกใบเสร็จ (ถ้าต่างจากที่อยู่ผู้ป่วย)
+                <label className="span-2">ที่อยู่ออกใบเสร็จ (ถ้าต่างจากที่อยู่ผู้รับบริการ)
                   <input name="employer_billing_address" value={employer.billing_address} aria-invalid={fieldErrors.employer_billing_address ? true : undefined} onChange={setEmployerField('billing_address')} />
                   {fieldError('employer_billing_address')}
                 </label>
               </div>
               {employer.customer_id && (
-                <p className="form-hint muted">แก้ข้อมูลผู้ว่าจ้างที่นี่ มีผลกับผู้ป่วยคนอื่นที่ใช้ผู้ว่าจ้างคนเดียวกันด้วย</p>
+                <p className="form-hint muted">แก้ข้อมูลผู้ว่าจ้างที่นี่ มีผลกับผู้รับบริการคนอื่นที่ใช้ผู้ว่าจ้างคนเดียวกันด้วย</p>
               )}
             </div>
           ) : (
@@ -363,12 +363,12 @@ export default function PatientFormPage() {
             แพ้ยาอยู่ในนี้ด้วยทั้งที่ไม่บังคับ เพราะเป็นข้อมูลความปลอดภัยที่ห้ามถูกฝังอยู่ในส่วนที่พับไว้ */}
         <h2>ข้อมูลที่ต้องกรอก</h2>
         <div className="grid">
-          <label>รหัสผู้ป่วย {isEdit ? '' : '*'}
+          <label>รหัสผู้รับบริการ {isEdit ? '' : '*'}
             <PatientCodeInput
               name="patient_id"
               // แฟ้มที่กำลังแก้ ไม่นับว่ารหัสเดิมของตัวเองซ้ำ
               checker={(code) => (code === id ? Promise.resolve(null) : api.checkPatientId(code, isEdit ? id : null))}
-              takenLabel="รหัสนี้ถูกใช้กับผู้ป่วยคนอื่นแล้ว"
+              takenLabel="รหัสนี้ถูกใช้กับผู้รับบริการคนอื่นแล้ว"
               value={isPatientCode(form.patient_id) ? form.patient_id : ''}
               invalid={Boolean(fieldErrors.patient_id)}
               onChange={(code) => {

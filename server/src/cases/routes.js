@@ -32,9 +32,9 @@ import {
   attendanceQuerySchema,
   CASE_TYPES,
   CASE_STATUSES,
-  CASE_CODE_RE,
 } from './schema.js';
 import { sql } from '../db/index.js';
+import { caseCode } from './caseCode.js';
 import { geocode, reverseGeocode, searchPlaces } from '../lib/geocode.js';
 import { resolveMapLink } from '../lib/maplink.js';
 import { canSeeStaffPay, requireManager } from '../lib/auth.js';
@@ -87,27 +87,12 @@ casesRouter.param('id', (req, res, next, id) => {
   repo
     .findById(id)
     .then((found) => {
-      if (!found) return next(notFound(`ไม่พบเคสรหัส ${id}`));
+      if (!found) return next(notFound(`ไม่พบเคสรหัส ${caseCode(id)}`));
       req.case = found;
       next();
     })
     .catch(next);
 });
-
-/**
- * ตรวจรหัสเคสระหว่างกรอก — ต้องมาก่อน '/:id'
- * ?id=VN690215209[&except=รหัสของเคสที่กำลังแก้] → { valid, available, taken_by }
- * ตัวจริงที่กันซ้ำคือตอนบันทึก (ensureCaseCodeFree + PK) อันนี้แค่บอกล่วงหน้า
- */
-casesRouter.get(
-  '/check-id',
-  asyncRoute(async (req, res) => {
-    const code = String(req.query.id ?? '').trim();
-    const valid = CASE_CODE_RE.test(code);
-    const owner = valid ? await repo.caseCodeOwner(sql, code, req.query.except || null) : null;
-    res.json({ valid, available: valid && !owner, taken_by: owner?.client_name ?? null });
-  }),
-);
 
 casesRouter.get('/meta', (req, res) => {
   res.json({ case_types: CASE_TYPES, statuses: CASE_STATUSES });
@@ -564,7 +549,7 @@ casesRouter.patch(
     let invoiceSyncFailed = false;
     if (invoices.billingSignature(req.case) !== invoices.billingSignature(updated)) {
       /* หาผู้จ่ายด้วย resolvePayer ตัวเดียวกับตอนออกใบ — ของเดิมดูแค่ customer_id ของเคส
-         เคสที่ผูกผู้ว่าจ้างไว้ที่แฟ้มผู้ป่วยจึงถูกซิงก์ชื่อผู้จ่ายกลับเป็นชื่อผู้ป่วยทุกครั้งที่แก้เคส */
+         เคสที่ผูกผู้ว่าจ้างไว้ที่แฟ้มผู้รับบริการจึงถูกซิงก์ชื่อผู้จ่ายกลับเป็นชื่อผู้รับบริการทุกครั้งที่แก้เคส */
       try {
         const customer = await resolvePayer(updated);
         await invoices.syncOpenFromCase(updated, customer);
@@ -922,7 +907,7 @@ casesRouter.get(
   }),
 );
 
-// ---------- รายงานอาการผู้ป่วย (case_reports) ----------
+// ---------- รายงานอาการผู้รับบริการ (case_reports) ----------
 
 /**
  * แก้รายงานหนึ่งใบ — ใช้ร่วมกับเส้นของพนักงานภาคสนาม (my/routes.js)

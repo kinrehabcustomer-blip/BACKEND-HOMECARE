@@ -289,10 +289,10 @@ export default function PatientModal({ patientId, siblings = [], onNavigate, onC
                       }
                     />
                     <Field label="ความสัมพันธ์กับผู้ติดต่อ" value={patient.emergency_contact_relation} />
-                    <Field label="ผู้ว่าจ้างเป็นอะไรกับผู้ป่วย" value={patient.employer_relation} />
-                    {/* ข้อมูลเดิม (กลับด้าน: ผู้ป่วยเป็นอะไรกับผู้ว่าจ้าง) — เลิกกรอกแล้ว โชว์เฉพาะแฟ้มที่เคยกรอกไว้ */}
+                    <Field label="ผู้ว่าจ้างเป็นอะไรกับผู้รับบริการ" value={patient.employer_relation} />
+                    {/* ข้อมูลเดิม (กลับด้าน: ผู้รับบริการเป็นอะไรกับผู้ว่าจ้าง) — เลิกกรอกแล้ว โชว์เฉพาะแฟ้มที่เคยกรอกไว้ */}
                     {patient.relation_to_customer && (
-                      <Field label="ผู้ป่วยเป็นอะไรกับผู้ว่าจ้าง (ข้อมูลเดิม)" value={patient.relation_to_customer} />
+                      <Field label="ผู้รับบริการเป็นอะไรกับผู้ว่าจ้าง (ข้อมูลเดิม)" value={patient.relation_to_customer} />
                     )}
                   </div>
                 )}
@@ -350,7 +350,7 @@ export default function PatientModal({ patientId, siblings = [], onNavigate, onC
                 className="btn danger-ghost foot-danger"
                 disabled={deleting}
                 title={`ลบแฟ้มผู้รับการดูแล ${patientId} ออกจากฐานข้อมูลถาวร?`}
-                detail="เคสที่เคยผูกไว้จะยังอยู่ในระบบ (ข้อมูลผู้ป่วยถูกบันทึกในเคสแล้ว) แต่จะไม่เชื่อมกับแฟ้มนี้อีก"
+                detail="เคสที่เคยผูกไว้จะยังอยู่ในระบบ (ข้อมูลผู้รับบริการถูกบันทึกในเคสแล้ว) แต่จะไม่เชื่อมกับแฟ้มนี้อีก"
                 confirmLabel="ลบแฟ้ม"
                 onConfirm={handleDelete}
               >

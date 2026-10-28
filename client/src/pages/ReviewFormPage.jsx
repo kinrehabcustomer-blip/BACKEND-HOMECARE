@@ -142,8 +142,8 @@ export default function ReviewFormPage() {
           <h1>แบบประเมินความพึงพอใจ{role} KIN</h1>
           <p className="review-intro">
             เรียน คุณญาติผู้รับบริการ<br />
-            KIN ขอขอบพระคุณสำหรับความไว้วางใจในการใช้บริการ{isTherapy ? 'กายภาพบำบัด' : 'ดูแลผู้ป่วย'}ที่บ้าน
-            ความคิดเห็นของท่านมีความสำคัญต่อการพัฒนาคุณภาพการให้บริการและการดูแลผู้ป่วยของเรา
+            KIN ขอขอบพระคุณสำหรับความไว้วางใจในการใช้บริการ{isTherapy ? 'กายภาพบำบัด' : 'ดูแลผู้รับบริการ'}ที่บ้าน
+            ความคิดเห็นของท่านมีความสำคัญต่อการพัฒนาคุณภาพการให้บริการและการดูแลผู้รับบริการของเรา
           </p>
         </header>
 
@@ -154,7 +154,7 @@ export default function ReviewFormPage() {
 
         <div className="review-fields">
           <label>
-            ชื่อผู้ป่วย
+            ชื่อผู้รับบริการ
             <input
               type="text"
               value={form.patient_name}
@@ -210,7 +210,7 @@ export default function ReviewFormPage() {
         <section className="review-section">
           <h2>คำถามสำหรับประเมินคุณภาพโดยรวม</h2>
 
-          <p className="review-ask">หากมีโอกาส ท่านต้องการให้{role}ท่านนี้กลับมาดูแลผู้ป่วยต่อหรือไม่?</p>
+          <p className="review-ask">หากมีโอกาส ท่านต้องการให้{role}ท่านนี้กลับมาดูแลผู้รับบริการต่อหรือไม่?</p>
           <ChoiceGroup
             name="want_again"
             labels={WANT_AGAIN_LABELS}

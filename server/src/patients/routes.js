@@ -9,7 +9,7 @@ import { ApiError, asyncRoute, notFound } from '../lib/errors.js';
 
 export const patientsRouter = Router();
 
-/** ทุก route ที่มี :id โหลดผู้ป่วยจาก patient_id (PK) ก่อน — ไม่มีก็ 404 ตั้งแต่ตรงนี้ */
+/** ทุก route ที่มี :id โหลดผู้รับบริการจาก patient_id (PK) ก่อน — ไม่มีก็ 404 ตั้งแต่ตรงนี้ */
 patientsRouter.param('id', (req, res, next, id) => {
   repo
     .findById(id)
@@ -30,7 +30,7 @@ patientsRouter.get(
 );
 
 /**
- * ตรวจรหัสผู้ป่วยระหว่างกรอก (ฟอร์มผู้ป่วย / เปิดเคส) — ต้องมาก่อน '/:id'
+ * ตรวจรหัสผู้รับบริการระหว่างกรอก (ฟอร์มผู้รับบริการ / เปิดเคส) — ต้องมาก่อน '/:id'
  * ?id=KN690202463[&except=รหัสของแฟ้มที่กำลังแก้] → { valid, available, taken_by }
  * ตัวจริงที่กันซ้ำคือตอนบันทึก (ensurePatientCodeFree + PK) อันนี้แค่บอกล่วงหน้า
  */
@@ -65,7 +65,7 @@ patientsRouter.patch(
     const input = updatePatientSchema.parse(req.body);
     const updated = await repo.update(req.params.id, input);
 
-    // เพิ่งผูกผู้ว่าจ้างให้ผู้ป่วย (เคสเปิดไว้ตอนยังไม่รู้ผู้จ่าย) → เติมผู้ว่าจ้างให้เคสที่ยังไม่มี
+    // เพิ่งผูกผู้ว่าจ้างให้ผู้รับบริการ (เคสเปิดไว้ตอนยังไม่รู้ผู้จ่าย) → เติมผู้ว่าจ้างให้เคสที่ยังไม่มี
     // แล้วอัปเดตชื่อผู้จ่ายในใบแจ้งหนี้ที่ยังแก้ได้ (ร่าง/ออกใบแล้ว) ให้ตรงกัน — ทั้งในระบบและตอนพิมพ์
     if ('customer_id' in input && updated?.customer_id) {
       const affected = await cases.backfillCustomerForPatient(updated.patient_id, updated.customer_id);
@@ -79,7 +79,7 @@ patientsRouter.patch(
   }),
 );
 
-/** ลบผู้ป่วย — เคสที่เคยให้บริการยังอยู่ครบ (ข้อมูลผู้ป่วยถูกคัดลอกไว้ในเคสแล้ว) */
+/** ลบผู้รับบริการ — เคสที่เคยให้บริการยังอยู่ครบ (ข้อมูลผู้รับบริการถูกคัดลอกไว้ในเคสแล้ว) */
 patientsRouter.delete(
   '/:id',
   asyncRoute(async (req, res) => {
@@ -87,7 +87,7 @@ patientsRouter.delete(
     if (result.reason === 'in_use') {
       throw new ApiError(
         409,
-        `ผู้ป่วยรายนี้ยังมีเคสที่กำลังทำ ${result.active_cases} เคส — ลบแล้วทีมหน้างานจะเสียข้อมูลแพ้ยาและข้อมูลสุขภาพที่อ่านสดจากแฟ้ม`,
+        `ผู้รับบริการรายนี้ยังมีเคสที่กำลังทำ ${result.active_cases} เคส — ลบแล้วทีมหน้างานจะเสียข้อมูลแพ้ยาและข้อมูลสุขภาพที่อ่านสดจากแฟ้ม`,
         { active_cases: result.active_cases },
       );
     }

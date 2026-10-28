@@ -11,6 +11,7 @@ import {
 import { CAL_STATES, dayLabel, timeRange } from '../lib/calendarUi.js';
 import LineIcon from '../components/LineIcon.jsx';
 import PageRefresh from '../components/PageRefresh.jsx';
+import { caseCode } from '../lib/patientCode.js';
 
 const WEEKDAYS = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
 
@@ -272,7 +273,7 @@ export default function CalendarPage() {
                       onClick={() => patch({ open: c.case_id })}
                       title={[
                         timeRange(c),
-                        c.case_id,
+                        caseCode(c.case_id),
                         SERVICE_KIND_LABELS[kindOf(c)],
                         c.client_name,
                         c.assigned_name ?? 'ยังไม่จับคู่พนักงาน',
@@ -362,7 +363,7 @@ function DayPanel({ day, list, onOpenCase, onClose }) {
                 </p>
                 <p className="muted">
                   <button className="btn link-btn" onClick={() => onOpenCase(c.case_id)}>
-                    <span className="mono">{c.case_id}</span> — เปิดเคส
+                    <span className="mono">{caseCode(c.case_id)}</span> — เปิดเคส
                   </button>
                 </p>
               </div>

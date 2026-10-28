@@ -6,6 +6,7 @@ import { useToast } from '../toast.jsx';
 import { CASE_STATUS_LABELS, formatBaht, formatDate, openDatePicker } from '../labels.js';
 import CasePayPanel from './CasePay.jsx';
 import LineIcon from './LineIcon.jsx';
+import { caseCode } from '../lib/patientCode.js';
 
 /**
  * แท็บ "ปล่อยค่าจ้าง" — เคสทุกใบที่มีเงินให้จัดการ อยู่รวมกันในหน้าเดียว
@@ -239,7 +240,7 @@ export default function PayQueue({ reloadKey, openCase, onOpenCase }) {
                             )}
                           </span>
                           <span className="cell-sub">
-                            <span className="mono">{c.case_id}</span>
+                            <span className="mono">{caseCode(c.case_id)}</span>
                             {c.client_name && ` · ${c.client_name}`}
                             {c.closed_at && ` · ปิดเคส ${formatDate(c.closed_at)}`}
                           </span>
@@ -364,7 +365,7 @@ function PayModal({ row, busy, run, toast, onClose }) {
         <header className="modal-head">
           <div>
             <p className="mono muted">
-              {row.case_id}
+              {caseCode(row.case_id)}
               {row.client_name && ` · ${row.client_name}`}
             </p>
             <h2>{row.worker_names || 'ยังไม่มีพนักงาน'}</h2>

@@ -92,7 +92,7 @@ export default function FamilyAccess({ caseId, disabled }) {
         <div className="family-invite">
           <label className="checkbox">
             <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
-            ได้รับความยินยอมจากผู้ป่วยหรือผู้มีอำนาจแทนแล้ว ให้ญาติคนนี้ดูสรุปการดูแลผ่าน LINE
+            ได้รับความยินยอมจากผู้รับบริการหรือผู้มีอำนาจแทนแล้ว ให้ญาติคนนี้ดูสรุปการดูแลผ่าน LINE
           </label>
           <button className="btn tiny primary" type="button" disabled={!consent || busy} onClick={createInvite}>
             {busy ? 'กำลังออกรหัส…' : 'เชิญญาติเข้า LINE'}

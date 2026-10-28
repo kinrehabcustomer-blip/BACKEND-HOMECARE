@@ -4,6 +4,7 @@ import { serviceName } from '../components/MyCaseModal.jsx';
 import PageRefresh, { RefreshButton, useUpdatedAt } from '../components/PageRefresh.jsx';
 import { VISIT_STATE_LABELS, PAY_STATUS_LABELS, formatBaht, formatDate, timeText, durationText } from '../labels.js';
 import { thisMonth } from '../lib/attendanceUi.js';
+import { caseCode } from '../lib/patientCode.js';
 
 /**
  * การมาทำงาน + ค่าตอบแทนของพนักงานภาคสนามเอง
@@ -146,7 +147,7 @@ export default function MyAttendancePage() {
                           <li key={c.case_id}>
                             <span>
                               {c.client_name ?? c.case_title ?? 'เคสที่ถูกลบแล้ว'}
-                              <span className="cell-sub mono">{c.case_id}</span>
+                              <span className="cell-sub mono">{caseCode(c.case_id)}</span>
                             </span>
                             <span>
                               {formatBaht(c.amount)}
@@ -175,7 +176,7 @@ export default function MyAttendancePage() {
                   <div>
                     <strong>{c.client_name}</strong>
                     <p className="muted">
-                      <span className="mono">{c.case_id}</span>
+                      <span className="mono">{caseCode(c.case_id)}</span>
                       {' · '}{serviceName(c)}
                       {' · '}{c.shifts} กะ
                       {c.closed_at && ` · ปิดเมื่อ ${formatDate(c.closed_at)}`}

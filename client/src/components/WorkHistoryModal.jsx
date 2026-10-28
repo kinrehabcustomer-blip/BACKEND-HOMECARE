@@ -3,6 +3,7 @@ import CaseModal from './CaseModal.jsx';
 import { useSheetSwipe } from '../lib/sheetSwipe.js';
 import { useScrollLock } from '../lib/scrollLock.js';
 import { SERVICE_KIND_LABELS, serviceKindOf, CASE_STATUS_LABELS, formatBaht, formatDate } from '../labels.js';
+import { caseCode } from '../lib/patientCode.js';
 
 /**
  * หน้าต่างประวัติการทำงานฉบับเต็มของพนักงานหนึ่งคน — ตารางแบบเดียวกับหน้าเคส
@@ -86,7 +87,7 @@ export default function WorkHistoryModal({ employeeName, cases = [], onClose }) 
                         }
                       }}
                     >
-                      <td className="mono link">{c.case_id}</td>
+                      <td className="mono link">{caseCode(c.case_id)}</td>
                       <td>
                         {c.title}
                         <span className="cell-sub">{c.client_name}</span>

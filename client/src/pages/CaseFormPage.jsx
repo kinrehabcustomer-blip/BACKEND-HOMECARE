@@ -10,8 +10,7 @@ import {
 import LineIcon from '../components/LineIcon.jsx';
 import StaffPicker from '../components/StaffPicker.jsx';
 import PatientCodeInput from '../components/PatientCodeInput.jsx';
-import YearCodeInput from '../components/YearCodeInput.jsx';
-import { isPatientCode, isCaseCode } from '../lib/patientCode.js';
+import { isPatientCode, caseCode } from '../lib/patientCode.js';
 import { nextRoundDates, endDateFor } from '../lib/caseRounds.js';
 import { useCanSeeStaffPay } from '../auth.jsx';
 import { useScrollLock } from '../lib/scrollLock.js';
@@ -21,8 +20,6 @@ const TIERS = ['CG', 'NA', 'PN', 'RN'];
 const CATEGORY_LABELS = { daily: 'รายวัน', weekly: 'รายสัปดาห์', monthly: 'รายเดือน' };
 
 const BLANK = {
-  // รหัสเคส VN + ปี พ.ศ. 2 หลัก + เลข 7 หลัก (กรอกเอง) — ตอนแก้: ว่าง = คงรหัสเดิม
-  case_code: '',
   customer_id: '',
   patient_id: '',
   service_kind: '',
@@ -30,9 +27,9 @@ const BLANK = {
   pkg_english: false, // [Homecare] พนักงานสื่อสารภาษาอังกฤษ — บวกค่าภาษาเข้า fee
   physio_package_id: '', // [กายภาพ]
 
-  // ตัวตนผู้ป่วย (มาจากแฟ้ม patient / หรือกรอกเพื่อสร้างแฟ้มใหม่) — client_name/gender/age/medical_history คัดลอกเป็น snapshot ในเคส
+  // ตัวตนผู้รับบริการ (มาจากแฟ้ม patient / หรือกรอกเพื่อสร้างแฟ้มใหม่) — client_name/gender/age/medical_history คัดลอกเป็น snapshot ในเคส
   client_name: '', patient_gender: '', patient_age: '', medical_history: '',
-  // เฉพาะตอนสร้างผู้ป่วยใหม่ — เก็บที่แฟ้มผู้ป่วย ไม่ใช่คอลัมน์ของเคส (ถูกตัดออกก่อนบันทึกเคส)
+  // เฉพาะตอนสร้างผู้รับบริการใหม่ — เก็บที่แฟ้มผู้รับบริการ ไม่ใช่คอลัมน์ของเคส (ถูกตัดออกก่อนบันทึกเคส)
   weight_kg: '', height_cm: '', allergies: '', food_allergies: '',
 
   // การประเมิน/อาการครั้งนี้ (ข้อมูลของเคส เปลี่ยนได้ทุกรอบ)
@@ -48,14 +45,14 @@ const BLANK = {
   start_date: '', end_date: '', fee: '', staff_pay: '', note: '',
   // อุปกรณ์เสริมที่คิดเงินเพิ่ม [{ name, quantity, unit_price }] — บวกเข้ายอดใบแจ้งหนี้ ไม่รวมในค่าบริการ
   addons: [],
-  // รหัสผู้ป่วย (KN…) ของแฟ้มที่จะสร้างใหม่ — ไม่ใช่คอลัมน์ของเคส (ถูกตัดออกก่อนบันทึกเคส)
+  // รหัสผู้รับบริการ (KN…) ของแฟ้มที่จะสร้างใหม่ — ไม่ใช่คอลัมน์ของเคส (ถูกตัดออกก่อนบันทึกเคส)
   patient_code: '',
   assigned_to: '',
 };
 
 /* ชื่อแทนของเคสที่เปิดโดยรู้แค่ผู้ว่าจ้าง — ต้องตรงกับ PATIENT_PENDING ใน server/src/cases/schema.js
    โหลดเคสมาแก้แล้วแปลงกลับเป็นช่องว่าง ให้กรอกชื่อจริงทับได้เลย ไม่ต้องลบคำนี้ออกเอง */
-const PATIENT_PENDING = 'ยังไม่ระบุผู้ป่วย';
+const PATIENT_PENDING = 'ยังไม่ระบุผู้รับบริการ';
 
 const BLANK_ADDON = { name: '', quantity: '1', unit_price: '' };
 
@@ -138,7 +135,7 @@ export default function CaseFormPage() {
   const [query, setQuery] = useState('');
   const [matches, setMatches] = useState([]);
   const [pickedPatient, setPickedPatient] = useState(null);
-  /* ผู้ว่าจ้างเป็นอะไรกับผู้ป่วย — เก็บที่แฟ้มผู้ป่วย (employer_relation) ไม่ใช่ที่เคส จึงแยกจาก form
+  /* ผู้ว่าจ้างเป็นอะไรกับผู้รับบริการ — เก็บที่แฟ้มผู้รับบริการ (employer_relation) ไม่ใช่ที่เคส จึงแยกจาก form
      relationSaved = ค่าในแฟ้มตอนนี้ — แก้แล้วค่อยบันทึกกลับแฟ้มหลังบันทึกเคส */
   const [relation, setRelation] = useState('');
   const relationSaved = useRef('');
@@ -149,7 +146,7 @@ export default function CaseFormPage() {
   // ผู้รับการดูแลที่อยู่ใต้ผู้ว่าจ้างที่เลือกไว้ — เสนอให้เลือกเลยโดยไม่ต้องพิมพ์ค้นหา
   const [ownPatients, setOwnPatients] = useState([]);
 
-  // ผู้ว่าจ้าง (customer) — เลือกได้ไม่บังคับ; ถ้าเลือกผู้ป่วยที่ผูกลูกค้าไว้แล้วจะมาเอง
+  // ผู้ว่าจ้าง (customer) — เลือกได้ไม่บังคับ; ถ้าเลือกผู้รับบริการที่ผูกลูกค้าไว้แล้วจะมาเอง
   const [payer, setPayer] = useState(null);
   const [payerQuery, setPayerQuery] = useState('');
   const [payerMatches, setPayerMatches] = useState([]);
@@ -357,8 +354,8 @@ export default function CaseFormPage() {
   }
 
   /**
-   * เลือกผู้ป่วย -> ผูก patient_id + คัดลอกข้อมูลตัวตน (snapshot) เข้าเคส และดึงผู้ว่าจ้างที่ผูกไว้มาแสดง
-   * "คัดลอก" ไม่ใช่ "อ้างอิง" — เคสที่ปิดแล้วคงข้อมูล ณ วันให้บริการไว้แม้แฟ้มผู้ป่วยจะแก้ทีหลัง
+   * เลือกผู้รับบริการ -> ผูก patient_id + คัดลอกข้อมูลตัวตน (snapshot) เข้าเคส และดึงผู้ว่าจ้างที่ผูกไว้มาแสดง
+   * "คัดลอก" ไม่ใช่ "อ้างอิง" — เคสที่ปิดแล้วคงข้อมูล ณ วันให้บริการไว้แม้แฟ้มผู้รับบริการจะแก้ทีหลัง
    */
   function pickPatient(p) {
     setPickedPatient(p);
@@ -377,7 +374,7 @@ export default function CaseFormPage() {
     }));
   }
 
-  /** เลิกเลือกผู้ป่วย -> กลับไปโหมดค้นหา/สร้างใหม่ (ข้อมูลที่เติมไว้ไม่ล้าง เผื่อสร้างแฟ้มใหม่จากข้อมูลเดิม) */
+  /** เลิกเลือกผู้รับบริการ -> กลับไปโหมดค้นหา/สร้างใหม่ (ข้อมูลที่เติมไว้ไม่ล้าง เผื่อสร้างแฟ้มใหม่จากข้อมูลเดิม) */
   function unpickPatient() {
     setPickedPatient(null);
     relationSaved.current = ''; // ค่าที่พิมพ์ค้างไว้ ใช้กับแฟ้มใหม่ต่อได้
@@ -397,7 +394,7 @@ export default function CaseFormPage() {
     setForm((prev) => ({ ...prev, customer_id: '' }));
   }
 
-  // ค้นหาผู้ป่วยที่ server — โชว์เฉพาะเมื่อยังไม่ได้เลือกและมีการพิมพ์
+  // ค้นหาผู้รับบริการที่ server — โชว์เฉพาะเมื่อยังไม่ได้เลือกและมีการพิมพ์
   useEffect(() => {
     if (form.patient_id || !query.trim()) {
       setMatches([]);
@@ -433,7 +430,7 @@ export default function CaseFormPage() {
       .catch(() => setOwnPatients([]));
   }, [isEdit, form.customer_id, form.patient_id]);
 
-  // ค้นหาผู้ว่าจ้าง (customer) สำหรับผูกกับผู้ป่วยใหม่
+  // ค้นหาผู้ว่าจ้าง (customer) สำหรับผูกกับผู้รับบริการใหม่
   useEffect(() => {
     if (form.customer_id || !payerQuery.trim()) {
       setPayerMatches([]);
@@ -446,7 +443,7 @@ export default function CaseFormPage() {
   }, [payerQuery, form.customer_id]);
 
   /* ---------- ต่อเคส (?renew=CASE-0005) ----------
-     คัดลอกทุกอย่างจากรอบก่อนมาเป็นค่าเริ่มต้น: ผู้ว่าจ้าง ผู้ป่วย บริการ ค่าบริการ อุปกรณ์เสริม ที่อยู่ พิกัด พนักงาน
+     คัดลอกทุกอย่างจากรอบก่อนมาเป็นค่าเริ่มต้น: ผู้ว่าจ้าง ผู้รับบริการ บริการ ค่าบริการ อุปกรณ์เสริม ที่อยู่ พิกัด พนักงาน
      แก้ได้ทุกช่องก่อนบันทึก (ลูกค้าต่อแล้วเปลี่ยนแพ็คเกจ/ราคาได้) · ทีมดูแลรอบก่อน server ใส่ให้เองตอนบันทึก */
   const renewFrom = !isEdit ? searchParams.get('renew') : null;
   const [renewSource, setRenewSource] = useState(null);
@@ -472,7 +469,7 @@ export default function CaseFormPage() {
         initial.current = JSON.stringify(filled);
         setRenewSource(c);
         if (c.customer_id) setPayer({ customer_id: c.customer_id, name: c.customer_name });
-        // แฟ้มผู้ป่วยเดิม — โชว์เป็นผู้ป่วยที่เลือกอยู่ (ไม่ทับข้อมูลในฟอร์มด้วยข้อมูลแฟ้ม รอบก่อนอาจแก้ไว้แล้ว)
+        // แฟ้มผู้รับบริการเดิม — โชว์เป็นผู้รับบริการที่เลือกอยู่ (ไม่ทับข้อมูลในฟอร์มด้วยข้อมูลแฟ้ม รอบก่อนอาจแก้ไว้แล้ว)
         if (c.patient_id) {
           api.getPatient(c.patient_id).then((p) => { setPickedPatient(p); loadRelation(p); }).catch(() => {});
         }
@@ -499,7 +496,7 @@ export default function CaseFormPage() {
     });
   }, [renewSource, matrix]);
 
-  // เปิดเคสจากหน้าผู้รับการดูแล (?patient_id=PAT-0001) -> เลือกผู้ป่วยรายนั้นให้เลย
+  // เปิดเคสจากหน้าผู้รับการดูแล (?patient_id=PAT-0001) -> เลือกผู้รับบริการรายนั้นให้เลย
   useEffect(() => {
     if (isEdit) return;
     const pid = searchParams.get('patient_id');
@@ -507,11 +504,11 @@ export default function CaseFormPage() {
     api.getPatient(pid).then((p) => pickPatient(p)).catch(() => {});
   }, [isEdit]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // เปิดเคสจากหน้าลูกค้า (?customer_id=CUS-0001) -> รู้ผู้ว่าจ้างแล้ว เหลือเลือก/สร้างผู้ป่วย
+  // เปิดเคสจากหน้าลูกค้า (?customer_id=CUS-0001) -> รู้ผู้ว่าจ้างแล้ว เหลือเลือก/สร้างผู้รับบริการ
   useEffect(() => {
     if (isEdit) return;
     const cid = searchParams.get('customer_id');
-    if (!cid || searchParams.get('patient_id')) return; // ถ้ามาจากผู้ป่วย ผู้ว่าจ้างมาเองแล้ว
+    if (!cid || searchParams.get('patient_id')) return; // ถ้ามาจากผู้รับบริการ ผู้ว่าจ้างมาเองแล้ว
     api.getCustomer(cid).then((c) => {
       setPayer(c);
       setForm((prev) => ({ ...prev, customer_id: c.customer_id }));
@@ -547,7 +544,6 @@ export default function CaseFormPage() {
         const filled = { ...BLANK };
         for (const key of Object.keys(BLANK)) filled[key] = c[key] ?? '';
         if (filled.client_name === PATIENT_PENDING) filled.client_name = '';
-        filled.case_code = isCaseCode(c.case_id) ? c.case_id : ''; // รหัสเดิมแบบ CASE-xxxx = ช่องว่าง (กรอก VN เพื่อเปลี่ยน)
         filled.addons = (c.addons ?? []).map((a) => ({
           name: a.name, quantity: String(a.quantity), unit_price: String(a.unit_price),
         }));
@@ -599,7 +595,7 @@ export default function CaseFormPage() {
     /* name ต้องมี ไม่ใช่แค่ของประดับ — ตอน server ทักว่าช่องไหนผิด โค้ดด้านล่างเลื่อนจอไปหาช่องนั้น
        ด้วย querySelector('[name="..."]') ฟอร์มนี้เคยไม่ใส่ให้เลยหาไม่เจอสักช่อง คนกรอกจึงเห็นแต่
        ข้อความแดงบนสุดแต่ไม่รู้ว่าต้องแก้ตรงไหน ทั้งที่ฟอร์มยาว 2,300px กว่า
-       (ฟอร์มลูกค้า/ผู้ป่วย/พนักงานเขียน name ใส่ทีละช่องเอง จึงไม่เจอปัญหานี้) */
+       (ฟอร์มลูกค้า/ผู้รับบริการ/พนักงานเขียน name ใส่ทีละช่องเอง จึงไม่เจอปัญหานี้) */
     name: key,
     value: key.endsWith('phone') ? formatPhoneInput(form[key]) : form[key],
     'data-empty': form[key] === '' ? '' : undefined, // ช่องวันที่ว่าง → ตัวอักษร วว/ดด/ปปปป สีเทา (ดู index.css)
@@ -611,7 +607,7 @@ export default function CaseFormPage() {
     },
   });
 
-  // มีผู้ว่าจ้างแล้ว (เลือกจากระบบ หรือเพิ่มใหม่) = เปิดเคสได้โดยยังไม่ต้องรู้ชื่อผู้ป่วย
+  // มีผู้ว่าจ้างแล้ว (เลือกจากระบบ หรือเพิ่มใหม่) = เปิดเคสได้โดยยังไม่ต้องรู้ชื่อผู้รับบริการ
   const payerKnown = Boolean(form.customer_id || newPayer);
 
   /* ---------- อุปกรณ์เสริม: เพิ่ม/แก้/ลบทีละแถว ---------- */
@@ -720,19 +716,19 @@ export default function CaseFormPage() {
     setLocError(null);
   };
 
-  /** error รายช่องจาก API อื่น (ผู้ป่วย/ผู้ว่าจ้าง) ใช้ชื่อช่องของตารางนั้น — แปลงเป็นชื่อช่องในฟอร์มนี้ ให้ขึ้นใต้ช่องได้ */
+  /** error รายช่องจาก API อื่น (ผู้รับบริการ/ผู้ว่าจ้าง) ใช้ชื่อช่องของตารางนั้น — แปลงเป็นชื่อช่องในฟอร์มนี้ ให้ขึ้นใต้ช่องได้ */
   const remapFields = (map) => (err) => {
     if (err.fields) err.fields = err.fields.map((f) => ({ ...f, field: map[f.field] ?? f.field }));
     throw err;
   };
 
   /**
-   * ยังไม่ได้เลือกผู้ป่วย = ผู้ป่วยรายใหม่ -> สร้างแฟ้ม (รหัส KN ที่กรอก) จากข้อมูลที่กรอก แล้วผูกกับผู้ว่าจ้าง (ถ้ามี)
-   * เก็บ patient_id กลับเข้าฟอร์ม เผื่อบันทึกเคสพลาดแล้วกดใหม่ จะไม่สร้างผู้ป่วยซ้ำ
+   * ยังไม่ได้เลือกผู้รับบริการ = ผู้รับบริการรายใหม่ -> สร้างแฟ้ม (รหัส KN ที่กรอก) จากข้อมูลที่กรอก แล้วผูกกับผู้ว่าจ้าง (ถ้ามี)
+   * เก็บ patient_id กลับเข้าฟอร์ม เผื่อบันทึกเคสพลาดแล้วกดใหม่ จะไม่สร้างผู้รับบริการซ้ำ
    */
   async function ensurePatient(payload) {
     if (payload.patient_id) return payload.patient_id;
-    // รู้แค่ผู้ว่าจ้าง — ยังไม่มีชื่อให้สร้างแฟ้ม (server เติม "ยังไม่ระบุผู้ป่วย" ให้เคส)
+    // รู้แค่ผู้ว่าจ้าง — ยังไม่มีชื่อให้สร้างแฟ้ม (server เติม "ยังไม่ระบุผู้รับบริการ" ให้เคส)
     if (!payload.client_name) return null;
 
     const patient = await api.createPatient({
@@ -768,14 +764,14 @@ export default function CaseFormPage() {
 
   /** บันทึกผู้ว่าจ้างรายใหม่เข้าตารางลูกค้า แล้วสลับเป็น "เลือกแล้ว" ทันที
       ถ้าขั้นต่อไปล้ม (เช่น เปิดเคสไม่ผ่าน) กดบันทึกซ้ำจะใช้ลูกค้าเดิม ไม่สร้างซ้ำ */
-  /** ความสัมพันธ์ที่แก้ในฟอร์มนี้ → บันทึกกลับแฟ้มผู้ป่วย (เคสบันทึกไปแล้ว พลาดตรงนี้แค่เตือน ไม่ล้มทั้งหน้า) */
+  /** ความสัมพันธ์ที่แก้ในฟอร์มนี้ → บันทึกกลับแฟ้มผู้รับบริการ (เคสบันทึกไปแล้ว พลาดตรงนี้แค่เตือน ไม่ล้มทั้งหน้า) */
   async function saveRelation(patientId) {
     if (!patientId || relation.trim() === relationSaved.current) return;
     try {
       await api.updatePatient(patientId, { employer_relation: relation.trim() || null });
       relationSaved.current = relation.trim();
     } catch (err) {
-      toast(`บันทึกเคสแล้ว แต่บันทึกความสัมพันธ์กับผู้ป่วยไม่สำเร็จ: ${err.message}`);
+      toast(`บันทึกเคสแล้ว แต่บันทึกความสัมพันธ์กับผู้รับบริการไม่สำเร็จ: ${err.message}`);
     }
   }
 
@@ -797,11 +793,11 @@ export default function CaseFormPage() {
     setConfirmingService(false);
 
     // กรอกเบอร์ผู้ว่าจ้างไว้แต่ไม่มีชื่อ — บันทึกผู้ว่าจ้างที่ไม่มีชื่อไม่ได้ ทักให้กรอกชื่อ ไม่ใช่ทิ้งเบอร์ไปเงียบๆ
-    /* ความสัมพันธ์เก็บที่แฟ้มผู้ป่วย — กรอกได้ทุกเมื่อ (ช่องอยู่ก่อนส่วนผู้ป่วย) แต่ถ้าบันทึกโดยยังไม่มีผู้ป่วยเลย
-       ค่านี้ไม่มีที่ให้เก็บ จะหายไปเงียบๆ — ทักให้กรอกชื่อผู้ป่วยก่อน หรือเว้นช่องนี้ไว้ */
+    /* ความสัมพันธ์เก็บที่แฟ้มผู้รับบริการ — กรอกได้ทุกเมื่อ (ช่องอยู่ก่อนส่วนผู้รับบริการ) แต่ถ้าบันทึกโดยยังไม่มีผู้รับบริการเลย
+       ค่านี้ไม่มีที่ให้เก็บ จะหายไปเงียบๆ — ทักให้กรอกชื่อผู้รับบริการก่อน หรือเว้นช่องนี้ไว้ */
     if (relation.trim() && !form.patient_id && !form.client_name.trim()) {
-      setError('กรอกความสัมพันธ์กับผู้ป่วยไว้ แต่ยังไม่มีชื่อผู้ป่วย — กรอกชื่อผู้ป่วยก่อน หรือเว้นช่องความสัมพันธ์ไว้');
-      setFieldErrors((prev) => ({ ...prev, employer_relation: 'ต้องมีชื่อผู้ป่วยก่อน จึงจะบันทึกความสัมพันธ์ได้' }));
+      setError('กรอกความสัมพันธ์กับผู้รับบริการไว้ แต่ยังไม่มีชื่อผู้รับบริการ — กรอกชื่อผู้รับบริการก่อน หรือเว้นช่องความสัมพันธ์ไว้');
+      setFieldErrors((prev) => ({ ...prev, employer_relation: 'ต้องมีชื่อผู้รับบริการก่อน จึงจะบันทึกความสัมพันธ์ได้' }));
       formEl.current?.querySelector('[name="employer_relation"]')?.scrollIntoView({ block: 'center', behavior: 'smooth' });
       return;
     }
@@ -813,28 +809,19 @@ export default function CaseFormPage() {
       return;
     }
 
-    // ต้องรู้อย่างน้อยหนึ่งคน: ผู้ป่วย หรือผู้ว่าจ้าง (เคสที่ไม่มีทั้งคู่ไม่รู้ว่าจะดูแลใคร/เก็บเงินใคร)
+    // ต้องรู้อย่างน้อยหนึ่งคน: ผู้รับบริการ หรือผู้ว่าจ้าง (เคสที่ไม่มีทั้งคู่ไม่รู้ว่าจะดูแลใคร/เก็บเงินใคร)
     if (!form.client_name.trim() && !form.customer_id && !newPayer?.name.trim()) {
-      setError('กรุณากรอกชื่อผู้ป่วย หรือระบุผู้ว่าจ้างอย่างน้อยหนึ่งอย่าง');
-      setFieldErrors((prev) => ({ ...prev, client_name: 'กรอกชื่อผู้ป่วย หรือเลือก/เพิ่มผู้ว่าจ้างด้านบน' }));
+      setError('กรุณากรอกชื่อผู้รับบริการ หรือระบุผู้ว่าจ้างอย่างน้อยหนึ่งอย่าง');
+      setFieldErrors((prev) => ({ ...prev, client_name: 'กรอกชื่อผู้รับบริการ หรือเลือก/เพิ่มผู้ว่าจ้างด้านบน' }));
       formEl.current?.querySelector('[name="client_name"]')?.scrollIntoView({ block: 'center', behavior: 'smooth' });
       return;
     }
 
-    /* รหัสเคส VN เป็นเลขที่เจ้าหน้าที่กรอก (ระบบออกเองไม่ได้) — เปิดเคส/ต่อเคสต้องกรอกให้ครบ
-       หน้าแก้: ว่าง/กรอกไม่ครบ = คงรหัสเดิม */
-    if (!isEdit && !isCaseCode(form.case_code)) {
-      setError('กรุณากรอกรหัสเคส (VN) ให้ครบ');
-      setFieldErrors((prev) => ({ ...prev, case_code: 'กรอกให้ครบ: VN + ปี พ.ศ. 2 หลัก + เลข 7 หลัก' }));
-      formEl.current?.querySelector('[name="case_code"]')?.scrollIntoView({ block: 'center', behavior: 'smooth' });
-      return;
-    }
-
-    /* ต้องสร้างแฟ้มผู้ป่วยใหม่ = ต้องมีรหัส KN ครบ (เปิดเคสใหม่ที่ไม่ได้เลือกผู้ป่วยเดิม
-       หรือแก้เคสที่เพิ่งใส่ชื่อผู้ป่วยให้ครั้งแรก) — ทักก่อนยิง จะได้ไม่สร้างผู้ว่าจ้างไปครึ่งทาง */
+    /* ต้องสร้างแฟ้มผู้รับบริการใหม่ = ต้องมีรหัส KN ครบ (เปิดเคสใหม่ที่ไม่ได้เลือกผู้รับบริการเดิม
+       หรือแก้เคสที่เพิ่งใส่ชื่อผู้รับบริการให้ครั้งแรก) — ทักก่อนยิง จะได้ไม่สร้างผู้ว่าจ้างไปครึ่งทาง */
     const needsCode = form.client_name.trim() && !form.patient_id && (!isEdit || !original?.client_name);
     if (needsCode && !isPatientCode(form.patient_code)) {
-      setError('กรุณากรอกรหัสผู้ป่วย (KN) สำหรับแฟ้มผู้ป่วยใหม่');
+      setError('กรุณากรอกรหัสผู้รับบริการ (KN) สำหรับแฟ้มผู้รับบริการใหม่');
       setFieldErrors((prev) => ({ ...prev, patient_code: 'กรอกให้ครบ: KN + ปี พ.ศ. 2 หลัก + เลข 7 หลัก' }));
       formEl.current?.querySelector('[name="patient_code"]')?.scrollIntoView({ block: 'center', behavior: 'smooth' });
       return;
@@ -847,24 +834,21 @@ export default function CaseFormPage() {
       payload.customer_id = await ensurePayer(payload);
       // รหัสแฟ้มใหม่ส่งไปที่ /patients (เปิดเคส) หรือแนบไปกับการแก้เคส (สร้างแฟ้มย้อนหลัง) เท่านั้น
       if (!(isEdit && needsCode)) delete payload.patient_code;
-      // รหัสเคส: เปิดเคส = บังคับส่ง · แก้เคส = ส่งเฉพาะตอนกรอกรหัสใหม่ที่ต่างจากเดิม (= เปลี่ยนรหัส)
-      delete payload.case_code;
-      if (!isEdit) payload.case_id = form.case_code;
-      else if (isCaseCode(form.case_code) && form.case_code !== id) payload.case_id = form.case_code;
+      // รหัสเคสไม่ต้องส่ง — server ตั้งจากรหัสผู้รับบริการ (KN) ของเคสเอง
 
-      // เคสใหม่ต้องผูกแฟ้มผู้ป่วยเสมอ — เลือกไว้แล้วใช้เลย ไม่งั้นสร้างใหม่จากข้อมูลที่กรอก
+      // เคสใหม่ต้องผูกแฟ้มผู้รับบริการเสมอ — เลือกไว้แล้วใช้เลย ไม่งั้นสร้างใหม่จากข้อมูลที่กรอก
       if (!isEdit) payload.patient_id = await ensurePatient(payload);
 
-      // ไม่มีช่องชื่อเคสแล้ว — ตั้งชื่ออัตโนมัติจากบริการที่เลือก + ชื่อผู้ป่วย (ใช้สำหรับค้นหา)
+      // ไม่มีช่องชื่อเคสแล้ว — ตั้งชื่ออัตโนมัติจากบริการที่เลือก + ชื่อผู้รับบริการ (ใช้สำหรับค้นหา)
       const gradeName = needGrade ? matrix?.grades.find((g) => g.grade_id === selGradeId)?.name : null;
       const serviceParts = isPhysio
         ? [selectedPhysio?.name]
         : [selectedFormat?.name, gradeName];
-      // ยังไม่รู้ชื่อผู้ป่วย = ใช้ชื่อผู้ว่าจ้างต่อท้ายแทน เคสจะได้ค้นเจอด้วยชื่อคนที่โทรมาจอง
+      // ยังไม่รู้ชื่อผู้รับบริการ = ใช้ชื่อผู้ว่าจ้างต่อท้ายแทน เคสจะได้ค้นเจอด้วยชื่อคนที่โทรมาจอง
       const who = payload.client_name || payer?.name || newPayer?.name?.trim() || null;
       payload.title = [...serviceParts, who].filter(Boolean).join(' · ') || who;
 
-      // ฟิลด์เหล่านี้ย้ายไปเก็บที่แฟ้มผู้ป่วยแล้ว ไม่เก็บซ้ำในเคส (allergies/relation ไม่ใช่คอลัมน์ของเคสอยู่แล้ว)
+      // ฟิลด์เหล่านี้ย้ายไปเก็บที่แฟ้มผู้รับบริการแล้ว ไม่เก็บซ้ำในเคส (allergies/relation ไม่ใช่คอลัมน์ของเคสอยู่แล้ว)
       delete payload.allergies;
       delete payload.food_allergies;
       delete payload.weight_kg;
@@ -891,7 +875,7 @@ export default function CaseFormPage() {
           updated.invoice_sync_failed
             ? "บันทึกเคสแล้ว แต่ใบร่างยังไม่อัปเดต กด 'รีเฟรชใบ' ในหน้าใบแจ้งหนี้ค่ะ"
             : updated.case_id !== id
-            ? `บันทึกแล้ว · เปลี่ยนรหัสเคสเป็น ${updated.case_id}`
+            ? `บันทึกแล้ว · เปลี่ยนรหัสเคสเป็น ${caseCode(updated.case_id)}`
             : 'บันทึกการแก้ไขแล้ว',
         );
         navigate(`/cases?open=${updated.case_id}`); // เปลี่ยนรหัสแล้วเคสเดิมไม่มีอยู่ที่รหัสเก่า
@@ -901,10 +885,10 @@ export default function CaseFormPage() {
         await saveRelation(created.patient_id);
         toast(
           created.invoice_draft_created === false
-            ? `เปิดเคส ${created.case_id} แล้ว แต่ใบร่างยังไม่เกิด กรุณาไปหน้าใบแจ้งหนี้แล้วกด "สร้างใบร่าง" ค่ะ`
+            ? `เปิดเคส ${caseCode(created.case_id)} แล้ว แต่ใบร่างยังไม่เกิด กรุณาไปหน้าใบแจ้งหนี้แล้วกด "สร้างใบร่าง" ค่ะ`
             : renewFrom
-            ? `ต่อเคสเป็น ${created.case_id} (รอบที่ ${created.round_no}) แล้ว · ระบบออกใบแจ้งหนี้ (ร่าง) ของรอบนี้ให้เรียบร้อย`
-            : `เปิดเคส ${created.case_id} แล้ว · ระบบออกใบแจ้งหนี้ (ร่าง) ให้เรียบร้อย`,
+            ? `ต่อเคสเป็น ${caseCode(created.case_id)} (รอบที่ ${created.round_no}) แล้ว · ระบบออกใบแจ้งหนี้ (ร่าง) ของรอบนี้ให้เรียบร้อย`
+            : `เปิดเคส ${caseCode(created.case_id)} แล้ว · ระบบออกใบแจ้งหนี้ (ร่าง) ให้เรียบร้อย`,
         );
         // เด้งกลับรายการพร้อมเปิดเคสที่เพิ่งสร้าง — เห็นผลทันทีและกดจับคู่พนักงานต่อได้เลย
         navigate(`/cases?open=${created.case_id}`);
@@ -926,12 +910,12 @@ export default function CaseFormPage() {
     <>
       <header className="page-head">
         <div>
-          <h1>{isEdit ? `แก้ไขเคส ${id}` : renewFrom ? `ต่อเคส ${renewFrom}` : 'เปิดเคสใหม่'}</h1>
-          {!isEdit && !renewFrom && <p className="muted">กรอกรหัสเคส (VN) · ระบบออกใบแจ้งหนี้ (ร่าง) ให้หลังบันทึก</p>}
+          <h1>{isEdit ? `แก้ไขเคส ${caseCode(id)}` : renewFrom ? `ต่อเคส ${caseCode(renewFrom)}` : 'เปิดเคสใหม่'}</h1>
+          {!isEdit && !renewFrom && <p className="muted">รหัสเคส = รหัสผู้รับบริการ (KN) · ระบบออกใบแจ้งหนี้ (ร่าง) ให้หลังบันทึก</p>}
           {renewFrom && (
             <p className="muted">
               รอบที่ {(renewSource?.round_no ?? 1) + 1} — คัดลอกข้อมูลจากรอบก่อนมาให้แล้ว ตรวจ/แก้ได้ทุกช่องก่อนบันทึก
-              {' '}· กรอกรหัสเคส (VN) ของรอบนี้ แล้วระบบออกใบแจ้งหนี้ (ร่าง) ให้ ทีมดูแลรอบก่อนตามมาด้วย
+              {' '}· รหัสเคสใช้รหัสผู้รับบริการเดิม ระบบออกใบแจ้งหนี้ (ร่าง) ให้ ทีมดูแลรอบก่อนตามมาด้วย
             </p>
           )}
         </div>
@@ -958,7 +942,7 @@ export default function CaseFormPage() {
 
       <form className="card form" ref={formEl} onSubmit={handleSubmit}>
         {/* ผู้ว่าจ้าง (ผู้จ่ายเงิน) อยู่บนสุด — ต้องเห็นตั้งแต่แรกว่าเคสนี้ผูกกับลูกค้ารายไหน
-            เลือกผู้ป่วยที่ผูกลูกค้าไว้แล้ว ผู้ว่าจ้างจะเด้งมาที่นี่เอง
+            เลือกผู้รับบริการที่ผูกลูกค้าไว้แล้ว ผู้ว่าจ้างจะเด้งมาที่นี่เอง
             โหมดแก้ไข: ถ้าเคสยังไม่มีผู้ว่าจ้าง ให้ค้นหา/เพิ่มลูกค้าเจ้าของเคสได้ที่นี่ (บันทึกแล้วใบแจ้งหนี้จะตามให้เอง) */}
         <h2>ผู้ว่าจ้าง</h2>
         <div className="customer-picker">
@@ -1023,10 +1007,10 @@ export default function CaseFormPage() {
               </label>
             </div>
           )}
-          {/* เก็บที่แฟ้มผู้ป่วย — ยังไม่มีผู้ป่วย (รู้แค่ผู้ว่าจ้าง) ก็ยังไม่มีที่ให้เก็บ */}
+          {/* เก็บที่แฟ้มผู้รับบริการ — ยังไม่มีผู้รับบริการ (รู้แค่ผู้ว่าจ้าง) ก็ยังไม่มีที่ให้เก็บ */}
           <div className="grid payer-grid payer-relation">
             <label>
-              ความสัมพันธ์กับผู้ป่วย
+              ความสัมพันธ์กับผู้รับบริการ
               <input
                 name="employer_relation"
                 value={relation}
@@ -1043,25 +1027,6 @@ export default function CaseFormPage() {
 
         <h2>รายละเอียดเคส</h2>
         <div className="grid">
-          <label>รหัสเคส (VN) {isEdit ? '' : '*'}
-            <YearCodeInput
-              prefix="VN"
-              name="case_code"
-              value={form.case_code}
-              invalid={Boolean(fieldErrors.case_code || fieldErrors.case_id)}
-              checker={(code) => (code === id ? Promise.resolve(null) : api.checkCaseId(code, isEdit ? id : null))}
-              takenLabel="รหัสนี้ถูกใช้กับเคสอื่นแล้ว"
-              onChange={(code) => {
-                setForm((prev) => ({ ...prev, case_code: code }));
-                setFieldErrors((prev) => (prev.case_code || prev.case_id ? { ...prev, case_code: undefined, case_id: undefined } : prev));
-              }}
-            />
-            {isEdit && !isCaseCode(id) && (
-              <span className="form-hint muted">รหัสเดิม {id} — กรอกรหัส VN เพื่อเปลี่ยน (กะ ใบแจ้งหนี้ และค่าจ้างที่ผูกอยู่ตามไปเอง)</span>
-            )}
-            {fieldError('case_code')}
-            {fieldError('case_id')}
-          </label>
           {/* ไม่มีช่องประเภทเคสแล้ว — server ตั้งให้เองจากประเภทบริการ (ใช้เลือกแบบบันทึกของพนักงาน) */}
           {serviceLocked && (
             <p className="form-hint muted span-2">
@@ -1306,29 +1271,29 @@ export default function CaseFormPage() {
         <h2>ผู้รับการดูแล</h2>
 
         {isEdit ? (
-          /* แก้ไขเคส: ข้อมูลผู้ป่วยในเคยคือ snapshot ณ วันให้บริการ — แก้ตรงนี้ไม่กระทบแฟ้มผู้ป่วย */
+          /* แก้ไขเคส: ข้อมูลผู้รับบริการในเคยคือ snapshot ณ วันให้บริการ — แก้ตรงนี้ไม่กระทบแฟ้มผู้รับบริการ */
           <>
             {form.patient_id && (
               <p className="notice snapshot-note">
-                ผูกกับแฟ้มผู้ป่วย <Link className="link" to={`/patients/${form.patient_id}`}>{form.patient_id}</Link>
-                {' '}· การแก้ด้านล่างแก้เฉพาะข้อมูลในเคสนี้ (snapshot) ไม่กระทบแฟ้มผู้ป่วย
+                ผูกกับแฟ้มผู้รับบริการ <Link className="link" to={`/patients/${form.patient_id}`}>{form.patient_id}</Link>
+                {' '}· การแก้ด้านล่างแก้เฉพาะข้อมูลในเคสนี้ (snapshot) ไม่กระทบแฟ้มผู้รับบริการ
               </p>
             )}
             {/* เคสที่เปิดตอนรู้แค่ผู้ว่าจ้าง — server สร้างแฟ้มให้เมื่อได้ชื่อ (cases/repo.js → patientForNamedCase) */}
             {!form.patient_id && original && !original.client_name && (
               <p className="notice snapshot-note">
-                เคสนี้ยังไม่มีแฟ้มผู้ป่วย — กรอกชื่อและรหัสผู้ป่วย (KN) แล้วกดบันทึก ระบบจะสร้างแฟ้มผู้รับการดูแล
+                เคสนี้ยังไม่มีแฟ้มผู้รับบริการ — กรอกชื่อและรหัสผู้รับบริการ (KN) แล้วกดบันทึก ระบบจะสร้างแฟ้มผู้รับการดูแล
                 {' '}ผูกกับผู้ว่าจ้างของเคสนี้ให้อัตโนมัติ
               </p>
             )}
             <div className="grid">
-              <label>ชื่อผู้ป่วย {payerKnown ? '(ว่างได้ — ยังไม่ทราบชื่อ)' : '*'}<input {...field('client_name')} />{fieldError('client_name')}</label>
+              <label>ชื่อผู้รับบริการ {payerKnown ? '(ว่างได้ — ยังไม่ทราบชื่อ)' : '*'}<input {...field('client_name')} />{fieldError('client_name')}</label>
               {!form.patient_id && !original?.client_name && (
-                <label>รหัสผู้ป่วย (KN) *
+                <label>รหัสผู้รับบริการ (KN) — ใช้เป็นรหัสเคสด้วย *
                   <PatientCodeInput
                     name="patient_code"
                     checker={(code) => api.checkPatientId(code)}
-                    takenLabel="รหัสนี้ถูกใช้กับผู้ป่วยคนอื่นแล้ว"
+                    takenLabel="รหัสนี้ถูกใช้กับผู้รับบริการคนอื่นแล้ว"
                     value={form.patient_code}
                     invalid={Boolean(fieldErrors.patient_code)}
                     onChange={(code) => {
@@ -1354,7 +1319,7 @@ export default function CaseFormPage() {
             </div>
           </>
         ) : pickedPatient ? (
-          /* เปิดเคสใหม่ + เลือกผู้ป่วยแล้ว: โชว์ข้อมูลแบบอ่านอย่างเดียว (ตัวตนมาจากแฟ้ม ไม่พิมพ์ซ้ำ) */
+          /* เปิดเคสใหม่ + เลือกผู้รับบริการแล้ว: โชว์ข้อมูลแบบอ่านอย่างเดียว (ตัวตนมาจากแฟ้ม ไม่พิมพ์ซ้ำ) */
           <>
             {pickedPatient.allergies && (
               <p className="notice allergy-alert">
@@ -1375,11 +1340,11 @@ export default function CaseFormPage() {
                   {pickedPatient.medical_history && ` · โรคประจำตัว: ${pickedPatient.medical_history}`}
                 </p>
               </div>
-              <button type="button" className="btn" onClick={unpickPatient}>เปลี่ยนผู้ป่วย</button>
+              <button type="button" className="btn" onClick={unpickPatient}>เปลี่ยนผู้รับบริการ</button>
             </div>
           </>
         ) : (
-          /* เปิดเคสใหม่ + ยังไม่เลือก: ค้นหาผู้ป่วยเดิม หรือกรอกเพื่อสร้างแฟ้มใหม่ */
+          /* เปิดเคสใหม่ + ยังไม่เลือก: ค้นหาผู้รับบริการเดิม หรือกรอกเพื่อสร้างแฟ้มใหม่ */
           <>
             <div className="customer-picker">
               <label className="customer-search">
@@ -1435,15 +1400,15 @@ export default function CaseFormPage() {
               )}
             </div>
 
-            <h3>ข้อมูลผู้ป่วยใหม่</h3>
+            <h3>ข้อมูลผู้รับบริการใหม่</h3>
             <div className="grid">
-              <label>ชื่อผู้ป่วย {payerKnown ? '(ว่างได้ — ยังไม่ทราบชื่อ)' : '*'}<input {...field('client_name')} />{fieldError('client_name')}</label>
+              <label>ชื่อผู้รับบริการ {payerKnown ? '(ว่างได้ — ยังไม่ทราบชื่อ)' : '*'}<input {...field('client_name')} />{fieldError('client_name')}</label>
               {!form.patient_id && (
-                <label>รหัสผู้ป่วย (KN) {payerKnown ? '(กรอกเมื่อมีชื่อผู้ป่วย)' : '*'}
+                <label>รหัสผู้รับบริการ (KN) — ใช้เป็นรหัสเคสด้วย {payerKnown ? '(กรอกเมื่อมีชื่อผู้รับบริการ)' : '*'}
                   <PatientCodeInput
                     name="patient_code"
                     checker={(code) => api.checkPatientId(code)}
-                    takenLabel="รหัสนี้ถูกใช้กับผู้ป่วยคนอื่นแล้ว"
+                    takenLabel="รหัสนี้ถูกใช้กับผู้รับบริการคนอื่นแล้ว"
                     value={form.patient_code}
                     invalid={Boolean(fieldErrors.patient_code)}
                     onChange={(code) => {

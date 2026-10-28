@@ -19,6 +19,7 @@ process.env.DATABASE_URL ||= 'postgresql://placeholder/placeholder';
 process.env.JWT_SECRET ||= 'x'.repeat(48);
 
 const { createCaseSchema, updateCaseSchema, adjustVisitSchema, bulkVisitSchema, visitRangeSchema, createReportSchema, hasReportContent, REPORT_CONTENT_FIELDS } = await import('../src/cases/schema.js');
+const { caseCode, isCaseOfPatient } = await import('../src/cases/caseCode.js');
 const { updateInvoiceSchema, paySchema } = await import('../src/invoices/schema.js');
 const { createRunSchema } = await import('../src/payroll/schema.js');
 const { isCalendarDate } = await import('../src/lib/dates.js');
@@ -68,9 +69,29 @@ const { errorHandler, ApiError } = await import('../src/lib/errors.js');
 const guards = await import('../src/employees/routes.js');
 const caseGuards = await import('../src/cases/routes.js');
 
+// ---------- รหัสเคส = รหัสผู้รับบริการ (KN) ----------
+describe('caseCode — รหัสเคสที่แสดงคือ KN ของผู้รับบริการ', () => {
+  test('ตัด -R ของเคสรอบถัดไปออก ทุกเคสของคนเดียวกันขึ้นรหัสเดียวกัน', () => {
+    assert.equal(caseCode('KN690202463'), 'KN690202463');
+    assert.equal(caseCode('KN690202463-R2'), 'KN690202463');
+    assert.equal(caseCode('KN690202463-R12'), 'KN690202463');
+  });
+  test('รหัสเก่าที่ลงท้าย -ตัวเลข อยู่แล้ว (CASE-0001 / PAT-0003) ไม่ถูกตัด', () => {
+    assert.equal(caseCode('CASE-0001'), 'CASE-0001');
+    assert.equal(caseCode('PAT-0003-R2'), 'PAT-0003');
+    assert.equal(caseCode(null), '');
+  });
+  test('isCaseOfPatient — เคสที่ยังเป็น VN/CASE หรือเป็นของคนอื่น = ต้องเปลี่ยนรหัส', () => {
+    assert.equal(isCaseOfPatient('KN690202463-R3', 'KN690202463'), true);
+    assert.equal(isCaseOfPatient('VN690215209', 'KN690202463'), false);
+    assert.equal(isCaseOfPatient('KN690202463', 'KN690000001'), false);
+    assert.equal(isCaseOfPatient('CASE-0001', null), false);
+  });
+});
+
 // ---------- contract ค่าจ้างของเคส ----------
 describe('staff_pay — schema, สิทธิ์ และการคำนวณใหม่ต้องตรงกัน', () => {
-  const base = { case_id: 'VN690000001', case_type: 'other', client_name: 'ผู้ป่วยทดสอบ' };
+  const base = { case_type: 'other', client_name: 'ผู้รับบริการทดสอบ' };
 
   test('schema เก็บ staff_pay ของ manager ไว้ ไม่ strip ทิ้ง', () => {
     assert.equal(createCaseSchema.parse({ ...base, staff_pay: 1234 }).staff_pay, 1234);
@@ -1081,7 +1102,7 @@ describe('geofence', () => {
   });
 });
 
-// ---------- รายงานอาการผู้ป่วย ----------
+// ---------- รายงานอาการผู้รับบริการ ----------
 describe('createReportSchema — รายงานว่างเปล่าต้องบันทึกไม่ได้', () => {
   test('กรอกช่องเดียวก็พอ (วัดไม่ครบเป็นเรื่องปกติหน้างาน)', () => {
     assert.equal(createReportSchema.safeParse({ pulse: 78 }).success, true);
@@ -1709,11 +1730,10 @@ describe('Workflow — เปิดเคสถึงเงินเข้าพ
   const CASE_STAFF_PAY = 20_000;
   const TEAM = ['EMP-0002', 'EMP-0005'];
 
-  test('1. เปิดเคส — ต้องมีรหัสเคส VN และชื่อผู้ป่วย (หรือผู้ว่าจ้าง)', () => {
+  test('1. เปิดเคส — ต้องมีชื่อผู้รับบริการ (หรือผู้ว่าจ้าง) · ไม่ต้องกรอกรหัสเคส', () => {
     const base = {
-      case_id: 'VN690215209',
       case_type: 'elderly_care',
-      client_name: 'ผู้ป่วยทดสอบ workflow',
+      client_name: 'ผู้รับบริการทดสอบ workflow',
       service_kind: 'homecare',
       fee: CASE_FEE,
       staff_pay: CASE_STAFF_PAY,
@@ -1721,16 +1741,13 @@ describe('Workflow — เปิดเคสถึงเงินเข้าพ
     };
     assert.equal(createCaseSchema.safeParse(base).success, true);
 
-    // ขาดชื่อผู้ป่วย = เปิดเคสไม่ได้ (เคสไม่มีชื่อคนไข้ก็ไม่รู้ว่าไปดูแลใคร)
+    // ขาดชื่อผู้รับบริการ = เปิดเคสไม่ได้ (เคสไม่มีชื่อคนไข้ก็ไม่รู้ว่าไปดูแลใคร)
     assert.equal(createCaseSchema.safeParse({ ...base, client_name: '' }).success, false);
     // ประเภทเคสต้องเป็นค่าใน enum ไม่ใช่ข้อความอิสระ — ไม่งั้นหลุดไปชน CHECK ของฐานข้อมูล
     assert.equal(createCaseSchema.safeParse({ ...base, case_type: 'อื่นๆ' }).success, false);
-    // รหัสเคส: ต้องมี และต้องเป็น VN + ตัวเลข 9 หลักพอดี
-    const { case_id: _omit, ...noCode } = base;
-    assert.equal(createCaseSchema.safeParse(noCode).success, false);
-    for (const bad of ['VN69021520', 'VN6902152099', 'vn690215209', 'CASE-0001', 'VN69O215209']) {
-      assert.equal(createCaseSchema.safeParse({ ...base, case_id: bad }).success, false, bad);
-    }
+    // รหัสเคสไม่ได้กรอกเองแล้ว (server ตั้งจากรหัสผู้รับบริการ) — ส่ง case_id มาก็ถูกตัดทิ้ง ไม่ใช้ค่าที่ส่งมา
+    const parsed = createCaseSchema.parse({ ...base, case_id: 'VN690215209' });
+    assert.equal('case_id' in parsed, false);
   });
 
   test('2. ออกใบแจ้งหนี้ — ออกได้จากร่างเท่านั้น แล้วรับชำระเกินยอดไม่ได้', () => {
@@ -2146,7 +2163,7 @@ describe('อุปกรณ์เสริมของเคส', () => {
   });
 
   test('schema รับรายการที่ถูกต้อง และปฏิเสธชื่อว่าง/ราคาติดลบ', () => {
-    const base = { case_id: 'VN690000001', case_type: 'other', client_name: 'ทดสอบ' };
+    const base = { case_type: 'other', client_name: 'ทดสอบ' };
     assert.ok(createCaseSchema.safeParse({ ...base, addons: [{ name: 'เตียงลม', quantity: 1, unit_price: 3500 }] }).success);
     assert.ok(createCaseSchema.safeParse({ ...base, addons: null }).success);
     assert.ok(!createCaseSchema.safeParse({ ...base, addons: [{ name: ' ', quantity: 1, unit_price: 1 }] }).success);
@@ -2186,7 +2203,7 @@ describe('วันสิ้นสุดตามรูปแบบบริก�
   });
 });
 
-describe('รหัสผู้ป่วย KN (ฝั่งหน้าเว็บ)', () => {
+describe('รหัสผู้รับบริการ KN (ฝั่งหน้าเว็บ)', () => {
   test('แยก/ประกอบรหัส · ไม่ครบ 7 หลัก = ยังไม่มีรหัส · รูปแบบตรงกับ server', async () => {
     const { joinPatientCode, splitPatientCode, PATIENT_CODE_RE: CLIENT_RE } = await import('../../client/src/lib/patientCode.js');
     const { PATIENT_CODE_RE } = await import('../src/patients/schema.js');

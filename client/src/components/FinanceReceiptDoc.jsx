@@ -1,11 +1,12 @@
 import { amountText, bahtText, docDate } from '../labels.js';
 import { ISSUER } from '../lib/issuer.js';
+import { caseCode } from '../lib/patientCode.js';
 
 /**
  * ใบเสร็จรับเงิน ส่วนที่ 2 สำหรับฝ่ายการเงิน / บัญชี — ออกได้เมื่อใบแจ้งหนี้ชำระครบแล้ว
  *
  * คนละใบกับใบเสร็จที่ส่งให้ลูกค้า (ตัวหลักใน InvoiceModal): ใบนี้เป็นสำเนาเก็บเข้าแฟ้มบัญชี
- * จึงจัดหน้าแบบแบบฟอร์มบัญชี — หัวกระดาษมีเลขเอกสาร/รหัสผู้ป่วย/เลขเคสให้ค้นย้อน ตารางแยกส่วนลดกับยอดคงเหลือ
+ * จึงจัดหน้าแบบแบบฟอร์มบัญชี — หัวกระดาษมีเลขเอกสาร/รหัสผู้รับบริการ/เลขเคสให้ค้นย้อน ตารางแยกส่วนลดกับยอดคงเหลือ
  * และมีช่องลงนามของผู้รับบริการกับเจ้าหน้าที่การเงิน พร้อมที่ประทับตราบริษัท
  *
  * ตัวเลขทุกตัวมาจากใบแจ้งหนี้ใบเดียวกับใบของลูกค้า (lines/pay ที่ InvoiceModal คิดไว้แล้ว)
@@ -43,9 +44,9 @@ export default function FinanceReceiptDoc({ item, lines, pay, cashier }) {
             <dt>วันที่ / Date :</dt><dd>{docDate(paidDate)}</dd>
             <dt>เลขที่เอกสาร / Document No :</dt><dd className="mono">{item.invoice_id}</dd>
             <dt>ชื่อผู้ชำระ / Name :</dt><dd>{item.bill_to_name}</dd>
-            {/* รหัสผู้ป่วย (KN…) — ไม่ใช่รหัสผู้ว่าจ้าง ฝ่ายบัญชีค้นย้อนจากแฟ้มผู้ป่วยได้ตรงกว่า (ไม่มีหน้าลูกค้าแล้ว) */}
-            <dt>รหัสผู้ป่วย :</dt><dd className="mono">{item.patient_id ?? '—'}</dd>
-            <dt>เลขที่เคส :</dt><dd className="mono">{item.case_id ?? '—'}</dd>
+            {/* รหัสผู้รับบริการ (KN…) — ไม่ใช่รหัสผู้ว่าจ้าง ฝ่ายบัญชีค้นย้อนจากแฟ้มผู้รับบริการได้ตรงกว่า (ไม่มีหน้าลูกค้าแล้ว) */}
+            <dt>รหัสผู้รับบริการ :</dt><dd className="mono">{item.patient_id ?? '—'}</dd>
+            <dt>เลขที่เคส :</dt><dd className="mono">{item.case_id ? caseCode(item.case_id) : '—'}</dd>
             <dt>ที่อยู่ :</dt><dd>{item.bill_to_address || '—'}</dd>
           </dl>
           <div className="fr-title">

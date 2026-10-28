@@ -24,8 +24,8 @@ export const phoneKey = (s) => digits(s).slice(-9);
 /**
  * ลูกค้าที่เบอร์ตรง (เทียบเฉพาะตัวเลข · ≥9 หลัก) — ใช้ทั้งตอนส่งเข้าระบบและตอนเสนอคู่ของเก่า
  * เบอร์ญาติในระบบนี้อยู่ 3 ที่: ลูกค้า (customers.phone) · เคส (cases.client_phone = เบอร์ติดต่อญาติ)
- * · ผู้ป่วย (patients.emergency_contact_phone) — ค้นครบทั้ง 3 แล้วคืนเป็นลูกค้า (ผู้ว่าจ้าง) ที่ผูกอยู่
- * เคส/ผู้ป่วยที่ยังไม่ได้ผูกลูกค้า ข้ามไป (ไม่มีลูกค้าให้ผูก LINE) · source บอกว่าเจอจากที่ไหน
+ * · ผู้รับบริการ (patients.emergency_contact_phone) — ค้นครบทั้ง 3 แล้วคืนเป็นลูกค้า (ผู้ว่าจ้าง) ที่ผูกอยู่
+ * เคส/ผู้รับบริการที่ยังไม่ได้ผูกลูกค้า ข้ามไป (ไม่มีลูกค้าให้ผูก LINE) · source บอกว่าเจอจากที่ไหน
  */
 export async function findByPhones(phones) {
   const list = [...new Set(phones.map(digits).filter((p) => p.length >= 9).map(phoneKey))];
@@ -37,9 +37,9 @@ export async function findByPhones(phones) {
      FROM (
        SELECT customer_id, ${d('phone')} AS phone_digits, 'ลูกค้า' AS source FROM customers
        UNION ALL
-       SELECT customer_id, ${d('client_phone')}, 'เคส ' || case_id FROM cases WHERE customer_id IS NOT NULL
+       SELECT customer_id, ${d('client_phone')}, 'เคส ' || regexp_replace(case_id, '-R[0-9]+$', '') FROM cases WHERE customer_id IS NOT NULL
        UNION ALL
-       SELECT customer_id, ${d('emergency_contact_phone')}, 'ผู้ป่วย ' || patient_id FROM patients WHERE customer_id IS NOT NULL
+       SELECT customer_id, ${d('emergency_contact_phone')}, 'ผู้รับบริการ ' || patient_id FROM patients WHERE customer_id IS NOT NULL
      ) m
      JOIN customers cu ON cu.customer_id = m.customer_id
      WHERE m.phone_digits = ANY(:phones::text[])

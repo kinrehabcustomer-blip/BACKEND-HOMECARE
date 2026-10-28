@@ -121,11 +121,11 @@ async function createCustomer(input = {}) {
 async function createPatient(input = {}) {
   const response = await post('/api/patients', {
     patient_id: nextPatientId(),
-    name: 'ผู้ป่วยทดสอบการลบ',
+    name: 'ผู้รับบริการทดสอบการลบ',
     allergies: 'แพ้เพนิซิลลิน',
     ...input,
   });
-  mustStatus(response, 201, 'สร้างผู้ป่วย');
+  mustStatus(response, 201, 'สร้างผู้รับบริการ');
   return response.body;
 }
 
@@ -223,7 +223,7 @@ try {
     await sql.run(
       `INSERT INTO case_family_links
          (case_id, code_hash, code_expires_at, invited_by, consent_by, can_invite)
-       VALUES (:case_id, :hash, now() + interval '7 days', 'ผู้จัดการ', 'ผู้แทนผู้ป่วย', true)`,
+       VALUES (:case_id, :hash, now() + interval '7 days', 'ผู้จัดการ', 'ผู้แทนผู้รับบริการ', true)`,
       { case_id: caseRow.case_id, hash: randomUUID() },
     );
 
@@ -266,7 +266,7 @@ try {
     );
   }
 
-  head('3 · ลบลูกค้า/ผู้ป่วยที่ยังใช้งาน');
+  head('3 · ลบลูกค้า/ผู้รับบริการที่ยังใช้งาน');
   {
     const customer = await createCustomer();
     const patient = await createPatient({ customer_id: customer.customer_id });
@@ -290,20 +290,20 @@ try {
     const afterPatient = await sql.one('SELECT patient_id FROM cases WHERE case_id = :id', { id: caseRow.case_id });
     probe(
       patientDelete.status === 409 && afterPatient?.patient_id === patient.patient_id,
-      'ลบแฟ้มผู้ป่วยระหว่างเคสเปิด ทำให้ข้อมูลแพ้ยาที่หน้างานอ่านสดหายไป',
+      'ลบแฟ้มผู้รับบริการระหว่างเคสเปิด ทำให้ข้อมูลแพ้ยาที่หน้างานอ่านสดหายไป',
       `HTTP=${patientDelete.status} case_patient=${afterPatient?.patient_id ?? 'NULL'}`,
-      'ลบแฟ้มผู้ป่วยที่มีเคสเปิดไม่ได้ ข้อมูลความปลอดภัยยังผูกอยู่',
+      'ลบแฟ้มผู้รับบริการที่มีเคสเปิดไม่ได้ ข้อมูลความปลอดภัยยังผูกอยู่',
     );
 
     const unusedCustomer = await createCustomer({ name: 'ลูกค้าเพิ่งสร้างผิด' });
-    const unusedPatient = await createPatient({ name: 'ผู้ป่วยเพิ่งสร้างผิด' });
+    const unusedPatient = await createPatient({ name: 'ผู้รับบริการเพิ่งสร้างผิด' });
     const unusedResults = await Promise.all([
       del(`/api/customers/${unusedCustomer.customer_id}`),
       del(`/api/patients/${unusedPatient.patient_id}`),
     ]);
     probe(
       unusedResults.every((r) => r.status === 204),
-      'แฟ้มลูกค้า/ผู้ป่วยที่ไม่มีงานผูกอยู่ลบไม่ได้',
+      'แฟ้มลูกค้า/ผู้รับบริการที่ไม่มีงานผูกอยู่ลบไม่ได้',
       `HTTP=${unusedResults.map((r) => r.status).join(',')}`,
       'แฟ้มที่เพิ่งสร้างผิดและไม่มีงานผูกอยู่ลบได้',
     );
@@ -389,7 +389,7 @@ try {
       'ยิงลบของชิ้นเดียวพร้อมกันไม่ 500 และเหลือผลลัพธ์เดียวคือลบแล้ว',
     );
 
-    const parent = await createCustomer({ name: 'ผู้ว่าจ้างลบพร้อมแฟ้มผู้ป่วย' });
+    const parent = await createCustomer({ name: 'ผู้ว่าจ้างลบพร้อมแฟ้มผู้รับบริการ' });
     const child = await createPatient({ customer_id: parent.customer_id });
     const familyRace = await Promise.all([
       del(`/api/customers/${parent.customer_id}`),

@@ -2,12 +2,13 @@ import { useEffect } from 'react';
 import { useSheetSwipe } from '../lib/sheetSwipe.js';
 import { useScrollLock } from '../lib/scrollLock.js';
 import CaseReports from './CaseReports.jsx';
+import { caseCode } from '../lib/patientCode.js';
 
 /**
  * popup "ตารางรายงานทั้งหมด" ของเคสหนึ่งใบ
  *
  * เคสที่ดูแลต่อเนื่องบันทึกวันละ 2–4 ครั้ง คลังจึงโตขึ้นทุกวันจนกางในหน้าเคสไม่ไหว
- * (หน้าเคสมีทั้งข้อมูลผู้ป่วย ที่อยู่ ตารางกะ — รายงานสองร้อยใบจะดันทุกอย่างตกจอไปหมด)
+ * (หน้าเคสมีทั้งข้อมูลผู้รับบริการ ที่อยู่ ตารางกะ — รายงานสองร้อยใบจะดันทุกอย่างตกจอไปหมด)
  * หน้าเคสจึงเหลือแค่ใบล่าสุดไม่กี่ใบ แล้วมาเปิดที่นี่เมื่อต้องไล่ย้อนหลังจริงๆ
  *
  * ข้างในเป็น CaseReports ตัวเดิมที่ไม่ได้จำกัดจำนวน — ตัวกรองเดือน/ประเภท การแบ่งหน้า
@@ -27,8 +28,8 @@ export default function ReportArchiveModal({ caseId, caseInfo, title, scope, cur
       <div className="modal modal-wide is-subsheet" ref={sheetRef} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
         <header className="modal-head">
           <div>
-            <p className="mono muted">{caseId}</p>
-            <h2>รายงานอาการผู้ป่วย</h2>
+            <p className="mono muted">{caseCode(caseId)}</p>
+            <h2>รายงานอาการผู้รับบริการ</h2>
             {title && <p className="muted">{title}</p>}
           </div>
           <button className="modal-close" onClick={onClose} aria-label="ปิด">×</button>

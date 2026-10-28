@@ -10,14 +10,15 @@ import {
   formatBaht, formatDate, toBuddhistYear,
 } from '../labels.js';
 import { formatPhone } from '../lib/phone.js';
+import { caseCode } from '../lib/patientCode.js';
 
 const PER_PAGE_OPTIONS = [20, 50, 100];
 
 // คอลัมน์ที่กดเรียงได้ — ต้องตรงกับ enum ของ sort ฝั่ง server (cases/schema.js)
-// title ของเคสถูกตั้งอัตโนมัติเป็น "บริการ · ชื่อผู้ป่วย" การเรียงตาม title จึงคือการเรียงตามบริการ
+// title ของเคสถูกตั้งอัตโนมัติเป็น "บริการ · ชื่อผู้รับบริการ" การเรียงตาม title จึงคือการเรียงตามบริการ
 const SORTABLE = {
   case_id: { label: 'รหัสเคส', hint: 'เรียงตามลำดับที่เปิดเคส' },
-  title: { label: 'บริการ / ผู้ป่วย', hint: 'เรียงตามชื่อบริการ' },
+  title: { label: 'บริการ / ผู้รับบริการ', hint: 'เรียงตามชื่อบริการ' },
   start_date: { label: 'เริ่ม / ค่าจ้าง', hint: 'เรียงตามวันเริ่มให้บริการ' },
 };
 
@@ -174,7 +175,7 @@ export default function CaseListPage() {
         <div className="toolbar">
           <input
             className="search search-compact"
-            placeholder="ค้นหา รหัสเคส / แพ็คเกจ / ชื่อผู้ป่วย / เบอร์โทร"
+            placeholder="ค้นหา รหัสเคส / แพ็คเกจ / ชื่อผู้รับบริการ / เบอร์โทร"
             value={q}
             onChange={(e) => setFilter('q', e.target.value)}
           />
@@ -275,7 +276,7 @@ export default function CaseListPage() {
                 >
                   {/* ลำดับนับต่อเนื่องข้ามหน้า — เป็นลำดับของ "รายการที่เห็นตอนนี้" ไม่ใช่เลขประจำตัว */}
                   <td className="row-index" data-label="ลำดับ">{(page - 1) * Number(perPage) + i + 1}</td>
-                  <td className="mono link" data-label="รหัสเคส">{c.case_id}</td>
+                  <td className="mono link" data-label="รหัสเคส">{caseCode(c.case_id)}</td>
                   <td data-label="บริการ">
                     {/* สองสายบริการเก็บชื่อคนละคอลัมน์ — กายภาพมาก่อนเพราะเคสที่ผูกแพ็คเกจไว้จะไม่มีเรท Homecare */}
                     {c.physio_package_name ? (
@@ -286,7 +287,7 @@ export default function CaseListPage() {
                     ) : (
                       <span className="muted">ไม่ระบุบริการ</span>
                     )}
-                    {/* บรรทัดรองคือผู้ป่วย (ผู้รับการดูแล) ไม่ใช่ผู้ว่าจ้าง — พนักงานจับคู่/ตามงานด้วยชื่อคนที่ไปดูแล */}
+                    {/* บรรทัดรองคือผู้รับบริการ (ผู้รับการดูแล) ไม่ใช่ผู้ว่าจ้าง — พนักงานจับคู่/ตามงานด้วยชื่อคนที่ไปดูแล */}
                     <span className="cell-sub">{c.client_name}</span>
                   </td>
                   <td data-label="เริ่ม / ค่าจ้าง">

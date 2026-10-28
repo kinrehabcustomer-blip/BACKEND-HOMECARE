@@ -10,6 +10,7 @@ import {
   SERVICE_KIND_LABELS, serviceKindOf, CASE_STATUS_LABELS, MONTH_LABELS,
   formatDate, formatPeriod, toBuddhistYear,
 } from '../labels.js';
+import { caseCode } from '../lib/patientCode.js';
 
 /** สถานะเคสตามลำดับการทำงานจริง: รอจับคู่ → จับคู่แล้ว → กำลังให้บริการ → ปิดเคส */
 const STATUSES = ['unassigned', 'assigned', 'in_progress', 'closed'];
@@ -216,7 +217,7 @@ export default function DashboardPage() {
                         <div>
                           <strong>{c.title}</strong>
                           <p className="muted">
-                            <span className="mono">{c.case_id}</span>
+                            <span className="mono">{caseCode(c.case_id)}</span>
                             {' · '}{SERVICE_KIND_LABELS[serviceKindOf(c)]}
                             {c.start_date && ` · เริ่ม ${formatDate(c.start_date)}`}
                           </p>

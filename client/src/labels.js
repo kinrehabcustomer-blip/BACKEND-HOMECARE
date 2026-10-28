@@ -22,7 +22,7 @@ export const POSITION_LABELS = {
  */
 export const THERAPY_POSITIONS = ['therapist', 'occupational_therapist', 'speech_therapist'];
 
-/** กลุ่มพนักงาน — back = สายสำนักงาน · front = ที่เหลือทั้งหมด (ออกไปดูแลผู้ป่วยจริง)
+/** กลุ่มพนักงาน — back = สายสำนักงาน · front = ที่เหลือทั้งหมด (ออกไปดูแลผู้รับบริการจริง)
     ต้องตรงกับ BACK_POSITIONS / FRONT_POSITIONS ใน server/src/employees/schema.js */
 export const BACK_POSITIONS = ['super_admin', 'manager', 'hr', 'admin', 'finance'];
 export const FRONT_POSITIONS = Object.keys(POSITION_LABELS).filter((p) => !BACK_POSITIONS.includes(p));

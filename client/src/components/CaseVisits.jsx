@@ -6,6 +6,7 @@ import {
 } from '../labels.js';
 import LineIcon from './LineIcon.jsx';
 import TimeSelect from './TimeSelect.jsx';
+import { caseCode } from '../lib/patientCode.js';
 
 const WEEKDAYS = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
 
@@ -559,7 +560,7 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
                 {preview.conflicts.slice(0, 4).map((c) => (
                   <li key={`${c.visit_date}-${c.other_case_id}`}>
                     {formatDate(c.visit_date)} · {c.employee_name ?? 'ไม่ระบุคน'} มีงานที่ {c.other_client_name}
-                    {' ('}<span className="mono">{c.other_case_id}</span>
+                    {' ('}<span className="mono">{caseCode(c.other_case_id)}</span>
                     {c.other_start ? ` ${c.other_start}-${c.other_end ?? ''}` : ' ไม่ระบุเวลา'})
                   </li>
                 ))}

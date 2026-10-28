@@ -5,6 +5,7 @@ import ErrorBar from '../components/ErrorBar.jsx';
 import PageRefresh from '../components/PageRefresh.jsx';
 import { SERVICE_KIND_LABELS, serviceKindOf, VISIT_STATE_LABELS, MONTH_LABELS, toBuddhistYear } from '../labels.js';
 import { CAL_STATES, dayLabel, timeRange } from '../lib/calendarUi.js';
+import { caseCode } from '../lib/patientCode.js';
 
 const WEEKDAYS = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
 
@@ -154,7 +155,7 @@ export default function MyCalendarPage() {
                       onClick={() => setOpenId(c.case_id)}
                       title={[
                         timeRange(c),
-                        c.case_id,
+                        caseCode(c.case_id),
                         SERVICE_KIND_LABELS[serviceKindOf(c)],
                         c.client_name,
                         VISIT_STATE_LABELS[c.state],

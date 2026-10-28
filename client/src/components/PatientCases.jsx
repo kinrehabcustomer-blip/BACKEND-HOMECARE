@@ -1,12 +1,13 @@
 import { Link } from 'react-router-dom';
 import { SERVICE_KIND_LABELS, serviceKindOf, CASE_STATUS_LABELS, formatBaht, formatDate } from '../labels.js';
+import { caseCode } from '../lib/patientCode.js';
 
 /**
- * เคสที่ผูกกับผู้รับการดูแลรายนี้ — มุมของผู้ป่วย จึงโชว์ "พนักงานที่รับ" ไม่ใช่ชื่อผู้ป่วยซ้ำ
- * (เคสจะขึ้นที่นี่เมื่อเปิดเคสจากหน้าผู้ป่วย ซึ่งผูก patient_id ให้อัตโนมัติ)
+ * เคสที่ผูกกับผู้รับการดูแลรายนี้ — มุมของผู้รับบริการ จึงโชว์ "พนักงานที่รับ" ไม่ใช่ชื่อผู้รับบริการซ้ำ
+ * (เคสจะขึ้นที่นี่เมื่อเปิดเคสจากหน้าผู้รับบริการ ซึ่งผูก patient_id ให้อัตโนมัติ)
  *
  * แต่ละเคสกดเข้าไปดูตัวเคสได้ (ตารางกะที่ไปดูแลจริง · รายงานอาการรายครั้ง · ค่าใช้จ่าย) —
- * หน้าผู้ป่วยตอบว่า "คนนี้เคยใช้บริการอะไรบ้าง" ส่วนคำถามถัดมาเสมอคือ "แล้วเคสนั้นเป็นยังไง"
+ * หน้าผู้รับบริการตอบว่า "คนนี้เคยใช้บริการอะไรบ้าง" ส่วนคำถามถัดมาเสมอคือ "แล้วเคสนั้นเป็นยังไง"
  * ซึ่งเดิมต้องจำรหัสเคสแล้วไปหาเองที่หน้าเคส · เปิดเป็น popup บนหน้าเคส ปิดแล้วกดถอยกลับมาที่นี่ได้
  *
  * limit: โชว์กี่เคสก่อน — ไม่ส่ง = โชว์ทั้งหมด (หน้าเต็ม); popup ส่ง limit แล้วบอกว่าเหลืออีกกี่เคส
@@ -39,7 +40,7 @@ export default function PatientCases({ cases = [], limit }) {
           <div>
             <strong>{c.title}</strong>
             <p className="muted">
-              <span className="mono">{c.case_id}</span>
+              <span className="mono">{caseCode(c.case_id)}</span>
               {' · '}{SERVICE_KIND_LABELS[serviceKindOf(c)]}
               {c.assigned_name && ` · ${[c.assigned_name, c.team_names].filter(Boolean).join(' · ')}`}
             </p>

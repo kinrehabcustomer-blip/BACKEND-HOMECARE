@@ -150,7 +150,7 @@ async function newCase(id, assignedTo, { staffPay = 4200, fee = 9000, status = '
     {
       id,
       title: `เคสทดสอบ ${id}`,
-      client: `ผู้ป่วย ${id}`,
+      client: `ผู้รับบริการ ${id}`,
       status,
       assigned_to: assignedTo,
       fee,
