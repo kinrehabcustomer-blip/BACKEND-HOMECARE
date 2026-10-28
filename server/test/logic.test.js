@@ -2085,7 +2085,7 @@ describe('แบบประเมิน — ตำแหน่งที่เ�
     const { FRONT_POSITIONS, BACK_POSITIONS, POSITIONS } = await import('../src/employees/schema.js');
     assert.deepEqual(REVIEW_POSITIONS, FRONT_POSITIONS);
     assert.deepEqual([...FRONT_POSITIONS].sort(), [
-      'assistant_nurse', 'caregiver', 'nurse', 'occupational_therapist', 'practical_nurse', 'speech_therapist', 'therapist',
+      'assistant_nurse', 'caregiver', 'nurse', 'occupational_therapist', 'practical_nurse', 'speech_therapist', 'therapist', 'unassigned',
     ]);
     for (const p of THERAPY_POSITIONS) assert.ok(FRONT_POSITIONS.includes(p), `${p} ต้องอยู่กลุ่ม front`);
     // สองกลุ่มรวมกันได้ทุกตำแหน่งพอดี ไม่ซ้อนกัน

@@ -47,7 +47,8 @@ UPDATE employees SET position = 'admin' WHERE position = 'admin_ipd';
 ALTER TABLE employees ADD CONSTRAINT employees_position_check
   CHECK (position IN ('caregiver', 'assistant_nurse', 'practical_nurse', 'nurse',
                       'therapist', 'occupational_therapist', 'speech_therapist',
-                      'manager', 'hr', 'admin', 'finance', 'super_admin'));
+                      'manager', 'hr', 'admin', 'finance', 'super_admin',
+                      'unassigned'));  -- "ว่าง" = ยังไม่ได้กำหนดตำแหน่ง (นำเข้ารายชื่อ 28 ต.ค. 2569)
 
 -- ใบรับรอง / ใบประกอบวิชาชีพ ผูกกับพนักงานผ่าน employee_id
 CREATE TABLE IF NOT EXISTS employee_certificates (

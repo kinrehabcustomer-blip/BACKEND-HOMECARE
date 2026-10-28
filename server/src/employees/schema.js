@@ -16,6 +16,9 @@ export const THERAPY_POSITIONS = ['therapist', 'occupational_therapist', 'speech
 export const POSITIONS = [
   'caregiver', 'assistant_nurse', 'practical_nurse', 'nurse',
   ...THERAPY_POSITIONS,
+  // unassigned = "ว่าง" — นำเข้ารายชื่อมาแล้วแต่ยังไม่ได้กำหนดตำแหน่ง (28 ต.ค. 2569) · อยู่กลุ่ม front
+  // แต่ไม่ตรงระดับไหนในตารางราคา จึงไม่ถูกเสนอตอนจับคู่เคสจนกว่าจะตั้งตำแหน่งจริง (ดู positionsForCase)
+  'unassigned',
   // สายสำนักงาน (กลุ่ม back) — สิทธิ์ของแต่ละตำแหน่งดูที่ POSITION_PERMISSIONS ใน lib/auth.js
   // 'admin' = Admin HC (ชื่อเดิม "แอดมิน") · 'finance' = การเงิน (Admin IPD เลิกใช้แล้ว — ย้ายเป็น Admin HC)
   'manager', 'hr', 'admin', 'finance',

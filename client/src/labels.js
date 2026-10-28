@@ -6,6 +6,7 @@ export const POSITION_LABELS = {
   therapist: 'นักกายภาพบำบัด',
   occupational_therapist: 'นักกิจกรรมบำบัด',
   speech_therapist: 'นักแก้ไขการพูด',
+  unassigned: 'ว่าง', // ยังไม่ได้กำหนดตำแหน่ง — ต้องตรงกับ POSITIONS ใน server/src/employees/schema.js
   manager: 'ผู้จัดการ',
   hr: 'HR',
   // Admin HC (ชื่อเดิม "แอดมิน") = สิทธิ์เท่าผู้จัดการทุกอย่าง ยกเว้นเรื่องเงิน (ค่าจ้าง/กำไร/รอบจ่าย/รายได้บริษัท)
