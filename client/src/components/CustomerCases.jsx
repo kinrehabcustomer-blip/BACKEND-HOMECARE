@@ -1,7 +1,8 @@
-import { CASE_TYPE_LABELS, CASE_STATUS_LABELS, formatBaht, formatDate } from '../labels.js';
+import { SERVICE_KIND_LABELS, serviceKindOf, CASE_STATUS_LABELS, formatBaht, formatDate } from '../labels.js';
+import { caseCode } from '../lib/patientCode.js';
 
 /**
- * เคสที่ลูกค้ารายนี้เคยใช้บริการ — มุมของลูกค้า จึงโชว์ "พนักงานที่รับ" ไม่ใช่ชื่อผู้ป่วย
+ * เคสที่ลูกค้ารายนี้เคยใช้บริการ — มุมของลูกค้า จึงโชว์ "พนักงานที่รับ" ไม่ใช่ชื่อผู้รับบริการ
  * (คนละมุมกับ WorkHistory ที่เป็นเคสของพนักงาน จึงแยกกันคนละตัว)
  *
  * limit: โชว์กี่เคสก่อน — ไม่ส่ง = โชว์ทั้งหมด (หน้าเต็ม)
@@ -30,8 +31,8 @@ export default function CustomerCases({ cases = [], limit }) {
           <div>
             <strong>{c.title}</strong>
             <p className="muted">
-              <span className="mono">{c.case_id}</span>
-              {' · '}{CASE_TYPE_LABELS[c.case_type]}
+              <span className="mono">{caseCode(c.case_id)}</span>
+              {' · '}{SERVICE_KIND_LABELS[serviceKindOf(c)]}
               {c.assigned_name && ` · ${[c.assigned_name, c.team_names].filter(Boolean).join(' · ')}`}
             </p>
             <p className="muted">

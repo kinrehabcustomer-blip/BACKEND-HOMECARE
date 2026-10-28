@@ -603,6 +603,68 @@ if (process.env.RUN_DB_TESTS !== '1') {
       await sql.run(`UPDATE cases SET case_id = 'CASE-FIXTURE', patient_id = :p WHERE case_id = 'KN690215210-R3'`, { p: originalPatient ?? null });
     });
 
+    test('เลข VN: กายภาพหนึ่งนัดหนึ่ง VN · Homecare หนึ่งเคสหนึ่ง VN · หัตถการได้ VN แยกและบวกเข้าใบแจ้งหนี้', async () => {
+      const patchCase = async (id, body) => {
+        const res = await fetch(`${base}/api/cases/${id}`, {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json', cookie: `${COOKIE_NAME}=${signToken(MANAGER)}` },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        assert.equal(res.status, 200, JSON.stringify(data));
+        return data;
+      };
+      const VN = /^VN\d{9}$/;
+
+      // Homecare: ลงนัดกี่กะก็ได้ VN ของเคสแค่เลขเดียว (ออกตอนลงนัดครั้งแรก) กะไม่มี VN ของตัวเอง
+      const home = await post('/api/cases', { case_type: 'other', client_name: 'VN Homecare', fee: 9000 }, MANAGER, 201);
+      assert.equal(home.vn, null, 'ยังไม่ลงนัด = ยังไม่ออก VN');
+      await post(`/api/cases/${home.case_id}/visits/bulk`, { dates: ['2026-11-02', '2026-11-03', '2026-11-04'] }, MANAGER, 201);
+      const homeVn = (await get(`/api/cases/${home.case_id}`, MANAGER)).body.vn;
+      assert.match(homeVn, VN);
+      await post(`/api/cases/${home.case_id}/visits`, { visit_date: '2026-11-05' }, MANAGER, 201);
+      assert.equal((await get(`/api/cases/${home.case_id}`, MANAGER)).body.vn, homeVn, 'ลงนัดเพิ่มแล้ว VN เคสเดิม');
+      assert.ok((await get(`/api/cases/${home.case_id}/visits`, MANAGER)).body.every((v) => v.vn == null));
+
+      // กายภาพ: ทุกนัดได้ VN ของตัวเอง ไม่ซ้ำกัน · เคสไม่มี VN
+      const pkgId = (await sql.one(
+        `INSERT INTO physio_packages (name, sessions, special_price, staff_pay)
+         VALUES ('VN pack', 10, 5000, 500) RETURNING physio_package_id`)).physio_package_id;
+      const physio = await post('/api/cases', { case_type: 'other', client_name: 'VN Physio', service_kind: 'physio',
+        physio_package_id: pkgId, fee: 5000 }, MANAGER, 201);
+      await post(`/api/cases/${physio.case_id}/visits/bulk`, { dates: ['2026-11-02', '2026-11-09'] }, MANAGER, 201);
+      await post(`/api/cases/${physio.case_id}/visits`, { visit_date: '2026-11-16' }, MANAGER, 201);
+      const vns = (await get(`/api/cases/${physio.case_id}/visits`, MANAGER)).body.map((v) => v.vn);
+      assert.equal(vns.length, 3);
+      assert.ok(vns.every((v) => VN.test(v)), JSON.stringify(vns));
+      assert.equal(new Set([...vns, homeVn]).size, 4, 'VN ไม่ซ้ำกันทั้งระบบ');
+      assert.equal((await get(`/api/cases/${physio.case_id}`, MANAGER)).body.vn, null);
+
+      // หัตถการ: บันทึกแล้วได้ VN แยกรายการละเลข · ยอดบวกเข้าใบร่าง · บันทึกซ้ำคง VN เดิม
+      const withProc = await patchCase(home.case_id, {
+        addons: [
+          { name: 'เตียงลม', quantity: 1, unit_price: 3500 },
+          { kind: 'procedure', name: 'ทำแผล', quantity: 1, unit_price: 800 },
+          { kind: 'procedure', name: 'เปลี่ยนสาย NG', quantity: 1, unit_price: 1200, vn: 'VN690000001' },
+        ],
+      });
+      const procs = withProc.addons.filter((a) => a.kind === 'procedure');
+      assert.equal(procs.length, 2);
+      assert.ok(procs.every((a) => VN.test(a.vn)));
+      assert.notEqual(procs[0].vn, procs[1].vn);
+      assert.ok(!procs.some((a) => a.vn === 'VN690000001'), 'เลขที่ไม่ใช่ของเคสนี้ไม่ถูกใช้');
+      assert.ok(![...vns, homeVn].some((v) => procs.some((a) => a.vn === v)));
+      assert.equal(withProc.addons[0].vn, undefined, 'อุปกรณ์เสริมคงรูปเดิม ไม่มี VN');
+
+      const again = await patchCase(home.case_id, { addons: withProc.addons, note: 'บันทึกซ้ำ' });
+      assert.deepEqual(again.addons.map((a) => a.vn), withProc.addons.map((a) => a.vn));
+
+      const draft = (await get(`/api/invoices?case_id=${home.case_id}`, MANAGER)).body.data[0];
+      assert.equal(Number(draft.amount), 9000 + 3500 + 800 + 1200, 'ใบร่างซิงก์ยอดหัตถการ');
+      assert.equal(draft.is_stale, false);
+      assert.deepEqual(draft.addons.filter((a) => a.kind === 'procedure').map((a) => a.vn), procs.map((a) => a.vn));
+    });
+
     test('ยกเลิกเคส: ใบร่างถูกยกเลิกตาม · ใบของเคสที่ยกเลิกแล้วออกใบไม่ได้', async () => {
       const c = await newCase();
       const draft = (await get(`/api/invoices?case_id=${c.case_id}`, MANAGER)).body.data[0];
@@ -891,7 +953,7 @@ if (process.env.RUN_DB_TESTS !== '1') {
       assert.deepEqual(draft.addons, [bed]);
       assert.equal(draft.is_stale, false);
       const edited = (await get(`/api/cases/${c.case_id}/events`, MANAGER)).body.filter((e) => e.event === 'edited');
-      assert.match(edited[0].detail, /อุปกรณ์เสริม: 3,741 บาท → 3,500 บาท/);
+      assert.match(edited[0].detail, /อุปกรณ์เสริม\/หัตถการ: 3,741 บาท → 3,500 บาท/);
 
       // ส่งรายการเดิมซ้ำ (ฟอร์มส่งมาทั้งชุด) ต้องไม่นับว่าแก้อุปกรณ์
       await patchCase(c.case_id, { addons: [bed], note: 'แก้แค่หมายเหตุ' });

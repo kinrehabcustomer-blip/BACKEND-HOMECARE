@@ -603,6 +603,8 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
                 <span className="visit-seq">{idx + 1}</span>
                 <span className="visit-date">
                   {formatDate(v.visit_date)}{t && ` · ${t}`}
+                  {/* กายภาพ: หนึ่งนัดหนึ่ง VN (ระบบออกตอนลงนัด) · Homecare ไม่มี VN รายกะ ใช้ VN ของเคส */}
+                  {v.vn && <span className="mono muted"> · {v.vn}</span>}
                 </span>
                 <span className="visit-who muted">
                   {v.assigned_name ?? 'ไม่ระบุคน'}

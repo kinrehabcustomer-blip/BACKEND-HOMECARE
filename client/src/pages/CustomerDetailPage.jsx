@@ -180,7 +180,7 @@ export default function CustomerDetailPage() {
         <ConfirmButton
           className="btn danger"
           title={`ลบลูกค้า ${id} ออกจากฐานข้อมูลถาวร?`}
-          detail="เคสที่เคยให้บริการจะยังอยู่ (ข้อมูลผู้ป่วยถูกบันทึกไว้ในเคสแล้ว) แต่จะไม่เชื่อมกับลูกค้ารายนี้อีก"
+          detail="เคสที่เคยให้บริการจะยังอยู่ (ข้อมูลผู้รับบริการถูกบันทึกไว้ในเคสแล้ว) แต่จะไม่เชื่อมกับลูกค้ารายนี้อีก"
           confirmLabel="ลบถาวร"
           onConfirm={handleDelete}
         >

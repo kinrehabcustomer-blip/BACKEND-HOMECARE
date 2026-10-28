@@ -21,6 +21,7 @@ import LineIcon from './LineIcon.jsx';
 import StaffPicker from './StaffPicker.jsx';
 import { formatPhone, formatPhoneInput } from '../lib/phone.js';
 import { caseCode } from '../lib/patientCode.js';
+import { isProcedure } from '../lib/addons.js';
 
 /**
  * ชื่อบริการของเคส — สองสายเก็บคนละที่ (Homecare = รูปแบบ+เกรด, กายภาพ = ชื่อแพ็คเกจ)
@@ -542,14 +543,26 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                     />
                   )}
                   <Field label="ค่าบริการที่ได้รับ" value={item.fee != null && formatBaht(item.fee)} />
-                  {item.addons?.length > 0 && (
+                  {item.addons?.some((x) => !isProcedure(x)) && (
                     <Field
                       label="อุปกรณ์เสริม (คิดเพิ่มในใบแจ้งหนี้)"
                       value={item.addons
+                        .filter((x) => !isProcedure(x))
                         .map((x) => `${x.name}${x.quantity !== 1 ? ` ×${x.quantity}` : ''} ${formatBaht(x.quantity * x.unit_price)}`)
                         .join(' · ')}
                     />
                   )}
+                  {item.addons?.some(isProcedure) && (
+                    <Field
+                      label="หัตถการ (คิดเพิ่มในใบแจ้งหนี้)"
+                      value={item.addons
+                        .filter(isProcedure)
+                        .map((x) => `${x.name} ${formatBaht(x.unit_price)}${x.vn ? ` (${x.vn})` : ''}`)
+                        .join(' · ')}
+                    />
+                  )}
+                  {/* Homecare ได้ VN เคสละหนึ่งเลข (ออกตอนลงนัดครั้งแรก) · กายภาพมี VN รายนัดในตารางนัด */}
+                  {item.vn && <Field label="เลข VN" value={item.vn} mono />}
                   {/* ยอดที่พนักงานจะเห็นเป็นรายได้ของตัวเองเมื่อปิดเคส — ต้องเห็นก่อนกดปิด (เฉพาะผู้จัดการ) */}
                   {seePay && (
                     <Field label="ค่าจ้างพนักงาน" value={item.staff_pay != null && formatBaht(item.staff_pay)} />

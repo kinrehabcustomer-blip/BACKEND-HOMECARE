@@ -34,6 +34,9 @@ const CaseFormPage = lazy(() => import('./pages/CaseFormPage.jsx'));
 const CalendarPage = lazy(() => import('./pages/CalendarPage.jsx'));
 const InvoiceListPage = lazy(() => import('./pages/InvoiceListPage.jsx'));
 const PayrollPage = lazy(() => import('./pages/PayrollPage.jsx'));
+const CustomerListPage = lazy(() => import('./pages/CustomerListPage.jsx'));
+const CustomerFormPage = lazy(() => import('./pages/CustomerFormPage.jsx'));
+const CustomerDetailPage = lazy(() => import('./pages/CustomerDetailPage.jsx'));
 const PatientListPage = lazy(() => import('./pages/PatientListPage.jsx'));
 const PatientFormPage = lazy(() => import('./pages/PatientFormPage.jsx'));
 const PatientDetailPage = lazy(() => import('./pages/PatientDetailPage.jsx'));
@@ -87,6 +90,7 @@ const ADMIN_NAV = [
   { to: '/revenue', icon: 'dashboard', label: 'รายได้บริษัท', perm: 'money', unlessPerm: 'office' },
   { to: '/packages', icon: 'home', label: 'แพ็คเกจ Homecare', perm: 'office' },
   { to: '/physio-packages', icon: 'activity', label: 'แพ็คเกจกายภาพบำบัด', perm: 'office' },
+  { to: '/customers', icon: 'users', label: 'ลูกค้า', perm: 'office' },
   { to: '/patients', icon: 'heart', label: 'ผู้รับบริการ', perm: 'office' },
   { to: '/employees', icon: 'user', label: 'พนักงาน', perm: 'office' },
   { to: '/reviews', icon: 'star', label: 'คะแนนประเมินจากญาติ', perm: 'office' },
@@ -351,8 +355,11 @@ export default function App() {
             <Route path="/my-calendar" element={<AppLayout><MyCalendarPage /></AppLayout>} />
             <Route path="/my-attendance" element={<AppLayout><MyAttendancePage /></AppLayout>} />
 
-            {/* ไม่มีหน้าลูกค้าแล้ว — ข้อมูลผู้ว่าจ้างดู/แก้ในแฟ้มผู้รับบริการ · ลิงก์/บุ๊กมาร์กเก่าพาไปหน้าผู้รับบริการแทนหน้าว่าง */}
-            <Route path="/customers/*" element={<Navigate to="/patients" replace />} />
+            {/* ลูกค้า (ผู้ว่าจ้าง/ผู้จ่ายเงิน) — กลับมาเปิดแสดงในเมนูอีกครั้ง (ดร.ธงชัย 28 ต.ค. 2569) */}
+            <Route path="/customers" element={<AppLayout perm="office"><CustomerListPage /></AppLayout>} />
+            <Route path="/customers/new" element={<AppLayout perm="office"><CustomerFormPage /></AppLayout>} />
+            <Route path="/customers/:id" element={<AppLayout perm="office"><CustomerDetailPage /></AppLayout>} />
+            <Route path="/customers/:id/edit" element={<AppLayout perm="office"><CustomerFormPage /></AppLayout>} />
 
             <Route path="/patients" element={<AppLayout perm="office"><PatientListPage /></AppLayout>} />
             <Route path="/patients/new" element={<AppLayout perm="office"><PatientFormPage /></AppLayout>} />

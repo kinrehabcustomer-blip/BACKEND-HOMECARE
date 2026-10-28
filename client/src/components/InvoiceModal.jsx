@@ -12,6 +12,7 @@ import FinanceReceiptDoc from './FinanceReceiptDoc.jsx';
 import CustomerInvoiceDoc, { addonAmount, paidBy } from './CustomerInvoiceDoc.jsx';
 import { ACCEPTED, compressImage, formatFileSize } from '../lib/image.js';
 import { caseCode } from '../lib/patientCode.js';
+import { addonLabel } from '../lib/addons.js';
 
 const FOCUSABLE = 'a[href], button:not(:disabled), input, select, textarea, [tabindex]:not([tabindex="-1"])';
 
@@ -367,7 +368,7 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
         : [
             { description: item.service_description, amount: serviceAmount, discount: 0 },
             ...addons.map((a) => ({
-              description: `อุปกรณ์เสริม: ${a.name}${a.quantity !== 1 ? ` (${amountText(a.unit_price)} × ${a.quantity})` : ''}`,
+              description: `${addonLabel(a)}${a.quantity !== 1 ? ` (${amountText(a.unit_price)} × ${a.quantity})` : ''}`,
               amount: addonAmount(a),
               discount: 0,
             })),

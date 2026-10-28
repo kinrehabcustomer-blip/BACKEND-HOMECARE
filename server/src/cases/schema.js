@@ -95,17 +95,20 @@ const caseFields = z.object({
   // สิทธิ์ manager-only บังคับที่ route เพราะ schema ไม่รู้ว่าใครเป็นผู้เรียก
   staff_pay: z.number().nonnegative('ค่าจ้างพนักงานต้องไม่ติดลบ').optional().nullable(),
 
-  // อุปกรณ์เสริมที่คิดเงินเพิ่มจากค่าบริการ — ถูกบวกเข้ายอดใบแจ้งหนี้ (ดู lib/addons.js)
-  // null/ไม่ส่ง = ไม่มีอุปกรณ์เสริม · ส่ง [] ตอนแก้เคส = ล้างรายการเดิมทิ้ง
+  // อุปกรณ์เสริม + หัตถการที่คิดเงินเพิ่มจากค่าบริการ — ถูกบวกเข้ายอดใบแจ้งหนี้ (ดู lib/addons.js)
+  // null/ไม่ส่ง = ไม่มีรายการ · ส่ง [] ตอนแก้เคส = ล้างรายการเดิมทิ้ง
+  // หัตถการ = kind 'procedure' (จำนวน 1 เสมอ) · vn ที่ส่งมาใช้ได้เฉพาะเลขเดิมของเคสนี้ (ดู visitNumbers.js)
   addons: z
     .array(
       z.object({
-        name: z.string().trim().min(1, 'กรุณากรอกชื่ออุปกรณ์').max(200),
-        quantity: z.number().positive('จำนวนต้องมากกว่า 0').max(10000),
+        name: z.string().trim().min(1, 'กรุณากรอกชื่อรายการ').max(200),
+        quantity: z.number().positive('จำนวนต้องมากกว่า 0').max(10000).default(1),
         unit_price: z.number().nonnegative('ราคาต้องไม่ติดลบ').max(10_000_000),
+        kind: z.enum(['equipment', 'procedure']).optional(),
+        vn: z.string().trim().max(20).optional().nullable(),
       }),
     )
-    .max(50, 'อุปกรณ์เสริมได้ไม่เกิน 50 รายการ')
+    .max(50, 'อุปกรณ์เสริมและหัตถการรวมกันได้ไม่เกิน 50 รายการ')
     .optional()
     .nullable(),
 

@@ -1,5 +1,6 @@
 import { amountText, bahtText, docDate } from '../labels.js';
 import { ISSUER, printStamp } from '../lib/issuer.js';
+import { addonLabel } from '../lib/addons.js';
 
 /**
  * ตัวเอกสารใบแจ้งหนี้/ใบเสร็จรับเงินของลูกค้า — ใช้ร่วม 2 ที่ให้ตรงกันทุกตัวอักษร (24 ต.ค. 2569)
@@ -137,7 +138,7 @@ export default function CustomerInvoiceDoc({ item, signer }) {
               <tr key={`addon-${i}`}>
                 <td className="inv-c">{i + 2}</td>
                 <td>
-                  อุปกรณ์เสริม: {a.name}
+                  {addonLabel(a)}
                   {a.quantity !== 1 && ` (${amountText(a.unit_price)} × ${a.quantity})`}
                 </td>
                 <td className="inv-c">{a.quantity}</td>

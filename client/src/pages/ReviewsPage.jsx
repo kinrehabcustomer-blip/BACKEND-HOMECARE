@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api.js';
 import { STATUS_LABELS, POSITION_LABELS, stampText } from '../labels.js';
 import Stars from '../components/Stars.jsx';
@@ -14,6 +14,20 @@ import { scoreText } from '../lib/reviewQuestions.js';
  */
 export default function ReviewsPage() {
   const navigate = useNavigate();
+  /* ตัวกรองอยู่ใน URL แบบเดียวกับหน้าเคส/ลูกค้า — กดเข้าดูรายละเอียดแล้วย้อนกลับ คำค้นยังอยู่
+     replace ไม่ push: พิมพ์ทีละตัวไม่ควรกลายเป็นประวัติให้กดย้อนกลับทีละตัวอักษร */
+  const [params, setParams] = useSearchParams();
+  const q = params.get('q') ?? '';
+  const ratedFilter = params.get('rated') ?? '';
+  const setFilter = (key, value) =>
+    setParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (value) next.set(key, value);
+      else next.delete(key);
+      return next;
+    }, { replace: true });
+  const filtered = Boolean(q || ratedFilter);
+  const clearFilters = () => setParams({}, { replace: true });
   const [rows, setRows] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -40,6 +54,18 @@ export default function ReviewsPage() {
   const teamAvg = totalReviews
     ? rated.reduce((sum, r) => sum + r.avg_score * r.review_count, 0) / totalReviews
     : null;
+
+  /* ค้นในหน้า (ข้อมูลทั้งทีมโหลดมาครั้งเดียวอยู่แล้ว) — ชื่อ นามสกุล ชื่อเล่น รหัส หรือตำแหน่ง
+     การ์ดสรุปด้านบนยังเป็นตัวเลขของทั้งทีม ไม่เปลี่ยนตามคำค้น */
+  const needle = q.trim().toLowerCase();
+  const shown = rows.filter((r) => {
+    if (ratedFilter === 'yes' && !r.review_count) return false;
+    if (ratedFilter === 'no' && r.review_count) return false;
+    if (!needle) return true;
+    return [r.first_name, r.last_name, `${r.first_name} ${r.last_name}`, r.nickname, r.employee_id,
+      POSITION_LABELS[r.position], r.position]
+      .some((v) => v && String(v).toLowerCase().includes(needle));
+  });
 
   return (
     <PageRefresh onRefresh={load} busy={loading}>
@@ -69,6 +95,27 @@ export default function ReviewsPage() {
           </div>
         </div>
 
+        {rows.length > 0 && (
+          <div className="toolbar">
+            <input
+              className="search search-compact"
+              type="search"
+              placeholder="ค้นหา ชื่อพนักงาน / ชื่อเล่น / รหัสพนักงาน / ตำแหน่ง"
+              aria-label="ค้นหาพนักงาน"
+              value={q}
+              onChange={(e) => setFilter('q', e.target.value)}
+            />
+            <select value={ratedFilter} onChange={(e) => setFilter('rated', e.target.value)} aria-label="คะแนน">
+              <option value="">พนักงานทุกคน</option>
+              <option value="yes">มีคะแนนแล้ว</option>
+              <option value="no">ยังไม่มีคะแนน</option>
+            </select>
+            {/* โผล่เฉพาะตอนมีอะไรกรองอยู่ — ปุ่มที่กดแล้วไม่เกิดอะไรขึ้นไม่ควรมีให้เห็น */}
+            {filtered && <button className="btn" onClick={clearFilters}>ล้างตัวกรอง</button>}
+            {filtered && <span className="muted">พบ {shown.length} จาก {rows.length} คน</span>}
+          </div>
+        )}
+
         {rows.length === 0 ? (
           <div className="empty-state">
             <p>ยังไม่มีพนักงานกลุ่ม front ในระบบ</p>
@@ -89,7 +136,7 @@ export default function ReviewsPage() {
                 </tr>
               </thead>
               <tbody>
-                {rows.map((r) => (
+                {shown.map((r) => (
                   /* กดได้ทั้งแถว ไม่ใช่เฉพาะชื่อ — ท่าเดียวกับตารางเคส/ลูกค้า/พนักงาน
                      ชื่อจึงไม่เป็นลิงก์ซ้อนอยู่ข้างใน (ลิงก์ในแถวที่กดได้ = เป้าหมายซ้อนกันสองชั้น
                      ที่คนใช้แป้นพิมพ์ต้องกด Tab ผ่านสองครั้งเพื่อไปที่เดียวกัน) */
@@ -140,6 +187,14 @@ export default function ReviewsPage() {
                     </td>
                   </tr>
                 ))}
+                {shown.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="empty">
+                      ไม่พบพนักงานที่ตรงกับคำค้น{' '}
+                      <button className="btn link-btn" onClick={clearFilters}>ล้างตัวกรอง</button>
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>

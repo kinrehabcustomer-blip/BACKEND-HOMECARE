@@ -303,12 +303,16 @@ export default function InvoiceListPage() {
                   </td>
                   <td data-label="ยอดสุทธิ">{formatBaht(v.total)}</td>
                   <td data-label="สถานะ">
-                    <span className={`badge invoice-${v.is_overdue ? 'overdue' : v.status}`}>
-                      {v.is_overdue ? 'เกินกำหนด' : INVOICE_STATUS_LABELS[v.status]}
+                    {/* ป้ายสลิปรอตรวจซ้อนเป็นบรรทัดที่สองใต้สถานะ — เดิมอยู่บรรทัดเดียวกันแล้วโดนตัดเป็น "…"
+                        เพราะเซลล์ตารางไม่ตัดบรรทัด (คอลัมน์สถานะแคบ ป้ายสองอันวางคู่กันไม่พอ) */}
+                    <span className="status-stack">
+                      <span className={`badge invoice-${v.is_overdue ? 'overdue' : v.status}`}>
+                        {v.is_overdue ? 'เกินกำหนด' : INVOICE_STATUS_LABELS[v.status]}
+                      </span>
+                      {Number(v.pending_slip_count) > 0 && (
+                        <span className="badge pending-slip-badge">สลิปรอตรวจ {v.pending_slip_count}</span>
+                      )}
                     </span>
-                    {Number(v.pending_slip_count) > 0 && (
-                      <span className="badge pending-slip-badge">📎 รอตรวจ {v.pending_slip_count}</span>
-                    )}
                   </td>
                 </tr>
               ))}

@@ -1,5 +1,6 @@
 import { sql, transaction, nextCaseId } from '../db/index.js';
 import { caseCode, caseIdForPatient, isCaseOfPatient } from './caseCode.js';
+import { issueForVisits, withProcedureNumbers } from './visitNumbers.js';
 /* รายการช่องของรายงานมาจาก schema.js ที่เดียว — ฟอร์มมี 80 กว่าช่อง การก๊อปรายชื่อมาไว้สองที่
    แปลว่าวันหนึ่งจะมีช่องที่ผ่าน validation แล้วแต่ไม่ถูกเขียนลงตาราง (บันทึกสำเร็จแต่ข้อมูลหาย)
    ต่างจากตาราง cases ที่ยังประกาศ COLUMNS เอง เพราะช่องน้อยและมีคอลัมน์ที่ระบบเติมเองปนอยู่ */
@@ -580,7 +581,8 @@ export async function create(rawInput, actor) {
     if (!values.client_name) values.client_name = PATIENT_PENDING;
     values.pkg_english = input.pkg_english ?? false; // คอลัมน์ NOT NULL — ไม่ส่งมา = ไม่ได้ขอภาษาอังกฤษ
     // node-postgres แปลง array เป็น array ของ Postgres ไม่ใช่ JSON — ต้อง stringify เองก่อนลงคอลัมน์ JSONB
-    values.addons = JSON.stringify(normalizeAddons(input.addons));
+    // หัตถการได้ VN ของตัวเองตั้งแต่บันทึก (เคสใหม่ = เลขใหม่ทุกบรรทัด รวมที่คัดลอกมาจากรอบก่อน)
+    values.addons = JSON.stringify(await withProcedureNumbers(tx, input.addons));
 
     await assertPhysioPackageUsable(input, tx);
 
@@ -683,7 +685,7 @@ const FIELD_LABELS = {
   current_symptoms: 'อาการปัจจุบัน', medical_devices: 'อุปกรณ์การแพทย์', care_goal: 'เป้าหมายการดูแล',
   service_start_preference: 'ความสะดวกเริ่มบริการ', address: 'ที่อยู่', client_phone: 'เบอร์ติดต่อ',
   nurse_call_preference: 'ความต้องการผู้ดูแล', start_date: 'วันเริ่ม', end_date: 'วันสิ้นสุด',
-  fee: 'ค่าบริการ', staff_pay: 'ค่าจ้างพนักงาน', addons: 'อุปกรณ์เสริม',
+  fee: 'ค่าบริการ', staff_pay: 'ค่าจ้างพนักงาน', addons: 'อุปกรณ์เสริม/หัตถการ',
   geo_lat: 'พิกัด', geo_lng: 'พิกัด', geofence_radius_m: 'รัศมีเช็คอิน', note: 'หมายเหตุ',
 };
 
@@ -750,7 +752,7 @@ async function valueChanges(tx, current, values) {
   if ('addons' in values) {
     const before = addonsTotal(current?.addons);
     const after = addonsTotal(JSON.parse(values.addons));
-    if (before !== after) out.push(`อุปกรณ์เสริม: ${bahtText(before)} → ${bahtText(after)}`);
+    if (before !== after) out.push(`อุปกรณ์เสริม/หัตถการ: ${bahtText(before)} → ${bahtText(after)}`);
   }
   return out;
 }
@@ -808,11 +810,13 @@ export async function update(caseId, rawInput, actor) {
   for (const col of fields) values[col] = input[col] ?? null;
   // ล้างชื่อผู้รับบริการในหน้าแก้ = กลับไปเป็น "ยังไม่ระบุ" (คอลัมน์ NOT NULL)
   if ('client_name' in values && !values.client_name) values.client_name = PATIENT_PENDING;
-  if ('addons' in values) values.addons = JSON.stringify(normalizeAddons(values.addons));
 
   await transaction(async (tx) => {
     const payState = await staffPayUpdateForTransaction(tx, caseId, input);
     const { current, mode: payMode } = payState;
+
+    // หัตถการเดิมคงเลข VN เดิม หัตถการที่เพิ่งเพิ่มได้เลขใหม่ (ต้องรู้ของเดิมก่อน จึงทำหลังล็อกเคส)
+    if ('addons' in values) values.addons = JSON.stringify(await withProcedureNumbers(tx, values.addons, current.addons));
 
     /* เคสที่จบแล้วเปลี่ยนแพ็คเกจย้อนหลังไม่ได้ — ค่าบริการ/ชื่อเคส/ใบแจ้งหนี้จะเปลี่ยนตาม
        ทั้งที่งานเกิดขึ้นไปแล้วตามแพ็คเกจเดิม ต้องเปิดเคสใหม่ก่อน (กติกาเดียวกับการจับคู่/เริ่มงาน) */
@@ -1356,7 +1360,7 @@ export function listVisits(caseId) {
               v.assigned_to, v.planned_start, v.planned_end,
               v.check_in_at, v.check_out_at, v.check_in_distance_m, v.location_flagged,
               v.check_in_late_minutes, v.off_schedule,
-              v.pay_status, v.pay_note, v.approved_by_name,
+              v.pay_status, v.pay_note, v.approved_by_name, v.vn,
               e.first_name || ' ' || e.last_name AS assigned_name,
               e.nickname                          AS assigned_nickname
        FROM case_visits v
@@ -1472,12 +1476,17 @@ export async function addVisits(caseId, dates, { assigned_to, planned_start, pla
              :planned_start, :planned_end, :staff_pay, :note)`;
   });
 
-  const inserted = await sql.all(
-    `INSERT INTO case_visits (case_id, visit_date, assigned_to, planned_start, planned_end, staff_pay, note)
-     VALUES ${values.join(', ')}
-     RETURNING visit_id`,
-    params,
-  );
+  // ลงนัดแล้วออก VN ในทรานแซกชันเดียวกัน — นัดที่ได้มาต้องมีเลขเสมอ (ดู visitNumbers.js)
+  const inserted = await transaction(async (tx) => {
+    const rows = await tx.all(
+      `INSERT INTO case_visits (case_id, visit_date, assigned_to, planned_start, planned_end, staff_pay, note)
+       VALUES ${values.join(', ')}
+       RETURNING visit_id`,
+      params,
+    );
+    await issueForVisits(tx, caseId, rows.map((r) => r.visit_id));
+    return rows;
+  });
 
   return {
     visits: await listVisits(caseId),

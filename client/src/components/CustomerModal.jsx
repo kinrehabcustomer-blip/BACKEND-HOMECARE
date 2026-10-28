@@ -350,7 +350,7 @@ export default function CustomerModal({ customerId, siblings = [], onNavigate, o
                 className="btn danger-ghost foot-danger"
                 disabled={deleting}
                 title={`ลบลูกค้า ${customerId} ออกจากฐานข้อมูลถาวร?`}
-                detail="เคสที่เคยให้บริการจะยังอยู่ในระบบ (ข้อมูลผู้ป่วยถูกบันทึกไว้ในเคสแล้ว) แต่จะไม่เชื่อมกับลูกค้ารายนี้อีก"
+                detail="เคสที่เคยให้บริการจะยังอยู่ในระบบ (ข้อมูลผู้รับบริการถูกบันทึกไว้ในเคสแล้ว) แต่จะไม่เชื่อมกับลูกค้ารายนี้อีก"
                 confirmLabel="ลบลูกค้า"
                 onConfirm={handleDelete}
               >
