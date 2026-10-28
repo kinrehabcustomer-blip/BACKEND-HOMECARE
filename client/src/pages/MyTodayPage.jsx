@@ -185,7 +185,7 @@ function ShiftCard({ visit, busy, onCheckIn, onCheckOut, onReport }) {
         <p className="muted">{serviceName(visit) || SERVICE_KIND_LABELS[serviceKindOf(visit)]}</p>
         {visit.address && <p className="muted shift-addr"><LineIcon name="pin" className="text-ico" />{visit.address}</p>}
 
-        {/* แพ้ยา/แพ้อาหาร — อ่านสดจากแฟ้มผู้ป่วย ไม่ใช่สำเนาในเคส (แฟ้มถูกแก้เมื่อไหร่ต้องเห็นทันที)
+        {/* แพ้ยา/แพ้อาหาร — อ่านสดจากแฟ้มผู้รับบริการ ไม่ใช่สำเนาในเคส (แฟ้มถูกแก้เมื่อไหร่ต้องเห็นทันที)
             วางไว้บนการ์ดของวันนี้เลย เพราะเป็นสิ่งที่ต้องรู้ "ก่อนถึงบ้าน" ไม่ใช่ต้องกดเข้าไปหา */}
         {(visit.patient_allergies || visit.patient_food_allergies) && (
           <p className="allergy-alert">

@@ -11,7 +11,7 @@ import { normalizeAddons, addonsTotal } from '../lib/addons.js';
 const COLUMNS = [
   'title',
   'case_type',
-  'customer_id', // ผู้ว่าจ้าง (ข้อมูลผู้ป่วยด้านล่างถูกคัดลอกมาไว้ในเคส)
+  'customer_id', // ผู้ว่าจ้าง (ข้อมูลผู้รับบริการด้านล่างถูกคัดลอกมาไว้ในเคส)
   'patient_id',  // ผู้รับการดูแล (แฟ้มถาวรใน patients) — ต่างจาก customer_id ที่เป็นผู้จ่ายเงิน
 
   // บริการที่เคสนี้เลือกใช้ (ค่าจ้าง fee คัดลอกจากราคาของสิ่งที่เลือก ไม่ใช่อ่านสดจากตารางราคา)
@@ -22,7 +22,7 @@ const COLUMNS = [
   'pkg_english',    // [homecare] พนักงานสื่อสารภาษาอังกฤษ (fee รวมค่าภาษาแล้ว)
   'physio_package_id', // [physio] แพ็คเกจกายภาพบำบัดที่ซื้อ
 
-  // รายละเอียดผู้ป่วย
+  // รายละเอียดผู้รับบริการ
   'client_name',
   'patient_gender',
   'patient_age',
@@ -56,13 +56,13 @@ const COLUMNS = [
 const NOW = `to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')`;
 
 /**
- * ข้อมูลความปลอดภัยของผู้ป่วยที่ต้อง "อ่านสดจากแฟ้ม" ไม่ใช่ snapshot ของเคส
+ * ข้อมูลความปลอดภัยของผู้รับบริการที่ต้อง "อ่านสดจากแฟ้ม" ไม่ใช่ snapshot ของเคส
  *
  * เคสคัดลอกข้อมูลไว้ตอนเปิด ซึ่งถูกสำหรับราคา/ผู้จ่าย (ใบที่ปิดไปแล้วต้องไม่ขยับ)
- * แต่ผิดสำหรับ "แพ้ยา / โรคประจำตัว" — แก้แฟ้มผู้ป่วยแล้วคนที่ไปหน้างานยังเห็นของเก่า
+ * แต่ผิดสำหรับ "แพ้ยา / โรคประจำตัว" — แก้แฟ้มผู้รับบริการแล้วคนที่ไปหน้างานยังเห็นของเก่า
  * แพ้ยาไม่เคยถูกคัดลอกลงเคสด้วยซ้ำ พนักงานภาคสนามจึงไม่เคยเห็นเลย
  *
- * medical_history_stale = แฟ้มผู้ป่วยกับ snapshot ในเคสไม่ตรงกันแล้ว → ขึ้นป้ายเตือนให้ไปดูของจริง
+ * medical_history_stale = แฟ้มผู้รับบริการกับ snapshot ในเคสไม่ตรงกันแล้ว → ขึ้นป้ายเตือนให้ไปดูของจริง
  * ต้องมี alias c (cases) และ pt (patients) ใน query ที่เอาไปใช้
  */
 const PATIENT_LIVE = `
@@ -242,7 +242,7 @@ export function findById(caseId) {
 }
 
 /**
- * เพิ่งผูกผู้ว่าจ้างให้ผู้ป่วย -> เติมผู้ว่าจ้างคนนี้ให้เคสของผู้ป่วยรายนั้น "ที่ยังไม่มีผู้ว่าจ้าง"
+ * เพิ่งผูกผู้ว่าจ้างให้ผู้รับบริการ -> เติมผู้ว่าจ้างคนนี้ให้เคสของผู้รับบริการรายนั้น "ที่ยังไม่มีผู้ว่าจ้าง"
  * แตะเฉพาะเคสที่ customer_id ว่าง — เคสที่มีผู้จ่ายของตัวเองอยู่แล้วไม่ทับ (ผู้จ่ายอาจเป็นคนละคน)
  * คืนเคส (แบบเต็ม พร้อม join บริการ) ที่ถูกแก้ ให้ผู้เรียกเอาไป sync ใบแจ้งหนี้ต่อ
  */
@@ -291,7 +291,7 @@ export const FIELD_ACCESS_WINDOW_DAYS = 30;
  * windowDays: นับเฉพาะกะที่เกิดภายใน N วันล่าสุด · ไม่ใส่ = ใช้ค่ากลาง FIELD_ACCESS_WINDOW_DAYS
  * (ส่ง null มาเองเท่านั้นจึงจะไม่จำกัดเวลา — ตอนนี้ไม่มีเส้นไหนใช้ ตั้งใจให้ "ปลอดภัยไว้ก่อน" เป็นค่าตั้งต้น)
  * เหตุผลที่ต้องมีหน้าต่างเวลา: คนที่ถูกสลับออกจากเคสหรือลาออกไปแล้วไม่ควรอ่านข้อมูลสุขภาพ
- * และข้อความของครอบครัวผู้ป่วยต่อไปได้ไม่สิ้นสุด เพียงเพราะเคยมีกะหนึ่งกะเมื่อปีก่อน
+ * และข้อความของครอบครัวผู้รับบริการต่อไปได้ไม่สิ้นสุด เพียงเพราะเคยมีกะหนึ่งกะเมื่อปีก่อน
  * (ผู้รับผิดชอบหลักและคนในทีมยังผ่านตามเดิม เพราะสองอย่างนั้นคือ "สถานะปัจจุบัน" ที่แอดมินถอดออกได้)
  */
 export async function hasFieldAccess(employeeId, caseId, { windowDays = FIELD_ACCESS_WINDOW_DAYS } = {}) {
@@ -302,7 +302,7 @@ export async function hasFieldAccess(employeeId, caseId, { windowDays = FIELD_AC
        AND (c.assigned_to = :eid
             OR EXISTS (SELECT 1 FROM case_team t WHERE t.case_id = c.case_id AND t.employee_id = :eid)
             /* กะที่ถูกยกเลิก = งานที่ไม่ได้เกิดขึ้น จึงไม่ควรเป็นใบเบิกทางให้อ่านประวัติการรักษา
-               ที่อยู่ และข้อมูลสุขภาพของผู้ป่วยรายนั้นต่อไปตลอดกาล (เคสถูกยกเลิกทั้งใบก็เข้าข่ายเดียวกัน) */
+               ที่อยู่ และข้อมูลสุขภาพของผู้รับบริการรายนั้นต่อไปตลอดกาล (เคสถูกยกเลิกทั้งใบก็เข้าข่ายเดียวกัน) */
             OR EXISTS (SELECT 1 FROM case_visits v
                        WHERE v.case_id = c.case_id AND v.assigned_to = :eid
                          AND v.status <> 'cancelled'${
@@ -556,7 +556,7 @@ export function create(rawInput, actor) {
     values.case_type = input.case_type ?? caseTypeForService(input);
     values.renewed_from = prev?.case_id ?? null;
     values.round_no = prev ? prev.round_no + 1 : 1;
-    // รู้แค่ผู้ว่าจ้าง ยังไม่รู้ชื่อผู้ป่วย (schema บังคับให้มีอย่างใดอย่างหนึ่งแล้ว)
+    // รู้แค่ผู้ว่าจ้าง ยังไม่รู้ชื่อผู้รับบริการ (schema บังคับให้มีอย่างใดอย่างหนึ่งแล้ว)
     if (!values.client_name) values.client_name = PATIENT_PENDING;
     values.pkg_english = input.pkg_english ?? false; // คอลัมน์ NOT NULL — ไม่ส่งมา = ไม่ได้ขอภาษาอังกฤษ
     // node-postgres แปลง array เป็น array ของ Postgres ไม่ใช่ JSON — ต้อง stringify เองก่อนลงคอลัมน์ JSONB
@@ -567,10 +567,10 @@ export function create(rawInput, actor) {
     // ไม่ได้ส่งค่าจ้างมา = ใช้ของแพ็คเกจ · ส่งตัวเลขมาเอง (รวม 0) = เคารพตามนั้น
     if (values.staff_pay == null) values.staff_pay = await payFromService(input, tx);
 
-    // ไม่มีช่องกรอกชื่อเคสแล้ว — ปกติหน้าเว็บส่งชื่อที่ประกอบจากแพ็คเกจ+ผู้ป่วยมาให้
-    // ถ้าเรียก API ตรงๆ โดยไม่ส่ง title มา ใช้ชื่อผู้ป่วยแทน เพื่อไม่ให้ชน NOT NULL
+    // ไม่มีช่องกรอกชื่อเคสแล้ว — ปกติหน้าเว็บส่งชื่อที่ประกอบจากแพ็คเกจ+ผู้รับบริการมาให้
+    // ถ้าเรียก API ตรงๆ โดยไม่ส่ง title มา ใช้ชื่อผู้รับบริการแทน เพื่อไม่ให้ชน NOT NULL
     if (!values.title) {
-      // ยังไม่รู้ชื่อผู้ป่วย = ตั้งชื่อเคสตามผู้ว่าจ้างแทน (ชื่อเคสไปขึ้นในใบแจ้งหนี้ด้วย ห้ามเป็นคำแทนชื่อ)
+      // ยังไม่รู้ชื่อผู้รับบริการ = ตั้งชื่อเคสตามผู้ว่าจ้างแทน (ชื่อเคสไปขึ้นในใบแจ้งหนี้ด้วย ห้ามเป็นคำแทนชื่อ)
       const payer = values.client_name === PATIENT_PENDING && values.customer_id
         ? await tx.one('SELECT name FROM customers WHERE customer_id = :id', { id: values.customer_id })
         : null;
@@ -654,7 +654,7 @@ const FIELD_LABELS = {
   title: 'ชื่อเคส', case_type: 'ประเภทเคส', customer_id: 'ผู้ว่าจ้าง', patient_id: 'ผู้รับการดูแล',
   service_kind: 'สายบริการ', pkg_grade_id: 'เกรด', pkg_format_id: 'รูปแบบบริการ',
   pkg_staff_tier: 'ระดับพนักงาน', pkg_english: 'ค่าภาษาอังกฤษ', physio_package_id: 'แพ็คเกจกายภาพบำบัด',
-  client_name: 'ชื่อผู้ป่วย', patient_gender: 'เพศ', patient_age: 'อายุ',
+  client_name: 'ชื่อผู้รับบริการ', patient_gender: 'เพศ', patient_age: 'อายุ',
   weight_kg: 'น้ำหนัก', height_cm: 'ส่วนสูง', medical_history: 'โรคประจำตัว',
   current_symptoms: 'อาการปัจจุบัน', medical_devices: 'อุปกรณ์การแพทย์', care_goal: 'เป้าหมายการดูแล',
   service_start_preference: 'ความสะดวกเริ่มบริการ', address: 'ที่อยู่', client_phone: 'เบอร์ติดต่อ',
@@ -732,10 +732,10 @@ async function valueChanges(tx, current, values) {
 }
 
 /**
- * เคสที่เปิดตอนรู้แค่ผู้ว่าจ้าง (ชื่อผู้ป่วยเป็น PATIENT_PENDING ไม่มีแฟ้มผู้ป่วย) แล้วเพิ่งกรอกชื่อจริงในหน้าแก้
- * → สร้างแฟ้มผู้ป่วยจากข้อมูลในเคส ผูกกับผู้ว่าจ้างเดียวกัน คืนรหัส PAT ใหม่ (ไม่เข้าเงื่อนไข = null)
+ * เคสที่เปิดตอนรู้แค่ผู้ว่าจ้าง (ชื่อผู้รับบริการเป็น PATIENT_PENDING ไม่มีแฟ้มผู้รับบริการ) แล้วเพิ่งกรอกชื่อจริงในหน้าแก้
+ * → สร้างแฟ้มผู้รับบริการจากข้อมูลในเคส ผูกกับผู้ว่าจ้างเดียวกัน คืนรหัส PAT ใหม่ (ไม่เข้าเงื่อนไข = null)
  *
- * จำกัดเฉพาะเคสที่เคยเป็น "ยังไม่ระบุผู้ป่วย" — เคสเก่าที่มีชื่อจริงแต่ไม่มีแฟ้ม (ก่อนมีระบบแฟ้มผู้ป่วย)
+ * จำกัดเฉพาะเคสที่เคยเป็น "ยังไม่ระบุผู้รับบริการ" — เคสเก่าที่มีชื่อจริงแต่ไม่มีแฟ้ม (ก่อนมีระบบแฟ้มผู้รับบริการ)
  * ไม่ถูกสร้างแฟ้มเงียบๆ ทุกครั้งที่มีคนกดบันทึก
  */
 async function patientForNamedCase(tx, current, values, patientCode) {
@@ -744,10 +744,10 @@ async function patientForNamedCase(tx, current, values, patientCode) {
   const name = values.client_name;
   if (!name || name === PATIENT_PENDING) return null;
 
-  // รหัสผู้ป่วยเป็นเลขที่เจ้าหน้าที่กรอก (KN…) ระบบออกเองไม่ได้ — ได้ชื่อแล้วต้องได้รหัสมาคู่กัน
+  // รหัสผู้รับบริการเป็นเลขที่เจ้าหน้าที่กรอก (KN…) ระบบออกเองไม่ได้ — ได้ชื่อแล้วต้องได้รหัสมาคู่กัน
   if (!patientCode) {
-    throw new ApiError(400, 'กรุณากรอกรหัสผู้ป่วย (KN) เพื่อสร้างแฟ้มผู้ป่วยให้เคสนี้', [
-      { field: 'patient_code', message: 'กรอกรหัสผู้ป่วย เช่น KN690202463' },
+    throw new ApiError(400, 'กรุณากรอกรหัสผู้รับบริการ (KN) เพื่อสร้างแฟ้มผู้รับบริการให้เคสนี้', [
+      { field: 'patient_code', message: 'กรอกรหัสผู้รับบริการ เช่น KN690202463' },
     ]);
   }
   await ensurePatientCodeFree(tx, patientCode);
@@ -783,7 +783,7 @@ export async function update(caseId, rawInput, actor) {
 
   const values = { case_id: caseId };
   for (const col of fields) values[col] = input[col] ?? null;
-  // ล้างชื่อผู้ป่วยในหน้าแก้ = กลับไปเป็น "ยังไม่ระบุ" (คอลัมน์ NOT NULL)
+  // ล้างชื่อผู้รับบริการในหน้าแก้ = กลับไปเป็น "ยังไม่ระบุ" (คอลัมน์ NOT NULL)
   if ('client_name' in values && !values.client_name) values.client_name = PATIENT_PENDING;
   if ('addons' in values) values.addons = JSON.stringify(normalizeAddons(values.addons));
 
@@ -804,7 +804,7 @@ export async function update(caseId, rawInput, actor) {
       values.staff_pay = payState.staff_pay;
     }
 
-    // เคสที่เปิดโดยรู้แค่ผู้ว่าจ้าง เพิ่งได้ชื่อผู้ป่วย → สร้างแฟ้มผู้ป่วยแล้วผูกกับเคส (ทรานแซกชันเดียวกัน)
+    // เคสที่เปิดโดยรู้แค่ผู้ว่าจ้าง เพิ่งได้ชื่อผู้รับบริการ → สร้างแฟ้มผู้รับบริการแล้วผูกกับเคส (ทรานแซกชันเดียวกัน)
     const newPatient = await patientForNamedCase(tx, current, values, input.patient_code);
     if (newPatient) {
       values.patient_id = newPatient;
@@ -820,7 +820,7 @@ export async function update(caseId, rawInput, actor) {
       values.case_type = caseTypeForService({ ...current, ...values });
       if (!fields.includes('case_type')) fields.push('case_type');
     }
-    if (newPatient) details.push(`สร้างแฟ้มผู้ป่วย ${newPatient}`);
+    if (newPatient) details.push(`สร้างแฟ้มผู้รับบริการ ${newPatient}`);
 
     if (nextId) {
       await ensureCaseCodeFree(tx, nextId, caseId);
@@ -3463,7 +3463,7 @@ export function assignableEmployees() {
 }
 
 // ============================================================================
-// รายงานอาการผู้ป่วย (case_reports) — บันทึกทีละครั้งของเคสหนึ่งใบ
+// รายงานอาการผู้รับบริการ (case_reports) — บันทึกทีละครั้งของเคสหนึ่งใบ
 //
 // ต่างจาก cases.current_symptoms ที่เป็น "อาการ ณ วันเปิดเคส" ช่องเดียวซึ่งแก้ทับไปเรื่อยๆ
 // ตารางนี้เก็บทุกครั้งที่บันทึกไว้ทั้งหมด — ย้อนดูแนวโน้มได้ว่าอาทิตย์ที่แล้วความดันเท่าไหร่

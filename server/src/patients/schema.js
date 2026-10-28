@@ -25,23 +25,23 @@ const date = zodDate(z);
 const birthDate = zodPastDate(z);
 
 /**
- * รหัสผู้ป่วย = KN + ปี พ.ศ. 2 หลัก + เลข 7 หลักที่เจ้าหน้าที่กรอกเอง (เช่น KN690202463)
+ * รหัสผู้รับบริการ = KN + ปี พ.ศ. 2 หลัก + เลข 7 หลักที่เจ้าหน้าที่กรอกเอง (เช่น KN690202463)
  * ไม่ใช่เลขรันอัตโนมัติแบบ PAT-0001 เดิม — เลขชุดนี้มาจากเอกสารของศูนย์ ระบบจึงแค่ตรวจรูปแบบและห้ามซ้ำ
- * แฟ้มเก่าที่ยังเป็น PAT-xxxx ใช้ต่อได้ และแก้เป็นรหัส KN ได้ในหน้าแก้ไขผู้ป่วย
+ * แฟ้มเก่าที่ยังเป็น PAT-xxxx ใช้ต่อได้ และแก้เป็นรหัส KN ได้ในหน้าแก้ไขผู้รับบริการ
  * (ต้องตรงกับ PATIENT_CODE_RE ใน client/src/lib/patientCode.js)
  */
 export const PATIENT_CODE_RE = /^KN\d{9}$/;
 export const patientCode = z
   .string()
   .trim()
-  .regex(PATIENT_CODE_RE, 'รหัสผู้ป่วยต้องเป็น KN + ปี พ.ศ. 2 หลัก + เลข 7 หลัก (เช่น KN690202463)');
+  .regex(PATIENT_CODE_RE, 'รหัสผู้รับบริการต้องเป็น KN + ปี พ.ศ. 2 หลัก + เลข 7 หลัก (เช่น KN690202463)');
 
 /**
  * มีแต่ชื่อที่บังคับกรอก — เหมือน customers เพราะข้อมูลมักได้มาทีละนิดทางโทรศัพท์
  * customer_id (ผู้ว่าจ้าง) ไม่บังคับ: บาง lead ยังไม่มีลูกค้าในระบบ หรือยังไม่รู้ว่าใครจ่าย
  */
 export const createPatientSchema = z.object({
-  // รหัสผู้ป่วย — บังคับตอนสร้าง · ตอนแก้ (updatePatientSchema) ส่งมา = เปลี่ยนรหัส
+  // รหัสผู้รับบริการ — บังคับตอนสร้าง · ตอนแก้ (updatePatientSchema) ส่งมา = เปลี่ยนรหัส
   patient_id: patientCode,
   name: z.string().trim().min(1, 'กรุณากรอกชื่อผู้รับการดูแล').max(200),
   customer_id: optionalShort,
@@ -67,7 +67,7 @@ export const createPatientSchema = z.object({
     .nullable(),
   nationality: optionalShort,
   relation_to_customer: optionalShort,
-  employer_relation: optionalShort, // ผู้ว่าจ้างเป็นอะไรกับผู้ป่วย
+  employer_relation: optionalShort, // ผู้ว่าจ้างเป็นอะไรกับผู้รับบริการ
 
   weight_kg: z.number().positive('น้ำหนักต้องมากกว่า 0').max(500).optional().nullable(),
   height_cm: z.number().positive('ส่วนสูงต้องมากกว่า 0').max(300).optional().nullable(),

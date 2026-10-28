@@ -24,7 +24,7 @@ export const roleForPosition = (position) => (ADMIN_POSITIONS.includes(position)
 /**
  * สิทธิ์รายหมวดของพนักงานกลุ่ม back — ส่งไปกับ session เป็น permissions ให้หน้าเว็บซ่อนเมนู
  * (ต้องตรงกับ NAV ใน client/src/App.jsx)
- *   office  = งานหลังบ้าน: ภาพรวม · เคส · ตารางงาน · การมาทำงาน · ลูกค้า · ผู้ป่วย · แพ็คเกจ · พนักงาน · ประเมิน
+ *   office  = งานหลังบ้าน: ภาพรวม · เคส · ตารางงาน · การมาทำงาน · ลูกค้า · ผู้รับบริการ · แพ็คเกจ · พนักงาน · ประเมิน
  *   billing = ใบแจ้งหนี้
  *   money   = ค่าจ้างพนักงาน/ต้นทุน/กำไร · ค่าตอบแทนพนักงาน (payroll) · รายได้บริษัท
  *
@@ -35,7 +35,7 @@ export const POSITION_PERMISSIONS = {
   manager: ['office', 'billing', 'money'],
   hr: ['office', 'billing'],
   admin: ['office', 'billing'],   // Admin HC
-  finance: ['billing', 'money'],  // การเงิน — เฉพาะหน้าเรื่องเงิน ไม่เห็นเคส/ลูกค้า/ผู้ป่วย/พนักงาน
+  finance: ['billing', 'money'],  // การเงิน — เฉพาะหน้าเรื่องเงิน ไม่เห็นเคส/ลูกค้า/ผู้รับบริการ/พนักงาน
 };
 export const permissionsFor = (position) => POSITION_PERMISSIONS[position] ?? [];
 export const can = (position, permission) => permissionsFor(position).includes(permission);
@@ -237,7 +237,7 @@ export const requirePermission = (permission, message) => (req, res, next) => {
   next();
 };
 
-/** งานหลังบ้าน (เคส/ลูกค้า/ผู้ป่วย/พนักงาน/แพ็คเกจ/ประเมิน) — ผู้จัดการ · HR · Admin HC */
+/** งานหลังบ้าน (เคส/ลูกค้า/ผู้รับบริการ/พนักงาน/แพ็คเกจ/ประเมิน) — ผู้จัดการ · HR · Admin HC */
 export const requireAdmin = requirePermission('office', 'บัญชีของคุณไม่มีสิทธิ์เข้าถึงงานหลังบ้านส่วนนี้');
 
 /** ใบแจ้งหนี้ — ผู้จัดการ · HR · Admin HC · การเงิน */

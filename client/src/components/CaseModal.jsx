@@ -144,7 +144,7 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
   const [busy, setBusy] = useState(false);
   const [visits, setVisits] = useState([]);      // ใช้แค่สรุปจำนวนบนปุ่ม การจัดการจริงอยู่ใน popup ย่อย
   const [visitsOpen, setVisitsOpen] = useState(false);
-  /* รายงานอาการผู้ป่วย — ตัวรายการกางอยู่ในหน้าแล้ว (ดูส่วน "รายงานอาการผู้ป่วย" ข้างล่าง)
+  /* รายงานอาการผู้รับบริการ — ตัวรายการกางอยู่ในหน้าแล้ว (ดูส่วน "รายงานอาการผู้รับบริการ" ข้างล่าง)
      ตัวนี้เหลือไว้เป็นจำนวนรวม ใช้ตัดสินว่าจะโชว์ปุ่มพิมพ์ไหม — ขอมาหน้าละใบเดียว ไม่ดึงทั้งคลัง */
   const [reports, setReports] = useState({ total: 0 });
   const [team, setTeam] = useState([]); // คนที่ร่วมดูแลเคส นอกเหนือจากผู้รับผิดชอบหลัก
@@ -459,13 +459,13 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
               {error && <p className="error">{error}</p>}
 
               <section>
-                <h3>รายละเอียดผู้ป่วย</h3>
+                <h3>รายละเอียดผู้รับบริการ</h3>
                 <div className="field-grid">
-                  <Field label="ชื่อผู้ป่วย" value={item.client_name} />
+                  <Field label="ชื่อผู้รับบริการ" value={item.client_name} />
                   <Field label="เพศ / อายุ" value={genderAge(item)} />
                   <Field label="น้ำหนัก / ส่วนสูง" value={weightHeight(item)} />
                 </div>
-                {/* แพ้ยา/แพ้อาหาร มีที่แฟ้มผู้ป่วยที่เดียว (ไม่ได้คัดลอกลงเคส) — อ่านสดมาแสดงคู่กัน */}
+                {/* แพ้ยา/แพ้อาหาร มีที่แฟ้มผู้รับบริการที่เดียว (ไม่ได้คัดลอกลงเคส) — อ่านสดมาแสดงคู่กัน */}
                 {(item.patient_allergies || item.patient_food_allergies) && (
                   <p className="allergy-alert">
                     {item.patient_allergies && <>แพ้ยา: {item.patient_allergies}</>}
@@ -474,11 +474,11 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                   </p>
                 )}
                 <Field label="โรคประจำตัว" value={item.medical_history} />
-                {/* snapshot ในเคสไม่ตรงกับแฟ้มผู้ป่วยแล้ว — พนักงานภาคสนามเห็นของล่าสุดอยู่
+                {/* snapshot ในเคสไม่ตรงกับแฟ้มผู้รับบริการแล้ว — พนักงานภาคสนามเห็นของล่าสุดอยู่
                     แต่ที่นี่ยังโชว์ snapshot เพราะเป็นข้อมูล ณ วันเปิดเคส จึงต้องบอกให้รู้ว่าต่างกัน */}
                 {item.medical_history_stale && (
                   <p className="notice">
-                    แฟ้มผู้ป่วยถูกแก้หลังเปิดเคส — ปัจจุบันคือ “{item.patient_medical_history || 'ไม่ได้ระบุ'}”
+                    แฟ้มผู้รับบริการถูกแก้หลังเปิดเคส — ปัจจุบันคือ “{item.patient_medical_history || 'ไม่ได้ระบุ'}”
                     {' '}(พนักงานภาคสนามเห็นข้อมูลล่าสุดนี้แล้ว)
                   </p>
                 )}
@@ -642,7 +642,7 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                   ที่เกินไปดูได้ในคลังเต็ม (ปุ่มของ CaseReports เอง) — กติกาเดียวกับฝั่งพนักงาน */}
               <section>
                 <div className="section-head">
-                  <h3>รายงานอาการผู้ป่วย</h3>
+                  <h3>รายงานอาการผู้รับบริการ</h3>
                   {/* สองทางที่ต่างกันจริงๆ: อ่านในระบบ (กางดูรายใบ แก้ไขได้ กรองตามเดือน/ที่ผิดปกติ)
                       กับใบกระดาษที่ส่งออกไปข้างนอก (ญาติขอดู แพทย์ขอประวัติ เก็บเข้าแฟ้มตอนปิดเคส)
                       ทางแรกต้องอยู่ตรงนี้ด้วยเสมอ ไม่ใช่โผล่เฉพาะตอนรายงานเยอะจนล้นออกนอกหน้า */}

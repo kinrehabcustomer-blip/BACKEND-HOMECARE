@@ -146,7 +146,7 @@ await sql.run(
   { id: CUSTOMER_B, address: `${SECRET_ADDRESS}-B` },
 );
 
-async function insertCase(id, { customer = CUSTOMER_A, assigned = EMP_A, status = 'assigned', client = 'ผู้ป่วย A' } = {}) {
+async function insertCase(id, { customer = CUSTOMER_A, assigned = EMP_A, status = 'assigned', client = 'ผู้รับบริการ A' } = {}) {
   await sql.run(
     `INSERT INTO cases
        (case_id, title, case_type, client_name, client_phone, address, customer_id, status, assigned_to,
@@ -168,8 +168,8 @@ async function insertCase(id, { customer = CUSTOMER_A, assigned = EMP_A, status 
 }
 
 await insertCase(CASE_A);
-await insertCase(CASE_B, { customer: CUSTOMER_B, assigned: EMP_B, client: 'ผู้ป่วย B' });
-await insertCase(CASE_ASSIGN, { status: 'unassigned', assigned: null, client: 'ผู้ป่วยรอคน' });
+await insertCase(CASE_B, { customer: CUSTOMER_B, assigned: EMP_B, client: 'ผู้รับบริการ B' });
+await insertCase(CASE_ASSIGN, { status: 'unassigned', assigned: null, client: 'ผู้รับบริการรอคน' });
 await sql.run(
   `INSERT INTO case_visits
      (case_id, visit_date, planned_start, planned_end, assigned_to, status, staff_pay, pay_status)
@@ -208,7 +208,7 @@ await sql.run(
     customer: CUSTOMER_A,
     line: LINE_CUSTOMER_A,
     payload: JSON.stringify({
-      kind: 'invoice', invoice_id: 'INV-BRIDGE', patient_name: 'ผู้ป่วย A', total: INVOICE_TOTAL,
+      kind: 'invoice', invoice_id: 'INV-BRIDGE', patient_name: 'ผู้รับบริการ A', total: INVOICE_TOTAL,
       paid: 0, balance: INVOICE_TOTAL, due_date: bkkDate(), issue_date: bkkDate(), url: 'https://staff.kinorigin.com/bill/QA-NOT-A-REAL-TOKEN',
     }),
   },
@@ -414,7 +414,7 @@ try {
   const strangerSummary = await postTicket('family/summary', 'kin-family', { u: LINE_STRANGER, case_id: CASE_A });
   probe(
     strangerSummary.status === 200 && Array.isArray(strangerSummary.body?.cases) && strangerSummary.body.cases.length === 0,
-    'LINE ที่ไม่ผูกกับเคสอ่านสรุปผู้ป่วยได้',
+    'LINE ที่ไม่ผูกกับเคสอ่านสรุปผู้รับบริการได้',
     `${strangerSummary.status} ${brief(strangerSummary.body)}`,
     'LINE ที่ไม่ผูกกับเคสได้รายการว่าง',
   );
@@ -431,7 +431,7 @@ try {
   probe(crossPhoto.status === 403, 'ญาติเคส A เปิดรูปของเคส B ได้', `${crossPhoto.status} ${brief(crossPhoto.body)}`, 'ญาติเปิดรูปข้ามเคสถูกกั้น 403');
   const crossOverview = await postTicket('customers/case-overview', 'kin-case-overview', { cid: CUSTOMER_A, case_id: CASE_B });
   probe(
-    crossOverview.status === 404 && !JSON.stringify(crossOverview.body).includes('ผู้ป่วย B'),
+    crossOverview.status === 404 && !JSON.stringify(crossOverview.body).includes('ผู้รับบริการ B'),
     'ห้องลูกค้า A ขอ case-overview ของลูกค้า B ได้',
     `${crossOverview.status} ${brief(crossOverview.body)}`,
     'case-overview ผูก case_id กับ customer_id จริง',
@@ -467,7 +467,7 @@ try {
   );
 
   const CASE_ACCEPT_REPLAY = 'CASE-BRIDGE-ACCEPT-REPLAY';
-  await insertCase(CASE_ACCEPT_REPLAY, { client: 'ผู้ป่วยรับรหัสซ้ำ' });
+  await insertCase(CASE_ACCEPT_REPLAY, { client: 'ผู้รับบริการรับรหัสซ้ำ' });
   const acceptInvite = await family.createInvite(CASE_ACCEPT_REPLAY, 'QA replay');
   const acceptToken = ticket('kin-family-join', { u: LINE_FAM_C, code: acceptInvite.code, name: 'ญาติ C' });
   const acceptReplay = await Promise.all([
@@ -495,7 +495,7 @@ try {
   probe(postRows === 1, 'replay ตั๋วข้อความญาติสร้างข้อความซ้ำ', `HTTP=${postReplay.map((r) => r.status)} · rows=${postRows}`, 'ตั๋วข้อความญาติใบเดิมสร้างได้หนึ่งข้อความ');
 
   const CASE_INVITE_REPLAY = 'CASE-BRIDGE-INVITE-REPLAY';
-  await insertCase(CASE_INVITE_REPLAY, { client: 'ผู้ป่วยชวนซ้ำ' });
+  await insertCase(CASE_INVITE_REPLAY, { client: 'ผู้รับบริการชวนซ้ำ' });
   const headInvite = await family.createInvite(CASE_INVITE_REPLAY, 'QA replay');
   await postTicket('family/accept', 'kin-family-join', { u: LINE_FAM_C, code: headInvite.code, name: 'ญาติหัวหน้า' });
   const inviteToken = ticket('kin-family-invite', { u: LINE_FAM_C, case_id: CASE_INVITE_REPLAY });

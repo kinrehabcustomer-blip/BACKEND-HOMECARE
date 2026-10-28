@@ -119,7 +119,7 @@ export default function PatientListPage() {
   return (
     <PageRefresh onRefresh={() => setReloadKey((k) => k + 1)} busy={loading}>
       {/* ไม่มีหัวหน้าบนจอ (แถบตัวกรองเป็นส่วนบนสุด) — คง h1 ไว้ให้โปรแกรมอ่านหน้าจอ */}
-      <h1 className="sr-only">ผู้ป่วย</h1>
+      <h1 className="sr-only">ผู้รับบริการ</h1>
 
       {/* แถบตัวกรอง + ตาราง อยู่ในการ์ดใบเดียวกัน (จอเล็กแยกกลับเป็นแถบตัวกรอง + การ์ดรายแถว — ดู .list-card) */}
       <div className="list-card">
@@ -144,13 +144,13 @@ export default function PatientListPage() {
           {/* โผล่เฉพาะตอนมีอะไรกรองอยู่ — ปุ่มที่กดแล้วไม่เกิดอะไรขึ้นไม่ควรมีให้เห็น */}
           {filtered && <button className="btn" onClick={clearFilters}>ล้างตัวกรอง</button>}
           {/* ปุ่มหลักของหน้าอยู่ท้ายแถบตัวกรอง (ไม่มีหัวหน้าแล้ว) */}
-          <Link className="btn primary toolbar-action" to="/patients/new">+ เพิ่มผู้ป่วย</Link>
+          <Link className="btn primary toolbar-action" to="/patients/new">+ เพิ่มผู้รับบริการ</Link>
         </div>
 
         {/* กรองมาจากลิงก์ของลูกค้ารายหนึ่ง — ต้องบอกให้เห็น ไม่งั้นคนอ่านนึกว่านี่คือทั้งระบบ */}
         {customerId && (
           <p className="notice filter-chip">
-            แสดงเฉพาะผู้ป่วยของ <strong className="mono">{customerId}</strong>
+            แสดงเฉพาะผู้รับบริการของ <strong className="mono">{customerId}</strong>
             <button className="btn link-btn" onClick={() => setFilter('customer_id', '')}>แสดงทั้งหมด</button>
           </p>
         )}
@@ -257,12 +257,12 @@ export default function PatientListPage() {
                   <td colSpan={7} className="empty">
                     {filtered ? (
                       <>
-                        ไม่พบผู้ป่วยที่ตรงกับเงื่อนไข{' '}
+                        ไม่พบผู้รับบริการที่ตรงกับเงื่อนไข{' '}
                         <button className="btn link-btn" onClick={clearFilters}>ล้างตัวกรอง</button>
                       </>
                     ) : (
                       <>
-                        ยังไม่มีผู้ป่วยในระบบ{' '}
+                        ยังไม่มีผู้รับบริการในระบบ{' '}
                         <Link className="link" to="/patients/new">เพิ่มรายแรก →</Link>
                       </>
                     )}

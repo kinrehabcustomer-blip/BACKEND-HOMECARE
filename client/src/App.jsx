@@ -19,7 +19,7 @@ import NotificationBell from './components/NotificationBell.jsx';
  */
 const ForgotPasswordPage = lazy(() => import('./pages/ForgotPasswordPage.jsx'));
 /* หน้าแบบประเมินของญาติ — lazy เหมือนหน้าอื่น และสำคัญกว่าหน้าอื่นด้วย
-   คนที่เปิดคือญาติผู้ป่วยจากลิงก์ในไลน์ บนมือถือ ครั้งเดียวจบ ไม่ควรต้องโหลดระบบหลังบ้านทั้งก้อน */
+   คนที่เปิดคือญาติผู้รับบริการจากลิงก์ในไลน์ บนมือถือ ครั้งเดียวจบ ไม่ควรต้องโหลดระบบหลังบ้านทั้งก้อน */
 const ReviewFormPage = lazy(() => import('./pages/ReviewFormPage.jsx'));
 const PublicBillPage = lazy(() => import('./pages/PublicBillPage.jsx'));
 const ReviewsPage = lazy(() => import('./pages/ReviewsPage.jsx'));
@@ -87,7 +87,7 @@ const ADMIN_NAV = [
   { to: '/revenue', icon: 'dashboard', label: 'รายได้บริษัท', perm: 'money', unlessPerm: 'office' },
   { to: '/packages', icon: 'home', label: 'แพ็คเกจ Homecare', perm: 'office' },
   { to: '/physio-packages', icon: 'activity', label: 'แพ็คเกจกายภาพบำบัด', perm: 'office' },
-  { to: '/patients', icon: 'heart', label: 'ผู้ป่วย', perm: 'office' },
+  { to: '/patients', icon: 'heart', label: 'ผู้รับบริการ', perm: 'office' },
   { to: '/employees', icon: 'user', label: 'พนักงาน', perm: 'office' },
   { to: '/reviews', icon: 'star', label: 'คะแนนประเมินจากญาติ', perm: 'office' },
 ];
@@ -351,7 +351,7 @@ export default function App() {
             <Route path="/my-calendar" element={<AppLayout><MyCalendarPage /></AppLayout>} />
             <Route path="/my-attendance" element={<AppLayout><MyAttendancePage /></AppLayout>} />
 
-            {/* ไม่มีหน้าลูกค้าแล้ว — ข้อมูลผู้ว่าจ้างดู/แก้ในแฟ้มผู้ป่วย · ลิงก์/บุ๊กมาร์กเก่าพาไปหน้าผู้ป่วยแทนหน้าว่าง */}
+            {/* ไม่มีหน้าลูกค้าแล้ว — ข้อมูลผู้ว่าจ้างดู/แก้ในแฟ้มผู้รับบริการ · ลิงก์/บุ๊กมาร์กเก่าพาไปหน้าผู้รับบริการแทนหน้าว่าง */}
             <Route path="/customers/*" element={<Navigate to="/patients" replace />} />
 
             <Route path="/patients" element={<AppLayout perm="office"><PatientListPage /></AppLayout>} />

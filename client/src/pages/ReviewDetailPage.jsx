@@ -233,7 +233,7 @@ export default function ReviewDetailPage() {
                     <strong>{scoreText(r.avg_score)}</strong>
                   </span>
                   <span className="muted">
-                    {r.patient_name && `ผู้ป่วย ${r.patient_name} · `}
+                    {r.patient_name && `ผู้รับบริการ ${r.patient_name} · `}
                     {r.service_date ? `รับบริการ ${formatDate(r.service_date)} · ` : ''}
                     ส่ง {stampText(r.submitted_at)}
                   </span>

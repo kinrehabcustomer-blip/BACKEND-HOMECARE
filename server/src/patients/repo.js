@@ -2,25 +2,25 @@ import { sql, transaction } from '../db/index.js';
 import { likeEscape } from '../lib/likeEscape.js';
 import { ApiError } from '../lib/errors.js';
 
-/** เจ้าของรหัสผู้ป่วยนี้ (ถ้ามี) — ใช้ทั้งตอนบันทึก และเส้นตรวจซ้ำที่หน้าฟอร์มเรียกระหว่างพิมพ์ */
+/** เจ้าของรหัสผู้รับบริการนี้ (ถ้ามี) — ใช้ทั้งตอนบันทึก และเส้นตรวจซ้ำที่หน้าฟอร์มเรียกระหว่างพิมพ์ */
 export const patientCodeOwner = (db, code, exceptId = null) =>
   db.one(
     'SELECT patient_id, name FROM patients WHERE patient_id = :code AND patient_id IS DISTINCT FROM :except',
     { code, except: exceptId },
   );
 
-/** รหัสผู้ป่วยซ้ำ — เช็คก่อนเขียน จะได้บอกได้ว่าซ้ำกับใคร (ชนกันพร้อมกันพอดียังมี PK กันอีกชั้น) */
+/** รหัสผู้รับบริการซ้ำ — เช็คก่อนเขียน จะได้บอกได้ว่าซ้ำกับใคร (ชนกันพร้อมกันพอดียังมี PK กันอีกชั้น) */
 export async function ensurePatientCodeFree(db, code, exceptId = null) {
   const taken = await patientCodeOwner(db, code, exceptId);
   if (taken) {
-    throw new ApiError(409, `รหัสผู้ป่วย ${code} มีอยู่แล้ว (${taken.name})`, [
+    throw new ApiError(409, `รหัสผู้รับบริการ ${code} มีอยู่แล้ว (${taken.name})`, [
       { field: 'patient_id', message: `รหัสนี้ถูกใช้กับ ${taken.name} แล้ว` },
     ]);
   }
 }
 
 const COLUMNS = [
-  'customer_id', // ผู้ว่าจ้าง (FK ไป customers) — ไม่ใช่ตัวผู้ป่วยเอง
+  'customer_id', // ผู้ว่าจ้าง (FK ไป customers) — ไม่ใช่ตัวผู้รับบริการเอง
   // ตัวตน
   'name',
   'title',
@@ -87,7 +87,7 @@ export async function list({ q, customer_id, has_customer, status, page, per_pag
   const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
   const { total } = await sql.one(`SELECT COUNT(*) AS total FROM patients p ${clause}`, params);
 
-  // ดึงชื่อ/เบอร์ผู้ว่าจ้างและจำนวนเคสของผู้ป่วยมาด้วย หน้าเว็บจะได้ไม่ต้องยิง API ซ้ำทีละแถว
+  // ดึงชื่อ/เบอร์ผู้ว่าจ้างและจำนวนเคสของผู้รับบริการมาด้วย หน้าเว็บจะได้ไม่ต้องยิง API ซ้ำทีละแถว
   // (ผู้รับการดูแลไม่มีเบอร์ของตัวเอง — เบอร์ที่โทรจริงคือเบอร์ผู้ว่าจ้าง)
   // ต้องใส่ prefix p. ให้ sort เพราะ join customers ที่มีคอลัมน์ name/created_at ชื่อชนกัน
   const rows = await sql.all(
@@ -112,7 +112,7 @@ export function findById(patientId) {
   return sql.one('SELECT * FROM patients WHERE patient_id = :id', { id: patientId });
 }
 
-/** ผู้ป่วยพร้อมผู้ว่าจ้าง (ลูกค้า) และเคสทั้งหมดที่ผูกกับผู้ป่วยรายนี้ (ผูกด้วย patient_id) */
+/** ผู้รับบริการพร้อมผู้ว่าจ้าง (ลูกค้า) และเคสทั้งหมดที่ผูกกับผู้รับบริการรายนี้ (ผูกด้วย patient_id) */
 export async function findDetailById(patientId) {
   const patient = await findById(patientId);
   if (!patient) return null;
@@ -120,7 +120,7 @@ export async function findDetailById(patientId) {
   const [customer, cases] = await Promise.all([
     patient.customer_id
       ? sql.one(
-          // ส่งครบทุกช่องที่ฟอร์มผู้ป่วยแก้ได้ — ขาดช่องไหน ฟอร์มจะเห็นเป็นค่าว่างแล้วบันทึกทับของจริงทิ้ง
+          // ส่งครบทุกช่องที่ฟอร์มผู้รับบริการแก้ได้ — ขาดช่องไหน ฟอร์มจะเห็นเป็นค่าว่างแล้วบันทึกทับของจริงทิ้ง
           'SELECT customer_id, name, phone, tax_id, billing_address FROM customers WHERE customer_id = :id',
           { id: patient.customer_id },
         )
@@ -181,7 +181,7 @@ export async function update(patientId, input) {
 }
 
 export async function remove(patientId) {
-  // เคสที่ผูกผู้ป่วยรายนี้ไม่หายไปด้วย — FK เป็น ON DELETE SET NULL และเคสคัดลอกข้อมูลผู้ป่วยไว้แล้ว
+  // เคสที่ผูกผู้รับบริการรายนี้ไม่หายไปด้วย — FK เป็น ON DELETE SET NULL และเคสคัดลอกข้อมูลผู้รับบริการไว้แล้ว
   const changes = await sql.run('DELETE FROM patients WHERE patient_id = :id', { id: patientId });
   return changes > 0;
 }

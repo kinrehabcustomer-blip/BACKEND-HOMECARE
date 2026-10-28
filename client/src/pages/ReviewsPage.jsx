@@ -73,7 +73,7 @@ export default function ReviewsPage() {
           <div className="empty-state">
             <p>ยังไม่มีพนักงานกลุ่ม front ในระบบ</p>
             <p className="muted">
-              แบบประเมินนี้เปิดใช้กับพนักงานที่ออกไปดูแลผู้ป่วย — CG, NA, PN, RN และสายบำบัด
+              แบบประเมินนี้เปิดใช้กับพนักงานที่ออกไปดูแลผู้รับบริการ — CG, NA, PN, RN และสายบำบัด
             </p>
           </div>
         ) : (

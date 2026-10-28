@@ -1,6 +1,6 @@
 /**
  * รหัสที่เจ้าหน้าที่กรอกเองแบบ "ตัวอักษร 2 ตัว + ปี พ.ศ. 2 หลัก + เลข 7 หลัก"
- *   ผู้ป่วย = KN (เช่น KN690202463) — ต้องตรงกับ PATIENT_CODE_RE ใน server/src/patients/schema.js
+ *   ผู้รับบริการ = KN (เช่น KN690202463) — ต้องตรงกับ PATIENT_CODE_RE ใน server/src/patients/schema.js
  *   เคส     = VN (เช่น VN690215209) — ต้องตรงกับ CASE_CODE_RE ใน server/src/cases/schema.js
  */
 export const PATIENT_CODE_RE = /^KN\d{9}$/;
@@ -33,6 +33,6 @@ export function parsePastedCode(prefix, text) {
   return m ? { year: m[1], number: m[2] } : null;
 }
 
-// ชื่อเดิมของรหัสผู้ป่วย — ยังใช้อยู่ในฟอร์ม/เทส
+// ชื่อเดิมของรหัสผู้รับบริการ — ยังใช้อยู่ในฟอร์ม/เทส
 export const splitPatientCode = (code) => splitCode('KN', code);
 export const joinPatientCode = (year, number) => joinCode('KN', year, number);

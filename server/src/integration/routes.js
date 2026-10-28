@@ -56,7 +56,7 @@ integrationRouter.post(
 
 /**
  * สรุปงานของฉันให้หน้า "งานของฉัน" ใน LINE (chat.kinorigin.com/me) — ตั๋ว purpose 'kin-my' อายุ 1 นาที ยิงจากเซิร์ฟเวอร์ chat
- * ส่งแค่ที่จำเป็นต่อการเห็นภาพรวม: วันที่ เวลา รหัสเคส ชนิดบริการ สถานะกะ · ไม่ส่งชื่อ/ที่อยู่/เบอร์ผู้ป่วย และไม่ส่งยอดเงิน
+ * ส่งแค่ที่จำเป็นต่อการเห็นภาพรวม: วันที่ เวลา รหัสเคส ชนิดบริการ สถานะกะ · ไม่ส่งชื่อ/ที่อยู่/เบอร์ผู้รับบริการ และไม่ส่งยอดเงิน
  * เพราะลิงก์หน้า /me ส่งต่อกันได้ — รายละเอียดเต็มดูในระบบงานนี้ (เข้าด้วยตั๋ว LINE อายุสั้น + ผูกด้วยรหัสผ่าน)
  */
 const thDate = (offsetDays = 0) => new Date(Date.now() + 7 * 3.6e6 + offsetDays * 864e5).toISOString().slice(0, 10);
@@ -500,7 +500,7 @@ integrationRouter.post(
                 WHERE l.case_id = m.case_id AND l.accepted_at IS NOT NULL AND l.revoked_at IS NULL AND l.line_user_id IS NOT NULL) AS family,
               (SELECT array_agg(DISTINCT e.line_user_id) FROM employees e
                 WHERE e.line_user_id IS NOT NULL AND e.employee_id IS DISTINCT FROM m.employee_id
-                  -- คนที่ลาออก/ถูกพักงานต้องไม่ได้รับแจ้งเตือนข้อความของครอบครัวผู้ป่วยต่อ (ดู BLOCKED_STATUSES)
+                  -- คนที่ลาออก/ถูกพักงานต้องไม่ได้รับแจ้งเตือนข้อความของครอบครัวผู้รับบริการต่อ (ดู BLOCKED_STATUSES)
                   AND COALESCE(e.status, '') NOT IN (${BLOCKED_SQL})
                   AND (e.employee_id = c.assigned_to
                        OR EXISTS (SELECT 1 FROM case_team t WHERE t.case_id = c.case_id AND t.employee_id = e.employee_id)
@@ -742,7 +742,7 @@ integrationRouter.post(
  *   ตั๋ว 'kin-family-lifecycle' {} → { grace_days, lead_days, closed_window_days, closed: [...], expiring: [...] }
  *   closed   = เคสที่เพิ่งปิด/ยกเลิกภายใน 2 วัน → ข้อความขอบคุณ + บอกว่ายังเปิดดูย้อนหลังได้อีกกี่วัน
  *   expiring = เคสที่สิทธิ์เปิดดูเหลือ ≤3 วัน   → ข้อความเตือนให้เปิดดู/บันทึกไว้ก่อน
- *   เพดาน 30 วันมาจาก family.CLOSED_GRACE_DAYS ที่เดียว (ฝั่ง chat ห้าม hardcode) · ส่งแค่ชื่อต้นของผู้ป่วย
+ *   เพดาน 30 วันมาจาก family.CLOSED_GRACE_DAYS ที่เดียว (ฝั่ง chat ห้าม hardcode) · ส่งแค่ชื่อต้นของผู้รับบริการ
  *   ไม่ส่งชื่อโรค/อาการ/ชื่อสกุล — ข้อความนี้ขึ้นบนหน้าจอล็อกของญาติ คนข้าง ๆ เห็นได้
  *
  * 🔴 หน้าต่าง 2 วันของ closed มีไว้กันรอบแรกหลัง deploy ยิงย้อนหลังรวดเดียว

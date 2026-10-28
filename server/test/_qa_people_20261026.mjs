@@ -1,7 +1,7 @@
 /**
- * QA รอบ 18 — แฟ้มลูกค้าและผู้ป่วย
+ * QA รอบ 18 — แฟ้มลูกค้าและผู้รับบริการ
  *
- * ตรวจสายผู้จ่ายทั้งเส้น: เคส -> ผู้ว่าจ้างของเคส -> ผู้ว่าจ้างในแฟ้มผู้ป่วย -> snapshot บนใบแจ้งหนี้
+ * ตรวจสายผู้จ่ายทั้งเส้น: เคส -> ผู้ว่าจ้างของเคส -> ผู้ว่าจ้างในแฟ้มผู้รับบริการ -> snapshot บนใบแจ้งหนี้
  * รันบน PostgreSQL ชั่วคราว + Express จริง + HTTP จริงทุกข้อ:
  *   node test/_run_probe.mjs test/_qa_people_20261026.mjs
  *
@@ -245,8 +245,8 @@ try {
 
     const patientNationalId = '1101700203002';
     const patientRace = await Promise.all([
-      post('/api/patients', { patient_id: nextPatientId(), name: 'ผู้ป่วยซ้ำ A', national_id: patientNationalId }),
-      post('/api/patients', { patient_id: nextPatientId(), name: 'ผู้ป่วยซ้ำ B', national_id: patientNationalId }),
+      post('/api/patients', { patient_id: nextPatientId(), name: 'ผู้รับบริการซ้ำ A', national_id: patientNationalId }),
+      post('/api/patients', { patient_id: nextPatientId(), name: 'ผู้รับบริการซ้ำ B', national_id: patientNationalId }),
     ]);
     const patientStatuses = patientRace.map((r) => r.status).sort((a, b) => a - b);
     const patientCount = await sql.one(
@@ -255,32 +255,32 @@ try {
     );
     probe(
       patientStatuses.join(',') === '201,409' && Number(patientCount.n) === 1,
-      'สองหน้าจอสร้างผู้ป่วยเลขบัตรเดียวกันผ่านมากกว่าหนึ่งแฟ้ม',
+      'สองหน้าจอสร้างผู้รับบริการเลขบัตรเดียวกันผ่านมากกว่าหนึ่งแฟ้ม',
       `statuses=${patientStatuses.join(',')} rows=${patientCount.n}`,
-      'คำขอสร้างผู้ป่วยเลขบัตรเดียวกันพร้อมกัน รอดหนึ่งคำขอและอีกคำขอได้ 409 เหลือจริงหนึ่งแถว',
+      'คำขอสร้างผู้รับบริการเลขบัตรเดียวกันพร้อมกัน รอดหนึ่งคำขอและอีกคำขอได้ 409 เหลือจริงหนึ่งแถว',
     );
 
     const patientConflict = patientRace.find((r) => r.status === 409);
     probe(
       patientConflict && !/พนักงาน/.test(patientConflict.body?.error ?? ''),
-      'ข้อความเลขบัตรผู้ป่วยซ้ำชี้ว่าไปชนกับพนักงาน',
+      'ข้อความเลขบัตรผู้รับบริการซ้ำชี้ว่าไปชนกับพนักงาน',
       `POST /api/patients ตอบ ${brief(patientConflict?.body)}`,
-      'ข้อความชนเลขบัตรของผู้ป่วยไม่ชี้ผิดไปเป็นแฟ้มพนักงาน',
+      'ข้อความชนเลขบัตรของผู้รับบริการไม่ชี้ผิดไปเป็นแฟ้มพนักงาน',
     );
 
     const samePatientName = await Promise.all([
-      post('/api/patients', { patient_id: nextPatientId(), name: 'ชื่อผู้ป่วยเหมือนกัน' }),
-      post('/api/patients', { patient_id: nextPatientId(), name: 'ชื่อผู้ป่วยเหมือนกัน' }),
+      post('/api/patients', { patient_id: nextPatientId(), name: 'ชื่อผู้รับบริการเหมือนกัน' }),
+      post('/api/patients', { patient_id: nextPatientId(), name: 'ชื่อผู้รับบริการเหมือนกัน' }),
     ]);
     info(
       samePatientName.every((r) => r.status === 201)
-        ? 'ชื่อผู้ป่วยเดียวกันแต่ไม่มีเลขบัตรสร้างพร้อมกันได้ 2 แฟ้ม — ชื่อไม่ใช่ตัวระบุเอกลักษณ์ จึงบันทึกเป็นพฤติกรรม ไม่ตัดสินเป็นบัค'
-        : `ผู้ป่วยชื่อซ้ำได้สถานะ ${samePatientName.map((r) => r.status).join(', ')}`,
+        ? 'ชื่อผู้รับบริการเดียวกันแต่ไม่มีเลขบัตรสร้างพร้อมกันได้ 2 แฟ้ม — ชื่อไม่ใช่ตัวระบุเอกลักษณ์ จึงบันทึกเป็นพฤติกรรม ไม่ตัดสินเป็นบัค'
+        : `ผู้รับบริการชื่อซ้ำได้สถานะ ${samePatientName.map((r) => r.status).join(', ')}`,
     );
   }
 
   // ---------------------------------------------------------------------------
-  head('2 · ลบแฟ้มที่ยังมีผู้ป่วย เคส และใบแจ้งหนี้ผูกอยู่');
+  head('2 · ลบแฟ้มที่ยังมีผู้รับบริการ เคส และใบแจ้งหนี้ผูกอยู่');
   await resetTopic();
   {
     const customer = (await createCustomer({
@@ -293,18 +293,18 @@ try {
     }));
     mustStatus(customer.response, 201, 'สร้างลูกค้าสำหรับทดสอบลบ');
     const patient = await createPatient({
-      name: 'คุณผู้ป่วยที่ยังมีเคส',
+      name: 'คุณผู้รับบริการที่ยังมีเคส',
       customer_id: customer.row.customer_id,
       national_id: '1101700203102',
     });
-    mustStatus(patient.response, 201, 'สร้างผู้ป่วยสำหรับทดสอบลบ');
+    mustStatus(patient.response, 201, 'สร้างผู้รับบริการสำหรับทดสอบลบ');
     const caseResult = await createCase({
       client_name: patient.row.name,
       customer_id: customer.row.customer_id,
       patient_id: patient.row.patient_id,
       fee: 7800,
     });
-    mustStatus(caseResult.response, 201, 'เปิดเคสที่ผูกทั้งลูกค้าและผู้ป่วย');
+    mustStatus(caseResult.response, 201, 'เปิดเคสที่ผูกทั้งลูกค้าและผู้รับบริการ');
     const invoice = await invoiceForCase(caseResult.row.case_id);
     const issued = await issueInvoice(invoice.invoice_id);
     const snapshot = {
@@ -319,7 +319,7 @@ try {
       removedCustomer.status === 204,
       'ลบลูกค้าที่มีเอกสารผูกอยู่ไม่ได้ตาม FK ที่ออกแบบไว้',
       `DELETE /api/customers/:id -> ${removedCustomer.status} ${brief(removedCustomer.body)}`,
-      'ลบแฟ้มลูกค้าที่มีผู้ป่วย/เคส/ใบแจ้งหนี้ผูกอยู่ได้ โดย FK ใช้ SET NULL',
+      'ลบแฟ้มลูกค้าที่มีผู้รับบริการ/เคส/ใบแจ้งหนี้ผูกอยู่ได้ โดย FK ใช้ SET NULL',
     );
 
     const patientAfterCustomerDelete = await get(`/api/patients/${patient.row.patient_id}`);
@@ -350,15 +350,15 @@ try {
     const invoiceAfterPatientDelete = await get(`/api/invoices/${invoice.invoice_id}`);
     probe(
       removedPatient.status === 204 && caseAfterPatientDelete.body?.patient_id === null,
-      'ลบผู้ป่วยที่มีเคสผูกอยู่ไม่ได้ หรือ cases.patient_id ไม่ถูก SET NULL',
+      'ลบผู้รับบริการที่มีเคสผูกอยู่ไม่ได้ หรือ cases.patient_id ไม่ถูก SET NULL',
       `DELETE=${removedPatient.status} case.patient_id=${caseAfterPatientDelete.body?.patient_id}`,
-      'ลบแฟ้มผู้ป่วยได้ เคสเก่ายังอยู่และ cases.patient_id ถูก SET NULL',
+      'ลบแฟ้มผู้รับบริการได้ เคสเก่ายังอยู่และ cases.patient_id ถูก SET NULL',
     );
     probe(
       invoiceAfterPatientDelete.status === 200 && invoiceAfterPatientDelete.body?.bill_to_name === snapshot.name,
-      'ลบแฟ้มผู้ป่วยแล้วใบการเงินเก่าหายหรือชื่อผู้จ่ายกลายเป็น null',
+      'ลบแฟ้มผู้รับบริการแล้วใบการเงินเก่าหายหรือชื่อผู้จ่ายกลายเป็น null',
       brief(invoiceAfterPatientDelete.body),
-      'ลบผู้ป่วยแล้วใบที่ออกไปแล้วยังเปิดได้และชื่อผู้จ่ายไม่หาย',
+      'ลบผู้รับบริการแล้วใบที่ออกไปแล้วยังเปิดได้และชื่อผู้จ่ายไม่หาย',
     );
   }
 
@@ -375,39 +375,39 @@ try {
     mustStatus(payerA.response, 201, 'สร้างผู้จ่าย A');
     mustStatus(payerB.response, 201, 'สร้างผู้จ่าย B');
 
-    const draftPatient = await createPatient({ name: 'ผู้ป่วยย้ายบ้านใบร่าง', customer_id: payerA.row.customer_id });
-    mustStatus(draftPatient.response, 201, 'สร้างผู้ป่วยสำหรับใบร่าง');
+    const draftPatient = await createPatient({ name: 'ผู้รับบริการย้ายบ้านใบร่าง', customer_id: payerA.row.customer_id });
+    mustStatus(draftPatient.response, 201, 'สร้างผู้รับบริการสำหรับใบร่าง');
     const draftCase = await createCase({
       client_name: draftPatient.row.name,
       patient_id: draftPatient.row.patient_id,
       customer_id: null,
       fee: 5000,
     });
-    mustStatus(draftCase.response, 201, 'เปิดเคสที่หาผู้จ่ายผ่านแฟ้มผู้ป่วย');
+    mustStatus(draftCase.response, 201, 'เปิดเคสที่หาผู้จ่ายผ่านแฟ้มผู้รับบริการ');
     const draftInvoice = await invoiceForCase(draftCase.row.case_id);
     probe(
       draftInvoice.bill_to_name === payerA.row.name && draftInvoice.customer_id === payerA.row.customer_id,
-      'เคสไม่มีผู้ว่าจ้างของตัวเองแล้วใบร่างไม่ไล่ไปหาผู้จ่ายจากแฟ้มผู้ป่วย',
+      'เคสไม่มีผู้ว่าจ้างของตัวเองแล้วใบร่างไม่ไล่ไปหาผู้จ่ายจากแฟ้มผู้รับบริการ',
       `bill_to=${draftInvoice.bill_to_name} customer_id=${draftInvoice.customer_id}`,
-      'ใบร่างเริ่มต้นไล่ผู้จ่ายจากแฟ้มผู้ป่วยได้เป็นบ้าน A',
+      'ใบร่างเริ่มต้นไล่ผู้จ่ายจากแฟ้มผู้รับบริการได้เป็นบ้าน A',
     );
 
     const moveDraft = await patch(`/api/patients/${draftPatient.row.patient_id}`, { customer_id: payerB.row.customer_id });
-    mustStatus(moveDraft, 200, 'ย้ายผู้ป่วยใบร่างไปผู้จ่าย B');
+    mustStatus(moveDraft, 200, 'ย้ายผู้รับบริการใบร่างไปผู้จ่าย B');
     const movedDraftInvoice = await get(`/api/invoices/${draftInvoice.invoice_id}`);
     const movedDraftCase = await get(`/api/cases/${draftCase.row.case_id}`);
     probe(
       movedDraftInvoice.body?.bill_to_name === payerB.row.name &&
         movedDraftInvoice.body?.customer_id === payerB.row.customer_id &&
         movedDraftCase.body?.customer_id === payerB.row.customer_id,
-      'ย้ายผู้ป่วยแล้วใบร่างยังชี้ผู้จ่ายบ้านเดิม',
+      'ย้ายผู้รับบริการแล้วใบร่างยังชี้ผู้จ่ายบ้านเดิม',
       `case.customer_id=${movedDraftCase.body?.customer_id} ` +
         `invoice.customer_id=${movedDraftInvoice.body?.customer_id} bill_to=${movedDraftInvoice.body?.bill_to_name}`,
-      'ย้ายผู้ป่วยแล้วเคสที่ยังไม่มีผู้จ่ายและใบร่างขยับไปผู้จ่ายใหม่พร้อมกัน',
+      'ย้ายผู้รับบริการแล้วเคสที่ยังไม่มีผู้จ่ายและใบร่างขยับไปผู้จ่ายใหม่พร้อมกัน',
     );
 
-    const issuedPatient = await createPatient({ name: 'ผู้ป่วยย้ายบ้านใบออกแล้ว', customer_id: payerA.row.customer_id });
-    mustStatus(issuedPatient.response, 201, 'สร้างผู้ป่วยสำหรับใบออกแล้ว');
+    const issuedPatient = await createPatient({ name: 'ผู้รับบริการย้ายบ้านใบออกแล้ว', customer_id: payerA.row.customer_id });
+    mustStatus(issuedPatient.response, 201, 'สร้างผู้รับบริการสำหรับใบออกแล้ว');
     const issuedCase = await createCase({
       client_name: issuedPatient.row.name,
       patient_id: issuedPatient.row.patient_id,
@@ -419,13 +419,13 @@ try {
     const issuedBeforeMove = await issueInvoice(issuedInvoice.invoice_id);
     probe(
       issuedBeforeMove.bill_to_name === payerA.row.name && issuedBeforeMove.customer_id === payerA.row.customer_id,
-      'ใบที่ออกไม่ใช้ผู้จ่ายจากแฟ้มผู้ป่วยตั้งแต่ต้น',
+      'ใบที่ออกไม่ใช้ผู้จ่ายจากแฟ้มผู้รับบริการตั้งแต่ต้น',
       `bill_to=${issuedBeforeMove.bill_to_name} customer_id=${issuedBeforeMove.customer_id}`,
-      'ก่อนย้ายผู้ป่วย ใบที่ออกใช้ snapshot ผู้จ่ายบ้าน A ถูกคน',
+      'ก่อนย้ายผู้รับบริการ ใบที่ออกใช้ snapshot ผู้จ่ายบ้าน A ถูกคน',
     );
 
     const moveIssued = await patch(`/api/patients/${issuedPatient.row.patient_id}`, { customer_id: payerB.row.customer_id });
-    mustStatus(moveIssued, 200, 'ย้ายผู้ป่วยหลังออกใบ');
+    mustStatus(moveIssued, 200, 'ย้ายผู้รับบริการหลังออกใบ');
     const issuedAfterMove = await get(`/api/invoices/${issuedInvoice.invoice_id}`);
     probe(
       issuedAfterMove.body?.bill_to_name === payerA.row.name &&
@@ -435,11 +435,11 @@ try {
       `ก่อนออกใบ=${payerA.row.name}/${payerA.row.tax_id}/${payerA.row.billing_address} ` +
         `หลังย้าย=${issuedAfterMove.body?.bill_to_name}/${issuedAfterMove.body?.bill_to_tax_id}/${issuedAfterMove.body?.bill_to_address} ` +
         `status=${issuedAfterMove.body?.status}`,
-      'ใบที่ออกแล้วคง snapshot ผู้จ่ายเดิม แม้ย้ายผู้ป่วยไปผู้ว่าจ้างใหม่',
+      'ใบที่ออกแล้วคง snapshot ผู้จ่ายเดิม แม้ย้ายผู้รับบริการไปผู้ว่าจ้างใหม่',
     );
 
-    const paidPatient = await createPatient({ name: 'ผู้ป่วยย้ายบ้านใบจ่ายแล้ว', customer_id: payerA.row.customer_id });
-    mustStatus(paidPatient.response, 201, 'สร้างผู้ป่วยสำหรับใบชำระแล้ว');
+    const paidPatient = await createPatient({ name: 'ผู้รับบริการย้ายบ้านใบจ่ายแล้ว', customer_id: payerA.row.customer_id });
+    mustStatus(paidPatient.response, 201, 'สร้างผู้รับบริการสำหรับใบชำระแล้ว');
     const paidCase = await createCase({
       client_name: paidPatient.row.name,
       patient_id: paidPatient.row.patient_id,
@@ -452,13 +452,13 @@ try {
     const paid = await post(`/api/invoices/${paidInvoice.invoice_id}/pay`, { request_id: randomUUID() });
     mustStatus(paid, 200, 'รับชำระใบก่อนย้ายผู้จ่าย');
     const movePaid = await patch(`/api/patients/${paidPatient.row.patient_id}`, { customer_id: payerB.row.customer_id });
-    mustStatus(movePaid, 200, 'ย้ายผู้ป่วยหลังชำระ');
+    mustStatus(movePaid, 200, 'ย้ายผู้รับบริการหลังชำระ');
     const paidAfterMove = await get(`/api/invoices/${paidInvoice.invoice_id}`);
     probe(
       paidAfterMove.body?.status === 'paid' && paidAfterMove.body?.bill_to_name === payerA.row.name,
       'ใบที่ชำระแล้วไหลตามผู้ว่าจ้างใหม่',
       brief(paidAfterMove.body),
-      'ใบที่ชำระแล้วคงชื่อผู้จ่ายเดิมหลังย้ายผู้ป่วย',
+      'ใบที่ชำระแล้วคงชื่อผู้จ่ายเดิมหลังย้ายผู้รับบริการ',
     );
   }
 
@@ -478,7 +478,7 @@ try {
     });
     mustStatus(customer.response, 201, 'สร้างลูกค้าข้อมูลอ่อนไหว');
     const patient = await createPatient({
-      name: 'ผู้ป่วยข้อมูลอ่อนไหว',
+      name: 'ผู้รับบริการข้อมูลอ่อนไหว',
       customer_id: customer.row.customer_id,
       national_id: '1101700203202',
       address: 'สถานที่ดูแล 789',
@@ -486,7 +486,7 @@ try {
       allergies: 'แพ้ยาทดสอบ',
       emergency_contact_phone: '089-111-2222',
     });
-    mustStatus(patient.response, 201, 'สร้างผู้ป่วยข้อมูลอ่อนไหว');
+    mustStatus(patient.response, 201, 'สร้างผู้รับบริการข้อมูลอ่อนไหว');
     const caseResult = await createCase({
       client_name: patient.row.name,
       client_phone: customer.row.phone,
@@ -505,7 +505,7 @@ try {
       const patientList = await get('/api/patients?per_page=100', who);
       probe(
         customerList.status === 403 && patientList.status === 403,
-        `${label}เปิดแฟ้มลูกค้า/ผู้ป่วยได้`,
+        `${label}เปิดแฟ้มลูกค้า/ผู้รับบริการได้`,
         `customers=${customerList.status} patients=${patientList.status}`,
         `${label}ถูกกันจาก /api/customers และ /api/patients (403)`,
       );
@@ -537,7 +537,7 @@ try {
     const otherField = await get(`/api/my/cases/${caseResult.row.case_id}`, FIELD_B);
     probe(
       otherField.status === 404,
-      'พนักงานภาคสนามคนอื่นเปิดข้อมูลผู้ป่วยของเคสที่ไม่เกี่ยวข้องได้',
+      'พนักงานภาคสนามคนอื่นเปิดข้อมูลผู้รับบริการของเคสที่ไม่เกี่ยวข้องได้',
       `GET /api/my/cases/:id -> ${otherField.status} ${brief(otherField.body)}`,
       'พนักงานภาคสนามที่ไม่เกี่ยวข้องกับเคสได้ 404 และไม่รู้ว่าเคสมีอยู่จริง',
     );
@@ -560,7 +560,7 @@ try {
           patientDetail.body?.national_id === patient.row.national_id,
         `${label}อ่านแฟ้มที่บทบาท office ต้องดูแลไม่ได้`,
         `customer=${customerDetail.status} patient=${patientDetail.status}`,
-        `${label} (สิทธิ์ office) เปิดรายละเอียดลูกค้าและผู้ป่วยได้ตามกติกาปัจจุบัน`,
+        `${label} (สิทธิ์ office) เปิดรายละเอียดลูกค้าและผู้รับบริการได้ตามกติกาปัจจุบัน`,
       );
     }
     info('ขอบเขตปัจจุบันของ HR/Admin HC คือเห็นแฟ้มเต็ม รวมที่อยู่ เบอร์ และเลขบัตร; ชุดนี้บันทึกข้อเท็จจริง ไม่ลดสิทธิ์แทนธุรกิจ');
@@ -622,18 +622,18 @@ try {
 
     const futureCustomer = await post('/api/customers', { name: 'เกิดในอนาคต', birth_date: '2099-01-01' });
     const futurePatient = await post('/api/patients', {
-      patient_id: nextPatientId(), name: 'ผู้ป่วยเกิดในอนาคต', birth_date: '2099-01-01',
+      patient_id: nextPatientId(), name: 'ผู้รับบริการเกิดในอนาคต', birth_date: '2099-01-01',
     });
     probe(
       futureCustomer.status === 400 && futurePatient.status === 400,
       'วันเกิดในอนาคตผ่านเข้าแฟ้มคนได้',
       `customers=${futureCustomer.status} patients=${futurePatient.status}`,
-      'วันเกิดในอนาคตถูกกั้นทั้งลูกค้าและผู้ป่วย',
+      'วันเกิดในอนาคตถูกกั้นทั้งลูกค้าและผู้รับบริการ',
     );
 
     const beCustomer = await post('/api/customers', { name: 'กรอกปี พ.ศ.', birth_date: '2569-10-26' });
     const bePatient = await post('/api/patients', {
-      patient_id: nextPatientId(), name: 'ผู้ป่วยกรอกปี พ.ศ.', birth_date: '2569-10-26',
+      patient_id: nextPatientId(), name: 'ผู้รับบริการกรอกปี พ.ศ.', birth_date: '2569-10-26',
     });
     probe(
       beCustomer.status === 400 && bePatient.status === 400,
@@ -658,10 +658,10 @@ try {
       mustStatus(created, 201, `สร้างข้อมูลค้นหา ${row.name}`);
     }
     const patientRows = [
-      { patient_id: nextPatientId(), name: 'ผู้ป่วยปกติ' },
-      { patient_id: nextPatientId(), name: "O'Neil ผู้ป่วย" },
-      { patient_id: nextPatientId(), name: 'ผู้ป่วย 10%' },
-      { patient_id: nextPatientId(), name: 'ผู้ป่วย_A' },
+      { patient_id: nextPatientId(), name: 'ผู้รับบริการปกติ' },
+      { patient_id: nextPatientId(), name: "O'Neil ผู้รับบริการ" },
+      { patient_id: nextPatientId(), name: 'ผู้รับบริการ 10%' },
+      { patient_id: nextPatientId(), name: 'ผู้รับบริการ_A' },
     ];
     for (const row of patientRows) {
       const created = await post('/api/patients', row);
@@ -699,7 +699,7 @@ try {
         Number(customerQuote.body?.pagination?.total) === 1 &&
         Number(patientQuote.body?.pagination?.total) === 1 &&
         containsRow(customerQuote.body, 'name', "O'Neil ลูกค้า") &&
-        containsRow(patientQuote.body, 'name', "O'Neil ผู้ป่วย"),
+        containsRow(patientQuote.body, 'name', "O'Neil ผู้รับบริการ"),
       "ค้นหาด้วย ' ทำให้ query พังหรือคืนข้อมูลผิดคน",
       `customers=${customerQuote.status}/${customerQuote.body?.pagination?.total} ` +
         `patients=${patientQuote.status}/${patientQuote.body?.pagination?.total}`,
@@ -727,21 +727,21 @@ try {
   head('7 · แถวกำพร้าและชื่อผู้จ่ายบนใบ');
   await resetTopic();
   {
-    const orphanPatient = await createPatient({ name: 'ผู้ป่วยยังไม่รู้ว่าใครจ่าย', customer_id: null });
-    mustStatus(orphanPatient.response, 201, 'สร้างผู้ป่วยไม่มีผู้ว่าจ้าง');
+    const orphanPatient = await createPatient({ name: 'ผู้รับบริการยังไม่รู้ว่าใครจ่าย', customer_id: null });
+    mustStatus(orphanPatient.response, 201, 'สร้างผู้รับบริการไม่มีผู้ว่าจ้าง');
     const orphanPatients = await get('/api/patients?has_customer=no&per_page=100');
     probe(
       orphanPatients.status === 200 &&
         containsRow(orphanPatients.body, 'patient_id', orphanPatient.row.patient_id),
-      'ผู้ป่วยที่ยังไม่มีผู้ว่าจ้างสร้างได้แต่กรองหากลับมาไม่ได้',
+      'ผู้รับบริการที่ยังไม่มีผู้ว่าจ้างสร้างได้แต่กรองหากลับมาไม่ได้',
       brief(orphanPatients.body),
-      'ผู้ป่วยไม่มีผู้ว่าจ้างสร้างได้ และตัวกรอง has_customer=no แสดงแถวนั้นจริง',
+      'ผู้รับบริการไม่มีผู้ว่าจ้างสร้างได้ และตัวกรอง has_customer=no แสดงแถวนั้นจริง',
     );
 
     const emptyIdentityCase = await post('/api/cases', { case_id: nextCaseId(), fee: 1000 });
     probe(
       emptyIdentityCase.status === 400,
-      'เปิดเคสโดยไม่มีทั้งผู้ว่าจ้าง ผู้ป่วย และชื่อผู้รับบริการได้',
+      'เปิดเคสโดยไม่มีทั้งผู้ว่าจ้าง ผู้รับบริการ และชื่อผู้รับบริการได้',
       `${emptyIdentityCase.status} ${brief(emptyIdentityCase.body)}`,
       'เคสที่ไม่มีตัวตนใดเลยถูกกั้น ต้องมีอย่างน้อยชื่อผู้รับบริการหรือผู้ว่าจ้าง',
     );
@@ -758,8 +758,8 @@ try {
       noLinksIssued.status === 200 && noLinksIssued.body?.status === 'issued' &&
         noLinksIssued.body?.customer_id === null &&
         noLinksIssued.body?.bill_to_name === 'คุณกำพร้าแต่มีชื่อ' &&
-        !/(null|undefined|ยังไม่ระบุผู้ป่วย)/i.test(noLinksText),
-      'เคสไม่มีผู้ว่าจ้างและผู้ป่วยออกใบไม่ได้ หรือชื่อบนใบเป็นคำภายใน/null',
+        !/(null|undefined|ยังไม่ระบุผู้รับบริการ)/i.test(noLinksText),
+      'เคสไม่มีผู้ว่าจ้างและผู้รับบริการออกใบไม่ได้ หรือชื่อบนใบเป็นคำภายใน/null',
       brief(noLinksIssued.body),
       'เคสไม่มี customer_id/patient_id แต่ออกใบได้ด้วยชื่อที่กรอก และไม่พิมพ์ null/คำแทนภายในลงใบ',
     );
@@ -770,7 +770,7 @@ try {
       patient_id: orphanPatient.row.patient_id,
       fee: 4200,
     });
-    mustStatus(patientOnlyCase.response, 201, 'เปิดเคสของผู้ป่วยที่ยังไม่มีผู้ว่าจ้าง');
+    mustStatus(patientOnlyCase.response, 201, 'เปิดเคสของผู้รับบริการที่ยังไม่มีผู้ว่าจ้าง');
     const patientOnlyInvoice = await invoiceForCase(patientOnlyCase.row.case_id);
     await issueInvoice(patientOnlyInvoice.invoice_id);
     const patientOnlyIssued = await get(`/api/invoices/${patientOnlyInvoice.invoice_id}`);
@@ -778,10 +778,10 @@ try {
     probe(
       patientOnlyIssued.body?.status === 'issued' && patientOnlyIssued.body?.customer_id === null &&
         patientOnlyIssued.body?.bill_to_name === orphanPatient.row.name &&
-        !/(null|undefined|ยังไม่ระบุผู้ป่วย)/i.test(patientOnlyText),
-      'ผู้ป่วยไม่มีผู้ว่าจ้างแล้วชื่อบนใบเป็น null/คำภายใน หรือออกใบไม่ได้',
+        !/(null|undefined|ยังไม่ระบุผู้รับบริการ)/i.test(patientOnlyText),
+      'ผู้รับบริการไม่มีผู้ว่าจ้างแล้วชื่อบนใบเป็น null/คำภายใน หรือออกใบไม่ได้',
       brief(patientOnlyIssued.body),
-      'ผู้ป่วยไม่มีผู้ว่าจ้างยังออกใบได้โดยใช้ชื่อผู้รับบริการ และไม่หลุดคำภายในลงเอกสาร',
+      'ผู้รับบริการไม่มีผู้ว่าจ้างยังออกใบได้โดยใช้ชื่อผู้รับบริการ และไม่หลุดคำภายในลงเอกสาร',
     );
   }
 

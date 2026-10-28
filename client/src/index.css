@@ -751,7 +751,7 @@ select option:checked {
 }
 .card-head h2 { margin: 0; }
 
-/* บรรทัดรองในช่องตาราง (ชื่อผู้ป่วยใต้ชื่อเคส, รหัสพนักงานใต้ชื่อ) */
+/* บรรทัดรองในช่องตาราง (ชื่อผู้รับบริการใต้ชื่อเคส, รหัสพนักงานใต้ชื่อ) */
 .cell-sub {
   display: block;
   margin-top: 2px;
@@ -1002,7 +1002,7 @@ select option:checked {
 .cert-flag { margin-left: 0.5rem; }
 
 /* ประวัติการทำงานของพนักงาน (เคสที่ทำอยู่ + ที่ปิดแล้ว) */
-/* รายการเคส (ประวัติการทำงาน / เคสของลูกค้า / เคสของผู้ป่วย) — กระชับ กวาดตาไล่ดูได้เร็ว
+/* รายการเคส (ประวัติการทำงาน / เคสของลูกค้า / เคสของผู้รับบริการ) — กระชับ กวาดตาไล่ดูได้เร็ว
    ตัวหนังสือเล็กลงและระยะแน่นขึ้น เพราะเป็นรายการยาวที่อ่านแบบสแกน ไม่ใช่อ่านทีละบรรทัด */
 .history-summary { margin-bottom: 0.5rem; font-size: 0.75rem; }
 .history-item {
@@ -1474,7 +1474,7 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
 /* min-width: 0 — ไม่งั้นช่องในตารางกริดจะกว้างตามเนื้อหาขั้นต่ำของมัน แล้วดันคอลัมน์จนล้นจอแคบ */
 .grid label { display: flex; flex-direction: column; gap: 0.3125rem; min-width: 0; font-size: 0.8125rem; font-weight: 600; color: var(--muted); }
 .grid .span-2 { grid-column: span 2; }
-/* ช่องความสัมพันธ์กับผู้ป่วยเป็นกริดแยกต่อจากชื่อ/เบอร์ผู้ว่าจ้าง — เว้นระยะเท่าช่องว่างในกริด ไม่ให้ช่องติดกัน */
+/* ช่องความสัมพันธ์กับผู้รับบริการเป็นกริดแยกต่อจากชื่อ/เบอร์ผู้ว่าจ้าง — เว้นระยะเท่าช่องว่างในกริด ไม่ให้ช่องติดกัน */
 .payer-relation { margin-top: 0.875rem; }
 /* ช่อง checkbox เรียงแนวนอน (กล่อง + ข้อความข้างกัน) แทนการเรียงลงของ .grid label */
 .grid label.checkbox-row { flex-direction: row; align-items: center; gap: 0.5rem; grid-column: span 2; }
@@ -2421,7 +2421,7 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
   text-align: center;
 }
 
-/* chip เคส 1 ใบใน 1 วัน — บรรทัดบนชื่อพนักงาน บรรทัดล่างชื่อผู้ป่วย */
+/* chip เคส 1 ใบใน 1 วัน — บรรทัดบนชื่อพนักงาน บรรทัดล่างชื่อผู้รับบริการ */
 .cal-chip {
   display: block;
   width: 100%;
@@ -2760,7 +2760,7 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
 /* ช่องเซ็นรับเงิน — ต้องกว้างพอให้เขียนชื่อด้วยมือได้จริง ไม่ใช่เส้นบางๆ พอเป็นพิธี */
 .payroll-doc-table .pd-sign { width: 16%; }
 
-/* ---------- แบบฟอร์มรายงานอาการผู้ป่วย (พิมพ์อย่างเดียว) ----------
+/* ---------- แบบฟอร์มรายงานอาการผู้รับบริการ (พิมพ์อย่างเดียว) ----------
    ซ่อนบนจอด้วยกติกาเดียวกับใบสรุปค่าตอบแทน (ห้าม display: none — ของที่ถูกซ่อนแบบนั้นไม่ถูกพิมพ์) */
 .report-doc {
   position: absolute;
@@ -3361,7 +3361,7 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
   margin-bottom: 1rem;
 }
 
-/* แถบบอกว่าเคสนี้ผูกกับแฟ้มผู้ป่วยไหน — .notice ตั้ง margin: 0 ไว้ ปริยายจึงชนป้ายช่องกรอกด้านล่าง
+/* แถบบอกว่าเคสนี้ผูกกับแฟ้มผู้รับบริการไหน — .notice ตั้ง margin: 0 ไว้ ปริยายจึงชนป้ายช่องกรอกด้านล่าง
    ใช้ระยะเท่าแถบแพ้ยาที่อยู่ในส่วนเดียวกัน */
 .snapshot-note { margin-bottom: 1rem; }
 
@@ -3479,7 +3479,7 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
 .shift-list { display: flex; flex-direction: column; gap: 0.75rem; }
 .shift-card { display: flex; align-items: center; gap: 1rem; margin-bottom: 0; }
 .shift-card .shift-main { flex: 1; min-width: 0; }
-/* ทับ .card h2 ที่เป็นหัวข้อเล็ก/จาง — ในการ์ดกะให้เป็นชื่อผู้ป่วยตัวหนา */
+/* ทับ .card h2 ที่เป็นหัวข้อเล็ก/จาง — ในการ์ดกะให้เป็นชื่อผู้รับบริการตัวหนา */
 .shift-card .shift-title { margin: 0.25rem 0 0.125rem; font-size: 1.0625rem; color: var(--heading); font-weight: 700; }
 .shift-when { display: flex; align-items: center; gap: 0.5rem; }
 .shift-time { font-weight: 700; font-size: 0.9375rem; }
@@ -3853,7 +3853,7 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
 .table tfoot th { background: var(--bg); border-top: 2px solid var(--border); font-weight: 700; }
 .att-filter { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
 
-/* ---------- รายงานอาการผู้ป่วย (บันทึกทีละครั้งในเคส) ---------- */
+/* ---------- รายงานอาการผู้รับบริการ (บันทึกทีละครั้งในเคส) ---------- */
 .report-list { display: flex; flex-direction: column; gap: 0.75rem; }
 /* บอกว่าบันทึกใหม่ได้ที่ไหน — หน้าเคสเป็นที่อ่านย้อนหลัง ไม่ใช่ที่กรอก */
 .report-where { margin: -0.25rem 0 0.75rem; font-size: 0.8125rem; }
@@ -4882,7 +4882,7 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
   /* หน้าภาพรวมเป็นแดชบอร์ดหลายการ์ดวางเป็นกริด — การ์ดกริดชนขอบไม่ได้ ใบเดี่ยวจึงคงมุมมนไว้ให้ทั้งหน้าเข้าชุดกัน */
   :is(.content, .content > .pull-zone > .pull-content):has(.hero-card) > .card:not(.narrow) { margin-inline: 0; border-inline: 1px solid var(--border); border-radius: var(--radius-card); }
   :is(.content, .content > .pull-zone > .pull-content):has(.hero-card) > .page-head { margin-bottom: 1.375rem; }
-  /* หน้ารายละเอียด (ผู้ป่วย / พนักงาน / คะแนนประเมิน) มีการ์ดคู่วางเป็นคอลัมน์ (.columns) ซึ่งชนขอบไม่ได้
+  /* หน้ารายละเอียด (ผู้รับบริการ / พนักงาน / คะแนนประเมิน) มีการ์ดคู่วางเป็นคอลัมน์ (.columns) ซึ่งชนขอบไม่ได้
      การ์ดเดี่ยวในหน้าเดียวกันจึงคงมุมมนเหมือนกันทั้งหน้า ไม่ใช่บางใบชนขอบบางใบไม่ชน */
   :is(.content, .content > .pull-zone > .pull-content):has(> .columns) > .card:not(.narrow) {
     margin-inline: 0; border-inline: 1px solid var(--border); border-top: 1px solid var(--border); border-radius: var(--radius-card);
@@ -5173,7 +5173,7 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
   .fr-signs { grid-template-columns: 1fr; gap: 1rem; }
 }
 
-/* ---------- ช่องรหัสผู้ป่วย KN + ปี + เลข 7 หลัก (PatientCodeInput) ---------- */
+/* ---------- ช่องรหัสผู้รับบริการ KN + ปี + เลข 7 หลัก (PatientCodeInput) ---------- */
 .patient-code {
   display: flex;
   align-items: stretch;
@@ -5217,7 +5217,7 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
 :root[data-theme='dark'] .code-check.is-ok { color: #5fd39a; }
 :root[data-theme='dark'] .code-check.is-warn { color: #f0c56b; }
 
-/* ---------- ผู้ว่าจ้างในฟอร์มผู้ป่วย (ไม่มีหน้าลูกค้าแยกแล้ว — เพิ่ม/แก้ที่นี่) ---------- */
+/* ---------- ผู้ว่าจ้างในฟอร์มผู้รับบริการ (ไม่มีหน้าลูกค้าแยกแล้ว — เพิ่ม/แก้ที่นี่) ---------- */
 .employer-edit {
   padding: 0.875rem 1rem 1rem;
   border: 1px solid var(--border);

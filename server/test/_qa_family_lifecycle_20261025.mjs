@@ -132,7 +132,7 @@ try {
   const dup = both.closed.map((c) => c.case_id).filter((id) => both.expiring.some((e) => e.case_id === id));
   ok(dup.length === 0, 'ตั้งค่าให้ทับกันทั้งหมด ก็ยังไม่มีเคสไหนอยู่สองกลุ่มพร้อมกัน', dup);
 
-  head('6 · ชื่อผู้ป่วยว่าง');
+  head('6 · ชื่อผู้รับบริการว่าง');
   await closedCase({ agoDays: 0, client: '' });
   due = await family.lifecycleDue();
   ok(due.closed.every((c) => c.client_first === null || (typeof c.client_first === 'string' && c.client_first.length > 0)),

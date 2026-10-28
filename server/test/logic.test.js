@@ -70,7 +70,7 @@ const caseGuards = await import('../src/cases/routes.js');
 
 // ---------- contract ค่าจ้างของเคส ----------
 describe('staff_pay — schema, สิทธิ์ และการคำนวณใหม่ต้องตรงกัน', () => {
-  const base = { case_id: 'VN690000001', case_type: 'other', client_name: 'ผู้ป่วยทดสอบ' };
+  const base = { case_id: 'VN690000001', case_type: 'other', client_name: 'ผู้รับบริการทดสอบ' };
 
   test('schema เก็บ staff_pay ของ manager ไว้ ไม่ strip ทิ้ง', () => {
     assert.equal(createCaseSchema.parse({ ...base, staff_pay: 1234 }).staff_pay, 1234);
@@ -1081,7 +1081,7 @@ describe('geofence', () => {
   });
 });
 
-// ---------- รายงานอาการผู้ป่วย ----------
+// ---------- รายงานอาการผู้รับบริการ ----------
 describe('createReportSchema — รายงานว่างเปล่าต้องบันทึกไม่ได้', () => {
   test('กรอกช่องเดียวก็พอ (วัดไม่ครบเป็นเรื่องปกติหน้างาน)', () => {
     assert.equal(createReportSchema.safeParse({ pulse: 78 }).success, true);
@@ -1709,11 +1709,11 @@ describe('Workflow — เปิดเคสถึงเงินเข้าพ
   const CASE_STAFF_PAY = 20_000;
   const TEAM = ['EMP-0002', 'EMP-0005'];
 
-  test('1. เปิดเคส — ต้องมีรหัสเคส VN และชื่อผู้ป่วย (หรือผู้ว่าจ้าง)', () => {
+  test('1. เปิดเคส — ต้องมีรหัสเคส VN และชื่อผู้รับบริการ (หรือผู้ว่าจ้าง)', () => {
     const base = {
       case_id: 'VN690215209',
       case_type: 'elderly_care',
-      client_name: 'ผู้ป่วยทดสอบ workflow',
+      client_name: 'ผู้รับบริการทดสอบ workflow',
       service_kind: 'homecare',
       fee: CASE_FEE,
       staff_pay: CASE_STAFF_PAY,
@@ -1721,7 +1721,7 @@ describe('Workflow — เปิดเคสถึงเงินเข้าพ
     };
     assert.equal(createCaseSchema.safeParse(base).success, true);
 
-    // ขาดชื่อผู้ป่วย = เปิดเคสไม่ได้ (เคสไม่มีชื่อคนไข้ก็ไม่รู้ว่าไปดูแลใคร)
+    // ขาดชื่อผู้รับบริการ = เปิดเคสไม่ได้ (เคสไม่มีชื่อคนไข้ก็ไม่รู้ว่าไปดูแลใคร)
     assert.equal(createCaseSchema.safeParse({ ...base, client_name: '' }).success, false);
     // ประเภทเคสต้องเป็นค่าใน enum ไม่ใช่ข้อความอิสระ — ไม่งั้นหลุดไปชน CHECK ของฐานข้อมูล
     assert.equal(createCaseSchema.safeParse({ ...base, case_type: 'อื่นๆ' }).success, false);
@@ -2186,7 +2186,7 @@ describe('วันสิ้นสุดตามรูปแบบบริก�
   });
 });
 
-describe('รหัสผู้ป่วย KN (ฝั่งหน้าเว็บ)', () => {
+describe('รหัสผู้รับบริการ KN (ฝั่งหน้าเว็บ)', () => {
   test('แยก/ประกอบรหัส · ไม่ครบ 7 หลัก = ยังไม่มีรหัส · รูปแบบตรงกับ server', async () => {
     const { joinPatientCode, splitPatientCode, PATIENT_CODE_RE: CLIENT_RE } = await import('../../client/src/lib/patientCode.js');
     const { PATIENT_CODE_RE } = await import('../src/patients/schema.js');

@@ -81,9 +81,9 @@ export default function CustomerInvoiceDoc({ item, signer }) {
 
     <div className="inv-parties">
       <div>
-        {/* หัวใบระบุผู้ป่วย (คนที่รับบริการ) — ผู้จ่ายเงินอยู่ที่บรรทัด "ได้รับเงินจาก" และช่องลงนามผู้จ่ายด้านล่าง */}
-        <p>รหัสผู้ป่วย : <span className="mono">{item.patient_id ?? '—'}</span></p>
-        <p>ชื่อผู้ป่วย : {item.patient_name ?? '—'}</p>
+        {/* หัวใบระบุผู้รับบริการ (คนที่รับบริการ) — ผู้จ่ายเงินอยู่ที่บรรทัด "ได้รับเงินจาก" และช่องลงนามผู้จ่ายด้านล่าง */}
+        <p>รหัสผู้รับบริการ : <span className="mono">{item.patient_id ?? '—'}</span></p>
+        <p>ชื่อผู้รับบริการ : {item.patient_name ?? '—'}</p>
         {item.bill_to_tax_id && (
           <p>เลขผู้เสียภาษี : <span className="mono">{item.bill_to_tax_id}</span></p>
         )}
