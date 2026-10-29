@@ -79,17 +79,26 @@ publicBillRouter.get(
 );
 
 /** ลูกค้าแนบสลิปจากหน้าบิล — เก็บในตารางเดิมเป็น pending เท่านั้น ไม่มีการตัดยอดอัตโนมัติ */
+/* ตรวจ token + สถานะใบ "ก่อน" รับไฟล์ 9 MB (ตรวจ Codex 30 ต.ค. 2569 ข้อ 9)
+   เดิมอ่าน body ทั้งก้อนก่อนรู้ว่า token ปลอม — ยิง token มั่วพร้อมไฟล์ใหญ่ซ้ำ ๆ ก็กินหน่วยความจำได้ฟรี */
+const loadSlipInvoice = asyncRoute(async (req, res, next) => {
+  const id = await invoiceIdForToken(req.params.token);
+  const inv = id ? await repo.findById(id) : null;
+  if (!inv) throw notFound('ลิงก์นี้หมดอายุแล้ว — สอบถามทีม KIN HomeCare ในแชท LINE ได้เลยค่ะ');
+  if (inv.status !== 'issued' || !(Number(inv.balance) > 0)) {
+    throw new ApiError(409, 'ใบนี้ไม่มียอดค้างที่เปิดรับสลิปแล้วค่ะ');
+  }
+  req.slipInvoiceId = id;
+  next();
+});
+
 publicBillRouter.post(
   '/:token/slip',
   limitSlipPerToken,
+  loadSlipInvoice,
   raw({ type: 'multipart/form-data', limit: '9mb' }),
   asyncRoute(async (req, res) => {
-    const id = await invoiceIdForToken(req.params.token);
-    const inv = id ? await repo.findById(id) : null;
-    if (!inv) throw notFound('ลิงก์นี้หมดอายุแล้ว — สอบถามทีม KIN HomeCare ในแชท LINE ได้เลยค่ะ');
-    if (inv.status !== 'issued' || !(Number(inv.balance) > 0)) {
-      throw new ApiError(409, 'ใบนี้ไม่มียอดค้างที่เปิดรับสลิปแล้วค่ะ');
-    }
+    const id = req.slipInvoiceId;
     const image = multipartImage(req.body, String(req.headers['content-type'] || ''));
     await repo.addSlip(id, image, null, { status: 'pending', source: 'customer_page', notify: true });
     res.status(201).json({

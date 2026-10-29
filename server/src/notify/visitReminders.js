@@ -55,7 +55,9 @@ async function queueVisitNotification({ key, channel, recipient, eventKind, visi
   );
 }
 
-/** lease 10 นาที + เพิ่ม attempts ตอน claim; แต่ละผู้รับเป็นคนละแถว */
+/** lease 10 นาที + เพิ่ม attempts ตอน claim; แต่ละผู้รับเป็นคนละแถว
+ *  ส่งไม่ผ่านแล้วเว้นช่วงห่างขึ้นเรื่อย ๆ 10 → 20 → 40 → 80 → 160 นาที (ตรวจ Codex 30 ต.ค. 2569 ข้อ 11)
+ *  เดิมคืนคิวทันทีและยอมแค่ 3 ครั้ง — LINE ตอบ 429 ช่วงสั้น ๆ ก็เผาครบ 3 รอบติดกัน แล้วการเตือนนัดหายถาวร */
 export async function claimVisitNotificationOutbox(limit = 120) {
   await ensureVisitNotificationOutbox();
   return sql.all(
@@ -63,8 +65,9 @@ export async function claimVisitNotificationOutbox(limit = 120) {
         SET claimed_at = now(), attempts = attempts + 1
        FROM (
          SELECT id FROM visit_notification_outbox
-          WHERE sent_at IS NULL AND attempts < 3
-            AND (claimed_at IS NULL OR claimed_at < now() - interval '10 minutes')
+          WHERE sent_at IS NULL AND attempts < 5
+            AND (claimed_at IS NULL
+                 OR claimed_at < now() - interval '10 minutes' * power(2, GREATEST(attempts - 1, 0)))
           ORDER BY created_at, id
           LIMIT :limit FOR UPDATE SKIP LOCKED
        ) q
@@ -94,7 +97,7 @@ export async function ackVisitNotificationOutbox(results) {
     } else {
       acked += await sql.run(
         `UPDATE visit_notification_outbox
-            SET claimed_at = NULL, error = left(:error, 1000)
+            SET claimed_at = now(), error = left(:error, 1000)
           WHERE id = :id AND sent_at IS NULL`,
         { id, error: String(r?.error || 'ส่งไม่สำเร็จ') },
       );

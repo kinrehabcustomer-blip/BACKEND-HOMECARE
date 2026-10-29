@@ -124,3 +124,9 @@ export async function claimDigestDay(day) {
   );
   return n > 0;
 }
+
+/** คืนวันที่จองไว้เมื่อส่งไม่สำเร็จ — รอบถัดไปจะได้ลองใหม่ */
+export async function releaseDigestDay(day) {
+  await ensureDigestLog();
+  await sql.run(`DELETE FROM notify_digest_sent WHERE day = :day`, { day });
+}

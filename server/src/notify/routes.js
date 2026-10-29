@@ -101,7 +101,16 @@ const sendDigest = ({ once = false } = {}) => asyncRoute(async (req, res) => {
     return res.json({ sent: false, reason: `สรุปของวันที่ ${date} ถูกส่งไปแล้ว`, date, sections });
   }
 
-  const sent = await sendDigestEmail({ to: recipients.map((r) => r.email), date, sections });
+  /* ส่งไม่ผ่าน = คืนวันที่จองไว้ ให้ cron รอบถัดไปลองใหม่ (ตรวจ Codex 30 ต.ค. 2569 ข้อ 10)
+     เดิมจองค้างไว้ทั้งวัน — SMTP สะดุดครั้งเดียว สรุปของวันนั้นหายถาวร */
+  let sent;
+  try {
+    sent = await sendDigestEmail({ to: recipients.map((r) => r.email), date, sections });
+  } catch (err) {
+    if (once) await repo.releaseDigestDay(date).catch(() => {});
+    throw err;
+  }
+  if (once && !sent) await repo.releaseDigestDay(date).catch(() => {});
   res.json({
     sent,
     reason: sent ? null : 'ยังไม่ได้ตั้งค่า SMTP — พิมพ์ลง log ของ server แทน',

@@ -24,7 +24,8 @@ for (const { employee_id } of pending) {
     encrypted: encryptTempPassword(temp, employee_id),
     id: employee_id,
   });
-  console.log(`ตั้งรหัสผ่านชั่วคราวให้ ${employee_id} : ${temp}   <-- จดไว้แล้วส่งให้เจ้าตัว`);
+  // ไม่พิมพ์ตัวรหัสลง log (ตรวจ Codex 30 ต.ค. 2569 ข้อ 1) — หน้าพนักงานเปิดดูสำเนาที่เข้ารหัสไว้ได้
+  console.log(`ตั้งรหัสผ่านชั่วคราวให้ ${employee_id} แล้ว — ดูรหัสได้ที่หน้ารายละเอียดพนักงาน`);
 }
 
 console.log(pending.length ? `ตั้งรหัสผ่านให้ ${pending.length} คน` : 'ทุกคนมีรหัสผ่านแล้ว');
