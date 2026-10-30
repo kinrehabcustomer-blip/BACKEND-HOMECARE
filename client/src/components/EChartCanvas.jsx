@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import * as echarts from 'echarts/core';
-import { LineChart, BarChart } from 'echarts/charts';
-import { GridComponent, TooltipComponent, LegendComponent, TitleComponent } from 'echarts/components';
+import { LineChart, BarChart, PieChart } from 'echarts/charts';
+import { GridComponent, TooltipComponent, LegendComponent, TitleComponent, MarkAreaComponent } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
 
 /*
@@ -12,7 +12,8 @@ import { CanvasRenderer } from 'echarts/renderers';
  * ไฟล์นี้ถูกแยกออกมาจาก EChart.jsx เพื่อให้ไลบรารีกราฟกลายเป็นไฟล์ก้อนของตัวเอง
  * ที่ดาวน์โหลดตอนจะวาดกราฟจริงเท่านั้น — ดู EChart.jsx ว่าทำไม
  */
-echarts.use([LineChart, BarChart, GridComponent, TooltipComponent, LegendComponent, TitleComponent, CanvasRenderer]);
+// PieChart = วงแหวนสัดส่วนบริการ/ผลการเข้างานในหน้าภาพรวม (DashboardCharts.jsx) · MarkArea = แถบแรเงาช่วงเวลา
+echarts.use([LineChart, BarChart, PieChart, GridComponent, TooltipComponent, LegendComponent, TitleComponent, MarkAreaComponent, CanvasRenderer]);
 
 /**
  * ครอบ ECharts หนึ่ง instance ให้ใช้แบบ React ได้

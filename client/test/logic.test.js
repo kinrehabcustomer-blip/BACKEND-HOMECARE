@@ -14,7 +14,7 @@ import {
   formatBaht, amountText, bahtText, stampText, docDate, durationText,
   distanceText, ageFromBirthDate, toBuddhistYear, formatPeriod, todayTH,
 } from '../src/labels.js';
-import { dayLabel, timeRange, CAL_STATES } from '../src/lib/calendarUi.js';
+import { dayLabel, timeRange, CAL_STATES, parseTime } from '../src/lib/calendarUi.js';
 
 describe('stampText — เวลาในประวัติการทำรายการ', () => {
   test('ค่าที่ไม่มีโซนเวลา = เวลาไทยอยู่แล้ว ห้ามบวกเพิ่มอีก 7 ชั่วโมง', () => {
@@ -118,5 +118,19 @@ describe('ตัวช่วยของปฏิทิน', () => {
   test('สถานะกะบนปฏิทินต้องไม่มี cancelled (server ตัดออกตั้งแต่ต้นทาง)', () => {
     assert.ok(!CAL_STATES.includes('cancelled'));
     assert.equal(CAL_STATES.length, 5);
+  });
+});
+
+describe('parseTime — เวลาที่พิมพ์เองในกล่องย้ายกะ', () => {
+  test('รูปแบบที่คนพิมพ์จริงได้ HH:MM เดียวกัน', () => {
+    for (const t of ['9:30', '09:30', '9.30', '930', '0930', '9 30']) assert.equal(parseTime(t), '09:30', t);
+    assert.equal(parseTime('9'), '09:00');
+    assert.equal(parseTime('23:59'), '23:59');
+    assert.equal(parseTime(' 14:05 '), '14:05');
+  });
+  test('ว่าง = ไม่ได้กรอก (ใช้เวลาเดิม) · ไม่ใช่เวลา = null', () => {
+    assert.equal(parseTime(''), '');
+    assert.equal(parseTime('   '), '');
+    for (const t of ['24:00', '12:60', 'abc', '9:3x', '12345', '-1']) assert.equal(parseTime(t), null, t);
   });
 });

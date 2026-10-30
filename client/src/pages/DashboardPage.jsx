@@ -3,207 +3,92 @@ import { Link } from 'react-router-dom';
 import { api } from '../api.js';
 import { useCanSeeRevenue } from '../auth.jsx';
 import RevenueChart from '../components/RevenueChart.jsx';
-import CaseTypeChart from '../components/CaseTypeChart.jsx';
+import { KpiRow, ServiceDonut, ShiftDonut, WorkloadList } from '../components/DashboardCharts.jsx';
 import ErrorBar from '../components/ErrorBar.jsx';
 import PageRefresh from '../components/PageRefresh.jsx';
-import {
-  SERVICE_KIND_LABELS, serviceKindOf, CASE_STATUS_LABELS, MONTH_LABELS,
-  formatDate, formatPeriod, toBuddhistYear,
-} from '../labels.js';
+import { SERVICE_KIND_LABELS, serviceKindOf, formatDate } from '../labels.js';
 import { caseCode } from '../lib/patientCode.js';
 
-/** สถานะเคสตามลำดับการทำงานจริง: รอจับคู่ → จับคู่แล้ว → กำลังให้บริการ → ปิดเคส */
-const STATUSES = ['unassigned', 'assigned', 'in_progress', 'closed'];
-
-/** ตัวเลขสรุปหนึ่งช่อง — จุดสีคู่กับป้ายข้อความเสมอ ไม่ใช้สีสื่อความหมายเพียงอย่างเดียว */
-function StatTile({ label, value, share, status, to }) {
-  return (
-    <Link className="tile" to={to}>
-      <span className="tile-label">
-        <i className={`dot case-${status}`} aria-hidden="true" />
-        {label}
-      </span>
-      <span className="tile-value">{value}</span>
-      {/* "ของทั้งหมด" ถูกซ่อนบนจอแคบ (ดู index.css) — ที่นั่นมีแถบสัดส่วนอยู่เหนือช่องพวกนี้แล้ว
-          บอกว่าเทียบกับอะไร ส่วนบนจอกว้างไม่มีแถบ ข้อความเต็มจึงยังต้องมี */}
-      <span className="tile-share">
-        {share}
-        {share !== '—' && <span className="tile-of"> ของทั้งหมด</span>}
-      </span>
-    </Link>
-  );
-}
-
+/**
+ * หน้าภาพรวม — การ์ด KPI → วงแหวนสัดส่วนบริการ/ผลการเข้างาน → ภาระงาน/รอจับคู่ → รายได้
+ *
+ * การ์ดสรุปสถานะเคส (ตัวเลข 4 ช่อง + ตัวเลือกปี/เดือน) ถูกเอาออกตามที่ผู้ใช้ขอ (30 ต.ค. 2569)
+ * ตัวเลือกปี/เดือนออกไปด้วย เพราะมันคุมแค่การ์ดนั้น — สัดส่วนบริการกับรอจับคู่จึงนับทั้งระบบเสมอ
+ */
 export default function DashboardPage() {
-  const [year, setYear] = useState(''); // '' = ทุกปี
-  const [month, setMonth] = useState(''); // '' = ทั้งปี
-  const [periods, setPeriods] = useState([]);
   const [summary, setSummary] = useState(null);
   const [unassigned, setUnassigned] = useState([]);
+  const [unassignedTotal, setUnassignedTotal] = useState(0);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
   const [reloadKey, setReloadKey] = useState(0); // เด้งค่าเพื่อสั่งโหลดใหม่จากปุ่ม "ลองใหม่"
   const canSeeRevenue = useCanSeeRevenue(); // รายได้รวมของบริษัท = เฉพาะผู้จัดการ (HR ไม่เห็น)
+  const [charts, setCharts] = useState(null);
+  const [chartsError, setChartsError] = useState(null);
 
-  // ปี/เดือนที่มีข้อมูลจริง โหลดครั้งเดียว — ไม่ต้องดึงใหม่ทุกครั้งที่เปลี่ยนช่วงเวลา
+  /* กราฟกะงาน/เคสรายเดือน/ภาระงาน — โหลดแยกจากสรุปเคส
+     โหลดไม่สำเร็จไม่ลากการ์ดอื่นให้หายไปด้วย */
   useEffect(() => {
-    api.casePeriods().then(setPeriods).catch(() => {});
-  }, []);
+    let cancelled = false;
+    api.caseDashboard()
+      .then((d) => { if (!cancelled) { setCharts(d); setChartsError(null); } })
+      .catch((err) => !cancelled && setChartsError(err.message));
+    return () => { cancelled = true; };
+  }, [reloadKey]);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
 
-    const params = { status: 'unassigned', per_page: 5, sort: 'created_at', order: 'desc' };
-    if (year) params.year = year;
-    if (year && month) params.month = month;
-
-    Promise.all([api.caseSummary({ year, month }), api.listCases(params)])
+    Promise.all([
+      api.caseSummary(),
+      api.listCases({ status: 'unassigned', per_page: 5, sort: 'created_at', order: 'desc' }),
+    ])
       .then(([s, list]) => {
-        if (cancelled) return; // ผลของช่วงเวลาเก่าที่มาถึงช้ากว่า ต้องไม่ทับของที่เลือกอยู่
+        if (cancelled) return;
         setSummary(s);
         setUnassigned(list.data);
+        setUnassignedTotal(s.by_status.find((x) => x.status === 'unassigned')?.count ?? list.data.length);
         setError(null); // สำเร็จแล้วต้องล้าง error ของรอบก่อน ไม่งั้นเน็ตสะดุดครั้งเดียวแถบจะค้างตลอด
       })
       .catch((err) => !cancelled && setError(err.message))
       .finally(() => !cancelled && setLoading(false));
 
     return () => { cancelled = true; };
-  }, [year, month, reloadKey]);
-
-  // เดือนที่เลือกได้ = เฉพาะเดือนที่มีเคสจริงในปีที่เลือกอยู่
-  const monthsOfYear = periods.find((p) => p.year === year)?.months ?? [];
+  }, [reloadKey]);
 
   const reload = () => setReloadKey((k) => k + 1);
-
-  /** เปลี่ยนปีแล้วต้องล้างเดือนทิ้ง — เดือนเดิมอาจไม่มีข้อมูลในปีใหม่ */
-  const changeYear = (value) => {
-    setYear(value);
-    setMonth('');
-  };
-
-  /** ลิงก์จาก tile ไปหน้าเคส — พาช่วงเวลาที่เลือกอยู่ไปด้วย ไม่งั้นตัวเลขที่กดกับรายการที่เห็นจะไม่ตรงกัน */
-  const linkTo = (status) => {
-    const params = new URLSearchParams({ status });
-    if (year) params.set('year', year);
-    if (year && month) params.set('month', month);
-    return `/cases?${params}`;
-  };
-
-  const count = (status) => summary?.by_status.find((s) => s.status === status)?.count ?? 0;
   const total = summary?.total ?? 0;
-  const pct = (n) => (total === 0 ? '—' : `${Math.round((n / total) * 100)}%`);
-
-  // เรียงมากไปน้อย ประเภทที่ยังไม่มีเคสเลยไม่ต้องแสดง (กราฟเรียงซ้ำอีกชั้นเผื่อถูกเรียกจากที่อื่น)
-  const byType = summary ? [...(summary.by_service ?? [])].sort((a, b) => b.count - a.count) : [];
-
-  /* แถวบนสุดของการ์ดแรก (แทนหัวหน้าเดิม) — ตัวเลือกช่วงเวลาอยู่แถวเดียวเหนือทุกอย่างที่มันควบคุม */
-  const periodBar = (
-    <div className="hero-top">
-      <span className="muted">
-        {year ? `เคสที่เปิดใน${formatPeriod(year, month)}` : 'สรุปสถานะเคสทั้งหมดในระบบ'}
-      </span>
-      <div className="period-picker">
-        <select value={year} onChange={(e) => changeYear(e.target.value)} aria-label="เลือกปี">
-          <option value="">ทุกปี</option>
-          {periods.map((p) => (
-            <option key={p.year} value={p.year}>
-              ปี {toBuddhistYear(p.year)} ({p.count})
-            </option>
-          ))}
-        </select>
-
-        {/* เลือกเดือนไม่ได้จนกว่าจะเลือกปี — "พฤษภาคม" ของปีไหนไม่มีคำตอบ */}
-        <select
-          value={month}
-          onChange={(e) => setMonth(e.target.value)}
-          disabled={!year}
-          aria-label="เลือกเดือน"
-          title={year ? undefined : 'เลือกปีก่อน'}
-        >
-          <option value="">{year ? 'ทั้งปี' : 'ทุกเดือน'}</option>
-          {monthsOfYear.map((m) => (
-            <option key={m.month} value={m.month}>
-              {MONTH_LABELS[m.month]} ({m.count})
-            </option>
-          ))}
-        </select>
-      </div>
-    </div>
-  );
 
   return (
     <PageRefresh onRefresh={reload} busy={loading}>
-      {/* ไม่มีหัวหน้าบนจอ (การ์ดสรุปเป็นส่วนบนสุด) — คง h1 ไว้ให้โปรแกรมอ่านหน้าจอ */}
+      {/* ไม่มีหัวหน้าบนจอ (การ์ด KPI เป็นส่วนบนสุด) — คง h1 ไว้ให้โปรแกรมอ่านหน้าจอ */}
       <h1 className="sr-only">ภาพรวม</h1>
 
-      {/* error เป็นแถบเหนือเนื้อหา ไม่ทับทั้งหน้า — ตัวเลือกปี/เดือนกับตัวเลขที่โหลดมาได้แล้ว
-          ต้องไม่หายไปเพราะเน็ตสะดุดครั้งเดียว และต้องมีทางกดกลับมาเองโดยไม่ต้องรีเฟรชเบราว์เซอร์ */}
+      {/* error เป็นแถบเหนือเนื้อหา ไม่ทับทั้งหน้า — มีทางกดกลับมาเองโดยไม่ต้องรีเฟรชเบราว์เซอร์ */}
       <ErrorBar message={error} onRetry={reload} busy={loading} />
 
       {!summary ? (
         !error && <p className="muted">กำลังโหลด…</p>
       ) : total === 0 ? (
         <section className="card empty-state">
-          {periodBar}
-          <p>{year ? `ไม่มีเคสที่เปิดใน${formatPeriod(year, month)}` : 'ยังไม่มีเคสในระบบ'}</p>
-          {year ? (
-            <button className="btn" onClick={() => changeYear('')}>ดูทุกช่วงเวลา</button>
-          ) : (
-            <>
-              <p className="muted">เปิดเคสแรกเพื่อเริ่มติดตามงานและจับคู่พนักงาน</p>
-              <Link className="btn primary" to="/cases/new">+ เปิดเคสใหม่</Link>
-            </>
-          )}
+          <p>ยังไม่มีเคสในระบบ</p>
+          <p className="muted">เปิดเคสแรกเพื่อเริ่มติดตามงานและจับคู่พนักงาน</p>
+          <Link className="btn primary" to="/cases/new">+ เปิดเคสใหม่</Link>
         </section>
       ) : (
         <>
-          <section className="hero-card">
-            {periodBar}
-            <div className="hero">
-              <span className="hero-label">
-                {!year ? 'เคสทั้งหมด' : month ? 'เคสในเดือนนี้' : 'เคสในปีนี้'}
-              </span>
-              <span className="hero-value">{total.toLocaleString('th-TH')}</span>
-
-              {/* แถบสัดส่วนสถานะ — บอก "งานกองอยู่ตรงไหน" ในบรรทัดเดียว โดยไม่ต้องไล่อ่าน % ทีละช่อง
-                  ขึ้นเฉพาะจอแคบ (ดู index.css): ที่นั่นช่องตัวเลขเรียงเป็น 2×2 ซึ่งเทียบขนาดกันด้วยตาไม่ได้
-                  ส่วนจอกว้างช่องทั้งสี่เรียงเป็นแถวเดียวเทียบกันได้อยู่แล้ว และคอลัมน์นี้แคบเกินกว่าจะอ่านแถบออก
-
-                  aria-hidden — เป็นภาพแทนตัวเลขชุดเดียวกับที่อยู่ในช่องด้านล่าง ไม่ใช่ข้อมูลใหม่
-                  ปล่อยไว้โปรแกรมอ่านหน้าจอจะอ่านสัดส่วนซ้ำอีกรอบโดยไม่ได้ความหมายเพิ่ม */}
-              <div className="share-bar" aria-hidden="true">
-                {STATUSES.map((s) =>
-                  count(s) > 0 ? (
-                    <span
-                      key={s}
-                      className={`share-seg case-${s}`}
-                      style={{ width: `${(count(s) / total) * 100}%` }}
-                    />
-                  ) : null,
-                )}
-              </div>
-            </div>
-
-            <div className="tiles">
-              {STATUSES.map((s) => (
-                <StatTile
-                  key={s}
-                  label={CASE_STATUS_LABELS[s]}
-                  value={count(s).toLocaleString('th-TH')}
-                  share={pct(count(s))}
-                  status={s}
-                  to={linkTo(s)}
-                />
-              ))}
-            </div>
-          </section>
+          {/* การ์ด KPI กับผลการเข้างาน/ภาระงาน มีช่วงเวลาของตัวเอง (บอกในการ์ดแต่ละใบ) */}
+          {chartsError && <p className="error">โหลดกราฟไม่สำเร็จ: {chartsError}</p>}
+          {charts && <KpiRow data={charts} />}
 
           <div className="columns">
-            <section className="card">
-              <h2>เคสตามประเภทบริการ</h2>
-              <CaseTypeChart byType={byType} total={total} />
-            </section>
+            <ServiceDonut byService={summary.by_service ?? []} periodLabel="เคสทั้งหมดในระบบ" />
+            {charts && <ShiftDonut data={charts} />}
+          </div>
+
+          <div className="columns">
+            {charts && <WorkloadList data={charts} />}
 
             <section className="card">
               <h2>รอจับคู่พนักงาน</h2>
@@ -225,9 +110,9 @@ export default function DashboardPage() {
                       </li>
                     ))}
                   </ul>
-                  {count('unassigned') > unassigned.length && (
-                    <Link className="link" to={linkTo('unassigned')}>
-                      ดูทั้งหมด {count('unassigned')} เคส →
+                  {unassignedTotal > unassigned.length && (
+                    <Link className="link" to="/cases?status=unassigned">
+                      ดูทั้งหมด {unassignedTotal} เคส →
                     </Link>
                   )}
                 </>
@@ -235,10 +120,7 @@ export default function DashboardPage() {
             </section>
           </div>
 
-          {/* อยู่ใต้ทุกอย่างที่ตัวกรองด้านบนควบคุม เพราะการ์ดนี้มีช่วงเวลาของตัวเอง (บอกไว้ในหัวการ์ด)
-              ไม่ได้ขึ้นกับปี/เดือนที่เลือก — วางแทรกกลางจะอ่านเหมือนถูกกรองไปด้วย
-
-              ไม่ขึ้นสำหรับคนที่ไม่ใช่ผู้จัดการ ไม่ใช่ขึ้นแล้วโชว์ error — เส้น API ตอบ 403 อยู่แล้ว
+          {/* ไม่ขึ้นสำหรับคนที่ไม่ใช่ผู้จัดการ ไม่ใช่ขึ้นแล้วโชว์ error — เส้น API ตอบ 403 อยู่แล้ว
               (ดู requireManager ที่ /api/invoices/revenue) การ์ดที่ขึ้นมาเพื่อบอกว่า "คุณดูไม่ได้"
               ไม่ได้ช่วยใครทำงาน มีแต่บอกว่ามีตัวเลขที่ตัวเองไม่มีสิทธิ์อยู่ */}
           {canSeeRevenue && <RevenueChart />}

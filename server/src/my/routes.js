@@ -16,6 +16,7 @@ import { ApiError, asyncRoute, notFound } from '../lib/errors.js';
 import * as family from '../lib/family.js';
 import { THERAPY_POSITIONS } from '../employees/schema.js';
 import { sql } from '../db/index.js';
+import { notifySafely, onVisitAttendance } from '../notify/caseEvents.js';
 
 /**
  * ส่วนของ "พนักงานภาคสนาม" (field) — เห็น/แตะได้เฉพาะกะของตัวเอง
@@ -253,6 +254,7 @@ myRouter.post(
       off_schedule: offSchedule,
     });
     if (!result) throw new ApiError(409, 'คุณเช็คอินกะนี้ไปแล้ว'); // แข่งกดพร้อมกัน
+    await notifySafely('check-in', () => onVisitAttendance(visit.visit_id, 'checkin'));
     res.json(result);
   }),
 );
@@ -269,6 +271,7 @@ myRouter.post(
     const input = checkOutSchema.parse(req.body ?? {});
     const result = await cases.checkOutVisit(visit.visit_id, { lat: input.lat ?? null, lng: input.lng ?? null });
     if (!result) throw new ApiError(409, 'เช็คเอาท์ไม่สำเร็จ');
+    await notifySafely('check-out', () => onVisitAttendance(visit.visit_id, 'checkout'));
     res.json(result);
   }),
 );

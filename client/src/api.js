@@ -309,6 +309,8 @@ export const api = {
     return request(`/cases/summary${params.size ? `?${params}` : ''}`);
   },
   casePeriods: () => request('/cases/periods'),
+  /** ข้อมูลกราฟหน้าภาพรวม — { today, visits[21 วัน], monthly[12 เดือน], workload[8 คน] } */
+  caseDashboard: () => request('/cases/dashboard'),
   assignableEmployees: () => request('/cases/assignable-employees'),
 
   listCases: (params) => request(`/cases?${new URLSearchParams(params)}`),
@@ -488,6 +490,14 @@ export const api = {
   deleteVisitsOn: (id, dates) =>
     request(`/cases/${id}/visits?${new URLSearchParams({ dates: dates.join(',') })}`, { method: 'DELETE' }),
   updateVisit: (id, visitId, body) => request(`/cases/${id}/visits/${visitId}`, { method: 'PATCH', body }),
+  /**
+   * ย้ายกะจากปฏิทิน — times = { planned_start, planned_end } เมื่อลงช่องเวลาใหม่ (ไม่ส่ง = เวลาคงเดิม)
+   * คืน { visit_id, visit_date, ..., conflicts } (conflicts = งานอื่นของคนเดียวกันที่ชน)
+   */
+  moveVisit: (id, visitId, visitDate, times = {}) =>
+    request(`/cases/${id}/visits/${visitId}/move`, { method: 'POST', body: { visit_date: visitDate, ...times } }),
+  /** แอดมินส่งเตือนนัดทาง LINE เอง — คืน { staff, family } = จำนวนข้อความที่เข้าคิวส่ง */
+  remindVisit: (id, visitId) => request(`/cases/${id}/visits/${visitId}/remind`, { method: 'POST' }),
 
   // ---------- ค่าจ้างของเคส (ก้อนเดียว ผู้จัดการกดปล่อย) ----------
   /** ยอดเหมา · ปล่อยไปแล้ว · คงเหลือ · ถ้าปล่อยตอนนี้ใครได้เท่าไหร่ */

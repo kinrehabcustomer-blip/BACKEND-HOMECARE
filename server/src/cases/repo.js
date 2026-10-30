@@ -1701,7 +1701,7 @@ export async function updateVisit(caseId, visitId, input, actor) {
     const sets = changed.map((c) => `${c} = :${c}`);
     // ย้ายวัน/เวลา/คน = นัดใหม่ → เตือน LINE ใหม่ตามนัดใหม่ (notify/visitReminders.js)
     if (changed.some((c) => ['visit_date', 'planned_start', 'assigned_to'].includes(c)) || (changed.includes('status') && input.status === 'scheduled')) {
-      sets.push('remind_day_at = NULL', 'remind_3h_at = NULL', 'remind_family_at = NULL');
+      sets.push('remind_day_at = NULL', 'remind_3h_at = NULL', 'remind_family_at = NULL', 'remind_family_3h_at = NULL');
     }
     // คนเปลี่ยนสถานะเองแล้ว = ไม่ใช่กะที่ระบบยกเลิกให้อีกต่อไป ตอนเปิดเคสใหม่ต้องไม่ถูกคืนทับการตัดสินใจนี้
     if (changed.includes('status')) sets.push('auto_cancelled_at = NULL');
@@ -3540,6 +3540,91 @@ export async function summary(period) {
     total: Number(totals.total),
     by_status: toNumber(byStatus),
     by_service: toNumber(byType),
+  };
+}
+
+/**
+ * ข้อมูลกราฟหน้าภาพรวม (ดร.ธงชัย 30 ต.ค. 2569 "design dashboard ใหม่ อยากได้ chart เพิ่ม") — คำขอเดียวได้ครบสามกราฟ
+ *   visits    กะรายวัน 14 วันที่ผ่านมา + 7 วันข้างหน้า แยกตามสถานะกะ (สถานะคิดด้วย withVisitState ตัวเดียวกับปฏิทิน)
+ *   monthly   เคสที่เปิดรายเดือน 12 เดือนล่าสุด แยก Homecare / กายภาพ (นับตาม created_at เหมือนตัวกรองปี/เดือน)
+ *   workload  พนักงานที่ถือเคสที่ยังเดินอยู่มากที่สุด 8 คน — นับทั้งผู้รับผิดชอบหลักและคนในทีม + กะ 7 วันข้างหน้า
+ * ไม่มีเงินในนี้เลย — HR เปิดหน้าภาพรวมได้เหมือนผู้จัดการ
+ */
+export const DASHBOARD_PAST_DAYS = 14;
+export const DASHBOARD_NEXT_DAYS = 7;
+
+export async function dashboardCharts(now = new Date()) {
+  const today = isoDateTH(now);
+  const shift = (days) => isoDateTH(new Date(now.getTime() + days * 86_400_000));
+  const from = shift(-(DASHBOARD_PAST_DAYS - 1));
+  const to = shift(DASHBOARD_NEXT_DAYS);
+
+  const [visitRows, monthRows, workRows] = await Promise.all([
+    sql.all(
+      `SELECT v.visit_date, v.status, v.check_in_at, v.check_out_at
+       FROM case_visits v
+       WHERE v.status <> 'cancelled' AND v.visit_date BETWEEN :from AND :to`,
+      { from, to },
+    ),
+    sql.all(
+      `WITH months AS (
+         SELECT to_char(generate_series(
+                  date_trunc('month', :today::date) - interval '11 months',
+                  date_trunc('month', :today::date), interval '1 month'), 'YYYY-MM') AS month
+       )
+       SELECT m.month,
+              COUNT(c.case_id) FILTER (WHERE NOT ${PHYSIO_CASE_SQL}) AS homecare,
+              COUNT(c.case_id) FILTER (WHERE ${PHYSIO_CASE_SQL})     AS physio
+       FROM months m
+       LEFT JOIN cases c ON LEFT(c.created_at, 7) = m.month AND c.status <> 'cancelled'
+       GROUP BY m.month ORDER BY m.month`,
+      { today },
+    ),
+    sql.all(
+      `WITH holders AS (
+         SELECT c.assigned_to AS employee_id, c.case_id, true AS lead
+         FROM cases c WHERE c.status IN ('assigned', 'in_progress') AND c.assigned_to IS NOT NULL
+         UNION
+         SELECT t.employee_id, t.case_id, false
+         FROM case_team t JOIN cases c ON c.case_id = t.case_id
+         WHERE c.status IN ('assigned', 'in_progress')
+       )
+       SELECT e.employee_id, e.first_name, e.last_name, e.nickname, e.position,
+              COUNT(DISTINCT h.case_id) AS cases,
+              COUNT(DISTINCT h.case_id) FILTER (WHERE h.lead) AS lead_cases,
+              (SELECT COUNT(*) FROM case_visits v
+                WHERE v.assigned_to = e.employee_id AND v.status = 'scheduled' AND v.check_in_at IS NULL
+                  AND v.visit_date BETWEEN :today AND :next) AS upcoming_visits
+       FROM holders h JOIN employees e ON e.employee_id = h.employee_id
+       GROUP BY e.employee_id
+       ORDER BY cases DESC, upcoming_visits DESC, e.employee_id
+       LIMIT 8`,
+      { today, next: to },
+    ),
+  ]);
+
+  // ทุกวันในช่วงต้องมีแถว (วันว่าง = 0 ทุกสถานะ) ไม่งั้นแกนเวลาของกราฟกระโดดข้ามวัน
+  const STATES = ['scheduled', 'working', 'done', 'stale', 'missed'];
+  const days = new Map();
+  for (let d = -(DASHBOARD_PAST_DAYS - 1); d <= DASHBOARD_NEXT_DAYS; d++) {
+    days.set(shift(d), Object.fromEntries(STATES.map((s) => [s, 0])));
+  }
+  for (const v of visitRows) {
+    const { state } = withVisitState(v, now);
+    const day = days.get(v.visit_date);
+    if (day && state in day) day[state] += 1;
+  }
+
+  return {
+    today,
+    visits: [...days].map(([date, counts]) => ({ date, ...counts })),
+    monthly: monthRows.map((r) => ({ month: r.month, homecare: Number(r.homecare), physio: Number(r.physio) })),
+    workload: workRows.map((r) => ({
+      ...r,
+      cases: Number(r.cases),
+      lead_cases: Number(r.lead_cases),
+      upcoming_visits: Number(r.upcoming_visits),
+    })),
   };
 }
 

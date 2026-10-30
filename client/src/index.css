@@ -1130,6 +1130,28 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
   --case-closed: #9aa1a9;
   --case-cancelled: #c0504d;
 }
+/* สีกราฟหน้าภาพรวม (components/DashboardCharts.jsx) — ผ่านตัวตรวจสีของ dataviz ทั้งสองธีม
+   (ระยะช่วงสว่าง · ความสด · แยกได้เมื่อตาบอดสี · คอนทราสต์กับพื้น) — ลำดับซ้อนแท่งของสถานะกะคือ
+   working → done → missed → stale → scheduled ห้ามสลับ ลำดับนี้คือลำดับที่ผ่านการตรวจคู่ที่ติดกัน
+   ธีมมืดเป็นค่าที่เลือกให้พื้นมืดโดยเฉพาะ ไม่ใช่กลับสีอัตโนมัติ */
+:root {
+  --viz-homecare: #916919;
+  --viz-physio: #2a78d6;
+  --viz-visit-working: #1baf7a;
+  --viz-visit-done: #2a78d6;
+  --viz-visit-missed: #d03b3b;
+  --viz-visit-stale: #6250d6;
+  --viz-visit-scheduled: #ec835a;
+}
+:root[data-theme='dark'] {
+  --viz-homecare: #b88827;
+  --viz-physio: #3987e5;
+  --viz-visit-working: #199e70;
+  --viz-visit-done: #3987e5;
+  --viz-visit-missed: #d03b3b;
+  --viz-visit-stale: #9085e9;
+  --viz-visit-scheduled: #d9703f;
+}
 .dot { width: 0.5rem; height: 0.5rem; border-radius: 50%; flex-shrink: 0; }
 .dot.case-unassigned  { background: var(--case-unassigned); }
 .dot.case-assigned    { background: var(--case-assigned); }
@@ -1258,6 +1280,57 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
 /* ยอดรวมของช่วงที่กราฟแสดงอยู่ — อ่านตัวเลขจริงได้โดยไม่ต้องเอาเมาส์ไปชี้ */
 .chart-total { margin: 0 0 0.25rem; font-size: 0.875rem; }
 .chart-total strong { font-size: 1.375rem; font-variant-numeric: tabular-nums; }
+
+/* หน้าภาพรวมแบบการ์ด KPI (DashboardCharts.jsx) */
+.viz-swatch { width: 0.625rem; height: 0.625rem; border-radius: 0.1875rem; flex-shrink: 0; }
+.viz-note { margin: -0.5rem 0 0.5rem; font-size: 0.8125rem; }
+
+/* แถว KPI — 4 ใบบนจอกว้าง · 2 ใบบนแท็บเล็ต/มือถือ · การ์ดทั้งใบกดได้ (พาไปหน้าที่เกี่ยวข้อง) */
+.kpi-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1rem; margin-bottom: 1rem; }
+@media (max-width: 1100px) { .kpi-row { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.kpi {
+  display: flex; flex-direction: column; gap: 0.25rem; min-width: 0;
+  padding: 1rem 1.125rem 0.875rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  color: var(--text);
+  text-decoration: none;
+}
+.kpi:hover { border-color: var(--border-hover); background: var(--surface-2); }
+.kpi:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.kpi-label { font-size: 0.8125rem; font-weight: 600; color: var(--muted); }
+.kpi-value {
+  font-size: 1.875rem; font-weight: 700; line-height: 1.15;
+  color: var(--heading); font-variant-numeric: tabular-nums;
+}
+.kpi-value small { margin-left: 0.25rem; font-size: 0.875rem; font-weight: 600; color: var(--muted); }
+.kpi-sub { font-size: 0.75rem; color: var(--muted); min-height: 1.1em; }
+/* sparkline — กราฟเล็กยืดเต็มความกว้างการ์ด ขีดศูนย์ใช้สีหมึกจาง (currentColor) */
+.spark { display: block; width: 100%; height: 2.5rem; margin: 0.25rem 0 0.125rem; color: var(--muted); overflow: visible; }
+
+/* วงแหวน + คำอธิบายข้างกัน (แคบ = เรียงลง) */
+.donut { display: flex; align-items: center; gap: 1.25rem; flex-wrap: wrap; }
+.donut-chart { flex: 0 0 11rem; max-width: 100%; }
+.donut-legend { flex: 1; min-width: 10rem; margin: 0; padding: 0; list-style: none; display: grid; gap: 0.5rem; }
+.donut-legend li {
+  display: grid; grid-template-columns: auto 1fr auto 2.75rem; align-items: center; gap: 0.5rem;
+  font-size: 0.875rem; padding-bottom: 0.5rem; border-bottom: 1px dashed var(--divider);
+}
+.donut-legend li:last-child { border-bottom: none; padding-bottom: 0; }
+.donut-legend strong { font-variant-numeric: tabular-nums; color: var(--heading); }
+.donut-legend .muted { text-align: right; font-size: 0.8125rem; font-variant-numeric: tabular-nums; }
+
+/* ภาระงานพนักงาน — แถบเทียบในบรรทัด */
+.load-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 0.625rem; }
+.load-list li { display: grid; grid-template-columns: 6.5rem minmax(0, 1fr) 5.5rem; align-items: center; gap: 0.75rem; }
+.load-name { display: flex; flex-direction: column; min-width: 0; font-size: 0.875rem; line-height: 1.25; }
+.load-name strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.load-name .muted, .load-count .muted { font-size: 0.6875rem; }
+.load-count { display: flex; flex-direction: column; align-items: flex-end; font-size: 0.8125rem; line-height: 1.25; font-variant-numeric: tabular-nums; }
+.load-count strong { color: var(--heading); }
+.load-track { display: block; height: 0.5rem; background: var(--surface-2); border-radius: 62.4375rem; overflow: hidden; }
+.load-fill { display: block; height: 100%; background: var(--brand); border-radius: 62.4375rem; }
 
 .row { display: flex; gap: 0.75rem; padding: 0.4375rem 0; font-size: 0.875rem; border-bottom: 1px dashed var(--divider); }
 .row:last-child { border-bottom: none; }
@@ -1479,6 +1552,10 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
 /* min-width: 0 — ไม่งั้นช่องในตารางกริดจะกว้างตามเนื้อหาขั้นต่ำของมัน แล้วดันคอลัมน์จนล้นจอแคบ */
 .grid label { display: flex; flex-direction: column; gap: 0.3125rem; min-width: 0; font-size: 0.8125rem; font-weight: 600; color: var(--muted); }
 .grid .span-2 { grid-column: span 2; }
+/* พนักงานที่รับเคส (หน้าเปิดเคส) — เลือกได้หลายคน: รายชื่อที่เลือกแล้ว + ช่องเพิ่มอีกคน · หัวข้อหน้าตาเดียวกับ .grid label */
+.case-staff-pick { display: flex; flex-direction: column; gap: 0.5rem; min-width: 0; }
+.case-staff-label { font-size: 0.8125rem; font-weight: 600; color: var(--muted); }
+.case-staff-pick .assignee + .assignee { margin-top: 0; }
 /* ช่องความสัมพันธ์กับผู้รับบริการเป็นกริดแยกต่อจากชื่อ/เบอร์ผู้ว่าจ้าง — เว้นระยะเท่าช่องว่างในกริด ไม่ให้ช่องติดกัน */
 .payer-relation { margin-top: 0.875rem; }
 /* ช่อง checkbox เรียงแนวนอน (กล่อง + ข้อความข้างกัน) แทนการเรียงลงของ .grid label */
@@ -2449,6 +2526,69 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
    เลข 3 ต้องตรงกับ MONTH_VISIBLE (= 2) ใน CalendarPage.jsx */
 .cal-chips > .cal-chip:nth-child(n + 3) { display: none; }
 
+/* ย้ายกะด้วยการลากวาง (CalendarPage.jsx) — กะที่ลากได้มีเคอร์เซอร์จับ · ช่องที่วางได้/ไม่ได้ต่างกันชัดระหว่างลาก */
+.cal-chip.is-movable { cursor: grab; }
+.cal-chip.is-dragging { opacity: 0.45; }
+.cal-cell.is-drop-no { opacity: 0.55; }
+.cal-cell.is-drop-ok { background: var(--brand-soft); }
+.cal-cell.is-drop-over { box-shadow: inset 0 0 0 2px var(--brand); }
+/* slot ชั่วโมงในช่องวัน (DaySlots ใน CalendarPage.jsx · จอกว้างทั้งเดือนและสัปดาห์) — 00:00–23:00 เลื่อนดูในช่อง
+   ลากกะลง slot = ย้ายไปวัน-เวลานั้น · กะอยู่ใน slot ของชั่วโมงที่เริ่ม */
+.cal-slots {
+  position: relative;               /* ให้ offsetTop ของ slot นับจากกล่องนี้ — ใช้เลื่อนไปที่กะแรกของวัน */
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-hover) transparent;
+}
+.cal-slots::-webkit-scrollbar { width: 0.25rem; }
+.cal-slots::-webkit-scrollbar-thumb { background: var(--border-hover); border-radius: 62.4375rem; }
+.cal-slot {
+  display: flex;
+  gap: 0.25rem;
+  min-height: 1.375rem;
+  padding: 0.0625rem 0;
+  border-top: 1px dashed var(--divider);
+}
+.cal-slot-time {
+  flex: none;
+  width: 2.125rem;
+  padding-top: 0.1875rem;
+  font-size: 0.625rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+/* "ไม่ระบุเวลา" ตรึงบนสุดของช่อง — ช่องเลื่อนไปที่กะแรกที่มีเวลา ถ้าไม่ตรึง กะไม่ระบุเวลาจะหลุดออกนอกช่องจนไม่มีใครเห็น */
+.cal-slot.is-none {
+  position: sticky; top: 0; z-index: 1;
+  border-top: 0; border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.cal-slot.is-none .cal-slot-time { color: var(--text); font-weight: 600; }
+/* แถว "ก่อน 08:00" / "หลัง 20:00" — กะนอกช่วงเวลาที่แสดง พื้นจางให้รู้ว่าเป็นแถวรวม ไม่ใช่ชั่วโมงหนึ่ง */
+.cal-slot.is-outside { background: var(--bg); }
+.cal-slot.is-outside .cal-slot-time { color: var(--text); font-weight: 600; line-height: 1.2; }
+.cal-slot-chips { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.125rem; }
+.cal-slot.is-drop-no { opacity: 0.5; }
+.cal-slot.is-drop-ok { background: var(--brand-soft); }
+.cal-slot.is-drop-over { box-shadow: inset 0 0 0 2px var(--brand); border-radius: 0.25rem; }
+/* มุมมองสัปดาห์โหมด slot: แสดง 08:00–20:00 (13 แถว) ครบในช่องเดียว ไม่ต้องเลื่อน — สูงตามเนื้อหา
+   7 ช่องอยู่แถวเดียวกันของ grid จึงยืดเท่ากันเองตามช่องที่สูงที่สุด (วันที่มีแถว "ไม่ระบุ"/"ก่อน 08:00") */
+@media (min-width: 37.5625rem) {
+  .cal-grid.has-slots.is-week .cal-cell { height: auto; min-height: 0; }
+  .cal-grid.has-slots.is-week .cal-slots { overflow: visible; }
+}
+/* ในโหมด slot ช่องวันไม่ต้องทาสีทั้งช่องตอนลาก — slot ที่วางได้ทาสีของตัวเองอยู่แล้ว (ทาซ้อนสองชั้นจะแยกไม่ออก) */
+.cal-grid.has-slots .cal-cell.is-drop-ok { background: var(--surface); }
+.cal-grid.has-slots .cal-cell.is-drop-over { box-shadow: none; }
+.cal-grid.has-slots .cal-cell.is-today.is-drop-over { box-shadow: inset 0 0 0 2px var(--brand); }
+
+.cal-move-form { display: flex; flex-wrap: wrap; align-items: center; gap: 0.375rem; margin-top: 0.375rem; }
+.cal-move-form input[type='date'] { min-width: 0; }
+.cal-move-dates { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.5rem; font-size: 1.0625rem; }
+.history-item .btn.tiny:not(.link-btn) { margin-top: 0.375rem; }
+
 /* ปุ่ม "+N งานที่เหลือ" — เป็นข้อความเล็กๆ ไม่ใช่ปุ่มเต็มยศ จะได้ไม่แย่งสายตาไปจากตัวงานเอง */
 .cal-more {
   flex-shrink: 0;
@@ -3109,6 +3249,23 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
 }
 .picker-list button:hover { background: var(--brand-soft); }
 .picker-list button.is-on { background: var(--brand); color: var(--brand-ink); font-weight: 700; }
+/* ช่องเวลาพิมพ์เองได้ + ปุ่มเปิดรายการ (TimeComboInput.jsx) — รายการใช้หน้าตา .picker-list เดียวกับ TimeSelect */
+.time-combo { position: relative; display: flex; flex-wrap: wrap; align-items: stretch; }
+.time-combo input {
+  flex: 1; min-width: 0;
+  border-top-right-radius: 0; border-bottom-right-radius: 0;
+  font-variant-numeric: tabular-nums;
+}
+.time-combo-btn {
+  display: inline-flex; align-items: center; justify-content: center; width: 2.5rem;
+  border: 1px solid var(--border); border-left: 0; border-radius: 0 var(--radius) var(--radius) 0;
+  background: var(--surface); color: var(--muted); cursor: pointer;
+}
+.time-combo-btn:hover:not(:disabled) { color: var(--brand); background: var(--brand-soft); }
+.time-combo.is-invalid input { border-color: var(--danger); }
+.time-combo-hint { flex-basis: 100%; margin-top: 0.25rem; font-size: 0.75rem; color: var(--danger); }
+.time-combo-list button:first-child { color: var(--muted); }
+.time-combo-list button:first-child.is-on { color: var(--brand-ink); }
 .pick-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
 .conflict-list { margin: 0.375rem 0 0; padding-left: 1.125rem; font-size: 0.8125rem; }
 
@@ -4930,6 +5087,27 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
 }
 .sidebar nav a { border-radius: var(--radius); font-size: 0.875rem; padding-block: 0.625rem; }
 .sidebar nav a.active { font-weight: 600; box-shadow: inset 3px 0 var(--brand); }
+
+/* หัวข้อกลุ่มในแถบเมนู (เช่น "แพ็คเกจ") — หน้าตาเดียวกับลิงก์เมนู แต่เป็นปุ่มกาง/หุบ เมนูย่อยเยื้องเข้าใต้หัวข้อ */
+.sidebar nav .nav-group-btn {
+  display: flex; align-items: center; gap: 0.625rem; width: 100%;
+  padding: 0.625rem 0.75rem;
+  border: 0; border-radius: var(--radius); background: none;
+  color: var(--muted); font: inherit; font-size: 0.875rem; font-weight: 500; line-height: 1.5;
+  text-align: left; cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+.sidebar nav .nav-group-btn:hover { background: var(--surface-2); color: var(--text); }
+.sidebar nav .nav-group-btn:hover .nav-ico,
+.sidebar nav .nav-group-btn.has-active .nav-ico { color: var(--brand); }
+.sidebar nav .nav-group-btn.has-active { color: var(--text); font-weight: 600; }
+.sidebar nav .nav-group-btn:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.nav-caret { width: 1rem; height: 1rem; margin-left: auto; flex-shrink: 0; transition: transform 0.2s ease; }
+.nav-caret.is-open { transform: rotate(180deg); }
+.nav-sub { display: flex; flex-direction: column; gap: 0.1875rem; padding-left: 1.25rem; }
+.sidebar nav .nav-sub a { padding-block: 0.5rem; }
+.sidebar nav .nav-sub .nav-ico { width: 1.0625rem; height: 1.0625rem; }
+@media (prefers-reduced-motion: reduce) { .nav-caret { transition: none; } }
 .nav-ico { transition: color 0.15s ease; }
 .page-head { padding-bottom: 1.25rem; border-bottom: 1px solid var(--border); }
 .page-head h1 { color: var(--heading); font-weight: 600; }

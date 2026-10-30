@@ -20,6 +20,16 @@ const read = () => {
     brandSoft: v('--brand-soft'),
     surface: v('--surface'),
     danger: v('--danger'),
+    // ชุดสีกราฟหน้าภาพรวม — นิยามใน index.css (--viz-*) ตรวจแล้วทั้งสองธีม
+    viz: {
+      homecare: v('--viz-homecare'),
+      physio: v('--viz-physio'),
+      working: v('--viz-visit-working'),
+      done: v('--viz-visit-done'),
+      missed: v('--viz-visit-missed'),
+      stale: v('--viz-visit-stale'),
+      scheduled: v('--viz-visit-scheduled'),
+    },
     // ฟอนต์ต้องส่งเข้า option ด้วยเหมือนกัน — canvas ไม่สืบทอดจาก CSS
     font: getComputedStyle(document.body).fontFamily,
   };

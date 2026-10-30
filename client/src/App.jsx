@@ -64,6 +64,8 @@ const NAV_ICONS = {
   today: (<><rect x="3" y="4" width="18" height="18" rx="2" /><path d="M3 10h18M8 2v4M16 2v4" /><path d="M9 15l2 2 4-4" /></>),
   wallet: (<><path d="M3 7a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><path d="M3 9h18" /><path d="M16 13.5h2.5" /></>),
   star: (<path d="M12 2.6l2.9 5.9 6.5.9-4.7 4.6 1.1 6.5-5.8-3.1-5.8 3.1 1.1-6.5L2.6 9.4l6.5-.9z" />),
+  package: (<><path d="M21 8 12 3 3 8v8l9 5 9-5z" /><path d="M3 8l9 5 9-5M12 13v8" /></>),
+  chevron: (<path d="M6 9l6 6 6-6" />),
 };
 
 function NavIcon({ name }) {
@@ -87,13 +89,20 @@ const ADMIN_NAV = [
   { to: '/invoices', icon: 'invoice', label: 'ใบแจ้งหนี้', perm: 'billing' },
   { to: '/payroll', icon: 'wallet', label: 'ค่าตอบแทนพนักงาน', perm: 'money' },
   { to: '/revenue', icon: 'dashboard', label: 'รายได้บริษัท', perm: 'money', unlessPerm: 'office' },
-  { to: '/packages', icon: 'home', label: 'แพ็คเกจ Homecare', perm: 'office' },
-  { to: '/physio-packages', icon: 'activity', label: 'แพ็คเกจกายภาพบำบัด', perm: 'office' },
+  /* group = รวมอยู่ใต้หัวข้อเดียวที่กางได้ในแถบเมนู (ดู NAV_GROUPS) · sub = ชื่อสั้นในเมนูย่อย
+     label เต็มยังใช้เป็นชื่อหน้าบนแถบบน */
+  { to: '/packages', icon: 'home', label: 'แพ็คเกจ Homecare', sub: 'Homecare', group: 'packages', perm: 'office' },
+  { to: '/physio-packages', icon: 'activity', label: 'แพ็คเกจกายภาพบำบัด', sub: 'กายภาพบำบัด', group: 'packages', perm: 'office' },
   { to: '/customers', icon: 'users', label: 'ลูกค้า', perm: 'office' },
   { to: '/patients', icon: 'heart', label: 'ผู้รับบริการ', perm: 'office' },
   { to: '/employees', icon: 'user', label: 'พนักงาน', perm: 'office' },
   { to: '/reviews', icon: 'star', label: 'คะแนนประเมินจากญาติ', perm: 'office' },
 ];
+
+/** หัวข้อของเมนูที่รวมกลุ่มกัน — แพ็คเกจสองแบบยุบเป็นหัวข้อเดียว (ผู้ใช้ขอ 30 ต.ค. 2569) */
+const NAV_GROUPS = {
+  packages: { icon: 'package', label: 'แพ็คเกจ' },
+};
 
 /** เมนูหลังบ้านที่ผู้ใช้คนนี้เห็น — ว่าง = ตำแหน่งที่ยังไม่ได้กำหนดสิทธิ์ (ถ้ามีตำแหน่งใหม่ที่ยังไม่ได้ผูกสิทธิ์) */
 const navFor = (user) => {
@@ -124,6 +133,21 @@ function Sidebar() {
 
   // เมนูพับได้เฉพาะจอแคบ (CSS ซ่อนปุ่มบนจอกว้าง) — บนจอกว้างค่านี้ไม่มีผลกับอะไรเลย
   const [menuOpen, setMenuOpen] = useState(false);
+
+  /* หัวข้อกลุ่มที่กางอยู่ (เช่น "แพ็คเกจ") — กางเองเมื่ออยู่ในหน้าของกลุ่มนั้น
+     ไม่งั้นเข้าหน้าแพ็คเกจจากลิงก์อื่นแล้วเมนูที่ไฮไลต์ซ่อนอยู่ใต้หัวข้อที่หุบ */
+  const groupOf = (path) => items.find((i) => i.group && path.startsWith(i.to))?.group ?? null;
+  const [openGroups, setOpenGroups] = useState(() => new Set([groupOf(location.pathname)].filter(Boolean)));
+  useEffect(() => {
+    const g = groupOf(location.pathname);
+    if (g) setOpenGroups((prev) => (prev.has(g) ? prev : new Set([...prev, g])));
+  }, [location.pathname]); // eslint-disable-line react-hooks/exhaustive-deps
+  const toggleGroup = (g) =>
+    setOpenGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(g)) next.delete(g); else next.add(g);
+      return next;
+    });
 
   // เปลี่ยนหน้าแล้วต้องพับเมนูเอง ไม่งั้นเมนูค้างบังเนื้อหาที่เพิ่งกดเข้าไปดู
   useEffect(() => setMenuOpen(false), [location.pathname]);
@@ -182,13 +206,47 @@ function Sidebar() {
           ทำให้ปุ่มตั้งค่า/ออกจากระบบย้ายเข้าไปอยู่ในเมนู แทนที่จะแย่งที่บนแถบบน */}
       <div className="sidebar-panel">
         <nav id="main-nav" aria-label="เมนูหลัก">
-          {items.map((i) => (
-            <Fragment key={i.to}>
-              {i.to === items[0].to && <span className="nav-section-label">{isAdmin ? 'การดำเนินงาน' : 'พื้นที่ทำงาน'}</span>}
-              {i.to === '/packages' && <span className="nav-section-label">ข้อมูลและบริการ</span>}
-              <NavLink to={i.to}><NavIcon name={i.icon} />{i.label}</NavLink>
-            </Fragment>
-          ))}
+          {items.map((i, idx) => {
+            // เมนูในกลุ่ม: วาดหัวข้อกลุ่มครั้งเดียวตรงตัวแรกของกลุ่ม แล้วเมนูย่อยทั้งหมดอยู่ใต้หัวข้อนั้น
+            const firstOfGroup = i.group && items.findIndex((x) => x.group === i.group) === idx;
+            if (i.group && !firstOfGroup) return null;
+            const members = i.group ? items.filter((x) => x.group === i.group) : null;
+            const open = i.group && openGroups.has(i.group);
+            const groupActive = members?.some((m) => location.pathname.startsWith(m.to));
+            return (
+              <Fragment key={i.group ?? i.to}>
+                {idx === 0 && <span className="nav-section-label">{isAdmin ? 'การดำเนินงาน' : 'พื้นที่ทำงาน'}</span>}
+                {i.to === '/packages' && <span className="nav-section-label">ข้อมูลและบริการ</span>}
+                {!i.group ? (
+                  <NavLink to={i.to}><NavIcon name={i.icon} />{i.label}</NavLink>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      className={`nav-group-btn${groupActive ? ' has-active' : ''}`}
+                      aria-expanded={open}
+                      aria-controls={`nav-group-${i.group}`}
+                      onClick={() => toggleGroup(i.group)}
+                    >
+                      <NavIcon name={NAV_GROUPS[i.group].icon} />
+                      {NAV_GROUPS[i.group].label}
+                      <svg className={`nav-caret${open ? ' is-open' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        {NAV_ICONS.chevron}
+                      </svg>
+                    </button>
+                    {open && (
+                      <div className="nav-sub" id={`nav-group-${i.group}`}>
+                        {members.map((m) => (
+                          <NavLink key={m.to} to={m.to}><NavIcon name={m.icon} />{m.sub ?? m.label}</NavLink>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
+              </Fragment>
+            );
+          })}
           {/* วิดีโอสอนใช้งานย้ายไปอยู่ในหน้าตั้งค่าแล้ว (ส่วน "ช่วยเหลือ" — ดู SettingsPage) */}
         </nav>
 

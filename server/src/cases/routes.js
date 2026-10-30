@@ -17,6 +17,7 @@ import {
   calendarQuerySchema,
   createVisitSchema,
   updateVisitSchema,
+  moveVisitSchema,
   bulkVisitSchema,
   previewVisitsSchema,
   visitRangeSchema,
@@ -35,6 +36,8 @@ import {
 } from './schema.js';
 import { sql } from '../db/index.js';
 import { caseCode } from './caseCode.js';
+import * as caseEvents from '../notify/caseEvents.js';
+import { notifySafely } from '../notify/caseEvents.js';
 import { geocode, reverseGeocode, searchPlaces } from '../lib/geocode.js';
 import { resolveMapLink } from '../lib/maplink.js';
 import { canSeeStaffPay, requireManager } from '../lib/auth.js';
@@ -107,6 +110,12 @@ casesRouter.get(
     });
     res.json(await repo.summary(period));
   }),
+);
+
+/** ข้อมูลกราฟหน้าภาพรวม (กะรายวัน · เคสใหม่รายเดือน · ภาระงานพนักงาน) — ต้องอยู่เหนือ '/:id' */
+casesRouter.get(
+  '/dashboard',
+  asyncRoute(async (req, res) => res.json(await repo.dashboardCharts())),
 );
 
 /** ปี/เดือนที่มีเคสอยู่จริง — ให้หน้าเว็บเอาไปทำ dropdown เลือกช่วงเวลา */
@@ -574,7 +583,11 @@ casesRouter.post(
     }
     await ensureAssignable(employee_id);
 
-    res.json(visible(req, await repo.assign(req.params.id, employee_id, req.user)));
+    const result = await repo.assign(req.params.id, employee_id, req.user);
+    await notifySafely('assign', () =>
+      caseEvents.onCaseStaffChanged(req.params.id, { from: req.case.assigned_to, to: result?.assigned_to }),
+    );
+    res.json(visible(req, result));
   }),
 );
 
@@ -602,6 +615,7 @@ casesRouter.post(
 
     const added = await repo.addTeamMember(req.params.id, employee_id, req.user);
     if (!added) throw new ApiError(409, 'พนักงานคนนี้อยู่ในเคสนี้อยู่แล้ว');
+    await notifySafely('team-add', () => caseEvents.onCaseStaffChanged(req.params.id, { to: employee_id, role: 'team' }));
 
     res.json(await repo.listTeam(req.params.id));
   }),
@@ -613,6 +627,9 @@ casesRouter.delete(
   asyncRoute(async (req, res) => {
     const removed = await repo.removeTeamMember(req.params.id, req.params.employeeId, req.user);
     if (!removed) throw notFound('ไม่พบพนักงานคนนี้ในทีมของเคส');
+    await notifySafely('team-remove', () =>
+      caseEvents.onCaseStaffChanged(req.params.id, { from: req.params.employeeId, role: 'team' }),
+    );
     res.json(await repo.listTeam(req.params.id));
   }),
 );
@@ -622,7 +639,11 @@ casesRouter.post(
   '/:id/unassign',
   asyncRoute(async (req, res) => {
     if (isTerminal(req.case)) throw new ApiError(409, 'เคสนี้จบไปแล้ว');
-    res.json(visible(req, await repo.unassign(req.params.id, req.user)));
+    const result = await repo.unassign(req.params.id, req.user);
+    await notifySafely('unassign', () =>
+      caseEvents.onCaseStaffChanged(req.params.id, { from: req.case.assigned_to, to: result?.assigned_to ?? null }),
+    );
+    res.json(visible(req, result));
   }),
 );
 
@@ -776,7 +797,10 @@ casesRouter.post(
     ensureSchedulable(req.case);
     const input = createVisitSchema.parse(req.body);
     await ensureVisitAssignee(req.case, input.assigned_to);
-    res.status(201).json(await repo.addVisit(req.params.id, input));
+    const before = await caseEvents.visitIdsOf(req.params.id);
+    const result = await repo.addVisit(req.params.id, input);
+    await notifySafely('visit-add', () => caseEvents.onVisitsAdded(req.params.id, before, result));
+    res.status(201).json(result);
   }),
 );
 
@@ -787,7 +811,10 @@ casesRouter.post(
     ensureSchedulable(req.case);
     const input = bulkVisitSchema.parse(req.body);
     await ensureVisitAssignee(req.case, input.assigned_to);
-    res.status(201).json(await repo.addVisits(req.params.id, input.dates, input));
+    const before = await caseEvents.visitIdsOf(req.params.id);
+    const result = await repo.addVisits(req.params.id, input.dates, input);
+    await notifySafely('visits-bulk', () => caseEvents.onVisitsAdded(req.params.id, before, result));
+    res.status(201).json(result);
   }),
 );
 
@@ -852,6 +879,64 @@ casesRouter.delete(
     }
 
     res.json(await repo.listVisits(req.params.id));
+  }),
+);
+
+/**
+ * ย้ายกะจากหน้าปฏิทิน (วัน และ/หรือ ช่องเวลา) — เข้มกว่า PATCH ทั่วไป (ซึ่งแก้บันทึกย้อนหลังได้) เพราะเป็นการเลื่อนนัดจริง:
+ * ย้ายได้เฉพาะกะที่ยังรอเช็คอิน ยังไม่เลยวันนัด และวัน-เวลาใหม่ต้องไม่อยู่ในอดีต
+ * กะที่ขาดงานแล้วไม่ให้ย้าย — ประวัติขาดงานของคนเดิมจะหายไป
+ * ที่เหลือ (ล็อกเคส · ประวัติเคส · ล้างธงเตือน · แจ้ง LINE ว่าเลื่อนนัด) ทำใน repo.updateVisit ตามเดิม
+ * ตอบ conflicts = งานอื่นของพนักงานคนเดียวกันที่ชนวันเวลาใหม่ (เตือน ไม่บล็อก เหมือนตอนลงกะ)
+ */
+casesRouter.post(
+  '/:id/visits/:visitId/move',
+  asyncRoute(async (req, res) => {
+    const input = moveVisitSchema.parse(req.body);
+    const to = input.visit_date;
+    const visitId = Number(req.params.visitId);
+    const visit = await repo.findVisit(visitId);
+    if (!visit || visit.case_id !== req.params.id) throw notFound('ไม่พบกะนี้');
+    ensureSchedulable(req.case);
+    if (visit.visit_status !== 'scheduled' || visit.check_in_at) {
+      throw new ApiError(409, 'ย้ายได้เฉพาะกะที่ยังรอเช็คอิน');
+    }
+    const now = await repo.serverNowTH();
+    if (visit.visit_date < now.date) throw new ApiError(409, 'กะนี้เลยวันนัดมาแล้ว ย้ายจากปฏิทินไม่ได้');
+    if (to < now.date) throw new ApiError(409, 'ย้ายไปวันที่ผ่านมาแล้วไม่ได้');
+    const start = input.planned_start ?? visit.planned_start;
+    if (to === now.date && start && start < now.time) {
+      throw new ApiError(409, `เวลา ${start} ของวันนี้ผ่านไปแล้ว — เลือกช่วงเวลาที่ยังไม่ถึง`);
+    }
+
+    const change = { visit_date: to };
+    if (input.planned_start !== undefined) change.planned_start = input.planned_start;
+    if (input.planned_end !== undefined) change.planned_end = input.planned_end;
+    const same = Object.entries(change).every(([k, v]) => (v ?? null) === (visit[k] ?? null));
+    if (same) return res.json({ visit_id: visitId, ...change, conflicts: [] });
+
+    await repo.updateVisit(req.params.id, visitId, change, req.user);
+    res.json({ visit_id: visitId, ...change, conflicts: await repo.visitConflicts([visitId]) });
+  }),
+);
+
+/**
+ * แอดมินกดส่งเตือนนัดทาง LINE เอง (พนักงานที่ไปกะนั้น + ญาติของเคส) — เข้าคิว case_event_outbox
+ * ส่งจริงเมื่อ chat.kinorigin.com มารับคิว · ตอบจำนวนข้อความที่เข้าคิวเพื่อให้หน้าเว็บบอกผลตรงๆ
+ */
+casesRouter.post(
+  '/:id/visits/:visitId/remind',
+  asyncRoute(async (req, res) => {
+    const result = await caseEvents.queueManualReminder(req.params.id, Number(req.params.visitId), req.user);
+    if (result.error === 'not_found') throw notFound('ไม่พบกะนี้');
+    if (result.error === 'not_open') {
+      throw new ApiError(409, 'ส่งเตือนได้เฉพาะกะที่ยังไม่ถึงเวลาหรือยังไม่เช็คอิน และเคสยังไม่ปิด');
+    }
+    if (result.duplicate) throw new ApiError(429, 'เพิ่งส่งเตือนกะนี้ไป กรุณารอ 1 นาทีก่อนส่งซ้ำ');
+    if (!result.staff && !result.family) {
+      throw new ApiError(409, 'ยังไม่มีผู้รับที่ผูก LINE — ทั้งพนักงานของกะนี้และญาติของเคส');
+    }
+    res.json(result);
   }),
 );
 

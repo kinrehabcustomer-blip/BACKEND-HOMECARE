@@ -2119,4 +2119,223 @@ if (process.env.RUN_DB_TESTS !== '1') {
       assert.equal((await me(fresh)).status, 200, 'the session issued right after the change must survive');
     });
   });
+
+  describe('แจ้ง LINE เมื่อเคส/ปฏิทินเปลี่ยน (notify/caseEvents.js)', () => {
+    test('จับคู่ · ลงกะ · เปลี่ยนคน · เช็คอิน-เอาท์ เข้าคิว case_event_outbox ถูกคน และไม่ปนคิวเดิม', async () => {
+      const caseEvents = await import('../src/notify/caseEvents.js');
+      const family = await import('../src/lib/family.js');
+      await family.ensureFamilyTable();
+
+      const { today } = await sql.one(`SELECT to_char(now() AT TIME ZONE 'Asia/Bangkok','YYYY-MM-DD') AS today`);
+      const tomorrow = new Date(Date.parse(`${today}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+      const kase = await newCase();
+      await sql.run(`UPDATE cases SET case_type = 'physiotherapy' WHERE case_id = :id`, { id: kase.case_id });
+      const relative = `U${'e'.repeat(32)}`;
+      await sql.run(
+        `INSERT INTO case_family_links (case_id, line_user_id, display_name, invited_by, consent_by, accepted_at, can_invite)
+         VALUES (:cid, :uid, 'ญาติ', 'test', 'test', now(), true)`,
+        { cid: kase.case_id, uid: relative },
+      );
+      const staff = async (tag) => {
+        const e = await post('/api/employees', { first_name: `กภ.${tag}`, last_name: 'แจ้งเตือน', position: 'therapist' }, MANAGER, 201);
+        const line = `U${tag.repeat(32)}`;
+        await sql.run('UPDATE employees SET line_user_id = :line, must_change_password = false WHERE employee_id = :id', { line, id: e.employee_id });
+        return { ...emp(e.employee_id, 'therapist'), line };
+      };
+      const a = await staff('a');
+      const b = await staff('b');
+      const queued = () =>
+        sql.all('SELECT recipient_line_user_id AS to, event_kind AS kind, payload FROM case_event_outbox WHERE case_id = :id ORDER BY id', { id: kase.case_id });
+      const kinds = async (to) => (await queued()).filter((r) => r.to === to).map((r) => r.kind);
+
+      await post(`/api/cases/${kase.case_id}/assign`, { employee_id: a.employee_id });
+      assert.deepEqual(await kinds(a.line), ['case_assigned']);
+      assert.deepEqual(await kinds(relative), ['case_staff']);
+
+      await post(`/api/cases/${kase.case_id}/visits/bulk`, { dates: [today, tomorrow], planned_start: '23:59' }, MANAGER, 201);
+      const added = (await queued()).find((r) => r.kind === 'visits_added');
+      assert.equal(added.to, a.line);
+      assert.equal(added.payload.data.total, 2);
+      // ลงวันเดิมซ้ำ = addVisits ข้ามทั้งหมด → ไม่มีข้อความใหม่
+      await post(`/api/cases/${kase.case_id}/visits/bulk`, { dates: [today, tomorrow], planned_start: '23:59' }, MANAGER, 201);
+      assert.equal((await kinds(a.line)).filter((k) => k === 'visits_added').length, 1);
+
+      await post(`/api/cases/${kase.case_id}/assign`, { employee_id: b.employee_id });
+      assert.deepEqual(await kinds(a.line), ['case_assigned', 'visits_added', 'case_unassigned']);
+      const toB = (await queued()).find((r) => r.to === b.line && r.kind === 'case_assigned');
+      assert.equal(toB.payload.data.upcoming_visits.length, 2, 'กะข้างหน้าย้ายตามมาเป็นของคนใหม่');
+      assert.deepEqual(await kinds(relative), ['case_staff', 'case_staff']);
+
+      const visit = (await sql.one('SELECT visit_id FROM case_visits WHERE case_id = :id AND visit_date = :d', { id: kase.case_id, d: today }));
+      const photo = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aA1cAAAAASUVORK5CYII=';
+      await post(`/api/my/visits/${visit.visit_id}/check-in`, { photo }, b);
+      await post(`/api/my/visits/${visit.visit_id}/check-out`, {}, b);
+      assert.deepEqual(await kinds(relative), ['case_staff', 'case_staff', 'visit_checkin', 'visit_checkout']);
+      const checkin = (await queued()).find((r) => r.kind === 'visit_checkin');
+      assert.match(checkin.payload.data.check_in_time, /^\d{2}:\d{2}$/);
+      assert.equal(checkin.payload.data.session_no, 1);
+
+      // คิวเดิมที่ตัวส่งปัจจุบันดึงอยู่ ต้องไม่เห็นชนิดข้อความใหม่
+      const leaked = await sql.one(
+        `SELECT COUNT(*)::int AS n FROM visit_notification_outbox
+          WHERE event_kind IN ('case_assigned','case_unassigned','case_staff','visits_added','visit_checkin','visit_checkout')`,
+      ).catch(() => ({ n: 0 }));
+      assert.equal(leaked.n, 0);
+
+      // รับ/ack แบบเดียวกับคิวเดิม — ack แล้วไม่ถูกหยิบซ้ำ
+      const pending = (await caseEvents.claimCaseEventOutbox(500)).filter((r) => r.case_id === kase.case_id);
+      assert.equal(pending.length, (await queued()).length);
+      assert.equal(await caseEvents.ackCaseEventOutbox(pending.map((r) => ({ id: r.id, ok: true }))), pending.length);
+      const left = await sql.one('SELECT COUNT(*)::int AS n FROM case_event_outbox WHERE case_id = :id AND sent_at IS NULL', { id: kase.case_id });
+      assert.equal(left.n, 0);
+    });
+
+    test('แอดมินกดส่งเตือนกะเอง — เข้าคิวพนักงาน+ญาติ · กันกดซ้ำ · พนักงานภาคสนามกดไม่ได้ · กะที่จบแล้วส่งไม่ได้', async () => {
+      const family = await import('../src/lib/family.js');
+      await family.ensureFamilyTable();
+      const { today } = await sql.one(`SELECT to_char(now() AT TIME ZONE 'Asia/Bangkok','YYYY-MM-DD') AS today`);
+      const tomorrow = new Date(Date.parse(`${today}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+      const kase = await newCase();
+      const relative = `U${'f'.repeat(32)}`;
+      await sql.run(
+        `INSERT INTO case_family_links (case_id, line_user_id, display_name, invited_by, consent_by, accepted_at, can_invite)
+         VALUES (:cid, :uid, 'ญาติ', 'test', 'test', now(), true)`,
+        { cid: kase.case_id, uid: relative },
+      );
+      const e = await post('/api/employees', { first_name: 'ผู้ดูแล', last_name: 'เตือนเอง', position: 'caregiver' }, MANAGER, 201);
+      const line = `U${'d'.repeat(32)}`;
+      await sql.run('UPDATE employees SET line_user_id = :line WHERE employee_id = :id', { line, id: e.employee_id });
+      await sql.run('UPDATE cases SET geo_lat = 13.766892, geo_lng = 100.697079 WHERE case_id = :id', { id: kase.case_id });
+      await post(`/api/cases/${kase.case_id}/assign`, { employee_id: e.employee_id });
+      const assigned = await sql.one(
+        `SELECT payload FROM case_event_outbox WHERE case_id = :id AND event_kind = 'case_assigned'`, { id: kase.case_id });
+      assert.equal(assigned.payload.data.map_url, 'https://www.google.com/maps/dir/?api=1&destination=13.766892,100.697079');
+      const sched = await post(`/api/cases/${kase.case_id}/visits/bulk`, { dates: [tomorrow], planned_start: '09:00' }, MANAGER, 201);
+      const visit = sched.visits[0];
+      const path = `/api/cases/${kase.case_id}/visits/${visit.visit_id}/remind`;
+
+      await post(path, {}, FIELD, 403);
+      assert.deepEqual(await post(path, {}, HR), { staff: 1, family: 1, duplicate: false });
+      const rows = await sql.all(
+        `SELECT recipient_line_user_id AS to, payload FROM case_event_outbox WHERE visit_id = :id AND event_kind = 'manual_reminder' ORDER BY id`,
+        { id: visit.visit_id },
+      );
+      assert.deepEqual(rows.map((r) => r.to), [line, relative]);
+      assert.equal(rows[0].payload.data.planned_start, '09:00');
+      assert.equal(rows[0].payload.data.map_url, 'https://www.google.com/maps/dir/?api=1&destination=13.766892,100.697079');
+      assert.equal(rows[1].payload.data.address, undefined, 'ญาติไม่ต้องได้ที่อยู่/พิกัด');
+      assert.equal(rows[1].payload.data.map_url, undefined);
+      await post(path, {}, HR, 429);
+
+      await sql.run(`UPDATE case_visits SET status = 'cancelled' WHERE visit_id = :id`, { id: visit.visit_id });
+      await post(path, {}, MANAGER, 409);
+      await post(`/api/cases/${kase.case_id}/visits/999999/remind`, {}, MANAGER, 404);
+    });
+
+    test('ย้ายกะจากปฏิทิน — ย้ายได้เฉพาะกะรอเช็คอินไปวันนี้/อนาคต · บันทึกประวัติ · เข้าคิวแจ้งเลื่อนนัด · บอกงานที่ชน', async () => {
+      const { today } = await sql.one(`SELECT to_char(now() AT TIME ZONE 'Asia/Bangkok','YYYY-MM-DD') AS today`);
+      const inDays = (n) => new Date(Date.parse(`${today}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+      const e = await post('/api/employees', { first_name: 'ย้าย', last_name: 'วันนัด', position: 'caregiver' }, MANAGER, 201);
+      const kase = await newCase();
+      await post(`/api/cases/${kase.case_id}/assign`, { employee_id: e.employee_id });
+      const other = await newCase();
+      await post(`/api/cases/${other.case_id}/visits/bulk`, { dates: [inDays(5)], assigned_to: e.employee_id, planned_start: '09:00', planned_end: '10:00' }, MANAGER, 201);
+      const sched = await post(`/api/cases/${kase.case_id}/visits/bulk`,
+        { dates: [inDays(-2), inDays(2)], planned_start: '09:00', planned_end: '10:00' }, MANAGER, 201);
+      const past = sched.visits.find((v) => v.visit_date === inDays(-2));
+      const future = sched.visits.find((v) => v.visit_date === inDays(2));
+      const move = (v, to, who = MANAGER, code = 200) =>
+        post(`/api/cases/${kase.case_id}/visits/${v.visit_id}/move`, { visit_date: to }, who, code);
+
+      await move(future, inDays(3), FIELD, 403);
+      await move(future, inDays(-1), MANAGER, 409); // ไปอดีตไม่ได้
+      await move(past, inDays(3), MANAGER, 409); // กะขาดงาน (เลยวันแล้ว) ย้ายไม่ได้
+      await post(`/api/cases/${other.case_id}/visits/${future.visit_id}/move`, { visit_date: inDays(3) }, MANAGER, 404);
+
+      const res = await move(future, inDays(5));
+      assert.equal(res.visit_date, inDays(5));
+      assert.equal(res.conflicts.length, 1, 'ชนกับกะ 09:00 ของอีกเคสในวันเดียวกัน');
+      const row = await sql.one('SELECT visit_date, planned_start, assigned_to FROM case_visits WHERE visit_id = :id', { id: future.visit_id });
+      assert.deepEqual(row, { visit_date: inDays(5), planned_start: '09:00', assigned_to: e.employee_id }, 'ย้ายแค่วัน');
+      const ev = await sql.one(
+        `SELECT detail FROM case_events WHERE case_id = :id AND event = 'visit_edited' ORDER BY 1 DESC LIMIT 1`, { id: kase.case_id });
+      assert.match(ev.detail, new RegExp(`${inDays(2)} → ${inDays(5)}`));
+      const change = await sql.one('SELECT kind FROM visit_change_outbox WHERE visit_id = :id', { id: future.visit_id });
+      assert.equal(change.kind, 'moved');
+
+      assert.deepEqual(await move({ visit_id: future.visit_id }, inDays(5)), { visit_id: future.visit_id, visit_date: inDays(5), conflicts: [] });
+
+      // ลงช่องเวลา (มุมมองสัปดาห์): เปลี่ยนวันและเวลาพร้อมกัน ความยาวกะเท่าเดิม · ไม่ชนกับกะ 09:00 แล้ว
+      const timed = await post(`/api/cases/${kase.case_id}/visits/${future.visit_id}/move`,
+        { visit_date: inDays(5), planned_start: '14:00', planned_end: '15:00' }, MANAGER);
+      assert.deepEqual(timed.conflicts, []);
+      const moved = await sql.one('SELECT visit_date, planned_start, planned_end FROM case_visits WHERE visit_id = :id', { id: future.visit_id });
+      assert.deepEqual(moved, { visit_date: inDays(5), planned_start: '14:00', planned_end: '15:00' });
+      const timeEv = await sql.one(
+        `SELECT detail FROM case_events WHERE case_id = :id AND event = 'visit_edited' ORDER BY 1 DESC LIMIT 1`, { id: kase.case_id });
+      assert.match(timeEv.detail, /09:00 → 14:00/);
+      // เวลาของวันนี้ที่ผ่านไปแล้ว (00:00) ย้ายไปไม่ได้ · เวลารูปแบบผิด = 400
+      await post(`/api/cases/${kase.case_id}/visits/${future.visit_id}/move`, { visit_date: today, planned_start: '00:00' }, MANAGER, 409);
+      await post(`/api/cases/${kase.case_id}/visits/${future.visit_id}/move`, { visit_date: inDays(5), planned_start: '25:00' }, MANAGER, 400);
+      await sql.run(`UPDATE case_visits SET check_in_at = now() WHERE visit_id = :id`, { id: future.visit_id });
+      await move(future, inDays(6), MANAGER, 409); // เช็คอินแล้วย้ายไม่ได้
+    });
+
+    test('กราฟหน้าภาพรวม — กะ 21 วันครบทุกวัน · สถานะกะถูกนับ · เคสรายเดือน 12 เดือน · ภาระงานรวมคนในทีม · พนักงานภาคสนามเปิดไม่ได้', async () => {
+      const { today } = await sql.one(`SELECT to_char(now() AT TIME ZONE 'Asia/Bangkok','YYYY-MM-DD') AS today`);
+      const inDays = (n) => new Date(Date.parse(`${today}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+      const before = (await get('/api/cases/dashboard', MANAGER)).body;
+      assert.equal(before.visits.length, 21);
+      assert.equal(before.visits[13].date, today);
+      assert.equal(before.monthly.length, 12);
+      assert.equal(before.monthly.at(-1).month, today.slice(0, 7));
+
+      const a = await post('/api/employees', { first_name: 'แดช', last_name: 'บอร์ด', position: 'caregiver' }, MANAGER, 201);
+      const b = await post('/api/employees', { first_name: 'ทีม', last_name: 'แดช', position: 'caregiver' }, MANAGER, 201);
+      const kase = await newCase();
+      await post(`/api/cases/${kase.case_id}/assign`, { employee_id: a.employee_id });
+      await post(`/api/cases/${kase.case_id}/team`, { employee_id: b.employee_id });
+      await post(`/api/cases/${kase.case_id}/visits/bulk`, { dates: [inDays(-2), inDays(-1), inDays(3)] }, MANAGER, 201);
+      await sql.run(`UPDATE case_visits SET check_in_at = now() - interval '30 hours', check_out_at = now() - interval '25 hours'
+                      WHERE case_id = :id AND visit_date = :d`, { id: kase.case_id, d: inDays(-1) });
+
+      const after = await get('/api/cases/dashboard', HR);
+      assert.equal(after.status, 200, 'HR เห็นหน้าภาพรวม — ไม่มีตัวเลขเงินในเส้นนี้');
+      const day = (d) => after.body.visits.find((v) => v.date === d);
+      const delta = (d, s) => day(d)[s] - before.visits.find((v) => v.date === d)[s];
+      assert.equal(delta(inDays(-2), 'missed'), 1);
+      assert.equal(delta(inDays(-1), 'done'), 1);
+      assert.equal(delta(inDays(3), 'scheduled'), 1);
+      const sumMonth = (r) => r.homecare + r.physio;
+      assert.equal(sumMonth(after.body.monthly.at(-1)) - sumMonth(before.monthly.at(-1)), 1);
+      const lead = after.body.workload.find((w) => w.employee_id === a.employee_id);
+      const team = after.body.workload.find((w) => w.employee_id === b.employee_id);
+      assert.equal(lead?.lead_cases, 1);
+      assert.equal(team?.cases, 1, 'คนในทีมนับภาระงานด้วย');
+      assert.equal(team?.lead_cases, 0);
+      assert.equal(lead.upcoming_visits, 1);
+
+      assert.equal((await get('/api/cases/dashboard', FIELD)).status, 403);
+    });
+
+    test('เส้นรับคิวของ chat ต้องมีตั๋วที่ลงลายเซ็น', async () => {
+      const res = await fetch(`${base}/api/integration/cases/events`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ token: 'forged.token' }),
+      });
+      assert.equal(res.status, 401);
+    });
+
+    test('แจ้งเตือนพัง ไม่ทำให้งานหลักพัง', async () => {
+      const { notifySafely } = await import('../src/notify/caseEvents.js');
+      const original = console.error;
+      console.error = () => {};
+      try {
+        await assert.doesNotReject(notifySafely('test', async () => { throw new Error('boom'); }));
+      } finally {
+        console.error = original;
+      }
+    });
+  });
 }

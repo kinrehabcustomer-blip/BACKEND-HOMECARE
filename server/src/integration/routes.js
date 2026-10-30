@@ -23,6 +23,7 @@ import {
   claimVisitNotificationOutbox,
   ackVisitNotificationOutbox,
 } from '../notify/visitReminders.js';
+import { claimCaseEventOutbox, ackCaseEventOutbox, claimDueFamily3hReminders } from '../notify/caseEvents.js';
 import { ensureCustomerLineColumns as ensureCustomerLineColumnsSafe, findByPhones, linkFromChat } from '../lib/customerLine.js';
 
 /**
@@ -655,6 +656,24 @@ integrationRouter.post(
     await claimDueFamilyReminders();
     await claimVisitChanges();
     res.json({ acked: 0, pending: await claimVisitNotificationOutbox() });
+  }),
+);
+
+/**
+ * แจ้ง LINE ทันทีเมื่อเคส/ปฏิทินเปลี่ยน (notify/caseEvents.js) — คิวแยกจาก /visits/reminders
+ *   ตั๋ว 'kin-case-events' {ack?: [{id,ok,error}]} · รูปแบบรับ/ack เหมือน /visits/reminders ทุกประการ
+ */
+integrationRouter.post(
+  '/cases/events',
+  asyncRoute(async (req, res) => {
+    const { token } = hireSchema.parse(req.body);
+    const p = verifySigned(token, 'kin-case-events');
+    if (!p) throw new ApiError(401, 'ลายเซ็นไม่ถูกต้องหรือหมดอายุ');
+    if (Array.isArray(p.ack)) {
+      return res.json({ acked: await ackCaseEventOutbox(p.ack), pending: [] });
+    }
+    await claimDueFamily3hReminders(); // ญาติรอบ 3 ชม. ก่อนนัด — ถึงเวลาแล้วเข้าคิวก่อนดึง
+    res.json({ acked: 0, pending: await claimCaseEventOutbox() });
   }),
 );
 

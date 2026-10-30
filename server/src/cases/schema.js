@@ -384,6 +384,16 @@ export const updateVisitSchema = z
   })
   .partial();
 
+/**
+ * ย้ายกะจากปฏิทิน (ลากวาง / ปุ่มย้ายวันบนมือถือ) — คนไปคงเดิมเสมอ
+ * ไม่ส่ง planned_start = เวลาคงเดิม ย้ายแค่วัน · ส่งมา = ลงช่องเวลาใหม่ (planned_end ส่งมาด้วยเมื่อกะมีเวลาจบ)
+ */
+export const moveVisitSchema = z.object({
+  visit_date: date,
+  planned_start: time.optional(),
+  planned_end: time.nullable().optional(),
+});
+
 // ---------- รายงานอาการผู้รับบริการ (case_reports) ----------
 
 /**

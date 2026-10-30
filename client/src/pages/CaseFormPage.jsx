@@ -129,6 +129,10 @@ export default function CaseFormPage() {
   const [searchParams] = useSearchParams();
   const [form, setForm] = useState(BLANK);
   const [staff, setStaff] = useState([]);
+  /* พนักงานคนที่ 2 เป็นต้นไป (ทีมดูแลเคส) — คนแรกอยู่ที่ form.assigned_to เป็นผู้รับผิดชอบหลัก
+     กติกาเดียวกับปุ่ม "เพิ่มพนักงาน" ในป๊อปอัปเคส: คนแรกที่เลือกคือตัวอ้างของระบบ คนถัดไปเข้าทีม
+     ทีมถูกเพิ่มหลังเปิดเคสสำเร็จ (POST /cases/:id/team ทีละคน) — server ไม่ได้รับทีมมากับการสร้างเคส */
+  const [team, setTeam] = useState([]);
   const [matrix, setMatrix] = useState(null);
   const [physio, setPhysio] = useState([]);
   const [error, setError] = useState(null);
@@ -238,6 +242,31 @@ export default function CaseFormPage() {
     form.assigned_to && !baseStaff.some((e) => e.employee_id === form.assigned_to)
       ? [...baseStaff, ...staff.filter((e) => e.employee_id === form.assigned_to)]
       : baseStaff;
+  // คนที่เลือกไว้แล้ว (หลัก + ทีม) ตามลำดับที่เลือก · ตัวเลือกที่เหลือไม่รวมคนที่อยู่ในเคสแล้ว
+  const pickedStaff = [form.assigned_to, ...team].filter(Boolean);
+  const pickableStaff = shownStaff.filter((e) => !pickedStaff.includes(e.employee_id));
+  const staffById = (id) => staff.find((e) => e.employee_id === id);
+
+  function addStaff(id) {
+    if (!id || pickedStaff.includes(id)) return;
+    if (!form.assigned_to) {
+      setForm((prev) => ({ ...prev, assigned_to: id }));
+      setFieldErrors((prev) => (prev.assigned_to ? { ...prev, assigned_to: undefined } : prev));
+    } else {
+      setTeam((prev) => [...prev, id]);
+    }
+  }
+
+  /** นำออก — ถ้าเป็นคนหลัก ให้คนถัดไปในทีมขึ้นเป็นหลักแทน (เหมือน unassign ฝั่ง server) */
+  function removeStaff(id) {
+    if (id === form.assigned_to) {
+      const [next = '', ...rest] = team;
+      setForm((prev) => ({ ...prev, assigned_to: next }));
+      setTeam(rest);
+    } else {
+      setTeam((prev) => prev.filter((x) => x !== id));
+    }
+  }
 
   /**
    * ผู้ใช้เปลี่ยนการเลือกเรท -> ถ้าได้ช่องที่ให้บริการได้ คัดลอกค่าบริการมาเป็นค่าจ้าง (fee)
@@ -927,12 +956,25 @@ export default function CaseFormPage() {
         if (renewFrom) payload.renewed_from = renewFrom;
         const created = await api.createCase(payload);
         await saveRelation(created.patient_id);
+        // ทีมดูแลเคส (คนที่ 2 ขึ้นไป) — เพิ่มทีละคนหลังเคสเกิดแล้ว · เพิ่มไม่สำเร็จไม่ล้มทั้งการเปิดเคส แค่บอกให้เพิ่มเองในป๊อปอัป
+        const teamFailed = [];
+        for (const empId of team.filter((x) => x !== created.assigned_to)) {
+          try {
+            await api.addCaseTeam(created.case_id, empId);
+          } catch {
+            teamFailed.push(staffById(empId)?.first_name ?? empId);
+          }
+        }
+        // ผลการเพิ่มทีมต่อท้ายข้อความเดียวกัน — toast สองอันติดกัน อันหลังจะทับอันแรกจนไม่เห็นว่าเพิ่มใครไม่สำเร็จ
+        const teamNote = teamFailed.length
+          ? ` · เพิ่ม ${teamFailed.join(', ')} เข้าทีมไม่สำเร็จ — เพิ่มอีกครั้งได้ที่ป๊อปอัปเคส`
+          : '';
         toast(
-          created.invoice_draft_created === false
+          (created.invoice_draft_created === false
             ? `เปิดเคส ${caseCode(created.case_id)} แล้ว แต่ใบร่างยังไม่เกิด กรุณาไปหน้าใบแจ้งหนี้แล้วกด "สร้างใบร่าง" ค่ะ`
             : renewFrom
             ? `ต่อเคสเป็น ${caseCode(created.case_id)} (รอบที่ ${created.round_no}) แล้ว · ระบบออกใบแจ้งหนี้ (ร่าง) ของรอบนี้ให้เรียบร้อย`
-            : `เปิดเคส ${caseCode(created.case_id)} แล้ว · ระบบออกใบแจ้งหนี้ (ร่าง) ให้เรียบร้อย`,
+            : `เปิดเคส ${caseCode(created.case_id)} แล้ว · ระบบออกใบแจ้งหนี้ (ร่าง) ให้เรียบร้อย`) + teamNote,
         );
         // เด้งกลับรายการพร้อมเปิดเคสที่เพิ่งสร้าง — เห็นผลทันทีและกดจับคู่พนักงานต่อได้เลย
         navigate(`/cases?open=${created.case_id}`);
@@ -1635,24 +1677,45 @@ export default function CaseFormPage() {
         <h2>{isEdit ? 'หมายเหตุ' : 'จับคู่พนักงาน'}</h2>
         <div className="grid">
           {!isEdit && (
-            <label className="span-2">
-              พนักงานที่รับเคส
+            <div className="span-2 case-staff-pick">
+              <span className="case-staff-label">
+                พนักงานที่รับเคส{pickedStaff.length > 0 && ` (${pickedStaff.length} คน)`}
+              </span>
+              {/* เลือกได้หลายคน — คนแรกเป็นผู้รับผิดชอบหลัก (กะที่ลงโดยไม่ระบุคนจะเป็นของคนนี้) คนถัดไปเข้าทีมดูแลเคส */}
+              {pickedStaff.map((empId, i) => {
+                const e = staffById(empId);
+                return (
+                  <div className="assignee" key={empId}>
+                    <div>
+                      <strong>
+                        {e ? `${e.first_name} ${e.last_name}` : empId}
+                        {e?.nickname ? ` (${e.nickname})` : ''}
+                      </strong>
+                      <p className="muted">
+                        <span className="mono">{empId}</span>
+                        {e && ` · ${POSITION_LABELS[e.position] ?? e.position}`}
+                        {' · '}{i === 0 ? 'ผู้รับผิดชอบหลัก' : 'ทีมดูแลเคส'}
+                      </p>
+                    </div>
+                    <button type="button" className="btn danger-ghost" onClick={() => removeStaff(empId)}>
+                      นำออก
+                    </button>
+                  </div>
+                );
+              })}
               <StaffPicker
                 name="assigned_to"
-                label="พนักงานที่รับเคส"
-                staff={shownStaff}
-                value={form.assigned_to}
+                label="เพิ่มพนักงานที่รับเคส"
+                staff={pickableStaff}
+                value=""
                 wantedPositions={wantedPositions}
-                placeholder="— ยังไม่จับคู่ (จับคู่ทีหลังได้) —"
-                emptyText="ยังไม่มีพนักงานตำแหน่งที่ตรงกับบริการนี้"
+                placeholder={pickedStaff.length ? '+ เพิ่มพนักงานอีกคน' : '— ยังไม่จับคู่ (จับคู่ทีหลังได้) —'}
+                emptyText={pickedStaff.length ? 'เลือกพนักงานที่ตรงกับบริการนี้ครบแล้ว' : 'ยังไม่มีพนักงานตำแหน่งที่ตรงกับบริการนี้'}
                 invalid={Boolean(fieldErrors.assigned_to)}
-                onChange={(id) => {
-                  setForm((prev) => ({ ...prev, assigned_to: id }));
-                  setFieldErrors((prev) => (prev.assigned_to ? { ...prev, assigned_to: undefined } : prev));
-                }}
+                onChange={addStaff}
               />
-            {fieldError('assigned_to')}
-            </label>
+              {fieldError('assigned_to')}
+            </div>
           )}
 
           {/* บอกให้รู้ว่ารายชื่อถูกกรองอยู่ ไม่ใช่ปล่อยให้สงสัยว่าทำไมคนที่หาไม่โผล่ */}

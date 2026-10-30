@@ -231,6 +231,21 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
     }
   }
 
+  /** ส่งเตือนนัดทาง LINE เอง — ไม่เปลี่ยนรายการกะ จึงไม่ผ่าน run() · ข้อความเข้าคิว ส่งจริงเมื่อระบบแชทมารับ */
+  async function remind(v) {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await api.remindVisit(caseId, v.visit_id);
+      const who = [res.staff && 'พนักงาน', res.family && `ญาติ ${res.family} คน`].filter(Boolean).join(' และ ');
+      toast(`เข้าคิวส่ง LINE ถึง${who}แล้ว`);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function toggleDay(dateStr) {
     if (readOnly) return;
     setPicked((prev) => {
@@ -614,6 +629,17 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
                   {v.off_schedule && <> · <LineIcon name="alert" className="text-ico" />นอกวันนัด</>}
                 </span>
                 <span className={`badge visit-${v.state}`}>{VISIT_STATE_LABELS[v.state]}</span>
+                {!readOnly && v.state === 'scheduled' && v.visit_date >= today && (
+                  <button
+                    type="button"
+                    className="btn tiny"
+                    disabled={busy}
+                    title="ส่งข้อความเตือนนัดนี้ทาง LINE ถึงพนักงานและญาติ"
+                    onClick={() => remind(v)}
+                  >
+                    ส่งเตือน
+                  </button>
+                )}
                 {!readOnly && (
                   <button
                     type="button"

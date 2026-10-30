@@ -2292,3 +2292,18 @@ describe('แบบบันทึกของพนักงาน หลัง
     assert.equal(serviceKindOf({}), 'homecare');
   });
 });
+
+describe('ลิงก์แผนที่ในข้อความ LINE — ต้องตรงกับ "ลิงก์นำทาง" ในหน้าเคส', async () => {
+  const { mapUrlFor } = await import('../src/notify/caseEvents.js');
+  test('มีพิกัด = ลิงก์นำทางสูตรเดียวกับ CaseLocationLink.jsx', () => {
+    assert.equal(mapUrlFor(13.766892, 100.697079), 'https://www.google.com/maps/dir/?api=1&destination=13.766892,100.697079');
+    assert.equal(mapUrlFor('13.5', '100.25'), 'https://www.google.com/maps/dir/?api=1&destination=13.5,100.25');
+  });
+  test('ไม่มีพิกัดหรือพิกัดเพี้ยน = null (หน้าเคสก็ไม่แสดงลิงก์)', () => {
+    assert.equal(mapUrlFor(null, 100), null);
+    assert.equal(mapUrlFor('', ''), null);
+    assert.equal(mapUrlFor('abc', 100), null);
+    assert.equal(mapUrlFor(91, 100), null);
+    assert.equal(mapUrlFor(13, 181), null);
+  });
+});

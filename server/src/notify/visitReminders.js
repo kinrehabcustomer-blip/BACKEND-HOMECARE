@@ -14,7 +14,8 @@ import { ensureCustomerLineColumns } from '../lib/customerLine.js';
  */
 let ready = null;
 export const ensureVisitReminderColumns = () =>
-  (ready ??= ['remind_day_at TEXT', 'remind_3h_at TEXT', 'remind_family_at TEXT']
+  // remind_family_3h_at = ญาติรอบ 3 ชม. ก่อนนัด (เข้าคิว case_event_outbox ดู notify/caseEvents.js)
+  (ready ??= ['remind_day_at TEXT', 'remind_3h_at TEXT', 'remind_family_at TEXT', 'remind_family_3h_at TEXT']
     .reduce((p, col) => p.then(() => sql.run(`ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS ${col}`)), Promise.resolve())
     .catch((err) => {
       ready = null;
@@ -105,7 +106,7 @@ export async function ackVisitNotificationOutbox(results) {
 
 const NOW_TEXT = `to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')`;
 // เวลาเริ่มนัดเป็น timestamptz — ไม่ระบุเวลา ถือว่า 08:00 (ใช้กับรอบ day เท่านั้น)
-const START_AT = `((v.visit_date || ' ' || COALESCE(v.planned_start, '08:00'))::timestamp AT TIME ZONE 'Asia/Bangkok')`;
+export const START_AT = `((v.visit_date || ' ' || COALESCE(v.planned_start, '08:00'))::timestamp AT TIME ZONE 'Asia/Bangkok')`;
 const DAY_AT = `(((v.visit_date)::date - 1 + time '08:00') AT TIME ZONE 'Asia/Bangkok')`;
 
 /** กะที่ยังต้องไปจริง — นัดอยู่ เคสยังเดิน คนไปผูก LINE แล้ว ยังไม่ได้เช็คอิน */
@@ -181,8 +182,8 @@ export async function claimDueVisitReminders() {
  * ผู้รับ = ญาติที่ผูกเคสแล้ว (case_family_links ยอมรับแล้ว ยังไม่ถูกถอด) + ลูกค้าเจ้าของเคสที่ทักผ่าน LINE (customers.line_user_id)
  * ไม่มีผู้รับเลย = ไม่จอง — ถ้าญาติมาผูกทีหลังก่อนถึงนัด ยังได้รับการเตือน
  */
-const PHYSIO = `(c.physio_package_id IS NOT NULL OR c.service_kind = 'physio' OR c.case_type = 'physiotherapy')`;
-const FAMILY_IDS = `(SELECT array_agg(DISTINCT u) FROM (
+export const PHYSIO = `(c.physio_package_id IS NOT NULL OR c.service_kind = 'physio' OR c.case_type = 'physiotherapy')`;
+export const FAMILY_IDS = `(SELECT array_agg(DISTINCT u) FROM (
     SELECT l.line_user_id AS u FROM case_family_links l
      WHERE l.case_id = c.case_id AND l.revoked_at IS NULL AND l.accepted_at IS NOT NULL AND l.line_user_id IS NOT NULL
     UNION
