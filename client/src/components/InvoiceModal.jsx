@@ -12,6 +12,7 @@ import FinanceReceiptDoc from './FinanceReceiptDoc.jsx';
 import CustomerInvoiceDoc, { addonAmount, paidBy } from './CustomerInvoiceDoc.jsx';
 import { ACCEPTED, compressImage, formatFileSize } from '../lib/image.js';
 import { caseCode } from '../lib/patientCode.js';
+import { TRANSFER_PAYMENT_INSTRUCTION } from '../lib/issuer.js';
 import { addonLabel } from '../lib/addons.js';
 
 const FOCUSABLE = 'a[href], button:not(:disabled), input, select, textarea, [tabindex]:not([tabindex="-1"])';
@@ -125,6 +126,9 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
         `ชื่อผู้รับบริการ ${bill.patient_name ?? '—'}`,
         amountLine,
         bill.due_date ? `วันครบกำหนด ${docDate(bill.due_date)}` : null,
+        bill.kind !== 'receipt' && Number(bill.balance) > 0
+          ? `ช่องทางชำระเงิน\n${TRANSFER_PAYMENT_INSTRUCTION}`
+          : null,
         bill.url,
         'ลิงก์ใช้ได้ 6 เดือน',
       ].filter(Boolean).join('\n');

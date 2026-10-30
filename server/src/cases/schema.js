@@ -109,7 +109,8 @@ const caseFields = z.object({
         name: z.string().trim().min(1, 'กรุณากรอกชื่อรายการ').max(200),
         quantity: z.number().positive('จำนวนต้องมากกว่า 0').max(10000).default(1),
         unit_price: z.number().nonnegative('ราคาต้องไม่ติดลบ').max(10_000_000),
-        kind: z.enum(['equipment', 'procedure']).optional(),
+        // equipment/rent = เช่า (ไม่ติดคีย์) · sale = ซื้อขาด (ชื่อสินค้าจริงบนใบลูกค้า) · procedure = หัตถการ
+        kind: z.enum(['equipment', 'procedure', 'rent', 'sale']).optional(),
         vn: z.string().trim().max(20).optional().nullable(),
       }),
     )

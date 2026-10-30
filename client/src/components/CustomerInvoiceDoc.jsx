@@ -1,6 +1,6 @@
 import { amountText, bahtText, docDate } from '../labels.js';
-import { ISSUER, printStamp } from '../lib/issuer.js';
-import { addonLabel } from '../lib/addons.js';
+import { ISSUER, TRANSFER_PAYMENT_INSTRUCTION, printStamp } from '../lib/issuer.js';
+import { customerAddonDescription, customerItemDescription } from '../lib/customerInvoice.js';
 
 /**
  * ตัวเอกสารใบแจ้งหนี้/ใบเสร็จรับเงินของลูกค้า — ใช้ร่วม 2 ที่ให้ตรงกันทุกตัวอักษร (24 ต.ค. 2569)
@@ -69,7 +69,7 @@ export default function CustomerInvoiceDoc({ item, signer }) {
 
     <div className="inv-header">
       <div className="inv-logo">
-        <img src={ISSUER.logo} alt={ISSUER.name} />
+        <img className="inv-logo-kin" src={ISSUER.docLogo} alt={ISSUER.brand} />
       </div>
 
       <h3 className="inv-title">
@@ -77,15 +77,17 @@ export default function CustomerInvoiceDoc({ item, signer }) {
       </h3>
       <p className="inv-copy">{isCancelled ? 'ยกเลิกแล้ว' : 'สำเนา'}</p>
 
-      <p className="inv-org">{ISSUER.name}</p>
+      <p className="inv-org">{ISSUER.brand}</p>
+      <p className="inv-org-line">{ISSUER.name}</p>
+      <p className="inv-org-line">เลขประจำตัวผู้เสียภาษี {ISSUER.taxId}</p>
       <p className="inv-org-line">{ISSUER.address}</p>
-      <p className="inv-org-line">Tel. {ISSUER.tel}</p>
+      <p className="inv-org-line">โทร {ISSUER.tel}</p>
       <hr className="inv-rule" />
     </div>
 
     <div className="inv-parties">
       <div>
-        {/* หัวใบระบุผู้รับบริการ (คนที่รับบริการ) — ผู้จ่ายเงินอยู่ที่บรรทัด "ได้รับเงินจาก" และช่องลงนามผู้จ่ายด้านล่าง */}
+        {/* หัวใบและช่องลงนามระบุผู้รับบริการตามบิลจริง — ผู้จ่ายเงินอยู่ที่บรรทัด "ได้รับเงินจาก" บนใบเสร็จ */}
         <p>รหัสผู้รับบริการ : <span className="mono">{item.patient_id ?? '—'}</span></p>
         <p>ชื่อผู้รับบริการ : {item.patient_name ?? '—'}</p>
         {item.bill_to_tax_id && (
@@ -118,10 +120,10 @@ export default function CustomerInvoiceDoc({ item, signer }) {
           ใบแพ็คเกจปกติไม่มี items จึงยังเป็นบรรทัดเดียวเหมือนเดิม */}
       <tbody>
         {item.items?.length > 0 ? (
-          item.items.map((line) => (
+          item.items.map((line, index) => (
             <tr key={line.seq}>
               <td className="inv-c">{line.seq}</td>
-              <td>{line.description}</td>
+              <td>{customerItemDescription(item, index)}</td>
               <td className="inv-c">{line.quantity}</td>
               <td className="inv-r">{amountText(line.amount)}</td>
             </tr>
@@ -130,7 +132,7 @@ export default function CustomerInvoiceDoc({ item, signer }) {
           <>
             <tr>
               <td className="inv-c">1</td>
-              <td>{item.service_description}</td>
+              <td>{ISSUER.customerServiceDescription}</td>
               <td className="inv-c">1</td>
               <td className="inv-r">{amountText(serviceAmount)}</td>
             </tr>
@@ -138,7 +140,7 @@ export default function CustomerInvoiceDoc({ item, signer }) {
               <tr key={`addon-${i}`}>
                 <td className="inv-c">{i + 2}</td>
                 <td>
-                  {addonLabel(a)}
+                  {customerAddonDescription(a)}
                   {a.quantity !== 1 && ` (${amountText(a.unit_price)} × ${a.quantity})`}
                 </td>
                 <td className="inv-c">{a.quantity}</td>
@@ -191,6 +193,13 @@ export default function CustomerInvoiceDoc({ item, signer }) {
       </tfoot>
     </table>
 
+    {item.status === 'issued' && Number(item.balance) > 0 && (
+      <section className="inv-payment-channel">
+        <strong>ช่องทางชำระเงิน</strong>
+        <span>{TRANSFER_PAYMENT_INSTRUCTION}</span>
+      </section>
+    )}
+
     <p className="inv-methods">
       <span>เงินสด Cash={pay.cash}</span>
       <span>บัตรเครดิต/Credit Card={pay.credit}</span>
@@ -202,14 +211,14 @@ export default function CustomerInvoiceDoc({ item, signer }) {
 
     <div className="inv-signs">
       <div className="inv-sign">
-        <span className="inv-sign-role">ผู้จ่ายเงิน</span>
+        <span className="inv-sign-role">ผู้รับบริการ</span>
         <span className="inv-sign-dots">(...................................................)</span>
-        <span className="inv-sign-name">( คุณ {item.bill_to_name} )</span>
+        <span className="inv-sign-name">( คุณ {item.patient_name ?? item.bill_to_name} )</span>
       </div>
       {/* ผู้ลงนาม = คนที่กำลังสั่งพิมพ์ (บัญชีที่ล็อกอินอยู่) เพราะเป็นคนยื่นเอกสารให้ลูกค้าจริง
           ส่วนคนที่ออกใบ/รับเงินยังถูกบันทึกไว้ใน DB (issued_by/paid_by) สำหรับทำรายงาน */}
       <div className="inv-sign">
-        <span className="inv-sign-role">ผู้ออกเอกสาร / ผู้รับชำระเงิน</span>
+        <span className="inv-sign-role">เจ้าหน้าที่การเงิน</span>
         <span className="inv-sign-dots">(...................................................)</span>
         <span className="inv-sign-name">( {printerName} )</span>
       </div>

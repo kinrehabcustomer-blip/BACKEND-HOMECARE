@@ -1461,39 +1461,38 @@ export function visitConflicts(visitIds) {
  * ส่วนกะคนละเวลา/คนละคนในวันเดียวกันยังลงได้ตามปกติ (ตั้งใจให้ทำได้ตั้งแต่ระบบกะเฟส 2)
  */
 export async function addVisits(caseId, dates, { assigned_to, planned_start, planned_end, staff_pay, note } = {}) {
-  const existing = await sql.all(
-    `SELECT visit_date, assigned_to, planned_start FROM case_visits WHERE case_id = :id AND status <> 'cancelled'`,
-    { id: caseId },
-  );
-  // ไม่ระบุคน = ผู้รับผิดชอบหลักของเคส ต้องเทียบด้วยคนคนนั้น ไม่งั้นกดซ้ำแล้วได้กะซ้อน
-  const fallback = assigned_to
-    ? null
-    : (await sql.one('SELECT assigned_to FROM cases WHERE case_id = :id', { id: caseId }))?.assigned_to ?? null;
-  const who = assigned_to ?? fallback;
-  const seen = new Set(existing.map((v) => `${v.visit_date}|${v.assigned_to ?? ''}|${v.planned_start ?? ''}`));
+  /* ตรวจซ้ำ + ลงนัด + ออก VN ในทรานแซกชันเดียว โดยล็อกแถวเคสไว้ก่อน (ตรวจ Codex 30 ต.ค. 2569 ข้อ 5)
+     เดิมตรวจซ้ำนอกทรานแซกชัน — กดเบิ้ล/สองแท็บพร้อมกัน ทั้งคู่เห็นว่ายังไม่มีแล้ว insert ซ้อนได้
+     ตอนนี้คำขอที่สองต้องรอคำขอแรก commit ก่อน แล้วจะเห็นนัดที่เพิ่งลงและข้ามไปเอง */
+  const result = await transaction(async (tx) => {
+    const kase = await tx.one('SELECT assigned_to FROM cases WHERE case_id = :id FOR UPDATE', { id: caseId });
+    const existing = await tx.all(
+      `SELECT visit_date, assigned_to, planned_start FROM case_visits WHERE case_id = :id AND status <> 'cancelled'`,
+      { id: caseId },
+    );
+    // ไม่ระบุคน = ผู้รับผิดชอบหลักของเคส ต้องเทียบด้วยคนคนนั้น ไม่งั้นกดซ้ำแล้วได้กะซ้อน
+    const who = assigned_to ?? kase?.assigned_to ?? null;
+    const seen = new Set(existing.map((v) => `${v.visit_date}|${v.assigned_to ?? ''}|${v.planned_start ?? ''}`));
 
-  const fresh = dates.filter((d) => !seen.has(`${d}|${who ?? ''}|${planned_start ?? ''}`));
-  if (fresh.length === 0) {
-    return { visits: await listVisits(caseId), added: 0, skipped: dates.length, conflicts: [] };
-  }
+    const fresh = dates.filter((d) => !seen.has(`${d}|${who ?? ''}|${planned_start ?? ''}`));
+    if (fresh.length === 0) return { rows: [], skipped: dates.length };
 
-  const params = {
-    case_id: caseId,
-    assigned_to: assigned_to ?? null,
-    planned_start: planned_start ?? null,
-    planned_end: planned_end ?? null,
-    staff_pay: staff_pay ?? null,
-    note: note ?? null,
-  };
-  const values = fresh.map((d, i) => {
-    params[`d${i}`] = d;
-    return `(:case_id, :d${i},
-             COALESCE(:assigned_to, (SELECT assigned_to FROM cases WHERE case_id = :case_id)),
-             :planned_start, :planned_end, :staff_pay, :note)`;
-  });
+    const params = {
+      case_id: caseId,
+      assigned_to: assigned_to ?? null,
+      planned_start: planned_start ?? null,
+      planned_end: planned_end ?? null,
+      staff_pay: staff_pay ?? null,
+      note: note ?? null,
+    };
+    const values = fresh.map((d, i) => {
+      params[`d${i}`] = d;
+      return `(:case_id, :d${i},
+               COALESCE(:assigned_to, (SELECT assigned_to FROM cases WHERE case_id = :case_id)),
+               :planned_start, :planned_end, :staff_pay, :note)`;
+    });
 
-  // ลงนัดแล้วออก VN ในทรานแซกชันเดียวกัน — นัดที่ได้มาต้องมีเลขเสมอ (ดู visitNumbers.js)
-  const inserted = await transaction(async (tx) => {
+    // ลงนัดแล้วออก VN ในทรานแซกชันเดียวกัน — นัดที่ได้มาต้องมีเลขเสมอ (ดู visitNumbers.js)
     const rows = await tx.all(
       `INSERT INTO case_visits (case_id, visit_date, assigned_to, planned_start, planned_end, staff_pay, note)
        VALUES ${values.join(', ')}
@@ -1501,14 +1500,15 @@ export async function addVisits(caseId, dates, { assigned_to, planned_start, pla
       params,
     );
     await issueForVisits(tx, caseId, rows.map((r) => r.visit_id));
-    return rows;
+    return { rows, skipped: dates.length - fresh.length };
   });
 
+  const inserted = result.rows;
   return {
     visits: await listVisits(caseId),
     added: inserted.length,
-    skipped: dates.length - fresh.length,
-    conflicts: await visitConflicts(inserted.map((r) => r.visit_id)),
+    skipped: result.skipped,
+    conflicts: inserted.length ? await visitConflicts(inserted.map((r) => r.visit_id)) : [],
   };
 }
 

@@ -34,6 +34,8 @@ export const normalizeAddons = (addons) =>
           name: String(a.name ?? '').trim(),
           quantity: Number(a.quantity ?? 1),
           unit_price: Number(a.unit_price ?? 0),
+          // ซื้อขาดเท่านั้นที่ติด kind (ใบลูกค้าพิมพ์ชื่อสินค้าจริง) · เช่า/ของเดิมคงรูปเดิม ไม่ให้ใบเก่าขึ้นป้ายไม่ตรง
+          ...(a.kind === 'sale' ? { kind: 'sale' } : {}),
         },
   );
 

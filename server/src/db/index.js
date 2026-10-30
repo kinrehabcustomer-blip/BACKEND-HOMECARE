@@ -178,7 +178,12 @@ export async function nextVisitNumber(tx, now = new Date()) {
     );
     if (value > 9_999_999) throw new Error(`เลข VN ของปี ${yy} เต็มแล้ว`);
     const vn = `VN${yy}${String(value).padStart(7, '0')}`;
-    const taken = await tx.one('SELECT 1 AS taken FROM cases WHERE case_id = :vn', { vn });
+    // เช็ค vn ที่ออกไปแล้วด้วย กันตัวนับถอยหลัง (restore/reset) แล้วชน unique index (ตรวจ Codex 30 ต.ค. 2569 ข้อ 22)
+    const taken = await tx.one(
+      `SELECT 1 AS taken WHERE EXISTS (SELECT 1 FROM cases WHERE case_id = :vn OR vn = :vn)
+                            OR EXISTS (SELECT 1 FROM case_visits WHERE vn = :vn)`,
+      { vn },
+    );
     if (!taken) return vn;
   }
 }

@@ -44,7 +44,7 @@ const BLANK = {
 
   // fee = ค่าบริการที่ลูกค้าจ่าย · staff_pay = ค่าจ้างที่พนักงานได้เมื่อปิดเคส (คนละตัวเลข)
   start_date: '', end_date: '', fee: '', staff_pay: '', note: '',
-  // อุปกรณ์เสริมที่คิดเงินเพิ่ม [{ name, quantity, unit_price }] — บวกเข้ายอดใบแจ้งหนี้ ไม่รวมในค่าบริการ
+  // อุปกรณ์เสริมที่คิดเงินเพิ่ม [{ name, kind, quantity, unit_price }] — บวกเข้ายอดใบแจ้งหนี้ ไม่รวมในค่าบริการ
   addons: [],
   // หัตถการเพิ่มเติม [{ name, unit_price, vn }] — ส่งไปรวมใน addons (kind 'procedure') แต่ละรายการได้ VN แยก
   procedures: [],
@@ -57,7 +57,7 @@ const BLANK = {
    โหลดเคสมาแก้แล้วแปลงกลับเป็นช่องว่าง ให้กรอกชื่อจริงทับได้เลย ไม่ต้องลบคำนี้ออกเอง */
 const PATIENT_PENDING = 'ยังไม่ระบุผู้รับบริการ';
 
-const BLANK_ADDON = { name: '', quantity: '1', unit_price: '' };
+const BLANK_ADDON = { name: '', kind: 'rent', quantity: '1', unit_price: '' };
 const BLANK_PROCEDURE = { name: '', unit_price: '', vn: null };
 
 /** ยอดของบรรทัด — ปัดสองตำแหน่งแบบเดียวกับ server/src/lib/addons.js ตัวเลขบนฟอร์มจะได้ตรงกับใบ */
@@ -70,6 +70,8 @@ const addonsPayload = (list) =>
     .filter((a) => String(a.name).trim() !== '' || String(a.unit_price) !== '')
     .map((a) => ({
       name: String(a.name).trim(),
+      // เช่าคงรูปเดิม { name, quantity, unit_price } — เติมคีย์ให้ทุกบรรทัดแล้วใบเก่าทั้งระบบจะขึ้นป้าย "แพ็คเกจไม่ตรง"
+      ...(a.kind === 'sale' ? { kind: 'sale' } : {}),
       quantity: Number(a.quantity === '' ? 1 : a.quantity),
       unit_price: Number(a.unit_price === '' ? 0 : a.unit_price),
     }));
@@ -89,7 +91,7 @@ const proceduresPayload = (list) =>
 /** แยก addons ของเคสเป็นสองช่องของฟอร์ม — keepVn = false ตอนต่อเคส (รอบใหม่ได้ VN ใหม่) */
 const splitAddons = (addons, { keepVn = true } = {}) => ({
   addons: (addons ?? []).filter((a) => !isProcedure(a)).map((a) => ({
-    name: a.name, quantity: String(a.quantity), unit_price: String(a.unit_price),
+    name: a.name, kind: a.kind === 'sale' ? 'sale' : 'rent', quantity: String(a.quantity), unit_price: String(a.unit_price),
   })),
   procedures: (addons ?? []).filter(isProcedure).map((a) => ({
     name: a.name, unit_price: String(a.unit_price), vn: keepVn ? a.vn ?? null : null,
@@ -1314,6 +1316,16 @@ export default function CaseFormPage() {
                   onChange={(e) => setAddon(i, 'name', e.target.value)}
                 />
                 {fieldError(`addons.${i}.name`)}
+              </label>
+              <label>รูปแบบ
+                <select
+                  name={`addons.${i}.kind`}
+                  value={a.kind}
+                  onChange={(e) => setAddon(i, 'kind', e.target.value)}
+                >
+                  <option value="rent">เช่า</option>
+                  <option value="sale">ซื้อขาด</option>
+                </select>
               </label>
               <label>จำนวน
                 <input

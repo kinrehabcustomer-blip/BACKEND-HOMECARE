@@ -50,6 +50,7 @@ const {
   setBillingPlanForTransaction,
   setDepositAmountForTransaction,
   removeInvoiceForTransaction,
+  billingSignature,
 } = await import('../src/invoices/repo.js');
 const {
   firstAvailablePayrollRound,
@@ -2141,7 +2142,7 @@ describe('แบบประเมิน — นิยามฝั่งหน�
 
 describe('อุปกรณ์เสริมของเคส', () => {
   test('ยอดรวมปัดทีละบรรทัดก่อนรวม และรับค่าว่างได้', async () => {
-    const { addonsTotal, addonAmount } = await import('../src/lib/addons.js');
+    const { normalizeAddons, addonsTotal, addonAmount } = await import('../src/lib/addons.js');
     assert.equal(addonsTotal(null), 0);
     assert.equal(addonsTotal([]), 0);
     assert.equal(addonAmount({ quantity: 3, unit_price: 0.335 }), 1.01);
@@ -2152,6 +2153,13 @@ describe('อุปกรณ์เสริมของเคส', () => {
       ]),
       3741,
     );
+    // เช่าคงรูปเดิม (ไม่ติด kind) · ซื้อขาดเท่านั้นที่ติด kind: 'sale'
+    assert.deepEqual(normalizeAddons([{ name: 'เตียง', quantity: 1, unit_price: 500 }]), [
+      { name: 'เตียง', quantity: 1, unit_price: 500 },
+    ]);
+    assert.equal(normalizeAddons([{ name: 'รถเข็น', kind: 'sale' }])[0].kind, 'sale');
+    assert.equal(normalizeAddons([{ name: 'รถเข็น', kind: 'อื่น' }])[0].kind, undefined);
+    assert.equal(normalizeAddons([{ name: 'เตียง', kind: 'rent' }])[0].kind, undefined);
   });
 
   test('บรรทัดใบรายครั้งต่อเลขลำดับจากกะ และยอดตรงกับ addonsTotal', async () => {
@@ -2162,12 +2170,22 @@ describe('อุปกรณ์เสริมของเคส', () => {
     ]);
   });
 
+  test('ข้อมูลเก่าที่ไม่มี kind เท่ากับ rent — ไม่ทำให้ป้ายใบไม่ตรงกับเคสขึ้นเอง', () => {
+    const base = { fee: 1000, client_name: 'ทดสอบ', addons: [{ name: 'เตียง', quantity: 1, unit_price: 500 }] };
+    assert.equal(
+      billingSignature(base),
+      billingSignature({ ...base, addons: [{ ...base.addons[0], kind: 'rent' }] }),
+    );
+  });
+
   test('schema รับรายการที่ถูกต้อง และปฏิเสธชื่อว่าง/ราคาติดลบ', () => {
     const base = { case_type: 'other', client_name: 'ทดสอบ' };
     assert.ok(createCaseSchema.safeParse({ ...base, addons: [{ name: 'เตียงลม', quantity: 1, unit_price: 3500 }] }).success);
+    assert.ok(createCaseSchema.safeParse({ ...base, addons: [{ name: 'รถเข็น', kind: 'sale', quantity: 1, unit_price: 3500 }] }).success);
     assert.ok(createCaseSchema.safeParse({ ...base, addons: null }).success);
     assert.ok(!createCaseSchema.safeParse({ ...base, addons: [{ name: ' ', quantity: 1, unit_price: 1 }] }).success);
     assert.ok(!createCaseSchema.safeParse({ ...base, addons: [{ name: 'x', quantity: 1, unit_price: -1 }] }).success);
+    assert.ok(!createCaseSchema.safeParse({ ...base, addons: [{ name: 'x', kind: 'other', quantity: 1, unit_price: 1 }] }).success);
     assert.ok(!updateCaseSchema.safeParse({ addons: [{ name: 'x', quantity: 0, unit_price: 1 }] }).success);
   });
 });

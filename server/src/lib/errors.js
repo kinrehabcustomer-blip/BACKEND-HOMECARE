@@ -15,6 +15,10 @@ export const notFound = (message = 'ไม่พบข้อมูล') => new A
 /** ครอบ async handler ให้ error เด้งเข้า errorHandler แทนที่จะค้างเป็น unhandled rejection */
 export const asyncRoute = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
+/** URL สำหรับเขียน log — ตัด query และปิดท่อนที่หน้าตาเป็นโทเคน (ลิงก์บิล · ตั๋ว LINE/SSO)
+ *  log ของ Vercel อ่านได้หลายคน โทเคนที่ค้างใน log = เปิดบิลลูกค้าได้จนหมดอายุ (ตรวจ Codex 30 ต.ค. 2569 ข้อ 18) */
+const logUrl = (req) => String(req.originalUrl || '').split('?')[0].replace(/[A-Za-z0-9_.~-]{24,}/g, '***');
+
 // eslint-disable-next-line no-unused-vars -- express ต้องการ 4 args ถึงจะรู้ว่าเป็น error handler
 export function errorHandler(err, req, res, next) {
   if (err instanceof ZodError) {
@@ -71,7 +75,7 @@ export function errorHandler(err, req, res, next) {
   const rule = DB_RULES[err?.code];
   if (rule) {
     const where = err.constraint ?? err.column ?? null;
-    console.error(`[${req.method} ${req.originalUrl}] ${err.code} ${err.constraint ?? ''}`, err.detail ?? err.message);
+    console.error(`[${req.method} ${logUrl(req)}] ${err.code} ${err.constraint ?? ''}`, err.detail ?? err.message);
     return res.status(409).json({
       error: where ? `${rule} (${where})` : rule,
     });
@@ -85,7 +89,7 @@ export function errorHandler(err, req, res, next) {
    * ระบบนี้เป็นหลังบ้านของทีมตัวเอง อยู่หลัง login ทั้งหมด — ส่งชื่อ/ข้อความของ error กลับไปด้วย
    * คุ้มกว่าการปิดเงียบมาก (ไม่ส่ง stack เพราะยาวและไม่ช่วยคนหน้างาน)
    */
-  console.error(`[${req.method} ${req.originalUrl}]`, err);
+  console.error(`[${req.method} ${logUrl(req)}]`, err);
 
   /* ข้อความดิบส่งให้เฉพาะผู้ดูแลระบบ (ผู้จัดการ/HR) ซึ่งเป็นคนที่ส่งต่อให้คนแก้ได้จริง
      พนักงานภาคสนามเอาไปทำอะไรไม่ได้อยู่แล้ว และข้อความมักมีชื่อคอลัมน์/constraint ติดมาด้วย

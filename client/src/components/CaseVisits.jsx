@@ -193,7 +193,8 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
         })
         // ผลของคำขอเก่าที่กลับมาช้ากว่าต้องไม่ทับของใหม่
         .then((r) => seq === previewRef.current && setPreview(r))
-        .catch(() => seq === previewRef.current && setPreview({ conflicts: [], duplicates: [] }));
+        // ตรวจไม่สำเร็จต้องบอก ไม่ใช่ทำเหมือน "ไม่ชน" (ตรวจ Codex 30 ต.ค. 2569 ข้อ 6)
+        .catch(() => seq === previewRef.current && setPreview({ conflicts: [], duplicates: [], failed: true }));
     }, 300);
 
     return () => clearTimeout(timer);
@@ -567,6 +568,13 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
             </div>
           )}
 
+          {preview.failed && (
+            <div className="banner">
+              <strong>ตรวจตารางชนไม่สำเร็จ</strong>
+              <span className="cell-sub">ยังไม่รู้ว่าวันที่เลือกชนกับงานอื่นของพนักงานคนนี้หรือไม่ — ลองเลือกวันใหม่อีกครั้ง หรือดูปฏิทินพนักงานก่อนบันทึก</span>
+            </div>
+          )}
+
           {/* เตือนก่อนบันทึก ไม่ใช่หลังบันทึก — ยังกดบันทึกได้ บางครั้งจงใจซ้อน (แวะสองบ้านติดกัน) */}
           {preview.conflicts.length > 0 && (
             <div className="banner">
@@ -595,7 +603,11 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
                 type="button"
                 className="btn danger-ghost"
                 disabled={busy}
-                onClick={() => run(() => api.deleteVisitsOn(caseId, pickedWithVisits), { clearPicked: true })}
+                onClick={() => {
+                  // ลบถาวรทุกนัดที่ยังไม่เช็คอินในวันที่เลือก — ถามก่อน (ตรวจ Codex 30 ต.ค. 2569 ข้อ 7)
+                  if (!window.confirm(`ลบนัดที่ยังไม่เช็คอินของ ${pickedWithVisits.length} วันที่เลือก? ลบแล้วกู้คืนไม่ได้`)) return;
+                  run(() => api.deleteVisitsOn(caseId, pickedWithVisits), { clearPicked: true });
+                }}
               >
                 ลบของวันที่เลือก ({pickedWithVisits.length})
               </button>
