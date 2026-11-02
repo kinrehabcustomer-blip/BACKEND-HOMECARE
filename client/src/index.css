@@ -3757,6 +3757,8 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
 
 .checkin-photo h3 { font-size: 0.875rem; margin: 0 0 0.5rem; }
 .checkin-photo-preview { display: flex; align-items: flex-start; gap: 0.75rem; }
+.camera-video { display: block; width: 100%; max-width: 20rem; aspect-ratio: 3 / 4; object-fit: cover; background: #000; border-radius: var(--radius); margin-bottom: 0.5rem; }
+.camera-video.is-mirror { transform: scaleX(-1); }
 .checkin-photo-preview img { width: 8rem; height: 8rem; object-fit: cover; border-radius: var(--radius); border: 1px solid var(--border); }
 
 @media (max-width: 768px) {
