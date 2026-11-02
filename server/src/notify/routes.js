@@ -4,6 +4,7 @@ import { sendDigestEmail, mailerReady } from '../lib/mailer.js';
 import { ApiError, asyncRoute } from '../lib/errors.js';
 import { requireAuth, requireAdmin, requireBackOffice, requirePasswordChanged } from '../lib/auth.js';
 import { collectAlerts } from './alerts.js';
+import { failedVisitNotifications } from './visitReminders.js';
 
 /**
  * แจ้งเตือนเชิงรุก — ของค้างที่ต้องรีบรู้ ถูกส่งไปหาคน แทนที่จะรอให้คนมาเปิดหน้าเว็บเจอ
@@ -37,13 +38,15 @@ function flagReason(v) {
 /** รวบรวมของค้างทั้งหมด ณ ตอนนี้ — ใช้ทั้งตอนส่งอีเมลและตอนแสดงผลบนหน้าเว็บ */
 async function collect() {
   const period = await repo.todayTH();
-  const [missed, stale, flagged, unstaffed, overdue] = await Promise.all([
+  const [missed, stale, flagged, unstaffed, overdue, lineFailed] = await Promise.all([
     repo.missedShifts(period),
     repo.staleShifts(),
     repo.flaggedCheckIns(),
     repo.unstaffedToday(period),
     repo.overdueInvoices(period),
+    failedVisitNotifications(24).catch(() => []),
   ]);
+  const KIND_TH = { day: 'เตือนวันก่อนนัด', '3h': 'เตือน 3 ชม.', family: 'เตือนญาติ', moved: 'แจ้งเลื่อนนัด', cancelled: 'แจ้งยกเลิก/ลบนัด', reassigned: 'แจ้งเปลี่ยนคน' };
 
   const sections = [
     {
@@ -65,6 +68,14 @@ async function collect() {
       key: 'flagged',
       title: 'เช็คอินที่ต้องตรวจ (24 ชม.)',
       lines: flagged.map((v) => `${esc(v.visit_date)} · ${who(v)} — ${flagReason(v)}`),
+    },
+    {
+      // ดร.ธงชัย 2 พ.ย. 2569 ข้อ 3 — ส่ง LINE ไม่สำเร็จจนหมดรอบ เดิมไม่มีใครรู้ (โควตาหมด/โทเคนหมดอายุ/ผู้รับบล็อก OA)
+      key: 'line_failed',
+      title: 'แจ้งเตือนนัดทาง LINE ที่ส่งไม่สำเร็จ (24 ชม.) — โทรแจ้งเอง',
+      lines: lineFailed.map(
+        (f) => `${esc(f.visit_date ?? '-')} · ${esc(KIND_TH[f.event_kind] ?? f.event_kind)} → ${f.channel === 'family' ? 'ญาติ' : 'พนักงาน'}${f.client_name ? ` · ${esc(f.client_name)}` : ''} — ${esc(f.error)}`,
+      ),
     },
     {
       key: 'overdue',

@@ -61,6 +61,7 @@ async function queueVisitNotification({ key, channel, recipient, eventKind, visi
  *  เดิมคืนคิวทันทีและยอมแค่ 3 ครั้ง — LINE ตอบ 429 ช่วงสั้น ๆ ก็เผาครบ 3 รอบติดกัน แล้วการเตือนนัดหายถาวร */
 export async function claimVisitNotificationOutbox(limit = 120) {
   await ensureVisitNotificationOutbox();
+  await skipStaleReminders();
   return sql.all(
     `UPDATE visit_notification_outbox o
         SET claimed_at = now(), attempts = attempts + 1
@@ -78,6 +79,46 @@ export async function claimVisitNotificationOutbox(limit = 120) {
   );
 }
 
+/**
+ * ตัดข้อความเตือนที่ "เก่าแล้ว" ทิ้งก่อนส่ง (ดร.ธงชัย 2 พ.ย. 2569 สั่งแก้ข้อ 2 จากผลตรวจระบบนัด)
+ * ข้อความถูกแช่แข็งตอนเข้าคิว — ส่งรอบแรกไม่ผ่าน (เช่น LINE 429) แล้วระหว่างรอส่งซ้ำนัดถูกยกเลิก/ลบ/ย้ายวัน/เช็คอินไปแล้ว
+ * หรือเลยเวลานัดไปแล้ว ของเดิมยังส่ง "พรุ่งนี้มีนัด" ตามไปอีก · เทียบวัน+เวลาในข้อความกับนัดตัวจริงตอนนี้ ไม่ตรง = ข้าม
+ * ข้าม = attempts 99 + error ขึ้นต้น "ข้าม:" (ไม่ใช่ความล้มเหลว — สรุปส่งพลาดใน failedVisitNotifications ไม่นับ)
+ * ข้อความแจ้งเลื่อน/ยกเลิก/ลบ ไม่ตรวจตรงนี้ — นัดที่ถูกลบไม่มีแถวให้เทียบแล้ว และการแจ้งรอบใหม่เข้าคิวแยกเองอยู่แล้ว
+ */
+export const SKIPPED_PREFIX = 'ข้าม:';
+async function skipStaleReminders() {
+  await sql.run(
+    `UPDATE visit_notification_outbox o
+        SET attempts = 99, claimed_at = now(), error = '${SKIPPED_PREFIX} นัดเปลี่ยน/ยกเลิก/ลบ/เช็คอิน หรือเลยเวลานัดแล้ว'
+      WHERE o.sent_at IS NULL AND o.attempts < 5 AND o.event_kind IN ('day', '3h', 'family')
+        AND NOT EXISTS (
+          SELECT 1 FROM case_visits v
+           WHERE v.visit_id = o.visit_id AND v.status = 'scheduled' AND v.check_in_at IS NULL
+             AND v.visit_date = o.payload->'data'->>'visit_date'
+             AND COALESCE(v.planned_start, '') = COALESCE(o.payload->'data'->>'planned_start', '')
+             AND ${START_AT} > now())`,
+  );
+}
+
+/**
+ * ข้อความเตือน/แจ้งเลื่อนที่ส่งไม่สำเร็จจนหมดรอบ (5 ครั้ง) ใน `hours` ชั่วโมงล่าสุด — ขึ้นสรุปประจำวันของสำนักงาน
+ * (ดร.ธงชัย 2 พ.ย. 2569 ข้อ 3: เดิมพลาดแล้วเงียบ ไม่มีใครรู้ว่าโควตา LINE หมดหรือโทเคนหมดอายุ) · ไม่นับแถวที่ "ข้าม:" ตั้งใจข้าม
+ */
+export async function failedVisitNotifications(hours = 24) {
+  await ensureVisitNotificationOutbox();
+  return sql.all(
+    `SELECT o.channel, o.event_kind, o.visit_id, o.payload->'data'->>'visit_date' AS visit_date,
+            COALESCE(o.payload->'data'->>'client_name', '') AS client_name, left(COALESCE(o.error, ''), 160) AS error
+       FROM visit_notification_outbox o
+      WHERE o.sent_at IS NULL AND o.attempts >= 5 AND o.attempts < 99
+        AND COALESCE(o.error, '') NOT LIKE '${SKIPPED_PREFIX}%'
+        AND o.created_at > now() - make_interval(hours => :hours)
+      ORDER BY o.created_at DESC LIMIT 50`,
+    { hours },
+  );
+}
+
 export async function ackVisitNotificationOutbox(results) {
   await ensureVisitNotificationOutbox();
   let acked = 0;
@@ -87,12 +128,19 @@ export async function ackVisitNotificationOutbox(results) {
     if (r.ok === true) {
       const row = await sql.one(
         `UPDATE visit_notification_outbox SET sent_at = now(), claimed_at = NULL, error = NULL
-          WHERE id = :id AND sent_at IS NULL RETURNING visit_id, event_kind`,
+          WHERE id = :id AND sent_at IS NULL
+          RETURNING visit_id, event_kind, payload->'data'->>'visit_date' AS vd, payload->'data'->>'planned_start' AS ps`,
         { id },
       );
+      // ประทับตราเฉพาะเมื่อข้อความพูดถึงนัดวัน-เวลาปัจจุบันของกะ — ข้อความของนัดเดิมที่ส่งช้า
+      // ต้องไม่ไปบังการเตือนของวันนัดใหม่ (ผลตรวจ 2 พ.ย. 2569 ข้อ 3)
       if (row?.visit_id && ['day', '3h', 'family'].includes(row.event_kind)) {
         const col = row.event_kind === 'day' ? 'remind_day_at' : row.event_kind === '3h' ? 'remind_3h_at' : 'remind_family_at';
-        await sql.run(`UPDATE case_visits SET ${col} = ${NOW_TEXT} WHERE visit_id = :visitId`, { visitId: row.visit_id });
+        await sql.run(
+          `UPDATE case_visits SET ${col} = ${NOW_TEXT}
+            WHERE visit_id = :visitId AND visit_date = :vd AND COALESCE(planned_start, '') = COALESCE(:ps, '')`,
+          { visitId: row.visit_id, vd: row.vd, ps: row.ps },
+        );
       }
       if (row) acked++;
     } else {
@@ -129,6 +177,11 @@ async function claim(kind) {
      FROM case_visits v, cases c, employees e
      WHERE c.case_id = v.case_id AND e.employee_id = v.assigned_to
        AND v.${col} IS NULL AND ${ELIGIBLE} AND ${due}
+       -- ส่งไม่สำเร็จครบ 5 รอบไปแล้ว (ตราไม่ถูกประทับ) ไม่ต้องเลือกซ้ำ — ไม่งั้นกินที่ LIMIT จนนัดใหม่ไม่ได้รับการเตือน
+       AND NOT EXISTS (SELECT 1 FROM visit_notification_outbox d
+                        WHERE d.visit_id = v.visit_id AND d.event_kind = '${kind}' AND d.sent_at IS NULL AND d.attempts >= 5
+                          AND d.payload->'data'->>'visit_date' = v.visit_date
+                          AND COALESCE(d.payload->'data'->>'planned_start', '') = COALESCE(v.planned_start, ''))
        AND v.visit_id IN (
          SELECT v2.visit_id FROM case_visits v2
          WHERE v2.status = 'scheduled' AND v2.visit_date BETWEEN to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD')
@@ -144,6 +197,7 @@ async function claim(kind) {
  */
 export async function claimDueVisitReminders() {
   await ensureVisitReminderColumns();
+  await ensureVisitNotificationOutbox(); // claim() อ้างตารางนี้ (ตัดนัดที่ส่งไม่สำเร็จถาวรออก)
   const out = [];
   for (const kind of ['day', '3h']) {
     const ids = (await claim(kind)).map((r) => r.visit_id);
