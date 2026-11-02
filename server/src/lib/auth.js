@@ -63,6 +63,11 @@ if (!SECRET || SECRET.length < 32) {
 
 export const hashPassword = (plain) => bcrypt.hash(plain, 10);
 
+/* รหัสผ่านเริ่มต้นของพนักงานทุกคน (ดร.ธงชัย 2 พ.ย. 2569 "เอา one time password ออก ตั้งรหัสผ่านทุกคนเป็น 12345678")
+   เดิมสุ่มรหัสชั่วคราวรายคนแล้วบังคับเปลี่ยนตอน login ครั้งแรก — ยกเลิกแล้ว เจ้าตัวเปลี่ยนเองเมื่อไหร่ก็ได้
+   ⚠ รู้กันทั้งบริษัท = ใครรู้อีเมลพนักงานก็เข้าบัญชีนั้นได้จนกว่าเจ้าตัวจะเปลี่ยนรหัส */
+export const DEFAULT_PASSWORD = '12345678';
+
 /* ตัวอักษรของรหัสชั่วคราว — ตัด 0/O/1/I/l ออก เพราะรหัสนี้ถูกอ่านออกเสียง/จดใส่กระดาษส่งต่อกัน
    สลับตัวผิดแล้วจะกลายเป็น "เข้าไม่ได้" ที่หาสาเหตุไม่เจอ */
 const TEMP_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
@@ -261,9 +266,7 @@ export function requireBackOffice(req, res, next) {
  */
 export function requirePasswordChanged(req, res, next) {
   if (!req.user) return next(new ApiError(401, 'กรุณาเข้าสู่ระบบ'));
-  if (req.user.must_change_password) {
-    return next(new ApiError(403, 'กรุณาตั้งรหัสผ่านใหม่ก่อนใช้งานระบบ'));
-  }
+  // ยกเลิกการบังคับเปลี่ยนรหัสแล้ว (ทุกคนใช้รหัสเริ่มต้นได้ — ดู DEFAULT_PASSWORD) คงฟังก์ชันไว้เพราะหลายเส้นอ้างอยู่
   next();
 }
 

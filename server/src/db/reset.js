@@ -169,7 +169,7 @@ if (superAdminEmail) {
   console.log('\nสร้างบัญชี Super Admin แล้ว');
   console.log(`  รหัสพนักงาน : ${admin.employee_id}`);
   console.log(`  อีเมล login  : ${superAdminEmail}`);
-  console.log(`  รหัสผ่านชั่วคราว: ${admin.temp_password}   (ระบบบังคับเปลี่ยนตอน login ครั้งแรก)`);
+  console.log('  รหัสผ่านเริ่มต้น : 12345678   (ไม่บังคับเปลี่ยน — แนะนำให้เปลี่ยนเอง)');
 }
 
 // ตรวจซ้ำ: ทุกตารางนอกจากที่ตั้งใจเก็บต้องว่างจริง — ไม่เชื่อว่า CASCADE ไล่ลบครบเอง

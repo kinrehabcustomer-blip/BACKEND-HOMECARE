@@ -162,7 +162,6 @@ export default function LoginPage() {
           />
         </label>
 
-        <p className="muted">หากยังไม่มีอีเมลในประวัติ ให้ใช้รหัสพนักงานเป็น Username ชั่วคราว</p>
 
         {/* ป้ายเคยเขียนว่า "รหัสผ่าน (รหัสพนักงาน)" และ placeholder เป็น EMP-0001
             ซึ่งเท่ากับประกาศบนหน้าที่ใครก็เปิดได้ว่ารหัสผ่านตั้งต้นคือรหัสพนักงาน
@@ -183,9 +182,14 @@ export default function LoginPage() {
           {busy ? 'กำลังเข้าสู่ระบบ…' : 'เข้าสู่ระบบ'}
         </button>
 
-        {/* บอกว่าไปเอารหัสจากใคร โดยไม่บอกว่ารหัสคืออะไร — คนที่ควรรู้ถามได้ คนที่ไม่ควรรู้ไม่ได้อะไรไป */}
+        {/* ดร.ธงชัย 2 พ.ย. 2569 สั่งให้เขียนรหัสเริ่มต้นไว้หน้า login เลย (เปลี่ยนจากเดิมที่ไม่บอกรหัส) */}
+        <div className="notice login-hint">
+          <b>เข้าใช้งานครั้งแรก</b>
+          <div>Username : รหัสพนักงาน</div>
+          <div>Password : 12345678</div>
+        </div>
         <p className="muted login-note">
-          เข้าครั้งแรกใช้รหัสที่ฝ่ายบุคคลแจ้งไว้ · <Link to="/forgot-password">ลืมรหัสผ่าน?</Link>
+          <Link to="/forgot-password">ลืมรหัสผ่าน?</Link>
         </p>
       </form>
       <p className="login-footer">KIN HOME CARE · STAFF PORTAL</p>

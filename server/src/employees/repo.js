@@ -1,5 +1,5 @@
 import { sql, nextEmployeeId, transaction } from '../db/index.js';
-import { hashPassword, generateTempPassword } from '../lib/auth.js';
+import { hashPassword, DEFAULT_PASSWORD } from '../lib/auth.js';
 import { encryptTempPassword, tryDecryptTempPassword } from '../lib/tempPassword.js';
 import { ApiError } from '../lib/errors.js';
 
@@ -165,22 +165,18 @@ export function create(input, { lineUserId = null } = {}) {
     const values = { employee_id: employeeId };
     for (const col of COLUMNS) values[col] = input[col] ?? null;
 
-    /* รหัสผ่านชั่วคราวสุ่มใหม่ทุกคน — เก็บ hash สำหรับ login และสำเนาเข้ารหัสสำหรับฝ่ายบุคคล
-       (must_change_password เป็น TRUE ตั้งแต่ default ของตาราง และมีด่านบังคับที่ API แล้ว) */
-    const tempPassword = generateTempPassword();
-    values.password_hash = await hashPassword(tempPassword);
-    values.temp_password_encrypted = encryptTempPassword(tempPassword, employeeId);
+    /* พนักงานใหม่ทุกคนเริ่มที่รหัสเริ่มต้น (DEFAULT_PASSWORD) และไม่ถูกบังคับเปลี่ยน — ไม่มีรหัสชั่วคราว/สำเนาเข้ารหัสอีกแล้ว */
+    values.password_hash = await hashPassword(DEFAULT_PASSWORD);
 
     const extra = lineUserId ? ['line_user_id'] : [];
     if (lineUserId) values.line_user_id = lineUserId;
     const cols = [...COLUMNS, ...extra];
-    const created = await tx.one(
-      `INSERT INTO employees (employee_id, password_hash, temp_password_encrypted, ${cols.join(', ')})
-       VALUES (:employee_id, :password_hash, :temp_password_encrypted, ${cols.map((c) => `:${c}`).join(', ')})
+    return tx.one(
+      `INSERT INTO employees (employee_id, password_hash, must_change_password, ${cols.join(', ')})
+       VALUES (:employee_id, :password_hash, FALSE, ${cols.map((c) => `:${c}`).join(', ')})
        RETURNING ${PUBLIC}`,
       values,
     );
-    return { ...created, temp_password: tempPassword };
   });
 }
 

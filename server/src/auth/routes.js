@@ -91,9 +91,12 @@ authRouter.post(
     }
 
     const employee = await sql.one(
+      /* รหัสพนักงานใช้เป็น username ได้ทุกคน แม้มีอีเมลแล้ว (หน้า login เขียนไว้ให้ใช้รหัสพนักงาน + รหัสเริ่มต้น)
+         ตรงทั้งสองทาง = เอาที่ตรงอีเมลก่อน */
       `SELECT * FROM employees
-       WHERE lower(email) = lower(:email)
-          OR (NULLIF(btrim(email), '') IS NULL AND lower(employee_id) = lower(:email))`,
+       WHERE lower(email) = lower(:email) OR lower(employee_id) = lower(:email)
+       ORDER BY (lower(email) = lower(:email)) DESC
+       LIMIT 1`,
       { email },
     );
 
@@ -452,5 +455,5 @@ const toSession = (e) => ({
   role: roleForPosition(e.position), // สิทธิ์คิดจากตำแหน่ง (กลุ่ม back = admin, ที่เหลือ = field)
   // หมวดที่เข้าได้ (office/billing/money) — หน้าเว็บใช้ซ่อนเมนู ตัวจริงที่กันคือด่านของแต่ละเส้น
   permissions: permissionsFor(e.position),
-  must_change_password: e.must_change_password,
+  must_change_password: false, // ยกเลิกการบังคับเปลี่ยนรหัสแล้ว (ดู DEFAULT_PASSWORD ใน lib/auth.js)
 });
