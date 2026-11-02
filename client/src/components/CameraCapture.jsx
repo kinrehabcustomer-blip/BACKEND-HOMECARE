@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 
-const MAX_EDGE = 1280;
+const SIZE = 960; // ด้านของรูปสี่เหลี่ยมจัตุรัสที่เก็บ — ตรงกับกรอบที่เห็นบนจอ
 const QUALITY = 0.82;
 
 const ERRORS = {
@@ -62,11 +62,15 @@ export default function CameraCapture({ facing = 'user', onCapture, onCancel }) 
   function snap() {
     const video = videoRef.current;
     if (!video?.videoWidth) return;
-    const scale = Math.min(1, MAX_EDGE / Math.max(video.videoWidth, video.videoHeight));
+    // ตัดกลางภาพเป็นสี่เหลี่ยมจัตุรัส — ตรงกับกรอบที่เห็น (กล้องหน้ามือถือเป็นแนวตั้ง เว็บแคมเป็นแนวนอน ภาพที่ได้จึงเหมือนกันทุกเครื่อง)
+    const side = Math.min(video.videoWidth, video.videoHeight);
+    const sx = (video.videoWidth - side) / 2;
+    const sy = (video.videoHeight - side) / 2;
+    const out = Math.min(SIZE, side);
     const canvas = document.createElement('canvas');
-    canvas.width = Math.round(video.videoWidth * scale);
-    canvas.height = Math.round(video.videoHeight * scale);
-    canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+    canvas.width = out;
+    canvas.height = out;
+    canvas.getContext('2d').drawImage(video, sx, sy, side, side, 0, 0, out, out);
     onCapture(canvas.toDataURL('image/jpeg', QUALITY));
   }
 
@@ -75,15 +79,19 @@ export default function CameraCapture({ facing = 'user', onCapture, onCancel }) 
       {error ? (
         <p className="error">{error}</p>
       ) : (
-        // กล้องหน้าแสดงกลับด้านเหมือนกระจก แต่รูปที่จับจริงไม่กลับ
-        <video
-          ref={videoRef}
-          className={`camera-video ${facing === 'user' ? 'is-mirror' : ''}`}
-          playsInline
-          muted
-        />
+        <div className="camera-frame">
+          {/* กล้องหน้าแสดงกลับด้านเหมือนกระจก แต่รูปที่จับจริงไม่กลับ */}
+          <video
+            ref={videoRef}
+            className={`camera-video ${facing === 'user' ? 'is-mirror' : ''}`}
+            playsInline
+            muted
+          />
+          <span className="camera-guide" aria-hidden="true" />
+          {!ready && <span className="camera-wait">กำลังเปิดกล้อง…</span>}
+        </div>
       )}
-      <div className="photo-actions">
+      <div className="photo-actions camera-actions">
         {error ? (
           <button type="button" className="btn" onClick={() => setAttempt((n) => n + 1)}>ลองใหม่</button>
         ) : (
