@@ -102,6 +102,7 @@ export default function CalendarPage() {
   // วันอ้างอิงจุดเดียว — มุมมองเดือนใช้ปี/เดือนของมัน มุมมองสัปดาห์ใช้สัปดาห์ที่มันอยู่
   const anchor = /^\d{4}-\d{2}-\d{2}$/.test(get('date')) ? get('date') : todayISO();
   const employeeId = get('employee_id');
+  const clientCase = get('client'); // รหัสเคสของผู้รับบริการที่เลือกกรอง
   const kind = SERVICE_KIND_LABELS[get('kind')] ? get('kind') : '';
   const state = CAL_STATES.includes(get('state')) ? get('state') : '';
   const openDay = /^\d{4}-\d{2}-\d{2}$/.test(get('day')) ? get('day') : '';
@@ -164,9 +165,18 @@ export default function CalendarPage() {
 
   // กรองสายบริการ/สถานะกะในหน้าเว็บ ไม่ยิง API ใหม่ — ข้อมูลทั้งช่วงโหลดมาแล้ว สลับดูจึงเปลี่ยนทันที
   const shown = useMemo(
-    () => (visits ?? []).filter((c) => (!kind || kindOf(c) === kind) && (!state || c.state === state)),
-    [visits, kind, state],
+    () => (visits ?? []).filter((c) => (!kind || kindOf(c) === kind) && (!state || c.state === state) && (!clientCase || c.case_id === clientCase)),
+    [visits, kind, state, clientCase],
   );
+
+  /* รายชื่อผู้รับบริการในช่วงที่โหลดมา (ไม่ซ้ำ เรียงตามชื่อ) — กรองในหน้าเว็บ ไม่ยิง API ใหม่
+     คนที่เลือกค้างอยู่ใน URL แต่ไม่มีกะในช่วงนี้ ยังโชว์ไว้ให้ล้างได้ */
+  const clients = useMemo(() => {
+    const byCase = new Map();
+    for (const c of visits ?? []) if (!byCase.has(c.case_id)) byCase.set(c.case_id, c.client_name);
+    if (clientCase && !byCase.has(clientCase)) byCase.set(clientCase, clientCase);
+    return [...byCase.entries()].sort((a, b) => String(a[1]).localeCompare(String(b[1]), 'th'));
+  }, [visits, clientCase]);
 
   const byDay = useMemo(() => {
     const map = new Map();
@@ -177,7 +187,7 @@ export default function CalendarPage() {
     return map;
   }, [shown]);
 
-  const filtered = Boolean(employeeId || kind || state);
+  const filtered = Boolean(employeeId || kind || state || clientCase);
 
   /** ขยับช่วงที่ดู — เดือนละก้าว หรือสัปดาห์ละก้าวตามมุมมอง */
   function shift(delta) {
@@ -350,6 +360,13 @@ export default function CalendarPage() {
           ))}
         </SearchSelect>
 
+        <SearchSelect value={clientCase} onChange={(e) => patch({ client: e.target.value })} aria-label="เลือกผู้รับบริการ">
+          <option value="">ผู้รับบริการทุกคน</option>
+          {clients.map(([id, name]) => (
+            <option key={id} value={id}>{name} · {caseCode(id)}</option>
+          ))}
+        </SearchSelect>
+
         <SearchSelect value={kind} onChange={(e) => patch({ kind: e.target.value })} aria-label="เลือกประเภทบริการ">
           <option value="">ทุกประเภทบริการ</option>
           {Object.entries(SERVICE_KIND_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
@@ -361,7 +378,7 @@ export default function CalendarPage() {
         </SearchSelect>
 
         {filtered && (
-          <button className="btn" onClick={() => patch({ employee_id: '', kind: '', state: '' })}>ล้างตัวกรอง</button>
+          <button className="btn" onClick={() => patch({ employee_id: '', client: '', kind: '', state: '' })}>ล้างตัวกรอง</button>
         )}
         <button className="btn" onClick={() => window.print()}>
           <LineIcon name="printer" />พิมพ์
