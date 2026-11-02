@@ -598,7 +598,17 @@ export const REPORT_CONTENT_FIELDS = Object.keys(reportFields.shape).filter(
  * export ออกไปด้วยเพราะตอน "แก้" ต้องตรวจกับผลลัพธ์หลังรวมของเดิม ไม่ใช่กับเฉพาะช่องที่ส่งมา
  * (ส่ง symptoms: null มาช่องเดียวเพื่อล้างข้อความทิ้ง ก็ทำให้รายงานทั้งใบว่างได้เหมือนกัน)
  */
+/* รูปที่แนบกับรายงาน (หลายรูป · ตาราง case_report_images) — ไม่ใช่คอลัมน์ของ case_reports จึงอยู่นอก reportFields
+   attach_images = รูปใหม่ (data URL) · remove_image_ids = รูปเดิมที่สั่งลบ (ตอนแก้) */
+export const MAX_REPORT_IMAGES = 10;
+const reportImageFields = {
+  attach_images: z.array(imageSchema).max(6, 'แนบรูปได้ครั้งละไม่เกิน 6 รูป').optional().nullable(),
+  remove_image_ids: z.array(z.number().int().positive()).max(MAX_REPORT_IMAGES).optional().nullable(),
+};
+
 export const hasReportContent = (row) =>
+  (row?.attach_images?.length ?? 0) > 0 ||
+  (row?.image_count ?? 0) > 0 || // รูปเดิมที่เหลืออยู่ (route นับให้ตอนแก้)
   REPORT_CONTENT_FIELDS.some((f) => {
     const v = row?.[f];
     if (v == null) return false;
@@ -606,7 +616,7 @@ export const hasReportContent = (row) =>
     return String(v).trim() !== '';
   });
 
-export const createReportSchema = reportFields.superRefine((v, ctx) => {
+export const createReportSchema = reportFields.extend(reportImageFields).superRefine((v, ctx) => {
   if (hasReportContent(v)) return;
   ctx.addIssue({
     code: 'custom',
@@ -619,7 +629,7 @@ export const createReportSchema = reportFields.superRefine((v, ctx) => {
  * แก้รายงาน — ส่งมาเฉพาะช่องที่เปลี่ยน (ช่องที่ไม่ส่งมาคงของเดิมไว้)
  * จึงตรวจ "ต้องมีเนื้อหา" ตรงนี้ไม่ได้ ต้องตรวจหลังรวมกับของเดิมที่ชั้น route ด้วย hasReportContent
  */
-export const updateReportSchema = reportFields;
+export const updateReportSchema = reportFields.extend(reportImageFields);
 
 /**
  * ตัวกรองของคลังรายงาน — เคสที่ดูแลต่อเนื่องบันทึกวันละ 2–4 ครั้ง ครึ่งปีก็หลายร้อยใบ

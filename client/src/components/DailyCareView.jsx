@@ -7,7 +7,7 @@ import { DAILY_SECTIONS, bmiOf, dailyValueText, isFilled } from '../lib/dailyCar
  * แต่เวรหนึ่งกรอกจริงราว 15–25 ช่อง ถ้าโชว์ครบทุกช่องคนอ่านจะต้องกวาดตาผ่าน "ไม่ได้ระบุ" เต็มหน้า
  * กว่าจะเจอสิ่งที่เปลี่ยนไป ซึ่งเป็นสิ่งเดียวที่เขาเปิดเข้ามาดู
  */
-export default function DailyCareView({ report: raw, sections = DAILY_SECTIONS, photoUrl = null }) {
+export default function DailyCareView({ report: raw, sections = DAILY_SECTIONS, photoUrl = null, imageUrl = null }) {
   const report = { ...raw, bmi: bmiOf(raw.weight_kg, raw.height_cm) };
   const blocks = sections.map((s) => ({
     key: s.key,
@@ -35,6 +35,19 @@ export default function DailyCareView({ report: raw, sections = DAILY_SECTIONS, 
           </ul>
         </div>
       ))}
+
+      {imageUrl && report.image_ids?.length > 0 && (
+        <div className="care-view-block">
+          <h5>รูปภาพแนบ ({report.image_ids.length})</h5>
+          <div className="report-images-grid">
+            {report.image_ids.map((id) => (
+              <a className="report-image" key={id} href={imageUrl(id)} target="_blank" rel="noreferrer">
+                <img src={imageUrl(id)} alt="รูปแนบรายงาน" loading="lazy" />
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
 
       {report.has_wound_photo && photoUrl && (
         <div className="care-view-block">

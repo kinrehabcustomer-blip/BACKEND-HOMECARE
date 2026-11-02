@@ -458,6 +458,16 @@ export const messagesFor = (caseId, limit = 60) =>
     { id: caseId, limit },
   );
 
+/** เหมือน messagesFor แต่บอกด้วยว่าข้อความไหนเป็นของพนักงานคนที่ถามอยู่ (mine) — ไม่ส่งรหัสพนักงานออกไป */
+export const messagesForStaff = (caseId, limit, employeeId) =>
+  sql.all(
+    `SELECT message_id, author_kind, author_name, body, (photo_data IS NOT NULL) AS has_photo, created_at,
+            (employee_id IS NOT DISTINCT FROM :me) AS mine
+     FROM case_family_messages WHERE case_id = :id AND deleted_at IS NULL
+     ORDER BY created_at DESC LIMIT :limit`,
+    { id: caseId, limit, me: employeeId },
+  );
+
 export const messagePhoto = (caseId, messageId) =>
   sql.one(
     `SELECT photo_data AS data, photo_mime AS mime FROM case_family_messages

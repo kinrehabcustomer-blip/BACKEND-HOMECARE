@@ -1110,6 +1110,17 @@ ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS physical_exam   TEXT;
 ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS diagnosis       TEXT;
 ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS treatment_plan  TEXT;
 
+-- รูปที่แนบกับรายงาน (หลายรูปต่อใบ) — รายงานถูกลบ รูปลบตาม
+CREATE TABLE IF NOT EXISTS case_report_images (
+  image_id   INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  report_id  INTEGER NOT NULL REFERENCES case_reports (report_id) ON DELETE CASCADE,
+  data       BYTEA NOT NULL,
+  mime       TEXT NOT NULL,
+  size       INTEGER NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_case_report_images_report ON case_report_images (report_id);
+
 -- ============================================================================
 -- ทีมพนักงานของเคส (case_team) — เคสหนึ่งมีคนดูแลได้มากกว่าหนึ่งคน
 --

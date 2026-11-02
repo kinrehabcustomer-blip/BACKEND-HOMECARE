@@ -4,7 +4,7 @@ import { issueForVisits, withProcedureNumbers } from './visitNumbers.js';
 /* รายการช่องของรายงานมาจาก schema.js ที่เดียว — ฟอร์มมี 80 กว่าช่อง การก๊อปรายชื่อมาไว้สองที่
    แปลว่าวันหนึ่งจะมีช่องที่ผ่าน validation แล้วแต่ไม่ถูกเขียนลงตาราง (บันทึกสำเร็จแต่ข้อมูลหาย)
    ต่างจากตาราง cases ที่ยังประกาศ COLUMNS เอง เพราะช่องน้อยและมีคอลัมน์ที่ระบบเติมเองปนอยู่ */
-import { REPORT_CONTENT_FIELDS, PATIENT_PENDING } from './schema.js';
+import { REPORT_CONTENT_FIELDS, PATIENT_PENDING, MAX_REPORT_IMAGES } from './schema.js';
 import { ensurePatientCodeFree } from '../patients/repo.js';
 import { decodeImage, FRONT_POSITIONS } from '../employees/schema.js';
 import { ApiError } from '../lib/errors.js';
@@ -3695,6 +3695,56 @@ export function assignableEmployees() {
 // zod ตรวจ "ค่าที่รับได้" ส่วนที่นี่ตัดสิน "คอลัมน์ที่จะเขียนลงตาราง" คนละหน้าที่กัน
 /* ช่องกำกับ (ไม่ใช่เนื้อหา) + ทุกช่องเนื้อหาจาก schema — ยกเว้นรูปแผลที่ไม่ได้ลงคอลัมน์เดียว
    (wound_photo เป็น data URL ขาเข้า ต้องแตกเป็น data/mime/size สามคอลัมน์ ดู photoColumns) */
+/* ตารางรูปแนบรายงาน + คอลัมน์แบบบันทึกตรวจรักษาของนักกายภาพ — สร้างเองครั้งแรกที่มีคนเปิดรายงาน (IF NOT EXISTS ปลอดภัยรันซ้ำ)
+   แบบเดียวกับ ensureFamilyTable · schema.sql มีชุดเดียวกันไว้ให้ npm run migrate */
+let reportSchemaReady = null;
+export const ensureReportSchema = () =>
+  (reportSchemaReady ??= (async () => {
+    for (const q of [
+      'ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS height_cm DOUBLE PRECISION CHECK (height_cm BETWEEN 30 AND 250)',
+      'ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS chief_complaint TEXT',
+      'ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS physical_exam TEXT',
+      'ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS diagnosis TEXT',
+      'ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS treatment_plan TEXT',
+      `CREATE TABLE IF NOT EXISTS case_report_images (
+         image_id   INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+         report_id  INTEGER NOT NULL REFERENCES case_reports (report_id) ON DELETE CASCADE,
+         data       BYTEA NOT NULL,
+         mime       TEXT NOT NULL,
+         size       INTEGER NOT NULL,
+         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+       )`,
+      'CREATE INDEX IF NOT EXISTS idx_case_report_images_report ON case_report_images (report_id)',
+    ]) await sql.run(q);
+  })().catch((err) => { reportSchemaReady = null; throw err; }));
+
+/** รูปใหม่ที่แนบมา -> ไบนารีพร้อมเก็บ (ตรวจก่อนเขียนอะไรลงฐานข้อมูล รูปเสียใบเดียวต้องไม่ทำให้รายงานค้างครึ่งทาง) */
+function decodeAttachments(input) {
+  const list = input.attach_images ?? [];
+  try {
+    return list.map((u) => decodeImage(u));
+  } catch (err) {
+    throw new ApiError(400, err.message);
+  }
+}
+
+async function saveImages(tx, reportId, images, removeIds = []) {
+  if (removeIds.length) {
+    await tx.run('DELETE FROM case_report_images WHERE report_id = :rid AND image_id = ANY(:ids::int[])', { rid: reportId, ids: removeIds });
+  }
+  if (!images.length) return;
+  const { n } = await tx.one('SELECT COUNT(*)::int AS n FROM case_report_images WHERE report_id = :rid', { rid: reportId });
+  if (n + images.length > MAX_REPORT_IMAGES) {
+    throw new ApiError(400, `แนบรูปได้ไม่เกิน ${MAX_REPORT_IMAGES} รูปต่อรายงาน (มีอยู่ ${n} รูป)`);
+  }
+  for (const img of images) {
+    await tx.run(
+      'INSERT INTO case_report_images (report_id, data, mime, size) VALUES (:rid, :data, :mime, :size)',
+      { rid: reportId, data: img.data, mime: img.mime, size: img.size },
+    );
+  }
+}
+
 const REPORT_META = ['visit_id', 'report_date', 'report_time', 'shift', 'report_type'];
 const REPORT_COLUMNS = [...REPORT_META, ...REPORT_CONTENT_FIELDS.filter((f) => f !== 'wound_photo')];
 
@@ -3743,6 +3793,7 @@ const REPORT_BASE_COLS = [
   'r.wound_photo_mime',
   'r.wound_photo_size',
   '(r.wound_photo_data IS NOT NULL) AS has_wound_photo',
+  "(SELECT COALESCE(json_agg(i.image_id ORDER BY i.image_id), '[]'::json) FROM case_report_images i WHERE i.report_id = r.report_id) AS image_ids",
   'r.reported_by',
   'r.reported_by_name',
   'r.created_at',
@@ -3766,6 +3817,7 @@ const withoutPhotoBytes = (row) => {
  * (เคสดูแลต่อเนื่องบันทึกวันละหลายครั้ง ดึงทั้งหมดทุกครั้งที่เปิดดูไม่ไหว)
  */
 export async function listReports(caseId, { month, type, page = 1, per_page = 20 } = {}) {
+  await ensureReportSchema();
   const where = ['r.case_id = :id'];
   const params = { id: caseId };
 
@@ -3818,7 +3870,8 @@ export function reportMonths(caseId) {
 }
 
 /** รายงานของกะเดียว — หน้างานวันนี้ของพนักงานเปิดดู/บันทึกจากตรงนี้ */
-export function listReportsForVisit(visitId) {
+export async function listReportsForVisit(visitId) {
+  await ensureReportSchema();
   return sql.all(
     `SELECT ${REPORT_COLS} FROM case_reports r ${REPORT_VISIT}
      WHERE r.visit_id = :id
@@ -3834,7 +3887,8 @@ export function listReportsForVisit(visitId) {
  * (หลักแสนไบต์) ออกจากฐานข้อมูลมาทุกครั้งที่กด "แก้รายงาน" ทั้งที่ไม่มีใครใช้ค่านั้นเลย
  * สิ่งที่ผู้เรียกต้องรู้คือ "ใบนี้มีรูปอยู่ไหม" ซึ่ง has_wound_photo ตอบได้เท่ากัน
  */
-export function findReport(caseId, reportId) {
+export async function findReport(caseId, reportId) {
+  await ensureReportSchema();
   return sql.one(
     `SELECT ${REPORT_BASE_COLS} FROM case_reports r WHERE r.report_id = :rid AND r.case_id = :cid`,
     { rid: reportId, cid: caseId },
@@ -3846,6 +3900,8 @@ export function findReport(caseId, reportId) {
  * เก็บชื่อ ณ ตอนนั้นคู่กับรหัส เพราะคนบันทึกอาจเปลี่ยนชื่อ/ลาออกทีหลัง แต่บันทึกต้องยังอ่านออก
  */
 export async function addReport(caseId, input, actor) {
+  await ensureReportSchema();
+  const attachments = decodeAttachments(input);
   const photo = photoColumns(input);
   const columns = [...REPORT_COLUMNS, ...Object.keys(photo)];
 
@@ -3857,13 +3913,17 @@ export async function addReport(caseId, input, actor) {
   };
   for (const c of REPORT_COLUMNS) values[c] = blank(input[c]);
 
-  const row = await sql.one(
-    `INSERT INTO case_reports (case_id, reported_by, reported_by_name, ${columns.join(', ')})
-     VALUES (:case_id, :reported_by, :reported_by_name, ${columns.map(slot).join(', ')})
-     RETURNING *`,
-    values,
-  );
-  return withoutPhotoBytes(row);
+  const created = await transaction(async (tx) => {
+    const row = await tx.one(
+      `INSERT INTO case_reports (case_id, reported_by, reported_by_name, ${columns.join(', ')})
+       VALUES (:case_id, :reported_by, :reported_by_name, ${columns.map(slot).join(', ')})
+       RETURNING report_id`,
+      values,
+    );
+    await saveImages(tx, row.report_id, attachments);
+    return row;
+  });
+  return findReport(caseId, created.report_id);
 }
 
 /**
@@ -3872,22 +3932,40 @@ export async function addReport(caseId, input, actor) {
  * ไม่แตะ reported_by: เจ้าของบันทึกคือคนที่เขียนครั้งแรก การแก้ไม่ใช่การเปลี่ยนผู้บันทึก
  */
 export async function updateReport(caseId, reportId, input) {
+  await ensureReportSchema();
+  const attachments = decodeAttachments(input);
+  const removeIds = input.remove_image_ids ?? [];
   const photo = photoColumns(input);
   const fields = [...REPORT_COLUMNS.filter((c) => c in input), ...Object.keys(photo)];
-  if (fields.length === 0) return findReport(caseId, reportId);
+  if (fields.length === 0 && attachments.length === 0 && removeIds.length === 0) return findReport(caseId, reportId);
 
   const values = { cid: caseId, rid: reportId, ...photo };
   for (const c of REPORT_COLUMNS) if (c in input) values[c] = blank(input[c]);
 
-  const set = fields.map((c) => `${c} = ${slot(c)}`);
+  const set = [...fields.map((c) => `${c} = ${slot(c)}`)];
 
-  const row = await sql.one(
-    `UPDATE case_reports SET ${set.join(', ')}, updated_at = ${NOW}
-     WHERE report_id = :rid AND case_id = :cid
-     RETURNING *`,
-    values,
+  await transaction(async (tx) => {
+    // แก้แค่รูปก็ต้องขยับเวลา "แก้ล่าสุด" — ไม่มีช่องอื่นให้ SET จึงใช้ updated_at ตัวเดียว
+    const row = await tx.one(
+      `UPDATE case_reports SET ${[...set, `updated_at = ${NOW}`].join(', ')}
+       WHERE report_id = :rid AND case_id = :cid
+       RETURNING report_id`,
+      values,
+    );
+    if (row) await saveImages(tx, reportId, attachments, removeIds);
+  });
+  return findReport(caseId, reportId);
+}
+
+/** รูปแนบของรายงาน — กรองด้วย case_id เสมอ รูปของเคสอื่นต้องไม่หลุดออกทาง path ของเคสนี้ */
+export async function findReportImage(caseId, reportId, imageId) {
+  await ensureReportSchema();
+  return sql.one(
+    `SELECT i.data, i.mime FROM case_report_images i
+     JOIN case_reports r ON r.report_id = i.report_id
+     WHERE i.image_id = :iid AND i.report_id = :rid AND r.case_id = :cid`,
+    { iid: imageId, rid: reportId, cid: caseId },
   );
-  return withoutPhotoBytes(row);
 }
 
 /** รูปแผลของรายงาน — ส่งเป็นไฟล์ผ่าน endpoint แยก ไม่ยัดกลับไปใน JSON */

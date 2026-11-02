@@ -47,6 +47,7 @@ const AttendancePage = lazy(() => import('./pages/AttendancePage.jsx'));
 const MyTodayPage = lazy(() => import('./pages/MyTodayPage.jsx'));
 const MyCasesPage = lazy(() => import('./pages/MyCasesPage.jsx'));
 const MyCalendarPage = lazy(() => import('./pages/MyCalendarPage.jsx'));
+const MyChatPage = lazy(() => import('./pages/MyChatPage.jsx'));
 const MyReportsPage = lazy(() => import('./pages/MyReportsPage.jsx'));
 const MyAttendancePage = lazy(() => import('./pages/MyAttendancePage.jsx'));
 
@@ -66,6 +67,7 @@ const NAV_ICONS = {
   wallet: (<><path d="M3 7a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><path d="M3 9h18" /><path d="M16 13.5h2.5" /></>),
   star: (<path d="M12 2.6l2.9 5.9 6.5.9-4.7 4.6 1.1 6.5-5.8-3.1-5.8 3.1 1.1-6.5L2.6 9.4l6.5-.9z" />),
   package: (<><path d="M21 8 12 3 3 8v8l9 5 9-5z" /><path d="M3 8l9 5 9-5M12 13v8" /></>),
+  chat: (<path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 8.6 8.6 0 0 1-3.7-.8L3 21l1.9-5.1A8.4 8.4 0 1 1 21 11.5z" />),
   chevron: (<path d="M6 9l6 6 6-6" />),
 };
 
@@ -121,6 +123,7 @@ const homePath = (user) => {
 const FIELD_NAV = [
   { to: '/my-today', icon: 'today', label: 'งานวันนี้' },
   { to: '/my-cases', icon: 'cases', label: 'เคสของฉัน' },
+  { to: '/my-chat', icon: 'chat', label: 'แชทญาติ' },
   { to: '/my-reports', icon: 'activity', label: 'รายงานของฉัน' },
   { to: '/my-calendar', icon: 'calendar', label: 'ตารางงานของฉัน' },
   { to: '/my-attendance', icon: 'clock', label: 'ค่าตอบแทนของฉัน' },
@@ -400,6 +403,7 @@ export default function App() {
             {/* หน้าของพนักงานภาคสนาม — เข้าได้ทั้ง field และ admin (แสดงเฉพาะงานที่ตัวเองรับ) */}
             <Route path="/my-today" element={<AppLayout><MyTodayPage /></AppLayout>} />
             <Route path="/my-cases" element={<AppLayout><MyCasesPage /></AppLayout>} />
+            <Route path="/my-chat" element={<AppLayout><MyChatPage /></AppLayout>} />
             <Route path="/my-reports" element={<AppLayout><MyReportsPage /></AppLayout>} />
             <Route path="/my-calendar" element={<AppLayout><MyCalendarPage /></AppLayout>} />
             <Route path="/my-attendance" element={<AppLayout><MyAttendancePage /></AppLayout>} />

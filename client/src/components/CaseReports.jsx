@@ -384,6 +384,10 @@ export default function CaseReports({
       ? (isAdmin ? api.caseReportPhotoUrl(caseId, r.report_id) : api.myReportPhotoUrl(caseId, r.report_id))
       : null;
 
+  /** URL รูปแนบ (หลายรูป) ของรายงานใบหนึ่ง */
+  const imageUrlOf = (r) => (id) => (isAdmin ? api.caseReportImageUrl(caseId, r.report_id, id) : api.myReportImageUrl(caseId, r.report_id, id));
+  const imagesOf = (r) => (r.image_ids ?? []).map((id) => ({ id, url: imageUrlOf(r)(id) }));
+
   /** จัดกลุ่มตามวัน — ในคลังที่มีวันละหลายใบ วันคือหน่วยที่คนใช้ไล่หา ไม่ใช่ลำดับใบ */
   const days = useMemo(() => {
     const map = new Map();
@@ -512,6 +516,7 @@ export default function CaseReports({
                     {(structured ? brief(r) : simpleBrief(r)).join(' · ') || 'ดูรายละเอียด'}
                   </span>
 
+                  {r.image_ids?.length > 0 && <span className="report-row-imgs" title="มีรูปภาพแนบ">รูป {r.image_ids.length}</span>}
                   <span className="report-row-by">{r.reported_by_name ?? '—'}</span>
                   {/* บอกว่าแถวนี้กางได้ — ไม่มีอะไรบอกเลยคนจะไม่รู้ว่ากดได้
                       กางอยู่แล้วไม่ต้องมีค้างไว้ ปุ่มที่ใช้จริงตอนนั้นคือ "ย่อรายงาน" ท้ายใบ */}
@@ -532,7 +537,7 @@ export default function CaseReports({
         >
                     <div className="report-row-body">
                       {structured ? (
-                        <DailyCareView report={r} sections={viewSections} photoUrl={photoUrl(r)} />
+                        <DailyCareView report={r} sections={viewSections} photoUrl={photoUrl(r)} imageUrl={imageUrlOf(r)} />
                       ) : (
                         <>
                           {vitalChips(r).length > 0 && (
@@ -597,6 +602,7 @@ export default function CaseReports({
             busy={busy}
             error={formError}
             photoUrl={photoUrl(editingReport)}
+            existingImages={imagesOf(editingReport)}
             onSubmit={(body) => edit(editingReport.report_id, body)}
             onCancel={() => { setEditingId(null); setFormError(null); }}
           />

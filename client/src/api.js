@@ -293,6 +293,7 @@ export const api = {
   /** รายงานของกะเดียว (หน้างานวันนี้) — เคส/กะมาจากตัวกะเอง ไม่ต้องส่ง case_id */
   myVisitReports: (visitId) => request(`/my/visits/${visitId}/reports`),
   /** URL รูปแผลที่แนบในรายงาน — ใส่ใน <img src> ได้ (คุกกี้ session ไปด้วยอัตโนมัติ) */
+  myReportImageUrl: (caseId, reportId, imageId) => `/api/my/cases/${caseId}/reports/${reportId}/images/${imageId}`,
   myReportPhotoUrl: (caseId, reportId) => `/api/my/cases/${caseId}/reports/${reportId}/photo`,
   /** ลงรายงานย้อนหลังจากหน้าเคส — body ต้องมี visit_id (กะของตัวเองที่ถึงวันแล้ว) */
   addMyCaseReport: (caseId, body) => request(`/my/cases/${caseId}/reports`, { method: 'POST', body }),
@@ -534,6 +535,7 @@ export const api = {
   postFamilyMessage: (caseId, body) => request(`/family/cases/${caseId}/messages`, { method: 'POST', body }),
   hideFamilyMessage: (caseId, id) => request(`/family/cases/${caseId}/messages/${id}`, { method: 'DELETE' }),
   familyPhotoUrl: (caseId, id) => `/api/family/cases/${caseId}/messages/${id}/photo`,
+  caseReportImageUrl: (id, reportId, imageId) => `/api/cases/${id}/reports/${reportId}/images/${imageId}`,
   caseReportPhotoUrl: (id, reportId) => `/api/cases/${id}/reports/${reportId}/photo`,
   addCaseReport: (id, body) => request(`/cases/${id}/reports`, { method: 'POST', body }),
   updateCaseReport: (id, reportId, body) =>

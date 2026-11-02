@@ -358,6 +358,20 @@ myRouter.patch(
   }),
 );
 
+/** รูปแนบรายงาน (หลายรูป) ในเคสที่ฉันเข้าถึงได้ — เกณฑ์เดียวกับการอ่านรายงาน */
+myRouter.get(
+  '/cases/:id/reports/:reportId/images/:imageId',
+  asyncRoute(async (req, res, next) => {
+    if (!(await myCaseRow(req))) return next(notFound('ไม่พบเคสนี้ หรือไม่ใช่เคสที่คุณรับผิดชอบ'));
+    const row = await cases.findReportImage(req.params.id, Number(req.params.reportId), Number(req.params.imageId));
+    if (!row) return next(notFound('ไม่พบรูปนี้'));
+    res.setHeader('Content-Type', row.mime);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    res.send(row.data);
+  }),
+);
+
 /** รูปแผลของรายงานในเคสที่ฉันเข้าถึงได้ — เกณฑ์เดียวกับการอ่านรายงาน */
 myRouter.get(
   '/cases/:id/reports/:reportId/photo',
@@ -456,7 +470,7 @@ myRouter.get(
     await family.ensureFamilyTable();
     const family_count = (await family.listForCase(req.params.id)).filter((f) => f.state === 'linked' || f.accepted_at).length;
     res.set('Cache-Control', 'no-store');
-    res.json({ items: await family.messagesFor(req.params.id, 100), family_count });
+    res.json({ items: await family.messagesForStaff(req.params.id, 100, req.user.employee_id), family_count });
   }),
 );
 

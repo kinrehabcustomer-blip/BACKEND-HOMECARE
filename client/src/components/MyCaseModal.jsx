@@ -1,16 +1,12 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { useAuth } from '../auth.jsx';
-import CaseReports from './CaseReports.jsx';
-import CaseFamilyChat from './CaseFamilyChat.jsx';
 import CaseLocationLink from './CaseLocationLink.jsx';
 import { useSheetSwipe } from '../lib/sheetSwipe.js';
 import { useScrollLock } from '../lib/scrollLock.js';
-import { SERVICE_KIND_LABELS, serviceKindOf, GENDER_LABELS, VISIT_STATE_LABELS, formatDate, timeText, caseStage, todayTH } from '../labels.js';
+import { SERVICE_KIND_LABELS, serviceKindOf, GENDER_LABELS, VISIT_STATE_LABELS, formatDate, timeText, caseStage } from '../labels.js';
 import { formatPhone } from '../lib/phone.js';
 import { caseCode } from '../lib/patientCode.js';
-
-const CLOSED = ['closed', 'cancelled'];
 
 /** ชื่อบริการของเคส — กายภาพใช้ชื่อแพ็คเกจ, Homecare ใช้รูปแบบ+เกรด (ใช้ร่วมกันหลายหน้าของ field) */
 export const serviceName = (c) => {
@@ -53,13 +49,6 @@ export default function MyCaseModal({ caseId, onClose }) {
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
   }, [onClose]);
-
-  // กะของตัวเองที่ถึงวันแล้ว ใหม่ไปเก่า — ใช้เลือกกะตอนลงรายงานย้อนหลัง (เคสจบแล้ว = ไม่เปิด)
-  const today = todayTH();
-  const backfillVisits = item && !CLOSED.includes(item.status)
-    ? item.visits.filter((v) => v.assigned_to === me && v.visit_date <= today && v.status !== 'cancelled').reverse()
-    : null;
-  const hasBackfill = backfillVisits && backfillVisits.length > 0;
 
   const genderAge = item
     ? [GENDER_LABELS[item.patient_gender], item.patient_age != null && `${item.patient_age} ปี`].filter(Boolean).join(' / ')
@@ -134,27 +123,6 @@ export default function MyCaseModal({ caseId, onClose }) {
               {/* ที่นี่คือ "ประวัติ" อย่างเดียว — อ่านของทุกคนในเคสได้ (ผลัดเวรต้องรู้ว่ากะก่อนหน้าเจออะไร)
                   แต่การบันทึกอยู่ที่หน้างานวันนี้ที่เดียว เพราะรายงานต้องผูกกับกะที่ไปทำจริงเสมอ
                   ถ้าเปิดให้กรอกจากตรงนี้ด้วย จะได้รายงานที่ไม่รู้ว่าเป็นของนัดไหน */}
-              {/* แชทกับญาติ (ดร. 24 ต.ค. 2569 แบบ ก) — ญาติ ทีม และผู้ดูแลของเคสเห็นเหมือนกัน */}
-              <section>
-                <h3>แชทกับญาติ</h3>
-                <CaseFamilyChat caseId={item.case_id} closed={['closed', 'cancelled'].includes(item.status)} />
-              </section>
-
-              <section>
-                <h3>รายงานอาการผู้รับบริการ</h3>
-                <CaseReports
-                  caseId={item.case_id}
-                  caseInfo={item}
-                  scope="my"
-                  currentEmployeeId={me}
-                  readOnly
-                  allowAdd={false}
-                  backfillVisits={hasBackfill ? backfillVisits : null}
-                  inlineLimit={3}
-                  archiveTitle={item.client_name}
-                />
-              </section>
-
               {/* Homecare = ตารางกะ · กายภาพ = ตารางนัดเข้าคอร์ส */}
               <section>
                 <h3>
