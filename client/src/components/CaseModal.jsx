@@ -383,6 +383,28 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
       ? [...baseStaff, ...staff.filter((e) => e.employee_id === item.assigned_to)]
       : baseStaff;
 
+  /* กะถัดไปที่ยังต้องไป — ปุ่ม "ส่งเตือน" ท้ายหน้าต่างเตือนกะนี้ (เงื่อนไขเดียวกับปุ่มรายกะใน CaseVisits)
+     อยากเตือนกะอื่นให้กดที่แถวกะนั้นใน popup รายการกะ */
+  const nextVisit = visits
+    .filter((v) => v.status === 'scheduled' && !v.check_in_at && v.visit_date >= todayTH())
+    .sort((a, b) => `${a.visit_date} ${a.planned_start ?? ''}`.localeCompare(`${b.visit_date} ${b.planned_start ?? ''}`))[0];
+
+  /** ส่งเตือนนัดทาง LINE เอง — ไม่เปลี่ยนข้อมูลเคส จึงไม่ผ่าน run() · ข้อความเข้าคิว ส่งจริงเมื่อระบบแชทมารับ */
+  async function remindNext() {
+    if (!nextVisit) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await api.remindVisit(item.case_id, nextVisit.visit_id);
+      const parts = [res.staff && `พนักงาน ${res.staff}`, res.family && `ญาติ/ลูกค้า ${res.family}`].filter(Boolean);
+      toast(`เข้าคิวส่งเตือนแล้ว — ${parts.join(' · ')} คน`);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   /**
    * ยกเลิกเคส — ยืนยันด้วยฟอร์มในหน้า ไม่ใช่ prompt()
    *
@@ -911,6 +933,18 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
               {/* ลูกค้าใช้บริการต่อ — เปิดเคสรอบใหม่ที่คัดลอกจากเคสนี้ (ต่อได้ครั้งเดียว ยกเลิกแล้วต่อไม่ได้) */}
               {status !== 'cancelled' && !item.renewed_to && (
                 <Link className="btn" to={`/cases/new?renew=${item.case_id}`}>ต่อเคส</Link>
+              )}
+
+              {/* แอดมินกดส่งเตือนนัดทาง LINE เอง (พนักงาน + ญาติ) — กะถัดไปที่ยังไม่ถึง/ยังไม่เช็คอิน */}
+              {!terminal && nextVisit && (
+                <button
+                  className="btn"
+                  disabled={busy}
+                  title={`ส่งข้อความเตือนนัด ${nextVisit.visit_date}${nextVisit.planned_start ? ` ${nextVisit.planned_start}` : ''} ทาง LINE ถึงพนักงานและญาติ`}
+                  onClick={remindNext}
+                >
+                  ส่งเตือน
+                </button>
               )}
 
               {/* เคสจบแล้ว (ปิด/ยกเลิก) — เหลือแค่เปิดใหม่ */}
