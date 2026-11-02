@@ -1529,11 +1529,18 @@ export async function removeVisitsOn(caseId, dates) {
   if (dates.length === 0) return { visits: await listVisits(caseId), deleted: 0, kept: 0 };
 
   const { slots, params } = listSlots(dates, { id: caseId });
-  const deleted = await sql.run(
-    `DELETE FROM case_visits
-     WHERE case_id = :id AND visit_date IN (${slots}) AND check_in_at IS NULL`,
-    params,
-  );
+  await ensureVisitChangeTable();
+  // ลบนัด = แจ้งพนักงาน + ญาติเหมือน "ยกเลิก" (ดร.ธงชัย 2 พ.ย. 2569 ข้อ 1) — เดิมลบเงียบ นักกายภาพยังเดินทางไป ญาติยังรอ
+  const deleted = await transaction(async (tx) => {
+    const gone = await tx.all(
+      `DELETE FROM case_visits
+       WHERE case_id = :id AND visit_date IN (${slots}) AND check_in_at IS NULL
+       RETURNING visit_id, visit_date, planned_start, planned_end, assigned_to, status`,
+      params,
+    );
+    for (const v of gone) await recordVisitChange(tx, caseId, v.visit_id, v, { status: 'cancelled' }, ['status']);
+    return gone.length;
+  });
   const kept = await sql.one(
     `SELECT COUNT(*) AS n FROM case_visits
      WHERE case_id = :id AND visit_date IN (${slots}) AND check_in_at IS NOT NULL`,
@@ -1742,12 +1749,19 @@ export async function updateVisit(caseId, visitId, input, actor) {
  * คืน false เมื่อไม่ได้ลบ ให้ชั้น route ตอบ 409 พร้อมบอกเหตุผล
  */
 export async function removeVisit(caseId, visitId) {
-  const deleted = await sql.run(
-    `DELETE FROM case_visits
-     WHERE visit_id = :visit_id AND case_id = :case_id AND check_in_at IS NULL`,
-    { visit_id: visitId, case_id: caseId },
-  );
-  return deleted > 0;
+  await ensureVisitChangeTable();
+  // ลบนัด = แจ้งเหมือนยกเลิก (ดร.ธงชัย 2 พ.ย. 2569 ข้อ 1) · นัดที่ยกเลิกอยู่แล้ว/อยู่ในอดีต recordVisitChange ข้ามเอง
+  return transaction(async (tx) => {
+    const gone = await tx.one(
+      `DELETE FROM case_visits
+       WHERE visit_id = :visit_id AND case_id = :case_id AND check_in_at IS NULL
+       RETURNING visit_id, visit_date, planned_start, planned_end, assigned_to, status`,
+      { visit_id: visitId, case_id: caseId },
+    );
+    if (!gone) return false;
+    await recordVisitChange(tx, caseId, visitId, gone, { status: 'cancelled' }, ['status']);
+    return true;
+  });
 }
 
 // ---------- เช็คอิน/เอาท์ของพนักงานภาคสนาม (case_visits ระดับกะ) ----------
