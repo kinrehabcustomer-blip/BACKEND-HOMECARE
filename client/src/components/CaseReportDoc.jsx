@@ -3,7 +3,7 @@ import { ISSUER, printStamp } from '../lib/issuer.js';
 import { formatDate } from '../labels.js';
 import { TEXTS, vitalChips } from './CaseReports.jsx';
 import DailyCareView from './DailyCareView.jsx';
-import { usesDailyRecord, usesPhysioRecord, DAILY_SECTIONS, PHYSIO_SECTIONS } from '../lib/dailyCare.js';
+import { usesDailyRecord, usesPhysioRecord, DAILY_SECTIONS, PHYSIO_SECTIONS, PHYSIO_VIEW_SECTIONS } from '../lib/dailyCare.js';
 import { caseCode } from '../lib/patientCode.js';
 
 /** ป้ายกำกับใบที่ไม่ใช่รอบปกติ — บนกระดาษไม่มีสีให้ดู จึงต้องเป็นคำ */
@@ -33,7 +33,7 @@ export default function CaseReportDoc({ caseItem, reports }) {
 
   const printerName = [user?.first_name, user?.last_name].filter(Boolean).join(' ');
   const structured = usesPhysioRecord(caseItem) || usesDailyRecord(caseItem);
-  const sections = usesPhysioRecord(caseItem) ? PHYSIO_SECTIONS : DAILY_SECTIONS;
+  const sections = usesPhysioRecord(caseItem) ? PHYSIO_VIEW_SECTIONS : DAILY_SECTIONS;
 
   /* เรียงเก่า→ใหม่บนกระดาษ ตรงข้ามกับบนจอ — หน้าจอคือ "มีอะไรใหม่" (ใหม่สุดอยู่บน)
      ส่วนกระดาษคืออ่านเป็นลำดับเหตุการณ์ตั้งแต่ต้นจนจบ เหมือนแฟ้มประวัติทั่วไป */

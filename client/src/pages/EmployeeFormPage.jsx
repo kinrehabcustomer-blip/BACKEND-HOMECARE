@@ -10,6 +10,7 @@ import EmployeeCodeField from '../components/EmployeeCodeField.jsx';
 import { EMPLOYEE_CODE_RE } from '../lib/employeeCode.js';
 import { POSITION_LABELS, EMPLOYMENT_TYPE_LABELS, STATUS_LABELS, GENDER_LABELS } from '../labels.js';
 import { formatPhoneInput } from '../lib/phone.js';
+import SearchSelect from '../components/SearchSelect.jsx';
 
 const BLANK = {
   // รหัสที่กรอกเอง (add-on) — ว่าง = ให้ระบบออกรหัส / ตอนแก้ = ไม่เปลี่ยนรหัส
@@ -242,12 +243,12 @@ export default function EmployeeFormPage() {
             }}
           />
           <label>ตำแหน่ง *
-            <select required name="position" {...field('position')}>
+            <SearchSelect required name="position" {...field('position')}>
               {/* Super Admin ตั้งได้เฉพาะ Super Admin (server กันอีกชั้น) — คนอื่นไม่เห็นตัวเลือกนี้ เว้นแต่แฟ้มนี้เป็น Super Admin อยู่แล้ว */}
               {Object.entries(POSITION_LABELS)
                 .filter(([v]) => v !== 'super_admin' || user?.position === 'super_admin' || form.position === 'super_admin')
                 .map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-            </select>
+            </SearchSelect>
             {fieldError('position')}
           </label>
           <label>เบอร์โทร
@@ -255,9 +256,9 @@ export default function EmployeeFormPage() {
             {fieldError('phone')}
           </label>
           <label>สถานะ
-            <select name="status" {...field('status')}>
+            <SearchSelect name="status" {...field('status')}>
               {Object.entries(STATUS_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-            </select>
+            </SearchSelect>
             {fieldError('status')}
           </label>
         </div>
@@ -280,10 +281,10 @@ export default function EmployeeFormPage() {
               {fieldError('national_id')}
             </label>
             <label>เพศ
-              <select name="gender" {...field('gender')}>
+              <SearchSelect name="gender" {...field('gender')}>
                 <option value="">— ไม่ระบุ —</option>
                 {Object.entries(GENDER_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-              </select>
+              </SearchSelect>
             </label>
             <label>วันเกิด
               <input type="date" name="birth_date" {...field('birth_date')} />
@@ -309,9 +310,9 @@ export default function EmployeeFormPage() {
           <summary>ข้อมูลการจ้างงาน</summary>
           <div className="grid">
             <label>ประเภทการจ้าง
-              <select name="employment_type" {...field('employment_type')}>
+              <SearchSelect name="employment_type" {...field('employment_type')}>
                 {Object.entries(EMPLOYMENT_TYPE_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-              </select>
+              </SearchSelect>
             </label>
             <label>วันเริ่มงาน
               <input type="date" name="hire_date" {...field('hire_date')} />

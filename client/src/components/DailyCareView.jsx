@@ -1,4 +1,4 @@
-import { DAILY_SECTIONS, dailyValueText, isFilled } from '../lib/dailyCare.js';
+import { DAILY_SECTIONS, bmiOf, dailyValueText, isFilled } from '../lib/dailyCare.js';
 
 /**
  * แสดงรายงานที่บันทึกไว้แล้ว — วาดจากนิยามชุดเดียวกับฟอร์ม (ส่ง sections ชุดเดียวกันเข้ามา)
@@ -7,7 +7,8 @@ import { DAILY_SECTIONS, dailyValueText, isFilled } from '../lib/dailyCare.js';
  * แต่เวรหนึ่งกรอกจริงราว 15–25 ช่อง ถ้าโชว์ครบทุกช่องคนอ่านจะต้องกวาดตาผ่าน "ไม่ได้ระบุ" เต็มหน้า
  * กว่าจะเจอสิ่งที่เปลี่ยนไป ซึ่งเป็นสิ่งเดียวที่เขาเปิดเข้ามาดู
  */
-export default function DailyCareView({ report, sections = DAILY_SECTIONS, photoUrl = null }) {
+export default function DailyCareView({ report: raw, sections = DAILY_SECTIONS, photoUrl = null }) {
+  const report = { ...raw, bmi: bmiOf(raw.weight_kg, raw.height_cm) };
   const blocks = sections.map((s) => ({
     key: s.key,
     title: s.title,

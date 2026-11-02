@@ -1,9 +1,10 @@
 import { useMemo, useState } from 'react';
-import { DAILY_SECTIONS, dailyValueText, isFilled } from '../lib/dailyCare.js';
+import { DAILY_SECTIONS, bmiOf, dailyValueText, isFilled } from '../lib/dailyCare.js';
 import { compressImage } from '../lib/image.js';
 import { todayTH } from '../labels.js';
 import TimeSelect from './TimeSelect.jsx';
 import FileButton from './FileButton.jsx';
+import SearchSelect from './SearchSelect.jsx';
 
 /**
  * ฟอร์มบันทึกรายงานแบบมีโครงสร้าง — วาดทุกช่องจากนิยามที่ส่งเข้ามาทาง sections
@@ -11,7 +12,7 @@ import FileButton from './FileButton.jsx';
  * ใช้ได้กับทุกชุดช่องที่ประกาศไว้ใน lib/dailyCare.js (ดูแลประจำวัน / กายภาพบำบัด)
  * ตัวฟอร์มไม่รู้จักช่องไหนเป็นพิเศษเลย — เพิ่มฟอร์มใหม่ = เพิ่มนิยาม ไม่ต้องแตะไฟล์นี้
  *
- * ปุ่มชิปแทน <select> เกือบทั้งฟอร์ม เพราะพนักงานกรอกจากมือถือขณะอยู่หน้างาน
+ * ปุ่มชิปแทน <SearchSelect> เกือบทั้งฟอร์ม เพราะพนักงานกรอกจากมือถือขณะอยู่หน้างาน
  * การกดชิปหนึ่งครั้งจบเร็วกว่าเปิด dropdown แล้วเลื่อนหา และเห็นทุกตัวเลือกพร้อมกัน
  * (กดชิปที่เลือกอยู่ซ้ำ = ยกเลิกการเลือก — ไม่มีทางกรอกผิดแล้วลบไม่ออก)
  *
@@ -42,6 +43,7 @@ function toPayload(form, sections) {
   for (const s of sections) {
     for (const f of s.fields) {
       const v = form[f.key];
+      if (f.type === 'bmi') continue; // คำนวณเอง ไม่เก็บ
       if (f.type === 'number') out[f.key] = v === '' || v == null ? null : Number(v);
       else if (f.type === 'multi') out[f.key] = v?.length ? v : null;
       else if (f.type === 'bool') out[f.key] = v === '' || v == null ? null : v;
@@ -130,7 +132,7 @@ function Field({ field, value, onChange, disabled }) {
   if (field.type === 'number') {
     return (
       <label className="care-num">
-        {field.label} <span className="muted">({field.unit})</span>
+        <span className="care-num-label">{field.label} <span className="muted">({field.unit})</span></span>
         <input
           type="number"
           inputMode="decimal"
@@ -217,9 +219,15 @@ function Section({ section, form, set, disabled, photoUrl }) {
   const [open, setOpen] = useState(!section.collapsed || hasData);
 
   const body = (
-    <div className={`care-grid ${section.columns === 4 ? 'cols-4' : ''}`}>
+    <div className={`care-grid ${section.columns ? `cols-${section.columns}` : ''}`}>
       {section.fields.map((f) =>
-        f.type === 'photo' ? (
+        f.type === 'bmi' ? (
+          // BMI คำนวณจากน้ำหนัก/ส่วนสูงที่กรอกอยู่ — อ่านอย่างเดียว ไม่เก็บลงฐานข้อมูล
+          <label key={f.key} className="care-num">
+            <span className="care-num-label">{f.label}</span>
+            <input type="text" readOnly tabIndex={-1} value={bmiOf(form.weight_kg, form.height_cm) ?? ''} placeholder="อัตโนมัติ" />
+          </label>
+        ) : f.type === 'photo' ? (
           <PhotoField
             key={f.key}
             field={f}

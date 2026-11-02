@@ -14,6 +14,7 @@ import PageRefresh from '../components/PageRefresh.jsx';
 import { caseCode } from '../lib/patientCode.js';
 import { useToast } from '../toast.jsx';
 import TimeComboInput from '../components/TimeComboInput.jsx';
+import SearchSelect from '../components/SearchSelect.jsx';
 
 const WEEKDAYS = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
 
@@ -338,7 +339,7 @@ export default function CalendarPage() {
           <button className={view === 'week' ? 'on' : ''} onClick={() => patch({ view: 'week' })}>สัปดาห์</button>
         </span>
 
-        <select value={employeeId} onChange={(e) => patch({ employee_id: e.target.value })} aria-label="เลือกพนักงาน">
+        <SearchSelect value={employeeId} onChange={(e) => patch({ employee_id: e.target.value })} aria-label="เลือกพนักงาน">
           <option value="">พนักงานทุกคน</option>
           {/* เฉพาะพนักงาน front (คนที่รับเคส/มีกะ) · คนที่เลือกค้างอยู่ใน URL ยังโชว์ไว้ */}
           {staff.filter((s) => s.can_take_cases || s.employee_id === employeeId).map((s) => (
@@ -347,17 +348,17 @@ export default function CalendarPage() {
               {s.nickname ? ` (${s.nickname})` : ''} · {POSITION_LABELS[s.position]}
             </option>
           ))}
-        </select>
+        </SearchSelect>
 
-        <select value={kind} onChange={(e) => patch({ kind: e.target.value })} aria-label="เลือกประเภทบริการ">
+        <SearchSelect value={kind} onChange={(e) => patch({ kind: e.target.value })} aria-label="เลือกประเภทบริการ">
           <option value="">ทุกประเภทบริการ</option>
           {Object.entries(SERVICE_KIND_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-        </select>
+        </SearchSelect>
 
-        <select value={state} onChange={(e) => patch({ state: e.target.value })} aria-label="เลือกสถานะกะ">
+        <SearchSelect value={state} onChange={(e) => patch({ state: e.target.value })} aria-label="เลือกสถานะกะ">
           <option value="">ทุกสถานะกะ</option>
           {CAL_STATES.map((s) => <option key={s} value={s}>{VISIT_STATE_LABELS[s]}</option>)}
-        </select>
+        </SearchSelect>
 
         {filtered && (
           <button className="btn" onClick={() => patch({ employee_id: '', kind: '', state: '' })}>ล้างตัวกรอง</button>

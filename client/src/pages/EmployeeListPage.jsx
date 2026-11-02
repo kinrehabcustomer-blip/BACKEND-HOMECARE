@@ -8,6 +8,7 @@ import ErrorBar from '../components/ErrorBar.jsx';
 import PageRefresh from '../components/PageRefresh.jsx';
 import { POSITION_LABELS, STATUS_LABELS, EMPLOYMENT_TYPE_LABELS } from '../labels.js';
 import { formatPhone } from '../lib/phone.js';
+import SearchSelect from '../components/SearchSelect.jsx';
 
 const PER_PAGE_OPTIONS = [20, 50, 100];
 
@@ -128,18 +129,18 @@ export default function EmployeeListPage() {
             value={q}
             onChange={(e) => setFilter('q', e.target.value)}
           />
-          <select value={position} onChange={(e) => setFilter('position', e.target.value)}>
+          <SearchSelect value={position} onChange={(e) => setFilter('position', e.target.value)}>
             <option value="">ทุกตำแหน่ง</option>
             {Object.entries(POSITION_LABELS).map(([value, label]) => (
               <option key={value} value={value}>{label}</option>
             ))}
-          </select>
-          <select value={status} onChange={(e) => setFilter('status', e.target.value)}>
+          </SearchSelect>
+          <SearchSelect value={status} onChange={(e) => setFilter('status', e.target.value)}>
             <option value="">ทุกสถานะ</option>
             {Object.entries(STATUS_LABELS).map(([value, label]) => (
               <option key={value} value={value}>{label}</option>
             ))}
-          </select>
+          </SearchSelect>
           {/* โผล่เฉพาะตอนมีอะไรกรองอยู่ — ปุ่มที่กดแล้วไม่เกิดอะไรขึ้นไม่ควรมีให้เห็น */}
           {filtered && (
             <button className="btn" onClick={() => patch({ q: '', status: '', position: '', page: '1' })}>
@@ -275,9 +276,9 @@ export default function EmployeeListPage() {
 
             <label className="per-page">
               แสดง
-              <select value={perPage} onChange={(e) => setFilter('per_page', e.target.value)}>
+              <SearchSelect value={perPage} onChange={(e) => setFilter('per_page', e.target.value)}>
                 {PER_PAGE_OPTIONS.map((n) => <option key={n} value={n}>{n}</option>)}
-              </select>
+              </SearchSelect>
               ต่อหน้า
             </label>
           </div>

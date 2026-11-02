@@ -11,6 +11,7 @@ import {
 import LineIcon from './LineIcon.jsx';
 import ConfirmButton from './ConfirmButton.jsx';
 import { formatPhone, formatPhoneInput } from '../lib/phone.js';
+import SearchSelect from './SearchSelect.jsx';
 
 const FOCUSABLE = 'a[href], button:not(:disabled), input, select, textarea, [tabindex]:not([tabindex="-1"])';
 
@@ -81,9 +82,9 @@ function QuickEdit({ patient, onDone, onCancel }) {
       {error && <p className="error">{error}</p>}
       <div className="grid cols-2">
         <label>สถานะ
-          <select {...field('status')}>
+          <SearchSelect {...field('status')}>
             {Object.entries(PATIENT_STATUS_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-          </select>
+          </SearchSelect>
         </label>
         <label>เบอร์ผู้ติดต่อฉุกเฉิน<input inputMode="tel" {...field('emergency_contact_phone')} /></label>
         <label className="span-2">แพ้ยา

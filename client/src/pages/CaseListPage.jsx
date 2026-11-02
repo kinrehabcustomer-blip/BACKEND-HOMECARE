@@ -8,6 +8,7 @@ import PageRefresh from '../components/PageRefresh.jsx';
 import { SERVICE_KIND_LABELS, MONTH_LABELS, formatBaht, formatDate, toBuddhistYear, caseStage, CASE_STATUS_FILTER_LABELS } from '../labels.js';
 import { formatPhone } from '../lib/phone.js';
 import { caseCode } from '../lib/patientCode.js';
+import SearchSelect from '../components/SearchSelect.jsx';
 
 const PER_PAGE_OPTIONS = [20, 50, 100];
 
@@ -176,14 +177,14 @@ export default function CaseListPage() {
             value={q}
             onChange={(e) => setFilter('q', e.target.value)}
           />
-          <select value={year} onChange={(e) => setFilter('year', e.target.value)} aria-label="ปี">
+          <SearchSelect value={year} onChange={(e) => setFilter('year', e.target.value)} aria-label="ปี">
             <option value="">ทุกปี</option>
             {periods.map((p) => (
               <option key={p.year} value={p.year}>ปี {toBuddhistYear(p.year)} ({p.count})</option>
             ))}
-          </select>
+          </SearchSelect>
           {/* เลือกเดือนไม่ได้จนกว่าจะเลือกปี — "พฤษภาคม" ของปีไหนไม่มีคำตอบ */}
-          <select
+          <SearchSelect
             value={month}
             onChange={(e) => setFilter('month', e.target.value)}
             disabled={!year}
@@ -194,14 +195,14 @@ export default function CaseListPage() {
             {monthsOfYear.map((m) => (
               <option key={m.month} value={m.month}>{MONTH_LABELS[m.month]} ({m.count})</option>
             ))}
-          </select>
-          <select value={serviceKind} onChange={(e) => setFilter('service_kind', e.target.value)} aria-label="ประเภทบริการ">
+          </SearchSelect>
+          <SearchSelect value={serviceKind} onChange={(e) => setFilter('service_kind', e.target.value)} aria-label="ประเภทบริการ">
             <option value="">ทุกบริการ</option>
             {Object.entries(SERVICE_KIND_LABELS).map(([value, label]) => (
               <option key={value} value={value}>{label}</option>
             ))}
-          </select>
-          <select value={statusValue} onChange={(e) => setStatusFilter(e.target.value)} aria-label="สถานะ">
+          </SearchSelect>
+          <SearchSelect value={statusValue} onChange={(e) => setStatusFilter(e.target.value)} aria-label="สถานะ">
             <option value="">ทุกสถานะ</option>
             {/* สถานะตามวันที่ (รอเริ่ม/กำลังให้บริการ/รอยืนยันปิดเคส) แทนสถานะใน DB — ตรงกับป้ายในตาราง */}
             {Object.entries(CASE_STATUS_FILTER_LABELS).map(([value, label]) => (
@@ -211,9 +212,9 @@ export default function CaseListPage() {
             {Object.entries(PSEUDO_STATUS).map(([value, label]) => (
               <option key={value} value={value}>{label}</option>
             ))}
-          </select>
+          </SearchSelect>
           {/* "เคสของคนนี้" เป็นคำถามที่ถามบ่อย — server รองรับ assigned_to อยู่แล้ว แค่ไม่เคยมีช่องให้เลือก */}
-          <select value={assignedTo} onChange={(e) => setFilter('assigned_to', e.target.value)} aria-label="พนักงานที่รับ">
+          <SearchSelect value={assignedTo} onChange={(e) => setFilter('assigned_to', e.target.value)} aria-label="พนักงานที่รับ">
             <option value="">พนักงานทุกคน</option>
             {/* เฉพาะพนักงาน front (คนที่รับเคสได้) — สาย back ไม่มีเคสให้กรอง · คนที่เลือกค้างอยู่ใน URL ยังโชว์ไว้ */}
             {staff.filter((e) => e.can_take_cases || e.employee_id === assignedTo).map((e) => (
@@ -221,7 +222,7 @@ export default function CaseListPage() {
                 {e.first_name} {e.last_name}
               </option>
             ))}
-          </select>
+          </SearchSelect>
           {/* โผล่เฉพาะตอนมีอะไรกรองอยู่ — ปุ่มที่กดแล้วไม่เกิดอะไรขึ้นไม่ควรมีให้เห็น */}
           {filtered && <button className="btn" onClick={clearFilters}>ล้างตัวกรอง</button>}
           {/* ปุ่มเปิดเคสอยู่ท้ายแถบตัวกรอง (ดันไปชิดขวา) — ใกล้รายการที่จะเพิ่มเข้าไป */}
@@ -371,9 +372,9 @@ export default function CaseListPage() {
 
             <label className="per-page">
               แสดง
-              <select value={perPage} onChange={(e) => setFilter('per_page', e.target.value)}>
+              <SearchSelect value={perPage} onChange={(e) => setFilter('per_page', e.target.value)}>
                 {PER_PAGE_OPTIONS.map((n) => <option key={n} value={n}>{n}</option>)}
-              </select>
+              </SearchSelect>
               ต่อหน้า
             </label>
           </div>

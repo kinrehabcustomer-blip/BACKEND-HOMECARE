@@ -294,6 +294,8 @@ export const api = {
   myVisitReports: (visitId) => request(`/my/visits/${visitId}/reports`),
   /** URL รูปแผลที่แนบในรายงาน — ใส่ใน <img src> ได้ (คุกกี้ session ไปด้วยอัตโนมัติ) */
   myReportPhotoUrl: (caseId, reportId) => `/api/my/cases/${caseId}/reports/${reportId}/photo`,
+  /** ลงรายงานย้อนหลังจากหน้าเคส — body ต้องมี visit_id (กะของตัวเองที่ถึงวันแล้ว) */
+  addMyCaseReport: (caseId, body) => request(`/my/cases/${caseId}/reports`, { method: 'POST', body }),
   addMyVisitReport: (visitId, body) => request(`/my/visits/${visitId}/reports`, { method: 'POST', body }),
   updateMyCaseReport: (id, reportId, body) =>
     request(`/my/cases/${id}/reports/${reportId}`, { method: 'PATCH', body }),

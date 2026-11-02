@@ -16,6 +16,7 @@ import { nextRoundDates, endDateFor } from '../lib/caseRounds.js';
 import { useCanSeeStaffPay } from '../auth.jsx';
 import { useScrollLock } from '../lib/scrollLock.js';
 import { formatPhone, formatPhoneInput } from '../lib/phone.js';
+import SearchSelect from '../components/SearchSelect.jsx';
 
 const TIERS = ['CG', 'NA', 'PN', 'RN'];
 const CATEGORY_LABELS = { daily: 'รายวัน', weekly: 'รายสัปดาห์', monthly: 'รายเดือน' };
@@ -1127,15 +1128,15 @@ export default function CaseFormPage() {
             </p>
           )}
           <label>ประเภทบริการ
-            <select value={form.service_kind} disabled={serviceLocked} onChange={(e) => changeKind(e.target.value)}>
+            <SearchSelect value={form.service_kind} disabled={serviceLocked} onChange={(e) => changeKind(e.target.value)}>
               <option value="">— ไม่ระบุ —</option>
               {Object.entries(SERVICE_KIND_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-            </select>
+            </SearchSelect>
           </label>
 
           {isHomecare && (
           <label>รูปแบบบริการ
-            <select value={form.pkg_format_id} disabled={serviceLocked} onChange={(e) => applySelection({ pkg_format_id: e.target.value })}>
+            <SearchSelect value={form.pkg_format_id} disabled={serviceLocked} onChange={(e) => applySelection({ pkg_format_id: e.target.value })}>
               <option value="">— ไม่ระบุ —</option>
               {['daily', 'weekly', 'monthly'].map((cat) => {
                 const opts = matrix?.formats.filter((f) => f.category === cat) ?? [];
@@ -1146,13 +1147,13 @@ export default function CaseFormPage() {
                   </optgroup>
                 );
               })}
-            </select>
+            </SearchSelect>
           </label>
           )}
 
           {isPhysio && (
             <label>แพ็คเกจกายภาพบำบัด
-              <select value={form.physio_package_id} disabled={serviceLocked} onChange={(e) => applyPhysio(e.target.value)}>
+              <SearchSelect value={form.physio_package_id} disabled={serviceLocked} onChange={(e) => applyPhysio(e.target.value)}>
                 <option value="">— เลือกแพ็คเกจ —</option>
                 {physioOptions.map((p) => (
                   <option key={p.physio_package_id} value={p.physio_package_id}>
@@ -1162,21 +1163,21 @@ export default function CaseFormPage() {
                     {p.active ? '' : ' (ปิดขายแล้ว)'}
                   </option>
                 ))}
-              </select>
+              </SearchSelect>
             </label>
           )}
 
           {isHomecare && needGrade && (
             <label>เกรด
-              <select value={form.pkg_grade_id} disabled={serviceLocked} onChange={(e) => applySelection({ pkg_grade_id: e.target.value })}>
+              <SearchSelect value={form.pkg_grade_id} disabled={serviceLocked} onChange={(e) => applySelection({ pkg_grade_id: e.target.value })}>
                 <option value="">— เลือกเกรด —</option>
                 {matrix.grades.map((g) => <option key={g.grade_id} value={g.grade_id}>{g.name}</option>)}
-              </select>
+              </SearchSelect>
             </label>
           )}
           {isHomecare && (
           <label>ระดับพนักงาน
-            <select
+            <SearchSelect
               value={form.pkg_staff_tier}
               onChange={(e) => applySelection({ pkg_staff_tier: e.target.value })}
               disabled={serviceLocked || !selectedFormat || (needGrade && !selGradeId)}
@@ -1195,7 +1196,7 @@ export default function CaseFormPage() {
                   </option>
                 );
               })}
-            </select>
+            </SearchSelect>
           </label>
           )}
           {/* เต็มแถว — ไม่งั้นช่องถัดไป (วันเริ่ม) ขึ้นมาแทรกคอลัมน์ที่เหลือข้างกล่องติ๊กบนจอสามคอลัมน์ */}
@@ -1318,14 +1319,14 @@ export default function CaseFormPage() {
                 {fieldError(`addons.${i}.name`)}
               </label>
               <label>รูปแบบ
-                <select
+                <SearchSelect
                   name={`addons.${i}.kind`}
                   value={a.kind}
                   onChange={(e) => setAddon(i, 'kind', e.target.value)}
                 >
                   <option value="rent">เช่า</option>
                   <option value="sale">ซื้อขาด</option>
-                </select>
+                </SearchSelect>
               </label>
               <label>จำนวน
                 <input
@@ -1454,10 +1455,10 @@ export default function CaseFormPage() {
                 </label>
               )}
               <label>เพศ
-                <select {...field('patient_gender')}>
+                <SearchSelect {...field('patient_gender')}>
                   <option value="">— ไม่ระบุ —</option>
                   {Object.entries(GENDER_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                </select>
+                </SearchSelect>
               {fieldError('patient_gender')}
               </label>
               <label>อายุ (ปี)<input type="number" min="0" max="130" {...field('patient_age')} />{fieldError('patient_age')}</label>
@@ -1569,10 +1570,10 @@ export default function CaseFormPage() {
                 </label>
               )}
               <label>เพศ
-                <select {...field('patient_gender')}>
+                <SearchSelect {...field('patient_gender')}>
                   <option value="">— ไม่ระบุ —</option>
                   {Object.entries(GENDER_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                </select>
+                </SearchSelect>
               {fieldError('patient_gender')}
               </label>
               <label>อายุ (ปี)<input type="number" min="0" max="130" {...field('patient_age')} />{fieldError('patient_age')}</label>

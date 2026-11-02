@@ -8,6 +8,7 @@ import LineIcon from '../components/LineIcon.jsx';
 import ErrorBar from '../components/ErrorBar.jsx';
 import PageRefresh from '../components/PageRefresh.jsx';
 import { formatPhone } from '../lib/phone.js';
+import SearchSelect from '../components/SearchSelect.jsx';
 
 const PER_PAGE_OPTIONS = [20, 50, 100];
 
@@ -130,17 +131,17 @@ export default function PatientListPage() {
             value={q}
             onChange={(e) => setFilter('q', e.target.value)}
           />
-          <select value={status} onChange={(e) => setFilter('status', e.target.value)}>
+          <SearchSelect value={status} onChange={(e) => setFilter('status', e.target.value)}>
             <option value="">ทุกสถานะ</option>
             {Object.entries(PATIENT_STATUS_LABELS).map(([v, l]) => (
               <option key={v} value={v}>{l}</option>
             ))}
-          </select>
-          <select value={hasCustomer} onChange={(e) => setFilter('has_customer', e.target.value)}>
+          </SearchSelect>
+          <SearchSelect value={hasCustomer} onChange={(e) => setFilter('has_customer', e.target.value)}>
             <option value="">ผู้ว่าจ้าง: ทั้งหมด</option>
             <option value="yes">ผูกลูกค้าแล้ว</option>
             <option value="no">ยังไม่ผูกลูกค้า</option>
-          </select>
+          </SearchSelect>
           {/* โผล่เฉพาะตอนมีอะไรกรองอยู่ — ปุ่มที่กดแล้วไม่เกิดอะไรขึ้นไม่ควรมีให้เห็น */}
           {filtered && <button className="btn" onClick={clearFilters}>ล้างตัวกรอง</button>}
           {/* ปุ่มหลักของหน้าอยู่ท้ายแถบตัวกรอง (ไม่มีหัวหน้าแล้ว) */}
@@ -296,9 +297,9 @@ export default function PatientListPage() {
 
             <label className="per-page">
               แสดง
-              <select value={perPage} onChange={(e) => setFilter('per_page', e.target.value)}>
+              <SearchSelect value={perPage} onChange={(e) => setFilter('per_page', e.target.value)}>
                 {PER_PAGE_OPTIONS.map((n) => <option key={n} value={n}>{n}</option>)}
-              </select>
+              </SearchSelect>
               ต่อหน้า
             </label>
           </div>

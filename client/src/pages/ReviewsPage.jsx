@@ -5,6 +5,7 @@ import { STATUS_LABELS, POSITION_LABELS, stampText } from '../labels.js';
 import Stars from '../components/Stars.jsx';
 import PageRefresh from '../components/PageRefresh.jsx';
 import { scoreText } from '../lib/reviewQuestions.js';
+import SearchSelect from '../components/SearchSelect.jsx';
 
 /**
  * คะแนนประเมินจากญาติผู้รับบริการ — ภาพรวมรายบุคคล
@@ -105,11 +106,11 @@ export default function ReviewsPage() {
               value={q}
               onChange={(e) => setFilter('q', e.target.value)}
             />
-            <select value={ratedFilter} onChange={(e) => setFilter('rated', e.target.value)} aria-label="คะแนน">
+            <SearchSelect value={ratedFilter} onChange={(e) => setFilter('rated', e.target.value)} aria-label="คะแนน">
               <option value="">พนักงานทุกคน</option>
               <option value="yes">มีคะแนนแล้ว</option>
               <option value="no">ยังไม่มีคะแนน</option>
-            </select>
+            </SearchSelect>
             {/* โผล่เฉพาะตอนมีอะไรกรองอยู่ — ปุ่มที่กดแล้วไม่เกิดอะไรขึ้นไม่ควรมีให้เห็น */}
             {filtered && <button className="btn" onClick={clearFilters}>ล้างตัวกรอง</button>}
             {filtered && <span className="muted">พบ {shown.length} จาก {rows.length} คน</span>}

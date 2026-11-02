@@ -1102,6 +1102,14 @@ ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS post_spo2         INTEGER CHEC
 ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS home_program TEXT
   CHECK (home_program IN ('done', 'not_done', 'na'));
 
+-- ---------- แบบบันทึกการตรวจรักษา (นักกายภาพ · 2 พ.ย. 2569) ----------
+-- ใช้แทนชุดช่องเดิมของฟอร์มกายภาพ คอลัมน์เดิมคงไว้ให้ใบเก่าเปิดอ่านได้ · น้ำหนัก/สัญญาณชีพใช้คอลัมน์เดิม
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS height_cm DOUBLE PRECISION CHECK (height_cm BETWEEN 30 AND 250);
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS chief_complaint TEXT;
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS physical_exam   TEXT;
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS diagnosis       TEXT;
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS treatment_plan  TEXT;
+
 -- ============================================================================
 -- ทีมพนักงานของเคส (case_team) — เคสหนึ่งมีคนดูแลได้มากกว่าหนึ่งคน
 --

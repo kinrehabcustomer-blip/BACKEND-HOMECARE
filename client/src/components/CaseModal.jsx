@@ -148,6 +148,7 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
   const [team, setTeam] = useState([]); // คนที่ร่วมดูแลเคส นอกเหนือจากผู้รับผิดชอบหลัก
   /* ฟอร์มแก้รายงานกางอยู่ในหน้า — Esc/Tab ต้องไม่ปิดทั้งกล่องจนที่พิมพ์ไว้หาย */
   const [reportFormOpen, setReportFormOpen] = useState(false);
+  const [reportAddOpen, setReportAddOpen] = useState(false); // popup ลงรายงานย้อนหลัง (ปุ่มอยู่ที่หัวข้อรายงาน)
   /* ใบที่กำลังจะพิมพ์ — โหลดรายงานทั้งคลังตอนกดเท่านั้น (หน้าปกติใช้แค่ไม่กี่ใบล่าสุด)
      ค้างไว้หลังพิมพ์เสร็จก็ไม่มีผล เพราะตัวใบถูกซ่อนบนจออยู่แล้ว */
   const [printReports, setPrintReports] = useState(null);
@@ -678,25 +679,29 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                   {/* สองทางที่ต่างกันจริงๆ: อ่านในระบบ (กางดูรายใบ แก้ไขได้ กรองตามเดือน/ที่ผิดปกติ)
                       กับใบกระดาษที่ส่งออกไปข้างนอก (ญาติขอดู แพทย์ขอประวัติ เก็บเข้าแฟ้มตอนปิดเคส)
                       ทางแรกต้องอยู่ตรงนี้ด้วยเสมอ ไม่ใช่โผล่เฉพาะตอนรายงานเยอะจนล้นออกนอกหน้า */}
-                  {reports.total > 0 && (
-                    <span className="head-actions">
-                      <button className="btn tiny" onClick={() => setReportsOpen(true)}>
-                        <LineIcon name="eye" />ดูรายงานทั้งหมด ({reports.total})
-                      </button>
-                      <button className="btn tiny" disabled={printing} onClick={printReportForm}>
-                        <LineIcon name="printer" />{printing ? 'กำลังเตรียม…' : 'พิมพ์ / บันทึก PDF'}
-                      </button>
-                    </span>
-                  )}
+                  <span className="head-actions">
+                    {reports.total > 0 && (
+                      <>
+                        <button className="btn tiny" onClick={() => setReportsOpen(true)}>
+                          <LineIcon name="eye" />ดูรายงานทั้งหมด ({reports.total})
+                        </button>
+                        <button className="btn tiny" disabled={printing} onClick={printReportForm}>
+                          <LineIcon name="printer" />{printing ? 'กำลังเตรียม…' : 'พิมพ์ / บันทึก PDF'}
+                        </button>
+                      </>
+                    )}
+                    <button className="btn tiny primary" onClick={() => setReportAddOpen(true)}>
+                      + ลงรายงานย้อนหลัง
+                    </button>
+                  </span>
                 </div>
-                <p className="muted report-where">
-                  บันทึกรายงานได้ที่หน้า <strong>งานวันนี้</strong> ของกะนั้น — ตรงนี้ดูย้อนหลังและแก้ไขได้
-                </p>
                 <CaseReports
                   caseId={item.case_id}
                   caseInfo={item}
                   scope="admin"
-                  allowAdd={false}
+                  allowAdd
+                  adding={reportAddOpen}
+                  onAddingChange={setReportAddOpen}
                   inlineLimit={3}
                   archiveTitle={item.client_name}
                   onFormOpen={setReportFormOpen}

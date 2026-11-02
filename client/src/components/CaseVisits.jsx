@@ -7,6 +7,7 @@ import {
 import LineIcon from './LineIcon.jsx';
 import TimeSelect from './TimeSelect.jsx';
 import { caseCode } from '../lib/patientCode.js';
+import SearchSelect from './SearchSelect.jsx';
 
 const WEEKDAYS = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
 
@@ -497,14 +498,14 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
 
           {/* คนที่ไป: เฉพาะกะ Homecare — นัดกายภาพใช้ผู้รับผิดชอบหลักของเคส (นักกายภาพบำบัดของคอร์สนั้น) */}
           {!isAppt && (
-            <select value={who} disabled={busy} onChange={(e) => setWho(e.target.value)}>
+            <SearchSelect value={who} disabled={busy} onChange={(e) => setWho(e.target.value)}>
               <option value="">— ไม่ระบุคน —</option>
               {staff.map((s) => (
                 <option key={s.employee_id} value={s.employee_id}>
                   {s.first_name} {s.last_name} ({POSITION_LABELS[s.position]})
                 </option>
               ))}
-            </select>
+            </SearchSelect>
           )}
 
           {!isAppt && staff.length === 0 && (

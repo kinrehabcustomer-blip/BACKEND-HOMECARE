@@ -562,6 +562,14 @@ const reportFields = z.object({
   post_spo2: vital(50, 100, 'ออกซิเจนปลายนิ้วหลังทำ', '%'),
   home_program: choice(DONE, 'โปรแกรมที่บ้าน'),
 
+  /* แบบบันทึกการตรวจรักษาของนักกายภาพ (2 พ.ย. 2569) — ส่วนสูง + บันทึกตรวจรักษา 4 ช่อง
+     น้ำหนัก/สัญญาณชีพใช้คอลัมน์เดิม · BMI คำนวณหน้าเว็บ ไม่เก็บ */
+  height_cm: vital(30, 250, 'ส่วนสูง', 'ซม.', { integer: false }),
+  chief_complaint: reportText,
+  physical_exam: reportText,
+  diagnosis: reportText,
+  treatment_plan: reportText,
+
   // ---------- ข้อความสรุป (ใช้ทั้งฟอร์มสั้นและฟอร์มเต็ม) ----------
   symptoms: reportText,
   care_given: reportText,

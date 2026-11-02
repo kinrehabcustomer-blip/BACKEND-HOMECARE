@@ -1244,6 +1244,7 @@ describe('นิยามฟอร์มฝั่งหน้าเว็บต�
     for (const [name, sections] of [['ดูแลประจำวัน', DAILY_SECTIONS], ['กายภาพบำบัด', PHYSIO_SECTIONS]]) {
       for (const s of sections) {
         for (const f of s.fields) {
+          if (f.type === 'bmi') continue; // BMI คำนวณหน้าเว็บ ไม่มีคอลัมน์/ช่องใน schema
           assert.equal(known.has(f.key), true, `ฟอร์ม${name} มีช่อง ${f.key} ที่ schema ฝั่ง server ไม่รู้จัก`);
         }
       }

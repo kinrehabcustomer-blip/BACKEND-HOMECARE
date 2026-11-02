@@ -3,11 +3,12 @@ import { createPortal } from 'react-dom';
 import LineIcon from './LineIcon.jsx';
 import { POSITION_LABELS } from '../labels.js';
 import { useScrollLock } from '../lib/scrollLock.js';
+import SearchSelect from './SearchSelect.jsx';
 
 /**
- * ช่องเลือกพนักงานรับเคส — แทน <select> ที่เคยใช้
+ * ช่องเลือกพนักงานรับเคส — แทน <SearchSelect> ที่เคยใช้
  *
- * ทำไมไม่ใช้ <select>
+ * ทำไมไม่ใช้ <SearchSelect>
  *   รายการที่กางออกมาเบราว์เซอร์เป็นคนวาด บน iOS ข้อความยาว "รหัส · ชื่อ (ตำแหน่ง) · ถืออยู่ n เคส"
  *   ถูกหักเป็นสามบรรทัดต่อคน กวาดตาหาชื่อแทบไม่ได้ และจัดหน้าตาอะไรไม่ได้เลย
  *   ที่นี่วาดเองเป็นสองบรรทัด: ชื่อตัวใหญ่ กับรายละเอียดตัวเล็กข้างใต้

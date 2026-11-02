@@ -7,6 +7,7 @@ import ErrorBar from '../components/ErrorBar.jsx';
 import PageRefresh from '../components/PageRefresh.jsx';
 import { GENDER_LABELS } from '../labels.js';
 import { formatPhone } from '../lib/phone.js';
+import SearchSelect from '../components/SearchSelect.jsx';
 
 const PER_PAGE_OPTIONS = [20, 50, 100];
 
@@ -125,11 +126,11 @@ export default function CustomerListPage() {
             value={q}
             onChange={(e) => setFilter('q', e.target.value)}
           />
-          <select value={hasCases} onChange={(e) => setFilter('has_cases', e.target.value)} aria-label="ประวัติการใช้บริการ">
+          <SearchSelect value={hasCases} onChange={(e) => setFilter('has_cases', e.target.value)} aria-label="ประวัติการใช้บริการ">
             <option value="">ลูกค้าทุกคน</option>
             <option value="yes">เคยใช้บริการแล้ว</option>
             <option value="no">ยังไม่เคยเปิดเคส</option>
-          </select>
+          </SearchSelect>
           {/* โผล่เฉพาะตอนมีอะไรกรองอยู่ — ปุ่มที่กดแล้วไม่เกิดอะไรขึ้นไม่ควรมีให้เห็น */}
           {filtered && <button className="btn" onClick={clearFilters}>ล้างตัวกรอง</button>}
           {/* ปุ่มเพิ่มอยู่ท้ายแถบตัวกรอง (ดันไปชิดขวา) — ตำแหน่งเดียวกับปุ่มเปิดเคสใหม่ */}
@@ -257,9 +258,9 @@ export default function CustomerListPage() {
 
             <label className="per-page">
               แสดง
-              <select value={perPage} onChange={(e) => setFilter('per_page', e.target.value)}>
+              <SearchSelect value={perPage} onChange={(e) => setFilter('per_page', e.target.value)}>
                 {PER_PAGE_OPTIONS.map((n) => <option key={n} value={n}>{n}</option>)}
-              </select>
+              </SearchSelect>
               ต่อหน้า
             </label>
           </div>

@@ -47,6 +47,7 @@ const AttendancePage = lazy(() => import('./pages/AttendancePage.jsx'));
 const MyTodayPage = lazy(() => import('./pages/MyTodayPage.jsx'));
 const MyCasesPage = lazy(() => import('./pages/MyCasesPage.jsx'));
 const MyCalendarPage = lazy(() => import('./pages/MyCalendarPage.jsx'));
+const MyReportsPage = lazy(() => import('./pages/MyReportsPage.jsx'));
 const MyAttendancePage = lazy(() => import('./pages/MyAttendancePage.jsx'));
 
 /* ไอคอนเมนูแบบเส้น (Lucide-style) — stroke=currentColor จึง tint ตามสีเมนู (จาง → ทองตอน active) เอง */
@@ -120,6 +121,7 @@ const homePath = (user) => {
 const FIELD_NAV = [
   { to: '/my-today', icon: 'today', label: 'งานวันนี้' },
   { to: '/my-cases', icon: 'cases', label: 'เคสของฉัน' },
+  { to: '/my-reports', icon: 'activity', label: 'รายงานของฉัน' },
   { to: '/my-calendar', icon: 'calendar', label: 'ตารางงานของฉัน' },
   { to: '/my-attendance', icon: 'clock', label: 'ค่าตอบแทนของฉัน' },
 ];
@@ -398,6 +400,7 @@ export default function App() {
             {/* หน้าของพนักงานภาคสนาม — เข้าได้ทั้ง field และ admin (แสดงเฉพาะงานที่ตัวเองรับ) */}
             <Route path="/my-today" element={<AppLayout><MyTodayPage /></AppLayout>} />
             <Route path="/my-cases" element={<AppLayout><MyCasesPage /></AppLayout>} />
+            <Route path="/my-reports" element={<AppLayout><MyReportsPage /></AppLayout>} />
             <Route path="/my-calendar" element={<AppLayout><MyCalendarPage /></AppLayout>} />
             <Route path="/my-attendance" element={<AppLayout><MyAttendancePage /></AppLayout>} />
 

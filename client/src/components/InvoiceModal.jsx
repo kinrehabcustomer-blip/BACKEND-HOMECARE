@@ -14,6 +14,7 @@ import { ACCEPTED, compressImage, formatFileSize } from '../lib/image.js';
 import { caseCode } from '../lib/patientCode.js';
 import { TRANSFER_PAYMENT_INSTRUCTION } from '../lib/issuer.js';
 import { addonLabel } from '../lib/addons.js';
+import SearchSelect from './SearchSelect.jsx';
 
 const FOCUSABLE = 'a[href], button:not(:disabled), input, select, textarea, [tabindex]:not([tabindex="-1"])';
 
@@ -538,9 +539,9 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                   </label>
                   <label>
                     ช่องทาง
-                    <select value={payMethod} onChange={(e) => setPayMethod(e.target.value)}>
+                    <SearchSelect value={payMethod} onChange={(e) => setPayMethod(e.target.value)}>
                       {PAYMENT_METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
-                    </select>
+                    </SearchSelect>
                   </label>
                   <div className="pay-form-actions">
                     <button className="btn" disabled={busy} onClick={() => { setPayOpen(false); setPaySlipId(null); }}>ยกเลิก</button>
@@ -1033,7 +1034,7 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
               {/* ยังไม่ได้เลือกวิธีเก็บเงิน = ยังไม่มีเอกสารให้พิมพ์/ออก/รับเงิน */}
               {/* ชำระแล้ว = ออกได้สองเอกสาร — เลือกที่นี่ ตัวเอกสารด้านบนเปลี่ยนตาม และปุ่มพิมพ์พิมพ์ใบที่เลือกอยู่ */}
               {isReceipt && (
-                <select
+                <SearchSelect
                   className="foot-switch"
                   aria-label="เลือกเอกสารที่จะดู/พิมพ์"
                   value={docView}
@@ -1041,7 +1042,7 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                 >
                   <option value="customer">ใบเสร็จ (ลูกค้า)</option>
                   <option value="finance">ใบเสร็จฝ่ายการเงิน</option>
-                </select>
+                </SearchSelect>
               )}
 
               {lineInfo && (

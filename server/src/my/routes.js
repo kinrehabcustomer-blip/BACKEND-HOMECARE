@@ -313,6 +313,30 @@ myRouter.get(
    ฝั่งหลังบ้านยังสร้างที่ระดับเคสได้ สำหรับรายงานที่ไม่ได้เกิดจากการไปเยี่ยม เช่น พยาบาลโทรติดตามอาการ */
 
 /**
+ * ลงรายงานย้อนหลังจากหน้าเคส — ต้องระบุกะของตัวเองในเคสนี้ (visit_id) ที่ถึงวันแล้ว
+ * ยังยึดหลักเดิม "รายงานต้องผูกกับกะที่ไปทำจริง" · กะ/เคสตรวจจากฐานข้อมูล ไม่เชื่อ body (ลงให้กะคนอื่นไม่ได้)
+ * ไม่ต้องเช็คอินก่อน เพราะนี่คือทางแก้เมื่อลืมลงรายงานของกะที่ผ่านมาแล้ว
+ */
+myRouter.post(
+  '/cases/:id/reports',
+  asyncRoute(async (req, res, next) => {
+    const caseRow = await myCaseRow(req);
+    if (!caseRow) return next(notFound('ไม่พบเคสนี้ หรือไม่ใช่เคสที่คุณรับผิดชอบ'));
+    if (CLOSED_CASE.includes(caseRow.status)) throw new ApiError(409, 'เคสนี้จบไปแล้ว บันทึกรายงานเพิ่มไม่ได้');
+
+    const input = createReportSchema.parse(req.body ?? {});
+    if (input.visit_id == null) throw new ApiError(400, 'กรุณาเลือกกะที่จะลงรายงานย้อนหลัง');
+    const visit = await cases.findVisit(input.visit_id);
+    if (!visit || visit.case_id !== caseRow.case_id || visit.assigned_to !== req.user.employee_id) {
+      return next(notFound('ไม่พบกะนี้ หรือไม่ใช่กะที่คุณรับผิดชอบในเคสนี้'));
+    }
+    if (visit.visit_date > todayTH()) throw new ApiError(409, 'กะนี้ยังไม่ถึงวัน — ลงรายงานย้อนหลังไม่ได้');
+
+    res.status(201).json(await cases.addReport(caseRow.case_id, input, req.user));
+  }),
+);
+
+/**
  * แก้รายงานของตัวเอง — ใบที่คนอื่นเขียนแก้ไม่ได้ (ตอบ 404 เหมือนไม่มี ไม่บอกใบ้ว่ามีใบนี้อยู่)
  * ลบไม่ได้ทั้งของตัวเองและของคนอื่น — เป็นบันทึกทางการแพทย์ ให้ผู้จัดการเป็นคนลบจากหลังบ้าน
  */

@@ -3757,6 +3757,9 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
 
 .checkin-photo h3 { font-size: 0.875rem; margin: 0 0 0.5rem; }
 .checkin-photo-preview { display: flex; align-items: flex-start; gap: 0.75rem; }
+/* ช่องเลือกกะตอนพนักงานลงรายงานย้อนหลัง — ป้ายอยู่บน ช่องเลือกเต็มบรรทัด เว้นจากฟอร์มด้านล่าง */
+.backfill-visit { display: grid; gap: 0.375rem; margin-bottom: 1rem; font-weight: 600; font-size: 0.875rem; }
+.backfill-visit select { width: 100%; max-width: 22rem; font-weight: 400; font-size: 1rem; }
 .camera-video { display: block; width: 100%; max-width: 20rem; aspect-ratio: 3 / 4; object-fit: cover; background: #000; border-radius: var(--radius); margin-bottom: 0.5rem; }
 .camera-video.is-mirror { transform: scaleX(-1); }
 .checkin-photo-preview img { width: 8rem; height: 8rem; object-fit: cover; border-radius: var(--radius); border: 1px solid var(--border); }
@@ -4144,6 +4147,9 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
 .care-num { display: flex; flex-direction: column; gap: 0.3125rem; font-size: 0.8125rem; font-weight: 600; color: var(--muted); }
 .care-num input { font-weight: 400; color: var(--text); }
 .care-num .care-hint { margin: 0; font-weight: 400; }
+/* ป้าย + หน่วยอยู่บรรทัดเดียวกัน — ไม่งั้นหน่วยตกบรรทัดแล้วกล่องกรอกของแต่ละช่องสูงไม่เท่ากัน */
+.care-num-label { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.care-num input { width: 100%; box-sizing: border-box; }
 
 /* ชิปตัวเลือก — เป้ากดขนาดนิ้ว เพราะพนักงานกรอกจากมือถือขณะยืนอยู่ข้างเตียง */
 .chip-row { display: flex; flex-wrap: wrap; gap: 0.375rem; }
@@ -4298,6 +4304,7 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
   .care-grid { grid-template-columns: 1fr 1fr; }
   /* สัญญาณชีพเป็นตัวเลขสั้นๆ ล้วน วางได้ 4 ช่องต่อแถวโดยไม่บีบ */
   .care-grid.cols-4 { grid-template-columns: repeat(4, 1fr); }
+  .care-grid.cols-3 { grid-template-columns: repeat(3, 1fr); }
   /* ช่องข้อความยาวกินเต็มแถว ไม่ให้กล่องพิมพ์แคบจนพิมพ์สองบรรทัดแล้วเลื่อน */
   .care-grid .report-text { grid-column: 1 / -1; }
 }
@@ -5803,3 +5810,25 @@ h1, h2, h3, h4, .page-hero-title, .cal-title, .login-heading h1 {
   .bill-scroll .invoice-doc { min-width: 0; }
   .bill-cancelled { border-color: #8a2b2b; }
 }
+
+/* ---------- SearchSelect: รายการเลือกที่พิมพ์ค้นหาได้ (components/SearchSelect.jsx) ---------- */
+/* z-index สูงกว่า popup ซ้อน (60) และแผ่นล่าง แต่ต่ำกว่า toast (100) */
+.ss-pop {
+  position: fixed;
+  z-index: 90;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 0.625rem;
+  box-shadow: 0 8px 28px rgba(60, 45, 15, 0.18);
+  overflow: hidden;
+}
+.ss-search { margin: 0.5rem; width: calc(100% - 1rem); box-sizing: border-box; }
+.ss-list { list-style: none; margin: 0; padding: 0 0.25rem 0.375rem; overflow-y: auto; }
+.ss-item { padding: 0.5rem 0.625rem; border-radius: 0.375rem; cursor: pointer; font-size: 0.9375rem; color: var(--text); }
+.ss-item[data-active="true"] { background: var(--brand-soft); }
+.ss-item.is-selected { color: var(--brand); font-weight: 600; }
+.ss-item.is-disabled { color: var(--muted); cursor: not-allowed; opacity: 0.6; }
+.ss-group { padding: 0.5rem 0.625rem 0.25rem; font-size: 0.75rem; font-weight: 700; color: var(--muted); }
+.ss-empty { padding: 0.75rem 0.625rem; color: var(--muted); font-size: 0.875rem; }

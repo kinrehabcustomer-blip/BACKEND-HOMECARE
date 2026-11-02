@@ -9,6 +9,7 @@ import { api } from '../api.js';
 import { INVOICE_STATUS_LABELS, formatBaht, formatDate, caseStage } from '../labels.js';
 import { formatPhone } from '../lib/phone.js';
 import { caseCode } from '../lib/patientCode.js';
+import SearchSelect from '../components/SearchSelect.jsx';
 
 const PER_PAGE_OPTIONS = [20, 50, 100];
 
@@ -188,7 +189,7 @@ export default function InvoiceListPage() {
             value={q}
             onChange={(e) => setFilter('q', e.target.value)}
           />
-          <select value={statusValue} onChange={(e) => setStatusFilter(e.target.value)} aria-label="สถานะ">
+          <SearchSelect value={statusValue} onChange={(e) => setStatusFilter(e.target.value)} aria-label="สถานะ">
             <option value="">ทุกสถานะ</option>
             {Object.entries(INVOICE_STATUS_LABELS).map(([v, l]) => (
               <option key={v} value={v}>{l}</option>
@@ -197,7 +198,7 @@ export default function InvoiceListPage() {
             {Object.entries(PSEUDO_STATUS).map(([value, label]) => (
               <option key={value} value={value}>{label}</option>
             ))}
-          </select>
+          </SearchSelect>
           {/* โผล่เฉพาะตอนมีอะไรกรองอยู่ — ปุ่มที่กดแล้วไม่เกิดอะไรขึ้นไม่ควรมีให้เห็น */}
           {filtered && <button className="btn" onClick={clearFilters}>ล้างตัวกรอง</button>}
         </div>
@@ -370,9 +371,9 @@ export default function InvoiceListPage() {
 
             <label className="per-page">
               แสดง
-              <select value={perPage} onChange={(e) => setFilter('per_page', e.target.value)}>
+              <SearchSelect value={perPage} onChange={(e) => setFilter('per_page', e.target.value)}>
                 {PER_PAGE_OPTIONS.map((n) => <option key={n} value={n}>{n}</option>)}
-              </select>
+              </SearchSelect>
               ต่อหน้า
             </label>
           </div>

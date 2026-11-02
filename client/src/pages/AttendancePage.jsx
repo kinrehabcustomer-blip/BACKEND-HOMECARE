@@ -14,6 +14,7 @@ import { useSheetSwipe } from '../lib/sheetSwipe.js';
 import { useScrollLock } from '../lib/scrollLock.js';
 import { useCan } from '../auth.jsx';
 import { caseCode } from '../lib/patientCode.js';
+import SearchSelect from '../components/SearchSelect.jsx';
 
 /* หน้านี้คือเรื่อง "เข้า–ออกงาน" ทั้งหมด — รวมการยืนยันกะกลับมาด้วย
 
@@ -97,13 +98,13 @@ export default function AttendancePage() {
   const pending = exceptions?.length ?? 0;
 
   const employeePicker = (
-    <select value={employeeId} onChange={(e) => patch({ employee_id: e.target.value, page: '' })} aria-label="พนักงาน">
+    <SearchSelect value={employeeId} onChange={(e) => patch({ employee_id: e.target.value, page: '' })} aria-label="พนักงาน">
       <option value="">พนักงานทุกคน</option>
       {/* เฉพาะพนักงาน front (คนที่เช็คอินจริง) · คนที่เลือกค้างอยู่ใน URL ยังโชว์ไว้ */}
       {staff.filter((e) => e.can_take_cases || e.employee_id === employeeId).map((e) => (
         <option key={e.employee_id} value={e.employee_id}>{e.first_name} {e.last_name}</option>
       ))}
-    </select>
+    </SearchSelect>
   );
 
   return (
@@ -346,7 +347,7 @@ function TimeFix({ visit, busy, onClose, onSave }) {
           )}
 
           {/* ใช้ตัวเลือกเวลาตัวเดียวกับหน้าลงกะ — dropdown ที่ทำเอง สูงราว 6 บรรทัดแล้วเลื่อนดูที่เหลือ
-              (<select> ของเบราว์เซอร์กางยาวเท่าจำนวนรายการ 24 บรรทัดจนทับทั้งกล่อง สั่งความสูงไม่ได้)
+              (<SearchSelect> ของเบราว์เซอร์กางยาวเท่าจำนวนรายการ 24 บรรทัดจนทับทั้งกล่อง สั่งความสูงไม่ได้)
               และเป็นตัวเดียวกับที่ผู้จัดการใช้ตอนลงเวลานัด จึงกรอกด้วยท่าเดิมไม่ต้องเรียนรู้ใหม่ */}
           <div className="grid cols-2 timefix-times">
             <label>เวลาเข้า *
@@ -604,10 +605,10 @@ function Log({ month, employeeId, state, q, page, patch, employeePicker, reloadK
     <>
       <MonthPicker month={month} onChange={(m) => patch({ month: m, page: '' })}>
         {employeePicker}
-        <select value={state} onChange={(e) => patch({ state: e.target.value, page: '' })} aria-label="สถานะกะ">
+        <SearchSelect value={state} onChange={(e) => patch({ state: e.target.value, page: '' })} aria-label="สถานะกะ">
           <option value="">ทุกสถานะ</option>
           {Object.entries(VISIT_STATE_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-        </select>
+        </SearchSelect>
         <input
           className="search"
           placeholder="ค้นหา ชื่อพนักงาน / ผู้รับบริการ / รหัสเคส"
