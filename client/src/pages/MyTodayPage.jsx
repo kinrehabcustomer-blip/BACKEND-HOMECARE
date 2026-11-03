@@ -74,12 +74,39 @@ export default function MyTodayPage() {
   return (
     <PageRefresh onRefresh={load} busy={loading}>
       <header className="page-head">
-        <div>
-          <h1>งานวันนี้</h1>
-          <p className="muted">{dateLabel}{visits && ` · ${visits.length} กะ`}</p>
+        <div className="page-hero">
+          <span className="page-hero-icon" aria-hidden="true"><LineIcon name="calendar" /></span>
+          <div>
+            <p className="page-hero-kicker">{dateLabel}</p>
+            <h1 className="page-hero-title">งานวันนี้</h1>
+          </div>
         </div>
         <RefreshButton onRefresh={load} busy={loading} updatedAt={loadedAt} />
       </header>
+
+      {/* สรุปกะวันนี้ — ช่องตัวเลขชุดเดียวกับหน้าภาพรวมของหลังบ้าน */}
+      {visits && visits.length > 0 && (
+        <section className="hero-card today-summary">
+          <div className="hero">
+            <span className="hero-label">กะวันนี้</span>
+            <span className="hero-value">{visits.length}</span>
+          </div>
+          <div className="tiles">
+            <div className="tile is-static">
+              <span className="tile-label">รอเช็คอิน</span>
+              <span className="tile-value">{visits.filter((v) => v.state === 'scheduled').length}</span>
+            </div>
+            <div className="tile is-static">
+              <span className="tile-label">กำลังทำงาน</span>
+              <span className="tile-value">{visits.filter((v) => v.state === 'working' || v.state === 'stale').length}</span>
+            </div>
+            <div className="tile is-static">
+              <span className="tile-label">เสร็จแล้ว</span>
+              <span className="tile-value">{visits.filter((v) => v.state === 'done').length}</span>
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* error เป็นแถบเหนือรายการ ไม่ทับทั้งหน้า — กะที่โหลดมาได้แล้วต้องยังกดเช็คอิน/เช็คเอาท์ได้
           ถึงการดึงข้อมูลรอบล่าสุดจะล้มเหลว (พนักงานอยู่หน้างาน สัญญาณหายเป็นเรื่องปกติ) */}
