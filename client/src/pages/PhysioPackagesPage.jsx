@@ -16,6 +16,7 @@ const BLANK = {
   discount_percent: '',
   discount_amount: '',
   staff_pay: '',
+  english_fee: '',
   active: true,
   note: '',
 };
@@ -121,6 +122,7 @@ export default function PhysioPackagesPage() {
                 <th>ราคาเต็ม (บาท)</th>
                 <th>ราคาสุทธิ (บาท)</th>
                 <th>ตกเฉลี่ย (บาท/ครั้ง)</th>
+                <th>ภาษาอังกฤษ (บาท)</th>
                 {/* ค่าจ้าง/กำไร = เฉพาะผู้จัดการ — ตัดทั้งคอลัมน์ ไม่ใช่ปล่อยหัวตารางค้างไว้ให้ว่าง */}
                 {seePay && <th>ค่าจ้างพนักงาน (บาท)</th>}
                 <th>จัดการ</th>
@@ -156,6 +158,12 @@ export default function PhysioPackagesPage() {
                       ? <span className="muted">—</span>
                       : <>{formatBaht(p.avg_per_session)}<span className="cell-sub">ต่อครั้ง</span></>}
                   </td>
+                  {/* ค่าภาษาอังกฤษ — บวกเพิ่มเมื่อเคสติ๊ก "ภาษาอังกฤษ" · ว่าง = แพ็คนี้ไม่มีตัวเลือก (โหมดการ์ดซ่อนช่องว่าง) */}
+                  <td className={`physio-english${p.english_fee > 0 ? '' : ' is-blank'}`} data-label="ภาษาอังกฤษ">
+                    {p.english_fee > 0
+                      ? <>+{formatBaht(p.english_fee)}<span className="cell-sub">ต่อแพ็คเกจ</span></>
+                      : <span className="muted">—</span>}
+                  </td>
 
                   {/* ช่องที่ยังไม่ตั้งต้องเห็นชัด — ไม่มีค่าจ้าง = เคสสายกายภาพคำนวณค่าตอบแทนให้พนักงานไม่ได้เลย */}
                   {seePay && (
@@ -187,7 +195,7 @@ export default function PhysioPackagesPage() {
               ))}
               {items.length === 0 && (
                 <tr>
-                  <td colSpan={seePay ? 6 : 5} className="empty">ยังไม่มีแพ็คเกจ — กด "+ เพิ่มแพ็คเกจ" เพื่อเริ่ม</td>
+                  <td colSpan={seePay ? 7 : 6} className="empty">ยังไม่มีแพ็คเกจ — กด "+ เพิ่มแพ็คเกจ" เพื่อเริ่ม</td>
                 </tr>
               )}
             </tbody>
@@ -224,6 +232,7 @@ function PackageForm({ initial, onClose, onSaved }) {
     discount_percent: initial.discount_percent ?? '',
     discount_amount: initial.discount_amount ?? '',
     staff_pay: initial.staff_pay ?? '',
+    english_fee: initial.english_fee ?? '',
     sessions: initial.sessions ?? '',
     note: initial.note ?? '',
   });
@@ -256,6 +265,7 @@ function PackageForm({ initial, onClose, onSaved }) {
         special_price: net,
         // ไม่ใช่ผู้จัดการ = ไม่ส่งคีย์นี้ (ไม่ใช่ส่ง null) — updatePackage แตะเฉพาะคอลัมน์ที่ส่งมา ค่าจ้างเดิมจึงอยู่ครบ
         ...(seePay ? { staff_pay: toNum(form.staff_pay) } : null),
+        english_fee: toNum(form.english_fee),
         active: form.active,
         note: form.note.trim() || null,
       };
@@ -333,7 +343,7 @@ function PackageForm({ initial, onClose, onSaved }) {
                 ไม่กรอก = เคสสายกายภาพจะคำนวณค่าตอบแทนให้พนักงานไม่ได้
                 เห็น/แก้ได้เฉพาะผู้จัดการ · คนอื่นแก้ชื่อ-ราคา-ส่วนลดได้ตามปกติ ค่าจ้างเดิมไม่ถูกแตะ */}
             {seePay && (
-              <label className="span-2">ค่าจ้างพนักงาน (บาท)
+              <label>ค่าจ้างพนักงาน (บาท)
                 <input
                   type="number" min="0" step="100" value={form.staff_pay}
                   placeholder="ยอดที่พนักงานได้รับต่อแพ็คเกจนี้"
@@ -341,6 +351,16 @@ function PackageForm({ initial, onClose, onSaved }) {
                 />
               </label>
             )}
+            {/* ค่าภาษาอังกฤษ (ผู้ใช้ขอ 6 พ.ย. 2569) — แบบเดียวกับ Homecare: หน้าเปิดเคสมีกล่องติ๊ก "ภาษาอังกฤษ"
+                ติ๊กแล้วบวกยอดนี้เข้าค่าบริการ · ว่าง = แพ็คนี้ไม่มีตัวเลือก ไม่โชว์กล่องติ๊ก
+                ผู้ไม่เห็นค่าจ้าง = ช่องนี้กินเต็มแถวแทน */}
+            <label className={seePay ? '' : 'span-2'}>ค่าภาษาอังกฤษ (บาท)
+              <input
+                type="number" min="0" step="100" value={form.english_fee}
+                placeholder="ว่าง = ไม่มีตัวเลือกนี้"
+                onChange={(e) => set('english_fee', e.target.value)}
+              />
+            </label>
 
             {/* ยืนยันตัวเลขให้เห็นก่อนกดบันทึก — ตกเฉลี่ยคือคอลัมน์ที่ลูกค้าใช้เทียบความคุ้ม */}
             <div className="physio-preview span-2">

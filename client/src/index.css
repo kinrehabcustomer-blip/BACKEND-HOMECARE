@@ -3547,6 +3547,8 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
 .physio-special { color: var(--danger); font-weight: 700; font-size: 1rem; }
 .physio-special .cell-sub { color: var(--muted); font-weight: 400; }
 .physio-avg { font-weight: 600; }
+.physio-english { font-weight: 600; }
+.physio-english .cell-sub { color: var(--muted); font-weight: 400; }
 /* ค่าจ้างพนักงาน — น้ำหนักปกติ (ข้อมูลภายใน ไม่ใช่ราคาที่ลูกค้าเห็น)
    ช่องที่ยังไม่ตั้งขึ้นสีแดง เพราะเคสสายกายภาพจะคำนวณค่าตอบแทนให้พนักงานไม่ได้เลย */
 .physio-pay { font-weight: 600; }
@@ -3583,7 +3585,8 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
     background: var(--divider);
   }
   /* ไม่มีส่วนลด = ไม่มีราคาเต็มให้เทียบ บรรทัด "ราคาเต็ม —" จึงเป็นที่ว่างเปล่าๆ ในการ์ด */
-  .table.table-cards tbody td.physio-was.is-blank { display: none; }
+  .table.table-cards tbody td.physio-was.is-blank,
+  .table.table-cards tbody td.physio-english.is-blank { display: none; }
 
   /* ปุ่มจัดการ: ↑ ↓ เท่าที่จำเป็น ส่วน "แก้ไข/ลบ" หารความกว้างที่เหลือ
      ให้ทุกปุ่ม flex: 1 เท่ากันจะได้ปุ่มลูกศรกว้างเท่าปุ่มลบ ทั้งที่ไอคอนเดียว */

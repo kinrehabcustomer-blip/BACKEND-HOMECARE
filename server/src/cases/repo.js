@@ -24,7 +24,7 @@ const COLUMNS = [
   'pkg_grade_id',   // [homecare] เกรดการดูแล (ว่างได้ถ้ารูปแบบไม่อิงเกรด เช่น รายวัน/สัปดาห์)
   'pkg_format_id',  // [homecare] รูปแบบบริการ
   'pkg_staff_tier', // [homecare] ระดับพนักงาน CG/NA/PN
-  'pkg_english',    // [homecare] พนักงานสื่อสารภาษาอังกฤษ (fee รวมค่าภาษาแล้ว)
+  'pkg_english',    // [homecare/กายภาพ] พนักงานสื่อสารภาษาอังกฤษ (fee รวมค่าภาษาแล้ว)
   'physio_package_id', // [physio] แพ็คเกจกายภาพบำบัดที่ซื้อ
 
   // รายละเอียดผู้รับบริการ
@@ -68,12 +68,16 @@ export const ensureCasePriceSnapshots = () =>
 async function servicePriceSnapshot(db, s) {
   if (s.physio_package_id) {
     const p = await db.one(
-      'SELECT original_price, special_price FROM physio_packages WHERE physio_package_id = :id',
+      'SELECT original_price, special_price, english_fee FROM physio_packages WHERE physio_package_id = :id',
       { id: s.physio_package_id },
     );
+    /* ค่าภาษาอังกฤษบวกเข้าทั้งราคาเต็มและราคาที่ขาย — fee ของเคสรวมค่าภาษาแล้ว
+       ถ้าบวกแค่ฝั่งเดียว ใบแจ้งหนี้จะคิดส่วนลด (ราคาเต็ม − fee) ได้น้อยกว่าจริงเท่ากับค่าภาษา */
+    const english = s.pkg_english ? Number(p?.english_fee ?? 0) : 0;
+    const plus = (v) => (v == null ? null : v + english);
     return {
-      list: p?.original_price ?? null,
-      customer: s.fee ?? p?.special_price ?? p?.original_price ?? null,
+      list: plus(p?.original_price ?? null),
+      customer: s.fee ?? plus(p?.special_price ?? p?.original_price ?? null),
     };
   }
   if (s.pkg_format_id && s.pkg_staff_tier) {
@@ -400,10 +404,11 @@ export async function hasFieldAccess(employeeId, caseId, { windowDays = FIELD_AC
 function clearUnusedKind(input) {
   if (!('service_kind' in input)) return input;
 
-  const HOMECARE = { pkg_grade_id: null, pkg_format_id: null, pkg_staff_tier: null, pkg_english: false };
+  // ธงภาษาอังกฤษ (pkg_english) ใช้ได้ทั้งสองสาย — กายภาพบวกค่าภาษาตามแพ็คเกจ (physio_packages.english_fee)
+  const HOMECARE = { pkg_grade_id: null, pkg_format_id: null, pkg_staff_tier: null };
   if (input.service_kind === 'physio') return { ...input, ...HOMECARE };
   if (input.service_kind === 'homecare') return { ...input, physio_package_id: null };
-  return { ...input, ...HOMECARE, physio_package_id: null }; // ไม่ระบุสาย = ล้างทั้งคู่
+  return { ...input, ...HOMECARE, pkg_english: false, physio_package_id: null }; // ไม่ระบุสาย = ล้างทั้งคู่
 }
 
 /**

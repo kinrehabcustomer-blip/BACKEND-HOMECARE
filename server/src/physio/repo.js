@@ -3,7 +3,7 @@ import { sql, transaction } from '../db/index.js';
 const NOW = `to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')`;
 const COLUMNS = [
   'name', 'sessions', 'duration_months', 'original_price', 'special_price',
-  'discount_percent', 'discount_amount', 'staff_pay', 'active', 'note', 'sort_order',
+  'discount_percent', 'discount_amount', 'staff_pay', 'english_fee', 'active', 'note', 'sort_order',
 ];
 
 /**
@@ -99,9 +99,9 @@ export async function createPackage(input) {
   const row = await sql.one(
     `INSERT INTO physio_packages
        (name, sessions, duration_months, original_price, special_price,
-        discount_percent, discount_amount, staff_pay, active, note, sort_order)
+        discount_percent, discount_amount, staff_pay, english_fee, active, note, sort_order)
      VALUES (:name, :sessions, :duration_months, :original_price, :special_price,
-             :discount_percent, :discount_amount, :staff_pay, :active, :note, :sort_order)
+             :discount_percent, :discount_amount, :staff_pay, :english_fee, :active, :note, :sort_order)
      RETURNING *`,
     {
       name: input.name,
@@ -112,6 +112,7 @@ export async function createPackage(input) {
       discount_percent: input.discount_percent ?? null,
       discount_amount: input.discount_amount ?? null,
       staff_pay: input.staff_pay ?? null,
+      english_fee: input.english_fee ?? null,
       active: input.active ?? true,
       note: input.note ?? null,
       sort_order: input.sort_order ?? next,

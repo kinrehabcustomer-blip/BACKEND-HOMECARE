@@ -1375,7 +1375,7 @@ function describeService(c) {
 
   const parts =
     c.service_kind === 'physio'
-      ? [c.physio_package_name, sessions]
+      ? [c.physio_package_name, sessions, c.pkg_english && 'ภาษาอังกฤษ']
       : [c.format_name, c.grade_name, c.pkg_staff_tier, c.pkg_english && 'ภาษาอังกฤษ'];
 
   const service = parts.filter(Boolean).join(' · ');

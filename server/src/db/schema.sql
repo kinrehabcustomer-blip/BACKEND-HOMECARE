@@ -668,6 +668,11 @@ ALTER TABLE cases ADD COLUMN IF NOT EXISTS staff_pay DOUBLE PRECISION CHECK (sta
 -- เพิ่มให้เป็นคู่กับ special_price (ราคาที่ลูกค้าจ่าย) เหมือน pkg_rates ที่มี customer_price คู่กับ staff_pay
 ALTER TABLE physio_packages ADD COLUMN IF NOT EXISTS staff_pay DOUBLE PRECISION CHECK (staff_pay >= 0);
 
+-- ค่าภาษาอังกฤษของแพ็คเกจกายภาพ (บาท ต่อแพ็คเกจ) — ลูกค้าขอนักกายภาพที่สื่อสารภาษาอังกฤษได้ บวกเพิ่มจากราคาสุทธิ
+-- ตั้งรายแพ็คเกจ ไม่ใช่ค่าคงที่แบบ Homecare (ENGLISH_SURCHARGE) เพราะแพ็คเกจกายภาพมีจำนวนครั้งต่างกันมาก
+-- ว่าง = แพ็คเกจนี้ไม่มีตัวเลือกภาษาอังกฤษ · เคสเก็บธงไว้ที่ cases.pkg_english คอลัมน์เดียวกับ Homecare
+ALTER TABLE physio_packages ADD COLUMN IF NOT EXISTS english_fee DOUBLE PRECISION CHECK (english_fee >= 0);
+
 -- เคสเดิมที่เปิดก่อนมีคอลัมน์นี้ — เติมจากเรท/แพ็คเกจที่เคสอ้างอิงอยู่ (เท่าที่ยังหาเจอ)
 -- แตะเฉพาะแถวที่ยังว่าง เคสที่กรอกค่าจ้างเองไว้แล้วไม่ถูกทับ
 -- รันซ้ำได้เรื่อยๆ: ตั้งค่าจ้างในตารางเรท/แพ็คเกจทีหลังแล้วรันอีกครั้ง เคสที่ยังว่างจะได้ค่าไปด้วย

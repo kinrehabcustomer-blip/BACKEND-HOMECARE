@@ -28,7 +28,7 @@ const BLANK = {
   patient_id: '',
   service_kind: '',
   pkg_format_id: '', pkg_grade_id: '', pkg_staff_tier: '', // [Homecare]
-  pkg_english: false, // [Homecare] พนักงานสื่อสารภาษาอังกฤษ — บวกค่าภาษาเข้า fee
+  pkg_english: false, // [Homecare/กายภาพ] พนักงานสื่อสารภาษาอังกฤษ — บวกค่าภาษาเข้า fee
   physio_package_id: '', // [กายภาพ]
 
   // ตัวตนผู้รับบริการ (มาจากแฟ้ม patient / หรือกรอกเพื่อสร้างแฟ้มใหม่) — client_name/gender/age/medical_history คัดลอกเป็น snapshot ในเคส
@@ -311,10 +311,11 @@ export default function CaseFormPage() {
    * บวกลบจากตัวเลขปัจจุบัน ไม่ใช่ตั้งใหม่จากตารางเรท — เคสที่ตกลงราคาพิเศษไว้ต้องไม่ถูกทับ
    */
   function toggleEnglish(on) {
+    const add = isPhysio ? physioEnglishFee : englishFee;
     setForm((prev) => {
       const merged = { ...prev, pkg_english: on };
-      if (prev.fee !== '' && englishFee) {
-        merged.fee = String(Math.max(Number(prev.fee) + (on ? englishFee : -englishFee), 0));
+      if (prev.fee !== '' && add) {
+        merged.fee = String(Math.max(Number(prev.fee) + (on ? add : -add), 0));
       }
       return merged;
     });
@@ -329,6 +330,8 @@ export default function CaseFormPage() {
   // ปกติเสนอเฉพาะแพ็คเกจที่ยังเปิดขาย — แต่เคสเก่าที่ผูกแพ็คเกจซึ่งปิดขายไปแล้วต้องยังเห็นของตัวเอง
   // ไม่งั้น dropdown จะเด้งเป็นค่าว่างแล้วแพ็คเกจของเคสนั้นหายไปเงียบๆ ตอนกดบันทึก
   const physioOptions = physio.filter((p) => p.active || p.physio_package_id === selPhysioId);
+  // ค่าภาษาอังกฤษของแพ็คกายภาพที่เลือก (ตั้งรายแพ็คที่หน้าแพ็คเกจ) — 0 = แพ็คนี้ไม่มีตัวเลือกภาษาอังกฤษ
+  const physioEnglishFee = Number(selectedPhysio?.english_fee ?? 0);
 
   // ค่าตอบแทนพนักงานที่แพ็คเกจ/เรทซึ่งเลือกอยู่ตอนนี้กำหนดไว้ — ตัวตั้งของช่อง "ค่าจ้างพนักงาน"
   const packagePay = isPhysio
@@ -397,7 +400,9 @@ export default function CaseFormPage() {
       ...prev,
       service_kind: kind,
       staff_pay: '',
-      ...(kind !== 'homecare' ? { pkg_format_id: '', pkg_grade_id: '', pkg_staff_tier: '', pkg_english: false } : null),
+      // เปลี่ยนสาย = ล้างธงภาษาเสมอ — ค่าภาษาของสองสายคนละจำนวน ธงค้างไว้แล้ว fee ไม่ได้บวกจริง
+      ...(kind !== prev.service_kind ? { pkg_english: false } : null),
+      ...(kind !== 'homecare' ? { pkg_format_id: '', pkg_grade_id: '', pkg_staff_tier: '' } : null),
       ...(kind !== 'physio' ? { physio_package_id: '' } : null),
     }));
   }
@@ -407,7 +412,10 @@ export default function CaseFormPage() {
     setForm((prev) => {
       const merged = { ...prev, physio_package_id: value, staff_pay: '' };
       const p = physio.find((x) => x.physio_package_id === Number(value));
-      if (p && p.special_price != null) merged.fee = String(p.special_price);
+      // แพ็คใหม่ไม่มีค่าภาษา = ธงต้องไม่ค้าง · มี = ติ๊กค้างไว้ได้ แล้วบวกค่าภาษาของแพ็คใหม่ให้
+      const english = Number(p?.english_fee ?? 0);
+      if (!english) merged.pkg_english = false;
+      if (p && p.special_price != null) merged.fee = String(p.special_price + (merged.pkg_english ? english : 0));
       if (p && p.staff_pay != null) merged.staff_pay = String(p.staff_pay);
       return merged;
     });
@@ -766,7 +774,7 @@ export default function CaseFormPage() {
   /* ราคาในตารางวันนี้ของบริการที่เลือกอยู่ — ค่าบริการที่คัดลอกมาเป็นราคารอบก่อน ซึ่งอาจเป็นราคาเก่า
      หรือราคาที่ตกลงพิเศษไว้ จึงไม่ทับให้เอง แค่บอกว่าต่างกันแล้วให้กดเลือก (เลือกแพ็คเกจใหม่ = ใช้ราคาตารางอยู่แล้ว) */
   const listPrice = isPhysio
-    ? selectedPhysio?.special_price ?? null
+    ? selectedPhysio?.special_price != null ? selectedPhysio.special_price + (form.pkg_english ? physioEnglishFee : 0) : null
     : currentRate?.available && currentRate.customer_price != null
       ? (currentRate.net_price ?? currentRate.customer_price) + (form.pkg_english ? englishFee : 0)
       : null;
@@ -1448,6 +1456,18 @@ export default function CaseFormPage() {
                 onChange={(e) => toggleEnglish(e.target.checked)}
               />
               ภาษาอังกฤษ (+{formatBaht(englishFee)}{{ monthly: '/เดือน', weekly: '/สัปดาห์' }[selectedFormat.category] ?? '/วัน'})
+            </label>
+          )}
+          {/* กายภาพ: ค่าภาษาตั้งรายแพ็คเกจ (หน้าแพ็คเกจกายภาพบำบัด) — แพ็คที่ไม่ได้ตั้ง = ไม่มีกล่องติ๊ก */}
+          {isPhysio && physioEnglishFee > 0 && (
+            <label className="checkbox-row full-row">
+              <input
+                type="checkbox"
+                checked={Boolean(form.pkg_english)}
+                disabled={serviceLocked}
+                onChange={(e) => toggleEnglish(e.target.checked)}
+              />
+              ภาษาอังกฤษ (+{formatBaht(physioEnglishFee)}/แพ็คเกจ)
             </label>
           )}
           {isPhysio && selectedPhysio && (
