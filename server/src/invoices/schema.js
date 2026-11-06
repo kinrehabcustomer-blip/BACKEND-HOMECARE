@@ -134,6 +134,9 @@ export const listQuerySchema = z.object({
   hide_cancelled: z.enum(['yes']).optional(),
   // ประเภทบริการของเคสต้นทาง — ใบที่ไม่ผูกเคสนับเป็น Homecare (ใบกายภาพออกจากเคสกายภาพเสมอ)
   service_kind: z.enum(['homecare', 'physio']).optional(),
+  // ช่วงวันที่ออกใบ (รวมสองปลาย) — ใช้กับไฟล์ CSV รายวัน/สัปดาห์/เดือน · ใช้กับรายการปกติได้ด้วย
+  issued_from: date.optional(),
+  issued_to: date.optional(),
   page: z.coerce.number().int().min(1).default(1),
   per_page: z.coerce.number().int().min(1).max(100).default(20),
   sort: z.enum(['invoice_id', 'issue_date', 'total', 'created_at']).default('invoice_id'),

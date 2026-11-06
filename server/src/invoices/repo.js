@@ -507,7 +507,7 @@ export async function alertCounts() {
 const PHYSIO_INVOICE_SQL = `EXISTS (SELECT 1 FROM cases sk WHERE sk.case_id = i.case_id
   AND (COALESCE(sk.service_kind, '') = 'physio' OR sk.physio_package_id IS NOT NULL OR sk.case_type = 'physiotherapy'))`;
 
-function buildWhere({ q, status, customer_id, case_id, overdue, stale, draft_stale, pending_slip, hide_cancelled, service_kind }) {
+function buildWhere({ q, status, customer_id, case_id, overdue, stale, draft_stale, pending_slip, hide_cancelled, service_kind, issued_from, issued_to }) {
   const where = [];
   const params = {};
 
@@ -555,16 +555,26 @@ function buildWhere({ q, status, customer_id, case_id, overdue, stale, draft_sta
   if (service_kind) {
     where.push(service_kind === 'physio' ? PHYSIO_INVOICE_SQL : `NOT ${PHYSIO_INVOICE_SQL}`);
   }
+  // ช่วงวันที่ออกใบ (รวมสองปลาย) — issue_date เก็บเป็นข้อความ YYYY-MM-DD เทียบตรงๆ ได้
+  if (issued_from) {
+    where.push('i.issue_date >= :issued_from');
+    params.issued_from = issued_from;
+  }
+  if (issued_to) {
+    where.push('i.issue_date <= :issued_to');
+    params.issued_to = issued_to;
+  }
 
   return { clause: where.length ? `WHERE ${where.join(' AND ')}` : '', params };
 }
 
 export async function list({
-  q, status, customer_id, case_id, overdue, stale, draft_stale, pending_slip, hide_cancelled, service_kind, page, per_page, sort, order,
+  q, status, customer_id, case_id, overdue, stale, draft_stale, pending_slip, hide_cancelled, service_kind, issued_from, issued_to,
+  page, per_page, sort, order,
 }) {
   await Promise.all([ensureSlipSchema(), ensureLedgerTables()]);
   const { clause, params } = buildWhere({
-    q, status, customer_id, case_id, overdue, stale, draft_stale, pending_slip, hide_cancelled, service_kind,
+    q, status, customer_id, case_id, overdue, stale, draft_stale, pending_slip, hide_cancelled, service_kind, issued_from, issued_to,
   });
   const { total } = await sql.one(`SELECT COUNT(*) AS total FROM invoices i ${clause}`, params);
 
@@ -593,6 +603,26 @@ export async function list({
     data: rows.map(withComputed),
     pagination: { page, per_page, total: count, total_pages: Math.ceil(count / per_page) || 1 },
   };
+}
+
+/** ส่งออกได้มากสุดกี่ใบต่อไฟล์ — เพดานกันคำขอที่ไม่มีขอบเขตกินหน่วยความจำ (หนึ่งเดือนของบริษัทนี้ไม่ถึงหลักพัน) */
+export const EXPORT_LIMIT = 5000;
+
+/**
+ * ใบแจ้งหนี้ทั้งชุดตามตัวกรอง (ไม่แบ่งหน้า) สำหรับไฟล์ CSV รายวัน/สัปดาห์/เดือน — เรียงตามวันที่ออกแล้วเลขใบ
+ * ใช้ buildWhere + withComputed ตัวเดียวกับรายการ ยอดในไฟล์จึงตรงกับที่เห็นบนหน้าจอทุกช่อง
+ * คืน { data, truncated } — truncated = มีเกินเพดาน (ไฟล์มีแค่ EXPORT_LIMIT ใบแรก)
+ */
+export async function exportRows(filters) {
+  await Promise.all([ensureSlipSchema(), ensureLedgerTables()]);
+  const { clause, params } = buildWhere(filters);
+  const rows = await sql.all(
+    `${SELECT_INVOICE} ${clause}
+     ORDER BY i.issue_date NULLS LAST, i.created_at, i.invoice_id
+     LIMIT :limit`,
+    { ...params, limit: EXPORT_LIMIT + 1 },
+  );
+  return { data: rows.slice(0, EXPORT_LIMIT).map(withComputed), truncated: rows.length > EXPORT_LIMIT };
 }
 
 /**

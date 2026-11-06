@@ -133,6 +133,27 @@ invoicesRouter.get(
   asyncRoute(async (req, res) => res.json(await repo.list(listQuerySchema.parse(req.query)))),
 );
 
+/**
+ * ใบแจ้งหนี้ทั้งชุดในช่วงวันที่ออก สำหรับดาวน์โหลด CSV รายวัน/สัปดาห์/เดือน (ผู้ใช้ขอ 6 พ.ย. 2569)
+ * ต้องระบุช่วงเสมอ และยาวไม่เกิน 366 วัน — ไม่มีขอบเขต = ดึงทั้งฐานในคำขอเดียว
+ * ตัวกรองอื่น (บริการ/สถานะ/ค้นหา/ซ่อนใบยกเลิก) ใช้ชุดเดียวกับรายการ ไฟล์จึงตรงกับที่เห็นบนจอ
+ * อยู่เหนือ '/:id' ไม่งั้นคำว่า export โดนจับเป็นรหัสใบ
+ */
+invoicesRouter.get(
+  '/export',
+  asyncRoute(async (req, res) => {
+    const query = listQuerySchema.parse(req.query);
+    if (!query.issued_from || !query.issued_to) {
+      throw new ApiError(400, 'กรุณาระบุช่วงวันที่ออกใบ (issued_from และ issued_to)');
+    }
+    const days = (Date.parse(query.issued_to) - Date.parse(query.issued_from)) / 86_400_000;
+    if (days < 0) throw new ApiError(400, 'วันสิ้นสุดต้องไม่มาก่อนวันเริ่ม');
+    if (days > 366) throw new ApiError(400, 'ส่งออกได้ครั้งละไม่เกิน 1 ปี');
+    res.set('Cache-Control', 'no-store');
+    res.json(await repo.exportRows(query));
+  }),
+);
+
 /** เคสที่ยังไม่มีใบแจ้งหนี้ — หน้ารายการใบใช้เสนอปุ่มออกใบ (อยู่เหนือ '/:id' ไม่งั้นโดนจับเป็นรหัสใบ) */
 invoicesRouter.get(
   '/cases-without-invoice',

@@ -439,6 +439,8 @@ export const api = {
 
   // ---------- ใบแจ้งหนี้ ----------
   listInvoices: (params = {}) => request(`/invoices?${new URLSearchParams(params)}`),
+  /** ใบแจ้งหนี้ทั้งชุดในช่วงวันที่ออก (issued_from/issued_to) + ตัวกรองเดียวกับรายการ — สำหรับ CSV · คืน { data, truncated } */
+  exportInvoices: (params = {}) => request(`/invoices/export?${new URLSearchParams(params)}`),
   /** ยอดสรุปใบแจ้งหนี้ — ส่งตัวกรองชุดเดียวกับ listInvoices เพื่อให้ตัวเลขตรงกับรายการที่แสดงอยู่ */
   invoiceSummary: (params = {}) => request(`/invoices/summary?${new URLSearchParams(params)}`),
   /**

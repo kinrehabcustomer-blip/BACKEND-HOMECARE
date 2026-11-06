@@ -12,6 +12,7 @@ import { formatPhone } from '../lib/phone.js';
 import { caseCode } from '../lib/patientCode.js';
 import SearchSelect from '../components/SearchSelect.jsx';
 import FilterBar from '../components/FilterBar.jsx';
+import InvoiceExport from '../components/InvoiceExport.jsx';
 import LoadMore from '../components/LoadMore.jsx';
 import { useIsMobile } from '../lib/mobile.js';
 import { useLoadMore } from '../lib/loadMore.js';
@@ -213,6 +214,23 @@ export default function InvoiceListPage() {
   const rows = more.rows;
   const visibleIds = rows.map((v) => v.invoice_id);
 
+  // ตัวกรองของไฟล์ CSV = ตัวกรองของตารางตอนนี้ (ไม่รวมหน้า/การเรียง — ไฟล์เรียงตามวันที่ออกเสมอ)
+  const exportFilters = Object.fromEntries(
+    Object.entries({
+      q, status, service_kind: serviceKind, ...(pseudo ? { [pseudo]: 'yes' } : null),
+      hide_cancelled: showCancelled ? '' : 'yes',
+    }).filter(([, v]) => v !== '' && v != null),
+  );
+  const activeFilters = [
+    serviceKind && SERVICE_KIND_LABELS[serviceKind],
+    (pseudo && PSEUDO_STATUS[pseudo]) || (status && INVOICE_STATUS_LABELS[status]),
+    q && `คำค้น “${q}”`,
+  ].filter(Boolean).join(' · ');
+  const cancelledNote = showCancelled || status === 'cancelled' ? ' · รวมใบยกเลิก' : ' · ไม่รวมใบยกเลิก';
+  const exportNote = activeFilters
+    ? `ตามตัวกรองที่เลือกอยู่: ${activeFilters}${cancelledNote}`
+    : `ทุกบริการ ทุกสถานะ${cancelledNote}`;
+
   return (
     <PageRefresh onRefresh={() => setReloadKey((k) => k + 1)} busy={loading}>
       {/* ไม่มีหัวหน้าบนจอ (แถบตัวกรองเป็นส่วนบนสุด) — คง h1 ไว้ให้โปรแกรมอ่านหน้าจอ */}
@@ -250,7 +268,9 @@ export default function InvoiceListPage() {
           onClear={clearFilters}
           /* งานรอออกใบ (เคสที่ยังไม่มีใบ + ค่าใช้จ่ายเพิ่มเติม) — ปุ่มแจ้งเตือนท้ายแถบ กดแล้วกางรายการ
              เดิมเป็นการ์ดสองใบใต้ตาราง กินที่แสดงตาราง (ผู้ใช้ขอย้าย 6 พ.ย. 2569) */
-          extra={(
+          extra={(<>
+            {/* ดาวน์โหลด CSV รายวัน/สัปดาห์/เดือน — ใช้ตัวกรองชุดเดียวกับตาราง (ผู้ใช้ขอ 6 พ.ย. 2569) */}
+            <InvoiceExport filters={exportFilters} filterNote={exportNote} />
             <InvoiceTodo
               missing={missing}
               withExtras={withExtras}
@@ -258,7 +278,7 @@ export default function InvoiceListPage() {
               onIssue={issueFor}
               onIssueExtras={issueExtrasFor}
             />
-          )}
+          </>)}
         />
 
         {/* error เป็นแถบเหนือตาราง ไม่ทับทั้งหน้า — คำค้นที่พิมพ์ไว้ต้องไม่หายไปเพราะเน็ตสะดุด */}
