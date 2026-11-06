@@ -52,3 +52,31 @@ export const addonsTotal = (addons) =>
 export const addonsTotalSql = (c) => `COALESCE((
     SELECT SUM(ROUND((a ->> 'quantity')::numeric * (a ->> 'unit_price')::numeric, 2))
     FROM jsonb_array_elements(${c}.addons) a), 0)::double precision`;
+
+/* รายการเดียวกัน = ชื่อ ราคาต่อหน่วย ชนิด และ VN ตรงกัน — จำนวนไม่อยู่ใน key เพราะนับแยกเป็นยอดคงเหลือ
+   (เช่าเตียงเพิ่มจาก 1 เป็น 2 เดือน = ค้างเก็บอีก 1 ไม่ใช่รายการใหม่ทั้งก้อน) */
+const addonKey = (a) => JSON.stringify([a.name, a.unit_price, a.kind ?? null, a.vn ?? null]);
+const round3 = (n) => Math.round(n * 1000) / 1000;
+
+/**
+ * อุปกรณ์เสริม/หัตถการของเคสที่ยังไม่อยู่ในใบแจ้งหนี้ใบไหนเลย (ดร.ธงชัย 4 พ.ย. 2569)
+ *
+ * ค่าใช้จ่ายนอกแพ็คเกจที่เพิ่มเข้าเคสหลังใบแพ็คเกจออกไปแล้ว ไม่ถูกยัดเข้าใบเดิม — แอดมินออกเป็นใบใหม่เอง
+ * billed = addons ของทุกใบที่ยังไม่ยกเลิกของเคสนี้รวมกัน (ใบร่างนับด้วย เพราะใบร่างก็กำลังจะเก็บรายการนั้น)
+ * แต่ละรายการถูกเก็บได้ครั้งเดียวทั้งเคส ไม่ว่าจะอยู่ในใบแพ็คเกจ ใบส่วนที่เหลือ ใบตามกะ หรือใบค่าใช้จ่ายเพิ่มเติม
+ */
+export function unbilledAddons(caseAddons, billed = []) {
+  const covered = new Map();
+  for (const a of normalizeAddons(billed)) {
+    covered.set(addonKey(a), (covered.get(addonKey(a)) ?? 0) + a.quantity);
+  }
+  const out = [];
+  for (const a of normalizeAddons(caseAddons)) {
+    const key = addonKey(a);
+    const used = Math.min(a.quantity, covered.get(key) ?? 0);
+    covered.set(key, round3((covered.get(key) ?? 0) - used));
+    const left = round3(a.quantity - used);
+    if (left > 0) out.push({ ...a, quantity: left });
+  }
+  return out;
+}

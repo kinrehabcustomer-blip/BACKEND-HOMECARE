@@ -62,8 +62,60 @@ function compile(text, params) {
  */
 export const sql = executorFor(pool);
 
+/* ---------- ข้าม DDL "IF NOT EXISTS" ที่มีของอยู่แล้ว (optimize 6 พ.ย. 2569) ----------
+   หลายโมดูลสร้างตาราง/คอลัมน์/ดัชนีเองตอนเรียกครั้งแรกของแต่ละ instance (ensureFamilyTable, ensureReportSchema, …)
+   บน Vercel ทุก cold start = ยิง DDL ใหม่หมด (เปิดเคสครั้งแรกเคยยิง ~25 คำสั่งเรียงกัน) และ ALTER TABLE
+   ขอ ACCESS EXCLUSIVE lock แม้คอลัมน์จะมีอยู่แล้ว — ถ้ามีคิวรียาวค้างตารางนั้นอยู่ ทุกคำขอที่อ่านตารางเดียวกันจะต่อคิวรอ
+
+   แทนที่จะแก้ทีละโมดูล: อ่านแค็ตตาล็อกครั้งเดียวต่อ instance (คิวรีเดียว) แล้วข้ามคำสั่งที่ Postgres เองก็จะ "ไม่ทำอะไร"
+   เงื่อนไขเดียวกับ IF NOT EXISTS เป๊ะ (เทียบชื่อ) — ไม่ได้เดาว่าโครงสร้างถูกต้อง แค่ตัดรอบเดินทางไปฐานข้อมูลที่ไม่เปลี่ยนผลอะไร
+   คำสั่งที่ไม่ใช่สามรูปแบบนี้ / มีหลายคำสั่งในสตริงเดียว / ไม่พบในแค็ตตาล็อก = ส่งไปรันตามเดิมทุกตัว */
+const IF_NOT_EXISTS_DDL =
+  /^\s*(?:CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+([a-z_][a-z0-9_]*)|CREATE\s+(?:UNIQUE\s+)?INDEX\s+IF\s+NOT\s+EXISTS\s+([a-z_][a-z0-9_]*)\s+ON\b|ALTER\s+TABLE\s+([a-z_][a-z0-9_]*)\s+ADD\s+COLUMN\s+IF\s+NOT\s+EXISTS\s+([a-z_][a-z0-9_]*)\s)/i;
+let catalog = null;
+const loadCatalog = () =>
+  (catalog ??= pool
+    .query(
+      `SELECT c.relname, a.attname
+         FROM pg_class c
+         JOIN pg_namespace n ON n.oid = c.relnamespace
+         LEFT JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
+        WHERE n.nspname = current_schema() AND c.relkind IN ('r', 'p', 'i', 'v', 'm')`,
+    )
+    .then(({ rows }) => {
+      const set = new Set();
+      for (const r of rows) {
+        set.add(r.relname);
+        if (r.attname) set.add(`${r.relname}.${r.attname}`);
+      }
+      return set;
+    })
+    .catch((err) => {
+      catalog = null; // อ่านไม่ได้ = รัน DDL ตามปกติ ไม่ใช่ล้มทั้งคำขอ
+      console.error('[db] อ่านแค็ตตาล็อกไม่ได้ — รัน DDL ตามปกติ:', err.message);
+      return null;
+    }));
+
+async function alreadyExists(text) {
+  const m = IF_NOT_EXISTS_DDL.exec(text);
+  if (!m) {
+    // มีการลบโครงสร้าง (สคริปต์ reset/ทดสอบ) — ภาพแค็ตตาล็อกที่จำไว้เชื่อไม่ได้แล้ว อ่านใหม่รอบหน้า
+    if (/\bDROP\s+(?:TABLE|INDEX|COLUMN|SCHEMA)\b/i.test(text)) catalog = null;
+    return false;
+  }
+  if (text.replace(/;\s*$/, '').includes(';')) return false; // หลายคำสั่งในสตริงเดียว — ไม่แตะ
+  const set = await loadCatalog();
+  if (!set) return false;
+  const [, table, index, alterTable, column] = m;
+  const key = (table ?? index ?? `${alterTable}.${column}`).toLowerCase();
+  return set.has(key);
+}
+
+const SKIPPED = Object.freeze({ rows: [], rowCount: null });
+
 function executorFor(client) {
-  const exec = (text, params = {}) => {
+  const exec = async (text, params = {}) => {
+    if (await alreadyExists(text)) return SKIPPED;
     const { sql, values } = compile(text, params);
     return client.query(sql, values);
   };
@@ -215,5 +267,22 @@ export async function nextInvoiceId(tx, now = new Date()) {
     { counter: `invoice:${day}` },
   );
   return `HC-IV${day}${String(value).padStart(4, '0')}`;
+}
+
+/**
+ * เลขที่เอกสารการเงินอื่นนอกจากใบแจ้งหนี้ = HC- + ชนิด + วันที่ออก (YYMMDD) + เลขรัน
+ *   RC = ใบเสร็จ · CN = ใบลดหนี้ · DN = ใบเพิ่มหนี้   เช่น HC-RC6911020001
+ *
+ * ต่างจากใบแจ้งหนี้ตรงที่เลขรัน "ต่อเนื่องไม่รีเซ็ต" (ดร.ธงชัย 4 พ.ย. 2569) — ตัวนับเดียวต่อชนิด 'doc:RC'
+ * วันที่ในเลขบอกแค่วันออก ไม่ได้แบ่งตัวนับ · ครบ 9999 แล้วเลขรันยาวขึ้นเอง (padStart ไม่ตัด)
+ */
+export async function nextDocId(tx, kind, now = new Date()) {
+  const { value } = await tx.one(
+    `INSERT INTO id_counters (name, value) VALUES (:counter, 1)
+     ON CONFLICT (name) DO UPDATE SET value = id_counters.value + 1
+     RETURNING value`,
+    { counter: `doc:${kind}` },
+  );
+  return `HC-${kind}${invoiceDayCode(now)}${String(value).padStart(4, '0')}`;
 }
 export const nextPayrollId = (tx) => nextId(tx, 'payroll', 'PAY');

@@ -40,7 +40,7 @@ import * as caseEvents from '../notify/caseEvents.js';
 import { notifySafely } from '../notify/caseEvents.js';
 import { geocode, reverseGeocode, searchPlaces } from '../lib/geocode.js';
 import { resolveMapLink } from '../lib/maplink.js';
-import { canSeeStaffPay, requireManager } from '../lib/auth.js';
+import { can, canSeeStaffPay, requirePermission } from '../lib/auth.js';
 import { FRONT_POSITIONS } from '../employees/schema.js';
 import { ApiError, asyncRoute, notFound } from '../lib/errors.js';
 import { ensureFamilyTable } from '../lib/family.js';
@@ -195,7 +195,7 @@ casesRouter.post(
 /** สรุปค่าตอบแทนรายเดือนต่อพนักงาน (payroll) — ไม่ส่งเดือน = เดือนปัจจุบัน (โซนไทย), ไม่ส่งพนักงาน = ทุกคน */
 casesRouter.get(
   '/attendance/report',
-  requireManager,
+  requirePermission('payroll', 'บัญชีของคุณไม่มีสิทธิ์ดูสรุปค่าตอบแทน'),
   asyncRoute(async (req, res) => {
     const { month, employee_id } = attendanceQuerySchema.parse({
       month: req.query.month || undefined,
@@ -260,6 +260,8 @@ casesRouter.post(
     ensureCanSetStaffPay(req, req.body);
     const input = createCaseSchema.parse(req.body);
     if (input.assigned_to) await ensureAssignable(input.assigned_to);
+    // ทีมที่ส่งมาพร้อมการเปิดเคสใช้กติกาเดียวกับ POST /:id/team — ลาออก/พักงาน/สายสำนักงาน เข้าทีมไม่ได้
+    for (const employeeId of new Set(input.team ?? [])) await ensureAssignable(employeeId);
 
     const created = await repo.create(input, req.user);
 
@@ -301,8 +303,9 @@ const baht = (n) => Number(n).toLocaleString('th-TH');
 
 /** เฉพาะผู้จัดการเท่านั้นที่แตะเรื่องเงินค่าจ้างได้ — HR เห็นเคสได้แต่ไม่เห็นและไม่สั่งจ่ายตัวเลขนี้ */
 function ensureCanPay(req) {
-  if (!canSeeStaffPay(req.user?.position)) {
-    throw new ApiError(403, 'เฉพาะผู้จัดการเท่านั้นที่ปล่อยค่าจ้างได้');
+  // ปล่อย/อนุมัติค่าจ้าง = งานของเมนูค่าตอบแทนพนักงาน (ตั้งได้ในหน้าจัดการสิทธิ์)
+  if (!can(req.user?.position, 'payroll')) {
+    throw new ApiError(403, 'บัญชีของคุณไม่มีสิทธิ์ปล่อยค่าจ้าง');
   }
 }
 
@@ -839,7 +842,7 @@ casesRouter.delete(
       from: req.query.from,
       to: req.query.to,
     });
-    res.json(await repo.removeVisitsOn(req.params.id, dates));
+    res.json(await repo.removeVisitsOn(req.params.id, dates, req.user));
   }),
 );
 
@@ -867,11 +870,17 @@ casesRouter.delete(
   '/:id/visits/:visitId',
   asyncRoute(async (req, res) => {
     const visitId = Number(req.params.visitId);
-    const deleted = await repo.removeVisit(req.params.id, visitId);
+    const deleted = await repo.removeVisit(req.params.id, visitId, req.user);
 
     if (!deleted) {
       const visit = await repo.findVisit(visitId);
       if (!visit || visit.case_id !== req.params.id) throw notFound('ไม่พบกะนี้');
+      if (!visit.check_in_at) {
+        throw new ApiError(
+          409,
+          'กะที่ผ่านมาแล้วลบไม่ได้ — เป็นประวัติว่าวันนั้นมีนัด ถ้าไม่ได้ไปจริงให้เปลี่ยนสถานะเป็น "ยกเลิก" แทน',
+        );
+      }
       throw new ApiError(
         409,
         'กะนี้เช็คอินไปแล้ว ลบไม่ได้ — เป็นบันทึกการทำงานจริงและเป็นฐานค่าจ้าง (ถ้าลงผิดให้แก้เวลา หรือเปลี่ยนสถานะเป็นยกเลิก)',

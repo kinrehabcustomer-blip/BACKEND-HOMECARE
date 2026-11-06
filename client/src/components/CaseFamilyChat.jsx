@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
+import { useVisiblePoll } from '../lib/poll.js';
 import { ACCEPTED, compressImage } from '../lib/image.js';
+import ConfirmButton from './ConfirmButton.jsx';
 
 /**
  * แชทเคสกับญาติ — ฝั่งผู้ดูแล/นักกายภาพ (ดร.ธงชัย 24 ต.ค. 2569 แบบ ก)
@@ -9,6 +11,8 @@ import { ACCEPTED, compressImage } from '../lib/image.js';
  *
  * หน้าตาแบบแชท: ข้อความของเรา (mine) ชิดขวาสีทอง · ญาติ/ทีม/เพื่อนร่วมงานชิดซ้าย · คั่นด้วยวันที่
  * ใช้ในหน้า "แชทญาติ" (pages/MyChatPage.jsx) — header/รายชื่อเคสอยู่ที่หน้านั้น ที่นี่เป็นเฉพาะตัวบทสนทนา + ช่องพิมพ์
+ * และ popup ไทม์ไลน์ในหน้าเคสหลังบ้าน (FamilyAccess.jsx) — ส่ง source = BACKOFFICE_SOURCE: ใช้ API หลังบ้าน
+ * ข้อความของทีม KIN ชิดขวา · มีปุ่มซ่อนข้อความ · จำนวนญาติส่งมาทาง familyCount (API หลังบ้านคืนเป็น array เปล่า ๆ)
  */
 const MAX_LEN = 1000;
 const WHO = { family: 'ญาติ', team: 'ทีม KIN', staff: '' };
@@ -23,7 +27,22 @@ const dayText = (v) => {
   return new Date(v).toLocaleDateString('th-TH', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Asia/Bangkok' });
 };
 
-export default function CaseFamilyChat({ caseId, closed, onLoaded = null }) {
+const MY_SOURCE = {
+  list: (id) => api.myFamilyMessages(id),
+  post: (id, body) => api.postMyFamilyMessage(id, body),
+  photoUrl: (id, msgId) => api.myFamilyPhotoUrl(id, msgId),
+  hide: null,
+};
+
+export const BACKOFFICE_SOURCE = {
+  list: (id) =>
+    api.familyMessages(id).then((items) => ({ items: items.map((m) => ({ ...m, mine: m.author_kind === 'team' })) })),
+  post: (id, body) => api.postFamilyMessage(id, body),
+  photoUrl: (id, msgId) => api.familyPhotoUrl(id, msgId),
+  hide: (id, msgId) => api.hideFamilyMessage(id, msgId),
+};
+
+export default function CaseFamilyChat({ caseId, closed, onLoaded = null, source = MY_SOURCE, familyCount = null }) {
   const [data, setData] = useState(null);
   const [body, setBody] = useState('');
   const [image, setImage] = useState(null);
@@ -33,17 +52,17 @@ export default function CaseFamilyChat({ caseId, closed, onLoaded = null }) {
   const stickRef = useRef(true); // อยู่ล่างสุดอยู่ = ข้อความใหม่เลื่อนตาม · อ่านย้อนหลังอยู่ = ไม่ดึงลง
 
   const load = useCallback(
-    () => api.myFamilyMessages(caseId).then((d) => { setData(d); setError(null); onLoaded?.(d); }).catch((e) => setError(e.message)),
-    [caseId], // eslint-disable-line react-hooks/exhaustive-deps
+    () => source.list(caseId).then((d) => { setData(d); setError(null); onLoaded?.(d); }).catch((e) => setError(e.message)),
+    [caseId, source], // eslint-disable-line react-hooks/exhaustive-deps
   );
 
+  // เปลี่ยนเคส = ล้างของเก่า (ต้องประกาศก่อน useVisiblePoll — effect รันตามลำดับ ล้างก่อนแล้วค่อยดึง)
   useEffect(() => {
     setData(null);
     stickRef.current = true;
-    load();
-    const t = setInterval(load, 15000);
-    return () => clearInterval(t);
   }, [load]);
+  // ทุก 15 วิ เฉพาะตอนแท็บเปิดอยู่ (ดู lib/poll.js) — เดิมยิงต่อแม้พับแท็บ/จอดับ
+  useVisiblePoll(load, 15000);
 
   // API คืนใหม่ไปเก่า — เรียงใหม่สุดไว้ล่างแบบแชททั่วไป
   const items = [...(data?.items || [])].reverse();
@@ -69,7 +88,7 @@ export default function CaseFamilyChat({ caseId, closed, onLoaded = null }) {
     setBusy(true);
     setError(null);
     try {
-      await api.postMyFamilyMessage(caseId, { body: body.trim() || null, image });
+      await source.post(caseId, { body: body.trim() || null, image });
       setBody('');
       setImage(null);
       stickRef.current = true;
@@ -112,13 +131,24 @@ export default function CaseFamilyChat({ caseId, closed, onLoaded = null }) {
                 {!m.mine && <span className="fchat-who">{m.author_name}{label}</span>}
                 <div className="fchat-bubble">
                   {m.has_photo && (
-                    <a href={api.myFamilyPhotoUrl(caseId, m.message_id)} target="_blank" rel="noreferrer">
-                      <img className="fchat-photo" src={api.myFamilyPhotoUrl(caseId, m.message_id)} alt="รูปในแชทเคส" loading="lazy" />
+                    <a href={source.photoUrl(caseId, m.message_id)} target="_blank" rel="noreferrer">
+                      {/* รูปโหลดเสร็จทีหลังการเลื่อนลงล่างครั้งแรก — กล่องสูงขึ้นจนข้อความล่าสุดหลุดใต้ขอบ จึงเลื่อนตามอีกรอบ */}
+                      <img className="fchat-photo" src={source.photoUrl(caseId, m.message_id)} alt="รูปในแชทเคส" loading="lazy"
+                        onLoad={() => { const el = scrollRef.current; if (el && stickRef.current) el.scrollTop = el.scrollHeight; }} />
                     </a>
                   )}
                   {m.body && <p className="pre-line">{m.body}</p>}
                 </div>
-                <time className="fchat-time">{timeText(m.created_at)}</time>
+                <span className="fchat-meta">
+                  <time className="fchat-time">{timeText(m.created_at)}</time>
+                  {source.hide && (
+                    <ConfirmButton className="fchat-hide" title="ซ่อนข้อความนี้?" detail="ญาติทุกคนจะไม่เห็นข้อความนี้อีก"
+                      confirmLabel="ซ่อน" cancelLabel="ยกเลิก" danger={false}
+                      onConfirm={() => source.hide(caseId, m.message_id).then(load)}>
+                      ซ่อน
+                    </ConfirmButton>
+                  )}
+                </span>
               </div>
             </div>
           );
@@ -163,7 +193,7 @@ export default function CaseFamilyChat({ caseId, closed, onLoaded = null }) {
             </button>
           </div>
           <span className="fchat-count">
-            {data?.family_count ? `ญาติที่เชื่อม LINE แล้ว ${data.family_count} คนจะได้รับแจ้งเตือน` : 'ยังไม่มีญาติเชื่อม LINE กับเคสนี้ — ทีมเห็นข้อความ'}
+            {(familyCount ?? data?.family_count) ? `ญาติที่เชื่อม LINE แล้ว ${familyCount ?? data.family_count} คนจะได้รับแจ้งเตือน` : 'ยังไม่มีญาติเชื่อม LINE กับเคสนี้ — ทีมเห็นข้อความ'}
             {body.length > MAX_LEN - 150 && ` · ${body.length}/${MAX_LEN}`}
           </span>
         </div>

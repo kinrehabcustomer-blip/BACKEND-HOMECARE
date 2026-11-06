@@ -98,14 +98,17 @@ employeesRouter.get(
     res.set('Cache-Control', 'no-store');
     /* รหัสผ่านชั่วคราวให้เห็นเฉพาะคนที่ "จัดการบัญชีนั้นได้" — ไม่งั้น HR/Admin HC เปิดดูรหัสของบัญชีผู้จัดการ/ฝ่ายการเงิน
        ที่เพิ่งสร้าง แล้ว login เป็นบัญชีนั้นก่อนเจ้าตัว = ได้สิทธิ์เงินผ่านประตูหลัง (ข้าม ensureCanGrantManager) */
-    const detail = await repo.findDetailById(req.params.id, false);
-    if (!detail || !can(req.user.position, 'office')) return res.json(detail);
-    try {
-      ensureCanManageTarget(req, detail);
-    } catch {
-      return res.json(detail);
+    /* ตัดสินสิทธิ์จากแถวที่ param loader โหลดไว้แล้ว (ensureCanManageTarget ดูแค่ position) แล้วดึงรายละเอียดรอบเดียว
+       — เดิมดึงทั้งชุดสองรอบ (รอบแรกไม่มีรหัส แล้วดึงซ้ำทั้งก้อนเพื่อเติมรหัส) = 11 คิวรีต่อการเปิดหน้า (optimize 6 พ.ย. 2569) */
+    let withTemp = can(req.user.position, 'office');
+    if (withTemp) {
+      try {
+        ensureCanManageTarget(req, req.employee);
+      } catch {
+        withTemp = false;
+      }
     }
-    res.json(await repo.findDetailById(req.params.id, true));
+    res.json(await repo.findDetailById(req.params.id, withTemp, req.employee));
   }),
 );
 

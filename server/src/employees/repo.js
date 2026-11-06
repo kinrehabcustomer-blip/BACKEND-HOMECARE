@@ -78,7 +78,7 @@ export async function list({ q, status, position, page, per_page, sort, order })
   // ขึ้นก่อนคนที่เพิ่งเริ่มงานจริง (ค่าปริยายของ Postgres คือ NULLS FIRST เมื่อเรียงจากมากไปน้อย)
   const rows = await sql.all(
     `SELECT ${PUBLIC} FROM employees ${clause}
-     ORDER BY ${sort} ${order.toUpperCase()} NULLS LAST
+     ORDER BY ${sort} ${order.toUpperCase()} NULLS LAST, employee_id ${order.toUpperCase()}
      LIMIT :limit OFFSET :offset`,
     { ...params, limit: per_page, offset: (page - 1) * per_page },
   );
@@ -97,8 +97,9 @@ export function findById(employeeId) {
 }
 
 /** ดึงพนักงานพร้อมข้อมูลที่ผูกกับ employee_id จากโมดูลอื่น (ใบรับรอง + ผลงาน + เคสที่รับผิดชอบ) */
-export async function findDetailById(employeeId, includeTempPassword = false) {
-  const employee = await findById(employeeId);
+export async function findDetailById(employeeId, includeTempPassword = false, preloaded = null) {
+  // preloaded = แถวที่ผู้เรียกโหลดไว้แล้วในคำขอเดียวกัน (param loader ของ router) — ไม่ต้องอ่านซ้ำ
+  const employee = preloaded ?? (await findById(employeeId));
   if (!employee) return null;
 
   const [certificates, portfolio, cases] = await Promise.all([

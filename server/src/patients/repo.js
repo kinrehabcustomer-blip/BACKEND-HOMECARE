@@ -96,7 +96,7 @@ export async function list({ q, customer_id, has_customer, status, page, per_pag
      FROM patients p
      LEFT JOIN customers cu ON cu.customer_id = p.customer_id
      ${clause}
-     ORDER BY p.${sort} ${order.toUpperCase()}
+     ORDER BY p.${sort} ${order.toUpperCase()}, p.patient_id ${order.toUpperCase()}
      LIMIT :limit OFFSET :offset`,
     { ...params, limit: per_page, offset: (page - 1) * per_page },
   );

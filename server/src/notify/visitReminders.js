@@ -97,7 +97,9 @@ async function skipStaleReminders() {
            WHERE v.visit_id = o.visit_id AND v.status = 'scheduled' AND v.check_in_at IS NULL
              AND v.visit_date = o.payload->'data'->>'visit_date'
              AND COALESCE(v.planned_start, '') = COALESCE(o.payload->'data'->>'planned_start', '')
-             AND ${START_AT} > now())`,
+             /* เตือนพนักงาน: ต้องยังเป็นคนเดิม — ถูกย้ายกะระหว่างรอส่งซ้ำแล้วคนเก่ายังได้ที่อยู่/แผนที่ไป */
+             AND (o.event_kind = 'family' OR v.assigned_to IS NOT DISTINCT FROM o.payload->'data'->>'employee_id')
+             AND ${START_AT} > now())`
   );
 }
 

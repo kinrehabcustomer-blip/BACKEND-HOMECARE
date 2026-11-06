@@ -61,7 +61,7 @@ export default function MyTodayPage() {
     setError(null);
     try {
       const pos = await getPosition();
-      apply(await api.checkOut(visit.visit_id, pos.ok ? { lat: pos.lat, lng: pos.lng } : {}));
+      apply(await api.checkOut(visit.visit_id, pos.ok ? { lat: pos.lat, lng: pos.lng, accuracy: pos.accuracy } : {}));
     } catch (e) {
       setError(e.message);
     } finally {
@@ -227,7 +227,7 @@ function ShiftCard({ visit, busy, onCheckIn, onCheckOut, onReport }) {
           <p className="shift-times">
             เข้า {timeText(visit.check_in_at)}
             {visit.check_out_at && ` · ออก ${timeText(visit.check_out_at)} · รวม ${durationText(visit.worked_minutes)}`}
-            {visit.location_flagged && <span className="badge flag">นอกพื้นที่</span>}
+            {visit.location_flagged && <span className="badge flag">{visit.location_note ?? 'นอกพื้นที่'}</span>}
           </p>
         )}
       </div>

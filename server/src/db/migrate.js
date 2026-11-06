@@ -59,4 +59,13 @@ const { backfillVisitNumbers } = await import('../cases/visitNumbers.js');
 const vnIssued = await backfillVisitNumbers();
 console.log(vnIssued ? `ออกเลข VN ย้อนหลัง ${vnIssued} เลข` : 'นัดทุกนัดมีเลข VN แล้ว');
 
+/* ---------- ใบเสร็จย้อนหลัง ----------
+ * รับเงินที่บันทึกไว้ก่อนมีระบบใบเสร็จรายครั้ง ได้ใบเสร็จคนละใบ (ดู invoices/ledger.js) */
+const { backfillReceipts, backfillRefundDocs } = await import('../invoices/ledger.js');
+const receiptsIssued = await backfillReceipts();
+console.log(receiptsIssued ? `ออกใบเสร็จย้อนหลัง ${receiptsIssued} ใบ` : 'รับเงินทุกครั้งมีใบเสร็จแล้ว');
+const refundDocs = await backfillRefundDocs();
+console.log(refundDocs ? `ออกเลขใบสำคัญจ่ายย้อนหลัง ${refundDocs} ใบ` : 'เงินคืนทุกรายการมีเลขใบสำคัญจ่ายแล้ว');
+
 await pool.end();
+

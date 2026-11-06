@@ -195,7 +195,7 @@ export default function EmployeeModal({ employeeId, siblings = [], onNavigate, o
     <div className="modal-backdrop" onClick={onClose}>
       {/* กันไม่ให้คลิกในกล่องทะลุไปโดน backdrop จนปิดเอง */}
       <div
-        className="modal"
+        className="modal detail-modal"
         role="dialog"
         aria-modal="true"
         aria-label="ข้อมูลพนักงาน"

@@ -35,6 +35,7 @@ export const checkInSchema = z
 export const checkOutSchema = z.object({
   lat: lat.optional().nullable(),
   lng: lng.optional().nullable(),
+  accuracy: z.number().nonnegative().optional().nullable(),
 });
 
 // ประวัติการมาทำงานรายเดือน — ไม่ส่ง = เดือนปัจจุบัน

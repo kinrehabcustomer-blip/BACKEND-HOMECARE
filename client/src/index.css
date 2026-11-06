@@ -4390,6 +4390,29 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
 /* ป้ายบอกว่างวดนั้นคือเงินมัดจำ */
 .badge.deposit-tag { margin-right: 0.35rem; background: var(--divider); color: var(--muted); }
 
+/* ---------- ใบลดหนี้/เพิ่มหนี้ · ใบเสร็จรายครั้ง (components/InvoiceModal.jsx · server invoices/ledger.js) ---------- */
+/* ยอดหน้าใบ/ส่วนที่ปรับ/คืนเงิน — บรรทัดเล็กใต้ตัวเลขใหญ่ ให้รู้ว่ายอดสุทธิมาจากไหน */
+.pay-figure-note { font-size: 0.75rem; font-weight: 400; }
+.adj-history { border-top-style: dashed; }
+.adj-history li.is-void { opacity: 0.6; }
+.adj-history li.is-void .pay-history-amount { text-decoration: line-through; }
+.badge.adj-credit,
+.badge.adj-debit { margin-right: 0.35rem; }
+.badge.adj-credit { background: var(--danger-soft, var(--divider)); color: var(--danger); }
+.badge.adj-debit { background: var(--brand-soft); color: var(--brand); }
+/* เหตุผลพิมพ์ลงเอกสาร ยาวได้ — กินเต็มแถวของฟอร์ม · ข้อความเตือนคืนเงิน/ตัวอย่างยอดขึ้นบรรทัดของตัวเอง */
+.adj-form .adj-reason { flex: 1 1 100%; }
+.adj-form .adj-reason input { width: 100%; }
+.adj-refund-note,
+.adj-preview { flex: 1 1 100%; margin: 0; }
+.adj-refund-note { color: var(--danger); }
+/* ประเภทใบลดหนี้/เพิ่มหนี้ (ส่วนลด · หนี้สูญ …) วางถัดจากป้ายชนิดเอกสาร */
+.badge.adj-reason-tag { margin-right: 0.35rem; background: var(--divider); color: var(--text); }
+/* แก้ข้อมูลเงินคืน — วันที่ ช่องทาง หมายเหตุ เรียงแถวเดียว ตัดบรรทัดเองบนจอแคบ */
+.refund-edit-form { flex-wrap: wrap; }
+.refund-edit-form input[type='text'] { flex: 1 1 12rem; }
+.pay-void-form .adj-refund-note { flex: 1 1 100%; }
+
 /* สถานะ "ชำระบางส่วน" — สีกลางระหว่างรอชำระกับชำระครบ (เงินเข้ามาแล้วแต่ยังไม่จบ) */
 .badge.invoice-partial { background: #f3e2c0; color: #7a5a12; }
 
@@ -5147,6 +5170,9 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
 .nav-sub { display: flex; flex-direction: column; gap: 0.1875rem; padding-left: 1.25rem; }
 .sidebar nav .nav-sub a { padding-block: 0.5rem; }
 .sidebar nav .nav-sub .nav-ico { width: 1.0625rem; height: 1.0625rem; }
+/* เมนูย่อยวาดไว้เสมอ (App.jsx) — หุบ = ซ่อน · ชื่อเต็มใช้เฉพาะแผงเมนูบนมือถือ (ดู .tabbar-admin ใน warm-clarity.css) */
+.nav-sub.is-collapsed { display: none; }
+.nav-sub .nav-name-full { display: none; }
 @media (prefers-reduced-motion: reduce) { .nav-caret { transition: none; } }
 .nav-ico { transition: color 0.15s ease; }
 .page-head { padding-bottom: 1.25rem; border-bottom: 1px solid var(--border); }
@@ -5378,6 +5404,7 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
 .fr-total > div { padding: 0.375rem 0.5rem; }
 .fr-total-num { border-left: 1px solid #000; text-align: right; min-width: 9rem; }
 .fr-strong { font-weight: 700; }
+.fr-adjust-note { margin: 0; padding: 0.25rem 0.5rem; border-top: 1px solid #000; font-size: 0.75rem; }
 
 .fr-methods {
   display: flex;
@@ -5737,20 +5764,28 @@ h1, h2, h3, h4, .page-hero-title, .cal-title, .login-heading h1 {
 @media (max-width: 600px) {
   .content { --gx: 0.75rem; --gt: 1rem; }
 
-  /* แถว = รายการในการ์ด คั่นด้วยเส้น (ตารางบนคอมก็คั่นแถวด้วยเส้นแบบนี้) */
+  /* แถว = การ์ดแยกใบ วางบนพื้นอุ่น เว้นช่องระหว่างใบ (ผู้ใช้ขอ 6 พ.ย. 2569 — เดิมเป็นรายการต่อกันคั่นด้วยเส้น
+     อ่านแล้วแยกไม่ออกว่าข้อมูลบรรทัดไหนเป็นของคนไหน) · แถบตัวกรองด้านบนกับแถบเลื่อนหน้าด้านล่างยังเป็นพื้นขาวเต็มจอ
+     flex: 1 0 auto — รายการสั้นพื้นอุ่นยังยืดลงไปชนแถบเลื่อนหน้า ไม่เหลือแถบขาวโล่งคั่นกลาง */
   .list-card .table-wrap:not(.modal *) { margin: 0; }
+  .list-card > .table-wrap:not(.modal *):has(> .table-cards) { flex: 1 0 auto; }
+  .list-card .table-wrap:not(.modal *):has(> .table-cards) { padding: 0.75rem var(--gx); background: var(--bg); }
   .list-card .table-cards:not(.modal *) tbody tr {
-    margin: 0; padding: 0.875rem var(--gx);
-    border: 0; border-bottom: 1px solid var(--border-hover); border-radius: 0;
+    margin: 0 0 0.625rem; padding: 0.875rem 1rem;
+    border: 1px solid var(--border); border-radius: var(--radius-card, var(--radius));
     background: var(--surface);
+    box-shadow: 0 1px 2px rgba(40, 32, 15, 0.05);
   }
-  .list-card .table-cards:not(.modal *) tbody tr.is-picked { background: var(--brand-soft); }
-  /* แถวรวม = แถบท้ายการ์ด พื้นเข้ม ติดขอบล่างจอตอนเลื่อน (เหมือนแถวรวมบนคอม) */
+  .list-card .table-cards:not(.modal *) tbody tr:last-child { margin-bottom: 0; }
+  .list-card .table-cards:not(.modal *) tbody tr.is-picked { background: var(--brand-soft); border-color: var(--brand); }
+  /* แถว "กำลังโหลด… / ไม่พบข้อมูล" ไม่ใช่ข้อมูล — ไม่ต้องมีกรอบการ์ด */
+  .list-card .table-cards:not(.modal *) tbody tr:has(> td.empty) { border: 0; box-shadow: none; background: none; }
+  /* แถวรวม = แถบท้ายรายการ พื้นขาว ติดขอบล่างจอตอนเลื่อน กว้างเต็มจอ (ดึงออกเท่าระยะขอบของพื้นอุ่น) */
   .list-card .table-cards:not(.modal *) tfoot tr {
     position: sticky; bottom: 0; z-index: 1;
-    margin: 0; padding: 0.75rem var(--gx);
+    margin: 0.75rem calc(-1 * var(--gx)) -0.75rem; padding: 0.75rem var(--gx);
     border: 0; border-top: 2px solid var(--border); border-radius: 0;
-    background: var(--bg);
+    background: var(--surface);
   }
 }
 
@@ -5799,15 +5834,38 @@ h1, h2, h3, h4, .page-hero-title, .cal-title, .login-heading h1 {
 .family-invite { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
 .family-invite .checkbox { display: flex; gap: 6px; align-items: flex-start; font-size: 0.9em; flex: 1 1 260px; }
 .family-access .notice a { word-break: break-all; }
-.family-timeline { margin-top: 12px; border-top: 1px solid var(--border, #e5ddc8); padding-top: 8px; }
-.family-timeline h4 { margin: 4px 0 8px; }
-.family-post textarea { width: 100%; box-sizing: border-box; }
-.family-post-actions { display: flex; align-items: center; gap: 8px; margin: 6px 0 10px; }
-.family-thumb { width: 44px; height: 44px; object-fit: cover; border-radius: 6px; }
-.family-msg { padding: 8px 10px; border-radius: 10px; margin-bottom: 8px; background: #faf6ec; }
-.family-msg.team { background: #f1ead6; }
-.family-msg p { margin: 4px 0 0; }
-.family-photo { max-width: 220px; max-height: 220px; border-radius: 8px; margin-top: 6px; }
+/* ไทม์ไลน์กับญาติ: ในหน้าเคสเป็นการ์ดสรุปบรรทัดเดียว กดแล้วเปิด popup แชท (.family-chat-modal) */
+.family-timeline { margin-top: 0.75rem; }
+.family-tl-card {
+  display: flex; align-items: center; gap: 0.75rem; width: 100%;
+  padding: 0.75rem 0.875rem; border: 1px solid var(--border); border-radius: 0.75rem;
+  background: var(--surface); font: inherit; color: var(--text); text-align: left; cursor: pointer;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+.family-tl-card:hover { border-color: var(--brand); background: color-mix(in srgb, var(--brand-soft) 35%, var(--surface)); }
+.family-tl-card:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.family-tl-icon { flex: 0 0 auto; display: grid; place-items: center; width: 2.5rem; height: 2.5rem; border-radius: 0.625rem; background: var(--brand-soft); color: var(--brand); }
+.family-tl-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.125rem; }
+.family-tl-text strong { display: inline-flex; align-items: center; gap: 0.375rem; color: var(--heading, var(--text)); }
+.family-tl-count { min-width: 1.25rem; padding: 0 0.375rem; border-radius: 999px; background: var(--brand); color: #fff; font-size: 0.6875rem; line-height: 1.25rem; text-align: center; }
+.family-tl-preview { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.8125rem; color: var(--muted); }
+.family-tl-preview b { font-weight: 600; color: var(--text); }
+.family-tl-open { flex: 0 0 auto; font-size: 0.8125rem; font-weight: 600; color: var(--brand); }
+
+/* popup แชท — สูงคงที่ ข้อความเลื่อนในกรอบ ช่องพิมพ์อยู่ล่างเสมอ */
+.family-chat-modal { max-width: 40rem; height: min(46rem, 88dvh); overflow: hidden; outline: none; }
+.family-chat-modal .modal-head h2 { margin: 0; }
+.family-chat-modal .modal-head p.mono { margin: 0 0 0.125rem; font-size: 0.75rem; }
+.fchat-meta { display: inline-flex; align-items: center; gap: 0.25rem; }
+.fchat-hide {
+  border: 0; background: none; padding: 0.125rem 0.375rem; border-radius: 0.375rem;
+  font: inherit; font-size: 0.6875rem; color: var(--muted); cursor: pointer;
+}
+.fchat-hide:hover { background: var(--brand-soft); color: var(--danger, #b42318); }
+@media (max-width: 600px) {
+  .family-chat-modal { height: 94dvh; }
+  .family-tl-open { display: none; }
+}
 .customer-line { background: #f6f1e3; border-radius: 10px; padding: 8px 10px; margin-bottom: 10px; }
 .customer-line p { margin: 2px 0 0; }
 
@@ -5815,6 +5873,8 @@ h1, h2, h3, h4, .page-hero-title, .cal-title, .login-heading h1 {
    เปิดจากมือถือใน LINE เป็นหลัก — เอกสารกว้างเท่ากระดาษ จึงให้เลื่อนข้างได้ในกรอบ ไม่บีบตัวหนังสือจนอ่านไม่ออก */
 .bill-page { max-width: 60rem; margin: 0 auto; padding: 1rem; }
 .bill-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.75rem; font-weight: 600; }
+/* ลิงก์เดียวเห็นเอกสารทุกใบของบิล — ใบแจ้งหนี้ ใบเสร็จรายครั้ง ใบลดหนี้/เพิ่มหนี้ */
+.bill-doc-picker { flex: 1 1 14rem; min-width: 0; max-width: 100%; padding: 0.5rem; font: inherit; font-weight: 600; }
 .bill-scroll { overflow-x: auto; background: #fff; border: 1px solid var(--border, #e5e5e5); border-radius: 0.5rem; }
 .bill-scroll .invoice-doc { min-width: 40rem; }
 .bill-note { margin-top: 0.75rem; font-size: 0.875rem; color: var(--muted, #666); text-align: center; }
@@ -5857,6 +5917,25 @@ h1, h2, h3, h4, .page-hero-title, .cal-title, .login-heading h1 {
 .ss-item.is-disabled { color: var(--muted); cursor: not-allowed; opacity: 0.6; }
 .ss-group { padding: 0.5rem 0.625rem 0.25rem; font-size: 0.75rem; font-weight: 700; color: var(--muted); }
 .ss-empty { padding: 0.75rem 0.625rem; color: var(--muted); font-size: 0.875rem; }
+
+/* รายการหัตถการ (components/ProcedureNameInput.jsx) — ชื่อซ้าย ราคา 3 แบบขวา */
+.ss-pop:has(.proc-rates) { min-width: min(34rem, calc(100vw - 1rem)); }
+.ss-pop .ss-item:has(.proc-rates) { display: flex; align-items: center; gap: 0.75rem; justify-content: space-between; }
+.proc-opt-main { flex: 1; min-width: 0; line-height: 1.35; }
+.proc-rates { display: flex; gap: 0.25rem; flex: 0 0 auto; }
+.proc-rate {
+  display: flex; flex-direction: column; align-items: center; min-width: 4.25rem;
+  padding: 0.125rem 0.375rem; border: 1px solid var(--border); border-radius: 0.5rem;
+  background: var(--surface); color: var(--text); font: inherit; cursor: pointer; line-height: 1.25;
+}
+.proc-rate small { font-size: 0.6875rem; color: var(--muted); }
+.proc-rate b { font-size: 0.8125rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+.proc-rate:not(:disabled):hover { background: var(--brand-soft); border-color: var(--brand); }
+.proc-rate:disabled { opacity: 0.45; cursor: default; }
+@media (max-width: 640px) {
+  .ss-pop .ss-item:has(.proc-rates) { flex-direction: column; align-items: stretch; gap: 0.375rem; }
+  .proc-rates { justify-content: flex-start; }
+}
 
 /* ---------- แชทญาติ (pages/MyChatPage.jsx · components/CaseFamilyChat.jsx) ---------- */
 .mychat {
@@ -5954,6 +6033,12 @@ h1, h2, h3, h4, .page-hero-title, .cal-title, .login-heading h1 {
   /* เปิดห้องแชทแล้วซ่อนหัวหน้า ให้พื้นที่คุยเต็มจอ เหมือนแอปแชททั่วไป */
   .content:has(.mychat.has-room) .page-head { display: none; }
   .content:has(.mychat.has-room) .mychat { height: calc(100dvh - 6.5rem); }
+  /* แถบเมนูล่างลอยทับอยู่ (ขอบบนของแถบอยู่ที่ 4.5rem จากล่าง — ดู .tabbar ใน warm-clarity.css) — ต้องหักออกด้วย
+     ไม่งั้นช่องพิมพ์/ปุ่มส่งจมใต้แถบ · และเอา padding-bottom ของ .content ออกตอนเปิดห้อง (ห้องแชทหักที่ให้แถบเองแล้ว)
+     หน้าจะได้ไม่เลื่อนได้อีก (ตรวจ layout มือถือ 6 พ.ย. 2569) · 10.75rem = แถบบน ~5.6 + แถบล่าง 4.5 + ช่องไฟ */
+  .app.has-tabbar .mychat { height: calc(100dvh - 14.5rem - env(safe-area-inset-bottom)); }
+  .app.has-tabbar .content:has(.mychat.has-room) { padding-bottom: 0; }
+  .app.has-tabbar .content:has(.mychat.has-room) .mychat { height: calc(100dvh - 10.75rem - env(safe-area-inset-bottom)); }
   .mychat-head { padding: 0.5rem 0.75rem; gap: 0.5rem; }
   .fchat-scroll { padding: 0.75rem 0.625rem; }
   .fchat-composer { padding: 0.5rem 0.625rem calc(0.5rem + env(safe-area-inset-bottom)); }
@@ -5993,3 +6078,39 @@ h1, h2, h3, h4, .page-hero-title, .cal-title, .login-heading h1 {
 .camera-actions { justify-content: center; width: 100%; max-width: 20rem; }
 .camera-actions .btn { flex: 1; justify-content: center; }
 .checkin-photo .camera-capture { margin-bottom: 0.25rem; }
+
+/* ---------- หน้าต่อเคส (CaseFormPage ?renew=) ---------- */
+/* สรุปรอบก่อน — อ่านอย่างเดียว อยู่บนสุดของฟอร์ม */
+.renew-summary { border: 1px solid var(--border); border-radius: 10px; padding: 0.875rem 1rem; background: var(--surface-2); margin-bottom: 1rem; min-width: 0; }
+.renew-summary h2 { margin: 0 0 0.625rem; font-size: 1rem; }
+.renew-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: 0.5rem 1rem; margin: 0; }
+.renew-facts div { min-width: 0; }
+.renew-facts dt { font-size: 0.75rem; color: var(--muted); }
+.renew-facts dd { margin: 0.0625rem 0 0; overflow-wrap: anywhere; }
+.renew-summary .notice { margin: 0.625rem 0 0; }
+.renew-extras { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; }
+.renew-extras p { margin: 0; flex: 1 1 16rem; }
+/* หมวดที่คัดลอกจากรอบก่อนแบบพับ — หนึ่งบรรทัดต่อหมวด */
+.renew-copied { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.625rem 0.875rem; margin-top: 0.75rem; border: 1px solid var(--border); border-radius: var(--radius); min-width: 0; }
+.renew-copied > div { display: flex; flex-direction: column; gap: 0.125rem; min-width: 0; }
+.renew-copied .muted { overflow-wrap: anywhere; }
+.renew-copied .btn { flex-shrink: 0; }
+/* ซื้อขาด/หัตถการของรอบก่อนที่ไม่ได้ต่อให้ */
+.renew-leftover-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.375rem; }
+.renew-leftover-list li { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; min-width: 0; }
+.renew-leftover-list li > span { overflow-wrap: anywhere; }
+.renew-leftover-list .btn { flex-shrink: 0; }
+/* แบบกะของรอบก่อน */
+.renew-shifts { border: 1px solid var(--border); border-radius: 10px; padding: 0.75rem 1rem; margin: 0; min-width: 0; display: flex; flex-direction: column; gap: 0.5rem; }
+.renew-shifts legend { font-weight: 700; padding: 0 0.25rem; }
+.renew-shifts .checkbox-row { align-items: flex-start; }
+.renew-shifts .form-hint { margin: 0; }
+.row-renew { margin-left: 0.5rem; }
+
+/* แท็บอนุมัติจ่าย: ตัวกรองรอบ (เดือน · สถานะ) ชิดซ้าย ปุ่มเปิดรอบชิดขวา */
+.payroll-toolbar { gap: 0.5rem; }
+.payroll-toolbar > .btn { margin-left: auto; }
+@media (max-width: 600px) {
+  .payroll-toolbar > * { flex: 1 1 8rem; }
+  .payroll-toolbar > .btn { flex-basis: 100%; justify-content: center; }
+}

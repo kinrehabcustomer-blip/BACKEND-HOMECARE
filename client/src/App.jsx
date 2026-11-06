@@ -6,6 +6,7 @@ import LoginPage from './pages/LoginPage.jsx';
 import LineIcon from './components/LineIcon.jsx';
 import ChangePasswordForm from './components/ChangePasswordForm.jsx';
 import NotificationBell from './components/NotificationBell.jsx';
+import { useBottomBounce } from './lib/edgeBounce.js';
 
 /*
  * ทุกหน้ายกเว้นหน้า login ถูกโหลดตอนกดเข้าไปดูจริง ไม่ใช่ตอนเปิดเว็บ
@@ -34,6 +35,7 @@ const CaseFormPage = lazy(() => import('./pages/CaseFormPage.jsx'));
 const CalendarPage = lazy(() => import('./pages/CalendarPage.jsx'));
 const InvoiceListPage = lazy(() => import('./pages/InvoiceListPage.jsx'));
 const PayrollPage = lazy(() => import('./pages/PayrollPage.jsx'));
+const PermissionsPage = lazy(() => import('./pages/PermissionsPage.jsx'));
 const CustomerListPage = lazy(() => import('./pages/CustomerListPage.jsx'));
 const CustomerFormPage = lazy(() => import('./pages/CustomerFormPage.jsx'));
 const CustomerDetailPage = lazy(() => import('./pages/CustomerDetailPage.jsx'));
@@ -67,6 +69,7 @@ const NAV_ICONS = {
   wallet: (<><path d="M3 7a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><path d="M3 9h18" /><path d="M16 13.5h2.5" /></>),
   star: (<path d="M12 2.6l2.9 5.9 6.5.9-4.7 4.6 1.1 6.5-5.8-3.1-5.8 3.1 1.1-6.5L2.6 9.4l6.5-.9z" />),
   package: (<><path d="M21 8 12 3 3 8v8l9 5 9-5z" /><path d="M3 8l9 5 9-5M12 13v8" /></>),
+  shield: (<><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /><path d="M9 12l2 2 4-4" /></>),
   chat: (<path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 8.6 8.6 0 0 1-3.7-.8L3 21l1.9-5.1A8.4 8.4 0 1 1 21 11.5z" />),
   chevron: (<path d="M6 9l6 6 6-6" />),
 };
@@ -82,24 +85,30 @@ function NavIcon({ name }) {
 
 /* เมนูเก็บเป็นข้อมูล ไม่ใช่ JSX ตายตัว — ใช้สองที่: วาดรายการเมนู และหาชื่อหน้าปัจจุบันมาโชว์บนแถบบน
    ถ้าแยกกันเขียนสองชุด วันหนึ่งจะมีเมนูที่เปลี่ยนชื่อแล้วแถบบนยังเรียกชื่อเก่า */
-/* perm = หมวดสิทธิ์ที่ต้องมีถึงจะเห็นเมนูนี้ (ดู POSITION_PERMISSIONS ใน server/src/lib/auth.js)
-   unlessPerm = ซ่อนถ้ามีหมวดนี้อยู่แล้ว — หน้ารายได้แยกมีไว้ให้การเงิน ผู้จัดการดูกราฟเดียวกันที่หน้าภาพรวม */
+/* perm = สิทธิ์รายเมนูที่ต้องมีถึงจะเห็นเมนูนี้ — ตั้งรายตำแหน่งได้ในหน้า "จัดการสิทธิ์" (server/src/lib/permissions.js)
+   unlessPerm = ซ่อนถ้ามีสิทธิ์นี้อยู่แล้ว — หน้ารายได้แยกมีไว้ให้คนที่ไม่มีหน้าภาพรวม (ภาพรวมมีกราฟเดียวกันอยู่แล้ว)
+   positions = เมนูที่ผูกกับตำแหน่งตายตัว ไม่อยู่ในตารางสิทธิ์ (หน้าจัดการสิทธิ์เอง — กันปิดทางกลับของตัวเอง) */
+// ตำแหน่งที่เปิดหน้าจัดการสิทธิ์ได้ — ตรงกับ PERMISSION_ADMINS ใน server/src/lib/permissions.js
+const PERMISSION_ADMINS = ['super_admin', 'manager'];
+
+/* short = ชื่อสั้นบนแถบเมนูล่างของมือถือ (ดู TabBar) — ไม่ใส่ = ใช้ label */
 const ADMIN_NAV = [
-  { to: '/dashboard', icon: 'dashboard', label: 'ภาพรวม', perm: 'office' },
-  { to: '/cases', icon: 'cases', label: 'เคส', perm: 'office' },
-  { to: '/calendar', icon: 'calendar', label: 'ตารางงาน', perm: 'office' },
-  { to: '/attendance', icon: 'clock', label: 'การมาทำงาน', perm: 'office' },
-  { to: '/invoices', icon: 'invoice', label: 'ใบแจ้งหนี้', perm: 'billing' },
-  { to: '/payroll', icon: 'wallet', label: 'ค่าตอบแทนพนักงาน', perm: 'money' },
-  { to: '/revenue', icon: 'dashboard', label: 'รายได้บริษัท', perm: 'money', unlessPerm: 'office' },
+  { to: '/dashboard', icon: 'dashboard', label: 'ภาพรวม', perm: 'dashboard' },
+  { to: '/cases', icon: 'cases', label: 'เคส', perm: 'cases' },
+  { to: '/calendar', icon: 'calendar', label: 'ตารางงาน', short: 'ตาราง', perm: 'calendar' },
+  { to: '/attendance', icon: 'clock', label: 'การมาทำงาน', short: 'เข้างาน', perm: 'attendance' },
+  { to: '/invoices', icon: 'invoice', label: 'ใบแจ้งหนี้', perm: 'invoices' },
+  { to: '/payroll', icon: 'wallet', label: 'ค่าตอบแทนพนักงาน', short: 'ค่าตอบแทน', perm: 'payroll' },
+  { to: '/revenue', icon: 'dashboard', label: 'รายได้บริษัท', short: 'รายได้', perm: 'revenue', unlessPerm: 'dashboard' },
   /* group = รวมอยู่ใต้หัวข้อเดียวที่กางได้ในแถบเมนู (ดู NAV_GROUPS) · sub = ชื่อสั้นในเมนูย่อย
      label เต็มยังใช้เป็นชื่อหน้าบนแถบบน */
-  { to: '/packages', icon: 'home', label: 'แพ็คเกจ Homecare', sub: 'Homecare', group: 'packages', perm: 'office' },
-  { to: '/physio-packages', icon: 'activity', label: 'แพ็คเกจกายภาพบำบัด', sub: 'กายภาพบำบัด', group: 'packages', perm: 'office' },
-  { to: '/customers', icon: 'users', label: 'ลูกค้า', perm: 'office' },
-  { to: '/patients', icon: 'heart', label: 'ผู้รับบริการ', perm: 'office' },
-  { to: '/employees', icon: 'user', label: 'พนักงาน', perm: 'office' },
-  { to: '/reviews', icon: 'star', label: 'คะแนนประเมินจากญาติ', perm: 'office' },
+  { to: '/packages', icon: 'home', label: 'แพ็คเกจ Homecare', sub: 'Homecare', group: 'packages', perm: 'packages' },
+  { to: '/physio-packages', icon: 'activity', label: 'แพ็คเกจกายภาพบำบัด', sub: 'กายภาพบำบัด', group: 'packages', perm: 'packages' },
+  { to: '/customers', icon: 'users', label: 'ลูกค้า', perm: 'customers' },
+  { to: '/patients', icon: 'heart', label: 'ผู้รับบริการ', short: 'ผู้รับฯ', perm: 'patients' },
+  { to: '/employees', icon: 'user', label: 'พนักงาน', perm: 'employees' },
+  { to: '/reviews', icon: 'star', label: 'คะแนนประเมินจากญาติ', short: 'ประเมิน', perm: 'reviews' },
+  { to: '/permissions', icon: 'shield', label: 'จัดการสิทธิ์', short: 'สิทธิ์', positions: PERMISSION_ADMINS },
 ];
 
 /** หัวข้อของเมนูที่รวมกลุ่มกัน — แพ็คเกจสองแบบยุบเป็นหัวข้อเดียว (ผู้ใช้ขอ 30 ต.ค. 2569) */
@@ -110,7 +119,10 @@ const NAV_GROUPS = {
 /** เมนูหลังบ้านที่ผู้ใช้คนนี้เห็น — ว่าง = ตำแหน่งที่ยังไม่ได้กำหนดสิทธิ์ (ถ้ามีตำแหน่งใหม่ที่ยังไม่ได้ผูกสิทธิ์) */
 const navFor = (user) => {
   const perms = permissionsOf(user);
-  return ADMIN_NAV.filter((i) => perms.includes(i.perm) && !(i.unlessPerm && perms.includes(i.unlessPerm)));
+  return ADMIN_NAV.filter((i) =>
+    i.positions
+      ? i.positions.includes(user.position)
+      : perms.includes(i.perm) && !(i.unlessPerm && perms.includes(i.unlessPerm)));
 };
 
 /** หน้าแรกหลัง login — หน้าแรกที่เข้าได้จริง ไม่ใช่ /dashboard ตายตัว (การเงินเข้าภาพรวมไม่ได้) */
@@ -120,24 +132,79 @@ const homePath = (user) => {
 };
 
 
+// short = ชื่อสั้นบนแถบเมนูล่างของมือถือ (6 ช่องบนจอ 390px ชื่อเต็มไม่พอที่)
 const FIELD_NAV = [
-  { to: '/my-today', icon: 'today', label: 'งานวันนี้' },
-  { to: '/my-cases', icon: 'cases', label: 'เคสของฉัน' },
-  { to: '/my-chat', icon: 'chat', label: 'แชทญาติ' },
-  { to: '/my-reports', icon: 'activity', label: 'รายงานของฉัน' },
-  { to: '/my-calendar', icon: 'calendar', label: 'ตารางงานของฉัน' },
-  { to: '/my-attendance', icon: 'clock', label: 'ค่าตอบแทนของฉัน' },
+  { to: '/my-today', icon: 'today', label: 'งานวันนี้', short: 'วันนี้' },
+  { to: '/my-cases', icon: 'cases', label: 'เคสของฉัน', short: 'เคส' },
+  { to: '/my-chat', icon: 'chat', label: 'แชทญาติ', short: 'แชท' },
+  { to: '/my-reports', icon: 'activity', label: 'รายงานของฉัน', short: 'รายงาน' },
+  { to: '/my-calendar', icon: 'calendar', label: 'ตารางงานของฉัน', short: 'ตาราง' },
+  { to: '/my-attendance', icon: 'clock', label: 'ค่าตอบแทนของฉัน', short: 'ค่าตอบแทน' },
 ];
 
-function Sidebar() {
+/** จำนวนเมนูหลักบนแถบล่างของหลังบ้าน — ช่องที่ 5 คือปุ่ม "เมนู" (390px แบ่ง 5 ช่อง ช่องละ ~70px ชื่อสั้นยังไม่ตกบรรทัด) */
+const ADMIN_TABS = 4;
+
+/**
+ * แถบเมนูล่างบนมือถือ (จอกว้างซ่อนด้วย CSS — warm-clarity.css) แถบลอยมุมมน อยู่ที่นิ้วโป้งเอื้อมถึง
+ *
+ * พนักงานภาคสนาม: 6 หน้างานของตัวเองครบทุกอัน · ตั้งค่า/ออกจากระบบยังอยู่ใต้ ☰ บนแถบบน
+ * หลังบ้าน (ผู้ใช้ขอ 6 พ.ย. 2569): เมนูมีถึง 12 อัน ใส่แถบเดียวไม่พอ — 4 อันแรกที่คนนี้เข้าได้อยู่บนแถบ
+ * (เรียงตาม ADMIN_NAV ซึ่งเรียงตามความถี่ใช้อยู่แล้ว) ที่เหลือ + ตั้งค่า/ออกจากระบบอยู่ในแผง "เมนู"
+ * ที่เลื่อนขึ้นจากด้านล่าง (แผงเดียวกับ ☰ เดิม — แถบบนของหลังบ้านบนมือถือจึงไม่มีปุ่ม ☰ แล้ว)
+ */
+function TabBar({ menuOpen, onMenu }) {
+  const { user } = useAuth();
+  const location = useLocation();
+  const icon = (name) => <span className="tab-ico"><NavIcon name={name} /></span>;
+
+  if (user.role !== 'admin') {
+    return (
+      <nav className="tabbar" aria-label="เมนูพนักงาน">
+        {FIELD_NAV.map((i) => (
+          <NavLink key={i.to} to={i.to}>
+            {icon(i.icon)}
+            <span className="tab-label">{i.short}</span>
+          </NavLink>
+        ))}
+      </nav>
+    );
+  }
+
+  const tabs = navFor(user).filter((i) => !i.group).slice(0, ADMIN_TABS);
+  /* อยู่หน้าที่ไม่มีบนแถบ (ลูกค้า/พนักงาน/…) — ไฮไลต์ "เมนู" แทน ไม่งั้นแถบไม่มีช่องไหนติดเลย
+     คนใช้จะไม่รู้ว่าตอนนี้อยู่ตรงไหน และไม่รู้ว่าหน้านี้มาจากปุ่มไหน */
+  const elsewhere = !tabs.some((i) => location.pathname.startsWith(i.to));
+  return (
+    <nav className="tabbar" aria-label="เมนูลัด">
+      {tabs.map((i) => (
+        // ตอนแผงเมนูกางอยู่ ไฮไลต์ที่ "เมนู" ช่องเดียว — สองช่องติดพร้อมกันอ่านไม่ออกว่าอันไหนคือสิ่งที่เปิดอยู่
+        <NavLink key={i.to} to={i.to} className={({ isActive }) => (isActive && !menuOpen ? 'active' : '')}>
+          {icon(i.icon)}
+          <span className="tab-label">{i.short ?? i.label}</span>
+        </NavLink>
+      ))}
+      <button
+        type="button"
+        className={menuOpen || elsewhere ? 'active' : ''}
+        aria-expanded={menuOpen}
+        aria-controls="main-nav"
+        onClick={onMenu}
+      >
+        <span className="tab-ico"><LineIcon name={menuOpen ? 'close' : 'menu'} className="nav-ico" /></span>
+        <span className="tab-label">เมนู</span>
+      </button>
+    </nav>
+  );
+}
+
+/* menuOpen อยู่ที่ LayoutInner ไม่ใช่ที่นี่ — ปุ่ม "เมนู" บนแถบล่าง (TabBar) ต้องกางแผงเดียวกันนี้ได้ */
+function Sidebar({ menuOpen, setMenuOpen }) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const isAdmin = user.role === 'admin';
   const items = isAdmin ? navFor(user) : FIELD_NAV;
-
-  // เมนูพับได้เฉพาะจอแคบ (CSS ซ่อนปุ่มบนจอกว้าง) — บนจอกว้างค่านี้ไม่มีผลกับอะไรเลย
-  const [menuOpen, setMenuOpen] = useState(false);
 
   /* หัวข้อกลุ่มที่กางอยู่ (เช่น "แพ็คเกจ") — กางเองเมื่ออยู่ในหน้าของกลุ่มนั้น
      ไม่งั้นเข้าหน้าแพ็คเกจจากลิงก์อื่นแล้วเมนูที่ไฮไลต์ซ่อนอยู่ใต้หัวข้อที่หุบ */
@@ -155,7 +222,7 @@ function Sidebar() {
     });
 
   // เปลี่ยนหน้าแล้วต้องพับเมนูเอง ไม่งั้นเมนูค้างบังเนื้อหาที่เพิ่งกดเข้าไปดู
-  useEffect(() => setMenuOpen(false), [location.pathname]);
+  useEffect(() => setMenuOpen(false), [location.pathname]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Esc = พับเมนู — ทางออกมาตรฐานของทุกอย่างที่กางทับหน้าจอ
   useEffect(() => {
@@ -163,7 +230,7 @@ function Sidebar() {
     const onKeyDown = (e) => e.key === 'Escape' && setMenuOpen(false);
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [menuOpen]);
+  }, [menuOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleLogout() {
     await logout();
@@ -179,7 +246,9 @@ function Sidebar() {
           พนักงานภาคสนามเข้าหน้าพวกนั้นไม่ได้เลย (และ /api/notify/alerts เป็น requireAdmin)
           ใส่ให้เขาก็ได้กระดิ่งที่กดแล้วเจอ 403 ทุกบรรทัด */}
       <div className="brand">
-        <img className="brand-logo" src="/logo-navbar.webp" alt="KIN Home Care" />
+        {/* โลโก้ 2 ไฟล์ — CSS เลือกตาม data-theme (ไฟล์ -dark: ตัวอักษร HOME CARE สีครีม พื้นโปร่ง ไม่มีขอบขาว) */}
+        <img className="brand-logo logo-light" src="/logo-navbar.webp" alt="KIN Home Care" />
+        <img className="brand-logo logo-dark" src="/logo-navbar-dark.webp" alt="" aria-hidden="true" />
         {/* ตำแหน่งที่ยังไม่มีสิทธิ์หมวดไหนเลย ไม่มีของค้างให้ดู (และ /api/notify/alerts ตอบ 403) */}
         {isAdmin && items.length > 0 && <NotificationBell />}
       </div>
@@ -240,13 +309,17 @@ function Sidebar() {
                         {NAV_ICONS.chevron}
                       </svg>
                     </button>
-                    {open && (
-                      <div className="nav-sub" id={`nav-group-${i.group}`}>
-                        {members.map((m) => (
-                          <NavLink key={m.to} to={m.to}><NavIcon name={m.icon} />{m.sub ?? m.label}</NavLink>
-                        ))}
-                      </div>
-                    )}
+                    {/* วาดไว้เสมอ หุบด้วย CSS (.is-collapsed) — บนมือถือ (แผงเมนูของแถบล่าง) ไม่มีหัวข้อกางหุบ
+                        เมนูย่อยโชว์ตรงๆ เป็นเมนูปกติพร้อมชื่อเต็ม (ผู้ใช้ขอ 6 พ.ย. 2569) · ชื่อสั้น/เต็มสลับด้วย CSS */}
+                    <div className={`nav-sub${open ? '' : ' is-collapsed'}`} id={`nav-group-${i.group}`}>
+                      {members.map((m) => (
+                        <NavLink key={m.to} to={m.to}>
+                          <NavIcon name={m.icon} />
+                          <span className="nav-name-short">{m.sub ?? m.label}</span>
+                          <span className="nav-name-full">{m.label}</span>
+                        </NavLink>
+                      ))}
+                    </div>
                   </>
                 )}
               </Fragment>
@@ -312,32 +385,40 @@ function ForcePasswordChange() {
 }
 
 /** เนื้อในของเลย์เอาต์ — อยู่หลัง RequireAuth แล้ว จึงมั่นใจว่า user ไม่เป็น null */
-function LayoutInner({ children, perm }) {
+function LayoutInner({ children, perm, positions }) {
   const { user } = useAuth();
+  // เมนูพับได้เฉพาะจอแคบ — กางจาก ☰ บนแถบบน (พนักงานภาคสนาม) หรือปุ่ม "เมนู" บนแถบล่าง (หลังบ้าน)
+  const [menuOpen, setMenuOpen] = useState(false);
+  // เลื่อนจนสุดหน้าแล้วเด้งกลับนิดหนึ่ง (มือถือ) — ต้องเรียกก่อน return ด้านล่างตามกติกาของ hook
+  const bounceRef = useBottomBounce();
 
   // หน้าที่ต้องมีหมวดสิทธิ์ (office/billing/money) — ไม่มีก็เด้งไปหน้าแรกของตัวเอง
   // เป็นแค่การกันฝั่งหน้าเว็บ ตัวจริงกันที่ด่านของแต่ละเส้น API อีกชั้น
   if (perm && !permissionsOf(user).includes(perm)) return <Navigate to={homePath(user)} replace />;
+  // หน้าที่ผูกกับตำแหน่งตายตัว (จัดการสิทธิ์)
+  if (positions && !positions.includes(user.position)) return <Navigate to={homePath(user)} replace />;
 
   // ยังไม่ได้ตั้งรหัสของตัวเอง — API ปฏิเสธทุกเส้นอยู่แล้ว จึงไม่มีอะไรให้ทำในระบบนอกจากตั้งรหัส
   if (user.must_change_password) return <ForcePasswordChange />;
 
   return (
-    <div className="app">
-      <Sidebar />
-      <main className="content">
+    /* has-tabbar = มีแถบล่าง (ทุกคนบนมือถือ — CSS เว้นที่ให้เฉพาะจอแคบ) · tabbar-admin = แผงเมนูเลื่อนขึ้นจากล่าง ไม่ใช่ห้อยจากแถบบน */
+    <div className={`app has-tabbar${user.role === 'admin' ? ' tabbar-admin' : ''}${menuOpen ? ' menu-open' : ''}`}>
+      <Sidebar menuOpen={menuOpen} setMenuOpen={setMenuOpen} />
+      <main className="content" ref={bounceRef}>
         {children}
       </main>
+      <TabBar menuOpen={menuOpen} onMenu={() => setMenuOpen((v) => !v)} />
     </div>
   );
 }
 
 /** เลย์เอาต์ของหน้าที่ต้อง login (มี sidebar); หน้า login ใช้เลย์เอาต์ของตัวเอง
  *  perm = หมวดสิทธิ์ที่หน้านั้นต้องใช้ ('office' | 'billing' | 'money') · ไม่ใส่ = ทุกคนที่ login เข้าได้ */
-function AppLayout({ children, perm = null }) {
+function AppLayout({ children, perm = null, positions = null }) {
   return (
     <RequireAuth>
-      <LayoutInner perm={perm}>{children}</LayoutInner>
+      <LayoutInner perm={perm} positions={positions}>{children}</LayoutInner>
     </RequireAuth>
   );
 }
@@ -384,21 +465,22 @@ export default function App() {
             <Route path="/change-password" element={<Navigate to="/settings" replace />} />
             <Route path="/" element={<RequireAuth><HomeRedirect /></RequireAuth>} />
             <Route path="/no-access" element={<AppLayout><NoAccessPage /></AppLayout>} />
-            <Route path="/dashboard" element={<AppLayout perm="office"><DashboardPage /></AppLayout>} />
-            <Route path="/employees" element={<AppLayout perm="office"><EmployeeListPage /></AppLayout>} />
-            <Route path="/employees/new" element={<AppLayout perm="office"><EmployeeFormPage /></AppLayout>} />
-            <Route path="/employees/:id" element={<AppLayout perm="office"><EmployeeDetailPage /></AppLayout>} />
-            <Route path="/employees/:id/edit" element={<AppLayout perm="office"><EmployeeFormPage /></AppLayout>} />
+            <Route path="/dashboard" element={<AppLayout perm="dashboard"><DashboardPage /></AppLayout>} />
+            <Route path="/employees" element={<AppLayout perm="employees"><EmployeeListPage /></AppLayout>} />
+            <Route path="/employees/new" element={<AppLayout perm="employees"><EmployeeFormPage /></AppLayout>} />
+            <Route path="/employees/:id" element={<AppLayout perm="employees"><EmployeeDetailPage /></AppLayout>} />
+            <Route path="/employees/:id/edit" element={<AppLayout perm="employees"><EmployeeFormPage /></AppLayout>} />
 
-            <Route path="/cases" element={<AppLayout perm="office"><CaseListPage /></AppLayout>} />
-            <Route path="/cases/new" element={<AppLayout perm="office"><CaseFormPage /></AppLayout>} />
-            <Route path="/cases/:id/edit" element={<AppLayout perm="office"><CaseFormPage /></AppLayout>} />
+            <Route path="/cases" element={<AppLayout perm="cases"><CaseListPage /></AppLayout>} />
+            <Route path="/cases/new" element={<AppLayout perm="cases"><CaseFormPage /></AppLayout>} />
+            <Route path="/cases/:id/edit" element={<AppLayout perm="cases"><CaseFormPage /></AppLayout>} />
 
-            <Route path="/calendar" element={<AppLayout perm="office"><CalendarPage /></AppLayout>} />
-            <Route path="/attendance" element={<AppLayout perm="office"><AttendancePage /></AppLayout>} />
-            <Route path="/invoices" element={<AppLayout perm="billing"><InvoiceListPage /></AppLayout>} />
-            <Route path="/payroll" element={<AppLayout perm="money"><PayrollPage /></AppLayout>} />
-            <Route path="/revenue" element={<AppLayout perm="money"><RevenuePage /></AppLayout>} />
+            <Route path="/calendar" element={<AppLayout perm="calendar"><CalendarPage /></AppLayout>} />
+            <Route path="/attendance" element={<AppLayout perm="attendance"><AttendancePage /></AppLayout>} />
+            <Route path="/invoices" element={<AppLayout perm="invoices"><InvoiceListPage /></AppLayout>} />
+            <Route path="/payroll" element={<AppLayout perm="payroll"><PayrollPage /></AppLayout>} />
+            <Route path="/permissions" element={<AppLayout positions={PERMISSION_ADMINS}><PermissionsPage /></AppLayout>} />
+            <Route path="/revenue" element={<AppLayout perm="revenue"><RevenuePage /></AppLayout>} />
 
             {/* หน้าของพนักงานภาคสนาม — เข้าได้ทั้ง field และ admin (แสดงเฉพาะงานที่ตัวเองรับ) */}
             <Route path="/my-today" element={<AppLayout><MyTodayPage /></AppLayout>} />
@@ -409,21 +491,21 @@ export default function App() {
             <Route path="/my-attendance" element={<AppLayout><MyAttendancePage /></AppLayout>} />
 
             {/* ลูกค้า (ผู้ว่าจ้าง/ผู้จ่ายเงิน) — กลับมาเปิดแสดงในเมนูอีกครั้ง (ดร.ธงชัย 28 ต.ค. 2569) */}
-            <Route path="/customers" element={<AppLayout perm="office"><CustomerListPage /></AppLayout>} />
-            <Route path="/customers/new" element={<AppLayout perm="office"><CustomerFormPage /></AppLayout>} />
-            <Route path="/customers/:id" element={<AppLayout perm="office"><CustomerDetailPage /></AppLayout>} />
-            <Route path="/customers/:id/edit" element={<AppLayout perm="office"><CustomerFormPage /></AppLayout>} />
+            <Route path="/customers" element={<AppLayout perm="customers"><CustomerListPage /></AppLayout>} />
+            <Route path="/customers/new" element={<AppLayout perm="customers"><CustomerFormPage /></AppLayout>} />
+            <Route path="/customers/:id" element={<AppLayout perm="customers"><CustomerDetailPage /></AppLayout>} />
+            <Route path="/customers/:id/edit" element={<AppLayout perm="customers"><CustomerFormPage /></AppLayout>} />
 
-            <Route path="/patients" element={<AppLayout perm="office"><PatientListPage /></AppLayout>} />
-            <Route path="/patients/new" element={<AppLayout perm="office"><PatientFormPage /></AppLayout>} />
-            <Route path="/patients/:id" element={<AppLayout perm="office"><PatientDetailPage /></AppLayout>} />
-            <Route path="/patients/:id/edit" element={<AppLayout perm="office"><PatientFormPage /></AppLayout>} />
+            <Route path="/patients" element={<AppLayout perm="patients"><PatientListPage /></AppLayout>} />
+            <Route path="/patients/new" element={<AppLayout perm="patients"><PatientFormPage /></AppLayout>} />
+            <Route path="/patients/:id" element={<AppLayout perm="patients"><PatientDetailPage /></AppLayout>} />
+            <Route path="/patients/:id/edit" element={<AppLayout perm="patients"><PatientFormPage /></AppLayout>} />
 
-            <Route path="/reviews" element={<AppLayout perm="office"><ReviewsPage /></AppLayout>} />
-            <Route path="/reviews/:id" element={<AppLayout perm="office"><ReviewDetailPage /></AppLayout>} />
+            <Route path="/reviews" element={<AppLayout perm="reviews"><ReviewsPage /></AppLayout>} />
+            <Route path="/reviews/:id" element={<AppLayout perm="reviews"><ReviewDetailPage /></AppLayout>} />
 
-            <Route path="/packages" element={<AppLayout perm="office"><PackagesPage /></AppLayout>} />
-            <Route path="/physio-packages" element={<AppLayout perm="office"><PhysioPackagesPage /></AppLayout>} />
+            <Route path="/packages" element={<AppLayout perm="packages"><PackagesPage /></AppLayout>} />
+            <Route path="/physio-packages" element={<AppLayout perm="packages"><PhysioPackagesPage /></AppLayout>} />
 
             <Route path="*" element={<AppLayout perm="office"><p>ไม่พบหน้านี้</p></AppLayout>} />
           </Routes>

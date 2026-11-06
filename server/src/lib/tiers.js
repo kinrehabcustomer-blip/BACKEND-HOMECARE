@@ -21,7 +21,8 @@ export async function employeeMetrics(employeeId) {
   const since = new Date(Date.now() + 7 * 3.6e6 - 90 * 864e5).toISOString().slice(0, 10);
   const v = await sql.one(
     `SELECT count(*)::int AS shifts,
-            count(*) FILTER (WHERE COALESCE(v.check_in_late_minutes, 0) <= ${LATE_OK})::int AS on_time,
+            -- เช็คอินย้อนวัน (off_schedule) ไม่ใช่ตรงเวลา — สายเป็น NULL เพราะเทียบไม่ได้ ของเดิมจึงนับเป็นตรงเวลา
+            count(*) FILTER (WHERE NOT v.off_schedule AND COALESCE(v.check_in_late_minutes, 0) <= ${LATE_OK})::int AS on_time,
             -- รายงานผูกกับกะ (visit_id) ก่อน · เวรดึกบันทึกหลังเที่ยงคืน report_date เป็นวันถัดไป จึงรับวันถัดไปด้วยเมื่อไม่มี visit_id
             count(*) FILTER (WHERE EXISTS (
               SELECT 1 FROM case_reports r WHERE r.case_id = v.case_id AND r.reported_by = :emp

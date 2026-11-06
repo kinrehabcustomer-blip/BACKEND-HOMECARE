@@ -206,7 +206,7 @@ export default function PatientModal({ patientId, siblings = [], onNavigate, onC
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div
-        className="modal"
+        className="modal detail-modal"
         role="dialog"
         aria-modal="true"
         aria-label="ข้อมูลผู้รับการดูแล"

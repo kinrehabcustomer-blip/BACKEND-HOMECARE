@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api.js';
 import PatientModal from '../components/PatientModal.jsx';
@@ -9,6 +9,10 @@ import ErrorBar from '../components/ErrorBar.jsx';
 import PageRefresh from '../components/PageRefresh.jsx';
 import { formatPhone } from '../lib/phone.js';
 import SearchSelect from '../components/SearchSelect.jsx';
+import FilterBar from '../components/FilterBar.jsx';
+import LoadMore from '../components/LoadMore.jsx';
+import { useIsMobile } from '../lib/mobile.js';
+import { useLoadMore } from '../lib/loadMore.js';
 
 const PER_PAGE_OPTIONS = [20, 50, 100];
 
@@ -44,6 +48,11 @@ export default function PatientListPage() {
   const order = get('order') === 'asc' ? 'asc' : 'desc';
   const perPage = PER_PAGE_OPTIONS.includes(Number(get('per_page'))) ? get('per_page') : DEFAULTS.per_page;
   const page = Math.max(1, Number(get('page')) || 1);
+  /* มือถือไม่มีแถบเลื่อนหน้า — โหลดหน้า 1 แล้วต่อท้ายไปเรื่อยๆ ตอนเลื่อนลง (useLoadMore) · จอกว้างตาม ?page= เหมือนเดิม */
+  const mobile = useIsMobile();
+  const effPage = mobile ? 1 : page;
+  // เงื่อนไขของผลหน้า 1 ชุดล่าสุด — ใช้ขอหน้าถัดไปด้วยเงื่อนไขเดียวกันเป๊ะ
+  const lastQuery = useRef({});
   const openId = params.get('open');
 
   const filtered = Boolean(q || status || hasCustomer || customerId);
@@ -72,7 +81,7 @@ export default function PatientListPage() {
       const query = Object.fromEntries(
         Object.entries({
           q, status, has_customer: hasCustomer, customer_id: customerId,
-          page, per_page: perPage, sort, order,
+          page: effPage, per_page: perPage, sort, order,
         }).filter(([, v]) => v !== '' && v != null),
       );
 
@@ -80,6 +89,7 @@ export default function PatientListPage() {
         .listPatients(query)
         .then((data) => {
           if (cancelled) return; // ผลของเงื่อนไขเก่าที่มาถึงช้ากว่า ต้องไม่ทับผลของเงื่อนไขปัจจุบัน
+          lastQuery.current = query;
           setResult(data);
           setError(null); // สำเร็จแล้วต้องล้าง error ของรอบก่อน ไม่งั้นเน็ตสะดุดครั้งเดียวหน้าค้างเป็น error ตลอด
         })
@@ -91,7 +101,7 @@ export default function PatientListPage() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [q, status, hasCustomer, customerId, page, perPage, sort, order, reloadKey]);
+  }, [q, status, hasCustomer, customerId, effPage, perPage, sort, order, reloadKey]);
 
   // popup ถูกปิดด้วยปุ่มย้อนกลับของเบราว์เซอร์ — ประวัติที่เรา push ไว้ถูกใช้ไปแล้ว ต้องล้างธงทิ้ง
   useEffect(() => {
@@ -114,7 +124,11 @@ export default function PatientListPage() {
     }
   };
 
-  const rows = result?.data ?? [];
+  const fetchMore = useCallback((n) => api.listPatients({ ...lastQuery.current, page: n }), []);
+
+  const more = useLoadMore({ enabled: mobile, result, fetchPage: fetchMore, getKey: (r) => r.patient_id });
+
+  const rows = more.rows;
   const visibleIds = rows.map((p) => p.patient_id);
 
   return (
@@ -124,13 +138,15 @@ export default function PatientListPage() {
 
       {/* แถบตัวกรอง + ตาราง อยู่ในการ์ดใบเดียวกัน (จอเล็กแยกกลับเป็นแถบตัวกรอง + การ์ดรายแถว — ดู .list-card) */}
       <div className="list-card">
-        <div className="toolbar">
-          <input
+        {/* แถบค้นหา + ตัวกรอง — บนมือถือ dropdown ย้ายไปอยู่ในแผ่น "ตัวกรอง" (ดู FilterBar) */}
+        <FilterBar
+          search={<input
             className="search search-compact"
             placeholder="ค้นหา รหัส / ชื่อ / ชื่อเล่น / ชื่ออังกฤษ / เลขบัตร"
             value={q}
             onChange={(e) => setFilter('q', e.target.value)}
-          />
+          />}
+          filters={(<>
           <SearchSelect value={status} onChange={(e) => setFilter('status', e.target.value)}>
             <option value="">ทุกสถานะ</option>
             {Object.entries(PATIENT_STATUS_LABELS).map(([v, l]) => (
@@ -142,11 +158,13 @@ export default function PatientListPage() {
             <option value="yes">ผูกลูกค้าแล้ว</option>
             <option value="no">ยังไม่ผูกลูกค้า</option>
           </SearchSelect>
-          {/* โผล่เฉพาะตอนมีอะไรกรองอยู่ — ปุ่มที่กดแล้วไม่เกิดอะไรขึ้นไม่ควรมีให้เห็น */}
-          {filtered && <button className="btn" onClick={clearFilters}>ล้างตัวกรอง</button>}
-          {/* ปุ่มหลักของหน้าอยู่ท้ายแถบตัวกรอง (ไม่มีหัวหน้าแล้ว) */}
-          <Link className="btn primary toolbar-action" to="/patients/new">+ เพิ่มผู้รับบริการ</Link>
-        </div>
+          </>)}
+          filtered={filtered}
+          onClear={clearFilters}
+          /* ปุ่มหลักของหน้าอยู่ท้ายแถบตัวกรอง (ไม่มีหัวหน้าแล้ว) */
+          action={<Link className="btn primary toolbar-action" to="/patients/new">+ เพิ่มผู้รับบริการ</Link>}
+          actionIcon="patient"
+        />
 
         {/* กรองมาจากลิงก์ของลูกค้ารายหนึ่ง — ต้องบอกให้เห็น ไม่งั้นคนอ่านนึกว่านี่คือทั้งระบบ */}
         {customerId && (
@@ -200,7 +218,7 @@ export default function PatientListPage() {
                     }}
                   >
                     {/* ลำดับนับต่อเนื่องข้ามหน้า — เป็นลำดับของ "รายการที่เห็นตอนนี้" ไม่ใช่เลขประจำตัว */}
-                    <td className="row-index" data-label="ลำดับ">{(page - 1) * Number(perPage) + i + 1}</td>
+                    <td className="row-index" data-label="ลำดับ">{(effPage - 1) * Number(perPage) + i + 1}</td>
                     <td className="mono link" data-label="รหัส">{p.patient_id}</td>
                     <td data-label="ชื่อ" title={[p.name, p.nickname && `(${p.nickname})`].filter(Boolean).join(" ")}>
                       {p.name}
@@ -274,7 +292,11 @@ export default function PatientListPage() {
           </table>
         </div>
         {/* แถบเลื่อนหน้าอยู่ท้ายการ์ด (การ์ดยืดเต็มจอ — อยู่นอกการ์ดจะถูกดันตกจอ) */}
-        {result && (
+        {/* มือถือ: รายการยาวต่อเนื่อง โหลดเพิ่มเองตอนเลื่อนใกล้ท้าย — แทนแถบเลื่อนหน้า (ผู้ใช้ขอ 6 พ.ย. 2569) */}
+        {result && mobile && (
+          <LoadMore hasMore={more.hasMore} loading={more.loading} error={more.error} onMore={more.loadMore} total={more.total} unit="ราย" />
+        )}
+        {result && !mobile && (
           <div className="pager">
             {/* มีหน้าเดียวก็ไม่ต้องมีปุ่มเลื่อนหน้าที่กดไม่ได้ — แต่ตัวเลือกจำนวนแถวยังต้องอยู่ */}
             {result.pagination.total_pages > 1 && (

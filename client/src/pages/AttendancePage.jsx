@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../api.js';
 import { useToast } from '../toast.jsx';
-import { VISIT_STATE_LABELS, formatDate, timeText, durationText, distanceText } from '../labels.js';
+import { VISIT_STATE_LABELS, formatDate, timeText, durationText, distanceText, THERAPY_POSITIONS, TIER_POSITIONS } from '../labels.js';
 import LineIcon from '../components/LineIcon.jsx';
 import PageRefresh from '../components/PageRefresh.jsx';
 import ConfirmButton from '../components/ConfirmButton.jsx';
@@ -15,6 +15,9 @@ import { useScrollLock } from '../lib/scrollLock.js';
 import { useCan } from '../auth.jsx';
 import { caseCode } from '../lib/patientCode.js';
 import SearchSelect from '../components/SearchSelect.jsx';
+import LoadMore from '../components/LoadMore.jsx';
+import { useFilterSheet } from '../lib/filterSheet.jsx';
+import { useIsMobile } from '../lib/mobile.js';
 
 /* หน้านี้คือเรื่อง "เข้า–ออกงาน" ทั้งหมด — รวมการยืนยันกะกลับมาด้วย
 
@@ -31,6 +34,12 @@ const TABS = {
 };
 
 const LOG_PER_PAGE = 30;
+
+/** สายงานของพนักงานภาคสนาม — ตัวกรองบนหน้าการมาทำงาน (ทุกแท็บ) */
+const STAFF_GROUPS = {
+  homecare: { label: 'Homecare', positions: Object.values(TIER_POSITIONS).flat() },
+  physio: { label: 'กายภาพบำบัด', positions: THERAPY_POSITIONS },
+};
 
 /** จำนวนวันที่ผ่านมาแล้วนับจากวันที่กะ — ใช้บอกว่ากะค้างเช็คเอาท์มานานแค่ไหน */
 function daysAgo(dateStr) {
@@ -54,7 +63,7 @@ export default function AttendancePage() {
   const get = (key) => params.get(key) ?? '';
   /* แท็บ "ยืนยันกะ" เป็นของหมวด money เท่านั้น (เส้น /attendance/decide ปิดไว้ด้วย ensureCanPay)
      ถ้าไม่ซ่อน HR/Admin HC จะเห็นคิว ติ๊กเลือก กดอนุมัติ แล้วเจอแถบแดง — ปุ่มที่กดไม่ได้ไม่ควรมีอยู่ (ตรวจรอบ 10) */
-  const canPay = useCan('money');
+  const canPay = useCan('payroll'); // อนุมัติ/ปล่อยค่าจ้าง = งานของเมนูค่าตอบแทน
   const visibleTabs = canPay ? TABS : { exceptions: TABS.exceptions, log: TABS.log };
   const tab = visibleTabs[get('tab')] ? get('tab') : 'exceptions';
   const employeeId = get('employee_id');
@@ -93,18 +102,79 @@ export default function AttendancePage() {
     return loadExceptions();
   }, [loadExceptions]);
 
+  /* สายงาน (ผู้ใช้ขอ 6 พ.ย. 2569): ทั้งหมด · Homecare = สายดูแล CG/NA/PN/RN · กายภาพบำบัด = สายบำบัด (กายภาพ/กิจกรรม/แก้ไขการพูด)
+     กรองฝั่งหน้าเว็บจากตำแหน่งของพนักงานในแถว — ทุกแถวของสามแท็บมี employee_id อยู่แล้ว ไม่ต้องแก้ API
+     พนักงานที่ไม่อยู่ในรายชื่อ (ลาออก/ยังไม่กำหนดตำแหน่ง) ไม่เข้าสายไหน — เห็นเฉพาะตอนเลือก "ทั้งหมด" */
+  const group = STAFF_GROUPS[get('group')] ? get('group') : '';
+  const positionOf = new Map(staff.map((e) => [e.employee_id, e.position]));
+  const inGroup = (id) => !group || STAFF_GROUPS[group].positions.includes(positionOf.get(id));
+  const rowInGroup = (v) => inGroup(v.employee_id);
+
   // กรองพนักงานฝั่งหน้าเว็บ — endpoint รายการต้องตรวจไม่รับพารามิเตอร์ (ตั้งใจให้เห็นทุกคนเสมอ)
-  const shownExceptions = exceptions?.filter((v) => !employeeId || v.employee_id === employeeId) ?? null;
+  const shownExceptions = exceptions?.filter((v) => (!employeeId || v.employee_id === employeeId) && rowInGroup(v)) ?? null;
   const pending = exceptions?.length ?? 0;
 
-  const employeePicker = (
-    <SearchSelect value={employeeId} onChange={(e) => patch({ employee_id: e.target.value, page: '' })} aria-label="พนักงาน">
-      <option value="">พนักงานทุกคน</option>
-      {/* เฉพาะพนักงาน front (คนที่เช็คอินจริง) · คนที่เลือกค้างอยู่ใน URL ยังโชว์ไว้ */}
-      {staff.filter((e) => e.can_take_cases || e.employee_id === employeeId).map((e) => (
-        <option key={e.employee_id} value={e.employee_id}>{e.first_name} {e.last_name}</option>
-      ))}
-    </SearchSelect>
+  /* ปุ่มสลับสาย + รายชื่อพนักงาน — รายชื่อเหลือเฉพาะคนในสายที่เลือก
+     เปลี่ยนสายแล้วพนักงานที่เลือกค้างอยู่ไม่ได้อยู่ในสายใหม่ = ล้างทิ้ง ไม่งั้นได้รายการว่างโดยไม่รู้ว่าทำไม */
+  const pickGroup = (g) => patch({
+    group: g,
+    page: '',
+    ...(employeeId && g && !STAFF_GROUPS[g].positions.includes(positionOf.get(employeeId)) ? { employee_id: '' } : null),
+  });
+  const staffSelect = (
+      <SearchSelect value={employeeId} onChange={(e) => patch({ employee_id: e.target.value, page: '' })} aria-label="พนักงาน">
+        {/* เลือกสายอยู่ = ปุ่มสลับ/ชิปบอกสายแล้ว ตัวเลือกแรกเหลือสั้นๆ ไม่โดนตัดบนจอมือถือ */}
+        <option value="">{group ? 'ทุกคนในสายนี้' : 'พนักงานทุกคน'}</option>
+        {/* เฉพาะพนักงาน front (คนที่เช็คอินจริง) ในสายที่เลือก · คนที่เลือกค้างอยู่ใน URL ยังโชว์ไว้ */}
+        {staff.filter((e) => (e.can_take_cases && inGroup(e.employee_id)) || e.employee_id === employeeId).map((e) => (
+          <option key={e.employee_id} value={e.employee_id}>{e.first_name} {e.last_name}</option>
+        ))}
+      </SearchSelect>
+  );
+
+  /* มือถือ: ปุ่ม "ตัวกรอง" แบบเดียวกับหน้ารายการอื่น (ผู้ใช้ขอ 6 พ.ย. 2569) — สายงาน + พนักงานอยู่ในแผ่นตัวกรอง
+     สายงานในแผ่นเป็น dropdown (ชิปอ่านค่าจาก <select>) · จอกว้างยังเป็นปุ่มสลับสาย + รายชื่อ วางในแถบเหมือนเดิม */
+  const mobile = useIsMobile();
+  /* แท็บประวัติเช็คอิน: ช่องสถานะกะอยู่ในแผ่นตัวกรองด้วยบนมือถือ (ผู้ใช้ขอ 6 พ.ย. 2569) — แถบเหลือ เดือน · ตัวกรอง · ค้นหา · CSV */
+  const logState = tab === 'log' ? get('state') : '';
+  const filterSheet = useFilterSheet({
+    filters: (
+      <>
+        <SearchSelect value={group} onChange={(e) => pickGroup(e.target.value)} aria-label="สายงาน">
+          <option value="">ทุกสายงาน</option>
+          {Object.entries(STAFF_GROUPS).map(([key, g]) => <option key={key} value={key}>{g.label}</option>)}
+        </SearchSelect>
+        {staffSelect}
+        {tab === 'log' && (
+          <SearchSelect value={logState} onChange={(e) => patch({ state: e.target.value, page: '' })} aria-label="สถานะกะ">
+            <option value="">ทุกสถานะ</option>
+            {Object.entries(VISIT_STATE_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          </SearchSelect>
+        )}
+      </>
+    ),
+    filtered: Boolean(group || employeeId || logState),
+    onClear: () => patch({ group: '', employee_id: '', state: '', page: '' }),
+  });
+
+  const employeePicker = mobile ? (
+    <>
+      {filterSheet.button}
+      {filterSheet.chips}
+      {filterSheet.sheet}
+    </>
+  ) : (
+    <>
+      <span className="seg att-group" role="group" aria-label="สายงาน">
+        <button type="button" className={!group ? 'on' : ''} aria-pressed={!group} onClick={() => pickGroup('')}>ทั้งหมด</button>
+        {Object.entries(STAFF_GROUPS).map(([key, g]) => (
+          <button key={key} type="button" className={group === key ? 'on' : ''} aria-pressed={group === key} onClick={() => pickGroup(key)}>
+            {g.label}
+          </button>
+        ))}
+      </span>
+      {staffSelect}
+    </>
   );
 
   return (
@@ -148,6 +218,8 @@ export default function AttendancePage() {
             patch={patch}
             employeePicker={employeePicker}
             reloadKey={reloadKey}
+            rowFilter={group ? rowInGroup : null}
+            filterKey={group}
           />
         )}
         {tab === 'log' && (
@@ -160,6 +232,8 @@ export default function AttendancePage() {
             patch={patch}
             employeePicker={employeePicker}
             reloadKey={reloadKey}
+            rowFilter={group ? rowInGroup : null}
+            filterKey={group}
           />
         )}
       </div>
@@ -246,7 +320,7 @@ function WhoCell({ v }) {
 function reason(v) {
   if (v.state === 'missed') return 'ขาดงาน';
   if (v.state === 'stale') return 'ค้างเช็คเอาท์';
-  if (v.location_flagged) return 'นอกพื้นที่';
+  if (v.location_flagged) return v.location_note ? `ตำแหน่ง: ${v.location_note}` : 'นอกพื้นที่';
   if (v.off_schedule) return 'เช็คอินนอกวันนัด';
   if (v.check_in_late_minutes > LATE_MINUTES) return `มาสาย ${durationText(v.check_in_late_minutes)}`;
   return VISIT_STATE_LABELS[v.state];
@@ -299,6 +373,8 @@ function TimeFix({ visit, busy, onClose, onSave }) {
   const sheetRef = useSheetSwipe(onClose);
   const [start, setStart] = useState(clockValue(visit.check_in_at) || visit.planned_start || '');
   const [end, setEnd] = useState(clockValue(visit.check_out_at) || visit.planned_end || '');
+  // เหตุผลลงประวัติเคส (server บังคับ) — เติมกรณีที่พบบ่อยไว้ให้ แก้ได้
+  const [reason, setReason] = useState('พนักงานลืมเช็คอิน/เช็คเอาท์');
 
   useScrollLock();
   useEffect(() => {
@@ -319,7 +395,7 @@ function TimeFix({ visit, busy, onClose, onSave }) {
   /* ไม่มีพนักงานผูกกับกะนี้ = บันทึกไปก็ไม่รู้ว่าใครทำ และค่าตอบแทนจะไม่เข้าใคร
      (สรุปค่าตอบแทนนับจากคนที่เช็คอิน ซึ่ง server จะเติมจากพนักงานที่ถูกจัดให้กะนี้) */
   const noStaff = !visit.employee_id;
-  const canSave = ready && !noStaff && !busy;
+  const canSave = ready && !noStaff && !busy && reason.trim().length >= 3;
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -358,6 +434,11 @@ function TimeFix({ visit, busy, onClose, onSave }) {
             </label>
           </div>
 
+          <label>
+            เหตุผล *
+            <input type="text" value={reason} maxLength={300} disabled={noStaff} onChange={(e) => setReason(e.target.value)} />
+          </label>
+
           {/* ยืนยันสิ่งที่จะถูกบันทึกก่อนกด — โดยเฉพาะกรณีข้ามวัน ซึ่งระบบเดาให้เอง */}
           {minutes != null && (
             <p className="notice timefix-sum">
@@ -377,6 +458,7 @@ function TimeFix({ visit, busy, onClose, onSave }) {
                 check_in_at: stamp(visit.visit_date, start),
                 check_out_at: stamp(visit.visit_date, end, nextDay),
                 status: 'done',
+                reason: reason.trim(),
               })
             }
           >
@@ -410,27 +492,33 @@ function Exceptions({ rows, error, onReload, filters }) {
     }
   }
 
-  /* ปกติ cron ส่งสรุปให้เองทุกเช้า — ปุ่มนี้ไว้ส่งซ้ำตอนอยากให้ทีมเห็นเดี๋ยวนี้ หรือทดสอบว่าอีเมลออกจริง */
-  async function sendDigest() {
-    setBusy(true);
-    setActionError(null);
-    try {
-      const r = await api.sendDailyDigest();
-      toast(r.sent ? `ส่งสรุปให้ผู้จัดการ ${r.recipients} คนแล้ว` : `ไม่ได้ส่ง — ${r.reason}`);
-    } catch (e) {
-      setActionError(e.message);
-    } finally {
-      setBusy(false);
-    }
+  /* ดาวน์โหลดรายการต้องตรวจทั้งชุดเป็น CSV (ผู้ใช้ขอ 6 พ.ย. 2569 แทนปุ่มส่งสรุปทางอีเมล)
+     สรุปทางอีเมลยังส่งเองทุกเช้าตาม cron เหมือนเดิม — แค่ไม่มีปุ่มสั่งส่งด้วยมือในหน้านี้แล้ว */
+  function exportCsv() {
+    downloadCsv(
+      `attendance-issues-${thisMonth()}.csv`,
+      ['วันที่', 'พนักงาน', 'ผู้รับบริการ', 'รหัสเคส', 'ปัญหา', 'เวลานัด', 'เข้า', 'ออก', 'ตำแหน่ง', 'สาย (นาที)'],
+      rows.map((v) => [
+        v.visit_date, v.employee_name ?? '', v.client_name ?? '', caseCode(v.case_id),
+        reason(v),
+        v.planned_start ? `${v.planned_start}–${v.planned_end ?? ''}` : '',
+        v.check_in_at ? timeText(v.check_in_at) : '',
+        v.check_out_at ? timeText(v.check_out_at) : '',
+        v.location_note ?? (v.location_flagged ? 'นอกพื้นที่' : ''),
+        v.check_in_late_minutes ?? '',
+      ]),
+    );
   }
 
   return (
     <>
       <div className="att-filter">
         {filters}
-        <button className="btn" disabled={busy} onClick={sendDigest}>
-          <LineIcon name="mail" />ส่งสรุปทางอีเมลตอนนี้
-        </button>
+        {rows?.length > 0 && (
+          <button className="btn" onClick={exportCsv}>
+            <LineIcon name="download" />ดาวน์โหลด CSV
+          </button>
+        )}
       </div>
 
       {/* error เป็นแถบเหนือตาราง ไม่ทับทั้งหน้า — แท็บกับตัวกรองต้องไม่หายเพราะเน็ตสะดุด */}
@@ -494,7 +582,7 @@ function Exceptions({ rows, error, onReload, filters }) {
                         detail={`${v.employee_name} · ${formatDate(v.visit_date)} — ถ้าเลิกงานไปนานแล้ว ให้ใช้ "บันทึกเวลาจริง" แทน`}
                         confirmLabel="ปิดกะ"
                         cancelLabel="ไม่ปิด"
-                        onConfirm={() => adjust(v, { check_out_at: new Date().toISOString(), status: 'done' }, 'ปิดกะแล้ว')}
+                        onConfirm={() => adjust(v, { check_out_at: new Date().toISOString(), status: 'done', reason: 'ปิดกะค้าง (ลืมเช็คเอาท์) ด้วยเวลาปัจจุบัน' }, 'ปิดกะแล้ว')}
                       >
                         ปิดกะ
                       </ConfirmButton>
@@ -518,7 +606,7 @@ function Exceptions({ rows, error, onReload, filters }) {
                         detail={`${v.employee_name ?? 'ยังไม่มีพนักงาน'} · ${formatDate(v.visit_date)} — กะที่ยกเลิกจะไม่เข้าสรุปค่าตอบแทน · ถ้าวันนี้อยู่ในใบแจ้งหนี้ที่ออกให้ลูกค้าไปแล้ว ใบนั้นจะยังเก็บเงินของวันนี้อยู่ ต้องไปแก้ใบเอง`}
                         confirmLabel="ยกเลิกกะ"
                         cancelLabel="ไม่ยกเลิก"
-                        onConfirm={() => adjust(v, { status: 'cancelled' }, 'ยกเลิกกะแล้ว')}
+                        onConfirm={() => adjust(v, { status: 'cancelled', reason: 'ไม่ได้ไปทำงานกะนี้ (ยกเลิกจากรายการต้องตรวจ)' }, 'ยกเลิกกะแล้ว')}
                       >
                         ยกเลิกกะ
                       </ConfirmButton>
@@ -547,7 +635,7 @@ function Exceptions({ rows, error, onReload, filters }) {
   );
 }
 
-function Log({ month, employeeId, state, q, page, patch, employeePicker, reloadKey }) {
+function Log({ month, employeeId, state, q, page, patch, employeePicker, reloadKey, rowFilter = null, filterKey = '' }) {
   const [rows, setRows] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -572,6 +660,7 @@ function Log({ month, employeeId, state, q, page, patch, employeePicker, reloadK
      ยิงซ้ำเพื่อกรองจึงช้ากว่าและไม่ได้อะไรเพิ่ม */
   const term = q.trim().toLowerCase();
   const filteredRows = (rows ?? []).filter((v) => {
+    if (rowFilter && !rowFilter(v)) return false;   // สาย Homecare / กายภาพบำบัด (ดู STAFF_GROUPS)
     if (state && v.state !== state) return false;
     if (!term) return true;
     return [v.employee_name, v.client_name, v.case_id].some((s) => String(s ?? '').toLowerCase().includes(term));
@@ -579,7 +668,17 @@ function Log({ month, employeeId, state, q, page, patch, employeePicker, reloadK
 
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / LOG_PER_PAGE));
   const safePage = Math.min(page, totalPages);
-  const shown = filteredRows.slice((safePage - 1) * LOG_PER_PAGE, safePage * LOG_PER_PAGE);
+
+  /* มือถือ: ไม่มีแถบเลื่อนหน้า — รายการยาวต่อเนื่อง วาดทีละ 30 แถวแล้วเพิ่มเองตอนเลื่อนใกล้ท้าย (ผู้ใช้ขอ 6 พ.ย. 2569)
+     ข้อมูลทั้งเดือนอยู่ในมือแล้ว จึงแค่ขยายจำนวนที่วาด ไม่ต้องยิง API · เงื่อนไขเปลี่ยน = เริ่มที่ 30 แถวใหม่ */
+  const mobile = useIsMobile();
+  const [mobileLimit, setMobileLimit] = useState(LOG_PER_PAGE);
+  useEffect(() => setMobileLimit(LOG_PER_PAGE), [rows, state, term, month, employeeId, filterKey]);
+  const showMore = useCallback(() => setMobileLimit((n) => n + LOG_PER_PAGE), []);
+
+  const shown = mobile
+    ? filteredRows.slice(0, mobileLimit)
+    : filteredRows.slice((safePage - 1) * LOG_PER_PAGE, safePage * LOG_PER_PAGE);
   const filtered = Boolean(state || term || employeeId);
 
   function exportCsv() {
@@ -605,22 +704,29 @@ function Log({ month, employeeId, state, q, page, patch, employeePicker, reloadK
     <>
       <MonthPicker month={month} onChange={(m) => patch({ month: m, page: '' })}>
         {employeePicker}
-        <SearchSelect value={state} onChange={(e) => patch({ state: e.target.value, page: '' })} aria-label="สถานะกะ">
-          <option value="">ทุกสถานะ</option>
-          {Object.entries(VISIT_STATE_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-        </SearchSelect>
+        {/* มือถือ: ช่องสถานะอยู่ในแผ่นตัวกรอง (ดู filterSheet ใน AttendancePage) */}
+        {!mobile && (
+          <SearchSelect value={state} onChange={(e) => patch({ state: e.target.value, page: '' })} aria-label="สถานะกะ">
+            <option value="">ทุกสถานะ</option>
+            {Object.entries(VISIT_STATE_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          </SearchSelect>
+        )}
         <input
           className="search"
           placeholder="ค้นหา ชื่อพนักงาน / ผู้รับบริการ / รหัสเคส"
           value={q}
           onChange={(e) => patch({ q: e.target.value, page: '' })}
         />
-        {filtered && (
+        {filtered && !mobile && (
           <button className="btn" onClick={() => patch({ state: '', q: '', employee_id: '', page: '' })}>
             ล้างตัวกรอง
           </button>
         )}
-        {filteredRows.length > 0 && <button className="btn" onClick={exportCsv}><LineIcon name="download" />ดาวน์โหลด CSV</button>}
+        {filteredRows.length > 0 && (
+          <button className="btn att-csv" onClick={exportCsv} title="ดาวน์โหลด CSV">
+            <LineIcon name="download" /><span className="att-csv-label">ดาวน์โหลด CSV</span>
+          </button>
+        )}
       </MonthPicker>
 
       {error && <p className="error">{error}</p>}
@@ -661,7 +767,10 @@ function Log({ month, employeeId, state, q, page, patch, employeePicker, reloadK
             </table>
           </div>
 
-          <div className="pager">
+          {mobile && (
+            <LoadMore hasMore={mobileLimit < filteredRows.length} onMore={showMore} total={filteredRows.length} unit="กะ" />
+          )}
+          <div className="pager" hidden={mobile}>
             {totalPages > 1 && (
               <>
                 <button className="btn" disabled={safePage <= 1} onClick={() => patch({ page: String(safePage - 1) })}>

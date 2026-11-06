@@ -6,6 +6,7 @@ import Stars from '../components/Stars.jsx';
 import PageRefresh from '../components/PageRefresh.jsx';
 import { scoreText } from '../lib/reviewQuestions.js';
 import SearchSelect from '../components/SearchSelect.jsx';
+import FilterBar from '../components/FilterBar.jsx';
 
 /**
  * คะแนนประเมินจากญาติผู้รับบริการ — ภาพรวมรายบุคคล
@@ -97,24 +98,27 @@ export default function ReviewsPage() {
         </div>
 
         {rows.length > 0 && (
-          <div className="toolbar">
-            <input
+          /* แถบค้นหา + ตัวกรอง — บนมือถือ dropdown ย้ายไปอยู่ในแผ่น "ตัวกรอง" (ดู FilterBar) */
+          <FilterBar
+            search={<input
               className="search search-compact"
               type="search"
               placeholder="ค้นหา ชื่อพนักงาน / ชื่อเล่น / รหัสพนักงาน / ตำแหน่ง"
               aria-label="ค้นหาพนักงาน"
               value={q}
               onChange={(e) => setFilter('q', e.target.value)}
-            />
+            />}
+            filters={(<>
             <SearchSelect value={ratedFilter} onChange={(e) => setFilter('rated', e.target.value)} aria-label="คะแนน">
               <option value="">พนักงานทุกคน</option>
               <option value="yes">มีคะแนนแล้ว</option>
               <option value="no">ยังไม่มีคะแนน</option>
             </SearchSelect>
-            {/* โผล่เฉพาะตอนมีอะไรกรองอยู่ — ปุ่มที่กดแล้วไม่เกิดอะไรขึ้นไม่ควรมีให้เห็น */}
-            {filtered && <button className="btn" onClick={clearFilters}>ล้างตัวกรอง</button>}
-            {filtered && <span className="muted">พบ {shown.length} จาก {rows.length} คน</span>}
-          </div>
+            </>)}
+            filtered={filtered}
+            onClear={clearFilters}
+            extra={filtered && <span className="muted fbar-note">พบ {shown.length} จาก {rows.length} คน</span>}
+          />
         )}
 
         {rows.length === 0 ? (

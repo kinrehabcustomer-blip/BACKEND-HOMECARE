@@ -421,6 +421,12 @@ ALTER TABLE invoices ADD COLUMN IF NOT EXISTS issued_by_name TEXT;
 ALTER TABLE invoices ADD COLUMN IF NOT EXISTS paid_by        TEXT
   REFERENCES employees (employee_id) ON DELETE SET NULL ON UPDATE CASCADE;
 ALTER TABLE invoices ADD COLUMN IF NOT EXISTS paid_by_name   TEXT;
+-- ผู้ยกเลิกใบ + เหตุผล — ยกเลิกใบที่ออกแล้วเท่ากับเลิกเก็บเงินก้อนนั้น ต้องตอบได้ว่าใครสั่งและทำไม
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS cancelled_by      TEXT
+  REFERENCES employees (employee_id) ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS cancelled_by_name TEXT;
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS cancelled_at      TEXT;
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS cancel_reason     TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_invoices_customer ON invoices (customer_id);
 CREATE INDEX IF NOT EXISTS idx_invoices_case     ON invoices (case_id);
@@ -630,6 +636,10 @@ ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS check_out_lat       DOUBLE PREC
 ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS check_out_lng       DOUBLE PRECISION;
 -- true = อยู่นอก geofence / พิกัดน่าสงสัย → เข้ารายการให้ admin ตรวจ (ไม่บล็อกการเช็คอิน)
 ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS location_flagged    BOOLEAN NOT NULL DEFAULT FALSE;
+-- ธงขึ้นเพราะอะไร (ข้อความอ่านออก เช่น 'เข้า: GPS คลาด ±900 ม. · ออก: ห่าง 1.2 กม.') — ธงเดียวรวมทั้งตอนเข้าและออก
+ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS location_note        TEXT;
+ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS check_out_accuracy_m DOUBLE PRECISION;
+ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS check_out_distance_m INTEGER;
 -- admin แก้เวลา/ปิดกะให้ (ลืมเช็คเอาท์/GPS พัง) — เก็บว่าใครแก้ ไว้ตรวจสอบย้อนหลัง
 ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS adjusted_by TEXT
   REFERENCES employees (employee_id) ON DELETE SET NULL ON UPDATE CASCADE;
@@ -1322,6 +1332,11 @@ CREATE TABLE IF NOT EXISTS payroll_runs (
   created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS'),
   updated_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')
 );
+-- ผู้ยกเลิกรอบ — ยกเลิกแล้วก้อนเงินทั้งหมดกลับเข้ากองรอจ่าย ต้องตอบได้ว่าใครสั่ง (ตรวจรอบ 6 พ.ย. 2569)
+ALTER TABLE payroll_runs ADD COLUMN IF NOT EXISTS cancelled_by      TEXT
+  REFERENCES employees (employee_id) ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE payroll_runs ADD COLUMN IF NOT EXISTS cancelled_by_name TEXT;
+ALTER TABLE payroll_runs ADD COLUMN IF NOT EXISTS cancelled_at      TEXT;
 
 -- เดือนหนึ่งมีรอบที่ 1/2/3 ได้อย่างละครั้ง — ยกเว้นรอบที่ยกเลิกไปแล้ว (เปิดรอบเดิมใหม่ได้)
 CREATE UNIQUE INDEX IF NOT EXISTS idx_payroll_runs_period
@@ -1757,3 +1772,129 @@ ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS vn TEXT;
 ALTER TABLE cases ADD COLUMN IF NOT EXISTS vn TEXT;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_case_visits_vn ON case_visits (vn) WHERE vn IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_cases_vn ON cases (vn) WHERE vn IS NOT NULL;
+
+-- ============================================================================
+-- ใบเสร็จ · ใบลดหนี้ / ใบเพิ่มหนี้ · คืนเงิน (ดร.ธงชัย 4 พ.ย. 2569)
+--
+-- รับเงิน 1 ครั้ง = ใบเสร็จ 1 ใบ (เดิมมีใบเสร็จเฉพาะตอนจ่ายครบ ใช้เลขเดียวกับใบแจ้งหนี้)
+-- ใบที่ออกแล้วห้ามแก้ยอดตรง ๆ — ลดยอดออกใบลดหนี้ (CN) เพิ่มยอดออกใบเพิ่มหนี้ (DN)
+-- ลดหนี้จนเงินที่รับไว้เกินยอดใหม่ = บันทึกคืนเงินพร้อมกันทันที (ไม่เก็บเป็นเครดิต)
+-- เลขที่ HC-RC / HC-CN / HC-DN + วันที่ + เลขรันต่อเนื่องไม่รีเซ็ต (ดู nextDocId ใน db/index.js)
+--
+-- ต้องตรงกับ DDL ใน invoices/ledger.js (สร้างซ้ำแบบ lazy ที่นั่น กันโค้ดขึ้นก่อน migrate)
+-- invoice_id ไม่ CASCADE โดยตั้งใจ: ใบที่มีเอกสารต่อท้ายแล้วลบไม่ได้ในระดับฐานข้อมูล
+-- ใบเสร็จย้อนหลังของรับเงินเก่าเติมใน db/migrate.js (ต้องใช้ตัวนับเลขที่ ทำใน SQL ล้วนไม่ได้)
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS receipts (
+  receipt_id      TEXT PRIMARY KEY,
+  invoice_id      TEXT NOT NULL REFERENCES invoices (invoice_id) ON UPDATE CASCADE,
+  payment_id      INTEGER,   -- ไม่ผูก FK: ยกเลิกรายการรับเงินแล้วแถวรับเงินหาย แต่ใบเสร็จต้องอยู่ต่อเป็น 'voided'
+  amount          DOUBLE PRECISION NOT NULL CHECK (amount > 0),
+  paid_at         TEXT NOT NULL,
+  method          TEXT,
+  is_deposit      BOOLEAN NOT NULL DEFAULT FALSE,
+  bill_to_name    TEXT NOT NULL,
+  bill_to_tax_id  TEXT,
+  bill_to_address TEXT,
+  balance_after   DOUBLE PRECISION NOT NULL,  -- ยอดค้างหลังรับครั้งนี้
+  status          TEXT NOT NULL DEFAULT 'issued' CHECK (status IN ('issued', 'voided')),
+  void_reason     TEXT,
+  voided_by       TEXT REFERENCES employees (employee_id) ON DELETE SET NULL ON UPDATE CASCADE,
+  voided_by_name  TEXT,
+  voided_at       TEXT,
+  issued_by       TEXT REFERENCES employees (employee_id) ON DELETE SET NULL ON UPDATE CASCADE,
+  issued_by_name  TEXT,
+  created_at      TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_receipts_payment ON receipts (payment_id) WHERE payment_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_receipts_invoice ON receipts (invoice_id, receipt_id);
+
+CREATE TABLE IF NOT EXISTS invoice_adjustments (
+  note_id           TEXT PRIMARY KEY,
+  invoice_id        TEXT NOT NULL REFERENCES invoices (invoice_id) ON UPDATE CASCADE,
+  kind              TEXT NOT NULL CHECK (kind IN ('credit', 'debit')),  -- credit = ลดหนี้ · debit = เพิ่มหนี้
+  amount            DOUBLE PRECISION NOT NULL CHECK (amount > 0),
+  reason            TEXT NOT NULL,
+  items             JSONB NOT NULL DEFAULT '[]'::jsonb,
+  ref_receipt_id    TEXT,
+  issue_date        TEXT NOT NULL,
+  total_before      DOUBLE PRECISION NOT NULL,  -- ยอดสุทธิก่อน/หลังเอกสารนี้ ไว้พิมพ์บนใบ
+  total_after       DOUBLE PRECISION NOT NULL,
+  bill_to_name      TEXT NOT NULL,
+  bill_to_tax_id    TEXT,
+  bill_to_address   TEXT,
+  status            TEXT NOT NULL DEFAULT 'issued' CHECK (status IN ('issued', 'cancelled')),
+  cancel_reason     TEXT,
+  cancelled_by      TEXT REFERENCES employees (employee_id) ON DELETE SET NULL ON UPDATE CASCADE,
+  cancelled_by_name TEXT,
+  cancelled_at      TEXT,
+  issued_by         TEXT REFERENCES employees (employee_id) ON DELETE SET NULL ON UPDATE CASCADE,
+  issued_by_name    TEXT,
+  created_at        TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')
+);
+CREATE INDEX IF NOT EXISTS idx_invoice_adjustments_invoice ON invoice_adjustments (invoice_id, note_id);
+
+CREATE TABLE IF NOT EXISTS invoice_refunds (
+  refund_id        INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  invoice_id       TEXT NOT NULL REFERENCES invoices (invoice_id) ON UPDATE CASCADE,
+  note_id          TEXT REFERENCES invoice_adjustments (note_id) ON UPDATE CASCADE,
+  amount           DOUBLE PRECISION NOT NULL CHECK (amount > 0),
+  refunded_at      TEXT NOT NULL,
+  method           TEXT,
+  note             TEXT,
+  refunded_by      TEXT REFERENCES employees (employee_id) ON DELETE SET NULL ON UPDATE CASCADE,
+  refunded_by_name TEXT,
+  created_at       TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')
+);
+CREATE INDEX IF NOT EXISTS idx_invoice_refunds_invoice ON invoice_refunds (invoice_id, refund_id);
+
+-- ---------- ชุด A แผนแก้ระบบการเงิน (4 พ.ย. 2569) — ต้องตรงกับท้าย DDL ใน invoices/ledger.js ----------
+-- เงินคืนมีเลขเอกสาร HC-PV (ใบสำคัญจ่าย) และสถานะของตัวเอง
+-- voided = ยกเลิกพร้อมใบลดหนี้ของมัน ยกเลิกแยกเดี่ยวไม่ได้ (ยกเลิกแค่เงินคืน = รับเงินเกินยอดทันที)
+-- edit_log = ค่าก่อนแก้วันที่/ช่องทาง/หมายเหตุ ทุกครั้ง · เลข PV ย้อนหลังของเงินคืนเก่าเติมใน db/migrate.js
+ALTER TABLE invoice_refunds ADD COLUMN IF NOT EXISTS refund_doc_id TEXT;
+ALTER TABLE invoice_refunds ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active'
+  CHECK (status IN ('active', 'voided'));
+ALTER TABLE invoice_refunds ADD COLUMN IF NOT EXISTS void_reason TEXT;
+ALTER TABLE invoice_refunds ADD COLUMN IF NOT EXISTS voided_by TEXT
+  REFERENCES employees (employee_id) ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE invoice_refunds ADD COLUMN IF NOT EXISTS voided_by_name TEXT;
+ALTER TABLE invoice_refunds ADD COLUMN IF NOT EXISTS voided_at TEXT;
+ALTER TABLE invoice_refunds ADD COLUMN IF NOT EXISTS edit_log JSONB NOT NULL DEFAULT '[]'::jsonb;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_invoice_refunds_doc ON invoice_refunds (refund_doc_id) WHERE refund_doc_id IS NOT NULL;
+
+-- ประเภทใบลดหนี้/เพิ่มหนี้ แยกส่วนลดออกจากหนี้สูญในรายงาน · ของเก่าทั้งหมด = other
+ALTER TABLE invoice_adjustments ADD COLUMN IF NOT EXISTS reason_code TEXT NOT NULL DEFAULT 'other'
+  CHECK (reason_code IN ('discount', 'correction', 'not_rendered', 'bad_debt', 'extra_service', 'other'));
+
+-- เวลาที่ใบถูกออกจริง (ร่าง → ออกแล้ว หรือรับเงินเข้าใบร่าง) — แยกใบยกเลิกที่เคยส่งลูกค้ากับใบร่างที่ไม่เคยออก
+-- ใบเก่าเติมด้วย issue_date: ใบที่ออกแล้ว/ชำระแล้ว หรือใบยกเลิกที่มีเงิน ใบเสร็จ หรือ CN/DN ผูกอยู่
+-- รันซ้ำทุก deploy ได้: ใบใหม่ได้ค่าตอนออกเสมอ ใบร่างที่ยกเลิกโดยไม่เคยออกไม่เข้าเงื่อนไข จึงยังว่างตามจริง
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS issued_at TEXT;
+UPDATE invoices i SET issued_at = i.issue_date
+WHERE i.issued_at IS NULL
+  AND (i.status IN ('issued', 'paid')
+       OR EXISTS (SELECT 1 FROM invoice_payments p WHERE p.invoice_id = i.invoice_id)
+       OR EXISTS (SELECT 1 FROM receipts r WHERE r.invoice_id = i.invoice_id)
+       OR EXISTS (SELECT 1 FROM invoice_adjustments a WHERE a.invoice_id = i.invoice_id));
+
+-- ============================================================================
+-- ใบค่าใช้จ่ายเพิ่มเติม (ดร.ธงชัย 4 พ.ย. 2569)
+--
+-- อุปกรณ์เสริม/หัตถการที่เพิ่มเข้าเคสหลังใบแพ็คเกจออกไปแล้ว ไม่ถูกยัดเข้าใบเดิม — แอดมินกดออกเป็นใบใหม่เอง
+-- billing_kind = 'extra' : เก็บเต็มจำนวนเสมอ (ไม่ต้องเลือกวิธีเก็บเงิน) · ไม่ซิงก์ตามเคส · ไม่นับเป็น "ใบร่างของเคส"
+-- อุปกรณ์แต่ละรายการถูกเก็บได้ครั้งเดียวทั้งเคส คิดจากคอลัมน์ addons ของทุกใบที่ยังไม่ยกเลิก (ดู unbilledAddons)
+-- ============================================================================
+ALTER TABLE invoices DROP CONSTRAINT IF EXISTS invoices_billing_kind_check;
+ALTER TABLE invoices ADD CONSTRAINT invoices_billing_kind_check
+  CHECK (billing_kind IN ('full', 'deposit', 'balance', 'extra'));
+
+-- สิทธิ์รายตำแหน่งที่ตั้งจากหน้า "จัดการสิทธิ์" (lib/permissions.js) — ไม่มีแถว = ใช้ค่าตั้งต้นในโค้ด
+-- Super Admin ไม่อยู่ในตารางนี้ (มีสิทธิ์ครบเสมอ)
+CREATE TABLE IF NOT EXISTS role_permissions (
+  position        TEXT PRIMARY KEY,
+  permissions     TEXT[] NOT NULL,
+  updated_by      TEXT,
+  updated_by_name TEXT,
+  updated_at      TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')
+);

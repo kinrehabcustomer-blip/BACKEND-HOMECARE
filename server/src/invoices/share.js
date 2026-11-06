@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { sql, transaction } from '../db/index.js';
 import { ensureCustomerLineColumns } from '../lib/customerLine.js';
+import { ensureLedgerTables, netPaidSql, netTotalSql } from './ledger.js';
 
 /**
  * ส่งใบแจ้งหนี้/ใบเสร็จเข้า LINE ลูกค้าจากระบบงาน (ดร.ธงชัย 24 ต.ค. 2569 รวมหน้าหลังบ้าน ข้อ 4)
@@ -45,6 +46,8 @@ export const ensureShareTables = () =>
     )`);
     await sql.run(`CREATE INDEX IF NOT EXISTS idx_invoice_line_outbox_pending ON invoice_line_outbox (created_at) WHERE sent_at IS NULL`);
     await sql.run(`CREATE INDEX IF NOT EXISTS idx_invoice_line_outbox_invoice ON invoice_line_outbox (invoice_id, created_at DESC)`);
+    // invoiceSnapshot อ่านยอดผ่านตารางใบเสร็จ/ลดหนี้/คืนเงิน — ทุกเส้นของไฟล์นี้เรียก ensureShareTables ก่อนอยู่แล้ว
+    await ensureLedgerTables();
     // จองแถวตอนดึงคิว — ส่ง LINE แล้วแต่ ack ไม่ถึง (ระบบงาน deploy/timeout) หรือ cron ทับกัน = ไม่ส่งซ้ำทุก 3 นาที
     await sql.run(`ALTER TABLE invoice_line_outbox ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMPTZ`);
   })().catch((err) => {
@@ -71,8 +74,10 @@ const actorName = (user) => [user?.first_name, user?.last_name].filter(Boolean).
 
 async function invoiceSnapshot(tx, invoiceId, { lock = true } = {}) {
   return tx.one(
-    `SELECT i.invoice_id, i.customer_id, i.status, i.total, i.issue_date, i.due_date,
-            COALESCE((SELECT SUM(p.amount) FROM invoice_payments p WHERE p.invoice_id = i.invoice_id), 0) AS paid_amount,
+    `SELECT i.invoice_id, i.customer_id, i.status, ${netTotalSql('i')} AS total, i.issue_date, i.due_date,
+            ${netPaidSql('i')} AS paid_amount,
+            (SELECT r.receipt_id FROM receipts r WHERE r.invoice_id = i.invoice_id AND r.status = 'issued'
+              ORDER BY r.created_at DESC, r.receipt_id DESC LIMIT 1) AS latest_receipt_id,
             COALESCE(NULLIF(NULLIF(c.client_name, ''), 'ยังไม่ระบุผู้รับบริการ'), i.bill_to_name) AS patient_name
        FROM invoices i
        LEFT JOIN cases c ON c.case_id = i.case_id
@@ -92,6 +97,8 @@ function shareSummary(invoice, url) {
     total,
     paid,
     balance: Math.max(0, Math.round((total - paid) * 100) / 100),
+    // ใบเสร็จของการรับเงินครั้งล่าสุด — ข้อความ LINE/คัดลอกบอกเลขใบเสร็จได้ ลูกค้าเปิดลิงก์เดิมดูทุกใบ
+    latest_receipt_id: invoice.latest_receipt_id ?? null,
     due_date: invoice.due_date ?? null,
     issue_date: invoice.issue_date,
     url,
@@ -220,7 +227,33 @@ export function publicInvoice(inv) {
     bill_to_name: inv.bill_to_name, bill_to_tax_id: inv.bill_to_tax_id ?? null,
     service_description: inv.service_description, items: inv.items ?? [], addons: inv.addons ?? [],
     amount: inv.amount, discount: inv.discount, total: inv.total,
+    net_total: inv.net_total ?? inv.total, refunded_amount: inv.refunded_amount ?? 0,
     paid_amount: inv.paid_amount ?? 0, balance: inv.balance ?? 0,
+    /* ใบลดหนี้/เพิ่มหนี้ที่มีผลอยู่ — ยอดบนเอกสารลูกค้าต้องอ่านออกว่าทำไมไม่เท่ายอดหน้าใบ
+       ส่งครบเท่าที่พิมพ์บนตัวเอกสาร (AdjustmentNoteDoc) ลูกค้าเปิดดูทีละใบได้ · ไม่ส่งใบที่ยกเลิก/เหตุผลยกเลิก */
+    adjustments: (inv.adjustments ?? [])
+      .filter((a) => a.status === 'issued')
+      .map((a) => ({
+        note_id: a.note_id, kind: a.kind, amount: a.amount, issue_date: a.issue_date, status: a.status,
+        reason: a.reason, items: a.items ?? [], ref_receipt_id: a.ref_receipt_id ?? null,
+        total_before: a.total_before, total_after: a.total_after,
+        bill_to_name: a.bill_to_name, bill_to_tax_id: a.bill_to_tax_id ?? null, issued_by_name: a.issued_by_name ?? null,
+      })),
+    // ใบเสร็จรายครั้ง (HC-RC) — เฉพาะที่ยังมีผล ใบที่ยกเลิกไม่ใช่หลักฐานการจ่ายแล้ว
+    receipts: (inv.receipts ?? [])
+      .filter((r) => r.status === 'issued')
+      .map((r) => ({
+        receipt_id: r.receipt_id, amount: r.amount, paid_at: r.paid_at, method: r.method, is_deposit: r.is_deposit,
+        balance_after: r.balance_after, status: r.status,
+        bill_to_name: r.bill_to_name, bill_to_tax_id: r.bill_to_tax_id ?? null, issued_by_name: r.issued_by_name ?? null,
+      })),
+    // เงินคืนของใบลดหนี้ที่ยังมีผล — พิมพ์บนใบลดหนี้ว่าคืนเท่าไหร่ วันไหน (ไม่ส่งหมายเหตุภายใน/ประวัติแก้)
+    refunds: (inv.refunds ?? [])
+      .filter((r) => r.status === 'active')
+      .map((r) => ({
+        refund_doc_id: r.refund_doc_id ?? null, note_id: r.note_id ?? null,
+        amount: r.amount, refunded_at: r.refunded_at, method: r.method ?? null, status: r.status,
+      })),
     payment_method: inv.payment_method ?? null,
     payments: (inv.payments ?? []).map((p) => ({ amount: p.amount, method: p.method, paid_at: p.paid_at })),
     note: inv.note ?? null,

@@ -17,7 +17,7 @@ import LineIcon from './LineIcon.jsx';
 import StaffPicker from './StaffPicker.jsx';
 import { formatPhone, formatPhoneInput } from '../lib/phone.js';
 import { caseCode } from '../lib/patientCode.js';
-import { isProcedure } from '../lib/addons.js';
+import { isProcedure, addonLabel } from '../lib/addons.js';
 
 /**
  * ชื่อบริการของเคส — สองสายเก็บคนละที่ (Homecare = รูปแบบ+เกรด, กายภาพ = ชื่อแพ็คเกจ)
@@ -161,6 +161,7 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
   const [cancelReason, setCancelReason] = useState('');
   const [invoices, setInvoices] = useState([]);  // ใบแจ้งหนี้ของเคสนี้ (ปกติมีใบเดียว)
   const [openInvoiceId, setOpenInvoiceId] = useState(null);
+  const [extras, setExtras] = useState(null);    // ค่าใช้จ่ายเพิ่มเติมที่ยังไม่ได้ออกใบ { items, total }
   const [events, setEvents] = useState([]);      // ประวัติการทำรายการ (audit log) — ใหม่สุดอยู่บน
   const [eventsOpen, setEventsOpen] = useState(false);
 
@@ -174,11 +175,13 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
       api.listCaseEvents(caseId),
       api.listCaseReports(caseId, { per_page: 1 }),
       api.listCaseTeam(caseId),
-    ]).then(([c, list, v, inv, ev, rp, tm]) => {
+      api.unbilledExtras(caseId),
+    ]).then(([c, list, v, inv, ev, rp, tm, ex]) => {
       setItem(c);
       setStaff(list);
       setVisits(v);
       setInvoices(inv.data);
+      setExtras(ex);
       setEvents(ev);
       setReports({ total: rp.total });
       setTeam(tm);
@@ -240,13 +243,15 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
       api.listCaseEvents(caseId),
       api.listCaseReports(caseId, { per_page: 1 }),
       api.listCaseTeam(caseId),
+      api.unbilledExtras(caseId),
     ])
-      .then(([c, list, v, inv, ev, rp, tm]) => {
+      .then(([c, list, v, inv, ev, rp, tm, ex]) => {
         if (cancelled) return;
         setItem(c);
         setStaff(list);
         setVisits(v);
         setInvoices(inv.data);
+        setExtras(ex);
         setEvents(ev);
         setReports({ total: rp.total });
       setTeam(tm);
@@ -424,7 +429,7 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
   return (
     <div className="modal-backdrop" onClick={requestClose}>
       <div
-        className="modal"
+        className="modal detail-modal"
         role="dialog"
         aria-modal="true"
         aria-label="รายละเอียดเคส"
@@ -769,7 +774,7 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                               ? 'ผู้จ่ายในใบไม่ตรงกับเคส'
                               : v.fee_stale
                                 ? `ไม่ตรงกับยอดของเคส (${formatBaht(v.case_fee)})`
-                                : 'เคสเปลี่ยนแพ็คเกจ/อุปกรณ์เสริมหลังออกใบนี้'}</>
+                                : 'เคสเปลี่ยนแพ็คเกจหลังออกใบนี้'}</>
                           </p>
                         )}
                       </div>
@@ -781,6 +786,40 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                     </div>
                   ))
                 )}
+                {/* ค่าใช้จ่ายนอกแพ็คเกจที่เพิ่มหลังออกใบแพ็คเกจ — ไม่ยัดเข้าใบเดิม แอดมินกดออกเป็นใบใหม่เอง
+                    โชว์เฉพาะตอนเคสมีใบที่ใช้งานอยู่แล้ว (ยังไม่มีใบเลย = อุปกรณ์ไปอยู่ในใบแพ็คเกจตอนออกตามปกติ) */}
+                {extras?.items.length > 0 &&
+                  invoices.some((v) => v.status !== 'cancelled') &&
+                  item.status !== 'cancelled' && (
+                    <div className="history-item">
+                      <div>
+                        <strong>ค่าใช้จ่ายเพิ่มเติมที่ยังไม่ได้ออกใบ · {formatBaht(extras.total)}</strong>
+                        <ul className="muted">
+                          {extras.items.map((a, i) => (
+                            <li key={i}>
+                              {addonLabel(a)}
+                              {a.quantity !== 1 && ` × ${a.quantity}`} — {formatBaht(a.quantity * a.unit_price)}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                      <div className="invoice-row-actions">
+                        <button
+                          className="btn tiny primary"
+                          disabled={busy}
+                          onClick={() =>
+                            run(async () => {
+                              const created = await api.createExtrasInvoice(item.case_id);
+                              toast(`ออกใบค่าใช้จ่ายเพิ่มเติม ${created.invoice_id} แล้ว (ร่าง) — ตรวจแล้วกดออกใบได้เลย`);
+                              setOpenInvoiceId(created.invoice_id);
+                            })
+                          }
+                        >
+                          ออกใบค่าใช้จ่ายเพิ่มเติม
+                        </button>
+                      </div>
+                    </div>
+                  )}
               </section>
 
               {/* ประวัติการทำรายการ — ใครทำอะไรกับเคสนี้บ้าง เก็บทีละครั้ง ไม่ใช่แค่เวลาล่าสุด

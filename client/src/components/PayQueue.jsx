@@ -158,7 +158,7 @@ export default function PayQueue({ reloadKey, openCase, onOpenCase }) {
                   aria-pressed={!showDone}
                   onClick={() => setShowDone(false)}
                 >
-                  ค้างจ่าย ({pending.length})
+                  ค้างจ่าย <span className="seg-count">{pending.length}</span>
                 </button>
                 {/* ไม่ใช้คำว่า "ทั้งหมด" — มันอ่านว่า "ทุกเคส" ซึ่งชนกับการเลิกกรองช่วงวันที่
                     ชื่อต้องบอกว่ามันเพิ่มอะไรเข้ามา ไม่ใช่บอกว่ามันครอบคลุมแค่ไหน */}
@@ -168,7 +168,7 @@ export default function PayQueue({ reloadKey, openCase, onOpenCase }) {
                   aria-pressed={showDone}
                   onClick={() => setShowDone(true)}
                 >
-                  รวมที่จ่ายครบ ({rows.length})
+                  รวมที่จ่ายครบ <span className="seg-count">{rows.length}</span>
                 </button>
               </div>
             )}

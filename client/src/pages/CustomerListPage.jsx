@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api.js';
 import CustomerModal from '../components/CustomerModal.jsx';
@@ -8,6 +8,10 @@ import PageRefresh from '../components/PageRefresh.jsx';
 import { GENDER_LABELS } from '../labels.js';
 import { formatPhone } from '../lib/phone.js';
 import SearchSelect from '../components/SearchSelect.jsx';
+import FilterBar from '../components/FilterBar.jsx';
+import LoadMore from '../components/LoadMore.jsx';
+import { useIsMobile } from '../lib/mobile.js';
+import { useLoadMore } from '../lib/loadMore.js';
 
 const PER_PAGE_OPTIONS = [20, 50, 100];
 
@@ -41,6 +45,11 @@ export default function CustomerListPage() {
   const order = get('order') === 'asc' ? 'asc' : 'desc';
   const perPage = PER_PAGE_OPTIONS.includes(Number(get('per_page'))) ? get('per_page') : DEFAULTS.per_page;
   const page = Math.max(1, Number(get('page')) || 1);
+  /* มือถือไม่มีแถบเลื่อนหน้า — โหลดหน้า 1 แล้วต่อท้ายไปเรื่อยๆ ตอนเลื่อนลง (useLoadMore) · จอกว้างตาม ?page= เหมือนเดิม */
+  const mobile = useIsMobile();
+  const effPage = mobile ? 1 : page;
+  // เงื่อนไขของผลหน้า 1 ชุดล่าสุด — ใช้ขอหน้าถัดไปด้วยเงื่อนไขเดียวกันเป๊ะ
+  const lastQuery = useRef({});
   const openId = params.get('open');
 
   const filtered = Boolean(q || hasCases);
@@ -67,7 +76,7 @@ export default function CustomerListPage() {
     // หน่วงเล็กน้อยระหว่างพิมพ์ค้นหา จะได้ไม่ยิง API ทุกตัวอักษร
     const timer = setTimeout(() => {
       const query = Object.fromEntries(
-        Object.entries({ q, has_cases: hasCases, page, per_page: perPage, sort, order })
+        Object.entries({ q, has_cases: hasCases, page: effPage, per_page: perPage, sort, order })
           .filter(([, v]) => v !== '' && v != null),
       );
 
@@ -75,6 +84,7 @@ export default function CustomerListPage() {
         .listCustomers(query)
         .then((data) => {
           if (cancelled) return; // ผลของเงื่อนไขเก่าที่มาถึงช้ากว่า ต้องไม่ทับผลของเงื่อนไขปัจจุบัน
+          lastQuery.current = query;
           setResult(data);
           setError(null); // สำเร็จแล้วต้องล้าง error ของรอบก่อน ไม่งั้นเน็ตสะดุดครั้งเดียวหน้าค้างเป็น error ตลอด
         })
@@ -86,7 +96,7 @@ export default function CustomerListPage() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [q, hasCases, page, perPage, sort, order, reloadKey]);
+  }, [q, hasCases, effPage, perPage, sort, order, reloadKey]);
 
   // popup ถูกปิดด้วยปุ่มย้อนกลับของเบราว์เซอร์ — ประวัติที่เรา push ไว้ถูกใช้ไปแล้ว ต้องล้างธงทิ้ง
   useEffect(() => {
@@ -109,7 +119,11 @@ export default function CustomerListPage() {
     }
   };
 
-  const rows = result?.data ?? [];
+  const fetchMore = useCallback((n) => api.listCustomers({ ...lastQuery.current, page: n }), []);
+
+  const more = useLoadMore({ enabled: mobile, result, fetchPage: fetchMore, getKey: (r) => r.customer_id });
+
+  const rows = more.rows;
   const visibleIds = rows.map((c) => c.customer_id);
 
   return (
@@ -119,23 +133,27 @@ export default function CustomerListPage() {
 
       {/* แถบตัวกรอง + ตาราง + แถบเลื่อนหน้า อยู่ในการ์ดใบเดียวกัน (ดู .list-card) */}
       <div className="list-card">
-        <div className="toolbar">
-          <input
+        {/* แถบค้นหา + ตัวกรอง — บนมือถือ dropdown ย้ายไปอยู่ในแผ่น "ตัวกรอง" (ดู FilterBar) */}
+        <FilterBar
+          search={<input
             className="search search-compact"
             placeholder="ค้นหา รหัสลูกค้า / ชื่อ / ชื่อเล่น / เบอร์โทร / เลขบัตร / Line ID"
             value={q}
             onChange={(e) => setFilter('q', e.target.value)}
-          />
+          />}
+          filters={(<>
           <SearchSelect value={hasCases} onChange={(e) => setFilter('has_cases', e.target.value)} aria-label="ประวัติการใช้บริการ">
             <option value="">ลูกค้าทุกคน</option>
             <option value="yes">เคยใช้บริการแล้ว</option>
             <option value="no">ยังไม่เคยเปิดเคส</option>
           </SearchSelect>
-          {/* โผล่เฉพาะตอนมีอะไรกรองอยู่ — ปุ่มที่กดแล้วไม่เกิดอะไรขึ้นไม่ควรมีให้เห็น */}
-          {filtered && <button className="btn" onClick={clearFilters}>ล้างตัวกรอง</button>}
-          {/* ปุ่มเพิ่มอยู่ท้ายแถบตัวกรอง (ดันไปชิดขวา) — ตำแหน่งเดียวกับปุ่มเปิดเคสใหม่ */}
-          <Link className="btn primary toolbar-action" to="/customers/new">+ เพิ่มลูกค้า</Link>
-        </div>
+          </>)}
+          filtered={filtered}
+          onClear={clearFilters}
+          /* ปุ่มเพิ่มอยู่ท้ายแถบตัวกรอง (ดันไปชิดขวา) — ตำแหน่งเดียวกับปุ่มเปิดเคสใหม่ */
+          action={<Link className="btn primary toolbar-action" to="/customers/new">+ เพิ่มลูกค้า</Link>}
+          actionIcon="customer"
+        />
 
         {/* error เป็นแถบเหนือตาราง ไม่ทับทั้งหน้า — คำค้นที่พิมพ์ไว้ต้องไม่หายไปเพราะเน็ตสะดุด */}
         <ErrorBar message={error} onRetry={() => setReloadKey((k) => k + 1)} busy={loading} />
@@ -175,7 +193,7 @@ export default function CustomerListPage() {
                   }}
                 >
                   {/* ลำดับนับต่อเนื่องข้ามหน้า — เป็นลำดับของ "รายการที่เห็นตอนนี้" ไม่ใช่เลขประจำตัว */}
-                  <td className="row-index" data-label="ลำดับ">{(page - 1) * Number(perPage) + i + 1}</td>
+                  <td className="row-index" data-label="ลำดับ">{(effPage - 1) * Number(perPage) + i + 1}</td>
                   <td className="mono link" data-label="รหัส">{c.customer_id}</td>
                   <td data-label="ชื่อ" title={[c.name, c.nickname && `(${c.nickname})`].filter(Boolean).join(' ')}>
                     {c.name}
@@ -235,7 +253,11 @@ export default function CustomerListPage() {
           </table>
         </div>
 
-        {result && (
+        {/* มือถือ: รายการยาวต่อเนื่อง โหลดเพิ่มเองตอนเลื่อนใกล้ท้าย — แทนแถบเลื่อนหน้า (ผู้ใช้ขอ 6 พ.ย. 2569) */}
+        {result && mobile && (
+          <LoadMore hasMore={more.hasMore} loading={more.loading} error={more.error} onMore={more.loadMore} total={more.total} unit="ราย" />
+        )}
+        {result && !mobile && (
           <div className="pager">
             {/* มีหน้าเดียวก็ไม่ต้องมีปุ่มเลื่อนหน้าที่กดไม่ได้ — แต่ตัวเลือกจำนวนแถวยังต้องอยู่ */}
             {result.pagination.total_pages > 1 && (

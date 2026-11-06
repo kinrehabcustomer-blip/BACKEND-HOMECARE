@@ -112,7 +112,7 @@ export async function dueRatings() {
  * บันทึกดาว (ส่งซ้ำ = แก้ดาว/เติมเหตุผล) · ตรวจว่าคนให้ดาวเป็นญาติที่ผูกเคส หรือเป็นผู้ดูแลของเคสจริง
  * คืน { ok, low } หรือ { error }
  */
-export async function submitRating({ caseId, round, kind, line, stars, reason }) {
+export async function submitRating({ caseId, round, kind, line, stars, reason, askedAbout = null }) {
   await Promise.all([ensureRatingsTable(), ensureFamilyTable()]);
   const c = await sql.one(
     `SELECT c.case_id, c.assigned_to, a.first_name AS emp_first, a.nickname AS emp_nick
@@ -141,7 +141,20 @@ export async function submitRating({ caseId, round, kind, line, stars, reason })
   // ดาวจากญาติ = ของคนที่ทำกะจริงล่าสุดของเคส (คนแทน/เวรดึกคนละคน) · ยังไม่มีกะ = ผู้ดูแลหลัก
   // ใช้ lastWorkerSql ตัวเดียวกับ dueRatings — คนที่ถูกถามถึงกับคนที่ดาวลงต้องเป็นคนเดียวกันเสมอ
   const worker = kind === 'family' ? await sql.one(lastWorkerSql(':id'), { id: caseId }) : null;
-  const ratedId = worker?.employee_id || c.assigned_to;
+  /* เคสเวรเช้า/ดึกสลับกัน: คำถามส่งตอนเช้าถามถึงเวรดึก แต่ญาติตอบหลังเวรเช้าเช็คอินแล้ว
+     "คนทำกะล่าสุด ณ ตอนตอบ" จึงเป็นอีกคน ดาวลงผิดคน (ตรวจรอบ 6 พ.ย. 2569)
+     ฝั่ง chat ส่งชื่อคนที่ถามถึงกลับมา = ใช้คนนั้น — แต่ต้องเป็นคนที่ทำงานในเคสนี้จริง (กันตั๋วอ้างใครก็ได้) */
+  let asked = null;
+  if (kind === 'family' && askedAbout) {
+    asked = await sql.one(
+      `SELECT e.employee_id, e.first_name, e.nickname FROM employees e
+       WHERE e.employee_id = :emp
+         AND (e.employee_id = :assignee
+              OR EXISTS (SELECT 1 FROM case_visits v WHERE v.case_id = :id AND v.checked_in_by = e.employee_id))`,
+      { emp: askedAbout, assignee: c.assigned_to, id: caseId },
+    );
+  }
+  const ratedId = asked?.employee_id || worker?.employee_id || c.assigned_to;
   /* ส่งซ้ำ = แก้ดาวของรอบเดิม แถวเดิมจึงคงเจ้าของไว้ (DO UPDATE ไม่แตะ employee_id โดยตั้งใจ —
      ดาวที่ลงไปแล้วไม่ย้ายข้ามคนเวลาญาติเปลี่ยนใจ) แต่ของเดิมคืนชื่อ "คนทำกะล่าสุด ณ ตอนนี้" เสมอ
      สลับคนดูแลระหว่างรอบเดียวกันแล้วญาติแก้ดาวเป็น 1 → ข้อความแจ้งทีมระบุคนใหม่ ขณะที่ดาวจริง
@@ -158,7 +171,8 @@ export async function submitRating({ caseId, round, kind, line, stars, reason })
   /* คืนคนที่ดาวลงจริงไปด้วย — ฝั่ง chat เอาไปใส่ในข้อความแจ้งทีมตอนดาวต่ำ
      ไม่งั้นข้อความจะระบุผู้รับผิดชอบหลัก ทั้งที่คนที่ไปบ้านคืนนั้นเป็นอีกคน */
   let finalName = null;
-  if (finalId && worker && finalId === worker.employee_id) finalName = label(worker.first_name, worker.nickname);
+  if (finalId && asked && finalId === asked.employee_id) finalName = label(asked.first_name, asked.nickname);
+  else if (finalId && worker && finalId === worker.employee_id) finalName = label(worker.first_name, worker.nickname);
   else if (finalId && finalId === c.assigned_to) finalName = label(c.emp_first, c.emp_nick);
   else if (finalId) {
     const e = await sql.one('SELECT first_name, nickname FROM employees WHERE employee_id = :id', { id: finalId });

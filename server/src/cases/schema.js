@@ -130,6 +130,11 @@ const caseFields = z.object({
 
   // ต่อเคส: รหัสเคสรอบก่อน — ตั้งได้ตอนสร้างเท่านั้น (updateCaseSchema ตัดออก)
   renewed_from: z.string().trim().min(1).optional().nullable(),
+
+  /* ทีมดูแลเคส (คนที่ 2 ขึ้นไป) ที่เลือกไว้ตอนสร้าง — ตั้งได้ตอนสร้างเท่านั้น
+     ไม่ส่ง = ต่อเคสแล้วทีมรอบก่อนตามมาทั้งหมดเหมือนเดิม · ส่งมา (รวม []) = เอาเฉพาะคนที่ระบุ
+     หน้าต่อเคสให้ติ๊กเลือกว่าใครตามมา คนที่ไม่ติ๊กต้องไม่ถูกใส่กลับเข้าทีมเงียบๆ */
+  team: z.array(z.string().trim().min(1)).max(20, 'ทีมดูแลเคสได้ไม่เกิน 20 คน').optional(),
 });
 
 // สถานะเปลี่ยนผ่าน endpoint เฉพาะ (assign/unassign/close/reopen) เท่านั้น ไม่ให้แก้ตรงๆ
@@ -142,10 +147,17 @@ export const createCaseSchema = caseFields.superRefine((v, ctx) => {
       message: 'กรุณากรอกชื่อผู้รับบริการ หรือระบุผู้ว่าจ้าง',
     });
   }
+  if (v.start_date && v.end_date && v.end_date < v.start_date) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['end_date'], message: END_BEFORE_START });
+  }
 });
 
+/* วันสิ้นสุดก่อนวันเริ่ม = ลงกะอัตโนมัติไม่ได้สักวัน และเคสขึ้น "เลยกำหนดปิด" ทันทีที่ถึงวันเริ่ม
+   ฝั่งแก้เคสตรวจใน repo.update (ต้องรวมกับค่าเดิม เพราะแก้มาช่องเดียวได้) */
+export const END_BEFORE_START = 'วันสิ้นสุดต้องไม่ก่อนวันเริ่ม';
+
 export const updateCaseSchema = caseFields
-  .omit({ assigned_to: true, renewed_from: true })
+  .omit({ assigned_to: true, renewed_from: true, team: true })
   .partial()
   .extend({
     // รหัสของแฟ้มผู้รับบริการที่จะสร้างให้ ตอนเพิ่งใส่ชื่อผู้รับบริการให้เคสที่เปิดด้วยผู้ว่าจ้างอย่างเดียว
@@ -676,9 +688,15 @@ export const adjustVisitSchema = z
     check_out_at: isoDateTime.nullable(),
     status: z.enum(VISIT_STATUSES, { errorMap: () => ({ message: 'สถานะวันนัดไม่ถูกต้อง' }) }),
     location_flagged: z.boolean(),
+    // เหตุผลที่แก้ — บังคับเมื่อแตะฐานค่าจ้าง (เวลาเข้า/ออก/สถานะ) ลงประวัติเคสคู่กับค่าเดิม→ค่าใหม่
+    reason: z.string().trim().max(300),
   })
   .partial()
   .superRefine((v, ctx) => {
+    const touchesPayBasis = ['check_in_at', 'check_out_at', 'status'].some((k) => k in v);
+    if (touchesPayBasis && (v.reason ?? '').length < 3) {
+      ctx.addIssue({ code: 'custom', path: ['reason'], message: 'กรุณาระบุเหตุผลที่แก้กะนี้' });
+    }
     /* เวลาออกต้องมาหลังเวลาเข้า — ไม่งั้นได้กะที่ทำงานติดลบ แล้วไปหักชั่วโมงของกะอื่น
        ในสรุปค่าตอบแทน (SUM(check_out_at - check_in_at) ของทั้งเดือนรวมกันเป็นก้อนเดียว)
        ตรวจได้ที่นี่เฉพาะตอนส่งมาครบคู่ — ส่งมาช่องเดียวต้องเทียบกับค่าที่มีอยู่ใน DB (ดู route) */

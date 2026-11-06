@@ -55,6 +55,31 @@ export function splitAddons(item) {
   return { addons, serviceAmount: Math.round((Number(item.amount) - (addons.length > 0 ? sum : 0)) * 100) / 100 };
 }
 
+/** หัวกระดาษของเอกสารการเงินทุกชนิด (ใบแจ้งหนี้ · ใบเสร็จรายครั้ง · ใบลดหนี้/เพิ่มหนี้) — ใช้ชุดเดียวกันให้หน้าตาตรงกัน */
+export function DocHeader({ title, copy }) {
+  return (
+    <>
+      <p className="inv-printed">วันที่พิมพ์: {printStamp()}</p>
+
+      <div className="inv-header">
+        <div className="inv-logo">
+          <img className="inv-logo-kin" src={ISSUER.docLogo} alt={ISSUER.brand} />
+        </div>
+
+        <h3 className="inv-title">{title}</h3>
+        <p className="inv-copy">{copy}</p>
+
+        <p className="inv-org">{ISSUER.brand}</p>
+        <p className="inv-org-line">{ISSUER.name}</p>
+        <p className="inv-org-line">เลขประจำตัวผู้เสียภาษี {ISSUER.taxId}</p>
+        <p className="inv-org-line">{ISSUER.address}</p>
+        <p className="inv-org-line">โทร {ISSUER.tel}</p>
+        <hr className="inv-rule" />
+      </div>
+    </>
+  );
+}
+
 export default function CustomerInvoiceDoc({ item, signer }) {
   const isReceipt = item.status === 'paid';
   const isCancelled = item.status === 'cancelled';
@@ -63,27 +88,15 @@ export default function CustomerInvoiceDoc({ item, signer }) {
   const pay = paidBy(item.payments, item.payment_method, item.total, item.status, item.paid_amount);
   const { addons, serviceAmount } = splitAddons(item);
   const printerName = signer ?? '';
+  /* ใบลดหนี้/เพิ่มหนี้ที่มีผลอยู่ — ยอดหน้าใบ (total) ไม่เปลี่ยน ยอดที่ต้องจ่ายจริงคือ net_total (ดู server ledger.js) */
+  const notes = (item.adjustments ?? []).filter((a) => a.status === 'issued');
+  const netTotal = Number(item.net_total ?? item.total);
   return (
   <>
-    <p className="inv-printed">วันที่พิมพ์: {printStamp()}</p>
-
-    <div className="inv-header">
-      <div className="inv-logo">
-        <img className="inv-logo-kin" src={ISSUER.docLogo} alt={ISSUER.brand} />
-      </div>
-
-      <h3 className="inv-title">
-        {isPaymentProof ? 'ใบเสร็จรับเงิน /Receipt' : isCancelled ? 'เอกสารยกเลิก /Cancelled' : 'ใบแจ้งหนี้ /Invoice'}
-      </h3>
-      <p className="inv-copy">{isCancelled ? 'ยกเลิกแล้ว' : 'สำเนา'}</p>
-
-      <p className="inv-org">{ISSUER.brand}</p>
-      <p className="inv-org-line">{ISSUER.name}</p>
-      <p className="inv-org-line">เลขประจำตัวผู้เสียภาษี {ISSUER.taxId}</p>
-      <p className="inv-org-line">{ISSUER.address}</p>
-      <p className="inv-org-line">โทร {ISSUER.tel}</p>
-      <hr className="inv-rule" />
-    </div>
+    <DocHeader
+      title={isPaymentProof ? 'ใบเสร็จรับเงิน /Receipt' : isCancelled ? 'เอกสารยกเลิก /Cancelled' : 'ใบแจ้งหนี้ /Invoice'}
+      copy={isCancelled ? 'ยกเลิกแล้ว' : 'สำเนา'}
+    />
 
     <div className="inv-parties">
       <div>
@@ -163,11 +176,30 @@ export default function CustomerInvoiceDoc({ item, signer }) {
           <td colSpan={3} className="inv-r">รวมเงิน(หลังหักส่วนลด)/Sub Total</td>
           <td className="inv-r">{amountText(item.total)}</td>
         </tr>
+        {/* ธุรกิจยังไม่ได้จด VAT — แสดงช่องไว้ให้ลูกค้าเห็นชัดว่าไม่มีภาษีบวกเพิ่ม (ยอดข้างบน = ยอดที่ต้องจ่ายจริง) */}
+        <tr>
+          <td colSpan={3} className="inv-r">ภาษีมูลค่าเพิ่ม/VAT</td>
+          <td className="inv-r">{amountText(0)}</td>
+        </tr>
+        {notes.map((n) => (
+          <tr key={n.note_id}>
+            <td colSpan={3} className="inv-r">
+              {n.kind === 'credit' ? 'ใบลดหนี้/Credit Note' : 'ใบเพิ่มหนี้/Debit Note'} <span className="mono">{n.note_id}</span>
+            </td>
+            <td className="inv-r">{n.kind === 'credit' ? '−' : '+'}{amountText(n.amount)}</td>
+          </tr>
+        ))}
+        {notes.length > 0 && (
+          <tr>
+            <td colSpan={3} className="inv-r">ยอดสุทธิหลังปรับปรุง/Net Total</td>
+            <td className="inv-r">{amountText(netTotal)}</td>
+          </tr>
+        )}
         <tr>
           <td colSpan={3} className="inv-r">
             {isPaymentProof ? 'รับชำระแล้ว/Paid' : isCancelled ? 'สถานะ/Status' : 'ยอดที่ต้องชำระ/Amount Due'}
           </td>
-          <td className="inv-r"><strong>{isPaymentProof ? amountText(item.paid_amount ?? item.total) : isCancelled ? 'ยกเลิกแล้ว' : amountText(item.total)}</strong></td>
+          <td className="inv-r"><strong>{isPaymentProof ? amountText(item.paid_amount ?? netTotal) : isCancelled ? 'ยกเลิกแล้ว' : amountText(netTotal)}</strong></td>
         </tr>
         {/* ใบที่รับเงินมาบางส่วนแล้ว ต้องอ่านออกจากตัวเอกสารว่ารับไปเท่าไหร่และค้างเท่าไหร่
             ไม่งั้นลูกค้าถือใบที่เขียนยอดเต็มไว้ ทั้งที่จ่ายมัดจำไปแล้ว */}
@@ -186,7 +218,7 @@ export default function CustomerInvoiceDoc({ item, signer }) {
         {(!isCancelled || hasPayment) && (
           <tr>
             <td colSpan={4} className="inv-r inv-words">
-              ( {bahtText(isCancelled ? item.paid_amount : item.balance > 0 && item.paid_amount > 0 ? item.balance : item.total)} )
+              ( {bahtText(isCancelled ? item.paid_amount : item.balance > 0 && item.paid_amount > 0 ? item.balance : isPaymentProof ? (item.paid_amount ?? netTotal) : netTotal)} )
             </td>
           </tr>
         )}

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { useToast } from '../toast.jsx';
 import {
-  POSITION_LABELS, VISIT_STATE_LABELS, MONTH_LABELS, formatBaht, formatDate, timeText, toBuddhistYear,
+  POSITION_LABELS, VISIT_STATE_LABELS, MONTH_LABELS, formatBaht, formatDate, timeText, toBuddhistYear, todayTH,
 } from '../labels.js';
 import LineIcon from './LineIcon.jsx';
 import TimeSelect from './TimeSelect.jsx';
@@ -29,10 +29,8 @@ const nextDay = (key) => {
 
 /** 'YYYY-MM-DD' ประกอบเอง — ไม่ใช้ toISOString เพราะแปลงเป็น UTC แล้ววันเพี้ยน */
 const iso = (y, m, d) => `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-const todayISO = () => {
-  const t = new Date();
-  return iso(t.getFullYear(), t.getMonth() + 1, t.getDate());
-};
+// วันนี้ตามเวลาไทย (ไม่ใช่นาฬิกาเครื่อง) — server ตัดสิน "กะที่ผ่านมาแล้ว" ด้วยวันไทย ปุ่มต้องตรงกัน
+const todayISO = () => todayTH();
 
 /**
  * เวลากะที่ใช้จริงซ้ำๆ — กดชิปแทนการพิมพ์
@@ -219,7 +217,11 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
       } else {
         setVisits(res.visits);
         if (res.deleted != null) {
-          toast(`ลบ ${res.deleted} ${unit}${res.kept ? ` · เก็บ ${res.kept} ${unit}ที่เช็คอินไปแล้วไว้` : ''}`);
+          toast(
+            `ลบ ${res.deleted} ${unit}` +
+              (res.kept ? ` · เก็บ ${res.kept} ${unit}ที่เช็คอินไปแล้วไว้` : '') +
+              (res.past ? ` · ${res.past} ${unit}ที่ผ่านมาแล้วลบไม่ได้ (ถ้าไม่ได้ไปให้กด "ยกเลิก" ที่${unit}นั้น)` : ''),
+          );
         } else if (res.added != null) {
           toast(`บันทึก ${res.added} ${unit}${res.skipped ? ` · ข้าม ${res.skipped} วันที่มี${unit}เหมือนกันอยู่แล้ว` : ''}`);
         }
@@ -638,7 +640,7 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
                   {v.assigned_name ?? 'ไม่ระบุคน'}
                   {v.check_in_at && ` · เข้า ${timeText(v.check_in_at)}`}
                   {v.check_out_at && ` · ออก ${timeText(v.check_out_at)}`}
-                  {v.location_flagged && <> · <LineIcon name="alert" className="text-ico" />นอกพื้นที่</>}
+                  {v.location_flagged && <> · <LineIcon name="alert" className="text-ico" />{v.location_note ?? 'นอกพื้นที่'}</>}
                   {v.off_schedule && <> · <LineIcon name="alert" className="text-ico" />นอกวันนัด</>}
                 </span>
                 <span className={`badge visit-${v.state}`}>{VISIT_STATE_LABELS[v.state]}</span>
@@ -653,7 +655,8 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
                     ส่งเตือน
                   </button>
                 )}
-                {!readOnly && (
+                {/* ลบได้เฉพาะกะที่ยังไม่ถึงวัน · กะที่ผ่านมาแล้ว (ขาดงาน) เก็บไว้เป็นประวัติ — ยกเลิกได้แต่ลบไม่ได้ */}
+                {!readOnly && !v.check_in_at && v.visit_date >= today && (
                   <button
                     type="button"
                     className="btn tiny danger-ghost"
@@ -661,6 +664,17 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
                     onClick={() => run(() => api.deleteVisit(caseId, v.visit_id))}
                   >
                     ลบ
+                  </button>
+                )}
+                {!readOnly && v.state === 'missed' && (
+                  <button
+                    type="button"
+                    className="btn tiny danger-ghost"
+                    disabled={busy}
+                    title="วันนั้นไม่ได้ไปจริง — เปลี่ยนเป็นยกเลิก (ยังเก็บเป็นประวัติ)"
+                    onClick={() => run(() => api.updateVisit(caseId, v.visit_id, { status: 'cancelled' }))}
+                  >
+                    ยกเลิก
                   </button>
                 )}
               </li>

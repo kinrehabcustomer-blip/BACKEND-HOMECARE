@@ -170,7 +170,7 @@ export const useCan = (permission) => permissionsOf(useAuth()?.user).includes(pe
  * ตัวนี้ใช้ตัดสินแค่ว่าจะ "วาด" อะไรบนหน้าจอ — ตัวจริงที่กันคือ server ที่ตัดฟิลด์ออกจาก payload
  * (ดู canSeeStaffPay ใน server/src/lib/auth.js) แก้ค่านี้ในเบราว์เซอร์แล้วก็ยังไม่มีตัวเลขให้ดูอยู่ดี
  */
-export const useCanSeeStaffPay = () => useCan('money');
+export const useCanSeeStaffPay = () => useCan('see_pay');
 
 /**
  * เห็นรายได้รวมของบริษัทได้ไหม (กราฟรายได้หน้าภาพรวม) — เฉพาะตำแหน่งผู้จัดการเช่นกัน
@@ -181,7 +181,7 @@ export const useCanSeeStaffPay = () => useCan('money');
  *
  * ตัวจริงที่กันคือ requireManager หน้าเส้น /api/invoices/revenue — อันนี้แค่ไม่วาดการ์ดที่ยังไงก็โหลดไม่ได้
  */
-export const useCanSeeRevenue = () => useCan('money');
+export const useCanSeeRevenue = () => useCan('revenue');
 
 /** ครอบหน้าที่ต้อง login — ยังไม่ login ให้เด้งไปหน้า login */
 export function RequireAuth({ children }) {

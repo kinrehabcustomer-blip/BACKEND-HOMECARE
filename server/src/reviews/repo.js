@@ -126,6 +126,17 @@ const recentDuplicateWith = (db, employeeId, ipHash, minutes) =>
     )
     .then(Boolean);
 
+const DEVICE_DAILY_CAP = 3;
+const countDeviceTodayWith = (db, employeeId, ipHash) =>
+  db
+    .one(
+      `SELECT COUNT(*)::int AS n FROM staff_reviews
+       WHERE employee_id = :id AND ip_hash = :ip_hash
+         AND submitted_at > to_char((now() AT TIME ZONE 'Asia/Bangkok') - interval '24 hours', 'YYYY-MM-DD HH24:MI:SS')`,
+      { id: employeeId, ip_hash: ipHash },
+    )
+    .then((r) => r.n);
+
 export const recentDuplicate = (employeeId, ipHash, minutes) =>
   recentDuplicateWith(sql, employeeId, ipHash, minutes);
 
@@ -190,6 +201,12 @@ export const submitProtected = (token, input, ipHash, duplicateWindowMin, dailyC
     }
     if ((await countRecentWith(tx, employee.employee_id)) >= dailyCap) {
       return { reason: 'daily_cap' };
+    }
+    /* เครื่องเดียวต่อพนักงานหนึ่งคนต่อวัน ไม่เกิน DEVICE_DAILY_CAP ใบ (ตรวจรอบ 6 พ.ย. 2569)
+       ด่าน 3 นาทีกันแค่กดซ้ำ — คนถือลิงก์ (รวมตัวพนักงานเอง) ยิงห้าดาวได้ทุก 3 นาทีจนชนเพดาน 30
+       เพดานต่อเครื่องยังเผื่อญาติหลายคนในบ้านเดียวกันที่ใช้ไวไฟตัวเดียวกัน */
+    if ((await countDeviceTodayWith(tx, employee.employee_id, ipHash)) >= DEVICE_DAILY_CAP) {
+      return { reason: 'duplicate' };
     }
 
     return { review: await insertReview(tx, employee.employee_id, input, ipHash) };

@@ -547,7 +547,7 @@ export async function pay(runId, input, actor) {
 }
 
 /** ตัวปิดรอบจริง — แยกออกมาให้ payNow เรียกใน transaction เดียวกับการสร้างรอบได้ */
-async function payForTransaction(tx, runId, { pay_date, method, note }, actor) {
+async function payForTransaction(tx, runId, { pay_date, method, note, expected_total }, actor) {
   const state = await payrollRunForUpdate(tx, runId, 'pay');
   if (state.reason) return state;
 
@@ -561,6 +561,19 @@ async function payForTransaction(tx, runId, { pay_date, method, note }, actor) {
   );
   if (Number(counts.employees) === 0 || Number(counts.payouts) === 0) {
     return { reason: 'empty_run' };
+  }
+
+  if (expected_total != null) {
+    const live = await tx.one(
+      `SELECT COALESCE(SUM(t.total_pay), 0) AS total
+       FROM (${LIVE_ITEMS}) t JOIN payroll_items i ON i.item_id = t.item_id
+       WHERE i.run_id = :id`,
+      { id: runId },
+    );
+    const actual = Math.round(Number(live.total) * 100) / 100;
+    if (Math.abs(actual - Math.round(Number(expected_total) * 100) / 100) >= 0.01) {
+      return { reason: 'total_changed', actual, expected: Number(expected_total) };
+    }
   }
 
   // 1) ยอดบนสลิป = ผลรวมของก้อนที่ผูกอยู่ (ล้างเป็นศูนย์ก่อน เผื่อสลิปที่ไม่เหลือก้อนเงินแล้ว)
@@ -647,7 +660,7 @@ export async function payNow({ period_to, note, pay_date, method, payout_ids }, 
  * ยกเลิกรอบ (ร่างเท่านั้น) — รอบยังอยู่เป็นประวัติ แต่ก้อนเงินทั้งหมดกลับเข้ากองรอจ่าย
  * ลบเฉพาะ payroll_payout_lines ไม่ลบสลิป เพื่อให้ยังอ่านย้อนได้ว่ารอบที่ยกเลิกไปเคยจะจ่ายใครเท่าไหร่
  */
-export async function cancel(runId) {
+export async function cancel(runId, actor = null) {
   const result = await transaction(async (tx) => {
     const state = await payrollRunForRoundSlotUpdate(tx, runId, 'cancel');
     if (state.reason) return state;
@@ -659,9 +672,11 @@ export async function cancel(runId) {
       { id: runId },
     );
     const transitioned = await tx.run(
-      `UPDATE payroll_runs SET status = 'cancelled', updated_at = ${NOW}
+      `UPDATE payroll_runs
+       SET status = 'cancelled', cancelled_by = :by, cancelled_by_name = :by_name, cancelled_at = ${NOW},
+           updated_at = ${NOW}
        WHERE run_id = :id AND status = 'draft'`,
-      { id: runId },
+      { id: runId, by: actor?.employee_id ?? null, by_name: actor?.name ?? null },
     );
     if (transitioned !== 1) throw new Error(`สถานะรอบ ${runId} เปลี่ยนหลังได้ row lock`);
     return { run_id: runId };
