@@ -842,7 +842,9 @@ casesRouter.delete(
       from: req.query.from,
       to: req.query.to,
     });
-    res.json(await repo.removeVisitsOn(req.params.id, dates, req.user));
+    // ?employee= ลบเฉพาะนัดของคนนี้ — เคสหลายคน ลบตารางของคนหนึ่งต้องไม่กวาดนัดของอีกคนในวันเดียวกันไปด้วย
+    const employee = typeof req.query.employee === 'string' && req.query.employee ? req.query.employee : null;
+    res.json(await repo.removeVisitsOn(req.params.id, dates, req.user, employee));
   }),
 );
 

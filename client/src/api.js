@@ -536,8 +536,12 @@ export const api = {
   /** ตรวจก่อนบันทึกว่าวันที่เลือกไว้ชนกับงานอื่นไหม — คืน { conflicts, duplicates } (ไม่บันทึกอะไร) */
   previewVisits: (id, body) => request(`/cases/${id}/visits/preview`, { method: 'POST', body }),
   /** ลบกะของวันที่ระบุ — คืน { visits, deleted, kept } (kept = กะที่เช็คอินแล้ว จึงไม่ลบให้) */
-  deleteVisitsOn: (id, dates) =>
-    request(`/cases/${id}/visits?${new URLSearchParams({ dates: dates.join(',') })}`, { method: 'DELETE' }),
+  // employee = ลบเฉพาะนัดของคนนี้ (เคสหลายคน กำลังดูตารางของคนเดียวอยู่) · ไม่ส่ง = ทุกคนในวันนั้น
+  deleteVisitsOn: (id, dates, employee = null) =>
+    request(
+      `/cases/${id}/visits?${new URLSearchParams({ dates: dates.join(','), ...(employee ? { employee } : {}) })}`,
+      { method: 'DELETE' },
+    ),
   updateVisit: (id, visitId, body) => request(`/cases/${id}/visits/${visitId}`, { method: 'PATCH', body }),
   /**
    * ย้ายกะจากปฏิทิน — times = { planned_start, planned_end } เมื่อลงช่องเวลาใหม่ (ไม่ส่ง = เวลาคงเดิม)

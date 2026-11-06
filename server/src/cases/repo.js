@@ -1607,17 +1607,19 @@ function removedDetail(rows) {
  * ไม่งั้นลบทิ้งแล้วไม่เหลือหลักฐานว่าวันนั้นมีนัดแต่ไม่มีใครไป
  * กะที่เช็คอินไปแล้วไม่ลบให้ (เป็นบันทึกการทำงานจริงและเป็นฐานค่าจ้าง) — คืนจำนวนที่ข้ามไปให้บอกผู้ใช้
  */
-export async function removeVisitsOn(caseId, dates, actor = null) {
+export async function removeVisitsOn(caseId, dates, actor = null, employeeId = null) {
   if (dates.length === 0) return { visits: await listVisits(caseId), deleted: 0, kept: 0, past: 0 };
 
-  const { slots, params } = listSlots(dates, { id: caseId, today: isoDateTH(new Date()) });
+  // employeeId = ลบเฉพาะนัดของคนนี้ (เคสหลายคน) · null = ทุกคนในวันนั้นเหมือนเดิม
+  const { slots, params } = listSlots(dates, { id: caseId, today: isoDateTH(new Date()), emp: employeeId });
+  const whose = 'AND (CAST(:emp AS text) IS NULL OR assigned_to = :emp)';
   await ensureVisitChangeTable();
   // ลบนัด = แจ้งพนักงาน + ญาติเหมือน "ยกเลิก" (ดร.ธงชัย 2 พ.ย. 2569 ข้อ 1) — เดิมลบเงียบ นักกายภาพยังเดินทางไป ญาติยังรอ
   const deleted = await transaction(async (tx) => {
     const gone = await tx.all(
       `DELETE FROM case_visits
        WHERE case_id = :id AND visit_date IN (${slots}) AND check_in_at IS NULL
-         AND visit_date >= :today
+         AND visit_date >= :today ${whose}
        RETURNING visit_id, visit_date, planned_start, planned_end, assigned_to, status`,
       params,
     );
@@ -1629,7 +1631,7 @@ export async function removeVisitsOn(caseId, dates, actor = null) {
     `SELECT COUNT(*) FILTER (WHERE check_in_at IS NOT NULL) AS kept,
             COUNT(*) FILTER (WHERE check_in_at IS NULL AND visit_date < :today) AS past
      FROM case_visits
-     WHERE case_id = :id AND visit_date IN (${slots})`,
+     WHERE case_id = :id AND visit_date IN (${slots}) ${whose}`,
     params,
   );
 

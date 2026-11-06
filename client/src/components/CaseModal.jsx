@@ -56,6 +56,38 @@ function Field({ label, value, mono }) {
 }
 
 /**
+ * รายการคิดเงินเพิ่ม (อุปกรณ์เสริม / หัตถการ) — ทีละบรรทัด: ชื่อซ้าย ราคาชิดขวา เลข VN เป็นบรรทัดเล็กใต้ชื่อ
+ * เดิมต่อกันเป็นประโยคเดียวคั่นด้วย · ราคากับ VN ปนอยู่กลางข้อความ อ่านไม่ออกว่าอะไรราคาเท่าไร (ผู้ใช้ขอ 6 พ.ย. 2569)
+ * มีมากกว่าหนึ่งรายการ = มีบรรทัดรวมท้ายสุด
+ */
+function ChargeList({ items }) {
+  const rows = items.map((x) => ({ ...x, amount: (x.quantity ?? 1) * (x.unit_price ?? 0) }));
+  const total = rows.reduce((s, x) => s + x.amount, 0);
+  return (
+    <span className="charge-list" role="list">
+      {rows.map((x, i) => (
+        <span className="charge-row" role="listitem" key={`${x.name}-${x.vn ?? i}`}>
+          <span className="charge-name">
+            <span>
+              {x.name}
+              {x.quantity != null && x.quantity !== 1 && <span className="charge-qty"> ×{x.quantity}</span>}
+            </span>
+            {x.vn && <span className="charge-vn mono">{x.vn}</span>}
+          </span>
+          <span className="charge-amt">{formatBaht(x.amount)}</span>
+        </span>
+      ))}
+      {rows.length > 1 && (
+        <span className="charge-row is-total">
+          <span className="charge-name">รวม {rows.length} รายการ</span>
+          <span className="charge-amt">{formatBaht(total)}</span>
+        </span>
+      )}
+    </span>
+  );
+}
+
+/**
  * แก้ช่องที่เปลี่ยนบ่อยที่สุดได้ตรงนี้เลย ไม่ต้องออกไปหน้าฟอร์มเต็ม (ที่ยาว 800 บรรทัด)
  * สถานะไม่อยู่ในนี้เพราะเปลี่ยนผ่านปุ่ม action เฉพาะทาง (เริ่ม/ปิด/ยกเลิก) ที่คุมลำดับสถานะไว้แล้ว
  */
@@ -570,19 +602,13 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                   {item.addons?.some((x) => !isProcedure(x)) && (
                     <Field
                       label="อุปกรณ์เสริม (คิดเพิ่มในใบแจ้งหนี้)"
-                      value={item.addons
-                        .filter((x) => !isProcedure(x))
-                        .map((x) => `${x.name}${x.quantity !== 1 ? ` ×${x.quantity}` : ''} ${formatBaht(x.quantity * x.unit_price)}`)
-                        .join(' · ')}
+                      value={<ChargeList items={item.addons.filter((x) => !isProcedure(x))} />}
                     />
                   )}
                   {item.addons?.some(isProcedure) && (
                     <Field
                       label="หัตถการ (คิดเพิ่มในใบแจ้งหนี้)"
-                      value={item.addons
-                        .filter(isProcedure)
-                        .map((x) => `${x.name} ${formatBaht(x.unit_price)}${x.vn ? ` (${x.vn})` : ''}`)
-                        .join(' · ')}
+                      value={<ChargeList items={item.addons.filter(isProcedure)} />}
                     />
                   )}
                   {/* Homecare ได้ VN เคสละหนึ่งเลข (ออกตอนลงนัดครั้งแรก) · กายภาพมี VN รายนัดในตารางนัด */}
