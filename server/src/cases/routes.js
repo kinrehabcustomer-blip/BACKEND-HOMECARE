@@ -550,6 +550,15 @@ casesRouter.patch(
   asyncRoute(async (req, res) => {
     ensureCanSetStaffPay(req, req.body);
     const input = updateCaseSchema.parse(req.body);
+    /* ส่งวันมาช่องเดียว — schema เทียบข้ามช่องไม่ได้ ต้องเทียบกับค่าปัจจุบันของเคส
+       (Codex ข้อ 2 · 8 พ.ย. 2569) · ส่งมาทั้งคู่ schema จัดการไปแล้ว */
+    const nextStart = 'start_date' in input ? input.start_date : req.case.start_date;
+    const nextEnd = 'end_date' in input ? input.end_date : req.case.end_date;
+    if (nextStart && nextEnd && String(nextEnd) < String(nextStart)) {
+      throw new ApiError(400, 'วันสิ้นสุดต้องไม่มาก่อนวันเริ่ม', [
+        { field: 'end_date', message: 'วันสิ้นสุดต้องไม่มาก่อนวันเริ่ม' },
+      ]);
+    }
     const updated = await repo.update(req.params.id, input, req.user);
 
     // แก้เคสแล้วใบแจ้งหนี้ที่ยังแก้ได้ (ร่าง/ออกใบแล้ว) ต้องตามให้ทัน — ดู syncOpenFromCase
@@ -576,10 +585,29 @@ casesRouter.patch(
 casesRouter.post(
   '/:id/assign',
   asyncRoute(async (req, res) => {
-    const { employee_id } = assignSchema.parse(req.body);
+    const { employee_id, force } = assignSchema.parse(req.body);
 
     if (isTerminal(req.case)) {
       throw new ApiError(409, 'เคสนี้จบไปแล้ว — ต้องเปิดเคสใหม่ก่อนจึงจะจับคู่พนักงานได้');
+    }
+
+    /* ด่าน "พร้อมส่งคนไปไหม" (Codex ข้อ 1 · 8 พ.ย. 2569)
+       การเปิดแฟ้มแบบข้อมูลค่อย ๆ มาเป็นพฤติกรรมที่ตั้งใจ จึงไม่บังคับตอนสร้างเคส
+       แต่จังหวะ "จับคู่พนักงาน" คือจังหวะที่มีคนต้องเดินทางไปบ้านจริง ขาดสองอย่างนี้ไปไม่ได้:
+       ที่อยู่ที่ไปถึง และเบอร์ที่โทรหาได้ · ค่าบริการไม่บังคับ (ตั้งราคาทีหลังได้)
+       force: true = ผู้ใช้ยืนยันว่ารู้แล้วและยังจะมอบหมาย — จดไว้ในไทม์ไลน์เคย */
+    if (!force) {
+      const missing = [];
+      if (!String(req.case.address ?? '').trim()) missing.push('ที่อยู่ที่ไปให้บริการ');
+      if (!String(req.case.client_phone ?? '').trim()) missing.push('เบอร์ติดต่อของเคส');
+      if (missing.length) {
+        throw new ApiError(
+          409,
+          `เคสนี้ยังขาด${missing.join(' และ ')} — พนักงานไปถึงบ้านหรือโทรหาไม่ได้` +
+            ' กรอกให้ครบก่อน หรือถ้าตั้งใจมอบหมายทั้งที่ยังไม่ครบ ให้ยืนยันอีกครั้ง',
+          missing.map((m) => ({ field: m === 'เบอร์ติดต่อของเคส' ? 'client_phone' : 'address', message: `ยังไม่มี${m}` })),
+        );
+      }
     }
     await ensureAssignable(employee_id);
 

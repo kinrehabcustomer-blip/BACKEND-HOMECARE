@@ -63,9 +63,29 @@ export async function linkFromChat(d, customerId = null) {
      เบอร์ผู้ติดต่อฉุกเฉินของผู้รับบริการเป็นญาติคนละคนได้ ผูกอัตโนมัติแล้วจะกลายเป็น
      "LINE ของญาติ A ถูกผูกเข้าบัญชีของผู้ว่าจ้าง B" ซึ่งเห็นข้อมูลข้ามคน
      (ยังเสนอให้ทีมยืนยันได้ตามปกติ — ทีมส่ง customer_id มาเองก็ผูกได้) */
-  const autoMatch = customerId
-    ? null
-    : (await findByPhones([d.phone])).find((m) => m.kind === 'customer' || m.kind === 'case') ?? null;
+  let autoMatch = null;
+  if (!customerId) {
+    const hits = (await findByPhones([d.phone])).filter(
+      (m) => m.kind === 'customer' || m.kind === 'case',
+    );
+    /* เบอร์เดียวไปตรงลูกค้าหลายราย (เบอร์ญาติร่วม · แฟ้มซ้ำ) — ห้ามเดา
+       ของเดิมหยิบแถวแรกเงียบ ๆ (เรียงตามเลขลูกค้าน้อยสุด) ผูก LINE ผิดผู้ว่าจ้างแล้ว
+       พอเชิญเป็นญาติ คนนั้นเห็น timeline/รายงานของบ้านผิด = ข้อมูลผู้ป่วยข้ามบ้าน
+       (Codex ข้อ 4 · 8 พ.ย. 2569) — คืนรายชื่อให้ทีมเลือกแทน */
+    const distinct = [...new Map(hits.map((m) => [m.customer_id, m])).values()];
+    if (distinct.length > 1) {
+      return {
+        ambiguous: true,
+        matches: distinct.slice(0, 10).map((m) => ({
+          customer_id: m.customer_id,
+          name: m.name,
+          phone: m.phone,
+          source: m.source,
+        })),
+      };
+    }
+    autoMatch = distinct[0] ?? null;
+  }
   let customer = customerId ? await customers.findById(customerId) : autoMatch;
   if (customerId && !customer) return { error: 'not_found' };
 

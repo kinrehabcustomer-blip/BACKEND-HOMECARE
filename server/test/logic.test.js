@@ -517,6 +517,8 @@ describe('invoice mutations — สถานะ แผน และ payment ต�
             };
           }
           if (query.includes('SUM(amount)')) return { paid: 80, last_paid_at: '2026-08-24' };
+          // ใบนี้ยังไม่เคยส่งลิงก์ให้ลูกค้า (ด่าน already_shared — Codex ข้อ 7 · 8 พ.ย. 2569)
+          if (query.includes('invoice_shares') || query.includes('invoice_line_outbox')) return null;
           throw new Error(`unexpected query: ${query}`);
         },
         run: async () => ((mutations += 1), 1),
@@ -543,6 +545,7 @@ describe('invoice mutations — สถานะ แผน และ payment ต�
               invoice_id: 'INV-0001', status: 'issued', billing_kind: 'full', amount: 1, discount: 0,
             };
           }
+          if (query.includes('invoice_shares') || query.includes('invoice_line_outbox')) return null;
           return { paid: 0.11, last_paid_at: '2026-08-24' };
         },
         run: async (query, params) => {

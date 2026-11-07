@@ -3,6 +3,7 @@ import { Router, raw } from 'express';
 import * as repo from './repo.js';
 import { invoiceIdForToken, publicInvoice } from './share.js';
 import { ApiError, asyncRoute, notFound } from '../lib/errors.js';
+import { hitLimit } from '../lib/rateLimit.js';
 
 /**
  * GET /api/public/bill/:token — ลิงก์ดูใบแจ้งหนี้/ใบเสร็จที่ส่งเข้า LINE ลูกค้า (ดร.ธงชัย 24 ต.ค. 2569 ข้อ 4)
@@ -11,28 +12,45 @@ import { ApiError, asyncRoute, notFound } from '../lib/errors.js';
  */
 export const publicBillRouter = Router();
 
-const hits = new Map(); // เพดานกันไล่เดา token — 60 ครั้ง/นาที/IP
-publicBillRouter.use((req, res, next) => {
-  const ip = req.ip || 'x';
-  const now = Date.now();
-  const h = hits.get(ip);
-  if (!h || now - h.t > 60000) hits.set(ip, { t: now, n: 1 });
-  else if (++h.n > 60) return res.status(429).json({ error: 'เรียกถี่เกินไป ลองใหม่ในอีกสักครู่' });
-  if (hits.size > 5000) hits.clear();
+/* เพดานเก็บในฐานข้อมูล ไม่ใช่ Map ของโปรเซส (Codex ข้อ 11 · 8 พ.ย. 2569 · ดู lib/rateLimit.js)
+   บน Vercel แต่ละ instance มี Map ของตัวเอง และ cold start ล้างตัวนับทิ้ง เพดานจึงไม่เคยเป็นเพดานจริง
+
+   ที่มาของ IP: ใช้ header ที่แพลตฟอร์มเขียนทับเอง ก่อน x-forwarded-for ซึ่งผู้ส่งแต่งมาเองได้
+   (เหตุผลเดียวกับ reviews/routes.js · Codex ข้อ 12) */
+const clientIp = (req) => {
+  const first = (v) => String(v ?? '').split(',')[0].trim();
+  return (
+    first(req.headers['x-vercel-forwarded-for']) ||
+    first(req.headers['x-real-ip']) ||
+    req.ip ||
+    first(req.headers['x-forwarded-for']) ||
+    'x'
+  );
+};
+
+publicBillRouter.use(
+  asyncRoute(async (req, res, next) => {
+    const r = await hitLimit(`bill:${clientIp(req)}`, { limit: 60, windowSec: 60 });
+    if (!r.ok) return res.status(429).json({ error: 'เรียกถี่เกินไป ลองใหม่ในอีกสักครู่' });
+    next();
+  }),
+);
+
+const tokenKey = (token) => createHash('sha256').update(String(token)).digest('hex');
+/** เพดานแยกตาม token — ไม่ให้ผู้ถือลิงก์ยิงรูปถี่เกิน 10 ครั้ง/วัน (นับรวมทุก instance) */
+const limitSlipPerToken = asyncRoute(async (req, res, next) => {
+  const day = new Date().toISOString().slice(0, 10);
+  const r = await hitLimit(`slip:${tokenKey(req.params.token)}:${day}`, {
+    limit: 10,
+    windowSec: 86400,
+  });
+  if (!r.ok) {
+    return res
+      .status(429)
+      .json({ error: 'แนบสลิปครบ 10 ครั้งสำหรับวันนี้แล้ว กรุณาส่งในแชท LINE KIN HomeCare ค่ะ' });
+  }
   next();
 });
-
-const slipHits = new Map(); // เพดานแยกตาม token — ไม่ให้ผู้ถือ link ยิงรูปถี่เกิน 10 ครั้ง/วัน
-const tokenKey = (token) => createHash('sha256').update(String(token)).digest('hex');
-function limitSlipPerToken(req, res, next) {
-  const key = tokenKey(req.params.token);
-  const day = new Date().toISOString().slice(0, 10);
-  const h = slipHits.get(key);
-  if (!h || h.day !== day) slipHits.set(key, { day, n: 1 });
-  else if (++h.n > 10) return res.status(429).json({ error: 'แนบสลิปครบ 10 ครั้งสำหรับวันนี้แล้ว กรุณาส่งในแชท LINE KIN HomeCare ค่ะ' });
-  if (slipHits.size > 10000) slipHits.clear();
-  next();
-}
 
 function validateImage(buffer, mime) {
   if (!Buffer.isBuffer(buffer) || buffer.length === 0) throw new ApiError(400, 'กรุณาเลือกรูปสลิป');
@@ -46,6 +64,10 @@ function validateImage(buffer, mime) {
 
 /** multipart ช่อง file เพียงช่องเดียว — ไม่เพิ่ม dependency และไม่เขียนไฟล์ชั่วคราวลงดิสก์ */
 function multipartImage(buffer, contentType) {
+  /* ไม่ได้ส่ง body มา หรือ Content-Type ไม่ใช่ multipart → express.raw ไม่ทำงาน req.body เป็น undefined
+     ของเดิมไปเรียก buffer.indexOf ต่อแล้วได้ TypeError = 500 ทั้งที่เป็นคำขอผิดรูปธรรมดา (ต้องเป็น 400)
+     (Gemini ชี้ 8 พ.ย. 2569 · ยืนยันกับโค้ดแล้ว) */
+  if (!Buffer.isBuffer(buffer) || buffer.length === 0) throw new ApiError(400, 'กรุณาเลือกรูปสลิป');
   const boundary = /boundary=(?:"([^"]+)"|([^;\s]+))/i.exec(contentType)?.slice(1).find(Boolean);
   if (!boundary || boundary.length > 200) throw new ApiError(400, 'ข้อมูลไฟล์ไม่ถูกรูปแบบ');
   const headerEnd = buffer.indexOf(Buffer.from('\r\n\r\n'));

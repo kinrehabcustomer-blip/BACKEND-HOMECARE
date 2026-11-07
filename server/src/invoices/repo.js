@@ -1,7 +1,7 @@
 import { sql, nextInvoiceId, transaction } from '../db/index.js';
 import { PATIENT_PENDING } from '../cases/schema.js';
 import { normalizeAddons, addonAmount, addonsTotal, addonsTotalSql, addonLabel } from '../lib/addons.js';
-import { ensureShareTables } from './share.js';
+import { ensureShareTables, hasBeenShared } from './share.js';
 import { likeEscape } from '../lib/likeEscape.js';
 
 const NOW = `to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')`;
@@ -1280,6 +1280,24 @@ export async function updateInvoiceForTransaction(tx, invoiceId, input) {
   if (fields.length === 0) return { invoice_id: invoiceId };
 
   const changesAmount = 'amount' in input || 'discount' in input;
+  /* ใบที่ส่งลิงก์ให้ลูกค้าไปแล้ว ห้ามแก้ "เนื้อเอกสาร" อีก (Codex ข้อ 7 · 8 พ.ย. 2569)
+     ลิงก์สาธารณะอ่านใบสดจากฐาน ลูกค้าเปิด URL เดิมแล้วเห็นคนละยอด/คนละชื่อผู้จ่าย
+     โดยไม่มีเลขรุ่นอะไรบอกว่าเปลี่ยนไป · การซิงก์อัตโนมัติกันใบที่เคยส่งแล้วอยู่ ที่ยังไม่กันคือการแก้มือ
+     ยอดเปลี่ยน = ต้องยกเลิกใบแล้วออกใหม่ ส่วนช่องที่ไม่ขึ้นเอกสารลูกค้า (เช่น note) ยังแก้ได้ */
+  const CUSTOMER_FACING = [
+    'amount', 'discount', 'bill_to_name', 'bill_to_tax_id', 'bill_to_address',
+    'service_description', 'issue_date', 'due_date',
+  ];
+  if (fields.some((c) => CUSTOMER_FACING.includes(c)) && (await hasBeenShared(tx, invoiceId))) {
+    const changed = CUSTOMER_FACING.filter(
+      (c) =>
+        c in input &&
+        (c === 'amount' || c === 'discount'
+          ? Number(input[c] ?? 0) !== Number(invoice[c] ?? 0)
+          : (input[c] ?? null) !== (invoice[c] ?? null)),
+    );
+    if (changed.length) return { reason: 'already_shared', invoice_id: invoiceId, fields: changed };
+  }
   if (
     changesAmount &&
     (invoice.parent_invoice_id != null || invoice.billing_kind === 'deposit' || invoice.billing_kind === 'balance')
@@ -1338,6 +1356,8 @@ export async function updateInvoiceForTransaction(tx, invoiceId, input) {
 }
 
 export async function update(invoiceId, input) {
+  // ต้องมีตาราง invoice_shares ก่อน — updateInvoiceForTransaction ถามมันว่าใบนี้ส่งไปแล้วหรือยัง
+  await ensureShareTables();
   const result = await transaction((tx) => updateInvoiceForTransaction(tx, invoiceId, input));
   return invoiceMutationResult(result);
 }

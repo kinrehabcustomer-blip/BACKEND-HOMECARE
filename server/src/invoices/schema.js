@@ -149,6 +149,12 @@ export const cancelInvoiceSchema = z.object({
   reason: z.string().trim().max(300).optional().nullable(),
 });
 
+/* ปิดลิงก์บิลสาธารณะ — ไม่ระบุ token_hash = ปิดทุกลิงก์ที่ยังเปิดได้ของใบนั้น */
+export const revokeShareSchema = z.object({
+  token_hash: z.string().trim().regex(/^[0-9a-f]{64}$/, 'รหัสลิงก์ไม่ถูกต้อง').optional().nullable(),
+  reason: z.string().trim().max(300).optional().nullable(),
+});
+
 export const slipSchema = z.object({ image: imageSchema });
 
 export const rejectSlipSchema = z.object({

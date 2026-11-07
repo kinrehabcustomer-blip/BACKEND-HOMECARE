@@ -16,12 +16,13 @@ import {
   rejectSlipSchema,
   voidPaymentSchema,
   cancelInvoiceSchema,
+  revokeShareSchema,
 } from './schema.js';
 import { decodeImage } from '../employees/schema.js';
 import { ApiError, asyncRoute, notFound } from '../lib/errors.js';
 import { requireManager, can } from '../lib/auth.js';
 import { todayTh } from '../lib/dates.js';
-import { createShareLink, lineTarget, queueLineSend, sendHistory } from './share.js';
+import { createShareLink, lineTarget, queueLineSend, sendHistory, activeShares, revokeShares } from './share.js';
 
 export const invoicesRouter = Router();
 
@@ -210,6 +211,29 @@ invoicesRouter.post(
 );
 
 /**
+ * ลิงก์ที่ยังเปิดได้ของใบ + ปิดลิงก์ (Codex ข้อ 10 · 8 พ.ย. 2569)
+ *
+ * ลิงก์บิลอายุ 180 วันตามคำเคาะ ดร. 24 ต.ค. 2569 — ไม่แตะอายุ
+ * แต่ถ้าส่งผิดห้องหรือรู้ว่าลิงก์ถูกส่งต่อออกไป ต้องมีทางปิด ไม่ใช่รอครบหกเดือน
+ * (payload มีชื่อผู้ป่วย รหัสผู้ป่วย เลขผู้เสียภาษี รายละเอียดบริการ และประวัติชำระ)
+ * ปิดแล้วไม่ลบแถวทิ้ง เก็บไว้เป็นหลักฐานว่าใครปิดและเพราะอะไร
+ */
+invoicesRouter.get(
+  '/:id/share-links',
+  asyncRoute(async (req, res) => res.json({ links: await activeShares(req.params.id) })),
+);
+
+invoicesRouter.post(
+  '/:id/share-links/revoke',
+  asyncRoute(async (req, res) => {
+    const { reason, token_hash: tokenHash } = revokeShareSchema.parse(req.body ?? {});
+    const r = await revokeShares(req.params.id, { tokenHash: tokenHash ?? null, reason }, req.user);
+    if (!r.revoked) throw notFound('ไม่มีลิงก์ที่ยังเปิดได้ของใบนี้');
+    res.json({ ...r, links: await activeShares(req.params.id) });
+  }),
+);
+
+/**
  * ส่งใบแจ้งหนี้/ใบเสร็จเข้า LINE ลูกค้า (ดร.ธงชัย 24 ต.ค. 2569 ข้อ 4 · ดู share.js)
  * GET = ส่งได้ไหม + ประวัติการส่ง · POST = ออกลิงก์ดูเอกสาร + ใส่คิว (ระบบแชทส่งออก OA Kin HomeCare ภายในไม่กี่นาที)
  */
@@ -243,6 +267,15 @@ invoicesRouter.patch(
   '/:id',
   asyncRoute(async (req, res) => {
     const result = await repo.update(req.params.id, updateInvoiceSchema.parse(req.body ?? {}));
+    /* ใบที่ส่งลิงก์ให้ลูกค้าไปแล้ว — ลิงก์อ่านใบสด แก้ยอดแล้วลูกค้าเปิด URL เดิมเห็นคนละยอด
+       (Codex ข้อ 7 · 8 พ.ย. 2569) · ทางที่ถูกคือยกเลิกใบแล้วออกใหม่ */
+    if (result?.reason === 'already_shared') {
+      throw new ApiError(
+        409,
+        'ใบนี้ส่งลิงก์ให้ลูกค้าไปแล้ว แก้เนื้อเอกสารไม่ได้ — ถ้ายอดหรือข้อมูลผู้จ่ายเปลี่ยน' +
+          ' ให้ยกเลิกใบนี้แล้วออกใบใหม่ (ลิงก์เดิมอ่านใบสด ถ้าแก้ตรงนี้ลูกค้าจะเห็นคนละยอดโดยไม่มีอะไรบอก)',
+      );
+    }
     throwIfInvoiceMoved(result);
     if (result.reason === 'invalid_status') {
       throw new ApiError(409, 'ใบที่ชำระ/ยกเลิกแล้วแก้ไม่ได้ — ต้องยกเลิกแล้วออกใบใหม่');

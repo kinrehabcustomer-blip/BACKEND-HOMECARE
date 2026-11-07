@@ -431,6 +431,13 @@ ALTER TABLE invoices ADD COLUMN IF NOT EXISTS cancelled_by      TEXT
 ALTER TABLE invoices ADD COLUMN IF NOT EXISTS cancelled_by_name TEXT;
 ALTER TABLE invoices ADD COLUMN IF NOT EXISTS cancel_reason     TEXT;
 
+-- เพดานการเรียกของหน้าสาธารณะ เก็บรวมทุก instance (Codex ข้อ 11 · ดู lib/rateLimit.js)
+CREATE TABLE IF NOT EXISTS public_rate_limits (
+  bucket       TEXT PRIMARY KEY,
+  window_start TIMESTAMPTZ NOT NULL DEFAULT now(),
+  hits         INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE INDEX IF NOT EXISTS idx_invoices_customer ON invoices (customer_id);
 CREATE INDEX IF NOT EXISTS idx_invoices_case     ON invoices (case_id);
 CREATE INDEX IF NOT EXISTS idx_invoices_status   ON invoices (status);
@@ -1747,3 +1754,9 @@ ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS vn TEXT;
 ALTER TABLE cases ADD COLUMN IF NOT EXISTS vn TEXT;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_case_visits_vn ON case_visits (vn) WHERE vn IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_cases_vn ON cases (vn) WHERE vn IS NOT NULL;
+
+-- กันรายงานการดูแลซ้ำเมื่อเน็ตหลุดแล้วกดใหม่ (Codex ข้อ 6 · 8 พ.ย. 2569)
+-- หนึ่งกะมีรายงานหลายใบได้โดยตั้งใจ จึงกันซ้ำที่ "รหัสคำขอ" ไม่ใช่ที่ visit_id
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS request_id UUID;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_case_reports_request
+  ON case_reports (request_id) WHERE request_id IS NOT NULL;

@@ -290,6 +290,17 @@ integrationRouter.post(
     if (p.d.line_user_id && !isLineUserId(p.d.line_user_id)) throw new ApiError(400, 'LINE userId ไม่ถูกต้อง');
     const r = await linkFromChat(p.d, typeof p.customer_id === 'string' ? p.customer_id : null);
     if (r.error) throw new ApiError(404, 'ไม่พบลูกค้ารายนี้ในระบบงาน');
+    /* เบอร์ตรงลูกค้าหลายราย — ให้ทีมเลือกเอง ระบบเดาแทนไม่ได้ (Codex ข้อ 4 · 8 พ.ย. 2569)
+       ฝั่งแชทต้องแสดงรายชื่อแล้วส่ง customer_id ที่เลือกกลับมาในคำขอถัดไป */
+    if (r.ambiguous) {
+      return res.status(409).json({
+        error:
+          `เบอร์นี้ตรงกับลูกค้า ${r.matches.length} ราย — เลือกว่าจะผูกกับรายไหน` +
+          ' แล้วส่งคำขออีกครั้งพร้อมรหัสลูกค้า',
+        ambiguous: true,
+        matches: r.matches,
+      });
+    }
     /* ชนได้สองทาง — ต้องบอกให้ตรงทาง ไม่งั้นแอดมินไปแก้ผิดฝั่ง
        line_taken_by = LINE นี้ผูกกับลูกค้ารายอื่นอยู่ (ทางที่เพิ่งอุดเพิ่ม 8 พ.ย. 2569)
        ไม่มี line_taken_by = ลูกค้ารายนี้ผูก LINE อื่นไว้ก่อน (ของเดิม) */

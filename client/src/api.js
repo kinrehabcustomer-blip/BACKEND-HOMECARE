@@ -124,6 +124,8 @@ async function request(path, { empty = false, credentialCheck = false, ...option
     // (ยังคงข้อความรวมไว้เหมือนเดิม — หน้าที่ยังไม่ได้ใช้ fields จะไม่เปลี่ยนพฤติกรรม)
     if (fieldList) error.fields = fieldList;
     else if (data?.details) error.details = data.details;
+    // รหัสสถานะติดไปด้วย — หน้าที่ต้องแยก "ขอยืนยัน (409)" ออกจาก error จริง จะได้ไม่ต้องเดาจากข้อความ
+    error.status = res.status;
     throw error;
   }
 
@@ -451,6 +453,9 @@ export const api = {
   voidInvoicePayment: (id, paymentId, reason) =>
     request(`/invoices/${id}/payments/${paymentId}/void`, { method: 'POST', body: { reason } }),
   /* reason บังคับเมื่อใบนั้นรับเงินมาแล้ว (เซิร์ฟเวอร์เป็นคนตัดสิน ดู assessCancelAuthority) */
+  invoiceShareLinks: (id) => request(`/invoices/${id}/share-links`),
+  revokeInvoiceShareLinks: (id, reason = null, token_hash = null) =>
+    request(`/invoices/${id}/share-links/revoke`, { method: 'POST', body: { reason, token_hash } }),
   cancelInvoice: (id, reason = null) =>
     request(`/invoices/${id}/cancel`, { method: 'POST', body: { reason } }),
   deleteInvoice: (id) => request(`/invoices/${id}`, { method: 'DELETE' }),
@@ -535,7 +540,13 @@ export const api = {
   hideFamilyMessage: (caseId, id) => request(`/family/cases/${caseId}/messages/${id}`, { method: 'DELETE' }),
   familyPhotoUrl: (caseId, id) => `/api/family/cases/${caseId}/messages/${id}/photo`,
   caseReportPhotoUrl: (id, reportId) => `/api/cases/${id}/reports/${reportId}/photo`,
-  addCaseReport: (id, body) => request(`/cases/${id}/reports`, { method: 'POST', body }),
+  /* request_id ติดไปทุกครั้ง — เน็ตหลุดแล้วกดใหม่ (หรือเบราว์เซอร์ retry) ต้องได้รายงานใบเดิม
+     ไม่ใช่สองใบในกะเดียว (Codex ข้อ 6 · 8 พ.ย. 2569) · สร้างที่นี่ที่เดียวทุกผู้เรียกจึงได้ฟรี */
+  addCaseReport: (id, body) =>
+    request(`/cases/${id}/reports`, {
+      method: 'POST',
+      body: { request_id: crypto.randomUUID(), ...body },
+    }),
   updateCaseReport: (id, reportId, body) =>
     request(`/cases/${id}/reports/${reportId}`, { method: 'PATCH', body }),
   deleteCaseReport: (id, reportId) =>
@@ -543,7 +554,9 @@ export const api = {
 
   /** ประวัติการทำรายการของเคส (ใครจับคู่/ปิด/ยกเลิก เมื่อไหร่) — ใหม่สุดอยู่บน */
   listCaseEvents: (id) => request(`/cases/${id}/events`),
-  assignCase: (id, employee_id) => request(`/cases/${id}/assign`, { method: 'POST', body: { employee_id } }),
+  // force = ยืนยันมอบหมายทั้งที่เคสยังขาดที่อยู่/เบอร์ (เซิร์ฟเวอร์ตีกลับ 409 มาก่อนหนึ่งรอบ)
+  assignCase: (id, employee_id, force = false) =>
+    request(`/cases/${id}/assign`, { method: 'POST', body: { employee_id, ...(force ? { force: true } : {}) } }),
   /** ทีมพนักงานของเคส — คนที่ร่วมดูแลนอกเหนือจากผู้รับผิดชอบหลัก (ทุกตัวคืนรายชื่อทีมล่าสุด) */
   listCaseTeam: (id) => request(`/cases/${id}/team`),
   addCaseTeam: (id, employee_id) => request(`/cases/${id}/team`, { method: 'POST', body: { employee_id } }),
