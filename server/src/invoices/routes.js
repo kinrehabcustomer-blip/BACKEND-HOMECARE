@@ -15,12 +15,18 @@ import {
   slipSchema,
   rejectSlipSchema,
   voidPaymentSchema,
+  adjustmentSchema,
+  cancelAdjustmentSchema,
   cancelInvoiceSchema,
   revokeShareSchema,
+  updateRefundSchema,
 } from './schema.js';
+import { createAdjustment, cancelAdjustment, updateRefund } from './ledger.js';
 import { decodeImage } from '../employees/schema.js';
 import { ApiError, asyncRoute, notFound } from '../lib/errors.js';
-import { requireManager, can } from '../lib/auth.js';
+import { requirePermission, can } from '../lib/auth.js';
+
+const requireAdjust = requirePermission('invoice_adjust', 'บัญชีของคุณไม่มีสิทธิ์ออกใบลดหนี้/ยกเลิกใบ');
 import { todayTh } from '../lib/dates.js';
 import { createShareLink, lineTarget, queueLineSend, sendHistory, activeShares, revokeShares } from './share.js';
 
@@ -28,6 +34,10 @@ export const invoicesRouter = Router();
 
 // ใบที่เอกสารยังอยู่ในมือเรา — แก้/รีเฟรชได้ (ส่งมอบให้ลูกค้าครั้งเดียวตอนพิมพ์)
 const OPEN_STATUSES = ['draft', 'issued'];
+
+// ใบที่ออกแล้วปรับยอดได้ทางเดียว (ตัดสินใจ 4 พ.ย. 2569 · ดู ledger.js)
+const AMOUNT_LOCKED_MESSAGE =
+  'ใบนี้ออกไปแล้ว แก้ยอดในใบตรง ๆ ไม่ได้ — ลดยอดให้ออก "ใบลดหนี้" เพิ่มยอดให้ออก "ใบเพิ่มหนี้"';
 
 function throwIfInvoiceMoved(result) {
   if (!result) {
@@ -115,7 +125,7 @@ invoicesRouter.get(
  */
 invoicesRouter.get(
   '/revenue',
-  requireManager,
+  requirePermission('revenue', 'บัญชีของคุณไม่มีสิทธิ์ดูรายได้บริษัท'),
   asyncRoute(async (req, res) => res.json(await repo.revenue(revenueQuerySchema.parse(req.query)))),
 );
 
@@ -124,10 +134,71 @@ invoicesRouter.get(
   asyncRoute(async (req, res) => res.json(await repo.list(listQuerySchema.parse(req.query)))),
 );
 
+/**
+ * ใบแจ้งหนี้ทั้งชุดในช่วงวันที่ออก สำหรับดาวน์โหลด CSV รายวัน/สัปดาห์/เดือน (ผู้ใช้ขอ 6 พ.ย. 2569)
+ * ต้องระบุช่วงเสมอ และยาวไม่เกิน 366 วัน — ไม่มีขอบเขต = ดึงทั้งฐานในคำขอเดียว
+ * ตัวกรองอื่น (บริการ/สถานะ/ค้นหา/ซ่อนใบยกเลิก) ใช้ชุดเดียวกับรายการ ไฟล์จึงตรงกับที่เห็นบนจอ
+ * อยู่เหนือ '/:id' ไม่งั้นคำว่า export โดนจับเป็นรหัสใบ
+ */
+invoicesRouter.get(
+  '/export',
+  asyncRoute(async (req, res) => {
+    const query = listQuerySchema.parse(req.query);
+    if (!query.issued_from || !query.issued_to) {
+      throw new ApiError(400, 'กรุณาระบุช่วงวันที่ออกใบ (issued_from และ issued_to)');
+    }
+    const days = (Date.parse(query.issued_to) - Date.parse(query.issued_from)) / 86_400_000;
+    if (days < 0) throw new ApiError(400, 'วันสิ้นสุดต้องไม่มาก่อนวันเริ่ม');
+    if (days > 366) throw new ApiError(400, 'ส่งออกได้ครั้งละไม่เกิน 1 ปี');
+    res.set('Cache-Control', 'no-store');
+    res.json(await repo.exportRows(query));
+  }),
+);
+
 /** เคสที่ยังไม่มีใบแจ้งหนี้ — หน้ารายการใบใช้เสนอปุ่มออกใบ (อยู่เหนือ '/:id' ไม่งั้นโดนจับเป็นรหัสใบ) */
 invoicesRouter.get(
   '/cases-without-invoice',
   asyncRoute(async (req, res) => res.json(await repo.casesWithoutInvoice())),
+);
+
+/** เคสที่มีค่าใช้จ่ายเพิ่มเติม (อุปกรณ์/หัตถการที่เพิ่มหลังออกใบแพ็คเกจ) รอออกใบ — อยู่เหนือ '/:id' เหตุผลเดียวกัน */
+invoicesRouter.get(
+  '/cases-with-extras',
+  asyncRoute(async (req, res) => res.json(await repo.casesWithUnbilledExtras())),
+);
+
+/** ค่าใช้จ่ายเพิ่มเติมที่ยังไม่ได้ออกใบของเคสหนึ่ง — กล่องเคสใช้โชว์รายการก่อนกดออกใบ */
+invoicesRouter.get(
+  '/extras',
+  asyncRoute(async (req, res) => {
+    const caseRow = await cases.findById(String(req.query.case_id ?? ''));
+    if (!caseRow) throw notFound('ไม่พบเคสนี้');
+    res.json(await repo.unbilledExtras(caseRow));
+  }),
+);
+
+/**
+ * ออกใบค่าใช้จ่ายเพิ่มเติม (ดร.ธงชัย 4 พ.ย. 2569) — แอดมินกดเอง ไม่ออกอัตโนมัติ
+ * ใบใหม่มีเฉพาะอุปกรณ์/หัตถการของเคสที่ยังไม่อยู่ในใบไหน ไม่แตะใบแพ็คเกจเดิม
+ * ออกเป็นใบร่าง (เก็บเต็มจำนวน) ให้ตรวจแล้วกด "ออกใบ" เหมือนใบอื่น
+ */
+invoicesRouter.post(
+  '/extras',
+  asyncRoute(async (req, res) => {
+    const { case_id: caseId } = createInvoiceSchema.pick({ case_id: true }).parse(req.body ?? {});
+    const caseRow = await cases.findById(caseId);
+    if (!caseRow) throw new ApiError(400, `ไม่พบเคสรหัส ${caseId}`);
+    if (caseRow.status === 'cancelled') {
+      throw new ApiError(409, 'เคสนี้ถูกยกเลิกไปแล้ว ออกใบแจ้งหนี้ไม่ได้');
+    }
+
+    const customer = await resolvePayer(caseRow);
+    const created = await repo.createFromCase({ ...caseRow, customer }, {}, req.user, [], { extra: true });
+    if (created.reason === 'no_extras') {
+      throw new ApiError(409, 'เคสนี้ไม่มีค่าใช้จ่ายเพิ่มเติมที่ยังไม่ได้ออกใบ (อาจมีคนเพิ่งออกใบไปแล้ว)');
+    }
+    res.status(201).json(created);
+  }),
 );
 
 /**
@@ -163,8 +234,8 @@ invoicesRouter.post(
     const customer = await resolvePayer(caseRow);
 
     // ออกใบตามกะที่ไปจริง — แตกเป็นรายการรายครั้ง ยอดรวมคิดจากกะที่ทำเสร็จแล้วเท่านั้น
+    // อุปกรณ์เสริมที่ใบอื่นเก็บไปแล้วไม่ใส่ซ้ำ — createFromCase หักให้เองหลังล็อกเคส (ดู unbilledAddons)
     let items = [];
-    let addons = caseRow.addons;
     if (input.basis === 'visits') {
       ({ lines: items } = await repo.visitLines(caseRow, input));
       if (items.length === 0) {
@@ -173,13 +244,10 @@ invoicesRouter.post(
           'เคสนี้ไม่มีกะที่เช็คอิน–เอาท์ครบและยังไม่ได้ออกใบในช่วงที่เลือก จึงออกใบตามกะไม่ได้',
         );
       }
-      /* ใบตามกะมักออกเป็นรอบๆ (ทีละช่วงวัน) แต่อุปกรณ์เสริมเก็บครั้งเดียวต่อเคส
-         ใบก่อนหน้าที่ยังไม่ยกเลิกเก็บไปแล้ว = ใบนี้ไม่ใส่ซ้ำ */
-      if (await repo.addonsBilled(caseRow.case_id)) addons = [];
     }
 
     // req.user มาจาก requireAuth = พนักงานที่กำลังทำรายการนี้ → บันทึกเป็นผู้ออกเอกสาร
-    const created = await repo.createFromCase({ ...caseRow, customer }, input, req.user, items, { addons });
+    const created = await repo.createFromCase({ ...caseRow, customer }, input, req.user, items);
     /* เช็คซ้ำใน transaction หลังล็อกเคสแล้ว — ด่านข้างบนกันกรณีปกติ ส่วนนี้กันคำขอที่ยิงมาพร้อมกัน */
     if (created.reason === 'draft_exists') {
       throw new ApiError(
@@ -211,6 +279,10 @@ invoicesRouter.post(
 );
 
 /**
+ * ส่งใบแจ้งหนี้/ใบเสร็จเข้า LINE ลูกค้า (ดร.ธงชัย 24 ต.ค. 2569 ข้อ 4 · ดู share.js)
+ * GET = ส่งได้ไหม + ประวัติการส่ง · POST = ออกลิงก์ดูเอกสาร + ใส่คิว (ระบบแชทส่งออก OA Kin HomeCare ภายในไม่กี่นาที)
+ */
+/**
  * ลิงก์ที่ยังเปิดได้ของใบ + ปิดลิงก์ (Codex ข้อ 10 · 8 พ.ย. 2569)
  *
  * ลิงก์บิลอายุ 180 วันตามคำเคาะ ดร. 24 ต.ค. 2569 — ไม่แตะอายุ
@@ -233,10 +305,6 @@ invoicesRouter.post(
   }),
 );
 
-/**
- * ส่งใบแจ้งหนี้/ใบเสร็จเข้า LINE ลูกค้า (ดร.ธงชัย 24 ต.ค. 2569 ข้อ 4 · ดู share.js)
- * GET = ส่งได้ไหม + ประวัติการส่ง · POST = ออกลิงก์ดูเอกสาร + ใส่คิว (ระบบแชทส่งออก OA Kin HomeCare ภายในไม่กี่นาที)
- */
 invoicesRouter.get(
   '/:id/line',
   asyncRoute(async (req, res) => {
@@ -267,18 +335,20 @@ invoicesRouter.patch(
   '/:id',
   asyncRoute(async (req, res) => {
     const result = await repo.update(req.params.id, updateInvoiceSchema.parse(req.body ?? {}));
-    /* ใบที่ส่งลิงก์ให้ลูกค้าไปแล้ว — ลิงก์อ่านใบสด แก้ยอดแล้วลูกค้าเปิด URL เดิมเห็นคนละยอด
-       (Codex ข้อ 7 · 8 พ.ย. 2569) · ทางที่ถูกคือยกเลิกใบแล้วออกใหม่ */
-    if (result?.reason === 'already_shared') {
-      throw new ApiError(
-        409,
-        'ใบนี้ส่งลิงก์ให้ลูกค้าไปแล้ว แก้เนื้อเอกสารไม่ได้ — ถ้ายอดหรือข้อมูลผู้จ่ายเปลี่ยน' +
-          ' ให้ยกเลิกใบนี้แล้วออกใบใหม่ (ลิงก์เดิมอ่านใบสด ถ้าแก้ตรงนี้ลูกค้าจะเห็นคนละยอดโดยไม่มีอะไรบอก)',
-      );
-    }
     throwIfInvoiceMoved(result);
     if (result.reason === 'invalid_status') {
-      throw new ApiError(409, 'ใบที่ชำระ/ยกเลิกแล้วแก้ไม่ได้ — ต้องยกเลิกแล้วออกใบใหม่');
+      throw new ApiError(409, 'ใบที่ชำระ/ยกเลิกแล้วแก้ไม่ได้ — ปรับยอดด้วยใบลดหนี้/ใบเพิ่มหนี้แทน');
+    }
+    /* ใบที่ส่งลิงก์ให้ลูกค้าไปแล้ว — ลิงก์อ่านใบสด แก้แล้วลูกค้าเห็นเอกสารคนละชุด (Codex ข้อ 7) */
+    if (result.reason === 'already_shared') {
+      throw new ApiError(
+        409,
+        'ใบนี้ส่งลิงก์ให้ลูกค้าไปแล้ว แก้ข้อมูลบนเอกสารไม่ได้ — ถ้าข้อมูลผู้จ่ายหรือรายละเอียดบริการเปลี่ยน' +
+          ' ให้ยกเลิกใบนี้แล้วออกใบใหม่ (ลิงก์เดิมอ่านใบสด ถ้าแก้ตรงนี้ลูกค้าจะเห็นคนละชุดโดยไม่มีอะไรบอก)',
+      );
+    }
+    if (result.reason === 'amount_locked_issued') {
+      throw new ApiError(409, AMOUNT_LOCKED_MESSAGE);
     }
     if (result.reason === 'plan_amount_locked') {
       throw new ApiError(
@@ -315,8 +385,13 @@ invoicesRouter.post(
     if (!caseRow) throw new ApiError(409, 'เคสต้นทางถูกลบไปแล้ว');
 
     const customer = await resolvePayer(caseRow);
-    // กดรีเฟรชเอง = ตั้งใจให้ข้อมูลเคสทับสิ่งที่แก้มือไว้ในใบนี้ จึงบังคับซิงก์และล้างธง manual_edit
-    await repo.syncOpenFromCase(caseRow, customer, { forceInvoiceId: req.params.id });
+    if (req.invoice.status === 'issued') {
+      // ใบที่ออกแล้วดึงได้แค่ผู้จ่าย — ยอดที่ไม่ตรงกับเคสต้องปรับด้วยใบลดหนี้/เพิ่มหนี้ (ดู ledger.js)
+      await repo.refreshPayerFromCase(req.params.id, caseRow, customer);
+    } else {
+      // กดรีเฟรชเอง = ตั้งใจให้ข้อมูลเคสทับสิ่งที่แก้มือไว้ในใบนี้ จึงบังคับซิงก์และล้างธง manual_edit
+      await repo.syncOpenFromCase(caseRow, customer, { forceInvoiceId: req.params.id });
+    }
 
     res.json(await repo.findById(req.params.id));
   }),
@@ -392,6 +467,12 @@ invoicesRouter.patch(
     const result = await repo.setDepositAmount(req.params.id, deposit_amount);
     throwIfInvoiceMoved(result);
 
+    if (result.reason === 'amount_locked_issued') {
+      throw new ApiError(
+        409,
+        `ใบ ${result.invoice_id} ออกไปแล้ว แก้ยอดมัดจำไม่ได้ — ปรับยอดด้วยใบลดหนี้/ใบเพิ่มหนี้ที่ใบนั้นแทน`,
+      );
+    }
     if (result.reason === 'not_deposit_invoice') {
       throw new ApiError(
         409,
@@ -516,6 +597,12 @@ invoicesRouter.post(
       today: todayTh(),
     });
     if (result?.reason === 'not_found') throw notFound('ไม่พบรายการรับชำระนี้');
+    if (result?.reason === 'has_refunds') {
+      throw new ApiError(
+        409,
+        'ใบนี้มีการคืนเงินลูกค้าตามใบลดหนี้แล้ว ยกเลิกรายการรับเงินนี้จะทำให้เงินที่คืนไปมากกว่าเงินที่รับ — ตรวจสอบเรื่องคืนเงินก่อน',
+      );
+    }
     if (result?.reason === 'forbidden') {
       throw new ApiError(
         403,
@@ -525,6 +612,100 @@ invoicesRouter.post(
     }
     throwIfInvoiceMoved(result);
     res.json(result);
+  }),
+);
+
+/**
+ * ใบลดหนี้ / ใบเพิ่มหนี้ — ทางเดียวที่ปรับยอดของใบที่ออกแล้ว (ตัดสินใจ 4 พ.ย. 2569 · ดู ledger.js)
+ *
+ * ใบลดหนี้ลดรายได้และอาจต้องคืนเงิน จึงเปิดเฉพาะหมวด money (ผู้จัดการ/การเงิน) เหมือนการยกเลิกรายการรับเงินย้อนหลัง
+ * ใบเพิ่มหนี้คืองานเก็บเงินเพิ่มตามปกติ (เช่น เพิ่มหัตถการ) คนที่ทำใบแจ้งหนี้ได้ก็ออกได้
+ */
+invoicesRouter.post(
+  '/:id/adjustments',
+  asyncRoute(async (req, res) => {
+    const input = adjustmentSchema.parse(req.body ?? {});
+    if (input.kind === 'credit' && !can(req.user?.position, 'invoice_adjust')) {
+      throw new ApiError(403, 'บัญชีของคุณไม่มีสิทธิ์ออกใบลดหนี้');
+    }
+    const result = await createAdjustment(req.params.id, input, req.user);
+    throwIfInvoiceMoved(result);
+    if (result.reason === 'draft_editable') {
+      throw new ApiError(409, 'ใบนี้ยังเป็นร่าง — แก้ยอดในใบได้เลย ไม่ต้องออกใบลดหนี้/เพิ่มหนี้');
+    }
+    if (result.reason === 'invalid_status') throw new ApiError(409, 'ใบที่ยกเลิกแล้วออกใบลดหนี้/เพิ่มหนี้ไม่ได้');
+    if (result.reason === 'invalid_amount') throw new ApiError(400, 'จำนวนเงินต้องมากกว่า 0');
+    if (result.reason === 'exceeds_total') {
+      throw new ApiError(
+        400,
+        `ลดหนี้ได้ไม่เกินยอดสุทธิของใบ ${result.net_total.toLocaleString('th-TH')} บาท`,
+      );
+    }
+    if (result.reason === 'refund_required') {
+      throw new ApiError(
+        409,
+        `ลดหนี้แล้วเงินที่รับไว้เกินยอดใหม่ ${result.refund_amount.toLocaleString('th-TH')} บาท — ต้องบันทึกการคืนเงินพร้อมกัน`,
+        { refund_amount: result.refund_amount },
+      );
+    }
+    if (result.reason === 'cancel_instead') {
+      throw new ApiError(
+        409,
+        'ใบนี้ยังไม่ได้รับเงิน ลดจนยอดเหลือ 0 เท่ากับไม่มีการขายแล้ว — ให้กด "ยกเลิกใบ" แทน (ถ้าลูกค้าไม่จ่าย ให้เลือกประเภท "ตัดหนี้สูญ")',
+      );
+    }
+    if (result.reason === 'exceeds_balance') {
+      throw new ApiError(
+        400,
+        `ตัดหนี้สูญได้ไม่เกินยอดค้าง ${result.balance.toLocaleString('th-TH')} บาท — เงินที่รับมาแล้วตัดเป็นหนี้สูญไม่ได้`,
+      );
+    }
+    if (result.reason === 'invalid_reason_code') throw new ApiError(400, 'หนี้สูญใช้ได้กับใบลดหนี้เท่านั้น');
+    if (result.reason === 'receipt_not_found') throw new ApiError(400, 'ใบเสร็จที่อ้างถึงไม่ใช่ของใบแจ้งหนี้นี้');
+    res.status(201).json({ ...(await repo.findById(req.params.id)), created_note_id: result.note_id });
+  }),
+);
+
+invoicesRouter.post(
+  '/:id/adjustments/:noteId/cancel',
+  requireAdjust,
+  asyncRoute(async (req, res) => {
+    const { reason } = cancelAdjustmentSchema.parse(req.body ?? {});
+    const result = await cancelAdjustment(req.params.id, req.params.noteId, { reason }, req.user);
+    throwIfInvoiceMoved(result);
+    if (result.reason === 'invalid_status') throw new ApiError(409, 'ใบแจ้งหนี้นี้ถูกยกเลิกแล้ว');
+    if (result.reason === 'note_not_found') throw notFound('ไม่พบใบลดหนี้/เพิ่มหนี้นี้');
+    if (result.reason === 'note_cancelled') throw new ApiError(409, 'เอกสารนี้ถูกยกเลิกไปแล้ว');
+    if (result.reason === 'below_paid') {
+      throw new ApiError(
+        409,
+        `ยกเลิกใบเพิ่มหนี้นี้แล้วยอดสุทธิจะต่ำกว่าเงินที่รับไว้ ${result.paid.toLocaleString('th-TH')} บาท — ออกใบลดหนี้พร้อมคืนเงินแทน`,
+      );
+    }
+    res.json(await repo.findById(req.params.id));
+  }),
+);
+
+/**
+ * แก้ข้อมูลเงินคืนที่กรอกผิด (วันที่ · ช่องทาง · หมายเหตุ) — ยอดแก้ไม่ได้ ยกเลิกเงินคืนต้องยกเลิกใบลดหนี้ของมัน
+ * สิทธิ์เดียวกับคนออกใบลดหนี้ (หมวด money) เพราะเป็นข้อมูลเงินที่ออกจากบริษัท
+ */
+invoicesRouter.patch(
+  '/:id/refunds/:refundId',
+  asyncRoute(async (req, res) => {
+    if (!can(req.user?.position, 'invoice_adjust')) {
+      throw new ApiError(403, 'บัญชีของคุณไม่มีสิทธิ์แก้ข้อมูลการคืนเงิน');
+    }
+    const refundId = Number(req.params.refundId);
+    if (!Number.isInteger(refundId) || refundId <= 0) throw notFound('ไม่พบรายการคืนเงินนี้');
+    const input = updateRefundSchema.parse(req.body ?? {});
+    const result = await updateRefund(req.params.id, refundId, input, req.user);
+    throwIfInvoiceMoved(result);
+    if (result.reason === 'not_found' || result.reason === 'refund_not_found') throw notFound('ไม่พบรายการคืนเงินนี้');
+    if (result.reason === 'refund_voided') {
+      throw new ApiError(409, 'รายการคืนเงินนี้ถูกยกเลิกไปแล้ว (พร้อมใบลดหนี้) จึงแก้ไม่ได้');
+    }
+    res.json(await repo.findById(req.params.id));
   }),
 );
 
@@ -566,8 +747,11 @@ invoicesRouter.get(
   }),
 );
 
+/* ลบสลิป = ลบหลักฐานการโอนทิ้งถาวร — สิทธิ์ slip_delete (ค่าตั้งต้น: Admin HC · การเงิน · ผู้จัดการ · Super Admin)
+   ตั้งรายตำแหน่งได้ในหน้าจัดการสิทธิ์ */
 invoicesRouter.delete(
   '/:id/slips/:slipId',
+  requirePermission('slip_delete', 'บัญชีของคุณไม่มีสิทธิ์ลบสลิป'),
   asyncRoute(async (req, res, next) => {
     const slipId = Number(req.params.slipId);
     const removed = Number.isInteger(slipId) && (await repo.removeSlip(req.params.id, slipId));
@@ -588,33 +772,30 @@ invoicesRouter.post(
   }),
 );
 
+/* ยกเลิกใบ = เลิกเก็บเงินก้อนนั้นทั้งใบ ผลเท่ากับใบลดหนี้เต็มยอด จึงใช้สิทธิ์เดียวกัน (money)
+   และต้องมีเหตุผล — ของเดิมใครก็ได้ที่ทำใบแจ้งหนี้กดยกเลิกได้เงียบๆ ไม่เหลือร่องรอยว่าใครสั่ง */
 invoicesRouter.post(
   '/:id/cancel',
+  requireAdjust,
   asyncRoute(async (req, res) => {
     const { reason } = cancelInvoiceSchema.parse(req.body ?? {});
-    const result = await repo.cancel(req.params.id, { reason }, req.user, {
-      hasMoneyPermission: can(req.user?.position, 'money'),
-    });
+    const result = await repo.cancel(req.params.id, { reason }, req.user);
     throwIfInvoiceMoved(result);
     if (result.reason === 'invalid_status') throw new ApiError(409, 'ใบนี้ถูกยกเลิกไปแล้ว');
-    /* ใบที่มีเงินเข้ามาแล้ว — ยกเลิกแล้วรายได้ของบริษัทเปลี่ยน จึงจำกัดคนและบังคับเหตุผล
-       (เกณฑ์เดียวกับการยกเลิกรายการรับชำระ ดู /payments/:paymentId/void) */
-    if (result.reason === 'money_permission_required') {
+    if (result.reason === 'has_net_payments') {
       throw new ApiError(
-        403,
-        'ใบนี้รับเงินมาแล้ว — ต้องให้ผู้จัดการหรือฝ่ายการเงินเป็นคนยกเลิก' +
-          ' ถ้าเป็นการคืนเงินให้ลูกค้า ให้ยกเลิกรายการรับชำระ (ปุ่มใต้รายการรับเงิน) แทนการยกเลิกใบ',
+        409,
+        `ใบ ${result.invoice_id} ยังถือเงินลูกค้าอยู่ ${result.paid.toLocaleString('th-TH')} บาท — ` +
+          'ออกใบลดหนี้เต็มยอดพร้อมบันทึกคืนเงินก่อน จึงจะยกเลิกใบได้',
       );
-    }
-    if (result.reason === 'cancel_reason_required') {
-      throw new ApiError(400, 'ใบนี้รับเงินมาแล้ว กรุณาบอกเหตุผลที่ยกเลิก (เช่น ออกใบผิดคน · คืนเงินแล้ว)');
     }
     if (result.reason === 'sibling_has_payments') {
       throw new ApiError(
         409,
         `ใบ ${result.invoice_id} ในแผนมัดจำเดียวกันรับชำระมาแล้ว — ยกเลิกใบนี้ใบเดียวจะทำให้ยอดของแผนขาดไป` +
-          ' ถ้ายอดตกลงเปลี่ยน ให้แก้ที่ช่อง "ยอดมัดจำ" ของใบมัดจำแทน' +
-          ' หรือถ้าจะยกเลิกทั้งแผน ให้ยกเลิกใบที่รับเงินแล้วก่อน (ใบที่ยังไม่รับเงินจะถูกยกเลิกตามให้เอง)',
+          ' ถ้ายอดตกลงเปลี่ยน ให้ออกใบลดหนี้/เพิ่มหนี้ที่ใบนั้นแทน' +
+          ' หรือถ้าจะยกเลิกทั้งแผน ให้ลดหนี้เต็มยอดพร้อมคืนเงินที่ใบที่รับเงินแล้ว แล้วยกเลิกใบนั้นก่อน' +
+          ' (ใบที่ยังไม่รับเงินจะถูกยกเลิกตามให้เอง)',
       );
     }
     res.json(result);
@@ -638,6 +819,13 @@ invoicesRouter.delete(
   asyncRoute(async (req, res) => {
     const result = await repo.remove(req.params.id);
     throwIfInvoiceMoved(result);
+    if (result.reason === 'not_draft') {
+      throw new ApiError(
+        409,
+        `ใบ ${result.invoice_id} ${result.status === 'cancelled' ? 'ถูกยกเลิกไว้แล้ว' : 'ออกไปแล้ว'} — ` +
+          'ลบถาวรได้เฉพาะใบร่าง ใบที่ออกแล้วให้ใช้ "ยกเลิกใบนี้" เพื่อให้เลขที่เอกสารไม่ขาดช่วง',
+      );
+    }
     if (result.reason === 'has_payments') {
       throw new ApiError(
         409,

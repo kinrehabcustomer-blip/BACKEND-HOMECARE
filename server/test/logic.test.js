@@ -44,7 +44,6 @@ const {
   invoicePlanForUpdate,
   invoiceMutationResult,
   assessPaymentCapacity,
-  assessCancelAuthority,
   paymentCapacityForUpdate,
   updateInvoiceForTransaction,
   issueInvoiceForTransaction,
@@ -357,7 +356,8 @@ describe('assessPaymentCapacity — ห้ามรับชำระเกิ�
         if (query.includes('FOR UPDATE')) {
           return { invoice_id: 'INV-0001', total: 20000, billing_kind: 'full', status: 'issued' };
         }
-        if (query.includes('SUM(amount)')) return { paid: 15000 };
+        // ยอดสุทธิหลังลดหนี้/เพิ่มหนี้ และเงินรับสุทธิหลังคืนเงิน (invoices/ledger.js)
+        if (query.includes('AS net_paid')) return { net_total: 20000, net_paid: 15000, last_paid_at: null };
         throw new Error(`unexpected query: ${query}`);
       },
     };
@@ -365,7 +365,7 @@ describe('assessPaymentCapacity — ห้ามรับชำระเกิ�
     const result = await paymentCapacityForUpdate(tx, 'INV-0001', undefined);
     assert.equal(result.amount, 5000);
     assert.match(calls[0], /FOR UPDATE/);
-    assert.match(calls[1], /SUM\(amount\)/);
+    assert.match(calls[1], /invoice_payments[\s\S]*invoice_refunds/);
   });
 
   test('ไม่พบ invoice แล้วหยุดก่อนอ่านตาราง payments', async () => {
@@ -410,40 +410,6 @@ describe('invoice mutations — สถานะ แผน และ payment ต�
     assert.equal(assessInvoiceAction('cancel', 'cancelled').reason, 'invalid_status');
   });
 
-  /* ยกเลิกใบที่รับเงินมาแล้ว — ก่อน 8 พ.ย. 2569 ใครที่มีสิทธิ์ billing (HR · Admin HC) ก็กดได้
-     โดยไม่ต้องบอกเหตุผล แล้วยอดเงินก้อนนั้นหายจากกราฟรายได้ทันที (ตรวจรอบ 8 พ.ย. ข้อ C1)
-     ดร.ธงชัยเคาะ "แก้เลย" → ใบที่มีเงินผูกอยู่ ต้องมีสิทธิ์ money + ต้องบอกเหตุผล */
-  test('ยกเลิกใบที่มีเงินผูกอยู่ ต้องมีสิทธิ์ money และต้องบอกเหตุผล', () => {
-    const money = { hasMoneyPermission: true };
-    const billingOnly = { hasMoneyPermission: false };
-
-    // ใบที่ยังไม่มีเงินเข้าเลย — ยกเลิกได้ตามเดิม ไม่ขอสิทธิ์เพิ่ม ไม่บังคับเหตุผล
-    assert.deepEqual(assessCancelAuthority(false, null, billingOnly), {});
-    assert.deepEqual(assessCancelAuthority(false, '', billingOnly), {});
-
-    // ใบที่มีเงิน + ไม่มีสิทธิ์การเงิน = ปฏิเสธ แม้จะกรอกเหตุผลมาครบ
-    assert.equal(
-      assessCancelAuthority(true, 'ออกใบผิดคน', billingOnly).reason,
-      'money_permission_required',
-    );
-    assert.equal(assessCancelAuthority(true, null, billingOnly).reason, 'money_permission_required');
-
-    // มีสิทธิ์การเงินแต่ไม่บอกเหตุผล (หรือบอกสั้นจนไม่เป็นความ) = ปฏิเสธ
-    for (const reason of [null, undefined, '', '  ', 'ขอ']) {
-      assert.equal(assessCancelAuthority(true, reason, money).reason, 'cancel_reason_required');
-    }
-    // เกณฑ์ความยาวขั้นต่ำ 3 ตัวอักษร เท่ากับ voidPaymentSchema — สองที่ต้องเท่ากัน
-    assert.deepEqual(assessCancelAuthority(true, 'ผิด', money), {});
-
-    // มีสิทธิ์ + มีเหตุผล = ผ่าน
-    assert.deepEqual(assessCancelAuthority(true, 'คืนเงินลูกค้าแล้ว', money), {});
-    // เหตุผลที่มีช่องว่างหน้า-หลังต้องถูกตัดก่อนนับความยาว ไม่ใช่ผ่านเพราะช่องว่าง
-    assert.deepEqual(assessCancelAuthority(true, '  ออกใบซ้ำ  ', money), {});
-
-    // opts ว่าง/ไม่ส่งมาเลย ต้องถือว่าไม่มีสิทธิ์ ไม่ใช่ปล่อยผ่าน
-    assert.equal(assessCancelAuthority(true, 'เหตุผลครบ', undefined).reason, 'money_permission_required');
-    assert.equal(assessCancelAuthority(true, 'เหตุผลครบ', {}).reason, 'money_permission_required');
-  });
 
   test('single-row mutation อ่านสถานะล่าสุดด้วย FOR UPDATE ก่อนอนุญาต', async () => {
     const calls = [];
@@ -506,26 +472,23 @@ describe('invoice mutations — สถานะ แผน และ payment ต�
     assert.match(calls[2].query, /ORDER BY invoice_id[\s\S]*FOR UPDATE/);
   });
 
-  test('แก้ยอดหลังมี partial payment แล้วห้ามลด total ต่ำกว่าเงินที่รับจริง', async () => {
+  test('แก้ยอดหลังมี partial payment แล้วห้ามลด total ต่ำกว่าเงินที่รับจริง · ใบที่ออกแล้วแก้ยอดไม่ได้เลย', async () => {
     let mutations = 0;
-    const result = await updateInvoiceForTransaction(
-      {
-        one: async (query) => {
-          if (query.includes('FROM invoices i')) {
-            return {
-              invoice_id: 'INV-0001', status: 'issued', billing_kind: 'full', amount: 100, discount: 0,
-            };
-          }
-          if (query.includes('SUM(amount)')) return { paid: 80, last_paid_at: '2026-08-24' };
-          // ใบนี้ยังไม่เคยส่งลิงก์ให้ลูกค้า (ด่าน already_shared — Codex ข้อ 7 · 8 พ.ย. 2569)
-          if (query.includes('invoice_shares') || query.includes('invoice_line_outbox')) return null;
-          throw new Error(`unexpected query: ${query}`);
-        },
-        run: async () => ((mutations += 1), 1),
+    const txFor = (status) => ({
+      one: async (query) => {
+        if (query.includes('FROM invoices i')) {
+          return {
+            invoice_id: 'INV-0001', status, billing_kind: 'full', amount: 100, discount: 0,
+          };
+        }
+        if (query.includes('SUM(amount)')) return { paid: 80, last_paid_at: '2026-08-24' };
+        throw new Error(`unexpected query: ${query}`);
       },
-      'INV-0001',
-      { amount: 70 },
-    );
+      run: async () => ((mutations += 1), 1),
+    });
+    // ใบที่ออกแล้วต้องใช้ใบลดหนี้/เพิ่มหนี้ (4 พ.ย. 2569) — ปฏิเสธก่อนอ่านเงินด้วยซ้ำ
+    assert.equal((await updateInvoiceForTransaction(txFor('issued'), 'INV-0001', { amount: 70 })).reason, 'amount_locked_issued');
+    const result = await updateInvoiceForTransaction(txFor('draft'), 'INV-0001', { amount: 70 });
     assert.equal(result.reason, 'amount_below_paid');
     assert.equal(result.paid, 80);
     assert.equal(mutations, 0);
@@ -542,7 +505,7 @@ describe('invoice mutations — สถานะ แผน และ payment ต�
         one: async (query) => {
           if (query.includes('FROM invoices i')) {
             return {
-              invoice_id: 'INV-0001', status: 'issued', billing_kind: 'full', amount: 1, discount: 0,
+              invoice_id: 'INV-0001', status: 'draft', billing_kind: 'full', amount: 1, discount: 0,
             };
           }
           if (query.includes('invoice_shares') || query.includes('invoice_line_outbox')) return null;
@@ -593,9 +556,10 @@ describe('invoice mutations — สถานะ แผน และ payment ต�
     assert.equal(mutations, 0);
   });
 
-  test('แก้มัดจำอ่าน payment หลังล็อกใบคู่ และกันยอด balance ต่ำกว่าเงินที่เพิ่งรับ', async () => {
+  test('แก้มัดจำอ่าน payment หลังล็อกใบคู่ และกันยอด balance ต่ำกว่าเงินที่เพิ่งรับ · ใบที่ออกแล้วแก้ไม่ได้', async () => {
     const calls = [];
     let mutations = 0;
+    let rootStatus = 'issued';
     const tx = {
       one: async (query) => {
         calls.push(query);
@@ -603,14 +567,14 @@ describe('invoice mutations — สถานะ แผน และ payment ต�
           return { invoice_id: 'INV-0001', root_id: 'INV-0001' };
         }
         return {
-          invoice_id: 'INV-0001', parent_invoice_id: null, billing_kind: 'deposit', status: 'issued', total: 60,
+          invoice_id: 'INV-0001', parent_invoice_id: null, billing_kind: 'deposit', status: rootStatus, total: 60,
         };
       },
       all: async (query) => {
         calls.push(query);
         if (query.includes('parent_invoice_id = :root_id')) {
           return [{
-            invoice_id: 'INV-0002', parent_invoice_id: 'INV-0001', billing_kind: 'balance', status: 'issued', total: 40,
+            invoice_id: 'INV-0002', parent_invoice_id: 'INV-0001', billing_kind: 'balance', status: 'draft', total: 40,
           }];
         }
         if (query.includes('FROM invoice_payments')) {
@@ -624,6 +588,9 @@ describe('invoice mutations — สถานะ แผน และ payment ต�
       run: async () => ((mutations += 1), 1),
     };
 
+    assert.equal((await setDepositAmountForTransaction(tx, 'INV-0001', 70)).reason, 'amount_locked_issued');
+    rootStatus = 'draft';
+    calls.length = 0;
     const result = await setDepositAmountForTransaction(tx, 'INV-0001', 70);
     assert.equal(result.reason, 'balance_below_paid');
     assert.equal(result.invoice_id, 'INV-0002');
@@ -631,8 +598,9 @@ describe('invoice mutations — สถานะ แผน และ payment ต�
     assert.ok(calls.findIndex((q) => q.includes('FOR UPDATE')) < calls.findIndex((q) => q.includes('FROM invoice_payments')));
   });
 
-  test('รับเงิน commit ก่อนคำขอลบได้ lock แล้ว การลบเห็นยอดใหม่และไม่ยิง DELETE', async () => {
+  test('รับเงิน commit ก่อนคำขอลบได้ lock แล้ว การลบเห็นยอดใหม่และไม่ยิง DELETE · ลบได้เฉพาะใบร่าง', async () => {
     const calls = [];
+    let childStatus = 'issued';
     const tx = {
       one: async (query) => {
         calls.push(query);
@@ -640,14 +608,14 @@ describe('invoice mutations — สถานะ แผน และ payment ต�
           return { invoice_id: 'INV-0001', root_id: 'INV-0001' };
         }
         return {
-          invoice_id: 'INV-0001', parent_invoice_id: null, billing_kind: 'deposit', status: 'issued',
+          invoice_id: 'INV-0001', parent_invoice_id: null, billing_kind: 'deposit', status: 'draft',
         };
       },
       all: async (query) => {
         calls.push(query);
         if (query.includes('parent_invoice_id = :root_id')) {
           return [{
-            invoice_id: 'INV-0002', parent_invoice_id: 'INV-0001', billing_kind: 'balance', status: 'issued',
+            invoice_id: 'INV-0002', parent_invoice_id: 'INV-0001', billing_kind: 'balance', status: childStatus,
           }];
         }
         if (query.includes('FROM invoice_payments')) return [{ invoice_id: 'INV-0002', paid: 500 }];
@@ -656,6 +624,11 @@ describe('invoice mutations — สถานะ แผน และ payment ต�
       },
     };
 
+    const issued = await removeInvoiceForTransaction(tx, 'INV-0001');
+    assert.equal(issued.reason, 'not_draft');
+    assert.equal(issued.invoice_id, 'INV-0002');
+    childStatus = 'draft';
+    calls.length = 0;
     const result = await removeInvoiceForTransaction(tx, 'INV-0001');
     assert.equal(result.reason, 'has_payments');
     assert.equal(result.invoice_id, 'INV-0002');
@@ -918,29 +891,38 @@ describe('payroll round allocation — ช่องว่างและคำ�
 // ---------- เวลาออกต้องมาหลังเวลาเข้า ----------
 describe('adjustVisitSchema — กันเวลาออกมาก่อนเวลาเข้า', () => {
   const iso = (t) => `2026-08-10T${t}+07:00`;
+  const reason = 'ลืมเช็คเอาท์';
 
   test('เวลาออกหลังเวลาเข้า = ผ่าน', () => {
-    assert.equal(adjustVisitSchema.safeParse({ check_in_at: iso('09:00:00'), check_out_at: iso('17:00:00') }).success, true);
+    assert.equal(adjustVisitSchema.safeParse({ check_in_at: iso('09:00:00'), check_out_at: iso('17:00:00'), reason }).success, true);
+  });
+
+  test('แก้เวลา/สถานะต้องมีเหตุผล · เคลียร์ธงอย่างเดียวไม่ต้อง', () => {
+    const r = adjustVisitSchema.safeParse({ check_in_at: iso('09:00:00'), check_out_at: iso('17:00:00') });
+    assert.equal(r.success, false);
+    assert.deepEqual(r.error.issues[0].path, ['reason']);
+    assert.equal(adjustVisitSchema.safeParse({ status: 'cancelled', reason: 'ab' }).success, false, 'สั้นเกิน');
+    assert.equal(adjustVisitSchema.safeParse({ location_flagged: false }).success, true);
   });
 
   test('เวลาออกก่อนเวลาเข้า = ถูกปฏิเสธ', () => {
-    const r = adjustVisitSchema.safeParse({ check_in_at: iso('17:00:00'), check_out_at: iso('09:00:00') });
+    const r = adjustVisitSchema.safeParse({ check_in_at: iso('17:00:00'), check_out_at: iso('09:00:00'), reason });
     assert.equal(r.success, false);
     assert.match(r.error.issues[0].message, /เวลาออกต้องมาหลังเวลาเข้า/);
     assert.deepEqual(r.error.issues[0].path, ['check_out_at']);
   });
 
   test('เวลาเข้า = เวลาออก (ทำงาน 0 นาที) = ถูกปฏิเสธ', () => {
-    assert.equal(adjustVisitSchema.safeParse({ check_in_at: iso('17:13:00'), check_out_at: iso('17:13:00') }).success, false);
+    assert.equal(adjustVisitSchema.safeParse({ check_in_at: iso('17:13:00'), check_out_at: iso('17:13:00'), reason }).success, false);
   });
 
   test('ส่งมาช่องเดียว = ผ่านที่ชั้น schema (ชั้น route เทียบกับค่าใน DB ต่อ)', () => {
-    assert.equal(adjustVisitSchema.safeParse({ check_out_at: iso('17:00:00') }).success, true);
+    assert.equal(adjustVisitSchema.safeParse({ check_out_at: iso('17:00:00'), reason }).success, true);
     assert.equal(adjustVisitSchema.safeParse({ location_flagged: false }).success, true);
   });
 
   test('ล้างเวลาทิ้ง (null) ยังทำได้', () => {
-    assert.equal(adjustVisitSchema.safeParse({ check_in_at: null, check_out_at: null }).success, true);
+    assert.equal(adjustVisitSchema.safeParse({ check_in_at: null, check_out_at: null, reason }).success, true);
   });
 });
 
@@ -1283,6 +1265,7 @@ describe('นิยามฟอร์มฝั่งหน้าเว็บต�
     for (const [name, sections] of [['ดูแลประจำวัน', DAILY_SECTIONS], ['กายภาพบำบัด', PHYSIO_SECTIONS]]) {
       for (const s of sections) {
         for (const f of s.fields) {
+          if (f.type === 'bmi') continue; // BMI คำนวณหน้าเว็บ ไม่มีคอลัมน์/ช่องใน schema
           assert.equal(known.has(f.key), true, `ฟอร์ม${name} มีช่อง ${f.key} ที่ schema ฝั่ง server ไม่รู้จัก`);
         }
       }
@@ -2201,6 +2184,29 @@ describe('อุปกรณ์เสริมของเคส', () => {
     assert.equal(normalizeAddons([{ name: 'เตียง', kind: 'rent' }])[0].kind, undefined);
   });
 
+  test('ค่าใช้จ่ายค้างออกใบ = ของเคสหักที่ใบอื่นเก็บแล้ว นับตามจำนวน ไม่ใช่ทั้งรายการ', async () => {
+    const { unbilledAddons } = await import('../src/lib/addons.js');
+    const bed = { name: 'เตียงลม', quantity: 1, unit_price: 3500 };
+    const gloves = { name: 'ถุงมือ', quantity: 3, unit_price: 120 };
+    const wound = { name: 'ทำแผล', quantity: 1, unit_price: 300, kind: 'procedure', vn: 'VN690000001' };
+
+    assert.deepEqual(unbilledAddons([bed, gloves], []), [bed, gloves]);
+    assert.deepEqual(unbilledAddons([bed, gloves], [bed, gloves]), []);
+    assert.deepEqual(unbilledAddons(null, [bed]), []);
+    // เพิ่มจำนวนทีหลัง = ค้างเฉพาะส่วนที่เพิ่ม · เก็บจากหลายใบรวมกันได้
+    assert.deepEqual(unbilledAddons([bed, gloves], [bed, { ...gloves, quantity: 1 }]), [{ ...gloves, quantity: 2 }]);
+    assert.deepEqual(
+      unbilledAddons([gloves], [{ ...gloves, quantity: 1 }, { ...gloves, quantity: 2 }]),
+      [],
+    );
+    // ราคาเปลี่ยน = คนละรายการ · หัตถการแยกกันด้วย VN
+    assert.deepEqual(unbilledAddons([{ ...bed, unit_price: 4000 }], [bed]), [{ ...bed, unit_price: 4000 }]);
+    const wound2 = { ...wound, vn: 'VN690000002' };
+    assert.deepEqual(unbilledAddons([wound, wound2], [wound]), [wound2]);
+    // ข้อมูลเก่าที่ติด kind: 'rent' นับเป็นรายการเดียวกับของที่ไม่ติด kind
+    assert.deepEqual(unbilledAddons([bed], [{ ...bed, kind: 'rent' }]), []);
+  });
+
   test('บรรทัดใบรายครั้งต่อเลขลำดับจากกะ และยอดตรงกับ addonsTotal', async () => {
     const { addonLines } = await import('../src/invoices/repo.js');
     const lines = addonLines([{ name: 'รถเข็น', quantity: 2, unit_price: 500 }], 4);
@@ -2241,6 +2247,56 @@ describe('ต่อเคส — วันของรอบใหม่', () =>
     const { nextRoundDates } = await import('../../client/src/lib/caseRounds.js');
     assert.deepEqual(nextRoundDates('2026-10-01', '', '2026-10-16'), { start_date: '2026-10-16', end_date: '' });
     assert.deepEqual(nextRoundDates(null, '2026-10-31', '2026-10-16'), { start_date: '2026-11-01', end_date: '' });
+  });
+
+  test('ต่อให้เองเฉพาะของเช่า — ซื้อขาดกับหัตถการเก็บเงินไปแล้วในรอบก่อน', async () => {
+    const { carriesOver } = await import('../../client/src/lib/caseRounds.js');
+    assert.equal(carriesOver({ name: 'เตียงลม', quantity: 1, unit_price: 3000 }), true);
+    assert.equal(carriesOver({ name: 'ชุดทำแผล', kind: 'sale', quantity: 2, unit_price: 150 }), false);
+    assert.equal(carriesOver({ name: 'ทำแผล', kind: 'procedure', quantity: 1, unit_price: 500, vn: 'VN1' }), false);
+  });
+
+  test('แบบกะของรอบก่อน: คนเดียวกัน เวลาเดียวกัน = แบบเดียว · ไม่นับกะที่ยกเลิก · เรียงจากที่ลงบ่อยสุด', async () => {
+    const { shiftPatterns } = await import('../../client/src/lib/caseRounds.js');
+    const v = (visit_date, assigned_to, planned_start, planned_end, status = 'scheduled') =>
+      ({ visit_date, assigned_to, assigned_name: assigned_to && `ชื่อ ${assigned_to}`, planned_start, planned_end, status });
+    const patterns = shiftPatterns([
+      v('2026-11-02', 'A', '08:00', '17:00'), // จันทร์
+      v('2026-11-04', 'A', '08:00', '17:00'), // พุธ
+      v('2026-11-09', 'A', '08:00', '17:00'), // จันทร์ (ซ้ำวัน ไม่เพิ่ม weekday)
+      v('2026-11-03', 'B', '20:00', '08:00'), // อังคาร กะดึก
+      v('2026-11-05', 'B', '20:00', '08:00', 'cancelled'),
+      v('2026-11-06', null, null, null),      // ศุกร์ ไม่ระบุคน/เวลา
+    ]);
+    // A: จันทร์สองครั้ง พุธครั้งเดียว = พุธเป็นนัดแทรก ไม่ใช่วันประจำ · แบบที่มีแค่ครั้งเดียวคงวันนั้นไว้
+    assert.deepEqual(patterns.map((p) => [p.assigned_to, p.planned_start, p.weekdays, p.rare_weekdays, p.count]), [
+      ['A', '08:00', [1], [3], 3],
+      [null, null, [5], [], 1],
+      ['B', '20:00', [2], [], 1],
+    ]);
+    assert.equal(patterns[0].assigned_name, 'ชื่อ A');
+    assert.deepEqual(shiftPatterns(null), []);
+  });
+
+  test('แบบกะที่ทุกวันซ้ำสม่ำเสมอ (ดูแลรายเดือน) — ได้ครบทุกวัน ไม่มีวันถูกตัด', async () => {
+    const { shiftPatterns } = await import('../../client/src/lib/caseRounds.js');
+    const visits = Array.from({ length: 14 }, (_, i) => ({
+      visit_date: new Date(Date.UTC(2026, 10, 1 + i)).toISOString().slice(0, 10),
+      assigned_to: 'A', planned_start: '08:00', planned_end: '20:00', status: 'scheduled',
+    }));
+    const [p] = shiftPatterns(visits);
+    assert.deepEqual(p.weekdays, [0, 1, 2, 3, 4, 5, 6]);
+    assert.deepEqual(p.rare_weekdays, []);
+  });
+
+  test('นับกะในช่วงตามวันในสัปดาห์ — ตรงกับที่ server ลงให้จริง', async () => {
+    const { countDaysInRange } = await import('../../client/src/lib/caseRounds.js');
+    const { bulkVisitSchema } = await import('../src/cases/schema.js');
+    const range = { from: '2026-11-01', to: '2026-11-30', weekdays: [1, 3] };
+    assert.equal(countDaysInRange(range.from, range.to, range.weekdays), bulkVisitSchema.parse(range).dates.length);
+    assert.equal(countDaysInRange('2026-11-01', '2026-11-30', [0, 1, 2, 3, 4, 5, 6]), 30);
+    assert.equal(countDaysInRange('2026-11-30', '2026-11-01', [1]), 0);
+    assert.equal(countDaysInRange('2026-11-01', '', [1]), 0);
   });
 });
 
@@ -2400,5 +2456,62 @@ describe('ด่านข้อมูลเคส — เบอร์ที่�
     const narrow = parse({ from: '2026-03-01', to: '2026-03-05', count: 3 });
     assert.equal(narrow.success, true);
     assert.equal(narrow.data.dates.length, 5);
+
+  });
+});
+
+describe('ใบลดหนี้/เพิ่มหนี้ — ออกได้เมื่อไหร่ และเมื่อไหร่ต้องคืนเงิน (invoices/ledger.js)', async () => {
+  const { assessAdjustment } = await import('../src/invoices/ledger.js');
+  const ledger = (netTotal, netPaid) => ({ netTotal, netPaid, balance: netTotal - netPaid });
+
+  test('ใบร่างแก้ยอดเองได้ · ใบยกเลิกปรับไม่ได้', () => {
+    assert.equal(assessAdjustment('draft', ledger(1000, 0), { kind: 'debit', amount: 10 }).reason, 'draft_editable');
+    assert.equal(assessAdjustment('cancelled', ledger(1000, 0), { kind: 'debit', amount: 10 }).reason, 'invalid_status');
+  });
+
+  test('ลดหนี้ได้ไม่เกินยอดสุทธิ', () => {
+    assert.equal(assessAdjustment('issued', ledger(1000, 0), { kind: 'credit', amount: 1000.01 }).reason, 'exceeds_total');
+    // รับเงินไว้แล้ว ลดเต็มยอดได้ (พร้อมคืนเงินทั้งหมด) — ทางที่ต้องเดินก่อนยกเลิกใบที่ถือเงิน
+    assert.equal(assessAdjustment('paid', ledger(1000, 1000), { kind: 'credit', amount: 1000, refund: {} }).totalAfter, 0);
+  });
+
+  test('ยังไม่ได้รับเงิน ลดจนเหลือ 0 = ให้ยกเลิกใบแทน ยกเว้นตัดหนี้สูญ (L4)', () => {
+    assert.equal(assessAdjustment('issued', ledger(1000, 0), { kind: 'credit', amount: 1000 }).reason, 'cancel_instead');
+    // ลดบางส่วนยังได้ตามปกติ
+    assert.equal(assessAdjustment('issued', ledger(1000, 0), { kind: 'credit', amount: 400 }).totalAfter, 600);
+    const bad = assessAdjustment('issued', ledger(1000, 0), { kind: 'credit', amount: 1000, reason_code: 'bad_debt' });
+    assert.equal(bad.totalAfter, 0);
+    assert.equal(bad.refundAmount, 0);
+  });
+
+  test('หนี้สูญตัดได้ไม่เกินยอดค้าง และใช้กับใบเพิ่มหนี้ไม่ได้', () => {
+    // รับแล้ว 600 ค้าง 400 — ตัด 401 ไม่ได้ เพราะเท่ากับตัดเงินที่รับมาแล้ว (ซึ่งจะกลายเป็นต้องคืนเงิน)
+    assert.deepEqual(
+      assessAdjustment('issued', ledger(1000, 600), { kind: 'credit', amount: 401, reason_code: 'bad_debt' }),
+      { reason: 'exceeds_balance', balance: 400 },
+    );
+    const ok = assessAdjustment('issued', ledger(1000, 600), { kind: 'credit', amount: 400, reason_code: 'bad_debt' });
+    assert.equal(ok.totalAfter, 600);
+    assert.equal(ok.refundAmount, 0);
+    assert.equal(
+      assessAdjustment('issued', ledger(1000, 0), { kind: 'debit', amount: 10, reason_code: 'bad_debt' }).reason,
+      'invalid_reason_code',
+    );
+  });
+
+  test('ลดหนี้จนเงินที่รับไว้เกิน = ต้องส่งข้อมูลคืนเงิน ยอดคืนคิดจาก server', () => {
+    const paid = ledger(30000, 30000);
+    assert.deepEqual(assessAdjustment('paid', paid, { kind: 'credit', amount: 3000 }), { reason: 'refund_required', refund_amount: 3000 });
+    const ok = assessAdjustment('paid', paid, { kind: 'credit', amount: 3000, refund: {} });
+    assert.equal(ok.refundAmount, 3000);
+    assert.equal(ok.totalAfter, 27000);
+    // รับไว้บางส่วน ลดแล้วยังไม่เกินที่รับ = ไม่ต้องคืน
+    assert.equal(assessAdjustment('issued', ledger(30000, 10000), { kind: 'credit', amount: 3000 }).refundAmount, 0);
+  });
+
+  test('ใบเพิ่มหนี้ไม่เคยต้องคืนเงิน และปัดเศษสตางค์', () => {
+    const r = assessAdjustment('paid', ledger(100.1, 100.1), { kind: 'debit', amount: 0.2 });
+    assert.equal(r.totalAfter, 100.3);
+    assert.equal(r.refundAmount, 0);
   });
 });

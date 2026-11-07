@@ -13,8 +13,13 @@ import {
   physioBrief,
   DAILY_SECTIONS,
   PHYSIO_SECTIONS,
+  PHYSIO_VIEW_SECTIONS,
 } from '../lib/dailyCare.js';
 import TimeSelect from './TimeSelect.jsx';
+import { useSheetSwipe } from '../lib/sheetSwipe.js';
+import { useScrollLock } from '../lib/scrollLock.js';
+import { caseCode } from '../lib/patientCode.js';
+import SearchSelect from './SearchSelect.jsx';
 
 /**
  * สัญญาณชีพที่ให้กรอก — ช่วง min/max ตรงกับ zod ฝั่ง server และ CHECK ในตาราง
@@ -152,6 +157,42 @@ function ReportForm({ initial, busy, error, onSubmit, onCancel }) {
 }
 
 /**
+ * popup ของรายงานหนึ่งใบ (ลงย้อนหลัง / ดูเต็ม / แก้ไข)
+ * ฟอร์มไม่ปิดเมื่อกดพื้นหลัง/Esc เพราะที่กรอกค้างไว้จะหาย — ปิดได้ด้วย × หรือปุ่มยกเลิกของฟอร์ม
+ * โหมดดูอย่างเดียว (closeOnBackdrop) ปิดด้วยพื้นหลัง/Esc ได้ เพราะไม่มีอะไรหาย
+ */
+function ReportModal({ caseId, title, subtitle, onClose, closeOnBackdrop = false, children }) {
+  const sheetRef = useSheetSwipe(onClose);
+  useScrollLock();
+  useEffect(() => {
+    if (!closeOnBackdrop) return undefined;
+    const onKeyDown = (e) => e.key === 'Escape' && onClose();
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [closeOnBackdrop, onClose]);
+  return (
+    <div className="modal-backdrop modal-stacked" onClick={closeOnBackdrop ? onClose : undefined}>
+      <div className="modal modal-wide is-subsheet" ref={sheetRef} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+        <header className="modal-head">
+          <div>
+            <p className="mono muted">{caseCode(caseId)}</p>
+            <h2>{title}</h2>
+            {subtitle && <p className="muted">{subtitle}</p>}
+          </div>
+          <button className="modal-close" type="button" onClick={onClose} aria-label="ปิด">×</button>
+        </header>
+        <div className="modal-body">{children}</div>
+        {closeOnBackdrop && (
+          <footer className="modal-foot">
+            <button className="btn primary" type="button" onClick={onClose}>ปิด</button>
+          </footer>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
  * รายงานอาการผู้รับบริการ — ใช้ได้ทั้ง "ทั้งเคส" และ "เฉพาะกะเดียว"
  *
  * scope = 'admin' (ฝั่งจัดการ, /api/cases/:id/reports) | 'my' (พนักงานภาคสนาม, /api/my/...)
@@ -207,6 +248,9 @@ export default function CaseReports({
   inlineLimit = null,
   archiveTitle = null,
   allowAdd = true,
+  adding: addingProp,      // ควบคุมจากภายนอก (ปุ่มเพิ่มอยู่ที่หัวข้อของหน้าแม่) — ไม่ส่ง = ใช้ปุ่มของคอมโพเนนต์เอง
+  onAddingChange = null,
+  backfillVisits = null,   // พนักงาน: กะของตัวเองที่ลงรายงานย้อนหลังได้ — ส่งมา = เปิดปุ่ม "ลงรายงานย้อนหลัง" แม้หน้านี้ readOnly
 }) {
   const toast = useToast();
   const isAdmin = scope === 'admin';
@@ -220,6 +264,7 @@ export default function CaseReports({
   const daily = usesDailyRecord(caseInfo);
   const structured = physio || daily;
   const sections = physio ? PHYSIO_SECTIONS : DAILY_SECTIONS;
+  const viewSections = physio ? PHYSIO_VIEW_SECTIONS : DAILY_SECTIONS; // อ่านใบเก่าของกายภาพได้ด้วย
   const brief = physio ? physioBrief : dailyBrief;
   const Form = structured ? DailyCareForm : ReportForm;
 
@@ -228,8 +273,11 @@ export default function CaseReports({
   const [filters, setFilters] = useState({ month: '', type: '' });
   const [error, setError] = useState(null);            // ตอนโหลดรายการ
   const [formError, setFormError] = useState(null);    // ตอนบันทึก — คนละที่กัน ไม่งั้นกดบันทึกพลาดแล้วรายการหาย
-  const [adding, setAdding] = useState(false);
+  const [addingLocal, setAddingLocal] = useState(false);
+  const adding = addingProp ?? addingLocal;
+  const setAdding = (v) => { setAddingLocal(v); onAddingChange?.(v); };
   const [editingId, setEditingId] = useState(null);
+  const [backfillVisitId, setBackfillVisitId] = useState(null);
   const [openId, setOpenId] = useState(null);          // ใบที่กางอยู่ (กางได้ทีละใบ)
   const [busy, setBusy] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -313,7 +361,9 @@ export default function CaseReports({
      ปุ่มบันทึกจึงไม่มีทางโผล่ และ server ก็ไม่มีเส้นให้สร้างที่ระดับเคสอยู่แล้ว */
   const save = (body) =>
     run(
-      () => (visitId ? api.addMyVisitReport(visitId, body) : api.addCaseReport(caseId, body)),
+      () => (visitId
+        ? api.addMyVisitReport(visitId, body)
+        : backfillVisits ? api.addMyCaseReport(caseId, { ...body, visit_id: backfillVisitId ?? backfillVisits[0]?.visit_id }) : api.addCaseReport(caseId, body)),
       'บันทึกรายงานแล้ว',
     );
 
@@ -334,6 +384,10 @@ export default function CaseReports({
       ? (isAdmin ? api.caseReportPhotoUrl(caseId, r.report_id) : api.myReportPhotoUrl(caseId, r.report_id))
       : null;
 
+  /** URL รูปแนบ (หลายรูป) ของรายงานใบหนึ่ง */
+  const imageUrlOf = (r) => (id) => (isAdmin ? api.caseReportImageUrl(caseId, r.report_id, id) : api.myReportImageUrl(caseId, r.report_id, id));
+  const imagesOf = (r) => (r.image_ids ?? []).map((id) => ({ id, url: imageUrlOf(r)(id) }));
+
   /** จัดกลุ่มตามวัน — ในคลังที่มีวันละหลายใบ วันคือหน่วยที่คนใช้ไล่หา ไม่ใช่ลำดับใบ */
   const days = useMemo(() => {
     const map = new Map();
@@ -345,6 +399,8 @@ export default function CaseReports({
   }, [reports]);
 
   const filtering = Boolean(filters.month || filters.type);
+  const openReport = (reports ?? []).find((r) => r.report_id === openId) ?? null;
+  const editingReport = (reports ?? []).find((r) => r.report_id === editingId) ?? null;
 
   if (error && !reports) return <p className="error">{error}</p>;
   if (!reports) return <p className="muted">กำลังโหลด…</p>;
@@ -355,38 +411,59 @@ export default function CaseReports({
 
   return (
     <div className="report-list">
-      {!readOnly && !adding && (
+      {(!readOnly || backfillVisits) && !adding && (
         <div className="visit-summary">
           <p className="muted">
             {meta.total === 0
               ? (visitId ? 'ยังไม่ได้บันทึกรายงานของกะนี้' : filtering ? 'ไม่มีรายงานที่ตรงกับตัวกรอง' : 'ยังไม่มีรายงานอาการ')
               : `มีรายงาน ${meta.total} ใบ`}
           </p>
-          {/* หน้าเคสเป็นที่ "ดูย้อนหลัง" — การบันทึกอยู่ที่หน้างานวันนี้ของกะนั้นที่เดียว
-              (แก้/ลบยังทำได้จากที่นี่ เพราะเป็นการแก้ของที่มีอยู่แล้ว ไม่ใช่การสร้างใบที่ไม่ผูกกับกะ) */}
-          {allowAdd && (
+          {/* พนักงานบันทึกที่หน้างานวันนี้ของกะนั้น · หลังบ้านลงย้อนหลังแทนได้จากหน้าเคส (เลือกวันที่ในฟอร์ม · ดร.ธงชัย 2 พ.ย. 2569) */}
+          {(allowAdd || backfillVisits) && addingProp === undefined && (
             <button className="btn primary" type="button" onClick={() => { setAdding(true); setFormError(null); }}>
-              + บันทึกรายงาน
+              {(isAdmin || backfillVisits) && !visitId ? '+ ลงรายงานย้อนหลัง' : '+ บันทึกรายงาน'}
             </button>
           )}
         </div>
       )}
 
-      {adding && (
-        <Form
-          initial={null}
-          sections={sections}
-          busy={busy}
-          error={formError}
-          onSubmit={save}
-          onCancel={() => { setAdding(false); setFormError(null); }}
-        />
-      )}
+      {adding && (() => {
+        const pickedVisit = backfillVisits?.find((v) => v.visit_id === backfillVisitId) ?? backfillVisits?.[0] ?? null;
+        const form = (
+          <>
+          {backfillVisits && (
+            <label className="backfill-visit">
+              กะที่ลงรายงานให้
+              <SearchSelect value={pickedVisit?.visit_id ?? ''} onChange={(e) => setBackfillVisitId(Number(e.target.value))}>
+                {backfillVisits.map((v) => (
+                  <option key={v.visit_id} value={v.visit_id}>
+                    {formatDate(v.visit_date)}{v.planned_start ? ` · ${v.planned_start}` : ''}
+                  </option>
+                ))}
+              </SearchSelect>
+            </label>
+          )}
+          <Form
+            key={pickedVisit?.visit_id ?? 'new'}
+            initial={pickedVisit ? { report_date: pickedVisit.visit_date } : null}
+            sections={sections}
+            busy={busy}
+            error={formError}
+            onSubmit={save}
+            onCancel={() => { setAdding(false); setFormError(null); }}
+          />
+          </>
+        );
+        // ลงย้อนหลังจากหน้าเคส (หลังบ้าน) เปิดเป็น popup — ฟอร์มยาว ไม่ดันหน้าเคสลงไปทั้งหน้า
+        return (isAdmin || backfillVisits) && !visitId
+          ? <ReportModal caseId={caseId} title="ลงรายงานย้อนหลัง" subtitle={archiveTitle} onClose={() => { setAdding(false); setFormError(null); }}>{form}</ReportModal>
+          : form;
+      })()}
 
       {/* ตัวกรองคลัง — โผล่เมื่อของเริ่มเยอะจนต้องหา (เคสที่มีไม่กี่ใบไม่ต้องมีอะไรมาบัง) */}
       {!visitId && !overflow && (meta.months.length > 1 || meta.total > PER_PAGE || filtering) && (
         <div className="report-filters">
-          <select
+          <SearchSelect
             aria-label="เลือกเดือน"
             value={filters.month}
             onChange={(e) => setFilters((f) => ({ ...f, month: e.target.value }))}
@@ -397,7 +474,7 @@ export default function CaseReports({
                 {monthText(m.month)} ({m.total}){m.abnormal > 0 ? ` · ผิดปกติ ${m.abnormal}` : ''}
               </option>
             ))}
-          </select>
+          </SearchSelect>
           <button
             type="button"
             className={`chip ${filters.type === 'abnormal' ? 'is-on' : ''}`}
@@ -422,21 +499,9 @@ export default function CaseReports({
             </h4>
           )}
 
-          {rows.map((r) =>
-            editingId === r.report_id ? (
-              <Form
-                key={r.report_id}
-                initial={r}
-                sections={sections}
-                busy={busy}
-                error={formError}
-                photoUrl={photoUrl(r)}
-                onSubmit={(body) => edit(r.report_id, body)}
-                onCancel={() => { setEditingId(null); setFormError(null); }}
-              />
-            ) : (
-              <article className={`report-row ${openId === r.report_id ? 'is-open' : ''}`} key={r.report_id}>
-                <button type="button" className="report-row-head" onClick={() => setOpenId(openId === r.report_id ? null : r.report_id)}>
+          {rows.map((r) => (
+            <article className="report-row" key={r.report_id}>
+                <button type="button" className="report-row-head" onClick={() => setOpenId(r.report_id)}>
                   <span className={`report-row-time ${r.report_time ? '' : 'is-recorded'}`}>
                     {rowTime(r)}
                   </span>
@@ -451,75 +516,98 @@ export default function CaseReports({
                     {(structured ? brief(r) : simpleBrief(r)).join(' · ') || 'ดูรายละเอียด'}
                   </span>
 
+                  {r.image_ids?.length > 0 && <span className="report-row-imgs" title="มีรูปภาพแนบ">รูป {r.image_ids.length}</span>}
                   <span className="report-row-by">{r.reported_by_name ?? '—'}</span>
                   {/* บอกว่าแถวนี้กางได้ — ไม่มีอะไรบอกเลยคนจะไม่รู้ว่ากดได้
                       กางอยู่แล้วไม่ต้องมีค้างไว้ ปุ่มที่ใช้จริงตอนนั้นคือ "ย่อรายงาน" ท้ายใบ */}
-                  {openId !== r.report_id && <span className="report-row-more">ดูทั้งหมด</span>}
+                  <span className="report-row-more">ดูทั้งหมด</span>
                 </button>
-
-                {openId === r.report_id && (
-                  <div className="report-row-body">
-                    {structured ? (
-                      <DailyCareView report={r} sections={sections} photoUrl={photoUrl(r)} />
-                    ) : (
-                      <>
-                        {vitalChips(r).length > 0 && (
-                          <ul className="vital-chips">
-                            {vitalChips(r).map(([label, value, unit]) => (
-                              <li key={label}>
-                                <span className="vital-label">{label}</span>
-                                <span className="vital-value">{value}{unit && <span className="vital-unit"> {unit}</span>}</span>
-                              </li>
-                            ))}
-                          </ul>
-                        )}
-                        {TEXTS.filter((t) => r[t.key]).map((t) => (
-                          <p className="report-text-row" key={t.key}>
-                            <span className="field-label">{t.label}</span>
-                            {/* ขึ้นบรรทัดใหม่ตามที่คนกรอกพิมพ์ไว้ — พนักงานเขียนเป็นข้อๆ กันเป็นปกติ */}
-                            <span className="report-text-value">{r[t.key]}</span>
-                          </p>
-                        ))}
-                      </>
-                    )}
-
-                    <div className="report-row-foot">
-                      <span className="cell-sub">
-                        บันทึกโดย {r.reported_by_name ?? '—'}
-                        {/* แก้ทีหลังแล้วต้องเห็น ไม่งั้นบันทึกที่ถูกแก้จะดูเหมือนของดั้งเดิม */}
-                        {r.updated_at !== r.created_at && ` · แก้ล่าสุด ${editedAt(r.updated_at)}`}
-                      </span>
-                      <span className="stack-actions">
-                        {canEdit(r) && (
-                          <button className="btn tiny" type="button" disabled={busy} onClick={() => { setEditingId(r.report_id); setFormError(null); }}>
-                            แก้ไข
-                          </button>
-                        )}
-                        {isAdmin && !readOnly && (
-                          <ConfirmButton
-                            className="btn tiny danger-ghost"
-                            disabled={busy}
-                            title={`ลบรายงานของวันที่ ${formatDate(r.report_date)}?`}
-                            detail="เป็นบันทึกอาการที่ลบแล้วกู้คืนไม่ได้ — ถ้าแค่กรอกผิดให้กด “แก้ไข” แทน"
-                            confirmLabel="ลบรายงาน"
-                            onConfirm={() => remove(r.report_id)}
-                          >
-                            ลบ
-                          </ConfirmButton>
-                        )}
-                      </span>
-                    </div>
-
-                    <button type="button" className="report-collapse" onClick={() => setOpenId(null)}>
-                      ย่อรายงาน
-                    </button>
-                  </div>
-                )}
-              </article>
-            ),
-          )}
+            </article>
+          ))}
         </section>
       ))}
+
+      {/* ดูรายงานเต็ม + แก้/ลบ เปิดเป็น popup (ไม่กางในรายการ) */}
+      {openReport && editingId == null && ((r) => (
+        <ReportModal
+          caseId={caseId}
+          title={`รายงานวันที่ ${formatDate(openReport.report_date)} · ${rowTime(openReport)}`}
+          onClose={() => setOpenId(null)}
+          closeOnBackdrop
+        >
+                    <div className="report-row-body">
+                      {structured ? (
+                        <DailyCareView report={r} sections={viewSections} photoUrl={photoUrl(r)} imageUrl={imageUrlOf(r)} />
+                      ) : (
+                        <>
+                          {vitalChips(r).length > 0 && (
+                            <ul className="vital-chips">
+                              {vitalChips(r).map(([label, value, unit]) => (
+                                <li key={label}>
+                                  <span className="vital-label">{label}</span>
+                                  <span className="vital-value">{value}{unit && <span className="vital-unit"> {unit}</span>}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                          {TEXTS.filter((t) => r[t.key]).map((t) => (
+                            <p className="report-text-row" key={t.key}>
+                              <span className="field-label">{t.label}</span>
+                              {/* ขึ้นบรรทัดใหม่ตามที่คนกรอกพิมพ์ไว้ — พนักงานเขียนเป็นข้อๆ กันเป็นปกติ */}
+                              <span className="report-text-value">{r[t.key]}</span>
+                            </p>
+                          ))}
+                        </>
+                      )}
+  
+                      <div className="report-row-foot">
+                        <span className="cell-sub">
+                          บันทึกโดย {r.reported_by_name ?? '—'}
+                          {/* แก้ทีหลังแล้วต้องเห็น ไม่งั้นบันทึกที่ถูกแก้จะดูเหมือนของดั้งเดิม */}
+                          {r.updated_at !== r.created_at && ` · แก้ล่าสุด ${editedAt(r.updated_at)}`}
+                        </span>
+                        <span className="stack-actions">
+                          {canEdit(r) && (
+                            <button className="btn tiny" type="button" disabled={busy} onClick={() => { setEditingId(r.report_id); setFormError(null); }}>
+                              แก้ไข
+                            </button>
+                          )}
+                          {isAdmin && !readOnly && (
+                            <ConfirmButton
+                              className="btn tiny danger-ghost"
+                              disabled={busy}
+                              title={`ลบรายงานของวันที่ ${formatDate(r.report_date)}?`}
+                              detail="เป็นบันทึกอาการที่ลบแล้วกู้คืนไม่ได้ — ถ้าแค่กรอกผิดให้กด “แก้ไข” แทน"
+                              confirmLabel="ลบรายงาน"
+                              onConfirm={() => remove(r.report_id)}
+                            >
+                              ลบ
+                            </ConfirmButton>
+                          )}
+                        </span>
+                      </div>
+                    </div>
+        </ReportModal>
+      ))(openReport)}
+
+      {editingReport && (
+        <ReportModal
+          caseId={caseId}
+          title="แก้ไขรายงาน"
+          onClose={() => { setEditingId(null); setFormError(null); }}
+        >
+          <Form
+            initial={editingReport}
+            sections={sections}
+            busy={busy}
+            error={formError}
+            photoUrl={photoUrl(editingReport)}
+            existingImages={imagesOf(editingReport)}
+            onSubmit={(body) => edit(editingReport.report_id, body)}
+            onCancel={() => { setEditingId(null); setFormError(null); }}
+          />
+        </ReportModal>
+      )}
 
       {/* โหมดย่อ: ไม่ต้องมีปุ่มโหลดเพิ่ม ให้ไปดูต่อในตารางเต็มแทน */}
       {overflow && (

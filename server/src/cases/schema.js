@@ -135,6 +135,11 @@ const caseFields = z.object({
 
   // ต่อเคส: รหัสเคสรอบก่อน — ตั้งได้ตอนสร้างเท่านั้น (updateCaseSchema ตัดออก)
   renewed_from: z.string().trim().min(1).optional().nullable(),
+
+  /* ทีมดูแลเคส (คนที่ 2 ขึ้นไป) ที่เลือกไว้ตอนสร้าง — ตั้งได้ตอนสร้างเท่านั้น
+     ไม่ส่ง = ต่อเคสแล้วทีมรอบก่อนตามมาทั้งหมดเหมือนเดิม · ส่งมา (รวม []) = เอาเฉพาะคนที่ระบุ
+     หน้าต่อเคสให้ติ๊กเลือกว่าใครตามมา คนที่ไม่ติ๊กต้องไม่ถูกใส่กลับเข้าทีมเงียบๆ */
+  team: z.array(z.string().trim().min(1)).max(20, 'ทีมดูแลเคสได้ไม่เกิน 20 คน').optional(),
 });
 
 // สถานะเปลี่ยนผ่าน endpoint เฉพาะ (assign/unassign/close/reopen) เท่านั้น ไม่ให้แก้ตรงๆ
@@ -161,11 +166,17 @@ export const createCaseSchema = caseFields.superRefine((v, ctx) => {
       message: 'กรุณากรอกชื่อผู้รับบริการ หรือระบุผู้ว่าจ้าง',
     });
   }
-  checkDateOrder(v, ctx);
+  if (v.start_date && v.end_date && v.end_date < v.start_date) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['end_date'], message: END_BEFORE_START });
+  }
 });
 
+/* วันสิ้นสุดก่อนวันเริ่ม = ลงกะอัตโนมัติไม่ได้สักวัน และเคสขึ้น "เลยกำหนดปิด" ทันทีที่ถึงวันเริ่ม
+   ฝั่งแก้เคสตรวจใน repo.update (ต้องรวมกับค่าเดิม เพราะแก้มาช่องเดียวได้) */
+export const END_BEFORE_START = 'วันสิ้นสุดต้องไม่ก่อนวันเริ่ม';
+
 export const updateCaseSchema = caseFields
-  .omit({ assigned_to: true, renewed_from: true })
+  .omit({ assigned_to: true, renewed_from: true, team: true })
   .partial()
   .extend({
     // รหัสของแฟ้มผู้รับบริการที่จะสร้างให้ ตอนเพิ่งใส่ชื่อผู้รับบริการให้เคสที่เปิดด้วยผู้ว่าจ้างอย่างเดียว
@@ -590,6 +601,14 @@ const reportFields = z.object({
   post_spo2: vital(50, 100, 'ออกซิเจนปลายนิ้วหลังทำ', '%'),
   home_program: choice(DONE, 'โปรแกรมที่บ้าน'),
 
+  /* แบบบันทึกการตรวจรักษาของนักกายภาพ (2 พ.ย. 2569) — ส่วนสูง + บันทึกตรวจรักษา 4 ช่อง
+     น้ำหนัก/สัญญาณชีพใช้คอลัมน์เดิม · BMI คำนวณหน้าเว็บ ไม่เก็บ */
+  height_cm: vital(30, 250, 'ส่วนสูง', 'ซม.', { integer: false }),
+  chief_complaint: reportText,
+  physical_exam: reportText,
+  diagnosis: reportText,
+  treatment_plan: reportText,
+
   // ---------- ข้อความสรุป (ใช้ทั้งฟอร์มสั้นและฟอร์มเต็ม) ----------
   symptoms: reportText,
   care_given: reportText,
@@ -618,7 +637,17 @@ export const REPORT_CONTENT_FIELDS = Object.keys(reportFields.shape).filter(
  * export ออกไปด้วยเพราะตอน "แก้" ต้องตรวจกับผลลัพธ์หลังรวมของเดิม ไม่ใช่กับเฉพาะช่องที่ส่งมา
  * (ส่ง symptoms: null มาช่องเดียวเพื่อล้างข้อความทิ้ง ก็ทำให้รายงานทั้งใบว่างได้เหมือนกัน)
  */
+/* รูปที่แนบกับรายงาน (หลายรูป · ตาราง case_report_images) — ไม่ใช่คอลัมน์ของ case_reports จึงอยู่นอก reportFields
+   attach_images = รูปใหม่ (data URL) · remove_image_ids = รูปเดิมที่สั่งลบ (ตอนแก้) */
+export const MAX_REPORT_IMAGES = 10;
+const reportImageFields = {
+  attach_images: z.array(imageSchema).max(6, 'แนบรูปได้ครั้งละไม่เกิน 6 รูป').optional().nullable(),
+  remove_image_ids: z.array(z.number().int().positive()).max(MAX_REPORT_IMAGES).optional().nullable(),
+};
+
 export const hasReportContent = (row) =>
+  (row?.attach_images?.length ?? 0) > 0 ||
+  (row?.image_count ?? 0) > 0 || // รูปเดิมที่เหลืออยู่ (route นับให้ตอนแก้)
   REPORT_CONTENT_FIELDS.some((f) => {
     const v = row?.[f];
     if (v == null) return false;
@@ -630,6 +659,7 @@ export const hasReportContent = (row) =>
    (Codex ข้อ 6 · 8 พ.ย. 2569) · ไม่บังคับ เพราะหน้าเว็บรุ่นเก่ายังไม่ส่งมา
    หนึ่งกะมีรายงานหลายใบได้โดยตั้งใจ จึงกันซ้ำที่ "คำขอ" ไม่ใช่ที่ visit_id */
 export const createReportSchema = reportFields
+  .extend(reportImageFields)
   .extend({ request_id: z.string().uuid('รหัสคำขอต้องเป็น UUID').optional() })
   .superRefine((v, ctx) => {
   if (hasReportContent(v)) return;
@@ -644,7 +674,7 @@ export const createReportSchema = reportFields
  * แก้รายงาน — ส่งมาเฉพาะช่องที่เปลี่ยน (ช่องที่ไม่ส่งมาคงของเดิมไว้)
  * จึงตรวจ "ต้องมีเนื้อหา" ตรงนี้ไม่ได้ ต้องตรวจหลังรวมกับของเดิมที่ชั้น route ด้วย hasReportContent
  */
-export const updateReportSchema = reportFields;
+export const updateReportSchema = reportFields.extend(reportImageFields);
 
 /**
  * ตัวกรองของคลังรายงาน — เคสที่ดูแลต่อเนื่องบันทึกวันละ 2–4 ครั้ง ครึ่งปีก็หลายร้อยใบ
@@ -691,9 +721,15 @@ export const adjustVisitSchema = z
     check_out_at: isoDateTime.nullable(),
     status: z.enum(VISIT_STATUSES, { errorMap: () => ({ message: 'สถานะวันนัดไม่ถูกต้อง' }) }),
     location_flagged: z.boolean(),
+    // เหตุผลที่แก้ — บังคับเมื่อแตะฐานค่าจ้าง (เวลาเข้า/ออก/สถานะ) ลงประวัติเคสคู่กับค่าเดิม→ค่าใหม่
+    reason: z.string().trim().max(300),
   })
   .partial()
   .superRefine((v, ctx) => {
+    const touchesPayBasis = ['check_in_at', 'check_out_at', 'status'].some((k) => k in v);
+    if (touchesPayBasis && (v.reason ?? '').length < 3) {
+      ctx.addIssue({ code: 'custom', path: ['reason'], message: 'กรุณาระบุเหตุผลที่แก้กะนี้' });
+    }
     /* เวลาออกต้องมาหลังเวลาเข้า — ไม่งั้นได้กะที่ทำงานติดลบ แล้วไปหักชั่วโมงของกะอื่น
        ในสรุปค่าตอบแทน (SUM(check_out_at - check_in_at) ของทั้งเดือนรวมกันเป็นก้อนเดียว)
        ตรวจได้ที่นี่เฉพาะตอนส่งมาครบคู่ — ส่งมาช่องเดียวต้องเทียบกับค่าที่มีอยู่ใน DB (ดู route) */

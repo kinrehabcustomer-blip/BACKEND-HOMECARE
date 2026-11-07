@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import InvoiceModal from '../components/InvoiceModal.jsx';
 import SortHead from '../components/SortHead.jsx';
@@ -6,9 +7,15 @@ import OfficeLink from '../components/OfficeLink.jsx';
 import ErrorBar from '../components/ErrorBar.jsx';
 import PageRefresh from '../components/PageRefresh.jsx';
 import { api } from '../api.js';
-import { INVOICE_STATUS_LABELS, formatBaht, formatDate, caseStage } from '../labels.js';
+import { INVOICE_STATUS_LABELS, SERVICE_KIND_LABELS, formatBaht, formatDate, caseStage, invoiceStatusLabel } from '../labels.js';
 import { formatPhone } from '../lib/phone.js';
 import { caseCode } from '../lib/patientCode.js';
+import SearchSelect from '../components/SearchSelect.jsx';
+import FilterBar from '../components/FilterBar.jsx';
+import InvoiceExport from '../components/InvoiceExport.jsx';
+import LoadMore from '../components/LoadMore.jsx';
+import { useIsMobile } from '../lib/mobile.js';
+import { useLoadMore } from '../lib/loadMore.js';
 
 const PER_PAGE_OPTIONS = [20, 50, 100];
 
@@ -51,6 +58,7 @@ export default function InvoiceListPage() {
   /* เคสที่ไม่มีใบแจ้งหนี้เหลืออยู่ (เผลอลบ / เคสเก่า) — ออกใบได้ตรงนี้เลย
      เดิมหน้านี้บอกให้ไปหน้าเคส ส่วนหน้าเคสบอกให้มาหน้านี้ วนกันโดยไม่มีปุ่มให้กดสักที่ */
   const [missing, setMissing] = useState([]);
+  const [withExtras, setWithExtras] = useState([]); // เคสที่มีค่าใช้จ่ายเพิ่มเติมรอออกใบ
   const [issuing, setIssuing] = useState(null); // รหัสเคสที่กำลังออกใบ
 
   // เราเป็นคนเปิด popup เองหรือเปล่า — ใช้ตัดสินว่าตอนปิดควรถอยประวัติ (back) หรือลบพารามิเตอร์ทิ้ง
@@ -67,9 +75,19 @@ export default function InvoiceListPage() {
   const order = get('order') === 'asc' ? 'asc' : 'desc';
   const perPage = PER_PAGE_OPTIONS.includes(Number(get('per_page'))) ? get('per_page') : DEFAULTS.per_page;
   const page = Math.max(1, Number(get('page')) || 1);
+  /* มือถือไม่มีแถบเลื่อนหน้า — โหลดหน้า 1 แล้วต่อท้ายไปเรื่อยๆ ตอนเลื่อนลง (useLoadMore) · จอกว้างตาม ?page= เหมือนเดิม */
+  const mobile = useIsMobile();
+  const effPage = mobile ? 1 : page;
+  // เงื่อนไขของผลหน้า 1 ชุดล่าสุด — ใช้ขอหน้าถัดไปด้วยเงื่อนไขเดียวกันเป๊ะ
+  const lastQuery = useRef({});
   const openId = params.get('open');
+  /* ใบยกเลิกลบไม่ได้ (เลขที่เอกสารต้องต่อเนื่อง) จึงซ่อนจากรายการเป็นค่าเริ่มต้น
+     เลือกสถานะ "ยกเลิก" ตรง ๆ หรือติ๊กแสดง ก็ยังเห็นครบ (แผนแก้ระบบการเงิน L3) */
+  const showCancelled = get('show_cancelled') === 'yes';
+  // ประเภทบริการของเคสต้นทาง (Homecare / กายภาพบำบัด) — ค่าเดียวกับตัวกรองหน้าเคส
+  const serviceKind = SERVICE_KIND_LABELS[get('service_kind')] ? get('service_kind') : '';
 
-  const filtered = Boolean(q || status || pseudo);
+  const filtered = Boolean(q || status || pseudo || serviceKind);
 
   /** เขียนค่าลง URL — ปริยาย replace เพื่อไม่ให้ทุกตัวอักษรที่พิมพ์กลายเป็นประวัติหนึ่งชั้น */
   const patch = (changes, { push = false } = {}) => {
@@ -85,7 +103,7 @@ export default function InvoiceListPage() {
   const setFilter = (key, value) => patch({ [key]: value, page: '1' });
   const sortBy = (s, o) => patch({ sort: s, order: o, page: '1' });
   const clearFilters = () =>
-    patch({ q: '', status: '', page: '1', ...Object.fromEntries(PSEUDO_KEYS.map((k) => [k, ''])) });
+    patch({ q: '', status: '', service_kind: '', page: '1', ...Object.fromEntries(PSEUDO_KEYS.map((k) => [k, ''])) });
 
   /* ช่องสถานะถือทั้งสถานะจริงและตัวกรองเทียม — เลือกอันใหม่แล้วต้องล้างอันเก่าทุกตัว
      ไม่งั้นพารามิเตอร์เก่าค้างใน URL แล้วกรองซ้อนกันแบบที่ dropdown แสดงไม่ได้ */
@@ -103,7 +121,8 @@ export default function InvoiceListPage() {
 
     const query = Object.fromEntries(
       Object.entries({
-        q, status, ...(pseudo ? { [pseudo]: 'yes' } : null), page, per_page: perPage, sort, order,
+        q, status, service_kind: serviceKind, ...(pseudo ? { [pseudo]: 'yes' } : null), page: effPage, per_page: perPage, sort, order,
+        hide_cancelled: showCancelled ? '' : 'yes',
       })
         .filter(([, v]) => v !== '' && v != null),
     );
@@ -114,6 +133,7 @@ export default function InvoiceListPage() {
         .listInvoices(query)
         .then((data) => {
           if (cancelled) return; // ผลของเงื่อนไขเก่าที่มาถึงช้ากว่า ต้องไม่ทับผลของเงื่อนไขปัจจุบัน
+          lastQuery.current = query;
           setResult(data);
           setError(null); // สำเร็จแล้วต้องล้าง error ของรอบก่อน ไม่งั้นเน็ตสะดุดครั้งเดียวหน้าค้างเป็น error ตลอด
         })
@@ -125,12 +145,28 @@ export default function InvoiceListPage() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [q, status, pseudo, page, perPage, sort, order, reloadKey]);
+  }, [q, status, serviceKind, pseudo, effPage, perPage, sort, order, showCancelled, reloadKey]);
 
   // โหลดใหม่พร้อมรายการทุกครั้ง (reloadKey) — ลบใบใน popup แล้วเคสต้องโผล่ที่นี่ทันที
   useEffect(() => {
     api.casesWithoutInvoice().then(setMissing).catch(() => setMissing([]));
+    api.casesWithExtras().then(setWithExtras).catch(() => setWithExtras([]));
   }, [reloadKey]);
+
+  /** ออกใบค่าใช้จ่ายเพิ่มเติมของเคส (ใบใหม่แยกจากใบแพ็คเกจ) แล้วเปิดใบร่างให้ตรวจก่อนกดออกใบ */
+  async function issueExtrasFor(caseId) {
+    setIssuing(caseId);
+    setError(null);
+    try {
+      const created = await api.createExtrasInvoice(caseId);
+      openInvoice(created.invoice_id);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setReloadKey((k) => k + 1);
+      setIssuing(null);
+    }
+  }
 
   /** ออกใบร่างจากเคส แล้วเปิดใบให้เลือกวิธีเก็บเงินต่อ · มีใบร่างอยู่แล้ว (server ตอบ 409) = เปิดใบนั้นแทน */
   async function issueFor(caseId) {
@@ -171,8 +207,29 @@ export default function InvoiceListPage() {
     }
   };
 
-  const rows = result?.data ?? [];
+  const fetchMore = useCallback((n) => api.listInvoices({ ...lastQuery.current, page: n }), []);
+
+  const more = useLoadMore({ enabled: mobile, result, fetchPage: fetchMore, getKey: (r) => r.invoice_id });
+
+  const rows = more.rows;
   const visibleIds = rows.map((v) => v.invoice_id);
+
+  // ตัวกรองของไฟล์ CSV = ตัวกรองของตารางตอนนี้ (ไม่รวมหน้า/การเรียง — ไฟล์เรียงตามวันที่ออกเสมอ)
+  const exportFilters = Object.fromEntries(
+    Object.entries({
+      q, status, service_kind: serviceKind, ...(pseudo ? { [pseudo]: 'yes' } : null),
+      hide_cancelled: showCancelled ? '' : 'yes',
+    }).filter(([, v]) => v !== '' && v != null),
+  );
+  const activeFilters = [
+    serviceKind && SERVICE_KIND_LABELS[serviceKind],
+    (pseudo && PSEUDO_STATUS[pseudo]) || (status && INVOICE_STATUS_LABELS[status]),
+    q && `คำค้น “${q}”`,
+  ].filter(Boolean).join(' · ');
+  const cancelledNote = showCancelled || status === 'cancelled' ? ' · รวมใบยกเลิก' : ' · ไม่รวมใบยกเลิก';
+  const exportNote = activeFilters
+    ? `ตามตัวกรองที่เลือกอยู่: ${activeFilters}${cancelledNote}`
+    : `ทุกบริการ ทุกสถานะ${cancelledNote}`;
 
   return (
     <PageRefresh onRefresh={() => setReloadKey((k) => k + 1)} busy={loading}>
@@ -181,14 +238,22 @@ export default function InvoiceListPage() {
 
       {/* แถบตัวกรอง + ตาราง อยู่ในการ์ดใบเดียวกัน (เหมือนหน้ารายการอื่น — ดู .list-card) */}
       <div className="list-card">
-        <div className="toolbar">
-          <input
+        {/* แถบค้นหา + ตัวกรอง — บนมือถือ dropdown ย้ายไปอยู่ในแผ่น "ตัวกรอง" (ดู FilterBar) */}
+        <FilterBar
+          search={<input
             className="search search-compact"
             placeholder="ค้นหา เลขที่ใบ / ชื่อผู้รับบริการ / ผู้จ่าย / รหัสเคส"
             value={q}
             onChange={(e) => setFilter('q', e.target.value)}
-          />
-          <select value={statusValue} onChange={(e) => setStatusFilter(e.target.value)} aria-label="สถานะ">
+          />}
+          filters={(<>
+          <SearchSelect value={serviceKind} onChange={(e) => setFilter('service_kind', e.target.value)} aria-label="ประเภทบริการ">
+            <option value="">ทุกบริการ</option>
+            {Object.entries(SERVICE_KIND_LABELS).map(([value, label]) => (
+              <option key={value} value={value}>{label}</option>
+            ))}
+          </SearchSelect>
+          <SearchSelect value={statusValue} onChange={(e) => setStatusFilter(e.target.value)} aria-label="สถานะ">
             <option value="">ทุกสถานะ</option>
             {Object.entries(INVOICE_STATUS_LABELS).map(([v, l]) => (
               <option key={v} value={v}>{l}</option>
@@ -197,10 +262,24 @@ export default function InvoiceListPage() {
             {Object.entries(PSEUDO_STATUS).map(([value, label]) => (
               <option key={value} value={value}>{label}</option>
             ))}
-          </select>
-          {/* โผล่เฉพาะตอนมีอะไรกรองอยู่ — ปุ่มที่กดแล้วไม่เกิดอะไรขึ้นไม่ควรมีให้เห็น */}
-          {filtered && <button className="btn" onClick={clearFilters}>ล้างตัวกรอง</button>}
-        </div>
+          </SearchSelect>
+          </>)}
+          filtered={filtered}
+          onClear={clearFilters}
+          /* งานรอออกใบ (เคสที่ยังไม่มีใบ + ค่าใช้จ่ายเพิ่มเติม) — ปุ่มแจ้งเตือนท้ายแถบ กดแล้วกางรายการ
+             เดิมเป็นการ์ดสองใบใต้ตาราง กินที่แสดงตาราง (ผู้ใช้ขอย้าย 6 พ.ย. 2569) */
+          extra={(<>
+            {/* ดาวน์โหลด CSV รายวัน/สัปดาห์/เดือน — ใช้ตัวกรองชุดเดียวกับตาราง (ผู้ใช้ขอ 6 พ.ย. 2569) */}
+            <InvoiceExport filters={exportFilters} filterNote={exportNote} />
+            <InvoiceTodo
+              missing={missing}
+              withExtras={withExtras}
+              issuing={issuing}
+              onIssue={issueFor}
+              onIssueExtras={issueExtrasFor}
+            />
+          </>)}
+        />
 
         {/* error เป็นแถบเหนือตาราง ไม่ทับทั้งหน้า — คำค้นที่พิมพ์ไว้ต้องไม่หายไปเพราะเน็ตสะดุด */}
         <ErrorBar message={error} onRetry={() => setReloadKey((k) => k + 1)} busy={loading} />
@@ -244,7 +323,7 @@ export default function InvoiceListPage() {
                   }}
                 >
                   {/* ลำดับนับต่อเนื่องข้ามหน้า — เป็นลำดับของ "รายการที่เห็นตอนนี้" ไม่ใช่เลขที่เอกสาร */}
-                  <td className="row-index" data-label="ลำดับ">{(page - 1) * Number(perPage) + i + 1}</td>
+                  <td className="row-index" data-label="ลำดับ">{(effPage - 1) * Number(perPage) + i + 1}</td>
                   <td className="mono link" data-label="เลขที่ใบ">
                     {v.invoice_id}
                     {/* ใบไม่ตรงกับข้อมูลเคสแล้ว — เดิมรู้ได้ต่อเมื่อเปิดใบขึ้นมาดู ต้องเห็นตั้งแต่ในรายการ
@@ -301,13 +380,13 @@ export default function InvoiceListPage() {
                     {formatDate(v.issue_date)}
                     {v.due_date && <span className="cell-sub">ครบกำหนด {formatDate(v.due_date)}</span>}
                   </td>
-                  <td data-label="ยอดสุทธิ">{formatBaht(v.total)}</td>
+                  <td data-label="ยอดสุทธิ">{formatBaht(v.net_total ?? v.total)}</td>
                   <td data-label="สถานะ">
                     {/* ป้ายสลิปรอตรวจซ้อนเป็นบรรทัดที่สองใต้สถานะ — เดิมอยู่บรรทัดเดียวกันแล้วโดนตัดเป็น "…"
                         เพราะเซลล์ตารางไม่ตัดบรรทัด (คอลัมน์สถานะแคบ ป้ายสองอันวางคู่กันไม่พอ) */}
                     <span className="status-stack">
                       <span className={`badge invoice-${v.is_overdue ? 'overdue' : v.status}`}>
-                        {v.is_overdue ? 'เกินกำหนด' : INVOICE_STATUS_LABELS[v.status]}
+                        {v.is_overdue ? 'เกินกำหนด' : invoiceStatusLabel(v)}
                       </span>
                       {Number(v.pending_slip_count) > 0 && (
                         <span className="badge pending-slip-badge">สลิปรอตรวจ {v.pending_slip_count}</span>
@@ -347,10 +426,14 @@ export default function InvoiceListPage() {
           </table>
         </div>
         {/* แถบเลื่อนหน้าอยู่ท้ายการ์ด (การ์ดยืดเต็มจอ — อยู่นอกการ์ดจะถูกดันตกจอ) */}
+        {/* มือถือ: รายการยาวต่อเนื่อง โหลดเพิ่มเองตอนเลื่อนใกล้ท้าย — แทนแถบเลื่อนหน้า (ผู้ใช้ขอ 6 พ.ย. 2569) */}
+        {result && mobile && (
+          <LoadMore hasMore={more.hasMore} loading={more.loading} error={more.error} onMore={more.loadMore} total={more.total} unit="ใบ" />
+        )}
         {result && (
           <div className="pager">
             {/* มีหน้าเดียวก็ไม่ต้องมีปุ่มเลื่อนหน้าที่กดไม่ได้ — แต่ตัวเลือกจำนวนแถวยังต้องอยู่ */}
-            {result.pagination.total_pages > 1 && (
+            {!mobile && result.pagination.total_pages > 1 && (
               <>
                 <button className="btn" disabled={page <= 1} onClick={() => patch({ page: String(page - 1) })}>
                   ก่อนหน้า
@@ -368,45 +451,31 @@ export default function InvoiceListPage() {
               </>
             )}
 
-            <label className="per-page">
-              แสดง
-              <select value={perPage} onChange={(e) => setFilter('per_page', e.target.value)}>
-                {PER_PAGE_OPTIONS.map((n) => <option key={n} value={n}>{n}</option>)}
-              </select>
-              ต่อหน้า
-            </label>
+            {/* แสดงใบที่ยกเลิก — ย้ายจากแถบตัวกรองมาแถบล่าง (ผู้ใช้ขอ 6 พ.ย. 2569) อยู่คู่ตัวเลือกจำนวนแถว
+                ซ่อนตอนเลือกสถานะ "ยกเลิก" ตรง ๆ เพราะตอนนั้นเห็นใบยกเลิกอยู่แล้ว */}
+            {status !== 'cancelled' && (
+              <label className="check-inline pager-check">
+                <input
+                  type="checkbox"
+                  checked={showCancelled}
+                  onChange={(e) => setFilter('show_cancelled', e.target.checked ? 'yes' : '')}
+                />
+                แสดงใบที่ยกเลิก
+              </label>
+            )}
+            {!mobile && (
+              <label className="per-page">
+                แสดง
+                <SearchSelect value={perPage} onChange={(e) => setFilter('per_page', e.target.value)}>
+                  {PER_PAGE_OPTIONS.map((n) => <option key={n} value={n}>{n}</option>)}
+                </SearchSelect>
+                ต่อหน้า
+              </label>
+            )}
           </div>
         )}
       </div>
 
-
-      {/* เคสที่ไม่มีใบเหลืออยู่ — ซ่อนตอนกรองอยู่ เพราะกำลังหาใบที่มีอยู่แล้ว ไม่ได้มาออกใบใหม่ */}
-      {!filtered && missing.length > 0 && (
-        <section className="card">
-          <h2>เคสที่ยังไม่มีใบแจ้งหนี้ ({missing.length})</h2>
-          {missing.map((c) => (
-            <div className="history-item" key={c.case_id}>
-              <div>
-                <strong>{c.client_name ?? c.title}</strong>
-                <p className="muted">
-                  <OfficeLink className="link mono" to={`/cases?open=${c.case_id}`}>{caseCode(c.case_id)}</OfficeLink>
-                  {' · '}{caseStage(c).label}
-                  {' · '}ค่าบริการ {c.fee != null ? formatBaht(c.fee) : 'ยังไม่ระบุ'}
-                </p>
-              </div>
-              <div className="invoice-row-actions">
-                <button
-                  className="btn tiny primary"
-                  disabled={issuing != null}
-                  onClick={() => issueFor(c.case_id)}
-                >
-                  {issuing === c.case_id ? 'กำลังออกใบ…' : 'ออกใบแจ้งหนี้'}
-                </button>
-              </div>
-            </div>
-          ))}
-        </section>
-      )}
 
       {openId && (
         <InvoiceModal
@@ -419,5 +488,115 @@ export default function InvoiceListPage() {
         />
       )}
     </PageRefresh>
+  );
+}
+
+/**
+ * งานรอออกใบ — ปุ่มกระดิ่งท้ายแถบตัวกรอง + แผงรายการที่กางลงมา
+ * แผงถูก portal ไปที่ body และวางแบบ fixed ใต้ปุ่ม เพราะการ์ดรายการตัดของที่ล้นขอบ (ตารางล็อกพอดีจอ)
+ * ไม่มีงานค้าง = ไม่แสดงปุ่มเลย
+ */
+function InvoiceTodo({ missing, withExtras, issuing, onIssue, onIssueExtras }) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState(null);
+  const btnRef = useRef(null);
+  const panelRef = useRef(null);
+  const count = missing.length + withExtras.length;
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const place = () => {
+      const r = btnRef.current?.getBoundingClientRect();
+      if (r) setPos({ top: r.bottom + 6, right: Math.max(12, window.innerWidth - r.right) });
+    };
+    place();
+    const onDown = (e) => {
+      if (!panelRef.current?.contains(e.target) && !btnRef.current?.contains(e.target)) setOpen(false);
+    };
+    const onKey = (e) => e.key === 'Escape' && setOpen(false);
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    window.addEventListener('resize', place);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+      window.removeEventListener('resize', place);
+    };
+  }, [open]);
+
+  // งานหมดแล้ว (ออกใบครบ) — ปิดแผงเอง
+  useEffect(() => { if (count === 0) setOpen(false); }, [count]);
+
+  if (count === 0) return null;
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        className={`btn todo-btn${open ? ' is-open' : ''}`}
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <svg className="btn-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
+          strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.7 21a2 2 0 0 1-3.4 0" />
+        </svg>
+        รอออกใบ
+        <span className="todo-count">{count}</span>
+      </button>
+      {open && pos && createPortal(
+        <div
+          ref={panelRef}
+          className="todo-panel"
+          role="dialog"
+          aria-label="งานรอออกใบแจ้งหนี้"
+          style={{ top: pos.top, right: pos.right }}
+        >
+          {missing.length > 0 && (
+            <section>
+              <h3>เคสที่ยังไม่มีใบแจ้งหนี้ <span className="todo-sub-count">{missing.length}</span></h3>
+              {missing.map((c) => (
+                <div className="todo-row" key={c.case_id}>
+                  <div className="todo-row-text">
+                    <strong>{c.client_name ?? c.title}</strong>
+                    <span className="muted">
+                      <OfficeLink className="link mono" to={`/cases?open=${c.case_id}`}>{caseCode(c.case_id)}</OfficeLink>
+                      {' · '}{caseStage(c).label}
+                      {' · '}{c.fee != null ? formatBaht(c.fee) : 'ยังไม่ระบุค่าบริการ'}
+                    </span>
+                  </div>
+                  <button className="btn tiny primary" disabled={issuing != null} onClick={() => onIssue(c.case_id)}>
+                    {issuing === c.case_id ? 'กำลังออกใบ…' : 'ออกใบ'}
+                  </button>
+                </div>
+              ))}
+            </section>
+          )}
+          {withExtras.length > 0 && (
+            <section>
+              <h3>ค่าใช้จ่ายเพิ่มเติมที่ยังไม่ได้ออกใบ <span className="todo-sub-count">{withExtras.length}</span></h3>
+              {withExtras.map((c) => (
+                <div className="todo-row" key={c.case_id}>
+                  <div className="todo-row-text">
+                    <strong>{c.client_name ?? c.title}</strong>
+                    <span className="muted">
+                      <OfficeLink className="link mono" to={`/cases?open=${c.case_id}`}>{caseCode(c.case_id)}</OfficeLink>
+                      {' · '}{c.items.map((a) => a.name).join(', ')}
+                      {' · '}{formatBaht(c.total)}
+                    </span>
+                  </div>
+                  <button className="btn tiny primary" disabled={issuing != null} onClick={() => onIssueExtras(c.case_id)}>
+                    {issuing === c.case_id ? 'กำลังออกใบ…' : 'ออกใบเพิ่มเติม'}
+                  </button>
+                </div>
+              ))}
+            </section>
+          )}
+        </div>,
+        document.body,
+      )}
+    </>
   );
 }

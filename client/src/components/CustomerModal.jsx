@@ -192,7 +192,7 @@ export default function CustomerModal({ customerId, siblings = [], onNavigate, o
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div
-        className="modal"
+        className="modal detail-modal"
         role="dialog"
         aria-modal="true"
         aria-label="ข้อมูลลูกค้า"

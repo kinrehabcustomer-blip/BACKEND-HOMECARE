@@ -32,6 +32,9 @@ export const payRunSchema = z.object({
   pay_date: zodPastDate(z).optional(),
   method: optionalText,
   note: optionalText,
+  /* ยอดรวมที่ผู้กดเห็นบนจอตอนยืนยัน — ส่งมา = server จ่ายเฉพาะเมื่อยอดจริงยังเท่าเดิม
+     (อีกคนกด "ดึงยอดเพิ่ม" ระหว่างนั้น ยอดที่บันทึกว่าจ่ายจะไม่ใช่ยอดที่คนกดเห็น) · ไม่ส่ง = ไม่ตรวจ */
+  expected_total: z.number().nonnegative().optional(),
 });
 
 /**

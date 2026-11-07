@@ -23,6 +23,9 @@ export const setUnauthorizedHandler = (fn) => {
  */
 const TIMEOUT_MS = 30_000;
 
+/** GET ที่กำลังรอคำตอบอยู่ — path → promise ของ { res, text } (ดูใน request) */
+const inflight = new Map();
+
 /**
  * empty = true บอกว่า "เรียกอันนี้แล้วไม่มีอะไรให้คืนกลับมาก็ถูกแล้ว"
  * DELETE เป็นแบบนั้นโดยธรรมชาติอยู่แล้ว จึงไม่ต้องประกาศ (ดูเงื่อนไข 204 ด้านล่าง)
@@ -39,14 +42,41 @@ async function request(path, { empty = false, credentialCheck = false, ...option
   let res;
   let text;
   try {
-    res = await fetch(`/api${path}`, {
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include', // ส่งคุกกี้ session ไปด้วยทุก request
-      ...options,
-      body: options.body ? JSON.stringify(options.body) : undefined,
-      // อยู่หลัง spread — เวลาหมดอายุเป็นสิ่งที่ผู้เรียกเขียนทับไม่ได้
-      signal: controller.signal,
-    });
+    const fetchOnce = async () => {
+      const r = await fetch(`/api${path}`, {
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include', // ส่งคุกกี้ session ไปด้วยทุก request
+        ...options,
+        body: options.body ? JSON.stringify(options.body) : undefined,
+        // อยู่หลัง spread — เวลาหมดอายุเป็นสิ่งที่ผู้เรียกเขียนทับไม่ได้
+        signal: controller.signal,
+      });
+      return { res: r, text: r.status === 204 ? '' : await r.text() };
+    };
+
+    /* GET เส้นเดียวกันที่ยิงพร้อมกัน (ยังไม่มีตัวไหนตอบกลับ) = ใช้คำขอเดียวร่วมกัน (optimize 6 พ.ย. 2569)
+       เช่นเปิดหน้าต่างเคส: ตัวหน้าต่างกับแท็บครั้งที่ให้บริการต่างดึงรายชื่อพนักงานพร้อมกัน — เดิมยิงสองรอบ
+       แชร์แค่ "ข้อความดิบ" ทุกคน JSON.parse ของตัวเอง ได้ object แยกกัน แก้ของใครของมันไม่กระทบกัน
+       ไม่ใช่ cache: ตอบกลับแล้วลบทิ้งทันที คำขอถัดไปยิงใหม่เสมอ ข้อมูลไม่ค้างเก่า */
+    let pending;
+    if (!options.method || options.method === 'GET') {
+      pending = inflight.get(path);
+      if (!pending) {
+        const mine = fetchOnce();
+        pending = mine;
+        inflight.set(path, mine);
+        // ลบเฉพาะถ้ายังเป็นตัวเดิม — ระหว่างรออาจถูกล้างแล้วมีคำขอใหม่มาแทนที่ไปแล้ว
+        const done = () => inflight.get(path) === mine && inflight.delete(path);
+        mine.then(done, done);
+      }
+    } else {
+      /* มีการเขียนข้อมูล = GET ที่ค้างอยู่อาจเป็นข้อมูลก่อนเขียน ห้ามให้คำขอใหม่ไปเกาะ
+         ล้างทั้งตอนเริ่มและตอนเขียนเสร็จ (GET ที่ยิงระหว่างเขียนก็ยังเป็นของเก่าได้) */
+      inflight.clear();
+      pending = fetchOnce();
+      pending.then(() => inflight.clear(), () => inflight.clear());
+    }
+    ({ res, text } = await pending);
 
     /* 204 = ไม่มีเนื้อหาให้คืน ซึ่งถูกต้องสำหรับ DELETE และ logout
        แต่ถ้ามาจาก POST/PATCH ที่ผู้เรียกรอ object กลับไปใช้ต่อ (เช่น เอา id ของที่เพิ่งสร้างไปเปิดหน้าถัดไป)
@@ -58,10 +88,9 @@ async function request(path, { empty = false, credentialCheck = false, ...option
       throw new Error('เซิร์ฟเวอร์ตอบกลับไม่สมบูรณ์ — กรุณาลองใหม่อีกครั้ง');
     }
 
-    // อ่านเป็นข้อความก่อนแล้วค่อย parse — บาง response ตอบ body ว่าง (เช่น server หลุดกลางคัน
+    // body อ่านเป็นข้อความใน fetchOnce แล้วค่อย parse ด้านล่าง — บาง response ตอบ body ว่าง (เช่น server หลุดกลางคัน
     // หรือ proxy ตัดการเชื่อมต่อ) ถ้าเรียก res.json() ตรงๆ จะพังด้วยข้อความที่ผู้ใช้อ่านไม่รู้เรื่อง
-    // อ่าน body ให้จบในนี้ด้วย จะได้ยังอยู่ในความคุ้มครองของ timeout (ตัว body เองก็ค้างได้)
-    text = await res.text();
+    // อ่าน body ให้จบในนั้นด้วย จะได้ยังอยู่ในความคุ้มครองของ timeout (ตัว body เองก็ค้างได้)
   } catch (err) {
     /* ข้อความดิบของเบราว์เซอร์เป็นภาษาอังกฤษและไม่เหมือนกันสักตัว
        — Chrome: "Failed to fetch" · Safari บน iPhone: "Load failed" · Firefox: "NetworkError…"
@@ -122,10 +151,10 @@ async function request(path, { empty = false, credentialCheck = false, ...option
 
     // แนบรายละเอียดรายช่องไว้ด้วย ให้ฟอร์มเอาไปแปะข้อความใต้ช่องที่ผิดได้ตรงจุด
     // (ยังคงข้อความรวมไว้เหมือนเดิม — หน้าที่ยังไม่ได้ใช้ fields จะไม่เปลี่ยนพฤติกรรม)
-    if (fieldList) error.fields = fieldList;
-    else if (data?.details) error.details = data.details;
     // รหัสสถานะติดไปด้วย — หน้าที่ต้องแยก "ขอยืนยัน (409)" ออกจาก error จริง จะได้ไม่ต้องเดาจากข้อความ
     error.status = res.status;
+    if (fieldList) error.fields = fieldList;
+    else if (data?.details) error.details = data.details;
     throw error;
   }
 
@@ -295,7 +324,10 @@ export const api = {
   /** รายงานของกะเดียว (หน้างานวันนี้) — เคส/กะมาจากตัวกะเอง ไม่ต้องส่ง case_id */
   myVisitReports: (visitId) => request(`/my/visits/${visitId}/reports`),
   /** URL รูปแผลที่แนบในรายงาน — ใส่ใน <img src> ได้ (คุกกี้ session ไปด้วยอัตโนมัติ) */
+  myReportImageUrl: (caseId, reportId, imageId) => `/api/my/cases/${caseId}/reports/${reportId}/images/${imageId}`,
   myReportPhotoUrl: (caseId, reportId) => `/api/my/cases/${caseId}/reports/${reportId}/photo`,
+  /** ลงรายงานย้อนหลังจากหน้าเคส — body ต้องมี visit_id (กะของตัวเองที่ถึงวันแล้ว) */
+  addMyCaseReport: (caseId, body) => request(`/my/cases/${caseId}/reports`, { method: 'POST', body }),
   addMyVisitReport: (visitId, body) => request(`/my/visits/${visitId}/reports`, { method: 'POST', body }),
   updateMyCaseReport: (id, reportId, body) =>
     request(`/my/cases/${id}/reports/${reportId}`, { method: 'PATCH', body }),
@@ -409,6 +441,8 @@ export const api = {
 
   // ---------- ใบแจ้งหนี้ ----------
   listInvoices: (params = {}) => request(`/invoices?${new URLSearchParams(params)}`),
+  /** ใบแจ้งหนี้ทั้งชุดในช่วงวันที่ออก (issued_from/issued_to) + ตัวกรองเดียวกับรายการ — สำหรับ CSV · คืน { data, truncated } */
+  exportInvoices: (params = {}) => request(`/invoices/export?${new URLSearchParams(params)}`),
   /** ยอดสรุปใบแจ้งหนี้ — ส่งตัวกรองชุดเดียวกับ listInvoices เพื่อให้ตัวเลขตรงกับรายการที่แสดงอยู่ */
   invoiceSummary: (params = {}) => request(`/invoices/summary?${new URLSearchParams(params)}`),
   /**
@@ -430,6 +464,12 @@ export const api = {
   createInvoice: (body) => request('/invoices', { method: 'POST', body }),
   /** เคสที่ไม่มีใบแจ้งหนี้เหลืออยู่ (ไม่นับใบที่ยกเลิก) — ไว้เสนอปุ่มออกใบ */
   casesWithoutInvoice: () => request('/invoices/cases-without-invoice'),
+  /** ค่าใช้จ่ายเพิ่มเติม (อุปกรณ์/หัตถการที่เพิ่มหลังออกใบแพ็คเกจ) ที่ยังไม่ได้ออกใบ — { items, total } */
+  unbilledExtras: (caseId) => request(`/invoices/extras?${new URLSearchParams({ case_id: caseId })}`),
+  /** เคสที่มีค่าใช้จ่ายเพิ่มเติมรอออกใบ — ไว้เสนอปุ่มออกใบค่าใช้จ่ายเพิ่มเติม */
+  casesWithExtras: () => request('/invoices/cases-with-extras'),
+  /** ออกใบค่าใช้จ่ายเพิ่มเติมเป็นใบใหม่ (ใบร่าง เก็บเต็มจำนวน) — ไม่แตะใบแพ็คเกจเดิม */
+  createExtrasInvoice: (caseId) => request('/invoices/extras', { method: 'POST', body: { case_id: caseId } }),
   updateInvoice: (id, body) => request(`/invoices/${id}`, { method: 'PATCH', body }),
   refreshInvoice: (id) => request(`/invoices/${id}/refresh`, { method: 'POST' }),
   /** รับทราบว่าเคสเปลี่ยนแพ็คเกจหลังออกใบ และใบยังใช้ได้ตามเดิม (ปิดป้าย service_stale) */
@@ -452,12 +492,19 @@ export const api = {
   /** ยกเลิกรายการรับชำระที่บันทึกผิด (กรอกยอดผิด/บันทึกซ้ำ) — ต้องบอกเหตุผล · คืนใบที่อัปเดตแล้ว */
   voidInvoicePayment: (id, paymentId, reason) =>
     request(`/invoices/${id}/payments/${paymentId}/void`, { method: 'POST', body: { reason } }),
-  /* reason บังคับเมื่อใบนั้นรับเงินมาแล้ว (เซิร์ฟเวอร์เป็นคนตัดสิน ดู assessCancelAuthority) */
+  /* ลิงก์บิลสาธารณะของใบนี้ — ดูว่ายังเปิดได้กี่ลิงก์ และปิดเมื่อส่งผิดห้อง/ถูกส่งต่อ
+     (Codex ข้อ 10 · 8 พ.ย. 2569 · อายุ 180 วันคงเดิมตามคำเคาะ ดร.) */
   invoiceShareLinks: (id) => request(`/invoices/${id}/share-links`),
   revokeInvoiceShareLinks: (id, reason = null, token_hash = null) =>
     request(`/invoices/${id}/share-links/revoke`, { method: 'POST', body: { reason, token_hash } }),
-  cancelInvoice: (id, reason = null) =>
-    request(`/invoices/${id}/cancel`, { method: 'POST', body: { reason } }),
+  cancelInvoice: (id, reason) => request(`/invoices/${id}/cancel`, { method: 'POST', body: { reason } }),
+  /** ใบลดหนี้/เพิ่มหนี้ — ทางเดียวที่ปรับยอดใบที่ออกแล้ว (ดู server/src/invoices/ledger.js) */
+  createInvoiceAdjustment: (id, body) => request(`/invoices/${id}/adjustments`, { method: 'POST', body }),
+  cancelInvoiceAdjustment: (id, noteId, reason) =>
+    request(`/invoices/${id}/adjustments/${noteId}/cancel`, { method: 'POST', body: { reason } }),
+  /** แก้วันที่/ช่องทาง/หมายเหตุของเงินคืน — ยอดแก้ไม่ได้ · คืนใบที่อัปเดตแล้ว */
+  updateInvoiceRefund: (id, refundId, body) =>
+    request(`/invoices/${id}/refunds/${refundId}`, { method: 'PATCH', body }),
   deleteInvoice: (id) => request(`/invoices/${id}`, { method: 'DELETE' }),
   /** สลิปโอนเงินของลูกค้า — image เป็น data URL ที่ย่อแล้ว (compressImage) · คืนใบที่อัปเดตแล้ว */
   addInvoiceSlip: (id, image) => request(`/invoices/${id}/slips`, { method: 'POST', body: { image } }),
@@ -480,6 +527,10 @@ export const api = {
   /** เอาคนออกจากรอบนี้ — กะของเขากลับเข้ากองรอจ่าย ไปโผล่รอบถัดไปเอง */
   removePayrollItem: (id, itemId) => request(`/payroll/${id}/items/${itemId}`, { method: 'DELETE' }),
   payPayrollRun: (id, body) => request(`/payroll/${id}/pay`, { method: 'POST', body }),
+  // หน้าจัดการสิทธิ์รายตำแหน่ง (Super Admin · ผู้จัดการ)
+  permissions: () => request('/permissions'),
+  savePermissions: (position, permissions) => request(`/permissions/${position}`, { method: 'PUT', body: { permissions } }),
+  resetPermissions: (position) => request(`/permissions/${position}`, { method: 'DELETE' }),
   // เปิดรอบ + จ่ายในคำขอเดียว — ส่ง payout_ids จากพรีวิวไปให้ server ยืนยันว่าจ่ายตรงชุดที่เห็น
   payPayrollNow: (body) => request('/payroll/pay-now', { method: 'POST', body }),
   cancelPayrollRun: (id) => request(`/payroll/${id}/cancel`, { method: 'POST' }),
@@ -494,8 +545,12 @@ export const api = {
   /** ตรวจก่อนบันทึกว่าวันที่เลือกไว้ชนกับงานอื่นไหม — คืน { conflicts, duplicates } (ไม่บันทึกอะไร) */
   previewVisits: (id, body) => request(`/cases/${id}/visits/preview`, { method: 'POST', body }),
   /** ลบกะของวันที่ระบุ — คืน { visits, deleted, kept } (kept = กะที่เช็คอินแล้ว จึงไม่ลบให้) */
-  deleteVisitsOn: (id, dates) =>
-    request(`/cases/${id}/visits?${new URLSearchParams({ dates: dates.join(',') })}`, { method: 'DELETE' }),
+  // employee = ลบเฉพาะนัดของคนนี้ (เคสหลายคน กำลังดูตารางของคนเดียวอยู่) · ไม่ส่ง = ทุกคนในวันนั้น
+  deleteVisitsOn: (id, dates, employee = null) =>
+    request(
+      `/cases/${id}/visits?${new URLSearchParams({ dates: dates.join(','), ...(employee ? { employee } : {}) })}`,
+      { method: 'DELETE' },
+    ),
   updateVisit: (id, visitId, body) => request(`/cases/${id}/visits/${visitId}`, { method: 'PATCH', body }),
   /**
    * ย้ายกะจากปฏิทิน — times = { planned_start, planned_end } เมื่อลงช่องเวลาใหม่ (ไม่ส่ง = เวลาคงเดิม)
@@ -539,14 +594,12 @@ export const api = {
   postFamilyMessage: (caseId, body) => request(`/family/cases/${caseId}/messages`, { method: 'POST', body }),
   hideFamilyMessage: (caseId, id) => request(`/family/cases/${caseId}/messages/${id}`, { method: 'DELETE' }),
   familyPhotoUrl: (caseId, id) => `/api/family/cases/${caseId}/messages/${id}/photo`,
+  caseReportImageUrl: (id, reportId, imageId) => `/api/cases/${id}/reports/${reportId}/images/${imageId}`,
   caseReportPhotoUrl: (id, reportId) => `/api/cases/${id}/reports/${reportId}/photo`,
   /* request_id ติดไปทุกครั้ง — เน็ตหลุดแล้วกดใหม่ (หรือเบราว์เซอร์ retry) ต้องได้รายงานใบเดิม
-     ไม่ใช่สองใบในกะเดียว (Codex ข้อ 6 · 8 พ.ย. 2569) · สร้างที่นี่ที่เดียวทุกผู้เรียกจึงได้ฟรี */
+     ไม่ใช่สองใบในกะเดียว (Codex ข้อ 6 · 8 พ.ย. 2569) */
   addCaseReport: (id, body) =>
-    request(`/cases/${id}/reports`, {
-      method: 'POST',
-      body: { request_id: crypto.randomUUID(), ...body },
-    }),
+    request(`/cases/${id}/reports`, { method: 'POST', body: { request_id: crypto.randomUUID(), ...body } }),
   updateCaseReport: (id, reportId, body) =>
     request(`/cases/${id}/reports/${reportId}`, { method: 'PATCH', body }),
   deleteCaseReport: (id, reportId) =>

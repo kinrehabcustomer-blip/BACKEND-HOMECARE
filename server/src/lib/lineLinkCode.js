@@ -22,6 +22,8 @@ const EMPLOYEE_LINKED = () =>
  * ใช้ 2 ทาง: พิมพ์รหัสในแชท LINE @kinjobs (/api/integration/line-code) · กรอกในหน้าเข้าระบบที่เปิดจาก LINE (/api/auth/line-code)
  * → พนักงานที่ผูกแล้ว (แถวเต็ม) · รหัสผิด/หมดอายุ 400 · ลองผิดเกิน 5 ครั้ง/ชม. 429 · LINE ผูกคนอื่นอยู่ 409
  */
+const LINK_CODE_GLOBAL_MAX_TRIES = 50;
+
 export async function linkLineByCode(lineUserId, code, { ticket = null } = {}) {
   await ensureLineColumn();
   await ensureLinkCodeTables();
@@ -35,6 +37,14 @@ export async function linkLineByCode(lineUserId, code, { ticket = null } = {}) {
     { uid: lineUserId },
   );
   if (tries.n >= LINK_CODE_MAX_TRIES) throw new ApiError(429, 'ใส่รหัสผิดหลายครั้ง รอ 1 ชั่วโมงแล้วลองใหม่ หรือขอรหัสใหม่จากผู้ประสานงาน');
+  /* เพดานรวมทั้งระบบ (ตรวจรอบ 6 พ.ย. 2569) — เพดานรายคนนับตาม LINE ที่ผู้เดาเลือกเอง
+     เปิด LINE หลายบัญชีก็เดาคูณได้เรื่อยๆ และรหัสทุกคนอยู่ในกองเดียวกัน ใช้งานจริงผิดรวมกันไม่ถึงหลักสิบต่อชั่วโมง */
+  const allTries = await sql.one(
+    `SELECT count(*)::int AS n FROM line_link_tries WHERE line_user_id NOT LIKE 'fam:%' AND at > now() - interval '1 hour'`,
+  );
+  if (allTries.n >= LINK_CODE_GLOBAL_MAX_TRIES) {
+    throw new ApiError(429, 'มีการใส่รหัสผิดจำนวนมากในชั่วโมงนี้ ระบบพักการตรวจรหัสชั่วคราว — ลองใหม่ภายหลัง หรือติดต่อผู้ประสานงาน');
+  }
 
   const result = /^\d{6}$/.test(String(code ?? ''))
     ? await transaction(async (tx) => {

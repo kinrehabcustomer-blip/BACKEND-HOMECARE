@@ -3,6 +3,7 @@ import { api } from '../api.js';
 import { allocateShares, entitlements, round } from '../lib/payShare.js';
 import { formatBaht, formatDate, openDatePicker } from '../labels.js';
 import ConfirmButton from './ConfirmButton.jsx';
+import SearchSelect from './SearchSelect.jsx';
 
 /**
  * แผงจัดการค่าจ้างของเคสหนึ่งใบ — ใช้ที่แท็บ "ปล่อยค่าจ้าง" ของหน้ารอบจ่าย
@@ -270,7 +271,7 @@ export default function CasePayPanel({ caseId, busy, run, toast }) {
                   {left > 1 && (
                     <label className="pay-parts">
                       แบ่งจ่าย
-                      <select
+                      <SearchSelect
                         value={parts}
                         disabled={busy}
                         onChange={(e) => {
@@ -285,7 +286,7 @@ export default function CasePayPanel({ caseId, busy, run, toast }) {
                             {n === 1 ? 'จ่ายทีเดียวจบ' : `${n} งวด`}
                           </option>
                         ))}
-                      </select>
+                      </SearchSelect>
                       {parts > 1 && (
                         <span className="muted">
                           งวดละ {formatBaht(round(offered / parts))} จาก {formatBaht(offered)}

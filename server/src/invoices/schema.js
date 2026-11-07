@@ -130,6 +130,13 @@ export const listQuerySchema = z.object({
   draft_stale: z.enum(['yes']).optional(),
   // 'yes' = ใบที่มีสลิปลูกค้ารอทีมการเงินตรวจอย่างน้อยหนึ่งใบ
   pending_slip: z.enum(['yes']).optional(),
+  // 'yes' = ไม่แสดงใบที่ยกเลิก (ยกเว้นเลือกสถานะยกเลิกตรง ๆ) — ใบยกเลิกลบไม่ได้เพราะเลขที่ต้องต่อเนื่อง
+  hide_cancelled: z.enum(['yes']).optional(),
+  // ประเภทบริการของเคสต้นทาง — ใบที่ไม่ผูกเคสนับเป็น Homecare (ใบกายภาพออกจากเคสกายภาพเสมอ)
+  service_kind: z.enum(['homecare', 'physio']).optional(),
+  // ช่วงวันที่ออกใบ (รวมสองปลาย) — ใช้กับไฟล์ CSV รายวัน/สัปดาห์/เดือน · ใช้กับรายการปกติได้ด้วย
+  issued_from: date.optional(),
+  issued_to: date.optional(),
   page: z.coerce.number().int().min(1).default(1),
   per_page: z.coerce.number().int().min(1).max(100).default(20),
   sort: z.enum(['invoice_id', 'issue_date', 'total', 'created_at']).default('invoice_id'),
@@ -143,17 +150,74 @@ export const voidPaymentSchema = z.object({
   reason: z.string().trim().min(3, 'กรุณาบอกเหตุผลที่ยกเลิกรายการนี้ (เช่น กรอกยอดผิด · บันทึกซ้ำ)').max(300),
 });
 
-/* เหตุผลตอนยกเลิกใบ (ดร.ธงชัย 8 พ.ย. 2569) — ใบที่ยังไม่มีเงินเข้าไม่บังคับ จึงเป็น optional ที่นี่
-   แล้วไปบังคับในชั้น repo เฉพาะใบที่มีเงินผูกอยู่ (ดู assessCancelAuthority) เพราะที่นี่ยังไม่รู้ว่าใบไหนมีเงิน */
-export const cancelInvoiceSchema = z.object({
-  reason: z.string().trim().max(300).optional().nullable(),
+/**
+ * ใบลดหนี้ (credit) / ใบเพิ่มหนี้ (debit) ของใบที่ออกแล้ว — ใบที่ออกแล้วแก้ยอดตรง ๆ ไม่ได้ (ดู invoices/ledger.js)
+ * items = รายการที่ลด/เพิ่ม ไว้พิมพ์บนใบ (ไม่บังคับ) · ref_receipt_id = ใบเสร็จที่อ้างถึง (ไม่บังคับ)
+ * refund = ข้อมูลการโอนคืน ต้องส่งมาเมื่อลดหนี้แล้วเงินที่รับไว้เกินยอดใหม่ (server คิดยอดคืนเอง ไม่รับจากหน้าเว็บ)
+ */
+/**
+ * ประเภทของใบลดหนี้/เพิ่มหนี้ — ใช้แยกยอดในรายงาน (ส่วนลดจริงกับหนี้สูญต้องไม่ปนกัน)
+ * bad_debt มีกติกาของตัวเอง: ลดได้ไม่เกินยอดค้าง และลดจนเหลือ 0 ได้ (ดู assessAdjustment)
+ * ต้องตรงกับ CHECK ของ invoice_adjustments.reason_code
+ */
+export const ADJUSTMENT_REASONS = Object.freeze({
+  credit: ['discount', 'correction', 'not_rendered', 'bad_debt', 'other'],
+  debit: ['extra_service', 'correction', 'other'],
 });
 
-/* ปิดลิงก์บิลสาธารณะ — ไม่ระบุ token_hash = ปิดทุกลิงก์ที่ยังเปิดได้ของใบนั้น */
+export const adjustmentSchema = z.object({
+  kind: z.enum(['credit', 'debit'], { errorMap: () => ({ message: 'ชนิดเอกสารต้องเป็นใบลดหนี้หรือใบเพิ่มหนี้' }) }),
+  reason_code: z.enum(['discount', 'correction', 'not_rendered', 'bad_debt', 'extra_service', 'other']).default('other'),
+  amount: money.positive('จำนวนเงินต้องมากกว่า 0'),
+  reason: z.string().trim().min(3, 'กรุณาบอกเหตุผล (เช่น ยกเลิกกะ 2 วัน · เพิ่มหัตถการ)').max(300),
+  items: z
+    .array(z.object({ description: z.string().trim().min(1).max(200), amount: money }))
+    .max(50)
+    .optional(),
+  ref_receipt_id: z.string().trim().max(40).optional().nullable(),
+  refund: z
+    .object({
+      refunded_at: zodPastDate(z).optional(),
+      method: optionalText,
+      note: optionalText,
+    })
+    .optional()
+    .nullable(),
+}).superRefine((v, ctx) => {
+  if (!ADJUSTMENT_REASONS[v.kind].includes(v.reason_code)) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['reason_code'],
+      message: v.kind === 'credit' ? 'ประเภทนี้ใช้กับใบลดหนี้ไม่ได้' : 'ประเภทนี้ใช้กับใบเพิ่มหนี้ไม่ได้',
+    });
+  }
+});
+
+/** ยกเลิกใบแจ้งหนี้ — ต้องมีเหตุผลเสมอ (เก็บไว้กับใบ คู่กับชื่อคนที่ยกเลิก) */
+/* ปิดลิงก์บิลสาธารณะ — ไม่ระบุ token_hash = ปิดทุกลิงก์ที่ยังเปิดได้ของใบนั้น
+   (Codex ข้อ 10 · 8 พ.ย. 2569 · อายุ 180 วันคงเดิมตามคำเคาะ ดร. 24 ต.ค. 2569) */
 export const revokeShareSchema = z.object({
   token_hash: z.string().trim().regex(/^[0-9a-f]{64}$/, 'รหัสลิงก์ไม่ถูกต้อง').optional().nullable(),
   reason: z.string().trim().max(300).optional().nullable(),
 });
+
+export const cancelInvoiceSchema = z.object({
+  reason: z.string().trim().min(3, 'กรุณาบอกเหตุผลที่ยกเลิกใบนี้').max(300),
+});
+
+export const cancelAdjustmentSchema = z.object({
+  reason: z.string().trim().min(3, 'กรุณาบอกเหตุผลที่ยกเลิกเอกสารนี้').max(300),
+});
+
+/** แก้ข้อมูลเงินคืนที่กรอกผิด — ยอดเงินแก้ไม่ได้ (ดู updateRefundForTransaction) */
+export const updateRefundSchema = z
+  .object({
+    refunded_at: zodPastDate(z),
+    method: optionalText,
+    note: optionalText,
+  })
+  .partial()
+  .refine((v) => Object.keys(v).length > 0, { message: 'ไม่มีข้อมูลที่จะแก้' });
 
 export const slipSchema = z.object({ image: imageSchema });
 

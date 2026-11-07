@@ -4,7 +4,7 @@ import { api } from '../api.js';
 import { useToast } from '../toast.jsx';
 import MapPicker from '../components/MapPicker.jsx';
 import {
-  POSITION_LABELS, GENDER_LABELS, SERVICE_KIND_LABELS, ENGLISH_SURCHARGE,
+  POSITION_LABELS, GENDER_LABELS, SERVICE_KIND_LABELS, ENGLISH_SURCHARGE, CASE_STATUS_LABELS, INVOICE_STATUS_LABELS,
   formatBaht, ageFromBirthDate, positionsForCase, todayTH,
 } from '../labels.js';
 import LineIcon from '../components/LineIcon.jsx';
@@ -12,20 +12,23 @@ import StaffPicker from '../components/StaffPicker.jsx';
 import PatientCodeInput from '../components/PatientCodeInput.jsx';
 import { isPatientCode, caseCode } from '../lib/patientCode.js';
 import { PROCEDURE, isProcedure } from '../lib/addons.js';
-import { nextRoundDates, endDateFor } from '../lib/caseRounds.js';
+import { nextRoundDates, endDateFor, carriesOver, shiftPatterns, countDaysInRange } from '../lib/caseRounds.js';
 import { useCanSeeStaffPay } from '../auth.jsx';
 import { useScrollLock } from '../lib/scrollLock.js';
 import { formatPhone, formatPhoneInput } from '../lib/phone.js';
+import SearchSelect from '../components/SearchSelect.jsx';
+import ProcedureNameInput from '../components/ProcedureNameInput.jsx';
 
 const TIERS = ['CG', 'NA', 'PN', 'RN'];
 const CATEGORY_LABELS = { daily: 'รายวัน', weekly: 'รายสัปดาห์', monthly: 'รายเดือน' };
+const WEEKDAYS = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
 
 const BLANK = {
   customer_id: '',
   patient_id: '',
   service_kind: '',
   pkg_format_id: '', pkg_grade_id: '', pkg_staff_tier: '', // [Homecare]
-  pkg_english: false, // [Homecare] พนักงานสื่อสารภาษาอังกฤษ — บวกค่าภาษาเข้า fee
+  pkg_english: false, // [Homecare/กายภาพ] พนักงานสื่อสารภาษาอังกฤษ — บวกค่าภาษาเข้า fee
   physio_package_id: '', // [กายภาพ]
 
   // ตัวตนผู้รับบริการ (มาจากแฟ้ม patient / หรือกรอกเพื่อสร้างแฟ้มใหม่) — client_name/gender/age/medical_history คัดลอกเป็น snapshot ในเคส
@@ -308,10 +311,11 @@ export default function CaseFormPage() {
    * บวกลบจากตัวเลขปัจจุบัน ไม่ใช่ตั้งใหม่จากตารางเรท — เคสที่ตกลงราคาพิเศษไว้ต้องไม่ถูกทับ
    */
   function toggleEnglish(on) {
+    const add = isPhysio ? physioEnglishFee : englishFee;
     setForm((prev) => {
       const merged = { ...prev, pkg_english: on };
-      if (prev.fee !== '' && englishFee) {
-        merged.fee = String(Math.max(Number(prev.fee) + (on ? englishFee : -englishFee), 0));
+      if (prev.fee !== '' && add) {
+        merged.fee = String(Math.max(Number(prev.fee) + (on ? add : -add), 0));
       }
       return merged;
     });
@@ -326,6 +330,8 @@ export default function CaseFormPage() {
   // ปกติเสนอเฉพาะแพ็คเกจที่ยังเปิดขาย — แต่เคสเก่าที่ผูกแพ็คเกจซึ่งปิดขายไปแล้วต้องยังเห็นของตัวเอง
   // ไม่งั้น dropdown จะเด้งเป็นค่าว่างแล้วแพ็คเกจของเคสนั้นหายไปเงียบๆ ตอนกดบันทึก
   const physioOptions = physio.filter((p) => p.active || p.physio_package_id === selPhysioId);
+  // ค่าภาษาอังกฤษของแพ็คกายภาพที่เลือก (ตั้งรายแพ็คที่หน้าแพ็คเกจ) — 0 = แพ็คนี้ไม่มีตัวเลือกภาษาอังกฤษ
+  const physioEnglishFee = Number(selectedPhysio?.english_fee ?? 0);
 
   // ค่าตอบแทนพนักงานที่แพ็คเกจ/เรทซึ่งเลือกอยู่ตอนนี้กำหนดไว้ — ตัวตั้งของช่อง "ค่าจ้างพนักงาน"
   const packagePay = isPhysio
@@ -394,7 +400,9 @@ export default function CaseFormPage() {
       ...prev,
       service_kind: kind,
       staff_pay: '',
-      ...(kind !== 'homecare' ? { pkg_format_id: '', pkg_grade_id: '', pkg_staff_tier: '', pkg_english: false } : null),
+      // เปลี่ยนสาย = ล้างธงภาษาเสมอ — ค่าภาษาของสองสายคนละจำนวน ธงค้างไว้แล้ว fee ไม่ได้บวกจริง
+      ...(kind !== prev.service_kind ? { pkg_english: false } : null),
+      ...(kind !== 'homecare' ? { pkg_format_id: '', pkg_grade_id: '', pkg_staff_tier: '' } : null),
       ...(kind !== 'physio' ? { physio_package_id: '' } : null),
     }));
   }
@@ -404,7 +412,10 @@ export default function CaseFormPage() {
     setForm((prev) => {
       const merged = { ...prev, physio_package_id: value, staff_pay: '' };
       const p = physio.find((x) => x.physio_package_id === Number(value));
-      if (p && p.special_price != null) merged.fee = String(p.special_price);
+      // แพ็คใหม่ไม่มีค่าภาษา = ธงต้องไม่ค้าง · มี = ติ๊กค้างไว้ได้ แล้วบวกค่าภาษาของแพ็คใหม่ให้
+      const english = Number(p?.english_fee ?? 0);
+      if (!english) merged.pkg_english = false;
+      if (p && p.special_price != null) merged.fee = String(p.special_price + (merged.pkg_english ? english : 0));
       if (p && p.staff_pay != null) merged.staff_pay = String(p.staff_pay);
       return merged;
     });
@@ -504,15 +515,33 @@ export default function CaseFormPage() {
      แก้ได้ทุกช่องก่อนบันทึก (ลูกค้าต่อแล้วเปลี่ยนแพ็คเกจ/ราคาได้) · ทีมดูแลรอบก่อน server ใส่ให้เองตอนบันทึก */
   const renewFrom = !isEdit ? searchParams.get('renew') : null;
   const [renewSource, setRenewSource] = useState(null);
+  /* ของรอบก่อนที่หน้าต่อเคสใช้สรุป/ตัดสินใจ — แต่ละชิ้นโหลดแยกกัน ชิ้นไหนล้ม = null แล้วบอกบนจอ ไม่ล้มทั้งหน้า
+     invoices = ใบที่ยังไม่ยกเลิก · extras = ค่าใช้จ่ายเพิ่มเติมที่ยังไม่ออกใบ · visits = กะทั้งหมด · team = ทีมดูแล */
+  const [renewInfo, setRenewInfo] = useState(null);
+  // ซื้อขาด/หัตถการของรอบก่อน — ไม่ต่อให้เอง (ดู carriesOver) แต่โชว์ให้กดต่อทีละรายการ
+  const [renewLeftover, setRenewLeftover] = useState([]);
+  // คนของรอบก่อนที่ตามมาไม่ได้ (ลาออก/พักงาน/ย้ายไปสายสำนักงาน) — บอกให้รู้ ไม่ใช่หายไปเงียบๆ
+  const [renewDropped, setRenewDropped] = useState([]);
+  // แบบกะที่ผู้ใช้เอาติ๊กออก (key ของ shiftPatterns) — ที่เหลือลงให้หลังเปิดเคส
+  const [patternsOff, setPatternsOff] = useState([]);
+  const [issuingExtras, setIssuingExtras] = useState(false);
   useEffect(() => {
     if (!renewFrom) return;
+    const soft = (p) => p.catch(() => null);
+    Promise.all([
+      soft(api.listInvoices({ case_id: renewFrom, per_page: 100 }).then((r) => r.data.filter((v) => v.status !== 'cancelled'))),
+      soft(api.unbilledExtras(renewFrom)),
+      soft(api.listVisits(renewFrom)),
+      soft(api.listCaseTeam(renewFrom)),
+    ]).then(([invoices, extras, visits, team]) => setRenewInfo({ invoices, extras, visits, team }));
     api
       .getCase(renewFrom)
       .then((c) => {
         const filled = { ...BLANK };
         for (const key of Object.keys(BLANK)) filled[key] = c[key] ?? '';
         if (filled.client_name === PATIENT_PENDING) filled.client_name = '';
-        Object.assign(filled, splitAddons(c.addons, { keepVn: false }));
+        Object.assign(filled, splitAddons((c.addons ?? []).filter(carriesOver), { keepVn: false }));
+        setRenewLeftover((c.addons ?? []).filter((a) => !carriesOver(a)));
         if (!filled.service_kind) {
           if (filled.physio_package_id !== '') filled.service_kind = 'physio';
           else if (filled.pkg_format_id !== '') filled.service_kind = 'homecare';
@@ -550,6 +579,35 @@ export default function CaseFormPage() {
       return next;
     });
   }, [renewSource, matrix]);
+
+  /* ต่อเคส: ทีมรอบก่อนตามมาเป็นค่าเริ่มต้น (นำออกได้ในส่วนจับคู่พนักงาน) — เฉพาะคนที่ยังรับงานได้
+     ต้องรอทั้งเคส ทีม และรายชื่อพนักงานที่รับงานได้ แล้วตั้งครั้งเดียว · รายชื่อพนักงานโหลดไม่ขึ้น = ไม่ตัดใครทิ้ง
+     (ไม่รู้ว่าใครรับงานได้ ปล่อยให้ server ตรวจตอนบันทึกแทน) */
+  /* renewTeamReady = ตั้งทีมจากรอบก่อนให้แล้ว จึงส่งทีมที่เลือกไปกับการเปิดเคสได้
+     ยังไม่พร้อม (ทีมรอบก่อน/รายชื่อพนักงานโหลดไม่ขึ้น) = ไม่ส่ง ให้ server พาทีมรอบก่อนมาเองแบบเดิม
+     ไม่งั้นจะส่ง [] ไปแล้วทีมรอบก่อนหายทั้งชุด */
+  const [renewTeamReady, setRenewTeamReady] = useState(false);
+  useEffect(() => {
+    if (!renewSource || !renewInfo?.team || staff.length === 0 || renewTeamReady) return;
+    setRenewTeamReady(true);
+    const canTake = (empId) => staff.some((e) => e.employee_id === empId && e.can_take_cases);
+    const prior = [renewSource.assigned_to, ...renewInfo.team.map((t) => t.employee_id)]
+      .filter((x, i, all) => x && all.indexOf(x) === i);
+    const [main = '', ...rest] = prior.filter(canTake);
+    setRenewDropped(
+      prior.filter((x) => !canTake(x)).map((x) => {
+        const t = renewInfo.team.find((m) => m.employee_id === x);
+        return t?.name ?? (x === renewSource.assigned_to ? renewSource.assigned_name : null) ?? x;
+      }),
+    );
+    setTeam(rest);
+    setForm((prev) => {
+      if (prev.assigned_to === main) return prev;
+      const next = { ...prev, assigned_to: main };
+      initial.current = JSON.stringify(next); // ค่าตั้งต้นของฟอร์ม ไม่ใช่ "ยังไม่บันทึก"
+      return next;
+    });
+  }, [renewSource, renewInfo, staff, renewTeamReady]);
 
   // เปิดเคสจากหน้าผู้รับการดูแล (?patient_id=PAT-0001) -> เลือกผู้รับบริการรายนั้นให้เลย
   useEffect(() => {
@@ -696,6 +754,80 @@ export default function CaseFormPage() {
       Object.fromEntries(Object.entries(prev).filter(([k]) => !k.startsWith('procedures.'))));
   };
   const extrasTotal = addonsTotal(form.addons) + addonsTotal(form.procedures.map((p) => ({ ...p, quantity: 1 })));
+
+  /* ---------- ต่อเคส: สรุปรอบก่อน · ราคาตามตารางวันนี้ · แบบกะ ---------- */
+  const renewInvoices = renewInfo?.invoices ?? null;
+  const renewDue = (renewInvoices ?? []).filter((v) => v.status === 'issued' && v.balance > 0);
+  const renewDueTotal = Math.round(renewDue.reduce((s, v) => s + v.balance, 0) * 100) / 100;
+  const renewDrafts = (renewInvoices ?? []).filter((v) => v.status === 'draft');
+  /* ค่าใช้จ่ายเพิ่มเติม = ของที่ "เพิ่มหลังออกใบแพ็คเกจ" — รอบก่อนที่ยังไม่มีใบเลย อุปกรณ์จะไปอยู่ในใบแพ็คเกจตอนออกใบ
+     (เกณฑ์เดียวกับ casesWithUnbilledExtras ฝั่ง server) ไม่งั้นจะชวนออกใบอุปกรณ์ล้วนทั้งที่ใบหลักยังไม่เกิด */
+  const renewExtras = renewInfo?.extras?.items?.length && renewInvoices?.length ? renewInfo.extras : null;
+  const renewNoInvoice = Array.isArray(renewInvoices) && renewInvoices.length === 0;
+  // ปิดเคสรอบก่อน = ตรึงยอดค่าจ้าง · ยังไม่ปิดทั้งที่เลยวันสิ้นสุด เป็นงานค้างที่ต่อเคสแล้วมักถูกลืม
+  const renewOverdue =
+    renewSource && !TERMINAL_STATUSES.includes(renewSource.status) &&
+    Boolean(renewSource.end_date) && renewSource.end_date < todayTH();
+  const renewVisits = (renewInfo?.visits ?? []).filter((v) => v.status !== 'cancelled');
+  const renewDone = renewVisits.filter((v) => v.state === 'done').length;
+
+  /* ราคาในตารางวันนี้ของบริการที่เลือกอยู่ — ค่าบริการที่คัดลอกมาเป็นราคารอบก่อน ซึ่งอาจเป็นราคาเก่า
+     หรือราคาที่ตกลงพิเศษไว้ จึงไม่ทับให้เอง แค่บอกว่าต่างกันแล้วให้กดเลือก (เลือกแพ็คเกจใหม่ = ใช้ราคาตารางอยู่แล้ว) */
+  const listPrice = isPhysio
+    ? selectedPhysio?.special_price != null ? selectedPhysio.special_price + (form.pkg_english ? physioEnglishFee : 0) : null
+    : currentRate?.available && currentRate.customer_price != null
+      ? (currentRate.net_price ?? currentRate.customer_price) + (form.pkg_english ? englishFee : 0)
+      : null;
+  const priceDiffers = Boolean(renewFrom) && listPrice != null && form.fee !== '' && Number(form.fee) !== listPrice;
+
+  /* ลงกะได้เฉพาะคนที่อยู่ในเคส (กติกาเดียวกับหน้าลงกะ CaseVisits) — แบบกะของคนที่ไม่ได้ตามมาจึงลงให้ไม่ได้
+     กะที่ไม่ระบุคน = ของผู้รับผิดชอบหลัก ลงได้เสมอ */
+  const patterns = renewFrom ? shiftPatterns(renewInfo?.visits) : [];
+  const patternUsable = (p) => !p.assigned_to || pickedStaff.includes(p.assigned_to);
+  /* ไม่ลงกะย้อนหลัง — ต่อเคสช้า วันเริ่มรอบใหม่ (วันถัดจากรอบก่อนจบ) อาจผ่านไปแล้ว
+     กะที่ลงในอดีตไม่มีใครไปทำ จะกลายเป็น "ขาดงาน" ทันที → ลงตั้งแต่วันนี้เป็นต้นไปเท่านั้น */
+  const scheduleFrom = form.start_date && form.start_date < todayTH() ? todayTH() : form.start_date;
+  const startsInPast = Boolean(form.start_date) && scheduleFrom !== form.start_date;
+  const canSchedule = Boolean(scheduleFrom && form.end_date && form.end_date >= scheduleFrom);
+  const patternsOn = canSchedule ? patterns.filter((p) => patternUsable(p) && !patternsOff.includes(p.key)) : [];
+  const patternCount = (p) => countDaysInRange(scheduleFrom, form.end_date, p.weekdays);
+  const patternShifts = patternsOn.reduce((n, p) => n + patternCount(p), 0);
+  const patternDays = (p) =>
+    p.weekdays.length === 7 ? 'ทุกวัน' : p.weekdays.map((d) => WEEKDAYS[d]).join(' ');
+  const patternTime = (p) =>
+    p.planned_start ? `${p.planned_start}${p.planned_end ? `–${p.planned_end}` : ''}` : 'ไม่ระบุเวลา';
+
+  /** ซื้อขาด/หัตถการของรอบก่อน — รอบนี้มีอีกก็กดต่อทีละรายการ (ได้แถวที่แก้ได้เหมือนเพิ่มเอง · หัตถการได้ VN ใหม่) */
+  function carryLeftover(i) {
+    const { addons: rows, procedures: procs } = splitAddons([renewLeftover[i]], { keepVn: false });
+    setForm((prev) => ({ ...prev, addons: [...prev.addons, ...rows], procedures: [...prev.procedures, ...procs] }));
+    setRenewLeftover((prev) => prev.filter((_, j) => j !== i));
+  }
+
+  /** ค่าใช้จ่ายเพิ่มเติมของรอบก่อนที่ยังไม่ออกใบ — ออกเป็นใบร่างของรอบก่อน (ไม่ใช่ยกมารอบใหม่ ของนั้นใช้ในรอบก่อน) */
+  async function issueRenewExtras() {
+    setIssuingExtras(true);
+    setError(null);
+    try {
+      const created = await api.createExtrasInvoice(renewFrom);
+      toast(`ออกใบค่าใช้จ่ายเพิ่มเติม ${created.invoice_id} (ร่าง) ให้รอบก่อนแล้ว — ตรวจแล้วกดออกใบที่หน้าใบแจ้งหนี้`);
+      setRenewInfo((prev) => ({
+        ...prev,
+        extras: { ...prev.extras, items: [], total: 0 },
+        invoices: prev.invoices ? [created, ...prev.invoices] : prev.invoices,
+      }));
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setIssuingExtras(false);
+    }
+  }
+
+  /* หมวดที่คัดลอกจากรอบก่อน (ผู้ว่าจ้าง/ผู้รับการดูแล/อาการ/พิกัด) พับเป็นบรรทัดสรุปตอนต่อเคส — กด "แก้" แล้วกาง */
+  const [unfolded, setUnfolded] = useState([]);
+  const folded = (key) => Boolean(renewFrom) && !unfolded.includes(key);
+  const unfold = (key) => setUnfolded((prev) => [...prev, key]);
+  const clip = (text, n = 70) => (text && text.length > n ? `${text.slice(0, n)}…` : text);
 
   /** ข้อความเตือนใต้ช่อง — มาจาก details ของ zod ที่ server ส่งกลับมา
       ต้องมีคู่กับ aria-invalid เสมอ ไม่ใช้ขอบแดงสื่อความหมายอย่างเดียว (คนตาบอดสีจะไม่เห็น
@@ -956,11 +1088,15 @@ export default function CaseFormPage() {
         navigate(`/cases?open=${updated.case_id}`); // เปลี่ยนรหัสแล้วเคสเดิมไม่มีอยู่ที่รหัสเก่า
       } else {
         if (renewFrom) payload.renewed_from = renewFrom;
+        /* ต่อเคส: ทีมที่เลือกไว้ส่งไปกับการเปิดเคสเลย — ไม่ส่ง server จะพาทีมรอบก่อนมาทั้งหมด
+           รวมคนที่ผู้ใช้เพิ่งกดนำออก (ส่ง [] = ไม่เอาใครมาเลย ซึ่งต่างจากไม่ส่ง) */
+        if (renewTeamReady) payload.team = team.filter((x) => x !== payload.assigned_to);
         const created = await api.createCase(payload);
         await saveRelation(created.patient_id);
         // ทีมดูแลเคส (คนที่ 2 ขึ้นไป) — เพิ่มทีละคนหลังเคสเกิดแล้ว · เพิ่มไม่สำเร็จไม่ล้มทั้งการเปิดเคส แค่บอกให้เพิ่มเองในป๊อปอัป
+        // ส่งทีมไปกับการเปิดเคสแล้ว (payload.team) ไม่ต้องเพิ่มซ้ำ
         const teamFailed = [];
-        for (const empId of team.filter((x) => x !== created.assigned_to)) {
+        for (const empId of payload.team ? [] : team.filter((x) => x !== created.assigned_to)) {
           try {
             await api.addCaseTeam(created.case_id, empId);
           } catch {
@@ -968,9 +1104,36 @@ export default function CaseFormPage() {
           }
         }
         // ผลการเพิ่มทีมต่อท้ายข้อความเดียวกัน — toast สองอันติดกัน อันหลังจะทับอันแรกจนไม่เห็นว่าเพิ่มใครไม่สำเร็จ
-        const teamNote = teamFailed.length
+        let teamNote = teamFailed.length
           ? ` · เพิ่ม ${teamFailed.join(', ')} เข้าทีมไม่สำเร็จ — เพิ่มอีกครั้งได้ที่ป๊อปอัปเคส`
           : '';
+
+        /* ต่อเคส: ลงกะตามแบบรอบก่อนที่ติ๊กไว้ — ทีละแบบผ่านเส้นลงกะหลายวันตัวเดิม (ข้ามกะซ้ำ/เตือนชนให้เอง)
+           ลงไม่สำเร็จไม่ล้มการต่อเคส เคสเกิดแล้ว แค่บอกว่าแบบไหนต้องไปลงเองที่หน้าเคส */
+        if (renewFrom && patternsOn.length > 0) {
+          let added = 0;
+          let clashes = 0;
+          const failed = [];
+          for (const p of patternsOn) {
+            try {
+              const r = await api.addVisits(created.case_id, {
+                from: scheduleFrom,
+                to: payload.end_date,
+                weekdays: p.weekdays,
+                assigned_to: p.assigned_to,
+                planned_start: p.planned_start,
+                planned_end: p.planned_end,
+              });
+              added += r.added;
+              clashes += r.conflicts?.length ?? 0;
+            } catch {
+              failed.push(`${patternDays(p)} ${patternTime(p)}`);
+            }
+          }
+          teamNote += ` · ลงกะตามแบบรอบก่อน ${added} กะ`;
+          if (clashes > 0) teamNote += ` (ชนกับงานอื่นของพนักงาน ${clashes} กะ — ตรวจที่หน้าเคส)`;
+          if (failed.length) teamNote += ` · ลงกะแบบ ${failed.join(', ')} ไม่สำเร็จ — ลงเองที่หน้าเคส`;
+        }
         toast(
           (created.invoice_draft_created === false
             ? `เปิดเคส ${caseCode(created.case_id)} แล้ว แต่ใบร่างยังไม่เกิด กรุณาไปหน้าใบแจ้งหนี้แล้วกด "สร้างใบร่าง" ค่ะ`
@@ -992,7 +1155,11 @@ export default function CaseFormPage() {
         };
         setFieldErrors(Object.fromEntries(err.fields.map((f) => [fieldOf(f.field), f.message])));
         const first = fieldOf(err.fields[0]?.field ?? '');
-        formEl.current?.querySelector(`[name="${first}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        // ต่อเคส: ช่องที่ผิดอาจอยู่ในหมวดที่พับไว้ — กางทุกหมวดก่อน แล้วรอให้วาดเสร็จค่อยเลื่อนไปหา
+        if (renewFrom) setUnfolded(['payer', 'patient', 'assess', 'geo']);
+        setTimeout(() => {
+          formEl.current?.querySelector(`[name="${first}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        }, 0);
       }
       setSaving(false);
     }
@@ -1006,8 +1173,9 @@ export default function CaseFormPage() {
           {!isEdit && !renewFrom && <p className="muted">รหัสเคส = รหัสผู้รับบริการ (KN) · ระบบออกใบแจ้งหนี้ (ร่าง) ให้หลังบันทึก</p>}
           {renewFrom && (
             <p className="muted">
-              รอบที่ {(renewSource?.round_no ?? 1) + 1} — คัดลอกข้อมูลจากรอบก่อนมาให้แล้ว ตรวจ/แก้ได้ทุกช่องก่อนบันทึก
-              {' '}· รหัสเคสใช้รหัสผู้รับบริการเดิม ระบบออกใบแจ้งหนี้ (ร่าง) ให้ ทีมดูแลรอบก่อนตามมาด้วย
+              รอบที่ {(renewSource?.round_no ?? 1) + 1} — ตรวจวันที่ ราคา รายการคิดเงินเพิ่ม พนักงาน และกะ ก่อนบันทึก
+              {' '}· ข้อมูลผู้ว่าจ้าง/ผู้รับการดูแล/ที่อยู่คัดลอกจากรอบก่อนแล้ว (กด "แก้" ถ้าเปลี่ยน)
+              {' '}· ระบบออกใบแจ้งหนี้ (ร่าง) ของรอบนี้ให้
             </p>
           )}
         </div>
@@ -1033,9 +1201,88 @@ export default function CaseFormPage() {
       )}
 
       <form className="card form" ref={formEl} onSubmit={handleSubmit}>
+        {/* ต่อเคส: สรุปรอบก่อน (อ่านอย่างเดียว) — เรื่องที่ค้างจากรอบก่อนต้องเห็นก่อนต่อ ไม่ใช่รู้ทีหลัง
+            เตือนอย่างเดียว ไม่กันการต่อ: ลูกค้าค้างชำระก็ยังต่อบริการได้ แต่คนต่อต้องรู้ตัว */}
+        {renewSource && (
+          <section className="renew-summary" aria-labelledby="renew-summary-title">
+            <h2 id="renew-summary-title">
+              รอบก่อน · <Link className="link mono" to={`/cases?open=${renewSource.case_id}`}>{caseCode(renewSource.case_id)}</Link>
+              {' '}รอบที่ {renewSource.round_no ?? 1}
+            </h2>
+            <dl className="renew-facts">
+              <div><dt>วันที่</dt><dd>{renewSource.start_date || '—'} ถึง {renewSource.end_date || 'ไม่ระบุ'}</dd></div>
+              <div><dt>บริการ</dt><dd>{serviceText(renewSource)}</dd></div>
+              <div><dt>ค่าบริการ</dt><dd>{moneyText(renewSource.fee)}</dd></div>
+              <div><dt>สถานะ</dt><dd>{CASE_STATUS_LABELS[renewSource.status] ?? renewSource.status}</dd></div>
+              <div>
+                <dt>กะ</dt>
+                <dd>{renewInfo?.visits ? `ไปแล้ว ${renewDone} จาก ${renewVisits.length} กะ` : renewInfo ? 'โหลดไม่สำเร็จ' : '…'}</dd>
+              </div>
+              <div>
+                <dt>ใบแจ้งหนี้</dt>
+                <dd>
+                  {!renewInfo ? '…' : renewInvoices == null ? 'โหลดไม่สำเร็จ' : renewInvoices.length === 0 ? 'ยังไม่มีใบ' : (
+                    renewInvoices.map((v, i) => (
+                      <span key={v.invoice_id}>
+                        {i > 0 && ' · '}
+                        <Link className="link mono" to={`/invoices?open=${v.invoice_id}`}>{v.invoice_id}</Link>
+                        {' '}{INVOICE_STATUS_LABELS[v.status] ?? v.status}
+                        {v.status === 'issued' && v.balance > 0 && ` ค้าง ${formatBaht(v.balance)}`}
+                      </span>
+                    ))
+                  )}
+                </dd>
+              </div>
+            </dl>
+            {renewOverdue && (
+              <p className="notice">
+                <LineIcon name="alert" className="text-ico" />รอบก่อนเลยวันสิ้นสุดแล้วแต่ยังไม่ได้ปิดเคส — ค่าจ้างยังไม่ถูกตรึง
+                {' '}<Link className="link" to={`/cases?open=${renewSource.case_id}`}>ปิดเคสรอบก่อน</Link> ได้ที่ป๊อปอัปเคส (ต่อเคสก่อนหรือหลังก็ได้)
+              </p>
+            )}
+            {renewDue.length > 0 && (
+              <p className="notice">
+                <LineIcon name="alert" className="text-ico" />รอบก่อนยังค้างชำระ <strong>{formatBaht(renewDueTotal)}</strong>
+                {' '}({renewDue.map((v) => v.invoice_id).join(', ')}) — ต่อเคสได้ แต่ควรตามเก็บด้วย
+              </p>
+            )}
+            {renewNoInvoice && (
+              <p className="notice">
+                <LineIcon name="alert" className="text-ico" />รอบก่อนยังไม่มีใบแจ้งหนี้เลย — ออกใบให้รอบก่อนที่หน้าใบแจ้งหนี้ด้วย
+                {' '}(ใบของรอบนี้แยกกัน ไม่ได้เก็บแทนรอบก่อน)
+              </p>
+            )}
+            {renewDrafts.length > 0 && (
+              <p className="notice">
+                <LineIcon name="alert" className="text-ico" />ใบ {renewDrafts.map((v) => v.invoice_id).join(', ')} ของรอบก่อนยังเป็นใบร่าง
+                {' '}— ยังไม่ได้ส่งให้ลูกค้า
+              </p>
+            )}
+            {renewExtras && (
+              <div className="notice renew-extras">
+                <p>
+                  <LineIcon name="alert" className="text-ico" />รอบก่อนมีค่าใช้จ่ายเพิ่มเติมที่ยังไม่ได้ออกใบ
+                  {' '}<strong>{formatBaht(renewExtras.total)}</strong>
+                  {' '}({renewExtras.items.map((a) => a.name).join(', ')}) — เป็นของรอบก่อน ออกใบที่รอบก่อน ไม่ใช่ยกมารอบนี้
+                </p>
+                <button type="button" className="btn" disabled={issuingExtras} onClick={issueRenewExtras}>
+                  {issuingExtras ? 'กำลังออกใบ…' : 'ออกใบค่าใช้จ่ายเพิ่มเติม'}
+                </button>
+              </div>
+            )}
+          </section>
+        )}
+
         {/* ผู้ว่าจ้าง (ผู้จ่ายเงิน) อยู่บนสุด — ต้องเห็นตั้งแต่แรกว่าเคสนี้ผูกกับลูกค้ารายไหน
             เลือกผู้รับบริการที่ผูกลูกค้าไว้แล้ว ผู้ว่าจ้างจะเด้งมาที่นี่เอง
             โหมดแก้ไข: ถ้าเคสยังไม่มีผู้ว่าจ้าง ให้ค้นหา/เพิ่มลูกค้าเจ้าของเคสได้ที่นี่ (บันทึกแล้วใบแจ้งหนี้จะตามให้เอง) */}
+        {folded('payer') ? (
+          <CopiedRow
+            title="ผู้ว่าจ้าง"
+            summary={[payer?.name ?? 'ไม่ผูกผู้ว่าจ้าง', relation.trim() && `เป็น${relation.trim()}ของผู้รับบริการ`].filter(Boolean).join(' · ')}
+            onOpen={() => unfold('payer')}
+          />
+        ) : (<>
         <h2>ผู้ว่าจ้าง</h2>
         <div className="customer-picker">
           {payer ? (
@@ -1116,6 +1363,7 @@ export default function CaseFormPage() {
             </label>
           </div>
         </div>
+        </>)}
 
         <h2>รายละเอียดเคส</h2>
         <div className="grid">
@@ -1127,15 +1375,15 @@ export default function CaseFormPage() {
             </p>
           )}
           <label>ประเภทบริการ
-            <select value={form.service_kind} disabled={serviceLocked} onChange={(e) => changeKind(e.target.value)}>
+            <SearchSelect value={form.service_kind} disabled={serviceLocked} onChange={(e) => changeKind(e.target.value)}>
               <option value="">— ไม่ระบุ —</option>
               {Object.entries(SERVICE_KIND_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-            </select>
+            </SearchSelect>
           </label>
 
           {isHomecare && (
           <label>รูปแบบบริการ
-            <select value={form.pkg_format_id} disabled={serviceLocked} onChange={(e) => applySelection({ pkg_format_id: e.target.value })}>
+            <SearchSelect value={form.pkg_format_id} disabled={serviceLocked} onChange={(e) => applySelection({ pkg_format_id: e.target.value })}>
               <option value="">— ไม่ระบุ —</option>
               {['daily', 'weekly', 'monthly'].map((cat) => {
                 const opts = matrix?.formats.filter((f) => f.category === cat) ?? [];
@@ -1146,13 +1394,13 @@ export default function CaseFormPage() {
                   </optgroup>
                 );
               })}
-            </select>
+            </SearchSelect>
           </label>
           )}
 
           {isPhysio && (
             <label>แพ็คเกจกายภาพบำบัด
-              <select value={form.physio_package_id} disabled={serviceLocked} onChange={(e) => applyPhysio(e.target.value)}>
+              <SearchSelect value={form.physio_package_id} disabled={serviceLocked} onChange={(e) => applyPhysio(e.target.value)}>
                 <option value="">— เลือกแพ็คเกจ —</option>
                 {physioOptions.map((p) => (
                   <option key={p.physio_package_id} value={p.physio_package_id}>
@@ -1162,21 +1410,21 @@ export default function CaseFormPage() {
                     {p.active ? '' : ' (ปิดขายแล้ว)'}
                   </option>
                 ))}
-              </select>
+              </SearchSelect>
             </label>
           )}
 
           {isHomecare && needGrade && (
             <label>เกรด
-              <select value={form.pkg_grade_id} disabled={serviceLocked} onChange={(e) => applySelection({ pkg_grade_id: e.target.value })}>
+              <SearchSelect value={form.pkg_grade_id} disabled={serviceLocked} onChange={(e) => applySelection({ pkg_grade_id: e.target.value })}>
                 <option value="">— เลือกเกรด —</option>
                 {matrix.grades.map((g) => <option key={g.grade_id} value={g.grade_id}>{g.name}</option>)}
-              </select>
+              </SearchSelect>
             </label>
           )}
           {isHomecare && (
           <label>ระดับพนักงาน
-            <select
+            <SearchSelect
               value={form.pkg_staff_tier}
               onChange={(e) => applySelection({ pkg_staff_tier: e.target.value })}
               disabled={serviceLocked || !selectedFormat || (needGrade && !selGradeId)}
@@ -1195,7 +1443,7 @@ export default function CaseFormPage() {
                   </option>
                 );
               })}
-            </select>
+            </SearchSelect>
           </label>
           )}
           {/* เต็มแถว — ไม่งั้นช่องถัดไป (วันเริ่ม) ขึ้นมาแทรกคอลัมน์ที่เหลือข้างกล่องติ๊กบนจอสามคอลัมน์ */}
@@ -1208,6 +1456,18 @@ export default function CaseFormPage() {
                 onChange={(e) => toggleEnglish(e.target.checked)}
               />
               ภาษาอังกฤษ (+{formatBaht(englishFee)}{{ monthly: '/เดือน', weekly: '/สัปดาห์' }[selectedFormat.category] ?? '/วัน'})
+            </label>
+          )}
+          {/* กายภาพ: ค่าภาษาตั้งรายแพ็คเกจ (หน้าแพ็คเกจกายภาพบำบัด) — แพ็คที่ไม่ได้ตั้ง = ไม่มีกล่องติ๊ก */}
+          {isPhysio && physioEnglishFee > 0 && (
+            <label className="checkbox-row full-row">
+              <input
+                type="checkbox"
+                checked={Boolean(form.pkg_english)}
+                disabled={serviceLocked}
+                onChange={(e) => toggleEnglish(e.target.checked)}
+              />
+              ภาษาอังกฤษ (+{formatBaht(physioEnglishFee)}/แพ็คเกจ)
             </label>
           )}
           {isPhysio && selectedPhysio && (
@@ -1258,6 +1518,19 @@ export default function CaseFormPage() {
             <input type="number" min="0" step="0.01" {...field('fee')} />
             {fieldError('fee')}
           </label>
+          {priceDiffers && (
+            <p className="form-hint muted span-2">
+              ใช้ราคารอบก่อน <strong>{moneyText(form.fee)}</strong> — ราคาในตารางตอนนี้คือ{' '}
+              <strong>{formatBaht(listPrice)}</strong>{' '}
+              <button
+                type="button"
+                className="inline-link"
+                onClick={() => setForm((prev) => ({ ...prev, fee: String(listPrice) }))}
+              >
+                ใช้ราคาปัจจุบัน
+              </button>
+            </p>
+          )}
 
           {/* ยอดที่พนักงานจะเห็นเป็นรายได้ของตัวเองเมื่อปิดเคส — ดึงจากแพ็คเกจให้ แก้ทับได้
               เห็นเฉพาะผู้จัดการ · คนอื่นเปิดเคสได้ตามปกติแล้ว server เติมค่าจ้างจากเรท/แพ็คเกจให้เอง
@@ -1318,14 +1591,14 @@ export default function CaseFormPage() {
                 {fieldError(`addons.${i}.name`)}
               </label>
               <label>รูปแบบ
-                <select
+                <SearchSelect
                   name={`addons.${i}.kind`}
                   value={a.kind}
                   onChange={(e) => setAddon(i, 'kind', e.target.value)}
                 >
                   <option value="rent">เช่า</option>
                   <option value="sale">ซื้อขาด</option>
-                </select>
+                </SearchSelect>
               </label>
               <label>จำนวน
                 <input
@@ -1376,12 +1649,16 @@ export default function CaseFormPage() {
           {form.procedures.map((p, i) => (
             <div className="addon-row procedure-row" key={i}>
               <label>ชื่อหัตถการ
-                <input
+                <ProcedureNameInput
                   name={`procedures.${i}.name`}
                   value={p.name}
-                  placeholder="เช่น ทำแผล, เปลี่ยนสายให้อาหาร"
+                  placeholder="พิมพ์ค้นหาหัตถการ (อย่างน้อย 3 ตัวอักษร) เช่น ทำแผล"
                   aria-invalid={fieldErrors[`procedures.${i}.name`] ? true : undefined}
-                  onChange={(e) => setProcedure(i, 'name', e.target.value)}
+                  onChange={(v) => setProcedure(i, 'name', v)}
+                  onPick={(proc, price) => {
+                    setProcedure(i, 'name', proc.name);
+                    if (price != null) setProcedure(i, 'unit_price', String(price));
+                  }}
                 />
                 {fieldError(`procedures.${i}.name`)}
               </label>
@@ -1417,6 +1694,39 @@ export default function CaseFormPage() {
           </div>
         </section>
 
+        {/* ต่อเคส: ซื้อขาด/หัตถการของรอบก่อน ไม่ได้ต่อให้เอง (ลูกค้าจ่ายไปแล้ว/ทำไปแล้ว) — รอบนี้มีอีกก็กดต่อ */}
+        {renewLeftover.length > 0 && (
+          <section className="addons-field renew-leftover" aria-labelledby="renew-leftover-title">
+            <h3 id="renew-leftover-title">
+              รายการของรอบก่อนที่ไม่ได้ต่อให้ <span className="muted">(ซื้อขาด/หัตถการ — เก็บเงินไปแล้วในรอบก่อน)</span>
+            </h3>
+            <ul className="renew-leftover-list">
+              {renewLeftover.map((a, i) => (
+                <li key={`${a.name}-${i}`}>
+                  <span>
+                    {isProcedure(a) ? 'หัตถการ' : 'ซื้อขาด'}: {a.name}
+                    {!isProcedure(a) && Number(a.quantity) !== 1 && ` × ${a.quantity}`}
+                    {' · '}{formatBaht(Number(a.unit_price) * Number(a.quantity ?? 1))}
+                  </span>
+                  <button type="button" className="btn tiny" onClick={() => carryLeftover(i)}>+ ต่อรายการนี้</button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
+        {folded('patient') ? (
+          <CopiedRow
+            title="ผู้รับการดูแล"
+            summary={[
+              form.client_name || 'ยังไม่ระบุชื่อ',
+              form.patient_id,
+              form.patient_age !== '' && `${form.patient_age} ปี`,
+              clip(form.medical_history, 50) && `โรคประจำตัว: ${clip(form.medical_history, 50)}`,
+            ].filter(Boolean).join(' · ')}
+            onOpen={() => unfold('patient')}
+          />
+        ) : (<>
         <h2>ผู้รับการดูแล</h2>
 
         {isEdit ? (
@@ -1454,10 +1764,10 @@ export default function CaseFormPage() {
                 </label>
               )}
               <label>เพศ
-                <select {...field('patient_gender')}>
+                <SearchSelect {...field('patient_gender')}>
                   <option value="">— ไม่ระบุ —</option>
                   {Object.entries(GENDER_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                </select>
+                </SearchSelect>
               {fieldError('patient_gender')}
               </label>
               <label>อายุ (ปี)<input type="number" min="0" max="130" {...field('patient_age')} />{fieldError('patient_age')}</label>
@@ -1569,10 +1879,10 @@ export default function CaseFormPage() {
                 </label>
               )}
               <label>เพศ
-                <select {...field('patient_gender')}>
+                <SearchSelect {...field('patient_gender')}>
                   <option value="">— ไม่ระบุ —</option>
                   {Object.entries(GENDER_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                </select>
+                </SearchSelect>
               {fieldError('patient_gender')}
               </label>
               <label>อายุ (ปี)<input type="number" min="0" max="130" {...field('patient_age')} />{fieldError('patient_age')}</label>
@@ -1595,7 +1905,26 @@ export default function CaseFormPage() {
 
           </>
         )}
+        </>)}
+        {/* แพ้ยา/แพ้อาหาร ต้องเห็นเสมอ แม้หมวดผู้รับการดูแลถูกพับไว้ */}
+        {folded('patient') && pickedPatient?.allergies && (
+          <p className="notice allergy-alert">
+            <strong><LineIcon name="alert" className="text-ico" />แพ้ยา:</strong> {pickedPatient.allergies}
+          </p>
+        )}
+        {folded('patient') && pickedPatient?.food_allergies && (
+          <p className="notice allergy-alert">
+            <strong><LineIcon name="alert" className="text-ico" />แพ้อาหาร:</strong> {pickedPatient.food_allergies}
+          </p>
+        )}
 
+        {folded('assess') ? (
+          <CopiedRow
+            title="การประเมิน / อาการ"
+            summary={clip(form.current_symptoms) || clip(form.care_goal) || 'ยังไม่ได้กรอก — กด "แก้" ถ้ารอบนี้อาการเปลี่ยน'}
+            onOpen={() => unfold('assess')}
+          />
+        ) : (<>
         <h2>การประเมิน / อาการครั้งนี้</h2>
         <div className="grid">
           <label className="span-2">อาการปัจจุบัน
@@ -1607,7 +1936,18 @@ export default function CaseFormPage() {
             {fieldError('care_goal')}
           </label>
         </div>
+        </>)}
 
+        {folded('geo') ? (
+          <CopiedRow
+            title="ที่อยู่และพิกัด"
+            summary={[
+              clip(form.address, 60) || 'ไม่มีที่อยู่',
+              form.geo_lat !== '' && form.geo_lng !== '' ? 'ตั้งพิกัดเช็คอินแล้ว' : 'ยังไม่ตั้งพิกัดเช็คอิน',
+            ].join(' · ')}
+            onOpen={() => unfold('geo')}
+          />
+        ) : (<>
         <h2>พิกัดสถานที่ดูแล (สำหรับเช็คอิน)</h2>
         <div className="geo-section">
           {/* ที่อยู่อยู่คู่กับพิกัด — พิมพ์ที่อยู่แล้วกด "ใช้ที่อยู่ด้านบน" ค้นพิกัดต่อได้ทันที */}
@@ -1685,6 +2025,7 @@ export default function CaseFormPage() {
             </div>
           )}
         </div>
+        </>)}
 
         <h2>{isEdit ? 'หมายเหตุ' : 'จับคู่พนักงาน'}</h2>
         <div className="grid">
@@ -1727,7 +2068,83 @@ export default function CaseFormPage() {
                 onChange={addStaff}
               />
               {fieldError('assigned_to')}
+              {renewFrom && !renewTeamReady && renewInfo && (
+                <p className="form-hint muted">
+                  <LineIcon name="alert" className="text-ico" />โหลดทีมรอบก่อนไม่สำเร็จ — ระบบจะพาทีมรอบก่อนที่ยังรับงานได้มาให้เองตอนบันทึก
+                </p>
+              )}
+              {renewTeamReady && (
+                <p className="form-hint muted">
+                  ทีมรอบก่อนตามมาให้แล้ว — คนที่รอบนี้ไม่ได้ไปต่อ กด "นำออก"
+                  {renewDropped.length > 0 && (
+                    <>
+                      <br />
+                      <LineIcon name="alert" className="text-ico" />ไม่ได้ตามมา (ลาออก/พักงาน/รับเคสไม่ได้แล้ว):{' '}
+                      <strong>{renewDropped.join(', ')}</strong>
+                    </>
+                  )}
+                </p>
+              )}
             </div>
+          )}
+
+          {/* ต่อเคส: ลงกะรอบใหม่ตามแบบรอบก่อน (คนเดิม เวลาเดิม วันในสัปดาห์เดิม) — ลงให้หลังเปิดเคสสำเร็จ */}
+          {renewFrom && patterns.length > 0 && (
+            <fieldset className="full-row renew-shifts">
+              <legend>ลงกะตามแบบรอบก่อน</legend>
+              {!canSchedule && (
+                <p className="form-hint muted">
+                  <LineIcon name="alert" className="text-ico" />
+                  {form.end_date && form.end_date < todayTH()
+                    ? 'วันสิ้นสุดของรอบนี้ผ่านไปแล้ว — ไม่มีวันที่เหลือให้ลงกะ (ระบบไม่ลงกะย้อนหลัง)'
+                    : 'กรอกวันเริ่มและวันสิ้นสุดของรอบนี้ก่อน จึงจะลงกะตามแบบรอบก่อนได้'}
+                </p>
+              )}
+              {canSchedule && startsInPast && (
+                <p className="form-hint muted">
+                  <LineIcon name="alert" className="text-ico" />รอบนี้เริ่มก่อนวันนี้ — ลงกะให้ตั้งแต่วันนี้เป็นต้นไป
+                  {' '}(กะย้อนหลังไม่มีใครไปทำ จะกลายเป็นขาดงาน) ถ้าไปทำงานจริงแล้วให้ลงกะย้อนหลังเองที่หน้าเคส
+                </p>
+              )}
+              {patterns.map((p) => {
+                const usable = patternUsable(p);
+                const on = canSchedule && usable && !patternsOff.includes(p.key);
+                return (
+                  <label key={p.key} className={`checkbox-row${usable ? '' : ' muted'}`}>
+                    <input
+                      type="checkbox"
+                      checked={on}
+                      disabled={!canSchedule || !usable}
+                      onChange={(e) =>
+                        setPatternsOff((prev) =>
+                          e.target.checked ? prev.filter((k) => k !== p.key) : [...prev, p.key])}
+                    />
+                    <span>
+                      <strong>{patternDays(p)}</strong> · {patternTime(p)} · {p.assigned_name ?? 'ผู้รับผิดชอบหลัก'}
+                      <span className="muted">
+                        {' '}— รอบก่อน {p.count} กะ
+                        {canSchedule && usable && ` · รอบนี้ ${patternCount(p)} กะ`}
+                        {p.rare_weekdays.length > 0 &&
+                          ` · ไม่รวมวัน${p.rare_weekdays.map((d) => WEEKDAYS[d]).join(' ')} ที่มีครั้งเดียว (นัดเลื่อน/แทรก)`}
+                        {!usable && ' · คนนี้ไม่ได้อยู่ในเคสรอบนี้ เพิ่มเข้าพนักงานที่รับเคสก่อน'}
+                      </span>
+                    </span>
+                  </label>
+                );
+              })}
+              {patternShifts > 0 && (
+                <p className="form-hint muted">
+                  จะลงกะให้ {patternShifts} กะ หลังเปิดเคส · กะที่ชนกับงานอื่นของพนักงานยังลงให้ แต่จะแจ้งให้ตรวจ
+                  {isPhysio && selectedPhysio?.sessions != null && patternShifts > selectedPhysio.sessions && (
+                    <>
+                      <br />
+                      <LineIcon name="alert" className="text-ico" />เกินจำนวนครั้งของแพ็คเกจ ({selectedPhysio.sessions} ครั้ง)
+                      {' '}— เอาติ๊กบางแบบออก หรือลดวันสิ้นสุด
+                    </>
+                  )}
+                </p>
+              )}
+            </fieldset>
           )}
 
           {/* บอกให้รู้ว่ารายชื่อถูกกรองอยู่ ไม่ใช่ปล่อยให้สงสัยว่าทำไมคนที่หาไม่โผล่ */}
@@ -1753,7 +2170,7 @@ export default function CaseFormPage() {
         {/* ติดขอบล่างจอ — ฟอร์มนี้ยาวที่สุดในระบบ แก้คำเดียวก็ไม่ควรต้องเลื่อนสุดทางไปกดปุ่ม */}
         <div className="form-actions sticky">
           <button className="btn primary" type="submit" disabled={saving}>
-            {saving ? 'กำลังบันทึก…' : isEdit ? 'บันทึกการแก้ไข' : 'เปิดเคส'}
+            {saving ? 'กำลังบันทึก…' : isEdit ? 'บันทึกการแก้ไข' : renewFrom ? `ต่อเคส (รอบที่ ${(renewSource?.round_no ?? 1) + 1})` : 'เปิดเคส'}
           </button>
           <Link className="btn" to="/cases" onClick={confirmLeave}>ยกเลิก</Link>
         </div>
@@ -1810,5 +2227,18 @@ export default function CaseFormPage() {
         </div>
       )}
     </>
+  );
+}
+
+/** ต่อเคส: หมวดที่คัดลอกจากรอบก่อนแบบพับ — บรรทัดเดียวบอกว่าคัดลอกอะไรมา กด "แก้" แล้วกางเป็นช่องกรอกเต็ม */
+function CopiedRow({ title, summary, onOpen }) {
+  return (
+    <div className="renew-copied">
+      <div>
+        <strong>{title}</strong>
+        <span className="muted">{summary}</span>
+      </div>
+      <button type="button" className="btn tiny" onClick={onOpen}>แก้</button>
+    </div>
   );
 }

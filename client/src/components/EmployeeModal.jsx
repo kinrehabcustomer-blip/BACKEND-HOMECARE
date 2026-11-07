@@ -11,6 +11,7 @@ import {
 } from '../labels.js';
 import LineIcon from './LineIcon.jsx';
 import { formatPhone, formatPhoneInput } from '../lib/phone.js';
+import SearchSelect from './SearchSelect.jsx';
 
 // popup เป็นตัวอย่างข้อมูลย่อ — โชว์ประวัติการทำงานแค่ 3 ครั้งล่าสุด ที่เหลือดูที่หน้าเต็ม
 const PREVIEW_HISTORY = 3;
@@ -84,14 +85,14 @@ function QuickEdit({ employee, onDone, onCancel }) {
       {error && <p className="error">{error}</p>}
       <div className="grid cols-2">
         <label>สถานะ
-          <select {...field('status')}>
+          <SearchSelect {...field('status')}>
             {Object.entries(STATUS_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-          </select>
+          </SearchSelect>
         </label>
         <label>ตำแหน่ง
-          <select {...field('position')}>
+          <SearchSelect {...field('position')}>
             {Object.entries(POSITION_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-          </select>
+          </SearchSelect>
         </label>
         <label className="span-2">เบอร์โทร
           <input placeholder="เช่น 081-234-5678" {...field('phone')} />
@@ -194,7 +195,7 @@ export default function EmployeeModal({ employeeId, siblings = [], onNavigate, o
     <div className="modal-backdrop" onClick={onClose}>
       {/* กันไม่ให้คลิกในกล่องทะลุไปโดน backdrop จนปิดเอง */}
       <div
-        className="modal"
+        className="modal detail-modal"
         role="dialog"
         aria-modal="true"
         aria-label="ข้อมูลพนักงาน"

@@ -9,6 +9,7 @@ import { FRONT_POSITIONS } from '../employees/schema.js';
 import { linkLineByCode } from '../lib/lineLinkCode.js';
 import { outboxAck, outboxPending } from '../invoices/share.js';
 import * as invoiceRepo from '../invoices/repo.js';
+import { ensureLedgerTables, netPaidSql, netTotalSql } from '../invoices/ledger.js';
 import { caseRatings, dueRatings, employeeStars, submitRating } from '../lib/ratings.js';
 import { employeeTier } from '../lib/tiers.js';
 import { createEmployeeSchema, decodeImage } from '../employees/schema.js';
@@ -729,15 +730,14 @@ integrationRouter.post(
     if (!p || typeof p.cid !== 'string' || typeof p.image_url !== 'string' || typeof p.ref !== 'string') {
       throw new ApiError(401, 'ลายเซ็นไม่ถูกต้องหรือหมดอายุ');
     }
-    await invoiceRepo.ensureSlipSchema();
+    await Promise.all([invoiceRepo.ensureSlipSchema(), ensureLedgerTables()]);
     const amount = Number.isFinite(Number(p.amount)) && Number(p.amount) > 0 ? Math.round(Number(p.amount) * 100) / 100 : null;
     const invoice = await sql.one(
       `WITH open_bill AS (
          SELECT i.invoice_id, i.due_date, i.issue_date,
-                GREATEST(i.total - COALESCE(SUM(x.amount), 0), 0) AS balance
-           FROM invoices i LEFT JOIN invoice_payments x ON x.invoice_id = i.invoice_id
+                GREATEST(${netTotalSql('i')} - ${netPaidSql('i')}, 0) AS balance
+           FROM invoices i
           WHERE i.customer_id = :cid AND i.status = 'issued'
-          GROUP BY i.invoice_id
        )
        SELECT invoice_id, balance FROM open_bill WHERE balance > 0
        ORDER BY CASE WHEN :amount IS NOT NULL AND abs(balance - :amount) <= 0.01 THEN 0 ELSE 1 END,
@@ -774,16 +774,14 @@ integrationRouter.post(
     if (!p || typeof p.cid !== 'string') throw new ApiError(401, 'ลายเซ็นไม่ถูกต้องหรือหมดอายุ');
     const today = new Date(Date.now() + 7 * 3.6e6).toISOString().slice(0, 10);
     const money = (n) => Math.round(Number(n || 0) * 100) / 100;
-    await invoiceRepo.ensureSlipSchema();
+    await Promise.all([invoiceRepo.ensureSlipSchema(), ensureLedgerTables()]);
     const summary = await sql.one(
       `WITH billed AS (
          SELECT i.due_date,
                 CASE WHEN i.status = 'paid' THEN 0
-                     ELSE GREATEST(i.total - COALESCE(SUM(x.amount), 0), 0) END AS balance
+                     ELSE GREATEST(${netTotalSql('i')} - ${netPaidSql('i')}, 0) END AS balance
            FROM invoices i
-           LEFT JOIN invoice_payments x ON x.invoice_id = i.invoice_id
           WHERE i.customer_id = :cid AND i.status IN ('issued', 'paid')
-          GROUP BY i.invoice_id
        )
        SELECT COUNT(*)::int AS invoice_count,
               COALESCE(SUM(balance), 0) AS outstanding,
@@ -794,13 +792,11 @@ integrationRouter.post(
     );
     const open = await sql.all(
       `WITH billed AS (
-         SELECT i.invoice_id, i.case_id, i.issue_date, i.due_date, i.total,
-                COALESCE(SUM(x.amount), 0) AS paid,
-                GREATEST(i.total - COALESCE(SUM(x.amount), 0), 0) AS balance
+         SELECT i.invoice_id, i.case_id, i.issue_date, i.due_date, ${netTotalSql('i')} AS total,
+                ${netPaidSql('i')} AS paid,
+                GREATEST(${netTotalSql('i')} - ${netPaidSql('i')}, 0) AS balance
            FROM invoices i
-           LEFT JOIN invoice_payments x ON x.invoice_id = i.invoice_id
           WHERE i.customer_id = :cid AND i.status = 'issued'
-          GROUP BY i.invoice_id
        )
        SELECT invoice_id, case_id, issue_date, due_date, total, paid, balance,
               (due_date IS NOT NULL AND due_date < :today) AS overdue
@@ -1097,7 +1093,11 @@ integrationRouter.post(
       || !isLineUserId(p.line) || !Number.isInteger(p.stars) || p.stars < 1 || p.stars > 5) {
       throw new ApiError(401, 'ลายเซ็นไม่ถูกต้องหรือข้อมูลไม่ครบ');
     }
-    const r = await submitRating({ caseId: p.case_id, round: p.round, kind: p.kind, line: p.line, stars: p.stars, reason: p.reason });
+    const r = await submitRating({
+      caseId: p.case_id, round: p.round, kind: p.kind, line: p.line, stars: p.stars, reason: p.reason,
+      // คนที่ถูกถามถึงตอนส่งคำถาม (employee_id จาก /ratings/due) — ฝั่ง chat ส่งกลับมาได้ ไม่ส่งก็ใช้คนทำกะล่าสุดเหมือนเดิม
+      askedAbout: typeof p.employee_id === 'string' ? p.employee_id : null,
+    });
     if (r.error) throw new ApiError(r.error === 'not_found' ? 404 : 403, r.error);
     res.json(r);
   }),

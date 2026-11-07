@@ -1,19 +1,26 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from '../api.js';
-import { useAuth } from '../auth.jsx';
+import { useAuth, useCan } from '../auth.jsx';
 import { useToast } from '../toast.jsx';
 import { useSheetSwipe } from '../lib/sheetSwipe.js';
 import { useScrollLock } from '../lib/scrollLock.js';
-import { INVOICE_STATUS_LABELS, amountText, docDate, todayTH } from '../labels.js';
+import {
+  ADJUSTMENT_REASON_LABELS, ADJUSTMENT_REASON_OPTIONS, amountText, docDate, invoiceStatusLabel, todayTH,
+} from '../labels.js';
 import LineIcon from './LineIcon.jsx';
 import ConfirmButton from './ConfirmButton.jsx';
 import FinanceReceiptDoc from './FinanceReceiptDoc.jsx';
 import CustomerInvoiceDoc, { addonAmount, paidBy } from './CustomerInvoiceDoc.jsx';
+import ReceiptDoc from './ReceiptDoc.jsx';
+import AdjustmentNoteDoc from './AdjustmentNoteDoc.jsx';
+import RefundVoucherDoc from './RefundVoucherDoc.jsx';
 import { ACCEPTED, compressImage, formatFileSize } from '../lib/image.js';
 import { caseCode } from '../lib/patientCode.js';
 import { TRANSFER_PAYMENT_INSTRUCTION } from '../lib/issuer.js';
 import { addonLabel } from '../lib/addons.js';
+import SearchSelect from './SearchSelect.jsx';
+
 
 const FOCUSABLE = 'a[href], button:not(:disabled), input, select, textarea, [tabindex]:not([tabindex="-1"])';
 
@@ -35,13 +42,36 @@ const PAYMENT_METHODS = ['เงินสด', 'โอน', 'บัตรเค�
 
 export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onClose, onChanged, onReissued }) {
   const { user } = useAuth();
+  // ใบลดหนี้ลดรายได้และอาจต้องคืนเงิน — server เปิดให้เฉพาะหมวด money (ใบเพิ่มหนี้ทุกคนที่ทำบิลได้ออกได้)
+  // ใบลดหนี้ · ยกเลิกใบ · แก้ข้อมูลเงินคืน — สิทธิ์ invoice_adjust (ตั้งได้ในหน้าจัดการสิทธิ์)
+  const canMoney = useCan('invoice_adjust');
+  // ลบสลิป (หลักฐานการโอน) — สิทธิ์ slip_delete (ตั้งได้ในหน้าจัดการสิทธิ์)
+  const canDeleteSlip = useCan('slip_delete');
   const toast = useToast();
   const boxRef = useRef(null);
   // จอแคบ: ปัดลงเพื่อปิด — ใช้ ref เดียวกับ focus trap เพราะ element เดียวแปะสอง ref ไม่ได้
   useSheetSwipe(onClose, boxRef);
   const [item, setItem] = useState(null);
-  // ใบที่ชำระแล้วมีสองเอกสาร: ใบเสร็จของลูกค้า · ใบเสร็จส่วนที่ 2 ของฝ่ายการเงิน (ดู FinanceReceiptDoc)
+  /* เอกสารที่ดู/พิมพ์อยู่: 'customer' = ใบแจ้งหนี้ (ชำระแล้วขึ้นเป็นใบเสร็จ) · 'finance' = ใบเสร็จส่วนที่ 2 ของฝ่ายการเงิน
+     'rc:<เลขที่>' = ใบเสร็จของการรับเงินครั้งนั้น · 'note:<เลขที่>' = ใบลดหนี้/เพิ่มหนี้ */
   const [docView, setDocView] = useState('customer');
+  // ฟอร์มใบลดหนี้/เพิ่มหนี้ — ใบที่ออกแล้วแก้ยอดตรง ๆ ไม่ได้ (4 พ.ย. 2569)
+  const [adjOpen, setAdjOpen] = useState(false);
+  const [adjKind, setAdjKind] = useState('debit');
+  const [adjReasonCode, setAdjReasonCode] = useState('other');
+  const [adjAmount, setAdjAmount] = useState('');
+  const [adjReason, setAdjReason] = useState('');
+  const [refundDate, setRefundDate] = useState(todayTH);
+  const [refundMethod, setRefundMethod] = useState(PAYMENT_METHODS[1]);
+  // ใบลดหนี้/เพิ่มหนี้ที่กำลังจะยกเลิก + เหตุผล
+  const [noteCancelFor, setNoteCancelFor] = useState(null);
+  const [noteCancelReason, setNoteCancelReason] = useState('');
+  // ยกเลิกทั้งใบ — ต้องพิมพ์เหตุผลก่อน (server เก็บเหตุผล + ชื่อคนยกเลิกไว้กับใบ)
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [cancelReason, setCancelReason] = useState('');
+  // แก้ข้อมูลเงินคืนที่กรอกผิด (วันที่ · ช่องทาง · หมายเหตุ) — ยอดแก้ไม่ได้
+  const [refundEditFor, setRefundEditFor] = useState(null);
+  const [refundEdit, setRefundEdit] = useState({ refunded_at: '', method: '', note: '' });
   // เปิดใบอื่น (กดลูกศรไปใบถัดไป) = เริ่มที่ใบของลูกค้าเสมอ ไม่ค้างหน้าฝ่ายการเงินของใบก่อน
   useEffect(() => setDocView('customer'), [invoiceId]);
   const [error, setError] = useState(null);
@@ -68,15 +98,12 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
   // รายการรับชำระที่กำลังจะยกเลิก + เหตุผล (ยกเลิกทีละรายการ จึงเก็บรหัสเดียวพอ)
   const [voidFor, setVoidFor] = useState(null);
   const [voidReason, setVoidReason] = useState('');
-  /* กล่องเหตุผลตอนยกเลิกใบที่รับเงินแล้ว (ดร.ธงชัย 8 พ.ย. 2569) */
-  const [cancelOpen, setCancelOpen] = useState(false);
-  const [cancelReason, setCancelReason] = useState('');
   /* ส่งใบเข้า LINE ลูกค้า (ดร.ธงชัย 24 ต.ค. 2569 ข้อ 4) — { can_send, reason, customer_name, history } · ดู server/src/invoices/share.js */
   const [lineInfo, setLineInfo] = useState(null);
-  // ลิงก์บิลสาธารณะที่ยังเปิดได้ของใบนี้ (Codex ข้อ 10 · 8 พ.ย. 2569)
-  const [shareLinks, setShareLinks] = useState(null);
   const [lineInfoError, setLineInfoError] = useState(null);
   const [copyText, setCopyText] = useState(null);
+  // ลิงก์บิลสาธารณะที่ยังเปิดได้ของใบนี้ (Codex ข้อ 10 · 8 พ.ย. 2569)
+  const [shareLinks, setShareLinks] = useState(null);
   const lineStatus = item?.status;
   useEffect(() => {
     setLineInfo(null);
@@ -88,8 +115,7 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
     api.invoiceLine(invoiceId)
       .then((v) => !cancelled && setLineInfo(v))
       .catch(() => !cancelled && setLineInfoError('ตรวจสถานะ LINE ไม่ได้'));
-    /* ลิงก์ที่ยังเปิดได้ของใบนี้ — ล้มแล้วแค่ไม่โชว์ปุ่มปิดลิงก์ ไม่ต้องขึ้น error
-       (เป็นข้อมูลประกอบ ไม่ใช่สิ่งที่คนเปิดใบมาเพื่อดู) */
+    /* ล้มแล้วแค่ไม่โชว์ปุ่มปิดลิงก์ ไม่ต้องขึ้น error — เป็นข้อมูลประกอบ ไม่ใช่สิ่งที่คนเปิดใบมาเพื่อดู */
     api.invoiceShareLinks(invoiceId)
       .then((v) => !cancelled && setShareLinks(v.links ?? []))
       .catch(() => {});
@@ -136,6 +162,8 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
         `เลขที่ ${bill.invoice_id}`,
         `ชื่อผู้รับบริการ ${bill.patient_name ?? '—'}`,
         amountLine,
+        // ใบเสร็จของการรับเงินครั้งล่าสุด — ลูกค้าเปิดลิงก์เดียวกันดูใบเสร็จทุกใบได้
+        bill.latest_receipt_id ? `ใบเสร็จล่าสุด เลขที่ ${bill.latest_receipt_id}` : null,
         bill.due_date ? `วันครบกำหนด ${docDate(bill.due_date)}` : null,
         bill.kind !== 'receipt' && Number(bill.balance) > 0
           ? `ช่องทางชำระเงิน\n${TRANSFER_PAYMENT_INSTRUCTION}`
@@ -171,6 +199,9 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
     setItem(null);
     setError(null);
     setPayOpen(false);
+    setAdjOpen(false);
+    setCancelOpen(false);
+    setCancelReason('');
     setPaySlipId(null);
     Promise.all([api.getInvoice(invoiceId), api.invoicePlan(invoiceId)])
       .then(([v, sib]) => {
@@ -209,6 +240,7 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
         e.stopPropagation();
         // ฟอร์มรับชำระเปิดอยู่ Esc ควรพับฟอร์มก่อน ไม่ใช่ปิดทั้งกล่องจนวันที่/วิธีจ่ายที่เลือกไว้หาย
         if (payOpen) setPayOpen(false);
+        else if (adjOpen) setAdjOpen(false);
         else onClose();
         return;
       }
@@ -231,7 +263,7 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
 
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [onClose, payOpen]);
+  }, [onClose, payOpen, adjOpen]);
 
   // ตำแหน่งของใบนี้ในรายการหน้าปัจจุบัน — ใช้ทำปุ่มดูใบก่อนหน้า/ถัดไป
   const index = siblings.indexOf(invoiceId);
@@ -254,7 +286,7 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
 
   function openPaymentForm(slip = null) {
     setPayAmount(String(slip?.extracted_amount ?? item.balance));
-    setPayDate(/^\d{4}-\d{2}-\d{2}$/.test(slip?.extracted_date || '') ? slip.extracted_date : todayTH);
+    setPayDate(/^\d{4}-\d{2}-\d{2}$/.test(slip?.extracted_date || '') ? slip.extracted_date : todayTH());
     setPayMethod(slip ? 'โอน' : PAYMENT_METHODS[0]);
     setPaySlipId(slip?.slip_id ?? null);
     setPayRequestId(crypto.randomUUID());
@@ -264,8 +296,20 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
   // ชำระแล้วถือเป็น "ใบเสร็จรับเงิน" ตามธรรมเนียมเอกสารไทย · ยังไม่ชำระคือ "ใบแจ้งหนี้"
   const isReceipt = item?.status === 'paid';
   const showFinance = isReceipt && docView === 'finance';
+  // ใบเสร็จรายครั้ง / ใบลดหนี้-เพิ่มหนี้ที่เลือกดูอยู่ (ไม่พบ = ใบถูกโหลดใหม่แล้วเอกสารนั้นหาย → กลับไปดูใบแจ้งหนี้)
+  const viewReceipt = docView.startsWith('rc:') ? item?.receipts?.find((r) => r.receipt_id === docView.slice(3)) : null;
+  const viewNote = docView.startsWith('note:') ? item?.adjustments?.find((n) => n.note_id === docView.slice(5)) : null;
+  // 'pv:<refund_id>' = ใบสำคัญจ่ายของเงินคืน (ใช้ refund_id เพราะเงินคืนเก่าอาจยังไม่ได้เลข PV จนกว่าจะ migrate)
+  const viewRefund = docView.startsWith('pv:') ? item?.refunds?.find((r) => String(r.refund_id) === docView.slice(3)) : null;
   const printTitle = item?.invoice_id
-    ? `${isReceipt ? (showFinance ? 'ใบเสร็จรับเงิน_ฝ่ายการเงิน' : 'ใบเสร็จรับเงิน') : 'ใบแจ้งหนี้'}_${item.invoice_id}`.replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_')
+    ? (viewReceipt
+        ? `ใบเสร็จรับเงิน_${viewReceipt.receipt_id}`
+        : viewRefund
+          ? `ใบสำคัญจ่าย_${viewRefund.refund_doc_id ?? item.invoice_id}`
+          : viewNote
+          ? `${viewNote.kind === 'credit' ? 'ใบลดหนี้' : 'ใบเพิ่มหนี้'}_${viewNote.note_id}`
+          : `${isReceipt ? (showFinance ? 'ใบเสร็จรับเงิน_ฝ่ายการเงิน' : 'ใบเสร็จรับเงิน') : 'ใบแจ้งหนี้'}_${item.invoice_id}`
+      ).replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_')
     : null;
 
   // Save as PDF ใช้ชื่อเอกสารเป็นชื่อไฟล์เริ่มต้น และคืนชื่อหน้าเดิมเมื่อปิดเอกสาร
@@ -275,20 +319,53 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
     document.title = printTitle;
     return () => { document.title = previousTitle; };
   }, [printTitle]);
-  // เอกสารยังอยู่ในมือเรา (ส่งมอบให้ลูกค้าครั้งเดียวตอนพิมพ์) จึงยังรีเฟรช/แก้ได้
-  const canEdit = item?.status === 'draft' || item?.status === 'issued';
+  /* แก้ยอด/ดึงยอดจากเคสได้เฉพาะใบร่าง — ใบที่ออกแล้วปรับยอดด้วยใบลดหนี้/เพิ่มหนี้เท่านั้น (4 พ.ย. 2569) */
+  const canEdit = item?.status === 'draft';
+  // ใบที่ออกแล้วยังถือเป็นเอกสาร = ปรับยอดด้วย CN/DN ได้ (ใบร่างแก้ในใบได้เลย · ใบยกเลิกไม่มียอดให้ปรับ)
+  const canAdjust = item?.status === 'issued' || item?.status === 'paid';
   /* ดึงข้อมูลจากเคสมาทับได้จริงไหม — ต้องตรงกับเงื่อนไขใน syncOpenFromCase ฝั่ง server
      ใบงวด/ใบรายครั้ง/ใบที่รับเงินแล้วถูกข้าม ปุ่มรีเฟรชจะกดแล้วไม่เกิดอะไร (หรือ error) จึงไม่โชว์ */
   const refreshable =
     canEdit && !item?.has_items && !item?.is_plan_part && Number(item?.paid_amount ?? 0) === 0;
+  // ใบที่ออกแล้ว server ดึงจากเคสได้แค่ผู้จ่าย (ชื่อ/เลขผู้เสียภาษี/ที่อยู่) — ยอดไม่แตะ
+  const payerRefreshable = item?.status === 'issued' && item?.payer_stale;
+  // ยกเลิกใบได้เมื่อไม่ถือเงินลูกค้าอยู่ — ที่รับไว้ต้องลดหนี้พร้อมคืนเงินก่อน (server ตรวจซ้ำ)
+  // ยกเลิกใบ = เลิกเก็บเงินทั้งใบ เท่ากับลดหนี้เต็มยอด จึงต้องมีสิทธิ์เงินเหมือนใบลดหนี้ (server กันซ้ำ)
+  const canCancel = canMoney && canAdjust && Number(item?.paid_amount ?? 0) <= 0;
+
+  /* ตัวเลขตัวอย่างของฟอร์มใบลดหนี้/เพิ่มหนี้ — server คิดซ้ำเองทุกตัว (ที่นี่แค่ให้เห็นก่อนกด)
+     ลดหนี้จนเงินที่รับไว้เกินยอดใหม่ = ต้องคืนส่วนเกินทันที ฟอร์มจึงขอวันที่/ช่องทางคืนเงินเพิ่ม */
+  const adjValue = Math.round(Number(adjAmount) * 100) / 100;
+  const netNow = Number(item?.net_total ?? item?.total ?? 0);
+  const paidNow = Number(item?.paid_amount ?? 0);
+  const adjAfter = Math.round((adjKind === 'credit' ? netNow - adjValue : netNow + adjValue) * 100) / 100;
+  const adjRefund = adjKind === 'credit' ? Math.max(0, Math.round((paidNow - adjAfter) * 100) / 100) : 0;
+  const isBadDebt = adjKind === 'credit' && adjReasonCode === 'bad_debt';
+  // กติกาเดียวกับ assessAdjustment ฝั่ง server — ที่นี่แค่บอกให้รู้ก่อนกด
+  const adjOverBalance = isBadDebt && adjValue > Math.max(0, Number(item?.balance ?? 0));
+  const adjCancelInstead = adjKind === 'credit' && !isBadDebt && adjValue > 0 && adjAfter <= 0 && paidNow <= 0;
+  const adjValid =
+    adjValue > 0 && adjReason.trim().length >= 3 && adjAfter >= 0 && !adjOverBalance && !adjCancelInstead &&
+    (adjRefund === 0 || !!refundDate);
+
+  function openAdjustForm() {
+    setAdjKind(canMoney ? 'credit' : 'debit');
+    setAdjReasonCode(canMoney ? 'discount' : 'extra_service');
+    setAdjAmount('');
+    setAdjReason('');
+    setRefundDate(todayTH());
+    setRefundMethod(PAYMENT_METHODS[1]);
+    setPayOpen(false);
+    setAdjOpen(true);
+  }
 
   /**
    * ยกเลิกใบ — ใบยังอยู่ในระบบ เปลี่ยนสถานะเป็น "ยกเลิก" เก็บไว้เป็นประวัติ
    * ใช้กับใบที่ออกให้ลูกค้าไปแล้ว (ออกใบแล้ว/ชำระแล้ว) ซึ่งไม่ควรลบให้หายไปเฉยๆ
    */
-  function cancelInvoice(reason = null) {
+  function cancelInvoice() {
     return run(async () => {
-      await api.cancelInvoice(item.invoice_id, reason);
+      await api.cancelInvoice(item.invoice_id, cancelReason.trim());
       setCancelOpen(false);
       setCancelReason('');
       toast(`ยกเลิก ${item.invoice_id} แล้ว`);
@@ -402,6 +479,36 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
      สร้างครั้งเดียวแล้วใช้ซ้ำ สองที่จึงไม่มีวันพิมพ์ออกมาไม่ตรงกับที่เห็น */
   /* เนื้อในของเอกสาร — ใช้สองที่: ตัวที่เห็นในกล่องบนจอ กับสำเนาที่พิมพ์ (.print-sheet) · ตัวเอกสารอยู่ใน CustomerInvoiceDoc (ใช้ร่วมกับลิงก์ลูกค้า) */
   const docBody = item && <CustomerInvoiceDoc item={item} signer={printerName} />;
+  // เอกสารที่ถูกเลือกดู — ใบเสร็จรายครั้ง / ใบลดหนี้-เพิ่มหนี้ / ใบเสร็จฝ่ายการเงิน / ใบแจ้งหนี้ ตามลำดับ
+  const shownBody = !item
+    ? null
+    : viewReceipt
+      ? <ReceiptDoc item={item} receipt={viewReceipt} signer={printerName} />
+      : viewRefund
+        ? (
+          <RefundVoucherDoc
+            item={item}
+            refund={viewRefund}
+            note={item.adjustments?.find((n) => n.note_id === viewRefund.note_id)}
+            signer={printerName}
+          />
+        )
+        : viewNote
+          ? <AdjustmentNoteDoc item={item} note={viewNote} refund={refundOfNote(viewNote.note_id)} signer={printerName} />
+          : showFinance ? financeBody : docBody;
+  // สลิปแนบท้ายเฉพาะตอนพิมพ์ใบแจ้งหนี้/ใบเสร็จรวม — ใบเสร็จรายครั้ง ใบลดหนี้ ใบสำคัญจ่ายเป็นเอกสารเดี่ยว
+  const attachSlips = !viewReceipt && !viewNote && !viewRefund;
+  const receiptOf = (paymentId) => item?.receipts?.find((r) => r.payment_id === paymentId);
+  // เงินคืนของใบลดหนี้ — ยังมีผลก่อน ถ้ายกเลิกไปแล้วพร้อมใบลดหนี้ก็ยังโชว์ไว้เป็นประวัติ
+  function refundOfNote(noteId) {
+    const rows = item?.refunds?.filter((r) => r.note_id === noteId) ?? [];
+    return rows.find((r) => r.status !== 'voided') ?? rows.at(-1);
+  }
+
+  function openRefundEdit(refund) {
+    setRefundEditFor(refundEditFor === refund.refund_id ? null : refund.refund_id);
+    setRefundEdit({ refunded_at: refund.refunded_at, method: refund.method ?? '', note: refund.note ?? '' });
+  }
 
   /*
    * สำเนาสำหรับพิมพ์ — portal ไปเป็นลูกตรงของ <body> แล้ว CSS ตอนพิมพ์ซ่อนทั้งแอป (display: none) เหลือแต่ตัวนี้
@@ -416,11 +523,11 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
     createPortal(
       <div className="print-sheet" aria-hidden="true">
         <div className="invoice-doc">
-          {showFinance ? financeBody : docBody}
+          {shownBody}
 
           {/* สลิปโอนเงินแนบท้ายเอกสาร — มีเฉพาะในสำเนาที่พิมพ์ แต่ละใบขึ้นแผ่นใหม่ต่อจากตัวใบ
               บนจอไม่ต้องเห็นซ้ำ ส่วน "สลิปโอนเงิน" ด้านบนโชว์อยู่แล้ว (รูปเป็น URL เดียวกัน จึงโหลดค้างไว้แล้วตอนกดพิมพ์) */}
-          {item.slips?.some((s) => s.status === 'confirmed') && (
+          {attachSlips && item.slips?.some((s) => s.status === 'confirmed') && (
             <div className="inv-slips">
               {/* หนึ่งสลิปต่อหนึ่งแผ่น — หัวข้ออยู่ในแต่ละแผ่น หยิบแผ่นไหนขึ้นมาก็รู้ว่าเป็นของใบไหน */}
               {item.slips.filter((s) => s.status === 'confirmed').map((slip, i, printed) => (
@@ -473,7 +580,7 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                     ? 'เกินกำหนดชำระ'
                     : item.is_partial
                       ? 'ชำระบางส่วน'
-                      : INVOICE_STATUS_LABELS[item.status]}
+                      : invoiceStatusLabel(item)}
                 </span>
               </div>
               <div className="modal-head-actions">
@@ -551,9 +658,9 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                   </label>
                   <label>
                     ช่องทาง
-                    <select value={payMethod} onChange={(e) => setPayMethod(e.target.value)}>
+                    <SearchSelect value={payMethod} onChange={(e) => setPayMethod(e.target.value)}>
                       {PAYMENT_METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
-                    </select>
+                    </SearchSelect>
                   </label>
                   <div className="pay-form-actions">
                     <button className="btn" disabled={busy} onClick={() => { setPayOpen(false); setPaySlipId(null); }}>ยกเลิก</button>
@@ -588,6 +695,153 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                 </div>
               )}
 
+              {cancelOpen && canCancel && (
+                <div className="notice pay-form no-print">
+                  <p>
+                    ยกเลิก{isReceipt ? 'ใบเสร็จ' : 'ใบแจ้งหนี้'} {item.invoice_id} — ใบจะยังอยู่ในระบบเป็นประวัติ ไม่ถูกลบทิ้ง
+                    และเลขที่เอกสารไม่หาย ระบบจะบันทึกชื่อคุณกับเหตุผลไว้กับใบ
+                  </p>
+                  <label>
+                    เหตุผลที่ยกเลิก
+                    <input
+                      type="text"
+                      value={cancelReason}
+                      maxLength={300}
+                      placeholder="เช่น ลูกค้ายกเลิกบริการ · ออกใบผิด"
+                      onChange={(e) => setCancelReason(e.target.value)}
+                    />
+                  </label>
+                  <div className="pay-form-actions">
+                    <button type="button" className="btn" disabled={busy} onClick={() => setCancelOpen(false)}>
+                      ไม่ยกเลิกแล้ว
+                    </button>
+                    <button
+                      type="button"
+                      className="btn danger"
+                      disabled={busy || cancelReason.trim().length < 3}
+                      onClick={cancelInvoice}
+                    >
+                      ยืนยันยกเลิกใบ
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* ฟอร์มใบลดหนี้/เพิ่มหนี้ — ทางเดียวที่ปรับยอดของใบที่ออกแล้ว (server invoices/ledger.js) */}
+              {adjOpen && canAdjust && (
+                <div className="notice pay-form adj-form no-print">
+                  <label>
+                    ชนิดเอกสาร
+                    <SearchSelect
+                      value={adjKind}
+                      onChange={(e) => {
+                        setAdjKind(e.target.value);
+                        setAdjReasonCode(e.target.value === 'credit' ? 'discount' : 'extra_service');
+                      }}
+                    >
+                      {canMoney && <option value="credit">ใบลดหนี้ (ลดยอด)</option>}
+                      <option value="debit">ใบเพิ่มหนี้ (เพิ่มยอด)</option>
+                    </SearchSelect>
+                  </label>
+                  <label>
+                    ประเภท
+                    <SearchSelect value={adjReasonCode} onChange={(e) => setAdjReasonCode(e.target.value)}>
+                      {ADJUSTMENT_REASON_OPTIONS[adjKind].map(([code, label]) => (
+                        <option key={code} value={code}>{label}</option>
+                      ))}
+                    </SearchSelect>
+                  </label>
+                  <label>
+                    จำนวนเงิน (บาท)
+                    <input
+                      type="number"
+                      min="0.01"
+                      max={adjKind === 'credit' ? netNow : undefined}
+                      step="0.01"
+                      value={adjAmount}
+                      onChange={(e) => setAdjAmount(e.target.value)}
+                    />
+                  </label>
+                  <label className="adj-reason">
+                    เหตุผล (พิมพ์ลงบนเอกสาร)
+                    <input
+                      type="text"
+                      maxLength={300}
+                      value={adjReason}
+                      placeholder={adjKind === 'credit' ? 'เช่น ยกเลิกกะ 2 วัน (2 × 1,500)' : 'เช่น เพิ่มหัตถการ PR0008 ทำแผลขนาดเล็ก'}
+                      onChange={(e) => setAdjReason(e.target.value)}
+                    />
+                  </label>
+                  {adjRefund > 0 && (
+                    <>
+                      <p className="adj-refund-note">
+                        ลดแล้วเงินที่รับไว้เกินยอดใหม่ — ต้องคืนเงินลูกค้า <strong>{amountText(adjRefund)} บาท</strong> พร้อมกัน
+                      </p>
+                      <label>
+                        วันที่คืนเงิน
+                        <input type="date" value={refundDate} max={todayTH()} onChange={(e) => setRefundDate(e.target.value)} />
+                      </label>
+                      <label>
+                        ช่องทางคืนเงิน
+                        <SearchSelect value={refundMethod} onChange={(e) => setRefundMethod(e.target.value)}>
+                          {PAYMENT_METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
+                        </SearchSelect>
+                      </label>
+                    </>
+                  )}
+                  <p className="muted adj-preview">
+                    ยอดสุทธิตอนนี้ {amountText(netNow)} → หลังออกเอกสาร{' '}
+                    <strong>{adjValue > 0 && adjAfter >= 0 ? amountText(adjAfter) : '—'}</strong> บาท
+                    {adjKind === 'credit' && adjAfter < 0 && ' · ลดได้ไม่เกินยอดสุทธิ'}
+                  </p>
+                  {adjOverBalance && (
+                    <p className="adj-refund-note">
+                      ตัดหนี้สูญได้ไม่เกินยอดค้าง {amountText(Math.max(0, Number(item.balance)))} บาท — เงินที่รับมาแล้วตัดเป็นหนี้สูญไม่ได้
+                    </p>
+                  )}
+                  {adjCancelInstead && (
+                    <p className="adj-refund-note">
+                      ใบนี้ยังไม่ได้รับเงิน ลดจนยอดเหลือ 0 เท่ากับไม่มีการขาย — ให้กด “ยกเลิกใบ” แทน
+                      (ถ้าให้บริการแล้วแต่ลูกค้าไม่จ่าย ให้เลือกประเภท “ตัดหนี้สูญ”)
+                    </p>
+                  )}
+                  <div className="pay-form-actions">
+                    <button className="btn" disabled={busy} onClick={() => setAdjOpen(false)}>ยกเลิก</button>
+                    <button
+                      className="btn primary"
+                      disabled={busy || !adjValid}
+                      onClick={() =>
+                        run(async () => {
+                          const res = await api.createInvoiceAdjustment(item.invoice_id, {
+                            kind: adjKind,
+                            reason_code: adjReasonCode,
+                            amount: adjValue,
+                            reason: adjReason.trim(),
+                            refund: adjRefund > 0 ? { refunded_at: refundDate, method: refundMethod } : null,
+                          });
+                          toast(
+                            `ออก${adjKind === 'credit' ? 'ใบลดหนี้' : 'ใบเพิ่มหนี้'} ${res.created_note_id} แล้ว` +
+                              (adjRefund > 0 ? ` · บันทึกคืนเงิน ${amountText(adjRefund)} บาท` : ''),
+                          );
+                          setAdjOpen(false);
+                          setDocView(`note:${res.created_note_id}`);
+                        })
+                      }
+                    >
+                      ออก{adjKind === 'credit' ? 'ใบลดหนี้' : 'ใบเพิ่มหนี้'} {adjValue > 0 ? `${amountText(adjValue)} บาท` : ''}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {item.status === 'cancelled' && item.cancel_reason && (
+                <div className="notice no-print">
+                  <p>
+                    ยกเลิกโดย {item.cancelled_by_name ?? '—'} · {item.cancelled_at ?? ''} — เหตุผล: {item.cancel_reason}
+                  </p>
+                </div>
+              )}
+
               {/* เคสต้นทางถูกยกเลิกแล้วแต่ใบยังเปิดค้างอยู่ — ไม่ใช่ "ข้อมูลไม่ตรง" ที่กดรีเฟรชแล้วจบ
                   แต่เป็นคำถามว่ายังจะเก็บเงินใบนี้อยู่ไหม จึงแยกกล่องออกมา (ตรวจรอบ 13) */}
               {item.case_cancelled && (
@@ -596,22 +850,7 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                     <LineIcon name="alert" className="text-ico" />
                     <strong>เคสของใบนี้ถูกยกเลิกแล้ว</strong> แต่ใบยังเปิดค้างอยู่และยังนับอยู่ในยอดค้างรวม —
                     ตรวจก่อนว่ายังต้องเก็บเงินใบนี้อยู่ไหม ถ้าไม่เก็บแล้วให้กด “ยกเลิกใบนี้”
-                    ถ้าเก็บตามกะที่ไปจริง ให้แก้ยอดก่อนส่งให้ลูกค้า
-                  </p>
-                </div>
-              )}
-
-              {/* ใบนี้ถูกยกเลิกไปแล้ว — ใครสั่งและเพราะอะไร (ดร.ธงชัย 8 พ.ย. 2569)
-                  เงินที่เคยรับมายังนับเป็นรายได้ ใบที่ถูกยกเลิกจึงต้องบอกเหตุผลไว้บนตัวใบเอง
-                  ใบเก่าที่ยกเลิกไปก่อนมีช่องนี้จะไม่มีข้อมูล — ไม่ขึ้นกล่อง ไม่ใช่ขึ้นกล่องว่าง */}
-              {item.status === 'cancelled' && (item.cancel_reason || item.cancelled_by_name) && (
-                <div className="notice stale-notice no-print">
-                  <p>
-                    <LineIcon name="alert" className="text-ico" />
-                    <strong>ใบนี้ถูกยกเลิกแล้ว</strong>
-                    {item.cancel_reason && ` — ${item.cancel_reason}`}
-                    {item.cancelled_by_name && ` · โดย ${item.cancelled_by_name}`}
-                    {item.cancelled_at && ` · ${item.cancelled_at.slice(0, 16)}`}
+                    ถ้าเก็บตามกะที่ไปจริง ให้{canEdit ? 'แก้ยอดก่อนส่งให้ลูกค้า' : 'ออกใบลดหนี้ส่วนที่ไม่ได้ให้บริการ'}
                   </p>
                 </div>
               )}
@@ -628,13 +867,13 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                   )}
                   {item.fee_stale && (
                     <p>
-                      <LineIcon name="alert" className="text-ico" />ยอดตามเคสตอนนี้ (ค่าบริการ + อุปกรณ์เสริม) คือ <strong>{amountText(item.case_fee)}</strong>
-                      {' '}แต่ยอดสุทธิของใบนี้เป็น <strong>{amountText(item.total)}</strong> — ยังไม่ตรงกัน
+                      <LineIcon name="alert" className="text-ico" />ยอดตามเคสตอนนี้ (ค่าบริการ + อุปกรณ์เสริมในใบนี้) คือ <strong>{amountText(item.case_fee)}</strong>
+                      {' '}แต่ยอดสุทธิของใบนี้เป็น <strong>{amountText(item.net_total ?? item.total)}</strong> — ยังไม่ตรงกัน
                     </p>
                   )}
                   {item.service_stale && (
                     <p>
-                      <LineIcon name="alert" className="text-ico" />เคสนี้เปลี่ยนแพ็คเกจ/บริการ หรืออุปกรณ์เสริมหลังออกใบนี้ —
+                      <LineIcon name="alert" className="text-ico" />เคสนี้เปลี่ยนแพ็คเกจ/บริการหลังออกใบนี้ —
                       {' '}รายการและยอดในใบยังเป็นของชุดเดิม
                     </p>
                   )}
@@ -643,7 +882,8 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                       ? 'กดรีเฟรชเพื่อดึงข้อมูลล่าสุดจากเคสมาใส่ใบนี้'
                       : canEdit
                         ? 'ใบนี้แบ่งงวด แตกรายครั้ง หรือรับเงินมาแล้ว ระบบจึงปรับให้ตามเคสเองไม่ได้ — ตรวจยอดแล้วแก้ที่ใบ หรือลบแล้วออกใหม่'
-                        : 'ใบที่ชำระแล้วแก้ไม่ได้ ต้องยกเลิกแล้วออกใบใหม่'}
+                        : `ใบที่ออกแล้วแก้ยอดในใบไม่ได้ — ${item.fee_stale ? 'ลดยอดให้ออกใบลดหนี้ เพิ่มยอดให้ออกใบเพิ่มหนี้' : 'ปรับยอดด้วยใบลดหนี้/ใบเพิ่มหนี้'}`
+                          + (payerRefreshable ? ' · ผู้จ่ายดึงจากเคสได้ด้วยปุ่มด้านล่าง' : '')}
                     {item.service_stale && ' · ถ้ายอดเดิมยังถูกต้อง (เช่น ส่วนต่างออกใบแยก) กด "รับทราบ" เพื่อปิดคำเตือนเรื่องแพ็คเกจ'}
                   </p>
                   <div className="stale-actions">
@@ -656,7 +896,7 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                         รับทราบ ใบนี้ถูกต้องแล้ว
                       </button>
                     )}
-                    {refreshable ? (
+                    {refreshable && (
                       <button
                         className="btn primary"
                         disabled={busy}
@@ -664,17 +904,20 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                       >
                         รีเฟรชจากเคส
                       </button>
-                    ) : canEdit ? null : (
-                      <ConfirmButton
-                        className="btn danger-ghost"
+                    )}
+                    {payerRefreshable && (
+                      <button
+                        className="btn"
                         disabled={busy}
-                        title={`ลบใบเสร็จ ${item.invoice_id} ที่รับชำระแล้วทิ้งถาวร?`}
-                        detail="ลบแล้วกู้คืนไม่ได้ และเลขที่ใบจะข้าม — ระบบจะถามต่อว่าจะออกใบใหม่ตามข้อมูลปัจจุบันเลยไหม"
-                        confirmLabel="ลบถาวร"
-                        onConfirm={deleteInvoice}
+                        onClick={() => run(() => api.refreshInvoice(item.invoice_id))}
                       >
-                        ลบแล้วออกใบใหม่
-                      </ConfirmButton>
+                        ดึงผู้จ่ายจากเคส
+                      </button>
+                    )}
+                    {canAdjust && (item.fee_stale || item.service_stale) && (
+                      <button className="btn primary" disabled={busy} onClick={openAdjustForm}>
+                        ออกใบลดหนี้/เพิ่มหนี้
+                      </button>
                     )}
                   </div>
                 </div>
@@ -687,11 +930,20 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                   <div className="pay-figures">
                     <div>
                       <span className="field-label">ยอดสุทธิ</span>
-                      <strong>{amountText(item.total)}</strong>
+                      <strong>{amountText(item.net_total ?? item.total)}</strong>
+                      {/* ยอดหน้าใบไม่เปลี่ยนหลังออกใบ — ส่วนต่างมาจากใบลดหนี้/เพิ่มหนี้ด้านล่าง */}
+                      {Number(item.adjustment_total ?? 0) !== 0 && (
+                        <span className="muted pay-figure-note">
+                          หน้าใบ {amountText(item.total)} · ปรับ {item.adjustment_total > 0 ? '+' : '−'}{amountText(Math.abs(item.adjustment_total))}
+                        </span>
+                      )}
                     </div>
                     <div>
                       <span className="field-label">รับมาแล้ว</span>
                       <strong>{amountText(item.paid_amount)}</strong>
+                      {Number(item.refunded_amount ?? 0) > 0 && (
+                        <span className="muted pay-figure-note">คืนลูกค้าแล้ว {amountText(item.refunded_amount)}</span>
+                      )}
                     </div>
                     <div className={item.balance > 0 ? 'is-due' : ''}>
                       <span className="field-label">คงเหลือ</span>
@@ -787,6 +1039,16 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                             {pmt.method ?? '—'}
                             {pmt.received_by_name && ` · รับโดย ${pmt.received_by_name}`}
                           </span>
+                          {/* ใบเสร็จของการรับเงินครั้งนี้ — กดแล้วเอกสารด้านล่างเปลี่ยนเป็นใบเสร็จใบนั้น (พิมพ์ได้ทันที) */}
+                          {receiptOf(pmt.payment_id) && (
+                            <button
+                              type="button"
+                              className="inline-link mono"
+                              onClick={() => setDocView(`rc:${receiptOf(pmt.payment_id).receipt_id}`)}
+                            >
+                              {receiptOf(pmt.payment_id).receipt_id}
+                            </button>
+                          )}
                           {/* กรอกยอดผิด/บันทึกซ้ำ — เดิมแก้ไม่ได้เลย ต้องยกเลิกใบทั้งใบแล้วออกใหม่
                               เซิร์ฟเวอร์เป็นคนตัดสินว่าใครยกเลิกได้ (ดู assessPaymentVoid) ที่นี่แค่เปิดช่องให้กรอกเหตุผล */}
                           <button
@@ -841,8 +1103,163 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                             {v.voided_by_name && ` · โดย ${v.voided_by_name}`}
                             {v.voided_at && ` · ${v.voided_at.slice(0, 16)}`}
                           </span>
+                          {receiptOf(v.payment_id) && (
+                            <button
+                              type="button"
+                              className="inline-link mono"
+                              onClick={() => setDocView(`rc:${receiptOf(v.payment_id).receipt_id}`)}
+                            >
+                              {receiptOf(v.payment_id).receipt_id}
+                            </button>
+                          )}
                         </li>
                       ))}
+                    </ul>
+                  )}
+
+                  {/* ใบลดหนี้/เพิ่มหนี้ของใบนี้ — ที่มาของส่วนต่างระหว่างยอดหน้าใบกับยอดสุทธิ */}
+                  {item.adjustments?.length > 0 && (
+                    <ul className="pay-history adj-history">
+                      {item.adjustments.map((n) => {
+                        const refund = refundOfNote(n.note_id);
+                        const refundActive = refund && refund.status !== 'voided';
+                        return (
+                          <li key={n.note_id} className={n.status === 'cancelled' ? 'is-void' : ''}>
+                            <span className="pay-history-date">{docDate(n.issue_date)}</span>
+                            <span className="pay-history-amount">
+                              {n.kind === 'credit' ? '−' : '+'}{amountText(n.amount)}
+                            </span>
+                            <span className="muted">
+                              <span className={`badge ${n.kind === 'credit' ? 'adj-credit' : 'adj-debit'}`}>
+                                {n.kind === 'credit' ? 'ลดหนี้' : 'เพิ่มหนี้'}
+                              </span>
+                              {n.status === 'cancelled' && <span className="badge">ยกเลิกแล้ว</span>}
+                              {ADJUSTMENT_REASON_LABELS[n.reason_code] && n.reason_code !== 'other' && (
+                                <span className="badge adj-reason-tag">{ADJUSTMENT_REASON_LABELS[n.reason_code]}</span>
+                              )}
+                              {n.reason}
+                              {refund && ` · คืนเงิน ${amountText(refund.amount)} ${docDate(refund.refunded_at)} (${refund.method ?? '—'})`}
+                              {refund?.status === 'voided' && ' · เงินคืนยกเลิกแล้ว'}
+                              {n.issued_by_name && ` · โดย ${n.issued_by_name}`}
+                            </span>
+                            <button type="button" className="inline-link mono" onClick={() => setDocView(`note:${n.note_id}`)}>
+                              {n.note_id}
+                            </button>
+                            {/* ใบสำคัญจ่ายของเงินคืน — เปิดดู/พิมพ์เป็นเอกสารแยก */}
+                            {refund && (
+                              <button
+                                type="button"
+                                className="inline-link mono"
+                                onClick={() => setDocView(`pv:${refund.refund_id}`)}
+                              >
+                                {refund.refund_doc_id ?? 'ใบสำคัญจ่าย'}
+                              </button>
+                            )}
+                            {/* แก้ข้อมูลเงินคืนที่กรอกผิด — ยอดเงินแก้ไม่ได้ (ยอดผิด = ใบลดหนี้ผิด ต้องยกเลิกแล้วออกใหม่) */}
+                            {canMoney && refundActive && (
+                              <button
+                                type="button"
+                                className="inline-link"
+                                disabled={busy}
+                                onClick={() => openRefundEdit(refund)}
+                              >
+                                {refundEditFor === refund.refund_id ? 'ไม่แก้แล้ว' : 'แก้ข้อมูลเงินคืน'}
+                              </button>
+                            )}
+                            {refundActive && refundEditFor === refund.refund_id && (
+                              <div className="pay-void-form refund-edit-form">
+                                <input
+                                  type="date"
+                                  aria-label="วันที่คืนเงิน"
+                                  value={refundEdit.refunded_at}
+                                  max={todayTH()}
+                                  onChange={(e) => setRefundEdit((v) => ({ ...v, refunded_at: e.target.value }))}
+                                />
+                                <SearchSelect
+                                  aria-label="ช่องทางคืนเงิน"
+                                  value={refundEdit.method}
+                                  onChange={(e) => setRefundEdit((v) => ({ ...v, method: e.target.value }))}
+                                >
+                                  {[...new Set([...PAYMENT_METHODS, refundEdit.method].filter(Boolean))].map((m) => (
+                                    <option key={m} value={m}>{m}</option>
+                                  ))}
+                                </SearchSelect>
+                                <input
+                                  type="text"
+                                  aria-label="หมายเหตุ"
+                                  maxLength={500}
+                                  placeholder="หมายเหตุ เช่น เลขอ้างอิงการโอนคืน"
+                                  value={refundEdit.note}
+                                  onChange={(e) => setRefundEdit((v) => ({ ...v, note: e.target.value }))}
+                                />
+                                <button
+                                  type="button"
+                                  className="btn"
+                                  disabled={busy || !refundEdit.refunded_at}
+                                  onClick={() =>
+                                    run(async () => {
+                                      await api.updateInvoiceRefund(item.invoice_id, refund.refund_id, {
+                                        refunded_at: refundEdit.refunded_at,
+                                        method: refundEdit.method || null,
+                                        note: refundEdit.note.trim() || null,
+                                      });
+                                      setRefundEditFor(null);
+                                      toast('แก้ข้อมูลเงินคืนแล้ว — ค่าเดิมเก็บไว้ในประวัติ');
+                                    })
+                                  }
+                                >
+                                  บันทึก
+                                </button>
+                              </div>
+                            )}
+                            {/* ยกเลิกเอกสารที่ออกผิด — ใบลดหนี้ที่มีเงินคืน เงินคืนถูกยกเลิกไปพร้อมกัน (server ทำใน transaction เดียว)
+                                ใบเพิ่มหนี้ที่ทำให้ยอดต่ำกว่าเงินที่รับ server ปฏิเสธ */}
+                            {canMoney && canAdjust && n.status === 'issued' && (
+                              <button
+                                type="button"
+                                className="inline-link danger-link"
+                                disabled={busy}
+                                onClick={() => { setNoteCancelFor(noteCancelFor === n.note_id ? null : n.note_id); setNoteCancelReason(''); }}
+                              >
+                                {noteCancelFor === n.note_id ? 'ไม่ยกเลิกแล้ว' : 'ยกเลิกเอกสารนี้'}
+                              </button>
+                            )}
+                            {noteCancelFor === n.note_id && (
+                              <div className="pay-void-form">
+                                {refundActive && (
+                                  <p className="adj-refund-note">
+                                    ใบนี้มีเงินคืน {amountText(refund.amount)} บาท ({refund.refund_doc_id ?? 'ใบสำคัญจ่าย'}) —
+                                    ยกเลิกใบลดหนี้แล้วเงินคืนจะถูกยกเลิกด้วย ยอดค้างของลูกค้าจะกลับมา
+                                    ใช้เมื่อไม่ได้โอนคืนจริง หรือลูกค้าโอนเงินกลับมาแล้วเท่านั้น
+                                  </p>
+                                )}
+                                <input
+                                  type="text"
+                                  value={noteCancelReason}
+                                  maxLength={300}
+                                  placeholder="เหตุผล เช่น ออกผิดใบ · ยอดผิด"
+                                  onChange={(e) => setNoteCancelReason(e.target.value)}
+                                />
+                                <button
+                                  type="button"
+                                  className="btn danger"
+                                  disabled={busy || noteCancelReason.trim().length < 3}
+                                  onClick={() =>
+                                    run(async () => {
+                                      await api.cancelInvoiceAdjustment(item.invoice_id, n.note_id, noteCancelReason.trim());
+                                      setNoteCancelFor(null);
+                                      setNoteCancelReason('');
+                                      toast(`ยกเลิก ${n.note_id} แล้ว${refundActive ? ' พร้อมเงินคืน' : ''}`);
+                                    })
+                                  }
+                                >
+                                  ยืนยันยกเลิกเอกสาร
+                                </button>
+                              </div>
+                            )}
+                          </li>
+                        );
+                      })}
                     </ul>
                   )}
 
@@ -865,8 +1282,8 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                             <figcaption className="muted">
                               {docDate(slip.created_at.slice(0, 10))} · {formatFileSize(slip.image_size)}
                               {slip.uploaded_by_name && <><br />แนบโดย {slip.uploaded_by_name}</>}
-                              <br />
-                              <ConfirmButton
+                              {canDeleteSlip && <br />}
+                              {canDeleteSlip && <ConfirmButton
                                 className="inline-link"
                                 disabled={busy}
                                 title="ลบสลิปนี้?"
@@ -875,7 +1292,7 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                                 onConfirm={() => run(() => api.deleteInvoiceSlip(item.invoice_id, slip.slip_id))}
                               >
                                 ลบ
-                              </ConfirmButton>
+                              </ConfirmButton>}
                             </figcaption>
                           </figure>
                         ))}
@@ -995,7 +1412,7 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
 
               {/* ตัวเอกสารบนจอ (ดูก่อนพิมพ์) — ตอนสั่งพิมพ์ใช้สำเนาใน .print-sheet ด้านล่างแทน */}
               <div className={`invoice-doc ${item.needs_plan ? 'is-hidden' : ''}`}>
-                {showFinance ? financeBody : docBody}
+                {shownBody}
               </div>
             </div>
 
@@ -1007,44 +1424,8 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                   เป็นหลักฐานการเงิน ลบทิ้งแล้วไม่เหลืออะไรบอกว่าเคยรับเงินก้อนนี้มา
                   (ต่างจากใบร่าง/ใบที่ออกผิดซึ่งลบทิ้งได้ ตามที่ตั้งใจไว้ในโค้ดฝั่ง server)
                   ถ้าจำเป็นต้องลบจริงๆ ยกเลิกก่อนแล้วค่อยลบใบที่ยกเลิกได้ — สองจังหวะสำหรับของที่กู้ไม่ได้ */}
-              {item.status === 'paid' ? (
-                /* ใบที่รับเงินมาแล้ว — ต้องกรอกเหตุผลก่อน แล้วเซิร์ฟเวอร์เป็นคนตัดสินว่าใครยกเลิกได้
-                   (ผู้จัดการ/ฝ่ายการเงินเท่านั้น ดู assessCancelAuthority) ที่นี่แค่เปิดช่องให้กรอก
-                   เหตุผลถูกเก็บไว้บนใบพร้อมชื่อคนกดและเวลา — เงินที่หายจากรายงานต้องมีร่องรอย */
-                <div className="foot-danger invoice-cancel-paid">
-                  <button
-                    type="button"
-                    className="btn danger-ghost"
-                    disabled={busy}
-                    onClick={() => { setCancelOpen(!cancelOpen); setCancelReason(''); }}
-                  >
-                    {cancelOpen ? 'ไม่ยกเลิกแล้ว' : 'ยกเลิกใบนี้'}
-                  </button>
-                  {cancelOpen && (
-                    <div className="pay-void-form">
-                      <input
-                        type="text"
-                        value={cancelReason}
-                        maxLength={300}
-                        placeholder="เหตุผล เช่น ออกใบผิดคน · คืนเงินแล้ว"
-                        onChange={(e) => setCancelReason(e.target.value)}
-                      />
-                      <button
-                        type="button"
-                        className="btn danger"
-                        disabled={busy || cancelReason.trim().length < 3}
-                        onClick={() => cancelInvoice(cancelReason.trim())}
-                      >
-                        ยืนยันยกเลิกใบ
-                      </button>
-                      <p className="muted">
-                        ใบจะยังอยู่ในระบบเป็นประวัติ · ยอดที่รับมาแล้วยังนับเป็นรายได้ตามเดิม
-                        — ถ้าคืนเงินให้ลูกค้าไปแล้ว ให้กด “ยกเลิกรายการนี้” ใต้รายการรับเงินด้วย
-                      </p>
-                    </div>
-                  )}
-                </div>
-              ) : (
+              {/* ลบถาวรได้เฉพาะใบร่าง — ใบที่ออกแล้วมีเลขที่เอกสาร ต้องยกเลิกแทน (server ปฏิเสธเหมือนกัน · 4 พ.ย. 2569) */}
+              {item.status === 'draft' && (
                 <ConfirmButton
                   className="btn danger-ghost foot-danger"
                   disabled={busy}
@@ -1067,34 +1448,62 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                 </ConfirmButton>
               )}
 
-              {/* ใบที่ออกให้ลูกค้าไปแล้วแต่ยังไม่ได้เงิน — ยกเลิกได้โดยไม่ต้องลบทิ้ง เก็บไว้เป็นประวัติ
-                  endpoint /cancel มีมาตั้งแต่แรกแต่ไม่เคยมีปุ่มเรียกใช้เลย */}
-              {item.status === 'issued' && (
-                <ConfirmButton
-                  className="btn"
+              {/* ใบที่ออกแล้วแต่ไม่ได้ถือเงินลูกค้า — ยกเลิกได้โดยไม่ต้องลบทิ้ง เก็บไว้เป็นประวัติ
+                  ใบที่รับเงินไว้ต้องออกใบลดหนี้เต็มยอดพร้อมคืนเงินก่อน ปุ่มนี้จึงโผล่หลังคืนเงินครบแล้ว */}
+              {canCancel && (
+                <button
+                  type="button"
+                  className="btn danger-ghost foot-danger"
                   disabled={busy}
-                  title={`ยกเลิกใบแจ้งหนี้ ${item.invoice_id}?`}
-                  detail="ใบจะยังอยู่ในระบบเป็นประวัติ ไม่ถูกลบทิ้ง"
-                  confirmLabel="ยกเลิกใบ"
-                  cancelLabel="ไม่ยกเลิกแล้ว"
-                  onConfirm={cancelInvoice}
+                  onClick={() => {
+                    setCancelOpen((open) => !open);
+                    setCancelReason('');
+                    setPayOpen(false);
+                    setAdjOpen(false);
+                  }}
                 >
                   ยกเลิกใบ
-                </ConfirmButton>
+                </button>
               )}
 
-              {/* ยังไม่ได้เลือกวิธีเก็บเงิน = ยังไม่มีเอกสารให้พิมพ์/ออก/รับเงิน */}
-              {/* ชำระแล้ว = ออกได้สองเอกสาร — เลือกที่นี่ ตัวเอกสารด้านบนเปลี่ยนตาม และปุ่มพิมพ์พิมพ์ใบที่เลือกอยู่ */}
-              {isReceipt && (
-                <select
+              {canAdjust && (
+                <button
+                  className="btn"
+                  disabled={busy}
+                  title={Number(item.paid_amount) > 0 ? 'ยกเลิกใบที่รับเงินแล้ว = ออกใบลดหนี้เต็มยอดพร้อมคืนเงินก่อน' : undefined}
+                  onClick={() => (adjOpen ? setAdjOpen(false) : openAdjustForm())}
+                >
+                  ใบลดหนี้/เพิ่มหนี้
+                </button>
+              )}
+
+              {/* เลือกเอกสารที่จะดู/พิมพ์ — ตัวเอกสารด้านบนเปลี่ยนตาม และปุ่มพิมพ์พิมพ์ใบที่เลือกอยู่
+                  ชำระแล้วมีใบเสร็จฝ่ายการเงิน · รับเงินแต่ละครั้งมีใบเสร็จของตัวเอง · ใบลดหนี้/เพิ่มหนี้แยกใบ */}
+              {(isReceipt || item.receipts?.length > 0 || item.adjustments?.length > 0) && !item.needs_plan && (
+                <SearchSelect
                   className="foot-switch"
                   aria-label="เลือกเอกสารที่จะดู/พิมพ์"
-                  value={docView}
+                  value={viewReceipt || viewNote || viewRefund || docView === 'finance' ? docView : 'customer'}
                   onChange={(e) => setDocView(e.target.value)}
                 >
-                  <option value="customer">ใบเสร็จ (ลูกค้า)</option>
-                  <option value="finance">ใบเสร็จฝ่ายการเงิน</option>
-                </select>
+                  <option value="customer">{isReceipt ? 'ใบเสร็จรวม (ลูกค้า)' : 'ใบแจ้งหนี้'}</option>
+                  {isReceipt && <option value="finance">ใบเสร็จฝ่ายการเงิน</option>}
+                  {item.receipts?.map((r) => (
+                    <option key={r.receipt_id} value={`rc:${r.receipt_id}`}>
+                      ใบเสร็จ {r.receipt_id} · {amountText(r.amount)}{r.status === 'voided' ? ' (ยกเลิก)' : ''}
+                    </option>
+                  ))}
+                  {item.adjustments?.map((n) => (
+                    <option key={n.note_id} value={`note:${n.note_id}`}>
+                      {n.kind === 'credit' ? 'ใบลดหนี้' : 'ใบเพิ่มหนี้'} {n.note_id}{n.status === 'cancelled' ? ' (ยกเลิก)' : ''}
+                    </option>
+                  ))}
+                  {item.refunds?.map((r) => (
+                    <option key={r.refund_id} value={`pv:${r.refund_id}`}>
+                      ใบสำคัญจ่าย {r.refund_doc_id ?? `#${r.refund_id}`} · {amountText(r.amount)}{r.status === 'voided' ? ' (ยกเลิก)' : ''}
+                    </option>
+                  ))}
+                </SearchSelect>
               )}
 
               {lineInfo && (
@@ -1203,7 +1612,7 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                   disabled={busy}
                   onClick={() => {
                     if (payOpen) { setPayOpen(false); setPaySlipId(null); }
-                    else openPaymentForm();
+                    else { setAdjOpen(false); openPaymentForm(); }
                   }}
                 >
                   บันทึกการชำระเงิน

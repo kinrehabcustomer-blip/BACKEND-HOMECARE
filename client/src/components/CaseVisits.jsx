@@ -2,13 +2,20 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { useToast } from '../toast.jsx';
 import {
-  POSITION_LABELS, VISIT_STATE_LABELS, MONTH_LABELS, formatBaht, formatDate, timeText, toBuddhistYear,
+  POSITION_LABELS, VISIT_STATE_LABELS, MONTH_LABELS, formatBaht, formatDate, timeText, toBuddhistYear, todayTH,
 } from '../labels.js';
 import LineIcon from './LineIcon.jsx';
 import TimeSelect from './TimeSelect.jsx';
 import { caseCode } from '../lib/patientCode.js';
+import SearchSelect from './SearchSelect.jsx';
 
 const WEEKDAYS = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
+
+/* สีประจำตัวของแต่ละคนในเคสที่มีหลายคน (ผู้ใช้ขอ 6 พ.ย. 2569) — จุดบนปฏิทิน/ชิปชื่อ/แถวนัดใช้สีเดียวกัน
+   เลี่ยงทอง/เขียว/แดง ที่ปฏิทินใช้บอกสถานะนัดอยู่แล้ว · เกิน 6 คนวนสีซ้ำ (ยังมีชื่อกำกับทุกที่) */
+const PERSON_COLORS = 6;
+// ชิปชื่อเกินนี้แถวจะยาวเกินอ่าน — แถบลงนัดกลับไปใช้ช่องค้นหาชื่อแทน
+const MAX_PERSON_CHIPS = 6;
 
 /**
  * ปุ่มเลือกเร็วกวาดกี่วัน — "หนึ่งเดือนของสัญญา" คือ 30 วันติดต่อกัน ไม่ใช่ถึงสิ้นเดือนตามปฏิทิน
@@ -28,10 +35,8 @@ const nextDay = (key) => {
 
 /** 'YYYY-MM-DD' ประกอบเอง — ไม่ใช้ toISOString เพราะแปลงเป็น UTC แล้ววันเพี้ยน */
 const iso = (y, m, d) => `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-const todayISO = () => {
-  const t = new Date();
-  return iso(t.getFullYear(), t.getMonth() + 1, t.getDate());
-};
+// วันนี้ตามเวลาไทย (ไม่ใช่นาฬิกาเครื่อง) — server ตัดสิน "กะที่ผ่านมาแล้ว" ด้วยวันไทย ปุ่มต้องตรงกัน
+const todayISO = () => todayTH();
 
 /**
  * เวลากะที่ใช้จริงซ้ำๆ — กดชิปแทนการพิมพ์
@@ -137,7 +142,13 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
 
         const inCase = new Set([caseItem?.assigned_to, ...team.map((m) => m.employee_id)].filter(Boolean));
         // ลงกะได้เฉพาะสายดูแล/สายบำบัด — server กันซ้ำตอนบันทึก (ดู ensureAssignable)
-        setStaff(all.filter((e) => inCase.has(e.employee_id) && e.can_take_cases));
+        // ผู้รับผิดชอบหลักขึ้นก่อนเสมอ — ได้สีแรกและเป็นคนตั้งต้นของการลงนัด
+        const eligible = all.filter((e) => inCase.has(e.employee_id) && e.can_take_cases);
+        eligible.sort((a, b) => (b.employee_id === caseItem?.assigned_to) - (a.employee_id === caseItem?.assigned_to));
+        setStaff(eligible);
+        /* หลายคน = ต้องรู้เสมอว่ากำลังลงให้ใคร — ตั้งต้นที่ผู้รับผิดชอบหลัก (ตรงกับที่ server เติมให้ถ้าไม่ระบุ)
+           คนเดียว = เหมือนเดิม (กะ: เลือกจากช่องค้นหา · นัดกายภาพ: ผู้รับผิดชอบหลักเสมอ) */
+        if (eligible.length >= 2) setWho((w) => w || eligible[0].employee_id);
       })
       .catch((e) => !cancelled && setError(e.message));
     return () => {
@@ -145,14 +156,36 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
     };
   }, [caseId, caseItem?.assigned_to]);
 
+  /* เคสที่มีหลายคน: ดูตารางของ "ทุกคน" รวมกัน หรือของคนเดียว (view = รหัสพนักงาน)
+     เลือกดูคนไหน = ลงนัดให้คนนั้นด้วย (who) และ "ลบของวันที่เลือก" ลบเฉพาะของคนนั้น
+     เดิมนัดกายภาพไม่มีช่องเลือกคนเลย ทุกนัดตกเป็นของผู้รับผิดชอบหลักคนเดียว — ทีมสองคนลงตารางแยกกันไม่ได้ */
+  const multi = staff.length >= 2;
+  const [view, setView] = useState('');
+  const colorIndex = useMemo(() => new Map(staff.map((s, i) => [s.employee_id, i % PERSON_COLORS])), [staff]);
+  const dotClass = (id) => (colorIndex.has(id) ? `pc-${colorIndex.get(id)}` : 'pc-none');
+  const nameOf = (id) => {
+    const s = staff.find((x) => x.employee_id === id);
+    return s ? `${s.first_name} ${s.last_name}`.trim() : null;
+  };
+  const shown = useMemo(
+    () => (multi && view ? visits.filter((v) => v.assigned_to === view) : visits),
+    [visits, multi, view],
+  );
+  const countFor = (id) => visits.filter((v) => v.assigned_to === id && v.status !== 'cancelled').length;
+
+  function pickView(id) {
+    setView(id);
+    if (id) setWho(id); // ดูของใคร = ลงให้คนนั้น — กันลงผิดคนตอนกำลังดูตารางของอีกคนอยู่
+  }
+
   const byDate = useMemo(() => {
     const map = new Map();
-    for (const v of visits) {
+    for (const v of shown) {
       if (!map.has(v.visit_date)) map.set(v.visit_date, []);
       map.get(v.visit_date).push(v);
     }
     return map;
-  }, [visits]);
+  }, [shown]);
 
   const booked = visits.filter((v) => v.status !== 'cancelled').length;
   const doneCount = visits.filter((v) => v.state === 'done').length;
@@ -218,7 +251,11 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
       } else {
         setVisits(res.visits);
         if (res.deleted != null) {
-          toast(`ลบ ${res.deleted} ${unit}${res.kept ? ` · เก็บ ${res.kept} ${unit}ที่เช็คอินไปแล้วไว้` : ''}`);
+          toast(
+            `ลบ ${res.deleted} ${unit}` +
+              (res.kept ? ` · เก็บ ${res.kept} ${unit}ที่เช็คอินไปแล้วไว้` : '') +
+              (res.past ? ` · ${res.past} ${unit}ที่ผ่านมาแล้วลบไม่ได้ (ถ้าไม่ได้ไปให้กด "ยกเลิก" ที่${unit}นั้น)` : ''),
+          );
         } else if (res.added != null) {
           toast(`บันทึก ${res.added} ${unit}${res.skipped ? ` · ข้าม ${res.skipped} วันที่มี${unit}เหมือนกันอยู่แล้ว` : ''}`);
         }
@@ -374,6 +411,29 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
       )}
       {error && <p className="error">{error}</p>}
 
+      {/* เคสหลายคน: แท็บเลือกดูตารางของใคร — ตัวเลข = นัดที่ยังไม่ยกเลิกของคนนั้น */}
+      {multi && (
+        <div className="visit-people" role="group" aria-label={`ดู${unit}ของ`}>
+          <button type="button" className="vp-chip" aria-pressed={view === ''} onClick={() => pickView('')}>
+            ทุกคน <span className="vp-n">{booked}</span>
+          </button>
+          {staff.map((s) => (
+            <button
+              key={s.employee_id}
+              type="button"
+              className="vp-chip"
+              aria-pressed={view === s.employee_id}
+              onClick={() => pickView(s.employee_id)}
+              title={`${s.first_name} ${s.last_name} · ${POSITION_LABELS[s.position] ?? ''}`}
+            >
+              <i className={`vp-dot ${dotClass(s.employee_id)}`} aria-hidden="true" />
+              <span className="vp-name">{s.first_name} {s.last_name}</span>
+              <span className="vp-n">{countFor(s.employee_id)}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* ปฏิทินอยู่บนสุด — เป็นสิ่งที่คนเปิดหน้านี้มาดู ฟอร์มค่อยโผล่ตอนเลือกวันแล้ว */}
       <div className="mini-cal">
         {WEEKDAYS.map((w) => <div key={w} className="mini-cal-head">{w}</div>)}
@@ -395,6 +455,20 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
                 .map((v) => `${[v.planned_start, v.planned_end].filter(Boolean).join('-') || 'ไม่ระบุเวลา'} · ${v.assigned_name ?? 'ไม่ระบุคน'}`)
                 .join('\n')
             : '';
+          /* เคสหลายคน: วันที่มีนัดรออยู่ ระบายด้วยสีของคนที่ไป (ผู้ใช้ขอ 6 พ.ย. 2569) แทนทองเดียวกันทุกช่อง
+             สองคนในวันเดียว = แบ่งช่องเฉียงครึ่ง/สามส่วน · วันที่ไปแล้ว/ยกเลิกหมดยังใช้สีสถานะเดิม (เขียว/แดง) */
+          const cls = dayClass(list);
+          const people = multi && cls.includes('visit-scheduled')
+            ? [...new Set(list.filter((v) => v.status === 'scheduled').map((v) => v.assigned_to))].slice(0, 3)
+            : [];
+          const tone = (id) => (colorIndex.has(id) ? `var(--pc-${colorIndex.get(id)})` : 'var(--pc-none)');
+          const fill = people.length === 0
+            ? null
+            : people.length === 1
+              ? tone(people[0])
+              : `linear-gradient(135deg, ${people
+                  .map((id, n) => `${tone(id)} ${(n * 100) / people.length}% ${((n + 1) * 100) / people.length}%`)
+                  .join(', ')})`;
           const title = [
             formatDate(key),
             existing,
@@ -412,7 +486,8 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
               aria-pressed={isPicked}
               className={[
                 'mini-cal-day',
-                dayClass(list),
+                cls,
+                fill ? 'by-person' : '',
                 key === today ? 'is-today' : '',
                 isPicked ? 'is-picked' : '',
                 hasConflict ? 'has-conflict' : '',
@@ -420,9 +495,18 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
               ].filter(Boolean).join(' ')}
               onClick={() => toggleDay(key)}
               title={title}
+              style={fill ? { '--day-fill': fill } : undefined}
             >
               {day}
               {list.length > 0 && <span className="mini-cal-count">{list.length}</span>}
+              {/* ดูทุกคน: วันที่ไม่ได้ระบายสีคน (ไปแล้ว/ยกเลิก) ยังมีจุดสีบอกว่าเป็นนัดของใคร (สูงสุด 3 จุด) */}
+              {multi && !view && !fill && list.length > 0 && (
+                <span className="mini-cal-dots" aria-hidden="true">
+                  {[...new Set(list.filter((v) => v.status !== 'cancelled').map((v) => v.assigned_to))]
+                    .slice(0, 3)
+                    .map((id) => <i key={id ?? 'none'} className={`vp-dot ${dotClass(id)}`} />)}
+                </span>
+              )}
               {hasConflict && <span className="mini-cal-warn" aria-hidden="true">!</span>}
             </button>
           );
@@ -495,16 +579,37 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
             )}
           </p>
 
-          {/* คนที่ไป: เฉพาะกะ Homecare — นัดกายภาพใช้ผู้รับผิดชอบหลักของเคส (นักกายภาพบำบัดของคอร์สนั้น) */}
-          {!isAppt && (
-            <select value={who} disabled={busy} onChange={(e) => setWho(e.target.value)}>
-              <option value="">— ไม่ระบุคน —</option>
+          {/* หลายคน (ไม่เกิน 6): ชิปชื่อ แตะเลือกได้ทันทีและเห็นครบว่ากำลังลงให้ใคร — ใช้ทั้งกะและนัดกายภาพ */}
+          {multi && staff.length <= MAX_PERSON_CHIPS && (
+            <div className="time-chips who-chips" role="radiogroup" aria-label={`ลง${unit}ให้`}>
+              <span className="muted time-chips-label">ลง{unit}ให้</span>
+              {staff.map((s) => (
+                <button
+                  key={s.employee_id}
+                  type="button"
+                  role="radio"
+                  aria-checked={who === s.employee_id}
+                  className={`btn tiny ${who === s.employee_id ? 'primary' : ''}`}
+                  disabled={busy}
+                  onClick={() => setWho(s.employee_id)}
+                >
+                  <i className={`vp-dot ${dotClass(s.employee_id)}`} aria-hidden="true" />
+                  {s.first_name} {s.last_name}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* คนเดียว / เกิน 6 คน: ช่องค้นหาชื่อแบบเดิม — คนเดียวของนัดกายภาพไม่ต้องเลือก (ผู้รับผิดชอบหลักเสมอ) */}
+          {!isAppt && !(multi && staff.length <= MAX_PERSON_CHIPS) && (
+            <SearchSelect value={who} disabled={busy} onChange={(e) => setWho(e.target.value)}>
+              {!multi && <option value="">— ไม่ระบุคน —</option>}
               {staff.map((s) => (
                 <option key={s.employee_id} value={s.employee_id}>
                   {s.first_name} {s.last_name} ({POSITION_LABELS[s.position]})
                 </option>
               ))}
-            </select>
+            </SearchSelect>
           )}
 
           {!isAppt && staff.length === 0 && (
@@ -596,7 +701,7 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
 
           <div className="pick-actions">
             <button type="button" className="btn primary" disabled={busy} onClick={save}>
-              บันทึก {picked.size} {unit}
+              บันทึก {picked.size} {unit}{multi && who ? ` ให้ ${nameOf(who)}` : ''}
             </button>
             {pickedWithVisits.length > 0 && (
               <button
@@ -605,11 +710,14 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
                 disabled={busy}
                 onClick={() => {
                   // ลบถาวรทุกนัดที่ยังไม่เช็คอินในวันที่เลือก — ถามก่อน (ตรวจ Codex 30 ต.ค. 2569 ข้อ 7)
-                  if (!window.confirm(`ลบนัดที่ยังไม่เช็คอินของ ${pickedWithVisits.length} วันที่เลือก? ลบแล้วกู้คืนไม่ได้`)) return;
-                  run(() => api.deleteVisitsOn(caseId, pickedWithVisits), { clearPicked: true });
+                  // ดูตารางของคนเดียวอยู่ = ลบเฉพาะนัดของคนนั้น ไม่ไปลบนัดของคนอื่นในวันเดียวกัน
+                  const whose = multi && view ? ` ของ ${nameOf(view)}` : '';
+                  if (!window.confirm(`ลบนัดที่ยังไม่เช็คอิน${whose} ${pickedWithVisits.length} วันที่เลือก? ลบแล้วกู้คืนไม่ได้`)) return;
+                  run(() => api.deleteVisitsOn(caseId, pickedWithVisits, multi && view ? view : null), { clearPicked: true });
                 }}
               >
-                ลบของวันที่เลือก ({pickedWithVisits.length})
+                {/* ชื่อต้นพอ — ชื่อเต็มทำให้ปุ่มบนมือถือตัดเป็นสองบรรทัด (ยืนยันก่อนลบมีชื่อเต็มอยู่แล้ว) */}
+                {multi && view ? `ลบนัดของ ${nameOf(view).split(' ')[0]}` : 'ลบของวันที่เลือก'} ({pickedWithVisits.length})
               </button>
             )}
             <button type="button" className="btn" disabled={busy} onClick={() => setPicked(new Set())}>ล้าง</button>
@@ -617,13 +725,14 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
         </div>
       )}
 
-      {visits.length === 0 ? (
+      {shown.length === 0 ? (
         <p className="muted visit-empty">
-          {isAppt ? 'ยังไม่ได้ลงนัด' : 'ยังไม่ได้นัดกะ'}{readOnly ? '' : ' — แตะวันบนปฏิทินเพื่อเลือก'}
+          {isAppt ? 'ยังไม่ได้ลงนัด' : 'ยังไม่ได้นัดกะ'}{multi && view ? `ของ ${nameOf(view)}` : ''}
+          {readOnly ? '' : ' — แตะวันบนปฏิทินเพื่อเลือก'}
         </p>
       ) : (
         <ol className="visit-list">
-          {visits.map((v, idx) => {
+          {shown.map((v, idx) => {
             const t = [v.planned_start, v.planned_end].filter(Boolean).join('-');
             return (
               <li key={v.visit_id} className={`visit-${v.state}`}>
@@ -634,10 +743,11 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
                   {v.vn && <span className="mono muted"> · {v.vn}</span>}
                 </span>
                 <span className="visit-who muted">
+                  {multi && <i className={`vp-dot ${dotClass(v.assigned_to)}`} aria-hidden="true" />}
                   {v.assigned_name ?? 'ไม่ระบุคน'}
                   {v.check_in_at && ` · เข้า ${timeText(v.check_in_at)}`}
                   {v.check_out_at && ` · ออก ${timeText(v.check_out_at)}`}
-                  {v.location_flagged && <> · <LineIcon name="alert" className="text-ico" />นอกพื้นที่</>}
+                  {v.location_flagged && <> · <LineIcon name="alert" className="text-ico" />{v.location_note ?? 'นอกพื้นที่'}</>}
                   {v.off_schedule && <> · <LineIcon name="alert" className="text-ico" />นอกวันนัด</>}
                 </span>
                 <span className={`badge visit-${v.state}`}>{VISIT_STATE_LABELS[v.state]}</span>
@@ -652,7 +762,8 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
                     ส่งเตือน
                   </button>
                 )}
-                {!readOnly && (
+                {/* ลบได้เฉพาะกะที่ยังไม่ถึงวัน · กะที่ผ่านมาแล้ว (ขาดงาน) เก็บไว้เป็นประวัติ — ยกเลิกได้แต่ลบไม่ได้ */}
+                {!readOnly && !v.check_in_at && v.visit_date >= today && (
                   <button
                     type="button"
                     className="btn tiny danger-ghost"
@@ -660,6 +771,17 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
                     onClick={() => run(() => api.deleteVisit(caseId, v.visit_id))}
                   >
                     ลบ
+                  </button>
+                )}
+                {!readOnly && v.state === 'missed' && (
+                  <button
+                    type="button"
+                    className="btn tiny danger-ghost"
+                    disabled={busy}
+                    title="วันนั้นไม่ได้ไปจริง — เปลี่ยนเป็นยกเลิก (ยังเก็บเป็นประวัติ)"
+                    onClick={() => run(() => api.updateVisit(caseId, v.visit_id, { status: 'cancelled' }))}
+                  >
+                    ยกเลิก
                   </button>
                 )}
               </li>

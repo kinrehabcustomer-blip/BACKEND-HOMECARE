@@ -13,6 +13,7 @@ import {
   revokeSession,
   roleForPosition,
   permissionsFor,
+  loadPermissions,
   sessionEmployeeId,
   signToken,
   verifyPassword,
@@ -22,10 +23,17 @@ import { claimLineTicket, ensureLineColumn, verifyLineTicket, verifySigned } fro
 import { linkLineByCode } from '../lib/lineLinkCode.js';
 
 export const authRouter = Router();
+/* session ที่ส่งให้หน้าเว็บมีรายการสิทธิ์ (toSession) — login/line/me ไม่ผ่าน requireAuth ทุกเส้น
+   จึงโหลดสิทธิ์ที่ตั้งไว้ (แคช 15 วินาที) ที่หัว router นี้ครั้งเดียว */
+authRouter.use((req, res, next) => loadPermissions().then(() => next(), next));
 
 const OTP_TTL_MINUTES = 10;
 const OTP_MAX_ATTEMPTS = 5; // เดารหัสผิดเกินนี้ OTP ใบนั้นตายทันที กัน brute-force 6 หลัก
 const OTP_COOLDOWN_SECONDS = 60; // กันกดขอ OTP รัวๆ จนอีเมลถูกถล่ม
+/* ขอ OTP ได้ไม่เกินกี่ใบต่อบัญชีใน 24 ชม. (ตรวจรอบ 6 พ.ย. 2569) — ใบละเดาได้ 5 ครั้ง
+   ไม่มีเพดานรายวัน คนนอกขอใบใหม่ได้ทุกนาทีแล้วเดาวนไป ~7,200 ครั้ง/วัน (เดาถูกราว 20% ในหนึ่งเดือน)
+   5 ใบ/วัน = เดาได้ไม่เกิน 25 ครั้ง · เจ้าของบัญชีจริงแทบไม่เคยขอเกิน 2–3 ใบ */
+const OTP_DAILY_MAX = 5;
 
 /* กันเดารหัสผ่านออนไลน์ — เก็บในฐานข้อมูล ไม่ใช่หน่วยความจำ เพราะบน Vercel แต่ละคำขออาจไปคนละ instance
    ตัวเลขตั้งให้คนพิมพ์ผิดจริงไม่โดน (10 ครั้งใน 15 นาที) แต่คนยิงเดาได้แค่ ~1,000 ครั้งต่อวันต่อบัญชี */
@@ -82,20 +90,26 @@ authRouter.post(
   asyncRoute(async (req, res) => {
     const { email, password } = loginSchema.parse(req.body);
 
+    const employee = await sql.one(
+      /* รหัสพนักงานใช้เป็น username ได้ทุกคน แม้มีอีเมลแล้ว (หน้า login เขียนไว้ให้ใช้รหัสพนักงาน + รหัสเริ่มต้น)
+         ตรงทั้งสองทาง = เอาที่ตรงอีเมลก่อน */
+      `SELECT * FROM employees
+       WHERE lower(email) = lower(:email) OR lower(employee_id) = lower(:email)
+       ORDER BY (lower(email) = lower(:email)) DESC
+       LIMIT 1`,
+      { email },
+    );
+    /* ตัวนับรหัสผิดผูกกับ "บัญชี" ไม่ใช่สิ่งที่พิมพ์ (ตรวจรอบ 6 พ.ย. 2569) — เดิมพิมพ์อีเมลกับพิมพ์รหัสพนักงาน
+       ของคนเดียวกันนับแยกกัน เดาได้ 20 ครั้งแทน 10 · ชื่อที่ไม่มีบัญชีนับตามที่พิมพ์เหมือนเดิม */
+    const failKey = employee ? `emp:${employee.employee_id}` : email;
+
     /* นับตามชื่อที่ใช้เข้าสู่ระบบ แม้ไม่มีบัญชีนี้อยู่จริงก็โดนล็อกเหมือนกัน
        🔴 ด่านนี้กันคำขอที่มา "ทีละใบ" · คำขอที่ยิงพร้อมกันเป็นร้อยตัวเห็นตัวนับเท่ากันหมด
        จึงลอดไปได้ทั้งชุด (ตรวจรอบ 20) — ด่านจริงที่กันการยิงขนานอยู่หลัง bcrypt ด้านล่าง
        ซึ่งนับจากแถวที่เขียนลงไปแล้วจริง ไม่ใช่จากค่าที่อ่านมาก่อนหน้า */
-    if ((await recentLoginFailures(email)) >= LOGIN_MAX_FAILURES) {
+    if ((await recentLoginFailures(failKey)) >= LOGIN_MAX_FAILURES) {
       throw new ApiError(429, `กรอกรหัสผ่านผิดหลายครั้งเกินไป กรุณารอ ${LOGIN_LOCK_MINUTES} นาทีแล้วลองใหม่ หรือใช้ "ลืมรหัสผ่าน"`);
     }
-
-    const employee = await sql.one(
-      `SELECT * FROM employees
-       WHERE lower(email) = lower(:email)
-          OR (NULLIF(btrim(email), '') IS NULL AND lower(employee_id) = lower(:email))`,
-      { email },
-    );
 
     /* ตอบข้อความเดียวกันทั้งกรณีไม่มีอีเมลนี้และรหัสผ่านผิด — ไม่บอกใบ้ว่าอีเมลไหนมีอยู่จริง
        และต้องเสียเวลา bcrypt เท่ากันด้วย ไม่งั้นอีเมลที่ไม่มีอยู่จริงตอบเร็วกว่า ~60ms จนแยกออกได้ */
@@ -103,15 +117,15 @@ authRouter.post(
     if (!employee || !ok) {
       // ล้างแถวเก่าไปด้วย — อีเมลที่ไม่มีบัญชีไม่เคย login สำเร็จ แถวของมันจะไม่ถูกลบทางอื่น
       await sql.run(`DELETE FROM login_failures WHERE created_at < now() - interval '1 day'`);
-      await sql.run('INSERT INTO login_failures (email_key) VALUES (lower(:email))', { email });
+      await sql.run('INSERT INTO login_failures (email_key) VALUES (lower(:email))', { email: failKey });
       /* เทียบเพดาน "หลัง" เขียนแถวของตัวเองลงไปแล้ว — คำขอที่ยิงพร้อมกันจึงเห็นแถวของกันและกัน
          และตัวที่เกินโควตาได้ 429 แทนที่จะลอดไปหมดทุกตัว (ตรวจรอบ 20) */
-      if ((await recentLoginFailures(email)) > LOGIN_MAX_FAILURES) {
+      if ((await recentLoginFailures(failKey)) > LOGIN_MAX_FAILURES) {
         throw new ApiError(429, `กรอกรหัสผ่านผิดหลายครั้งเกินไป กรุณารอ ${LOGIN_LOCK_MINUTES} นาทีแล้วลองใหม่ หรือใช้ "ลืมรหัสผ่าน"`);
       }
       throw new ApiError(401, 'อีเมล รหัสพนักงาน หรือรหัสผ่านไม่ถูกต้อง');
     }
-    await clearLoginFailures(email);
+    await clearLoginFailures(failKey);
 
     const blocked = BLOCKED_STATUSES[employee.status];
     if (blocked) throw new ApiError(403, `${blocked} — ติดต่อผู้ดูแลระบบ`);
@@ -309,6 +323,13 @@ authRouter.post(
         { id: employee.employee_id, cooldown: OTP_COOLDOWN_SECONDS },
       );
       if (recent) return false;
+      const today = await tx.one(
+        `SELECT COUNT(*)::int AS n FROM password_reset_otps
+         WHERE employee_id = :id AND created_at > now() - interval '24 hours'`,
+        { id: employee.employee_id },
+      );
+      // เกินเพดานวันนี้ = ตอบข้อความกลางเหมือนเดิม (ไม่บอกว่าอีเมลนี้มีจริง) แต่ไม่ออกรหัสใหม่
+      if (today.n >= OTP_DAILY_MAX) return false;
 
       // ยกเลิกใบเก่าที่ยังไม่ได้ใช้ เพื่อให้มี OTP ที่ใช้ได้เพียงใบเดียวเสมอ
       await tx.run(
@@ -398,7 +419,7 @@ authRouter.post(
       // นาฬิกาฝั่งแอป ไม่ใช่ now() ของ DB — ต้องเป็นนาฬิกาเดียวกับ iat_ms ใน token (ดู requireAuth)
       { hash: await hashPassword(new_password), id: employee.employee_id, changed_at: new Date() },
     );
-    await clearLoginFailures(email);
+    await clearLoginFailures(`emp:${employee.employee_id}`);
 
     // ตั้งรหัสใหม่แล้วให้ login ใหม่เอง — เซสชันเก่าที่ค้างอยู่ (ถ้ามี) จะไม่ถูกใช้ต่อ
     res.clearCookie(COOKIE_NAME, clearCookieOptions);
@@ -452,5 +473,5 @@ const toSession = (e) => ({
   role: roleForPosition(e.position), // สิทธิ์คิดจากตำแหน่ง (กลุ่ม back = admin, ที่เหลือ = field)
   // หมวดที่เข้าได้ (office/billing/money) — หน้าเว็บใช้ซ่อนเมนู ตัวจริงที่กันคือด่านของแต่ละเส้น
   permissions: permissionsFor(e.position),
-  must_change_password: e.must_change_password,
+  must_change_password: false, // ยกเลิกการบังคับเปลี่ยนรหัสแล้ว (ดู DEFAULT_PASSWORD ใน lib/auth.js)
 });

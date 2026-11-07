@@ -134,6 +134,34 @@ export const INVOICE_STATUS_LABELS = {
   cancelled: 'ยกเลิก',
 };
 
+/**
+ * ประเภทใบลดหนี้/เพิ่มหนี้ — ต้องตรงกับ ADJUSTMENT_REASONS ฝั่ง server (invoices/schema.js)
+ * หนี้สูญตัดได้ไม่เกินยอดค้างและไม่มีการคืนเงิน (server ตรวจซ้ำ)
+ */
+export const ADJUSTMENT_REASON_OPTIONS = {
+  credit: [
+    ['discount', 'ส่วนลด'],
+    ['correction', 'แก้ไขราคาที่ผิด'],
+    ['not_rendered', 'ไม่ได้ให้บริการ'],
+    ['bad_debt', 'ตัดหนี้สูญ (ลูกค้าไม่จ่าย)'],
+    ['other', 'อื่น ๆ'],
+  ],
+  debit: [
+    ['extra_service', 'บริการ/รายการเพิ่ม'],
+    ['correction', 'แก้ไขราคาที่ผิด'],
+    ['other', 'อื่น ๆ'],
+  ],
+};
+export const ADJUSTMENT_REASON_LABELS = Object.fromEntries(
+  [...ADJUSTMENT_REASON_OPTIONS.credit, ...ADJUSTMENT_REASON_OPTIONS.debit],
+);
+
+/** ป้ายสถานะของใบ — ใบที่ปิดด้วยหนี้สูญต้องไม่ขึ้นว่า "ชำระแล้ว" เฉย ๆ (แผนแก้ระบบการเงิน L4) */
+export function invoiceStatusLabel(item) {
+  if (item?.status === 'paid' && Number(item.bad_debt_amount ?? 0) > 0) return 'ปิดยอด · ตัดหนี้สูญ';
+  return INVOICE_STATUS_LABELS[item?.status] ?? item?.status;
+}
+
 /** สายบริการที่เคสเลือกใช้ — คนละโมเดลราคากัน (ตารางเรท vs แพ็คเกจเหมาครั้ง) */
 export const SERVICE_KIND_LABELS = {
   homecare: 'Homecare',
@@ -208,6 +236,7 @@ export const CASE_EVENT_LABELS = {
   renewed: 'ต่อเคส',
   visit_adjusted: 'แก้กะ',
   visit_edited: 'แก้นัดหมายกะ',
+  visit_removed: 'ลบกะ',
   pay_approved: 'อนุมัติค่าจ้าง',
   pay_rejected: 'ไม่อนุมัติค่าจ้าง',
   pay_released: 'ปล่อยค่าจ้าง',

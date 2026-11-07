@@ -74,6 +74,18 @@ physioRouter.patch(
         );
       }
     }
+    /* อายุแพ็ก (เดือน) ก็เหมือนกัน — วันหมดอายุของคอร์สคิดสดจากแพ็ก (cases/physioQuota.js)
+       ลด 3 → 2 เดือน = ลูกค้าที่ซื้อไปแล้วเสียสิทธิ์ไปหนึ่งเดือนทุกราย ทั้งที่ไม่มีใครตั้งใจ */
+    if ('duration_months' in input && String(input.duration_months ?? '') !== String(pkg.duration_months ?? '')) {
+      const n = await repo.casesUsingPackage(req.params.id);
+      if (n > 0) {
+        throw new ApiError(
+          409,
+          `แพ็กนี้มีเคสใช้อยู่ ${n} เคส — แก้อายุแพ็กไม่ได้ เพราะวันหมดอายุของลูกค้าที่ซื้อไปแล้วจะเปลี่ยนตามทุกราย` +
+            ' · ถ้าเงื่อนไขใหม่ ให้สร้างแพ็กใหม่แล้วปิดขายแพ็กเดิม',
+        );
+      }
+    }
     await repo.ensureUniquePackageName();
     try {
       res.json(visible(req, await repo.updatePackage(req.params.id, input)));

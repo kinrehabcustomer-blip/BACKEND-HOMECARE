@@ -18,7 +18,21 @@ const MIN_ROWS = 10; // เติมบรรทัดว่างให้ต�
 
 export default function FinanceReceiptDoc({ item, lines, pay, cashier }) {
   const paidDate = item.paid_at ?? item.payments?.at(-1)?.paid_at ?? item.issue_date;
-  const filler = Math.max(0, MIN_ROWS - lines.length);
+  /* ใบลดหนี้/เพิ่มหนี้ที่มีผลอยู่ — ฝ่ายบัญชีต้องเห็นว่ายอดรวมทำไมไม่เท่ายอดหน้าใบ (แผนแก้ระบบการเงิน ข้อ 18)
+     ลดหนี้ลงช่องส่วนลด เพิ่มหนี้ลงช่องจำนวนเงิน · ยอดรวมใช้ยอดสุทธิหลังปรับ ไม่ใช่ยอดหน้าใบ */
+  const notes = (item.adjustments ?? []).filter((n) => n.status === 'issued');
+  const noteLines = notes.map((n) => {
+    const credit = n.kind === 'credit';
+    return {
+      description: `${credit ? 'ใบลดหนี้' : 'ใบเพิ่มหนี้'} ${n.note_id} : ${n.reason}`,
+      amount: credit ? 0 : Number(n.amount),
+      discount: credit ? Number(n.amount) : 0,
+    };
+  });
+  const rows = [...lines, ...noteLines];
+  const netTotal = Number(item.net_total ?? item.total);
+  const refunded = Number(item.refunded_amount ?? 0);
+  const filler = Math.max(0, MIN_ROWS - rows.length);
 
   const methods = [
     { key: 'cash', th: 'เงินสด', en: 'Cash' },
@@ -50,8 +64,8 @@ export default function FinanceReceiptDoc({ item, lines, pay, cashier }) {
             <dt>ที่อยู่ :</dt><dd>{item.bill_to_address || '—'}</dd>
           </dl>
           <div className="fr-title">
-            <h3>ใบเสร็จรับเงิน / RECEIPT</h3>
-            <p>สำเนา / COPY</p>
+            <h3>ใบเสร็จรับเงิน / ใบกำกับภาษี</h3>
+            <p>สำเนา</p>
           </div>
         </div>
 
@@ -73,11 +87,11 @@ export default function FinanceReceiptDoc({ item, lines, pay, cashier }) {
             </tr>
           </thead>
           <tbody>
-            {lines.map((l, i) => (
+            {rows.map((l, i) => (
               <tr key={i}>
                 <td className="fr-c">{i + 1}</td>
                 <td>{l.description}</td>
-                <td className="fr-r">{amountText(l.amount)}</td>
+                <td className="fr-r">{l.amount > 0 || l.discount === 0 ? amountText(l.amount) : '–'}</td>
                 <td className="fr-c">{l.discount > 0 ? amountText(l.discount) : '–'}</td>
                 <td className="fr-r">{amountText(l.amount - (l.discount ?? 0))}</td>
               </tr>
@@ -93,13 +107,20 @@ export default function FinanceReceiptDoc({ item, lines, pay, cashier }) {
         <div className="fr-total">
           <div>
             <p>จำนวนเงิน / TOTAL AMOUNT IN LETTERS</p>
-            <p className="fr-strong">{bahtText(item.total)}</p>
+            <p className="fr-strong">{bahtText(netTotal)}</p>
           </div>
           <div className="fr-total-num">
             <p>รวมทั้งสิ้น / TOTAL</p>
-            <p className="fr-strong">{amountText(item.total)}</p>
+            <p className="fr-strong">{amountText(netTotal)}</p>
           </div>
         </div>
+        {(notes.length > 0 || refunded > 0) && (
+          <p className="fr-adjust-note">
+            ยอดหน้าใบแจ้งหนี้ {amountText(item.total)} บาท
+            {notes.length > 0 && ` · ปรับด้วยใบลดหนี้/เพิ่มหนี้ ${notes.map((n) => n.note_id).join(', ')}`}
+            {refunded > 0 && ` · คืนเงินลูกค้าแล้ว ${amountText(refunded)} บาท`}
+          </p>
+        )}
 
         <div className="fr-methods">
           <span>วิธีการชำระ :</span>

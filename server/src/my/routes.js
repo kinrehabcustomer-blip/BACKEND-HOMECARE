@@ -43,12 +43,42 @@ const MONEY_FIELDS = [
   'rate_customer_price',
   'physio_staff_pay',
   'physio_original_price',
+  // ราคาบริการ ณ ตอนเปิดเคส (snapshot ราคาเต็ม/ราคาลูกค้า) — มาจาก c.* เหมือนกัน
+  'service_list_price_snapshot',
+  'service_customer_price_snapshot',
 ];
 
 function stripFinancial(row) {
   if (!row) return row;
   const shown = { ...row };
   for (const f of MONEY_FIELDS) delete shown[f];
+  /* อุปกรณ์เสริม/หัตถการ: พนักงานต้องรู้ว่ามีอะไรบ้าง (ต้องเตรียม/ใช้งาน) แต่ไม่ต้องรู้ราคาขาย */
+  if (Array.isArray(shown.addons)) {
+    shown.addons = shown.addons.map(({ unit_price, ...rest }) => rest);
+  }
+  return shown;
+}
+
+/**
+ * กะของคนอื่นในเคสเดียวกัน — เห็นได้ว่าใครเข้ากะไหน (ต้องรู้เพื่อส่งเวร) แต่ไม่เห็นผลอนุมัติค่าจ้าง
+ * เหตุผลที่ไม่จ่าย เวลามาสาย หรือระยะ/ธงนอกพื้นที่ของเพื่อนร่วมงาน — เรื่องพวกนี้เป็นของคนนั้นกับหัวหน้า
+ * กะของตัวเองคงไว้ครบ (หน้าการมาทำงานของตัวเองใช้อยู่)
+ */
+const PRIVATE_VISIT_FIELDS = [
+  'pay_status',
+  'pay_note',
+  'approved_by_name',
+  'check_in_late_minutes',
+  'check_in_distance_m',
+  'location_flagged',
+  'location_note',
+  'off_schedule',
+];
+
+function forViewer(visit, me) {
+  if (visit.assigned_to === me) return visit;
+  const shown = { ...visit };
+  for (const f of PRIVATE_VISIT_FIELDS) delete shown[f];
   return shown;
 }
 
@@ -98,7 +128,7 @@ myRouter.get(
       return next(notFound('ไม่พบเคสนี้ หรือไม่ใช่เคสที่คุณรับผิดชอบ'));
     }
     const visits = await cases.listVisits(req.params.id);
-    res.json({ ...stripFinancial(caseRow), visits });
+    res.json({ ...stripFinancial(caseRow), visits: visits.map((v) => forViewer(v, req.user.employee_id)) });
   }),
 );
 
@@ -183,12 +213,29 @@ myRouter.get(
   asyncRoute(async (req, res) => res.json(await payroll.payslipsFor(req.user.employee_id))),
 );
 
+/**
+ * แถวประวัติการมาทำงาน — ส่งเฉพาะที่หน้าประวัติใช้ (วัน เวลา สถานะ ค่าจ้าง ชื่อผู้รับบริการ บริการ)
+ *
+ * เดิมส่งแถว MY_VISIT ทั้งแถว ซึ่งมีที่อยู่ เบอร์โทร ประวัติการรักษา อาการ แพ้ยา ของผู้รับบริการติดมาด้วย
+ * และเลือกเดือนย้อนหลังได้ไม่จำกัด — เท่ากับเปิดข้อมูลสุขภาพของทุกคนที่เคยดูแลโดยไม่ผ่านกรอบ 30 วัน
+ * ของ hasFieldAccess (ตรวจรอบ 6 พ.ย. 2569) · หน้ารายละเอียดเคสยังเปิดได้ตามกรอบเวลาปกติ
+ */
+const ATTENDANCE_FIELDS = [
+  'visit_id', 'case_id', 'visit_date', 'visit_status', 'state', 'planned_start', 'planned_end',
+  'check_in_at', 'check_out_at', 'worked_minutes', 'check_in_late_minutes', 'off_schedule',
+  'location_flagged', 'location_note', 'pay_status', 'pay_note',
+  'client_name', 'case_type', 'service_kind', 'format_name', 'grade_name',
+  'physio_package_id', 'physio_package_name', 'physio_sessions',
+];
+const attendanceRow = (v) => Object.fromEntries(ATTENDANCE_FIELDS.filter((f) => f in v).map((f) => [f, v[f]]));
+
 /** ประวัติการมาทำงานของฉัน (รายเดือน) — ไม่ส่ง month = เดือนปัจจุบัน */
 myRouter.get(
   '/attendance',
   asyncRoute(async (req, res) => {
     const { month } = attendanceQuerySchema.parse({ month: req.query.month || undefined });
-    res.json(await cases.attendanceForEmployee(req.user.employee_id, month ?? todayTH().slice(0, 7)));
+    const rows = await cases.attendanceForEmployee(req.user.employee_id, month ?? todayTH().slice(0, 7));
+    res.json(rows.map(attendanceRow));
   }),
 );
 
@@ -200,6 +247,28 @@ const minutesBetween = (from, to) => {
   const [th, tm] = to.split(':').map(Number);
   return th * 60 + tm - (fh * 60 + fm);
 };
+
+/**
+ * ตรวจตำแหน่งตอนเข้า/ออกกะ — ขึ้นธงให้ admin ตรวจ ไม่บล็อก (GPS คลาดได้จริง ห้ามทำให้พนักงานลงเวลาไม่ได้)
+ *
+ * ของเดิมผ่านเงียบสองกรณีที่ไม่ควรผ่าน:
+ *  - เคสที่ยังไม่ตั้งพิกัด: ไม่มีอะไรให้เทียบ แต่ไม่ขึ้นธง ทุกการเช็คอินของเคสนั้นจึงดู "ตรวจแล้ว" หมด
+ *  - GPS คลาดกว้างกว่ารัศมี (เช่น ±1,500 ม. กับรัศมี 200 ม.): จุดกลางบังเอิญตกในรัศมีก็ผ่าน ทั้งที่จริงอยู่ที่ไหนก็ได้
+ * คืน { distance, flagged, note } — note เป็นข้อความสั้นอ่านออก ไว้บอกว่าธงขึ้นเพราะอะไร
+ */
+function assessLocation(input, visit) {
+  if (input.lat == null || input.lng == null) return { distance: null, flagged: true, note: 'ไม่ได้ส่งตำแหน่ง' };
+  if (visit.case_geo_lat == null || visit.case_geo_lng == null) {
+    return { distance: null, flagged: true, note: 'เคสยังไม่ตั้งพิกัด' };
+  }
+  const radius = visit.case_radius ?? DEFAULT_GEOFENCE_M;
+  const distance = distanceMeters(input.lat, input.lng, visit.case_geo_lat, visit.case_geo_lng);
+  if (distance > radius) return { distance, flagged: true, note: `ห่าง ${distance.toLocaleString('th-TH')} ม.` };
+  if (input.accuracy != null && input.accuracy > radius) {
+    return { distance, flagged: true, note: `GPS คลาด ±${Math.round(input.accuracy).toLocaleString('th-TH')} ม.` };
+  }
+  return { distance, flagged: false, note: null };
+}
 
 /**
  * เช็คอินกะ — เวลาใช้ now() ของ server (กันปลอมเวลา)
@@ -232,15 +301,7 @@ myRouter.post(
     const input = checkInSchema.parse(req.body ?? {});
     const photo = toImage(input.photo);
 
-    // ระยะจากพิกัดเคส — เทียบได้ต่อเมื่อเคสตั้งพิกัดไว้ + พนักงานส่งพิกัดมา
-    let distance = null;
-    let flagged = false;
-    if (input.lat == null || input.lng == null) {
-      flagged = true; // ไม่มีพิกัด (ปฏิเสธ GPS/ไม่มีสัญญาณ) = ต้องให้ admin ดู
-    } else if (visit.case_geo_lat != null && visit.case_geo_lng != null) {
-      distance = distanceMeters(input.lat, input.lng, visit.case_geo_lat, visit.case_geo_lng);
-      flagged = distance > (visit.case_radius ?? DEFAULT_GEOFENCE_M);
-    }
+    const { distance, flagged, note } = assessLocation(input, visit);
 
     const result = await cases.checkInVisit(visit.visit_id, {
       employee_id: req.user.employee_id,
@@ -249,12 +310,15 @@ myRouter.post(
       accuracy: input.accuracy ?? null,
       distance,
       flagged,
+      note: note && `เข้า: ${note}`,
       photo,
       late_minutes: lateMinutes,
       off_schedule: offSchedule,
     });
     if (!result) throw new ApiError(409, 'คุณเช็คอินกะนี้ไปแล้ว'); // แข่งกดพร้อมกัน
-    await notifySafely('check-in', () => onVisitAttendance(visit.visit_id, 'checkin'));
+    /* เช็คอินย้อนวัน (กะของเมื่อวานที่มากดวันนี้) ไม่แจ้งญาติว่า "มาถึงแล้ว" — ไม่มีใครมาถึงจริงตอนนี้
+       ข้อความจะทำให้ญาติเข้าใจผิดว่ามีคนอยู่ที่บ้าน (ตรวจรอบ 6 พ.ย. 2569) · admin ยังเห็นธงนอกวันนัด */
+    if (!offSchedule) await notifySafely('check-in', () => onVisitAttendance(visit.visit_id, 'checkin'));
     res.json(result);
   }),
 );
@@ -268,10 +332,28 @@ myRouter.post(
     if (!visit.check_in_at) throw new ApiError(409, 'ยังไม่ได้เช็คอินกะนี้');
     if (visit.check_out_at) throw new ApiError(409, 'คุณเช็คเอาท์กะนี้ไปแล้ว');
 
+    /* กะที่เปิดค้างนานเกินกว่าที่หน้า "งานวันนี้" ยังแสดง — กดออกเองตอนนี้จะได้ชั่วโมงทำงานหลักร้อย
+       ไหลเข้าค่าตอบแทนทันที ต้องให้ผู้จัดการแก้เวลาออกให้ (ของเดิมกันแค่ที่หน้าเว็บ เรียก API ตรงก็ผ่าน) */
+    const openHours = (Date.now() - new Date(visit.check_in_at).getTime()) / 3.6e6;
+    if (openHours > cases.OPEN_SHIFT_CARRY_HOURS) {
+      throw new ApiError(
+        409,
+        `กะนี้เช็คอินไว้เกิน ${cases.OPEN_SHIFT_CARRY_HOURS} ชั่วโมงแล้ว — แจ้งผู้จัดการให้แก้เวลาออกให้แทน`,
+      );
+    }
+
     const input = checkOutSchema.parse(req.body ?? {});
-    const result = await cases.checkOutVisit(visit.visit_id, { lat: input.lat ?? null, lng: input.lng ?? null });
+    const out = assessLocation(input, visit);
+    const result = await cases.checkOutVisit(visit.visit_id, {
+      lat: input.lat ?? null,
+      lng: input.lng ?? null,
+      accuracy: input.accuracy ?? null,
+      distance: out.distance,
+      flagged: out.flagged,
+      note: out.note && `ออก: ${out.note}`,
+    });
     if (!result) throw new ApiError(409, 'เช็คเอาท์ไม่สำเร็จ');
-    await notifySafely('check-out', () => onVisitAttendance(visit.visit_id, 'checkout'));
+    if (!visit.off_schedule) await notifySafely('check-out', () => onVisitAttendance(visit.visit_id, 'checkout'));
     res.json(result);
   }),
 );
@@ -313,6 +395,30 @@ myRouter.get(
    ฝั่งหลังบ้านยังสร้างที่ระดับเคสได้ สำหรับรายงานที่ไม่ได้เกิดจากการไปเยี่ยม เช่น พยาบาลโทรติดตามอาการ */
 
 /**
+ * ลงรายงานย้อนหลังจากหน้าเคส — ต้องระบุกะของตัวเองในเคสนี้ (visit_id) ที่ถึงวันแล้ว
+ * ยังยึดหลักเดิม "รายงานต้องผูกกับกะที่ไปทำจริง" · กะ/เคสตรวจจากฐานข้อมูล ไม่เชื่อ body (ลงให้กะคนอื่นไม่ได้)
+ * ไม่ต้องเช็คอินก่อน เพราะนี่คือทางแก้เมื่อลืมลงรายงานของกะที่ผ่านมาแล้ว
+ */
+myRouter.post(
+  '/cases/:id/reports',
+  asyncRoute(async (req, res, next) => {
+    const caseRow = await myCaseRow(req);
+    if (!caseRow) return next(notFound('ไม่พบเคสนี้ หรือไม่ใช่เคสที่คุณรับผิดชอบ'));
+    if (CLOSED_CASE.includes(caseRow.status)) throw new ApiError(409, 'เคสนี้จบไปแล้ว บันทึกรายงานเพิ่มไม่ได้');
+
+    const input = createReportSchema.parse(req.body ?? {});
+    if (input.visit_id == null) throw new ApiError(400, 'กรุณาเลือกกะที่จะลงรายงานย้อนหลัง');
+    const visit = await cases.findVisit(input.visit_id);
+    if (!visit || visit.case_id !== caseRow.case_id || visit.assigned_to !== req.user.employee_id) {
+      return next(notFound('ไม่พบกะนี้ หรือไม่ใช่กะที่คุณรับผิดชอบในเคสนี้'));
+    }
+    if (visit.visit_date > todayTH()) throw new ApiError(409, 'กะนี้ยังไม่ถึงวัน — ลงรายงานย้อนหลังไม่ได้');
+
+    res.status(201).json(await cases.addReport(caseRow.case_id, input, req.user));
+  }),
+);
+
+/**
  * แก้รายงานของตัวเอง — ใบที่คนอื่นเขียนแก้ไม่ได้ (ตอบ 404 เหมือนไม่มี ไม่บอกใบ้ว่ามีใบนี้อยู่)
  * ลบไม่ได้ทั้งของตัวเองและของคนอื่น — เป็นบันทึกทางการแพทย์ ให้ผู้จัดการเป็นคนลบจากหลังบ้าน
  */
@@ -331,6 +437,20 @@ myRouter.patch(
     const input = updateReportSchema.parse(req.body ?? {});
     await ensureVisitInCase(req.params.id, input.visit_id);
     res.json(await editReport(req.params.id, report, input));
+  }),
+);
+
+/** รูปแนบรายงาน (หลายรูป) ในเคสที่ฉันเข้าถึงได้ — เกณฑ์เดียวกับการอ่านรายงาน */
+myRouter.get(
+  '/cases/:id/reports/:reportId/images/:imageId',
+  asyncRoute(async (req, res, next) => {
+    if (!(await myCaseRow(req))) return next(notFound('ไม่พบเคสนี้ หรือไม่ใช่เคสที่คุณรับผิดชอบ'));
+    const row = await cases.findReportImage(req.params.id, Number(req.params.reportId), Number(req.params.imageId));
+    if (!row) return next(notFound('ไม่พบรูปนี้'));
+    res.setHeader('Content-Type', row.mime);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    res.send(row.data);
   }),
 );
 
@@ -432,7 +552,7 @@ myRouter.get(
     await family.ensureFamilyTable();
     const family_count = (await family.listForCase(req.params.id)).filter((f) => f.state === 'linked' || f.accepted_at).length;
     res.set('Cache-Control', 'no-store');
-    res.json({ items: await family.messagesFor(req.params.id, 100), family_count });
+    res.json({ items: await family.messagesForStaff(req.params.id, 100, req.user.employee_id), family_count });
   }),
 );
 

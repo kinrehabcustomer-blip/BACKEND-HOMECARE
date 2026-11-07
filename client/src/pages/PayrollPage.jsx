@@ -11,6 +11,7 @@ import ConfirmButton from '../components/ConfirmButton.jsx';
 import LineIcon from '../components/LineIcon.jsx';
 import { firstAvailablePayrollRound, MAX_PAYROLL_ROUNDS } from '../lib/payrollUi.js';
 import { caseCode } from '../lib/patientCode.js';
+import SearchSelect from '../components/SearchSelect.jsx';
 
 /** ป้ายสถานะรอบ — ใช้สีชุดเดียวกับใบแจ้งหนี้ (ร่าง/จ่ายแล้ว/ยกเลิก มีความหมายเดียวกัน) */
 const STATUS = {
@@ -58,6 +59,17 @@ function Runs({ reloadKey }) {
   const [openItemId, setOpenItemId] = useState(null);
   const [itemCases, setItemCases] = useState(null);
 
+  /* ตัวกรองรายการรอบ — กรองฝั่งหน้าเว็บ (รายการรอบมีไม่กี่สิบแถว โหลดมาครบอยู่แล้ว)
+     เดือนเสนอเฉพาะเดือนที่มีรอบจริง ไม่ใช่ปฏิทินทั้งปี — เลือกแล้วต้องเจออะไรสักอย่างเสมอ */
+  const [runMonth, setRunMonth] = useState('');
+  const [runStatus, setRunStatus] = useState('');
+  const runMonths = [...new Set((runs ?? []).map((r) => r.period_month))].sort().reverse();
+  /* รอบที่กางอยู่แสดงเสมอแม้ไม่ตรงตัวกรอง — เปิดรอบร่าง/กดจ่ายระหว่างกรองอยู่ (เช่นกรอง "จ่ายแล้ว" แล้วเปิดร่าง)
+     รอบนั้นต้องไม่หายไปจากจอทันทีหลังกด ทั้งที่เพิ่งทำรายการกับมัน */
+  const shownRuns = (runs ?? []).filter(
+    (r) => r.run_id === openRunId ||
+      ((!runMonth || r.period_month === runMonth) && (!runStatus || r.status === runStatus)),
+  );
 
   const load = useCallback(
     () =>
@@ -309,6 +321,7 @@ function Runs({ reloadKey }) {
                   run(async () => {
                     const v = await api.payPayrollRun(detail.run_id, {
                       pay_date: payForm?.pay_date ?? todayTH(),
+                      expected_total: Number(detail.total_pay), // server จ่ายเฉพาะเมื่อยอดยังเท่าที่เห็น
                     });
                     setDetail(v);
                     setPayForm(null);
@@ -363,13 +376,13 @@ function Runs({ reloadKey }) {
           แต่บอกได้ละเอียดกว่า (ใบไหนบ้าง ใบละเท่าไหร่) และกดทำต่อได้ตรงนั้นเลย
           แถบเตือนที่บอกแค่จำนวนแล้วให้ไปหาต่อเองคือขั้นตอนที่เพิ่มมาโดยไม่ได้ช่วยอะไร */}
 
-      <div className="att-filter payroll-bar">
-        {/* ยอดที่ปล่อยจากแท็บแรกไว้แล้วแต่ยังไม่เข้ารอบไหน — เดิมเห็นได้ต่อเมื่อกดเปิดฟอร์มรอบก่อน
-            แท็บนี้จึงดูเหมือน "เงินที่ปล่อยไปแล้วหายไปไหน" ทั้งที่รออยู่ครบทุกบาท
-            รอบที่ยกเลิกยิ่งทำให้เข้าใจผิดหนักขึ้น (ก้อนถูกปลดคืนกองรอจ่ายแล้ว แต่บนจอไม่มีอะไรบอก) */}
-        {/* ไม่มียอดรออยู่ = ไม่ต้องขึ้นอะไร — บรรทัดที่บอกว่า "ยังไม่มี" กินที่ทุกครั้งที่เปิดแท็บ
-            โดยไม่ได้บอกอะไรที่ต้องทำต่อ · มีบรรทัดนี้เมื่อไหร่แปลว่ามีเงินรออยู่จริง */}
-        {pending && pending.rows.length > 0 && (
+      {/* ยอดที่ปล่อยจากแท็บแรกไว้แล้วแต่ยังไม่เข้ารอบไหน — เดิมเห็นได้ต่อเมื่อกดเปิดฟอร์มรอบก่อน
+          แท็บนี้จึงดูเหมือน "เงินที่ปล่อยไปแล้วหายไปไหน" ทั้งที่รออยู่ครบทุกบาท
+          รอบที่ยกเลิกยิ่งทำให้เข้าใจผิดหนักขึ้น (ก้อนถูกปลดคืนกองรอจ่ายแล้ว แต่บนจอไม่มีอะไรบอก) */}
+      {/* ไม่มียอดรออยู่ = ไม่ต้องขึ้นอะไร — บรรทัดที่บอกว่า "ยังไม่มี" กินที่ทุกครั้งที่เปิดแท็บ
+          โดยไม่ได้บอกอะไรที่ต้องทำต่อ · มีบรรทัดนี้เมื่อไหร่แปลว่ามีเงินรออยู่จริง */}
+      {pending && pending.rows.length > 0 && (
+        <div className="att-filter payroll-bar">
           <p className="tab-hint payroll-waiting">
             ปล่อยค่าจ้างแล้วรอเข้ารอบ{' '}
             <strong>{formatBaht(total(pending.rows, 'total_pay'))}</strong>
@@ -377,8 +390,35 @@ function Runs({ reloadKey }) {
             {/* บอกต่อว่าจะทำให้มันเข้ารอบยังไง ไม่งั้นเป็นตัวเลขที่ไม่รู้ว่าต้องทำอะไรต่อ */}
             <span className="cell-sub">กด “เปิดรอบจ่าย” เพื่อกวาดยอดทั้งหมดนี้เข้ารอบ</span>
           </p>
+          {!opening && <button className="btn primary" onClick={openForm}>+ เปิดรอบจ่าย</button>}
+        </div>
+      )}
+
+      {/* แถบเครื่องมือของรายการรอบ: ตัวกรองชิดซ้าย · ปุ่มเปิดรอบชิดขวา (ตอนมียอดรอ ปุ่มอยู่ในกล่องยอดด้านบนแทน
+          — ปุ่มต้องอยู่ข้างตัวเลขที่ทำให้ตัดสินใจกด ไม่ใช่สองที่พร้อมกัน) */}
+      <div className="att-filter payroll-toolbar">
+        {/* ยังไม่มีรอบเลย = ไม่มีอะไรให้กรอง เหลือแค่ปุ่มเปิดรอบ */}
+        {runs?.length > 0 && (<>
+        <SearchSelect
+          value={runMonth}
+          aria-label="เดือนของรอบ"
+          onChange={(e) => { setRunMonth(e.target.value); collapse(); }}
+        >
+          <option value="">ทุกเดือน</option>
+          {runMonths.map((m) => <option key={m} value={m}>{monthLabel(m)}</option>)}
+        </SearchSelect>
+        <SearchSelect
+          value={runStatus}
+          aria-label="สถานะรอบ"
+          onChange={(e) => { setRunStatus(e.target.value); collapse(); }}
+        >
+          <option value="">ทุกสถานะ</option>
+          {Object.entries(STATUS).map(([key, s]) => <option key={key} value={key}>{s.label}</option>)}
+        </SearchSelect>
+        </>)}
+        {!opening && !(pending && pending.rows.length > 0) && (
+          <button className="btn primary" onClick={openForm}>+ เปิดรอบจ่าย</button>
         )}
-        {!opening && <button className="btn primary" onClick={openForm}>+ เปิดรอบจ่าย</button>}
       </div>
 
       {/* ---------- เปิดรอบใหม่ ---------- */}
@@ -537,6 +577,11 @@ function Runs({ reloadKey }) {
         <section className="card empty-state">
           <p className="muted">ยังไม่มีรอบจ่าย — กด “เปิดรอบจ่าย” เพื่อเริ่มรอบแรก</p>
         </section>
+      ) : shownRuns.length === 0 ? (
+        <section className="card empty-state">
+          <p className="muted">ไม่มีรอบที่ตรงกับตัวกรอง</p>
+          <button className="btn" onClick={() => { setRunMonth(''); setRunStatus(''); }}>ล้างตัวกรอง</button>
+        </section>
       ) : (
         <div className="table-wrap">
           <table className="table table-cards">
@@ -549,7 +594,7 @@ function Runs({ reloadKey }) {
               </tr>
             </thead>
             <tbody>
-              {runs.map((r) => (
+              {shownRuns.map((r) => (
                 <Fragment key={r.run_id}>
                 <tr
                   className={`is-tappable ${openRunId === r.run_id ? 'is-picked' : ''}`}
@@ -645,13 +690,13 @@ export default function PayrollPage() {
   };
 
   const employeePicker = (
-    <select value={employeeId} onChange={(e) => patch({ employee_id: e.target.value })} aria-label="พนักงาน">
+    <SearchSelect value={employeeId} onChange={(e) => patch({ employee_id: e.target.value })} aria-label="พนักงาน">
       <option value="">พนักงานทุกคน</option>
       {/* เฉพาะพนักงาน front (คนที่มีกะ/ได้ค่าจ้างรายเคส) · คนที่เลือกค้างอยู่ใน URL ยังโชว์ไว้ */}
       {staff.filter((e) => e.can_take_cases || e.employee_id === employeeId).map((e) => (
         <option key={e.employee_id} value={e.employee_id}>{e.first_name} {e.last_name}</option>
       ))}
-    </select>
+    </SearchSelect>
   );
 
   return (

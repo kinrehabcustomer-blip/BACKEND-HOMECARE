@@ -67,6 +67,15 @@ export async function updateGrade(id, input) {
   );
 }
 
+/**
+ * จำนวนเคสที่อ้างเกรด/รูปแบบนี้อยู่ (ทุกสถานะ รวมเคสที่ปิดแล้ว — ใบแจ้งหนี้ของเคสเก่ายังอ้างชื่อบริการนี้)
+ * ใช้กันการลบ: FK เป็น ON DELETE SET NULL ลบแล้วเคสเก่าไม่เหลือบริการ ใบแจ้งหนี้ทุกใบของเคสเหล่านั้นขึ้น "ไม่ตรง"
+ */
+export const casesUsingGrade = (id) =>
+  sql.one('SELECT COUNT(*)::int AS n FROM cases WHERE pkg_grade_id = :id', { id }).then((r) => r.n);
+export const casesUsingFormat = (id) =>
+  sql.one('SELECT COUNT(*)::int AS n FROM cases WHERE pkg_format_id = :id', { id }).then((r) => r.n);
+
 // ลบเกรด -> pkg_rates ของเกรดนั้นหายตาม (CASCADE), cases.pkg_grade_id เป็น NULL (SET NULL)
 export const removeGrade = (id) =>
   sql.run('DELETE FROM pkg_grades WHERE grade_id = :id', { id }).then((n) => n > 0);

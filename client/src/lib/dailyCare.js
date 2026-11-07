@@ -435,20 +435,54 @@ export const PHYSIO_INCIDENT_TYPES = opts(
   ['other', 'อื่นๆ'],
 );
 
+/**
+ * แบบบันทึกการตรวจรักษา (นักกายภาพบำบัด) — สัญญาณชีพ/ร่างกาย + บันทึกการตรวจรักษา 4 ช่อง
+ * (Chief Complaint · ตรวจร่างกาย · วินิจฉัย · แผนการรักษา) ใช้แทนแบบเดิมทั้งชุด (ดร.ธงชัย 2 พ.ย. 2569)
+ * ใบเก่าที่บันทึกด้วยแบบเดิมยังเปิดอ่านได้ — ดู PHYSIO_LEGACY_SECTIONS ด้านล่าง
+ */
 export const PHYSIO_SECTIONS = [
   {
-    key: 'work',
-    title: 'ข้อมูลการปฏิบัติงาน',
+    key: 'vitals',
+    title: 'สัญญาณชีพ / ข้อมูลร่างกาย',
+    hint: 'วัดได้ช่องไหนกรอกช่องนั้น — BMI คำนวณให้เองจากน้ำหนักและส่วนสูง',
+    columns: 3,
     fields: [
-      {
-        key: 'report_type',
-        label: 'ประเภทบันทึก',
-        type: 'choice',
-        options: opts(['routine', 'ครั้งปกติ'], ['change', 'อาการเปลี่ยน'], ['incident', 'เหตุการณ์ผิดปกติ']),
-      },
+      { key: 'weight_kg', label: 'BW', type: 'number', unit: 'kg.', min: 1, max: 500, step: 0.1 },
+      { key: 'height_cm', label: 'Ht', type: 'number', unit: 'cm.', min: 30, max: 250, step: 0.1 },
+      { key: 'bmi', label: 'BMI', type: 'bmi' },
+      { key: 'temperature_c', label: 'BT', type: 'number', unit: '°C', min: 30, max: 45, step: 0.1 },
+      { key: 'pulse', label: 'PR', type: 'number', unit: 't/m', min: 20, max: 250 },
+      { key: 'respiratory_rate', label: 'RR', type: 'number', unit: 't/m', min: 4, max: 80 },
+      { key: 'spo2', label: 'O₂sat', type: 'number', unit: '%', min: 50, max: 100 },
+      { key: 'bp_systolic', label: 'BP Systolic', type: 'number', unit: 'mmHg', min: 40, max: 300 },
+      { key: 'bp_diastolic', label: 'BP Diastolic', type: 'number', unit: 'mmHg', min: 20, max: 200 },
     ],
   },
+  {
+    key: 'exam',
+    title: 'บันทึกการตรวจรักษา',
+    fields: [
+      { key: 'chief_complaint', label: 'อาการสำคัญ (Chief Complaint)', type: 'text', rows: 3, placeholder: 'ระบุอาการสำคัญ (Chief Complaint)…' },
+      { key: 'physical_exam', label: 'ตรวจร่างกาย', type: 'text', rows: 3, placeholder: 'ระบุตรวจร่างกาย…' },
+      { key: 'diagnosis', label: 'วินิจฉัย', type: 'text', rows: 3, placeholder: 'ระบุวินิจฉัย…' },
+      { key: 'treatment_plan', label: 'แผนการรักษา', type: 'text', rows: 3, placeholder: 'ระบุแผนการรักษา…' },
+    ],
+  },
+];
 
+/** BMI = กก. / (เมตร)² — ไม่เก็บลงฐานข้อมูล คำนวณจากน้ำหนักและส่วนสูงทุกครั้ง (ไม่มีค่า = null) */
+export function bmiOf(weightKg, heightCm) {
+  const w = Number(weightKg);
+  const h = Number(heightCm) / 100;
+  if (!(w > 0) || !(h > 0)) return null;
+  return Math.round((w / (h * h)) * 10) / 10;
+}
+
+/**
+ * ช่องของแบบเดิม (ก่อน 2 พ.ย. 2569) — ไม่ใช้กรอกแล้ว เก็บไว้ให้ใบเก่าเปิดอ่านได้ครบ
+ * (ฐานข้อมูลยังเก็บคอลัมน์เดิมทั้งหมด) ช่องที่ซ้ำกับแบบใหม่ (สัญญาณชีพ) อยู่ในหมวดใหม่แล้ว
+ */
+export const PHYSIO_LEGACY_SECTIONS = [
   {
     key: 'pre',
     title: 'ก่อนเริ่มการรักษา',
@@ -475,20 +509,6 @@ export const PHYSIO_SECTIONS = [
         type: 'choice',
         options: opts(['good', 'ดี'], ['fair', 'ปานกลาง'], ['poor', 'น้อย']),
       },
-    ],
-  },
-
-  {
-    key: 'vitals',
-    title: 'สัญญาณชีพก่อนทำ',
-    hint: 'วัดได้ช่องไหนกรอกช่องนั้น — ใช้เทียบกับค่าหลังทำในหมวดล่าง',
-    columns: 4,
-    fields: [
-      { key: 'bp_systolic', label: 'ความดันตัวบน', type: 'number', unit: 'mmHg', min: 40, max: 300 },
-      { key: 'bp_diastolic', label: 'ความดันตัวล่าง', type: 'number', unit: 'mmHg', min: 20, max: 200 },
-      { key: 'pulse', label: 'ชีพจร', type: 'number', unit: 'ครั้ง/นาที', min: 20, max: 250 },
-      { key: 'spo2', label: 'ออกซิเจนปลายนิ้ว', type: 'number', unit: '%', min: 50, max: 100 },
-      { key: 'blood_sugar', label: 'น้ำตาลปลายนิ้ว', type: 'number', unit: 'mg/dL', min: 10, max: 800 },
     ],
   },
 
@@ -610,7 +630,10 @@ const fieldMap = (sections) =>
   new Map(sections.flatMap((s) => s.fields.map((f) => [f.key, { ...f, section: s.key }])));
 
 export const DAILY_FIELDS = fieldMap(DAILY_SECTIONS);
-export const PHYSIO_FIELDS = fieldMap(PHYSIO_SECTIONS);
+export const PHYSIO_FIELDS = fieldMap([...PHYSIO_SECTIONS, ...PHYSIO_LEGACY_SECTIONS]);
+
+/** ชุดช่องสำหรับ "อ่าน" รายงานกายภาพ — แบบใหม่ + แบบเดิม (ใบเก่า) · ช่องที่ไม่มีค่าจะไม่ถูกวาด */
+export const PHYSIO_VIEW_SECTIONS = [...PHYSIO_SECTIONS, ...PHYSIO_LEGACY_SECTIONS];
 
 /** ค่าดิบจากฐานข้อมูล -> คำที่คนอ่านรู้เรื่อง (ใช้ในหน้าดูรายงานและหน้าตรวจทานก่อนส่ง) */
 export function dailyValueText(field, value) {
@@ -628,6 +651,8 @@ export function dailyValueText(field, value) {
       return value ? (field.yes ?? 'ทำแล้ว') : (field.no ?? 'ไม่ได้ทำ');
     case 'number':
       return `${value}${field.unit && field.unit !== '0–10' && field.unit !== '1–7' ? ` ${field.unit}` : ''}`;
+    case 'bmi':
+      return String(value);
     case 'time':
       return `${value} น.`;
     case 'photo':
@@ -675,6 +700,11 @@ export function dailyBrief(r) {
  */
 export function physioBrief(r) {
   const parts = [];
+
+  // แบบใหม่ (2 พ.ย. 2569): อาการสำคัญ / วินิจฉัย เป็นสิ่งแรกที่คนอยากรู้ก่อนกาง
+  if (r.chief_complaint) parts.push(`CC: ${r.chief_complaint}`);
+  if (r.diagnosis) parts.push(`Dx: ${r.diagnosis}`);
+  if (r.bp_systolic != null || r.bp_diastolic != null) parts.push(`BP ${r.bp_systolic ?? '—'}/${r.bp_diastolic ?? '—'}`);
 
   if (r.condition_change) {
     parts.push(dailyValueText(PHYSIO_FIELDS.get('condition_change'), r.condition_change));

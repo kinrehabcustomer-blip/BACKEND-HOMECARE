@@ -209,6 +209,14 @@ payrollRouter.post(
     if (result.reason === 'empty_run') {
       throw new ApiError(409, 'รอบนี้ยังไม่มียอดค่าจ้างอยู่ในรายการ — ไม่มีอะไรให้จ่าย');
     }
+    if (result.reason === 'total_changed') {
+      throw new ApiError(
+        409,
+        `ยอดของรอบนี้เปลี่ยนระหว่างที่เปิดดูอยู่ (ตอนนี้ ${result.actual.toLocaleString('th-TH')} บาท` +
+          ` ไม่ใช่ ${result.expected.toLocaleString('th-TH')} บาท) — โหลดรอบใหม่ ตรวจยอด แล้วกดบันทึกการจ่ายอีกครั้ง`,
+        result,
+      );
+    }
     res.json(result);
   }),
 );
@@ -220,7 +228,7 @@ payrollRouter.post(
 payrollRouter.post(
   '/:id/cancel',
   asyncRoute(async (req, res) => {
-    const result = await repo.cancel(req.params.id);
+    const result = await repo.cancel(req.params.id, req.user);
     if (result.reason === 'not_found') throw notFound('ไม่พบรอบจ่ายนี้');
     if (result.reason === 'invalid_status') {
       throw new ApiError(

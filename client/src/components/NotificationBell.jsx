@@ -4,6 +4,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../api.js';
 import LineIcon from './LineIcon.jsx';
 import { ALERT_GROUPS } from '../lib/alertDefs.js';
+import { useVisiblePoll } from '../lib/poll.js';
 
 /* ดึงใหม่ทุกๆ กี่นาที — ของค้างพวกนี้เปลี่ยนระดับ "วันละไม่กี่ครั้ง" ไม่ใช่วินาทีต่อวินาที
    ถี่กว่านี้คือยิง query นับทั้งระบบซ้ำโดยไม่ได้อะไรเพิ่ม (แต่ละครั้งนับสิบกว่าตาราง) */
@@ -53,11 +54,8 @@ export default function NotificationBell() {
   /* 🔴 ห้ามมี location.search ใน dep ของก้อนที่ดึงข้อมูล — ช่องค้นหาทุกหน้าเขียน q ลง URL "ทุกตัวอักษร"
      เดิมพิมพ์ชื่อคนไข้ 10 ตัว = ยิงเส้นนี้ 10 ครั้ง (วัดจริงแล้ว +1 ต่อ 1 ตัวอักษร · ตรวจรอบ 10)
      ซึ่งเป็นเส้นที่หนักที่สุดในระบบตามที่เขียนไว้ข้างล่าง · เปลี่ยนหน้ายังดึงใหม่เหมือนเดิม */
-  useEffect(() => {
-    load();
-    const timer = setInterval(load, REFRESH_MS);
-    return () => clearInterval(timer);
-  }, [location.pathname, load]);
+  // แท็บพับอยู่ = ไม่ดึง (ดู lib/poll.js) · กลับมาเปิดหลังเกิน 5 นาทีดึงให้ทันที
+  useVisiblePoll(load, REFRESH_MS, location.pathname);
 
   /* Esc และการกดที่อื่น = ปิด — ทางออกมาตรฐานของทุกอย่างที่กางทับหน้าจอในระบบนี้
      (ใช้ช่วง capture เพื่อไม่ให้ชนกับตัวจัดการ Esc ของเมนูด้านข้างบนจอแคบ)

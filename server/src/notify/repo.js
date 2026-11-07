@@ -1,5 +1,6 @@
 import { sql } from '../db/index.js';
-import { POSITION_PERMISSIONS } from '../lib/auth.js';
+import { can, loadPermissions } from '../lib/auth.js';
+import { BACK_POSITIONS } from '../employees/schema.js';
 import { LATE_THRESHOLD_MINUTES } from '../cases/repo.js';
 
 /**
@@ -86,20 +87,22 @@ export const overdueInvoices = ({ today }) =>
 
 /**
  * ผู้รับสรุปประจำวัน = คนที่เข้าหลังบ้านได้และยังทำงานอยู่
- * ยึด "ตำแหน่ง" ที่มีสิทธิ์ office (POSITION_PERMISSIONS ใน lib/auth.js) ไม่ใช่คอลัมน์ role
+ * ยึด "ตำแหน่ง" ที่มีสิทธิ์ office (ตั้งได้ในหน้าจัดการสิทธิ์ · lib/permissions.js) ไม่ใช่คอลัมน์ role
  * — ผู้จัดการ / HR / Admin HC · ฝ่ายการเงินไม่ได้ (สรุปเป็นเรื่องเคส/กะ ที่ตำแหน่งนี้เปิดดูไม่ได้)
  * ไม่งั้นคนที่เพิ่งเลื่อนเป็นผู้จัดการจะเข้าหน้าเว็บได้แต่ไม่ได้รับอีเมล
  */
-export const digestRecipients = () =>
-  sql.all(
+export const digestRecipients = async () => {
+  await loadPermissions(); // cron เรียกโดยไม่ผ่าน requireAuth — ต้องโหลดสิทธิ์ที่ตั้งไว้เอง
+  return sql.all(
     `SELECT employee_id, email, first_name || ' ' || last_name AS name
      FROM employees
      WHERE position = ANY(:positions::text[])
        AND status NOT IN ('resigned', 'suspended')
        AND email IS NOT NULL
      ORDER BY employee_id`,
-    { positions: Object.keys(POSITION_PERMISSIONS).filter((p) => POSITION_PERMISSIONS[p].includes('office')) },
+    { positions: BACK_POSITIONS.filter((p) => can(p, 'office')) },
   );
+};
 
 /* กันสรุปรายวันถูกส่งซ้ำในวันเดียวกันจากทาง cron (ตรวจรอบ 17)
    Vercel cron ยิงซ้ำได้เมื่อครั้งแรก timeout หรือ deploy คาบเกี่ยว และใครที่ถือ CRON_SECRET

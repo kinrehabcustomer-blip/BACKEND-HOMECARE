@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { api } from '../api.js';
 import ConfirmButton from './ConfirmButton.jsx';
+import CaseFamilyChat, { BACKOFFICE_SOURCE } from './CaseFamilyChat.jsx';
 import { formatDate } from '../labels.js';
-import { ACCEPTED, compressImage } from '../lib/image.js';
 
 /**
  * ญาติที่ดูการดูแลผ่าน LINE OA Kin HomeCare (@145aflze) — ส่วนหนึ่งของหน้าเคส (ดู server/src/lib/family.js)
@@ -101,7 +102,7 @@ export default function FamilyAccess({ caseId, disabled }) {
       )}
       {error && <p className="error">{error}</p>}
 
-      <FamilyTimeline caseId={caseId} disabled={disabled} />
+      <FamilyTimeline caseId={caseId} disabled={disabled} linkedCount={items.filter((x) => x.state === 'linked').length} />
     </div>
   );
 }
@@ -162,83 +163,104 @@ function CustomerLine({ caseId, disabled, onLinked }) {
 /**
  * ไทม์ไลน์เคส (แบบ 3 · ดร. 22 ต.ค. 2569) — ข้อความ/รูปจากญาติและทีม ทุกคนในเคสเห็นเหมือนกัน
  * ทีมตอบที่นี่ ญาติเห็นในหน้า "ดูการดูแล" ใน LINE · ซ่อนข้อความที่ไม่เหมาะได้ (ไม่ลบจริง)
+ * ในหน้าเคสเหลือแค่การ์ดสรุป (จำนวน + ข้อความล่าสุด) — ตัวบทสนทนาเปิดเป็น popup แชท (5 พ.ย. 2569)
+ * เดิมวางข้อความทั้งหมดต่อกันในหน้าเคส ข้อความสะสมมากขึ้นก็ดันเนื้อหาส่วนอื่นลงไปไกล
  */
-function FamilyTimeline({ caseId, disabled }) {
+function FamilyTimeline({ caseId, disabled, linkedCount }) {
   const [items, setItems] = useState(null);
-  const [body, setBody] = useState('');
-  const [image, setImage] = useState(null);
-  const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState(false);
   const [error, setError] = useState(null);
 
   const load = () => api.familyMessages(caseId).then(setItems).catch((e) => setError(e.message));
   useEffect(() => { load(); }, [caseId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function pick(e) {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file) return;
-    try {
-      setImage(await compressImage(file));
-    } catch (err) {
-      setError(err.message);
-    }
-  }
-
-  async function send() {
-    setBusy(true);
-    setError(null);
-    try {
-      await api.postFamilyMessage(caseId, { body: body.trim() || null, image });
-      setBody('');
-      setImage(null);
-      load();
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
+  const latest = items?.[0]; // API คืนใหม่ไปเก่า
   return (
     <div className="family-timeline">
-      <h4>ไทม์ไลน์กับญาติ</h4>
-      {!disabled && (
-        <div className="family-post">
-          <textarea rows={2} value={body} onChange={(e) => setBody(e.target.value)} maxLength={1000}
-            placeholder="แจ้งญาติทุกคนในเคสนี้ เช่น วันนี้คุณพ่อเดินได้ไกลขึ้น 10 เมตร" />
-          <div className="family-post-actions">
-            <label className="btn tiny">
-              แนบรูป
-              <input type="file" accept={ACCEPTED} hidden onChange={pick} />
-            </label>
-            {image && <img src={image} alt="" className="family-thumb" />}
-            <button className="btn tiny primary" type="button" disabled={busy || (!body.trim() && !image)} onClick={send}>
-              {busy ? 'กำลังส่ง…' : 'ส่งถึงญาติ'}
-            </button>
-          </div>
-        </div>
-      )}
-      {items?.length === 0 && <p className="muted">ยังไม่มีข้อความ</p>}
-      {items?.map((m) => (
-        <div className={`family-msg ${m.author_kind}`} key={m.message_id}>
-          <div className="muted">
-            <strong>{m.author_name}</strong> · {formatDateTime(m.created_at)}
-            {' '}
-            <ConfirmButton className="btn tiny" title="ซ่อนข้อความนี้?" detail="ญาติทุกคนจะไม่เห็นข้อความนี้อีก"
-              confirmLabel="ซ่อน" cancelLabel="ยกเลิก" danger={false}
-              onConfirm={() => api.hideFamilyMessage(caseId, m.message_id).then(load)}>
-              ซ่อน
-            </ConfirmButton>
-          </div>
-          {m.body && <p className="pre-line">{m.body}</p>}
-          {m.has_photo && (
-            <a href={api.familyPhotoUrl(caseId, m.message_id)} target="_blank" rel="noreferrer">
-              <img className="family-photo" src={api.familyPhotoUrl(caseId, m.message_id)} alt="รูปในไทม์ไลน์" loading="lazy" />
-            </a>
-          )}
-        </div>
-      ))}
+      <button type="button" className="family-tl-card" onClick={() => setOpen(true)}>
+        <span className="family-tl-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12Z" />
+          </svg>
+        </span>
+        <span className="family-tl-text">
+          <strong>
+            ไทม์ไลน์กับญาติ
+            {items?.length > 0 && <span className="family-tl-count">{items.length}</span>}
+          </strong>
+          <span className="family-tl-preview">
+            {!items && !error && 'กำลังโหลด…'}
+            {items?.length === 0 && (disabled ? 'ยังไม่มีข้อความ' : 'ยังไม่มีข้อความ — กดเพื่อส่งข้อความถึงญาติ')}
+            {latest && (
+              <>
+                <b>{latest.author_name}</b> · {formatDateTime(latest.created_at)} — {latest.body || '📷 รูปภาพ'}
+              </>
+            )}
+          </span>
+        </span>
+        <span className="family-tl-open">เปิดแชท ›</span>
+      </button>
       {error && <p className="error">{error}</p>}
+      {open && (
+        <FamilyTimelinePopup
+          caseId={caseId}
+          disabled={disabled}
+          linkedCount={linkedCount}
+          onLoaded={(d) => setItems(d.items)}
+          onClose={() => { setOpen(false); load(); }}
+        />
+      )}
     </div>
+  );
+}
+
+/** popup แชทไทม์ไลน์ — ซ้อนบน popup เคส · Esc ปิดเฉพาะชั้นนี้ (ไม่ปิดเคสข้างหลัง) */
+function FamilyTimelinePopup({ caseId, disabled, linkedCount, onLoaded, onClose }) {
+  const boxRef = useRef(null);
+  useEffect(() => {
+    const previous = document.activeElement;
+    boxRef.current?.focus();
+    // ดักช่วง capture ก่อนตัวจัดการของ popup เคส (bubble) — เหมือน ConfirmButton
+    // กล่องยืนยัน "ซ่อนข้อความ" เปิดซ้อนอยู่ = ปล่อยให้มันปิดตัวเองก่อน
+    const onKeyDown = (e) => {
+      if (e.key !== 'Escape' || document.querySelector('.confirm-box')) return;
+      e.stopPropagation();
+      onClose();
+    };
+    document.addEventListener('keydown', onKeyDown, true);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown, true);
+      previous?.focus?.();
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return createPortal(
+    <div className="modal-backdrop modal-stacked" onClick={onClose}>
+      <div
+        className="modal family-chat-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label="ไทม์ไลน์กับญาติ"
+        tabIndex={-1}
+        ref={boxRef}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <header className="modal-head">
+          <div>
+            <p className="muted mono">{caseId}</p>
+            <h2>ไทม์ไลน์กับญาติ</h2>
+          </div>
+          <button className="modal-close" type="button" onClick={onClose} aria-label="ปิด">×</button>
+        </header>
+        <CaseFamilyChat
+          caseId={caseId}
+          closed={disabled}
+          source={BACKOFFICE_SOURCE}
+          familyCount={linkedCount}
+          onLoaded={onLoaded}
+        />
+      </div>
+    </div>,
+    document.body,
   );
 }

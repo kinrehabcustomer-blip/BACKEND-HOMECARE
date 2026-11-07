@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api.js';
 import CaseModal from '../components/CaseModal.jsx';
@@ -8,6 +8,11 @@ import PageRefresh from '../components/PageRefresh.jsx';
 import { SERVICE_KIND_LABELS, MONTH_LABELS, formatBaht, formatDate, toBuddhistYear, caseStage, CASE_STATUS_FILTER_LABELS } from '../labels.js';
 import { formatPhone } from '../lib/phone.js';
 import { caseCode } from '../lib/patientCode.js';
+import SearchSelect from '../components/SearchSelect.jsx';
+import FilterBar from '../components/FilterBar.jsx';
+import LoadMore from '../components/LoadMore.jsx';
+import { useIsMobile } from '../lib/mobile.js';
+import { useLoadMore } from '../lib/loadMore.js';
 
 const PER_PAGE_OPTIONS = [20, 50, 100];
 
@@ -65,6 +70,11 @@ export default function CaseListPage() {
   const order = get('order') === 'asc' ? 'asc' : 'desc';
   const perPage = PER_PAGE_OPTIONS.includes(Number(get('per_page'))) ? get('per_page') : DEFAULTS.per_page;
   const page = Math.max(1, Number(get('page')) || 1);
+  /* มือถือไม่มีแถบเลื่อนหน้า — โหลดหน้า 1 แล้วต่อท้ายไปเรื่อยๆ ตอนเลื่อนลง (useLoadMore) · จอกว้างตาม ?page= เหมือนเดิม */
+  const mobile = useIsMobile();
+  const effPage = mobile ? 1 : page;
+  // เงื่อนไขของผลหน้า 1 ชุดล่าสุด — ใช้ขอหน้าถัดไปด้วยเงื่อนไขเดียวกันเป๊ะ
+  const lastQuery = useRef({});
   const openId = params.get('open');
 
   const filtered = Boolean(q || status || serviceKind || assignedTo || year || pseudo);
@@ -115,7 +125,7 @@ export default function CaseListPage() {
         Object.entries({
           q, status, service_kind: serviceKind, assigned_to: assignedTo, year, month,
           ...(pseudo ? { [pseudo]: 'yes' } : null),
-          page, per_page: perPage, sort, order,
+          page: effPage, per_page: perPage, sort, order,
         }).filter(([, v]) => v !== '' && v != null),
       );
 
@@ -123,6 +133,7 @@ export default function CaseListPage() {
         .listCases(query)
         .then((data) => {
           if (cancelled) return; // ผลของเงื่อนไขเก่าที่มาถึงช้ากว่า ต้องไม่ทับผลของเงื่อนไขปัจจุบัน
+          lastQuery.current = query;
           setResult(data);
           setError(null); // สำเร็จแล้วต้องล้าง error ของรอบก่อน ไม่งั้นเน็ตสะดุดครั้งเดียวหน้าค้างเป็น error ตลอด
         })
@@ -134,7 +145,7 @@ export default function CaseListPage() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [q, status, serviceKind, assignedTo, pseudo, year, month, page, perPage, sort, order, reloadKey]);
+  }, [q, status, serviceKind, assignedTo, pseudo, year, month, effPage, perPage, sort, order, reloadKey]);
 
   // popup ถูกปิดด้วยปุ่มย้อนกลับของเบราว์เซอร์ — ประวัติที่เรา push ไว้ถูกใช้ไปแล้ว ต้องล้างธงทิ้ง
   useEffect(() => {
@@ -159,7 +170,11 @@ export default function CaseListPage() {
 
   const monthsOfYear = periods.find((p) => p.year === year)?.months ?? [];
 
-  const rows = result?.data ?? [];
+  const fetchMore = useCallback((n) => api.listCases({ ...lastQuery.current, page: n }), []);
+
+  const more = useLoadMore({ enabled: mobile, result, fetchPage: fetchMore, getKey: (r) => r.case_id });
+
+  const rows = more.rows;
   const visibleIds = rows.map((c) => c.case_id);
 
   return (
@@ -169,21 +184,30 @@ export default function CaseListPage() {
 
       {/* แถบตัวกรอง + ตาราง อยู่ในการ์ดใบเดียวกัน (จอเล็กแยกกลับเป็นแถบตัวกรอง + การ์ดรายแถว — ดู .list-card) */}
       <div className="list-card">
-        <div className="toolbar">
-          <input
-            className="search search-compact"
-            placeholder="ค้นหา รหัสเคส / แพ็คเกจ / ชื่อผู้รับบริการ / เบอร์โทร"
-            value={q}
-            onChange={(e) => setFilter('q', e.target.value)}
-          />
-          <select value={year} onChange={(e) => setFilter('year', e.target.value)} aria-label="ปี">
+        {/* แถบค้นหา + ตัวกรอง — บนมือถือ dropdown ย้ายไปอยู่ในแผ่น "ตัวกรอง" (ดู FilterBar) */}
+        <FilterBar
+          search={(
+            <input
+              className="search search-compact"
+              placeholder="ค้นหา รหัสเคส / แพ็คเกจ / ชื่อผู้รับบริการ / เบอร์โทร"
+              value={q}
+              onChange={(e) => setFilter('q', e.target.value)}
+            />
+          )}
+          filtered={filtered}
+          onClear={clearFilters}
+          /* ปุ่มเปิดเคสอยู่ท้ายแถบตัวกรอง (ดันไปชิดขวา) — ใกล้รายการที่จะเพิ่มเข้าไป */
+          action={<Link className="btn primary toolbar-action" to="/cases/new">+ เปิดเคสใหม่</Link>}
+          actionIcon="case"
+          filters={(<>
+          <SearchSelect value={year} onChange={(e) => setFilter('year', e.target.value)} aria-label="ปี">
             <option value="">ทุกปี</option>
             {periods.map((p) => (
               <option key={p.year} value={p.year}>ปี {toBuddhistYear(p.year)} ({p.count})</option>
             ))}
-          </select>
+          </SearchSelect>
           {/* เลือกเดือนไม่ได้จนกว่าจะเลือกปี — "พฤษภาคม" ของปีไหนไม่มีคำตอบ */}
-          <select
+          <SearchSelect
             value={month}
             onChange={(e) => setFilter('month', e.target.value)}
             disabled={!year}
@@ -194,14 +218,14 @@ export default function CaseListPage() {
             {monthsOfYear.map((m) => (
               <option key={m.month} value={m.month}>{MONTH_LABELS[m.month]} ({m.count})</option>
             ))}
-          </select>
-          <select value={serviceKind} onChange={(e) => setFilter('service_kind', e.target.value)} aria-label="ประเภทบริการ">
+          </SearchSelect>
+          <SearchSelect value={serviceKind} onChange={(e) => setFilter('service_kind', e.target.value)} aria-label="ประเภทบริการ">
             <option value="">ทุกบริการ</option>
             {Object.entries(SERVICE_KIND_LABELS).map(([value, label]) => (
               <option key={value} value={value}>{label}</option>
             ))}
-          </select>
-          <select value={statusValue} onChange={(e) => setStatusFilter(e.target.value)} aria-label="สถานะ">
+          </SearchSelect>
+          <SearchSelect value={statusValue} onChange={(e) => setStatusFilter(e.target.value)} aria-label="สถานะ">
             <option value="">ทุกสถานะ</option>
             {/* สถานะตามวันที่ (รอเริ่ม/กำลังให้บริการ/รอยืนยันปิดเคส) แทนสถานะใน DB — ตรงกับป้ายในตาราง */}
             {Object.entries(CASE_STATUS_FILTER_LABELS).map(([value, label]) => (
@@ -211,9 +235,9 @@ export default function CaseListPage() {
             {Object.entries(PSEUDO_STATUS).map(([value, label]) => (
               <option key={value} value={value}>{label}</option>
             ))}
-          </select>
+          </SearchSelect>
           {/* "เคสของคนนี้" เป็นคำถามที่ถามบ่อย — server รองรับ assigned_to อยู่แล้ว แค่ไม่เคยมีช่องให้เลือก */}
-          <select value={assignedTo} onChange={(e) => setFilter('assigned_to', e.target.value)} aria-label="พนักงานที่รับ">
+          <SearchSelect value={assignedTo} onChange={(e) => setFilter('assigned_to', e.target.value)} aria-label="พนักงานที่รับ">
             <option value="">พนักงานทุกคน</option>
             {/* เฉพาะพนักงาน front (คนที่รับเคสได้) — สาย back ไม่มีเคสให้กรอง · คนที่เลือกค้างอยู่ใน URL ยังโชว์ไว้ */}
             {staff.filter((e) => e.can_take_cases || e.employee_id === assignedTo).map((e) => (
@@ -221,12 +245,9 @@ export default function CaseListPage() {
                 {e.first_name} {e.last_name}
               </option>
             ))}
-          </select>
-          {/* โผล่เฉพาะตอนมีอะไรกรองอยู่ — ปุ่มที่กดแล้วไม่เกิดอะไรขึ้นไม่ควรมีให้เห็น */}
-          {filtered && <button className="btn" onClick={clearFilters}>ล้างตัวกรอง</button>}
-          {/* ปุ่มเปิดเคสอยู่ท้ายแถบตัวกรอง (ดันไปชิดขวา) — ใกล้รายการที่จะเพิ่มเข้าไป */}
-          <Link className="btn primary toolbar-action" to="/cases/new">+ เปิดเคสใหม่</Link>
-        </div>
+          </SearchSelect>
+          </>)}
+        />
 
         {/* error เป็นแถบเหนือตาราง ไม่ทับทั้งหน้า — ตัวกรองที่ตั้งไว้ต้องไม่หายไปเพราะเน็ตสะดุด */}
         <ErrorBar message={error} onRetry={() => setReloadKey((k) => k + 1)} busy={loading} />
@@ -273,7 +294,7 @@ export default function CaseListPage() {
                   }}
                 >
                   {/* ลำดับนับต่อเนื่องข้ามหน้า — เป็นลำดับของ "รายการที่เห็นตอนนี้" ไม่ใช่เลขประจำตัว */}
-                  <td className="row-index" data-label="ลำดับ">{(page - 1) * Number(perPage) + i + 1}</td>
+                  <td className="row-index" data-label="ลำดับ">{(effPage - 1) * Number(perPage) + i + 1}</td>
                   <td className="mono link" data-label="รหัสเคส">{caseCode(c.case_id)}</td>
                   <td data-label="บริการ">
                     {/* สองสายบริการเก็บชื่อคนละคอลัมน์ — กายภาพมาก่อนเพราะเคสที่ผูกแพ็คเกจไว้จะไม่มีเรท Homecare */}
@@ -316,6 +337,16 @@ export default function CaseListPage() {
                   </td>
                   <td data-label="สถานะ">
                     <span className={`badge case-${caseStage(c).key}`}>{caseStage(c).label}</span>
+                    {/* รายการ "ใกล้ครบกำหนด" มีไว้ถามลูกค้าว่าจะต่อไหม — ตอบว่าต่อแล้วกดต่อจากแถวนี้ได้เลย ไม่ต้องเปิดป๊อปอัปก่อน */}
+                    {pseudo === 'ending_soon' && (
+                      <Link
+                        className="btn tiny row-renew"
+                        to={`/cases/new?renew=${c.case_id}`}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        ต่อเคส
+                      </Link>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -348,7 +379,11 @@ export default function CaseListPage() {
           </table>
         </div>
         {/* แถบเลื่อนหน้าอยู่ท้ายการ์ด (การ์ดยืดเต็มจอ — อยู่นอกการ์ดจะถูกดันตกจอ) */}
-        {result && (
+        {/* มือถือ: รายการยาวต่อเนื่อง โหลดเพิ่มเองตอนเลื่อนใกล้ท้าย — แทนแถบเลื่อนหน้า (ผู้ใช้ขอ 6 พ.ย. 2569) */}
+        {result && mobile && (
+          <LoadMore hasMore={more.hasMore} loading={more.loading} error={more.error} onMore={more.loadMore} total={more.total} unit="เคส" />
+        )}
+        {result && !mobile && (
           <div className="pager">
             {/* มีหน้าเดียวก็ไม่ต้องมีปุ่มเลื่อนหน้าที่กดไม่ได้ — แต่ตัวเลือกจำนวนแถวยังต้องอยู่ */}
             {result.pagination.total_pages > 1 && (
@@ -371,9 +406,9 @@ export default function CaseListPage() {
 
             <label className="per-page">
               แสดง
-              <select value={perPage} onChange={(e) => setFilter('per_page', e.target.value)}>
+              <SearchSelect value={perPage} onChange={(e) => setFilter('per_page', e.target.value)}>
                 {PER_PAGE_OPTIONS.map((n) => <option key={n} value={n}>{n}</option>)}
-              </select>
+              </SearchSelect>
               ต่อหน้า
             </label>
           </div>

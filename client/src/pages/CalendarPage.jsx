@@ -14,6 +14,8 @@ import PageRefresh from '../components/PageRefresh.jsx';
 import { caseCode } from '../lib/patientCode.js';
 import { useToast } from '../toast.jsx';
 import TimeComboInput from '../components/TimeComboInput.jsx';
+import SearchSelect from '../components/SearchSelect.jsx';
+import FilterBar from '../components/FilterBar.jsx';
 
 const WEEKDAYS = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
 
@@ -101,6 +103,7 @@ export default function CalendarPage() {
   // วันอ้างอิงจุดเดียว — มุมมองเดือนใช้ปี/เดือนของมัน มุมมองสัปดาห์ใช้สัปดาห์ที่มันอยู่
   const anchor = /^\d{4}-\d{2}-\d{2}$/.test(get('date')) ? get('date') : todayISO();
   const employeeId = get('employee_id');
+  const clientCase = get('client'); // รหัสเคสของผู้รับบริการที่เลือกกรอง
   const kind = SERVICE_KIND_LABELS[get('kind')] ? get('kind') : '';
   const state = CAL_STATES.includes(get('state')) ? get('state') : '';
   const openDay = /^\d{4}-\d{2}-\d{2}$/.test(get('day')) ? get('day') : '';
@@ -163,9 +166,18 @@ export default function CalendarPage() {
 
   // กรองสายบริการ/สถานะกะในหน้าเว็บ ไม่ยิง API ใหม่ — ข้อมูลทั้งช่วงโหลดมาแล้ว สลับดูจึงเปลี่ยนทันที
   const shown = useMemo(
-    () => (visits ?? []).filter((c) => (!kind || kindOf(c) === kind) && (!state || c.state === state)),
-    [visits, kind, state],
+    () => (visits ?? []).filter((c) => (!kind || kindOf(c) === kind) && (!state || c.state === state) && (!clientCase || c.case_id === clientCase)),
+    [visits, kind, state, clientCase],
   );
+
+  /* รายชื่อผู้รับบริการในช่วงที่โหลดมา (ไม่ซ้ำ เรียงตามชื่อ) — กรองในหน้าเว็บ ไม่ยิง API ใหม่
+     คนที่เลือกค้างอยู่ใน URL แต่ไม่มีกะในช่วงนี้ ยังโชว์ไว้ให้ล้างได้ */
+  const clients = useMemo(() => {
+    const byCase = new Map();
+    for (const c of visits ?? []) if (!byCase.has(c.case_id)) byCase.set(c.case_id, c.client_name);
+    if (clientCase && !byCase.has(clientCase)) byCase.set(clientCase, clientCase);
+    return [...byCase.entries()].sort((a, b) => String(a[1]).localeCompare(String(b[1]), 'th'));
+  }, [visits, clientCase]);
 
   const byDay = useMemo(() => {
     const map = new Map();
@@ -176,7 +188,7 @@ export default function CalendarPage() {
     return map;
   }, [shown]);
 
-  const filtered = Boolean(employeeId || kind || state);
+  const filtered = Boolean(employeeId || kind || state || clientCase);
 
   /** ขยับช่วงที่ดู — เดือนละก้าว หรือสัปดาห์ละก้าวตามมุมมอง */
   function shift(delta) {
@@ -299,6 +311,20 @@ export default function CalendarPage() {
       ? `${formatDate(days[0])} – ${formatDate(days[6])}`
       : `${MONTH_LABELS[mm]} ${toBuddhistYear(year)}`;
 
+  /* ปุ่มเลื่อนช่วงเวลา ‹ วันนี้ › — วาดสองที่: ท้ายแถบตัวกรอง (จอกว้าง) · ข้างชื่อเดือนในหัวปฏิทิน (มือถือ)
+     CSS เลือกโชว์ทีละที่ (.cal-hero-nav-m) — บนมือถือแถบตัวกรองเหลือแถวเดียว ปุ่มเลื่อนเดือนไปอยู่ติดชื่อเดือนที่มันเปลี่ยน */
+  const navButtons = (
+    <>
+      <button type="button" onClick={() => shift(-1)} aria-label={view === 'week' ? 'สัปดาห์ก่อนหน้า' : 'เดือนก่อนหน้า'}>
+        <LineIcon name="chevron" className="cal-hero-prev" />
+      </button>
+      <button type="button" onClick={() => patch({ date: '' })}>วันนี้</button>
+      <button type="button" onClick={() => shift(1)} aria-label={view === 'week' ? 'สัปดาห์ถัดไป' : 'เดือนถัดไป'}>
+        <LineIcon name="chevron" className="cal-hero-next" />
+      </button>
+    </>
+  );
+
   return (
     <PageRefresh onRefresh={() => setReloadKey((k) => k + 1)} busy={loading}>
       {/* ไม่มีหัวหน้าบนจอ (ชื่อเดือน/สัปดาห์เป็นส่วนบนสุด) — คง h1 ไว้ให้โปรแกรมอ่านหน้าจอ */}
@@ -319,6 +345,7 @@ export default function CalendarPage() {
               )}
             </h2>
           </div>
+          <div className="cal-hero-nav cal-hero-nav-m no-print">{navButtons}</div>
         </div>
 
         {/* คำอธิบายสี — ชิปมี 5 สีตามสถานะกะ ไม่มีอะไรบอกก็เดาไม่ถูก */}
@@ -332,13 +359,26 @@ export default function CalendarPage() {
         </div>
       </div>
 
-      <div className="toolbar no-print">
-        <span className="seg">
-          <button className={view === 'month' ? 'on' : ''} onClick={() => patch({ view: '' })}>เดือน</button>
-          <button className={view === 'week' ? 'on' : ''} onClick={() => patch({ view: 'week' })}>สัปดาห์</button>
-        </span>
-
-        <select value={employeeId} onChange={(e) => patch({ employee_id: e.target.value })} aria-label="เลือกพนักงาน">
+      {/* แถบตัวกรอง — บนมือถือ: [เดือน|สัปดาห์] [ตัวกรอง] [พิมพ์] แถวเดียว dropdown อยู่ในแผ่น "ตัวกรอง" (ดู FilterBar) */}
+      <FilterBar
+        className="no-print"
+        lead={(
+          <span className="seg">
+            <button className={view === 'month' ? 'on' : ''} onClick={() => patch({ view: '' })}>เดือน</button>
+            <button className={view === 'week' ? 'on' : ''} onClick={() => patch({ view: 'week' })}>สัปดาห์</button>
+          </span>
+        )}
+        filtered={filtered}
+        onClear={() => patch({ employee_id: '', client: '', kind: '', state: '' })}
+        extra={(
+          <button className="btn cal-print-btn" onClick={() => window.print()} title="พิมพ์">
+            <LineIcon name="printer" /><span className="cal-print-label">พิมพ์</span>
+          </button>
+        )}
+        /* เลื่อนช่วงเวลา — ท้ายแถบตัวกรอง ชิดขวา (มือถือซ่อน ใช้ชุดในหัวปฏิทินแทน) */
+        action={<div className="cal-hero-nav toolbar-action">{navButtons}</div>}
+        filters={(<>
+        <SearchSelect value={employeeId} onChange={(e) => patch({ employee_id: e.target.value })} aria-label="เลือกพนักงาน">
           <option value="">พนักงานทุกคน</option>
           {/* เฉพาะพนักงาน front (คนที่รับเคส/มีกะ) · คนที่เลือกค้างอยู่ใน URL ยังโชว์ไว้ */}
           {staff.filter((s) => s.can_take_cases || s.employee_id === employeeId).map((s) => (
@@ -347,35 +387,27 @@ export default function CalendarPage() {
               {s.nickname ? ` (${s.nickname})` : ''} · {POSITION_LABELS[s.position]}
             </option>
           ))}
-        </select>
+        </SearchSelect>
 
-        <select value={kind} onChange={(e) => patch({ kind: e.target.value })} aria-label="เลือกประเภทบริการ">
+        <SearchSelect value={clientCase} onChange={(e) => patch({ client: e.target.value })} aria-label="เลือกผู้รับบริการ">
+          <option value="">ผู้รับบริการทุกคน</option>
+          {clients.map(([id, name]) => (
+            <option key={id} value={id}>{name} · {caseCode(id)}</option>
+          ))}
+        </SearchSelect>
+
+        <SearchSelect value={kind} onChange={(e) => patch({ kind: e.target.value })} aria-label="เลือกประเภทบริการ">
           <option value="">ทุกประเภทบริการ</option>
           {Object.entries(SERVICE_KIND_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-        </select>
+        </SearchSelect>
 
-        <select value={state} onChange={(e) => patch({ state: e.target.value })} aria-label="เลือกสถานะกะ">
+        <SearchSelect value={state} onChange={(e) => patch({ state: e.target.value })} aria-label="เลือกสถานะกะ">
           <option value="">ทุกสถานะกะ</option>
           {CAL_STATES.map((s) => <option key={s} value={s}>{VISIT_STATE_LABELS[s]}</option>)}
-        </select>
+        </SearchSelect>
 
-        {filtered && (
-          <button className="btn" onClick={() => patch({ employee_id: '', kind: '', state: '' })}>ล้างตัวกรอง</button>
-        )}
-        <button className="btn" onClick={() => window.print()}>
-          <LineIcon name="printer" />พิมพ์
-        </button>
-        {/* เลื่อนช่วงเวลา — ท้ายแถบตัวกรอง ชิดขวา */}
-        <div className="cal-hero-nav toolbar-action">
-          <button type="button" onClick={() => shift(-1)} aria-label={view === 'week' ? 'สัปดาห์ก่อนหน้า' : 'เดือนก่อนหน้า'}>
-            <LineIcon name="chevron" className="cal-hero-prev" />
-          </button>
-          <button type="button" onClick={() => patch({ date: '' })}>วันนี้</button>
-          <button type="button" onClick={() => shift(1)} aria-label={view === 'week' ? 'สัปดาห์ถัดไป' : 'เดือนถัดไป'}>
-            <LineIcon name="chevron" className="cal-hero-next" />
-          </button>
-        </div>
-      </div>
+        </>)}
+      />
 
       {/* error เป็นแถบเหนือปฏิทิน ไม่ทับทั้งหน้า — ตัวกรองที่ตั้งไว้ต้องไม่หายเพราะเน็ตสะดุด */}
       {error && <p className="error no-print">{error}</p>}
@@ -456,13 +488,6 @@ export default function CalendarPage() {
           })}
         </div>
       </div>
-
-      <p className="muted cal-note no-print">
-        ทุกเคส (ทั้ง <strong>Homecare</strong> และ <strong>กายภาพบำบัด</strong>) แสดงตาม
-        <strong>วันนัดที่ลงไว้</strong>ในหน้าจัดการเคส — เคสที่ยังไม่ลงวันนัดจะไม่ขึ้นบนปฏิทิน
-        · ย้ายได้โดย<strong>ลากกะที่รอเช็คอิน</strong>ไปวันอื่นแล้วเลือกเวลาในกล่องยืนยัน
-        (มุมมองสัปดาห์ลากลงช่องเวลาได้เลย) หรือกดที่วันแล้วเลือก "ย้ายวัน / เวลา"
-      </p>
 
       {openDay && (
         <DayPanel
@@ -705,7 +730,9 @@ function DaySlots({ day, list, chip, dragging, dropKey, canDropOn, dropProps }) 
     return map;
   }, [list]);
 
-  const showNone = byHour.has('none') || (dragging && !dragging.planned_start);
+  /* แถว "ไม่ระบุ" แสดงทุกวันเสมอ (6 พ.ย. 2569) — เดิมมีเฉพาะวันที่มีกะไม่ระบุเวลา
+     แถวชั่วโมงของวันอื่นจึงเลื่อนลงไม่ตรงกัน (08:00 ของวันหนึ่งอยู่สูงกว่าอีกวัน) อ่านข้ามวันไม่ได้ */
+  const showNone = true;
   // เลื่อนไปที่ slot แรกที่มีกะ — กะก่อน 08:00 อยู่แถวบนสุดอยู่แล้ว · วันว่างอยู่ที่ 08:00
   const timed = list.filter((c) => c.planned_start).map((c) => Number(c.planned_start.slice(0, 2)));
   const firstHour = timed.length ? Math.min(...timed) : DEFAULT_HOUR;

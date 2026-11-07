@@ -4,6 +4,7 @@ import { randomBytes } from 'node:crypto';
 import { ApiError } from './errors.js';
 import { sql } from '../db/index.js';
 import { BACK_POSITIONS } from '../employees/schema.js';
+import { permissionsFor, loadPermissions } from './permissions.js';
 
 const SECRET = process.env.JWT_SECRET;
 const TOKEN_TTL = '8h'; // ประมาณหนึ่งกะทำงาน — หมดกะแล้วต้อง login ใหม่
@@ -22,29 +23,16 @@ export const ADMIN_POSITIONS = BACK_POSITIONS;
 export const roleForPosition = (position) => (ADMIN_POSITIONS.includes(position) ? 'admin' : 'field');
 
 /**
- * สิทธิ์รายหมวดของพนักงานกลุ่ม back — ส่งไปกับ session เป็น permissions ให้หน้าเว็บซ่อนเมนู
- * (ต้องตรงกับ NAV ใน client/src/App.jsx)
- *   office  = งานหลังบ้าน: ภาพรวม · เคส · ตารางงาน · การมาทำงาน · ลูกค้า · ผู้รับบริการ · แพ็คเกจ · พนักงาน · ประเมิน
- *   billing = ใบแจ้งหนี้
- *   money   = ค่าจ้างพนักงาน/ต้นทุน/กำไร · ค่าตอบแทนพนักงาน (payroll) · รายได้บริษัท
- *
- * กลุ่ม front ไม่มีหมวดไหนเลย — ใช้แอปภาคสนาม (/api/my) ซึ่งเห็นเฉพาะงานของตัวเอง
+ * สิทธิ์ของพนักงานกลุ่ม back — ตั้งรายตำแหน่งได้จากหน้า "จัดการสิทธิ์" (ดู lib/permissions.js)
+ * permissionsFor คืนทั้งรายเมนู/งาน (cases, payroll, see_pay, …) และ 3 หมวดเดิมที่คิดจากชุดนั้น
+ *   office  = งานหลังบ้าน · billing = ใบแจ้งหนี้ · money = เรื่องเงิน
+ * ด่านเดิมที่เช็คหมวดจึงทำงานต่อได้ตามเดิม · กลุ่ม front ไม่มีสิทธิ์หลังบ้านเลย ใช้แอปภาคสนาม (/api/my)
  */
-export const POSITION_PERMISSIONS = {
-  super_admin: ['office', 'billing', 'money'], // Super Admin — ครบทุกหมวดเท่าผู้จัดการ (ต่างกันที่การแต่งตั้ง ดู employees/routes.js)
-  manager: ['office', 'billing', 'money'],
-  hr: ['office', 'billing'],
-  admin: ['office', 'billing'],   // Admin HC
-  finance: ['billing', 'money'],  // การเงิน — เฉพาะหน้าเรื่องเงิน ไม่เห็นเคส/ลูกค้า/ผู้รับบริการ/พนักงาน
-};
-export const permissionsFor = (position) => POSITION_PERMISSIONS[position] ?? [];
+export { permissionsFor, loadPermissions } from './permissions.js';
 export const can = (position, permission) => permissionsFor(position).includes(permission);
 
-/**
- * เห็นค่าจ้างพนักงาน/ต้นทุน/กำไรได้ไหม = มีสิทธิ์หมวด money
- * (เดิมเป็นผู้จัดการคนเดียว — ตอนนี้รวมการเงินด้วย ซึ่งเข้าได้เฉพาะหน้าเรื่องเงินอยู่แล้ว)
- */
-export const canSeeStaffPay = (position) => can(position, 'money');
+/** เห็นค่าจ้างพนักงาน/ต้นทุน/กำไรได้ไหม — สิทธิ์ see_pay (ค่าตั้งต้น: ผู้จัดการ · Super Admin · การเงิน) */
+export const canSeeStaffPay = (position) => can(position, 'see_pay');
 
 /**
  * ลบตัวเลขต้นทุน/กำไรออกจากแถวก่อนส่งให้คนที่ไม่ใช่ผู้จัดการ
@@ -62,6 +50,11 @@ if (!SECRET || SECRET.length < 32) {
 }
 
 export const hashPassword = (plain) => bcrypt.hash(plain, 10);
+
+/* รหัสผ่านเริ่มต้นของพนักงานทุกคน (ดร.ธงชัย 2 พ.ย. 2569 "เอา one time password ออก ตั้งรหัสผ่านทุกคนเป็น 12345678")
+   เดิมสุ่มรหัสชั่วคราวรายคนแล้วบังคับเปลี่ยนตอน login ครั้งแรก — ยกเลิกแล้ว เจ้าตัวเปลี่ยนเองเมื่อไหร่ก็ได้
+   ⚠ รู้กันทั้งบริษัท = ใครรู้อีเมลพนักงานก็เข้าบัญชีนั้นได้จนกว่าเจ้าตัวจะเปลี่ยนรหัส */
+export const DEFAULT_PASSWORD = '12345678';
 
 /* ตัวอักษรของรหัสชั่วคราว — ตัด 0/O/1/I/l ออก เพราะรหัสนี้ถูกอ่านออกเสียง/จดใส่กระดาษส่งต่อกัน
    สลับตัวผิดแล้วจะกลายเป็น "เข้าไม่ได้" ที่หาสาเหตุไม่เจอ */
@@ -148,8 +141,9 @@ export function requireAuth(req, res, next) {
     return next(new ApiError(401, 'เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่'));
   }
 
-  sql
-    .one(
+  // สิทธิ์รายตำแหน่ง (แคช 15 วินาที) — ด่านถัดไปทุกตัวอ่านแบบ sync จากแคชนี้
+  loadPermissions()
+    .then(() => sql.one(
       /* เช็คใบที่ถูกตัดในคิวรีเดียวกับที่อ่านพนักงานอยู่แล้ว — ไม่เพิ่มรอบไปฐานข้อมูล
          ตารางต้องมีอยู่ก่อนเสมอ (ensureRevokedSessions ด้านล่าง ถูกเรียกตั้งแต่ตอนสร้างแอป)
          เพราะ Postgres ตรวจชื่อตารางตั้งแต่ตอนแปลคำสั่ง — to_regclass กันตรงนี้ไม่ได้ */
@@ -158,7 +152,7 @@ export function requireAuth(req, res, next) {
               EXISTS (SELECT 1 FROM revoked_sessions r WHERE r.jti = :jti) AS revoked
        FROM employees e WHERE e.employee_id = :id`,
       { id: payload.sub, jti: payload.jti ?? '' },
-    )
+    ))
     .then((emp) => {
       /* เปลี่ยนรหัสผ่านแล้ว = เซสชันเก่าทุกตัวต้องตาย ไม่ใช่รอหมดอายุอีก 8 ชม.
          เหตุผลที่คนกดเปลี่ยนรหัสส่วนใหญ่คือ "สงสัยว่ามีคนอื่นเข้าถึงบัญชีอยู่" —
@@ -261,9 +255,7 @@ export function requireBackOffice(req, res, next) {
  */
 export function requirePasswordChanged(req, res, next) {
   if (!req.user) return next(new ApiError(401, 'กรุณาเข้าสู่ระบบ'));
-  if (req.user.must_change_password) {
-    return next(new ApiError(403, 'กรุณาตั้งรหัสผ่านใหม่ก่อนใช้งานระบบ'));
-  }
+  // ยกเลิกการบังคับเปลี่ยนรหัสแล้ว (ทุกคนใช้รหัสเริ่มต้นได้ — ดู DEFAULT_PASSWORD) คงฟังก์ชันไว้เพราะหลายเส้นอ้างอยู่
   next();
 }
 
@@ -291,7 +283,7 @@ const MONEY_CASE_ROUTES = [
 export function requireCaseAccess(req, res, next) {
   if (!req.user) return next(new ApiError(401, 'กรุณาเข้าสู่ระบบ'));
   if (can(req.user.position, 'office')) return next();
-  if (can(req.user.position, 'money') && MONEY_CASE_ROUTES.some((re) => re.test(req.path))) return next();
+  if (can(req.user.position, 'payroll') && MONEY_CASE_ROUTES.some((re) => re.test(req.path))) return next();
   return next(new ApiError(403, 'บัญชีของคุณไม่มีสิทธิ์เข้าถึงข้อมูลเคส'));
 }
 

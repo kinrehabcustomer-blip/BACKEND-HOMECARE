@@ -5,7 +5,7 @@ import { issueForVisits, withProcedureNumbers } from './visitNumbers.js';
 /* รายการช่องของรายงานมาจาก schema.js ที่เดียว — ฟอร์มมี 80 กว่าช่อง การก๊อปรายชื่อมาไว้สองที่
    แปลว่าวันหนึ่งจะมีช่องที่ผ่าน validation แล้วแต่ไม่ถูกเขียนลงตาราง (บันทึกสำเร็จแต่ข้อมูลหาย)
    ต่างจากตาราง cases ที่ยังประกาศ COLUMNS เอง เพราะช่องน้อยและมีคอลัมน์ที่ระบบเติมเองปนอยู่ */
-import { REPORT_CONTENT_FIELDS, PATIENT_PENDING } from './schema.js';
+import { REPORT_CONTENT_FIELDS, PATIENT_PENDING, MAX_REPORT_IMAGES, END_BEFORE_START } from './schema.js';
 import { ensurePatientCodeFree } from '../patients/repo.js';
 import { decodeImage, FRONT_POSITIONS } from '../employees/schema.js';
 import { ApiError } from '../lib/errors.js';
@@ -25,7 +25,7 @@ const COLUMNS = [
   'pkg_grade_id',   // [homecare] เกรดการดูแล (ว่างได้ถ้ารูปแบบไม่อิงเกรด เช่น รายวัน/สัปดาห์)
   'pkg_format_id',  // [homecare] รูปแบบบริการ
   'pkg_staff_tier', // [homecare] ระดับพนักงาน CG/NA/PN
-  'pkg_english',    // [homecare] พนักงานสื่อสารภาษาอังกฤษ (fee รวมค่าภาษาแล้ว)
+  'pkg_english',    // [homecare/กายภาพ] พนักงานสื่อสารภาษาอังกฤษ (fee รวมค่าภาษาแล้ว)
   'physio_package_id', // [physio] แพ็คเกจกายภาพบำบัดที่ซื้อ
 
   // รายละเอียดผู้รับบริการ
@@ -69,12 +69,16 @@ export const ensureCasePriceSnapshots = () =>
 async function servicePriceSnapshot(db, s) {
   if (s.physio_package_id) {
     const p = await db.one(
-      'SELECT original_price, special_price FROM physio_packages WHERE physio_package_id = :id',
+      'SELECT original_price, special_price, english_fee FROM physio_packages WHERE physio_package_id = :id',
       { id: s.physio_package_id },
     );
+    /* ค่าภาษาอังกฤษบวกเข้าทั้งราคาเต็มและราคาที่ขาย — fee ของเคสรวมค่าภาษาแล้ว
+       ถ้าบวกแค่ฝั่งเดียว ใบแจ้งหนี้จะคิดส่วนลด (ราคาเต็ม − fee) ได้น้อยกว่าจริงเท่ากับค่าภาษา */
+    const english = s.pkg_english ? Number(p?.english_fee ?? 0) : 0;
+    const plus = (v) => (v == null ? null : v + english);
     return {
-      list: p?.original_price ?? null,
-      customer: s.fee ?? p?.special_price ?? p?.original_price ?? null,
+      list: plus(p?.original_price ?? null),
+      customer: s.fee ?? plus(p?.special_price ?? p?.original_price ?? null),
     };
   }
   if (s.pkg_format_id && s.pkg_staff_tier) {
@@ -278,10 +282,19 @@ export async function list({ q, status, case_type, service_kind, assigned_to, no
 
   // NULLS LAST — start_date/title ว่างได้ ถ้าไม่ใส่ การเรียงจากใหม่ไปเก่าจะเอาเคสที่ยังไม่ได้ระบุวันเริ่ม
   // ขึ้นก่อนเคสที่เริ่มจริง (ค่าปริยายของ Postgres คือ NULLS FIRST เมื่อเรียงจากมากไปน้อย)
+  /* เลือกรหัสเคสของหน้านี้จากตาราง cases ก่อน แล้วค่อย JOIN พนักงาน/ลูกค้า/แพ็คเกจให้แค่ 20 แถวนั้น
+     — เดิม JOIN ครบทุกเคสที่เข้าเงื่อนไขแล้วเรียงแถวกว้างทั้งก้อนก่อนตัด (6,000 เคส ≈ 40 ms · optimize 6 พ.ย. 2569)
+     clause อ้างแค่ c (ตัวนับด้านบนใช้ FROM cases c ตัวเดียวกัน) และมี case_id ตัดสินลำดับเสมอ ผลจึงเหมือนเดิมทุกแถว
+     = ANY(ARRAY(…)) ไม่ใช่ IN (…) — IN ให้ planner เลือก hash semi join ได้ ซึ่ง JOIN ครบทุกเคสก่อนแล้วค่อยจับคู่ (ช้ากว่าเดิมอีก)
+     ARRAY(ซับคิวรี) ถูกคิดครั้งเดียวก่อน แล้วค้นด้วย PK แค่ 20 ตัว */
+  const orderBy = `c.${sort} ${order.toUpperCase()} NULLS LAST, c.case_id ${order.toUpperCase()}`;
   const rows = await sql.all(
-    `${SELECT_CASE} ${clause}
-     ORDER BY c.${sort} ${order.toUpperCase()} NULLS LAST
-     LIMIT :limit OFFSET :offset`,
+    `${SELECT_CASE}
+     WHERE c.case_id = ANY(ARRAY(
+       SELECT c.case_id FROM cases c ${clause}
+       ORDER BY ${orderBy}
+       LIMIT :limit OFFSET :offset))
+     ORDER BY ${orderBy}`,
     { ...params, limit: per_page, offset: (page - 1) * per_page },
   );
 
@@ -318,8 +331,9 @@ export async function backfillCustomerForPatient(patientId, customerId) {
 export function listForEmployee(employeeId) {
   return sql.all(
     `${SELECT_CASE}
-     WHERE c.assigned_to = :id
-        OR EXISTS (SELECT 1 FROM case_team t WHERE t.case_id = c.case_id AND t.employee_id = :id)
+     WHERE ((c.assigned_to = :id
+             OR EXISTS (SELECT 1 FROM case_team t WHERE t.case_id = c.case_id AND t.employee_id = :id))
+            AND ${ROLE_STILL_OPEN})
         /* ไม่นับกะที่ยกเลิก และนับย้อนหลังแค่ในหน้าต่างเวลาเดียวกับ hasFieldAccess
            ไม่งั้นรายการจะโชว์เคสที่เปิดเข้าไปแล้วได้ 404 (หรือกลับกัน ซ่อนเคสที่ยังเปิดได้) */
         OR EXISTS (SELECT 1 FROM case_visits v
@@ -341,6 +355,16 @@ export function listForEmployee(employeeId) {
 export const FIELD_ACCESS_WINDOW_DAYS = 30;
 
 /**
+ * ผู้รับผิดชอบหลัก/คนในทีม เข้าเคสได้ระหว่างเคสยังเปิด + อีก 30 วันหลังปิด/ยกเลิก (ตรวจรอบ 6 พ.ย. 2569)
+ * เดิมสองทางนี้ผ่านตลอดกาล — คนที่ดูแลเคสที่จบไปเมื่อปีก่อนยังเปิดเบอร์ ที่อยู่ ประวัติการรักษา
+ * รูปแผล และแชทญาติได้อยู่ · 30 วันเท่ากับทางกะ พอให้เขียนรายงานตกค้าง/ตอบญาติหลังปิดเคส
+ * ใช้ :window ตัวเดียวกับเงื่อนไขกะ (ผู้เรียกต้องส่งพารามิเตอร์ window มาด้วย)
+ */
+const ROLE_STILL_OPEN = `(c.status NOT IN ('closed', 'cancelled')
+  OR LEFT(COALESCE(c.closed_at, c.cancelled_at, c.updated_at), 10)
+     >= to_char(now() AT TIME ZONE 'Asia/Bangkok' - make_interval(days => :window), 'YYYY-MM-DD'))`;
+
+/**
  * พนักงานภาคสนามเข้าถึงเคสนี้ได้ไหม (ผู้รับผิดชอบหลัก / อยู่ในทีม / มีกะในเคส) — ใช้กันดูเคสคนอื่น
  *
  * windowDays: นับเฉพาะกะที่เกิดภายใน N วันล่าสุด · ไม่ใส่ = ใช้ค่ากลาง FIELD_ACCESS_WINDOW_DAYS
@@ -354,8 +378,9 @@ export async function hasFieldAccess(employeeId, caseId, { windowDays = FIELD_AC
   const row = await sql.one(
     `SELECT 1 FROM cases c
      WHERE c.case_id = :cid
-       AND (c.assigned_to = :eid
-            OR EXISTS (SELECT 1 FROM case_team t WHERE t.case_id = c.case_id AND t.employee_id = :eid)
+       AND (((c.assigned_to = :eid
+              OR EXISTS (SELECT 1 FROM case_team t WHERE t.case_id = c.case_id AND t.employee_id = :eid))
+             AND ${ROLE_STILL_OPEN})
             /* กะที่ถูกยกเลิก = งานที่ไม่ได้เกิดขึ้น จึงไม่ควรเป็นใบเบิกทางให้อ่านประวัติการรักษา
                ที่อยู่ และข้อมูลสุขภาพของผู้รับบริการรายนั้นต่อไปตลอดกาล (เคสถูกยกเลิกทั้งใบก็เข้าข่ายเดียวกัน) */
             OR EXISTS (SELECT 1 FROM case_visits v
@@ -366,7 +391,7 @@ export async function hasFieldAccess(employeeId, caseId, { windowDays = FIELD_AC
                          AND v.visit_date >= to_char(now() AT TIME ZONE 'Asia/Bangkok' - make_interval(days => ${days}), 'YYYY-MM-DD')`
                              : ''
                          }))`,
-    { cid: caseId, eid: employeeId },
+    { cid: caseId, eid: employeeId, window: days ?? FIELD_ACCESS_WINDOW_DAYS },
   );
   return Boolean(row);
 }
@@ -380,10 +405,11 @@ export async function hasFieldAccess(employeeId, caseId, { windowDays = FIELD_AC
 function clearUnusedKind(input) {
   if (!('service_kind' in input)) return input;
 
-  const HOMECARE = { pkg_grade_id: null, pkg_format_id: null, pkg_staff_tier: null, pkg_english: false };
+  // ธงภาษาอังกฤษ (pkg_english) ใช้ได้ทั้งสองสาย — กายภาพบวกค่าภาษาตามแพ็คเกจ (physio_packages.english_fee)
+  const HOMECARE = { pkg_grade_id: null, pkg_format_id: null, pkg_staff_tier: null };
   if (input.service_kind === 'physio') return { ...input, ...HOMECARE };
   if (input.service_kind === 'homecare') return { ...input, physio_package_id: null };
-  return { ...input, ...HOMECARE, physio_package_id: null }; // ไม่ระบุสาย = ล้างทั้งคู่
+  return { ...input, ...HOMECARE, pkg_english: false, physio_package_id: null }; // ไม่ระบุสาย = ล้างทั้งคู่
 }
 
 /**
@@ -640,7 +666,19 @@ export async function create(rawInput, actor) {
       await logEvent(tx, caseId, 'assigned', `มอบหมายให้ ${await staffLabel(tx, values.assigned_to)}`, actor);
     }
 
-    if (prev) {
+    if (input.team) {
+      /* ทีมที่ผู้ใช้เลือกมาเอง (หน้าต่อเคสติ๊กเลือก) — route ตรวจแล้วว่าทุกคนรับงานได้ · คนหลักไม่ใส่ซ้ำ
+         ใส่ในทรานแซกชันเดียวกับเคส: เคสเกิดแล้วทีมต้องครบ ไม่ใช่ครึ่งๆ เพราะยิงทีละคนแล้วล้มกลางทาง */
+      for (const employeeId of new Set(input.team)) {
+        if (employeeId === values.assigned_to) continue;
+        await tx.run(
+          `INSERT INTO case_team (case_id, employee_id, added_by)
+           VALUES (:case_id, :employee_id, :actor)
+           ON CONFLICT DO NOTHING`,
+          { case_id: caseId, employee_id: employeeId, actor: actor?.employee_id ?? null },
+        );
+      }
+    } else if (prev) {
       // ทีมดูแลรอบก่อนตามมาด้วย (เฉพาะคนที่ยังรับงานได้) — คนหลักมาจากฟอร์มแล้ว ไม่ใส่ซ้ำ
       await tx.run(
         `INSERT INTO case_team (case_id, employee_id, added_by)
@@ -660,6 +698,9 @@ export async function create(rawInput, actor) {
           assigned_to: values.assigned_to,
         },
       );
+    }
+
+    if (prev) {
       await logEvent(tx, caseId, 'renewed', `ต่อจาก ${caseCode(prev.case_id)} (รอบที่ ${values.round_no})`, actor);
       await logEvent(tx, prev.case_id, 'renewed', `ต่อเป็น ${caseCode(caseId)} (รอบที่ ${values.round_no})`, actor);
     }
@@ -727,6 +768,23 @@ function changedLabels(current, values, fields) {
 /* ตัวเลือกบริการที่ระบุตัวแพ็คเกจ/เรทจริง — ไม่รวม service_kind เพราะเคสเก่าที่ยังว่าง
    ถูกเติมให้ตอนเปิดฟอร์มแก้ ทั้งที่แพ็คเกจไม่ได้เปลี่ยน (นับรวมแล้วจะเหมือนเปลี่ยนบริการทุกครั้ง) */
 const SERVICE_ID_FIELDS = ['physio_package_id', 'pkg_format_id', 'pkg_grade_id', 'pkg_staff_tier'];
+
+/* ช่องที่ล็อกเมื่อเคสจบแล้ว — เทียบค่าจริง ไม่ใช่แค่ "ส่งมา" เพราะฟอร์มเต็มส่งทุกช่องกลับมาเสมอ */
+const LOCKED_WHEN_DONE = [
+  ['fee', 'ค่าบริการ', (v) => (v == null ? null : Number(v))],
+  ['staff_pay', 'ค่าจ้างพนักงาน', (v) => (v == null ? null : Number(v))],
+  ['start_date', 'วันเริ่ม', (v) => v || null],
+  ['end_date', 'วันสิ้นสุด', (v) => v || null],
+  ['customer_id', 'ผู้ว่าจ้าง', (v) => v || null],
+  ['addons', 'อุปกรณ์เสริม/หัตถการ', (v) =>
+    JSON.stringify(normalizeAddons(typeof v === 'string' ? JSON.parse(v) : v))],
+];
+
+function lockedFieldChanges(current, values) {
+  return LOCKED_WHEN_DONE
+    .filter(([col, , norm]) => col in values && norm(current[col]) !== norm(values[col]))
+    .map(([, label]) => label);
+}
 
 const serviceChanged = (current, values) =>
   SERVICE_ID_FIELDS.some((f) => f in values && String(current?.[f] ?? '') !== String(values[f] ?? ''));
@@ -846,6 +904,25 @@ export async function update(caseId, rawInput, actor) {
     if (payMode !== 'preserve') {
       if (!fields.includes('staff_pay')) fields.push('staff_pay');
       values.staff_pay = payState.staff_pay;
+    }
+
+    const nextStart = 'start_date' in values ? values.start_date : current.start_date;
+    const nextEnd = 'end_date' in values ? values.end_date : current.end_date;
+    if (('start_date' in values || 'end_date' in values) && nextStart && nextEnd && nextEnd < nextStart) {
+      throw new ApiError(400, END_BEFORE_START, [{ field: 'end_date', message: END_BEFORE_START }]);
+    }
+
+    /* เคสที่ปิด/ยกเลิกแล้ว: ตัวเลขเงินกับช่วงสัญญาถูกใช้ไปแล้ว (ใบแจ้งหนี้ · ค่าจ้าง · รอบต่อเคส)
+       แก้ย้อนหลังได้แปลว่าตัวเลขเปลี่ยนหลังส่งไปทำเงินเดือน/ออกใบแล้วโดยไม่มีใครรู้ — ต้องเปิดเคสใหม่ก่อน
+       ช่องอื่น (ข้อมูลผู้รับบริการ ที่อยู่ หมายเหตุ) ยังแก้ได้ เป็นข้อมูลอ้างอิง ไม่ไหลเข้าเงิน */
+    if (['closed', 'cancelled'].includes(current.status)) {
+      const locked = lockedFieldChanges(current, values);
+      if (locked.length > 0) {
+        throw new ApiError(
+          409,
+          `เคสนี้ปิดหรือยกเลิกไปแล้ว จึงแก้${locked.join(' / ')}ไม่ได้ — ต้องเปิดเคสใหม่ก่อน`,
+        );
+      }
     }
 
     if (serviceChanged(current, values) || 'fee' in values) {
@@ -1375,7 +1452,7 @@ export function listVisits(caseId) {
     .all(
       `SELECT v.visit_id, v.case_id, v.visit_date, v.status, v.note,
               v.assigned_to, v.planned_start, v.planned_end,
-              v.check_in_at, v.check_out_at, v.check_in_distance_m, v.location_flagged,
+              v.check_in_at, v.check_out_at, v.check_in_distance_m, v.location_flagged, v.location_note,
               v.check_in_late_minutes, v.off_schedule,
               v.pay_status, v.pay_note, v.approved_by_name, v.vn,
               e.first_name || ' ' || e.last_name AS assigned_name,
@@ -1522,33 +1599,49 @@ function listSlots(values, params = {}) {
   return { slots: slots.join(', '), params };
 }
 
+/* ข้อความประวัติของการลบกะ — วัน เวลา และคนที่ลงกะไว้ (กะหายไปจากฐานแล้ว ประวัติคือร่องรอยเดียวที่เหลือ) */
+function removedDetail(rows) {
+  const one = (v) =>
+    [v.visit_date, v.planned_start && `${v.planned_start}–${v.planned_end ?? ''}`, v.assigned_to].filter(Boolean).join(' ');
+  const shown = rows.slice(0, 10).map(one).join(' · ');
+  return `ลบกะ ${rows.length} กะ: ${shown}${rows.length > 10 ? ' …' : ''}`;
+}
+
 /**
  * ลบกะของวันที่ระบุ — ใช้ตอนลงตารางผิด หรือลูกค้าเลื่อนบริการ
+ * ลบได้เฉพาะกะตั้งแต่วันนี้เป็นต้นไป — กะที่ผ่านมาแล้วคือประวัติ (ขาดงาน/ยกเลิก) ต้องเปลี่ยนสถานะเป็นยกเลิกแทน
+ * ไม่งั้นลบทิ้งแล้วไม่เหลือหลักฐานว่าวันนั้นมีนัดแต่ไม่มีใครไป
  * กะที่เช็คอินไปแล้วไม่ลบให้ (เป็นบันทึกการทำงานจริงและเป็นฐานค่าจ้าง) — คืนจำนวนที่ข้ามไปให้บอกผู้ใช้
  */
-export async function removeVisitsOn(caseId, dates) {
-  if (dates.length === 0) return { visits: await listVisits(caseId), deleted: 0, kept: 0 };
+export async function removeVisitsOn(caseId, dates, actor = null, employeeId = null) {
+  if (dates.length === 0) return { visits: await listVisits(caseId), deleted: 0, kept: 0, past: 0 };
 
-  const { slots, params } = listSlots(dates, { id: caseId });
+  // employeeId = ลบเฉพาะนัดของคนนี้ (เคสหลายคน) · null = ทุกคนในวันนั้นเหมือนเดิม
+  const { slots, params } = listSlots(dates, { id: caseId, today: isoDateTH(new Date()), emp: employeeId });
+  const whose = 'AND (CAST(:emp AS text) IS NULL OR assigned_to = :emp)';
   await ensureVisitChangeTable();
   // ลบนัด = แจ้งพนักงาน + ญาติเหมือน "ยกเลิก" (ดร.ธงชัย 2 พ.ย. 2569 ข้อ 1) — เดิมลบเงียบ นักกายภาพยังเดินทางไป ญาติยังรอ
   const deleted = await transaction(async (tx) => {
     const gone = await tx.all(
       `DELETE FROM case_visits
        WHERE case_id = :id AND visit_date IN (${slots}) AND check_in_at IS NULL
+         AND visit_date >= :today ${whose}
        RETURNING visit_id, visit_date, planned_start, planned_end, assigned_to, status`,
       params,
     );
     for (const v of gone) await recordVisitChange(tx, caseId, v.visit_id, v, { status: 'cancelled' }, ['status']);
+    if (gone.length > 0) await logEvent(tx, caseId, 'visit_removed', removedDetail(gone), actor);
     return gone.length;
   });
-  const kept = await sql.one(
-    `SELECT COUNT(*) AS n FROM case_visits
-     WHERE case_id = :id AND visit_date IN (${slots}) AND check_in_at IS NOT NULL`,
+  const left = await sql.one(
+    `SELECT COUNT(*) FILTER (WHERE check_in_at IS NOT NULL) AS kept,
+            COUNT(*) FILTER (WHERE check_in_at IS NULL AND visit_date < :today) AS past
+     FROM case_visits
+     WHERE case_id = :id AND visit_date IN (${slots}) ${whose}`,
     params,
   );
 
-  return { visits: await listVisits(caseId), deleted, kept: Number(kept.n) };
+  return { visits: await listVisits(caseId), deleted, kept: Number(left.kept), past: Number(left.past) };
 }
 
 /**
@@ -1749,18 +1842,20 @@ export async function updateVisit(caseId, visitId, input, actor) {
  * (เป็นบันทึกการทำงานจริง เป็นฐานค่าจ้าง และมีรูปเซลฟี่เป็นหลักฐานติดอยู่)
  * คืน false เมื่อไม่ได้ลบ ให้ชั้น route ตอบ 409 พร้อมบอกเหตุผล
  */
-export async function removeVisit(caseId, visitId) {
+export async function removeVisit(caseId, visitId, actor = null) {
   await ensureVisitChangeTable();
   // ลบนัด = แจ้งเหมือนยกเลิก (ดร.ธงชัย 2 พ.ย. 2569 ข้อ 1) · นัดที่ยกเลิกอยู่แล้ว/อยู่ในอดีต recordVisitChange ข้ามเอง
   return transaction(async (tx) => {
     const gone = await tx.one(
       `DELETE FROM case_visits
        WHERE visit_id = :visit_id AND case_id = :case_id AND check_in_at IS NULL
+         AND visit_date >= :today
        RETURNING visit_id, visit_date, planned_start, planned_end, assigned_to, status`,
-      { visit_id: visitId, case_id: caseId },
+      { visit_id: visitId, case_id: caseId, today: isoDateTH(new Date()) },
     );
     if (!gone) return false;
     await recordVisitChange(tx, caseId, visitId, gone, { status: 'cancelled' }, ['status']);
+    await logEvent(tx, caseId, 'visit_removed', removedDetail([gone]), actor);
     return true;
   });
 }
@@ -1771,7 +1866,7 @@ const MY_VISIT = `
   SELECT v.visit_id, v.case_id, v.visit_date, v.status AS visit_status, v.note,
          v.assigned_to, v.checked_in_by, v.planned_start, v.planned_end,
          v.check_in_at, v.check_out_at, v.check_in_lat, v.check_in_lng,
-         v.check_in_distance_m, v.location_flagged,
+         v.check_in_distance_m, v.location_flagged, v.location_note,
          v.check_in_late_minutes, v.off_schedule,
          v.pay_status, v.pay_note,
          (v.check_in_photo_data IS NOT NULL) AS has_photo,
@@ -1926,7 +2021,7 @@ export const findVisitPhoto = (visitId, caseId = null) =>
  */
 export function checkInVisit(
   visitId,
-  { employee_id, lat, lng, accuracy, distance, flagged, photo, late_minutes, off_schedule },
+  { employee_id, lat, lng, accuracy, distance, flagged, note = null, photo, late_minutes, off_schedule },
 ) {
   return transaction(async (tx) => {
     // Same lock order as close/cancel: case first, then visit. Otherwise a
@@ -1938,14 +2033,14 @@ export function checkInVisit(
       `UPDATE case_visits
        SET check_in_at = now(), checked_in_by = :emp,
            check_in_lat = :lat, check_in_lng = :lng, check_in_accuracy_m = :acc,
-           check_in_distance_m = :dist, location_flagged = :flag,
+           check_in_distance_m = :dist, location_flagged = :flag, location_note = :note,
            check_in_late_minutes = :late, off_schedule = :off,
            check_in_photo_data = :pdata, check_in_photo_mime = :pmime, check_in_photo_size = :psize,
            updated_at = ${NOW}
        WHERE visit_id = :id AND check_in_at IS NULL AND status <> 'cancelled'`,
       {
         id: visitId, emp: employee_id, lat, lng, acc: accuracy,
-        dist: distance, flag: flagged,
+        dist: distance, flag: flagged, note,
         late: late_minutes ?? null, off: off_schedule ?? false,
         pdata: photo?.data ?? null, pmime: photo?.mime ?? null, psize: photo?.size ?? null,
       },
@@ -1977,11 +2072,16 @@ export function checkInVisit(
 }
 
 /** เช็คเอาท์กะ — route เช็คเงื่อนไขก่อนแล้ว, WHERE กันแข่งกดอีกชั้น; คืน null ถ้าไม่เข้าเงื่อนไข */
-export const checkOutVisit = (visitId, { lat, lng }) =>
+export const checkOutVisit = (visitId, { lat, lng, accuracy = null, distance = null, flagged = false, note = null }) =>
   sql
     .run(
       `UPDATE case_visits
        SET check_out_at = now(), check_out_lat = :lat, check_out_lng = :lng,
+           check_out_accuracy_m = :acc, check_out_distance_m = :dist,
+           -- ธงเดียวรวมเข้า+ออก: ออกนอกพื้นที่ก็ขึ้นธง แต่ออกในพื้นที่ไม่ล้างธงที่ขึ้นตอนเข้า
+           location_flagged = location_flagged OR :flag,
+           location_note = CASE WHEN :note::text IS NULL THEN location_note
+                                ELSE concat_ws(' · ', location_note, :note::text) END,
            -- กะที่ admin ยกเลิกระหว่างที่พนักงานอยู่หน้างาน ยังบันทึกเวลาออกได้ แต่ห้ามพลิกกลับเป็น done
            -- ไม่งั้นกะที่ยกเลิกแล้วจะกลับมานับชั่วโมงและสัดส่วนค่าจ้างเงียบๆ
            status = CASE WHEN status = 'cancelled' THEN status ELSE 'done' END,
@@ -1994,7 +2094,7 @@ export const checkOutVisit = (visitId, { lat, lng }) =>
             แต่ที่นี่ไม่เคยมีด่าน — เขียน check_in_at ผิดจากทางไหนก็ตามในอนาคต
             (นำเข้าข้อมูล · แก้ฐานมือ · เครื่องเวลาเพี้ยน) นาทีจะติดลบทันทีโดยไม่มีอะไรฟ้อง (ตรวจรอบ 16) */
          AND check_in_at < now()`,
-      { id: visitId, lat, lng },
+      { id: visitId, lat, lng, acc: accuracy, dist: distance, flag: flagged, note },
     )
     .then((n) => (n > 0 ? findVisit(visitId) : null));
 
@@ -2004,7 +2104,8 @@ const ADMIN_VISIT = `
   SELECT v.visit_id, v.case_id, v.visit_date, v.status AS visit_status,
          v.assigned_to, v.checked_in_by, v.planned_start, v.planned_end,
          v.check_in_at, v.check_out_at, v.check_in_lat, v.check_in_lng,
-         v.check_in_distance_m, v.check_in_accuracy_m, v.location_flagged, v.adjusted_by,
+         v.check_in_distance_m, v.check_in_accuracy_m, v.location_flagged, v.location_note,
+         v.check_out_distance_m, v.check_out_accuracy_m, v.adjusted_by,
          v.check_in_late_minutes, v.off_schedule,
          (v.check_in_photo_data IS NOT NULL) AS has_photo,
          -- รหัสของคนที่ employee_name อ้างถึง — ลำดับ COALESCE ต้องตรงกับบรรทัดล่างเป๊ะ
@@ -2147,7 +2248,7 @@ export function pendingApprovals({ month, employee_id } = {}) {
     .all(
       `SELECT v.visit_id, v.case_id, v.visit_date, v.planned_start, v.planned_end,
               v.check_in_at, v.check_out_at, v.check_in_distance_m,
-              v.location_flagged, v.off_schedule, v.check_in_late_minutes,
+              v.location_flagged, v.location_note, v.off_schedule, v.check_in_late_minutes,
               v.status AS visit_status,
               ROUND(EXTRACT(EPOCH FROM (v.check_out_at - v.check_in_at)) / 60) AS worked_minutes,
               c.client_name, c.status AS case_status,
@@ -2246,6 +2347,21 @@ const ADJUST_LABELS = {
   location_flagged: 'ธงนอกพื้นที่',
 };
 
+/* ค่าเดิม → ค่าใหม่ของแต่ละช่องที่แก้ (เวลาเป็นวันที่+เวลาไทย) — ประวัติต้องตอบได้ว่าแก้จากอะไรเป็นอะไร
+   ไม่ใช่แค่ "แก้เวลาเข้า" เพราะเวลาเข้า–ออกคือฐานของชั่วโมงทำงานและค่าจ้าง (ตรวจรอบ 6 พ.ย. 2569) */
+const thStamp = (t) =>
+  t ? new Date(new Date(t).getTime() + 7 * 3.6e6).toISOString().slice(0, 16).replace('T', ' ') : '—';
+function adjustChanges(before, input) {
+  const show = (col, v) =>
+    col === 'check_in_at' || col === 'check_out_at' ? thStamp(v)
+      : col === 'status' ? (VISIT_STATUS_TH[v] ?? v ?? '—')
+        : v ? 'มี' : 'ไม่มี';
+  return ['check_in_at', 'check_out_at', 'status', 'location_flagged']
+    .filter((col) => col in input)
+    .map((col) => `${ADJUST_LABELS[col]} ${show(col, before[col])} → ${show(col, input[col])}`)
+    .join(', ');
+}
+
 /**
  * admin แก้กะที่เช็คอินผิดพลาด — ปิดกะค้าง / แก้เวลา / เคลียร์ธง / เปลี่ยนสถานะ
  * เก็บ adjusted_by ไว้เสมอ ให้รู้ว่าใครแก้ และลงประวัติของเคสด้วย (การแก้เวลาเข้า–ออกกระทบค่าจ้าง)
@@ -2287,7 +2403,7 @@ export async function adjustVisit(caseId, visitId, input, admin) {
     /* ล็อกกะไว้ก่อนอ่านสถานะค่าจ้าง — ไม่งั้นการอนุมัติที่กำลังวิ่งอยู่คนละคำขออาจแทรกกลาง
        ระหว่าง "อ่านว่ายังไม่อนุมัติ" กับ "เขียนทับเวลา" แล้วกลายเป็นอนุมัติยอดที่ไม่มีใครเคยเห็น */
     const before = await tx.one(
-      `SELECT v.pay_status,
+      `SELECT v.pay_status, v.check_in_at, v.check_out_at, v.status,
               (SELECT COALESCE(SUM(p.amount), 0) FROM case_payouts p WHERE p.case_id = v.case_id) AS released
        FROM case_visits v
        WHERE v.visit_id = :visit_id AND v.case_id = :case_id
@@ -2323,7 +2439,8 @@ export async function adjustVisit(caseId, visitId, input, admin) {
         tx,
         caseId,
         'visit_adjusted',
-        `แก้กะวันที่ ${visit.visit_date}${touched.length ? ` — ${touched.join(', ')}` : ''}` +
+        `แก้กะวันที่ ${visit.visit_date}${touched.length ? ` — ${adjustChanges(before, input)}` : ''}` +
+          (input.reason ? ` · เหตุผล: ${input.reason}` : '') +
           (reopenApproval ? ' (ดึงกลับเป็นรออนุมัติค่าจ้าง)' : ''),
         typeof admin === 'string' ? { employee_id: adminId, name: await staffName(tx, adminId) } : admin,
       );
@@ -2607,9 +2724,14 @@ export const CANCELLED_WITH_WORK = `(
  * ไม่ใช้ "จำนวนวันตามสัญญา" (start_date → end_date) เป็นตัวหาร เพราะเคสจริงไม่ได้ลงกะทุกวัน
  * (สัปดาห์ละ 3 วันก็มี) ช่วงวันที่จึงไม่ใช่จำนวนงานที่ตกลงกันไว้ · ตารางกะคือแผนงานฉบับเดียว
  * ที่ระบบมีจริงและเป็นตัวเดียวกับที่ผู้จัดการเห็นบนหน้าเคส
+ *
+ * ตัวเศษนับเฉพาะกะที่ "ทำจบจริง": เช็คเอาท์แล้ว และผู้จัดการไม่ได้กดไม่อนุมัติ (ตรวจรอบ 6 พ.ย. 2569)
+ * เดิมนับแค่เช็คอิน — กะที่ถูกปฏิเสธ (GPS ผิด/ทำงาน 0 นาที) หรือเปิดค้างไม่ได้ออก ดันสัดส่วนขึ้น
+ * จ่ายเกินจริง · กะค้างที่ผู้จัดการปิดให้ (/adjust) จะมีเวลาออกแล้วจึงถูกนับตามปกติ
  */
 export const WORKED_SHIFTS = `(SELECT COUNT(*) FROM case_visits wv
-   WHERE wv.case_id = c.case_id AND wv.check_in_at IS NOT NULL AND wv.status <> 'cancelled')`;
+   WHERE wv.case_id = c.case_id AND wv.check_in_at IS NOT NULL AND wv.check_out_at IS NOT NULL
+     AND wv.status <> 'cancelled' AND wv.pay_status IS DISTINCT FROM 'rejected')`;
 export const PLANNED_SHIFTS = `(SELECT COUNT(*) FROM case_visits pv WHERE pv.case_id = c.case_id)`;
 
 /* เคสที่ยกเลิกแล้วแต่มีคนไปทำงานมาจริง จัดชั้นเดียวกับเคสที่ปิด — งานจบไปแล้วทั้งคู่
@@ -3699,6 +3821,56 @@ export function assignableEmployees() {
 // zod ตรวจ "ค่าที่รับได้" ส่วนที่นี่ตัดสิน "คอลัมน์ที่จะเขียนลงตาราง" คนละหน้าที่กัน
 /* ช่องกำกับ (ไม่ใช่เนื้อหา) + ทุกช่องเนื้อหาจาก schema — ยกเว้นรูปแผลที่ไม่ได้ลงคอลัมน์เดียว
    (wound_photo เป็น data URL ขาเข้า ต้องแตกเป็น data/mime/size สามคอลัมน์ ดู photoColumns) */
+/* ตารางรูปแนบรายงาน + คอลัมน์แบบบันทึกตรวจรักษาของนักกายภาพ — สร้างเองครั้งแรกที่มีคนเปิดรายงาน (IF NOT EXISTS ปลอดภัยรันซ้ำ)
+   แบบเดียวกับ ensureFamilyTable · schema.sql มีชุดเดียวกันไว้ให้ npm run migrate */
+let reportSchemaReady = null;
+export const ensureReportSchema = () =>
+  (reportSchemaReady ??= (async () => {
+    for (const q of [
+      'ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS height_cm DOUBLE PRECISION CHECK (height_cm BETWEEN 30 AND 250)',
+      'ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS chief_complaint TEXT',
+      'ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS physical_exam TEXT',
+      'ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS diagnosis TEXT',
+      'ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS treatment_plan TEXT',
+      `CREATE TABLE IF NOT EXISTS case_report_images (
+         image_id   INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+         report_id  INTEGER NOT NULL REFERENCES case_reports (report_id) ON DELETE CASCADE,
+         data       BYTEA NOT NULL,
+         mime       TEXT NOT NULL,
+         size       INTEGER NOT NULL,
+         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+       )`,
+      'CREATE INDEX IF NOT EXISTS idx_case_report_images_report ON case_report_images (report_id)',
+    ]) await sql.run(q);
+  })().catch((err) => { reportSchemaReady = null; throw err; }));
+
+/** รูปใหม่ที่แนบมา -> ไบนารีพร้อมเก็บ (ตรวจก่อนเขียนอะไรลงฐานข้อมูล รูปเสียใบเดียวต้องไม่ทำให้รายงานค้างครึ่งทาง) */
+function decodeAttachments(input) {
+  const list = input.attach_images ?? [];
+  try {
+    return list.map((u) => decodeImage(u));
+  } catch (err) {
+    throw new ApiError(400, err.message);
+  }
+}
+
+async function saveImages(tx, reportId, images, removeIds = []) {
+  if (removeIds.length) {
+    await tx.run('DELETE FROM case_report_images WHERE report_id = :rid AND image_id = ANY(:ids::int[])', { rid: reportId, ids: removeIds });
+  }
+  if (!images.length) return;
+  const { n } = await tx.one('SELECT COUNT(*)::int AS n FROM case_report_images WHERE report_id = :rid', { rid: reportId });
+  if (n + images.length > MAX_REPORT_IMAGES) {
+    throw new ApiError(400, `แนบรูปได้ไม่เกิน ${MAX_REPORT_IMAGES} รูปต่อรายงาน (มีอยู่ ${n} รูป)`);
+  }
+  for (const img of images) {
+    await tx.run(
+      'INSERT INTO case_report_images (report_id, data, mime, size) VALUES (:rid, :data, :mime, :size)',
+      { rid: reportId, data: img.data, mime: img.mime, size: img.size },
+    );
+  }
+}
+
 const REPORT_META = ['visit_id', 'report_date', 'report_time', 'shift', 'report_type'];
 const REPORT_COLUMNS = [...REPORT_META, ...REPORT_CONTENT_FIELDS.filter((f) => f !== 'wound_photo')];
 
@@ -3747,6 +3919,7 @@ const REPORT_BASE_COLS = [
   'r.wound_photo_mime',
   'r.wound_photo_size',
   '(r.wound_photo_data IS NOT NULL) AS has_wound_photo',
+  "(SELECT COALESCE(json_agg(i.image_id ORDER BY i.image_id), '[]'::json) FROM case_report_images i WHERE i.report_id = r.report_id) AS image_ids",
   'r.reported_by',
   'r.reported_by_name',
   'r.created_at',
@@ -3770,6 +3943,7 @@ const withoutPhotoBytes = (row) => {
  * (เคสดูแลต่อเนื่องบันทึกวันละหลายครั้ง ดึงทั้งหมดทุกครั้งที่เปิดดูไม่ไหว)
  */
 export async function listReports(caseId, { month, type, page = 1, per_page = 20 } = {}) {
+  await ensureReportSchema();
   const where = ['r.case_id = :id'];
   const params = { id: caseId };
 
@@ -3822,7 +3996,8 @@ export function reportMonths(caseId) {
 }
 
 /** รายงานของกะเดียว — หน้างานวันนี้ของพนักงานเปิดดู/บันทึกจากตรงนี้ */
-export function listReportsForVisit(visitId) {
+export async function listReportsForVisit(visitId) {
+  await ensureReportSchema();
   return sql.all(
     `SELECT ${REPORT_COLS} FROM case_reports r ${REPORT_VISIT}
      WHERE r.visit_id = :id
@@ -3838,7 +4013,8 @@ export function listReportsForVisit(visitId) {
  * (หลักแสนไบต์) ออกจากฐานข้อมูลมาทุกครั้งที่กด "แก้รายงาน" ทั้งที่ไม่มีใครใช้ค่านั้นเลย
  * สิ่งที่ผู้เรียกต้องรู้คือ "ใบนี้มีรูปอยู่ไหม" ซึ่ง has_wound_photo ตอบได้เท่ากัน
  */
-export function findReport(caseId, reportId) {
+export async function findReport(caseId, reportId) {
+  await ensureReportSchema();
   return sql.one(
     `SELECT ${REPORT_BASE_COLS} FROM case_reports r WHERE r.report_id = :rid AND r.case_id = :cid`,
     { rid: reportId, cid: caseId },
@@ -3862,18 +4038,20 @@ const ensureReportIdempotency = () =>
     .catch((err) => { reportIdemReady = null; throw err; }));
 
 export async function addReport(caseId, input, actor) {
+  await ensureReportSchema();
   await ensureReportIdempotency();
+  const attachments = decodeAttachments(input);
 
   /* คำขอเดิมที่ส่งซ้ำ (เน็ต timeout แล้วกดใหม่) — คืนใบเดิม ไม่สร้างใบที่สอง
-     หนึ่งกะมีรายงานหลายใบได้โดยตั้งใจ จึงกันซ้ำที่รหัสคำขอ ไม่ใช่ที่ visit_id */
+     หนึ่งกะมีรายงานหลายใบได้โดยตั้งใจ จึงกันซ้ำที่รหัสคำขอ ไม่ใช่ที่ visit_id
+     (Codex ข้อ 6 · 8 พ.ย. 2569) */
   if (input.request_id) {
-    const existing = await sql.one(
-      `SELECT * FROM case_reports WHERE case_id = :case_id AND request_id = :rid`,
+    const prior = await sql.one(
+      `SELECT report_id FROM case_reports WHERE case_id = :case_id AND request_id = :rid`,
       { case_id: caseId, rid: input.request_id },
     );
-    if (existing) return withoutPhotoBytes(existing);
+    if (prior) return findReport(caseId, prior.report_id);
   }
-
   const photo = photoColumns(input);
   const columns = [...REPORT_COLUMNS, ...Object.keys(photo)];
 
@@ -3886,25 +4064,30 @@ export async function addReport(caseId, input, actor) {
   };
   for (const c of REPORT_COLUMNS) values[c] = blank(input[c]);
 
+  let created;
   try {
-    const row = await sql.one(
-      `INSERT INTO case_reports (case_id, reported_by, reported_by_name, request_id, ${columns.join(', ')})
-       VALUES (:case_id, :reported_by, :reported_by_name, :request_id, ${columns.map(slot).join(', ')})
-       RETURNING *`,
-      values,
-    );
-    return withoutPhotoBytes(row);
+    created = await transaction(async (tx) => {
+      const row = await tx.one(
+        `INSERT INTO case_reports (case_id, reported_by, reported_by_name, request_id, ${columns.join(', ')})
+         VALUES (:case_id, :reported_by, :reported_by_name, :request_id, ${columns.map(slot).join(', ')})
+         RETURNING report_id`,
+        values,
+      );
+      await saveImages(tx, row.report_id, attachments);
+      return row;
+    });
   } catch (err) {
     /* สองคำขอเดียวกันมาพร้อมกันจริง ๆ — ตัวที่แพ้ชน unique index แล้วคืนใบของตัวที่ชนะ */
     if (err?.code === '23505' && input.request_id) {
-      const existing = await sql.one(
-        `SELECT * FROM case_reports WHERE case_id = :case_id AND request_id = :rid`,
+      const prior = await sql.one(
+        `SELECT report_id FROM case_reports WHERE case_id = :case_id AND request_id = :rid`,
         { case_id: caseId, rid: input.request_id },
       );
-      if (existing) return withoutPhotoBytes(existing);
+      if (prior) return findReport(caseId, prior.report_id);
     }
     throw err;
   }
+  return findReport(caseId, created.report_id);
 }
 
 /**
@@ -3913,22 +4096,40 @@ export async function addReport(caseId, input, actor) {
  * ไม่แตะ reported_by: เจ้าของบันทึกคือคนที่เขียนครั้งแรก การแก้ไม่ใช่การเปลี่ยนผู้บันทึก
  */
 export async function updateReport(caseId, reportId, input) {
+  await ensureReportSchema();
+  const attachments = decodeAttachments(input);
+  const removeIds = input.remove_image_ids ?? [];
   const photo = photoColumns(input);
   const fields = [...REPORT_COLUMNS.filter((c) => c in input), ...Object.keys(photo)];
-  if (fields.length === 0) return findReport(caseId, reportId);
+  if (fields.length === 0 && attachments.length === 0 && removeIds.length === 0) return findReport(caseId, reportId);
 
   const values = { cid: caseId, rid: reportId, ...photo };
   for (const c of REPORT_COLUMNS) if (c in input) values[c] = blank(input[c]);
 
-  const set = fields.map((c) => `${c} = ${slot(c)}`);
+  const set = [...fields.map((c) => `${c} = ${slot(c)}`)];
 
-  const row = await sql.one(
-    `UPDATE case_reports SET ${set.join(', ')}, updated_at = ${NOW}
-     WHERE report_id = :rid AND case_id = :cid
-     RETURNING *`,
-    values,
+  await transaction(async (tx) => {
+    // แก้แค่รูปก็ต้องขยับเวลา "แก้ล่าสุด" — ไม่มีช่องอื่นให้ SET จึงใช้ updated_at ตัวเดียว
+    const row = await tx.one(
+      `UPDATE case_reports SET ${[...set, `updated_at = ${NOW}`].join(', ')}
+       WHERE report_id = :rid AND case_id = :cid
+       RETURNING report_id`,
+      values,
+    );
+    if (row) await saveImages(tx, reportId, attachments, removeIds);
+  });
+  return findReport(caseId, reportId);
+}
+
+/** รูปแนบของรายงาน — กรองด้วย case_id เสมอ รูปของเคสอื่นต้องไม่หลุดออกทาง path ของเคสนี้ */
+export async function findReportImage(caseId, reportId, imageId) {
+  await ensureReportSchema();
+  return sql.one(
+    `SELECT i.data, i.mime FROM case_report_images i
+     JOIN case_reports r ON r.report_id = i.report_id
+     WHERE i.image_id = :iid AND i.report_id = :rid AND r.case_id = :cid`,
+    { iid: imageId, rid: reportId, cid: caseId },
   );
-  return withoutPhotoBytes(row);
 }
 
 /** รูปแผลของรายงาน — ส่งเป็นไฟล์ผ่าน endpoint แยก ไม่ยัดกลับไปใน JSON */

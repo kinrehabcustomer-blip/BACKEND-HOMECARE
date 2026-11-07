@@ -8,6 +8,7 @@ import {
   GENDER_LABELS, TITLE_LABELS, BLOOD_TYPE_LABELS, PATIENT_STATUS_LABELS, ageFromBirthDate,
 } from '../labels.js';
 import { formatPhoneInput } from '../lib/phone.js';
+import SearchSelect from '../components/SearchSelect.jsx';
 
 const BLANK = {
   // รหัสผู้รับบริการ KN + ปี พ.ศ. 2 หลัก + เลข 7 หลัก (กรอกเอง) — ตอนแก้คือรหัสเดิม (อาจยังเป็น PAT-xxxx)
@@ -383,10 +384,10 @@ export default function PatientFormPage() {
             {fieldError('patient_id')}
           </label>
           <label>คำนำหน้า
-            <select name="title" {...field('title')}>
+            <SearchSelect name="title" {...field('title')}>
               <option value="">— ไม่ระบุ —</option>
               {Object.entries(TITLE_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-            </select>
+            </SearchSelect>
           </label>
           <label>ชื่อ - นามสกุล *
             <input required name="name" {...field('name')} />
@@ -395,15 +396,15 @@ export default function PatientFormPage() {
           <label>ชื่อเล่น<input name="nickname" {...field('nickname')} /></label>
 
           <label>เพศ
-            <select name="gender" {...field('gender')}>
+            <SearchSelect name="gender" {...field('gender')}>
               <option value="">— ไม่ระบุ —</option>
               {Object.entries(GENDER_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-            </select>
+            </SearchSelect>
           </label>
           <label>สถานะ
-            <select name="status" {...field('status')}>
+            <SearchSelect name="status" {...field('status')}>
               {Object.entries(PATIENT_STATUS_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-            </select>
+            </SearchSelect>
           </label>
 
           {/* แยกสองช่อง — แพ้ยาเป็นเรื่องของคนให้ยา แพ้อาหารเป็นเรื่องของคนเตรียมอาหาร
@@ -457,10 +458,10 @@ export default function PatientFormPage() {
             <label>น้ำหนัก (กก.)<input type="number" min="0" step="0.1" name="weight_kg" {...field('weight_kg')} /></label>
             <label>ส่วนสูง (ซม.)<input type="number" min="0" step="0.1" name="height_cm" {...field('height_cm')} /></label>
             <label>กรุ๊ปเลือด
-              <select name="blood_type" {...field('blood_type')}>
+              <SearchSelect name="blood_type" {...field('blood_type')}>
                 <option value="">— ไม่ระบุ —</option>
                 {Object.keys(BLOOD_TYPE_LABELS).map((v) => <option key={v} value={v}>{v}</option>)}
-              </select>
+              </SearchSelect>
             </label>
             <label className="span-2">สิทธิการรักษา
               <input name="medical_rights" placeholder="เช่น บัตรทอง ประกันสังคม ประกันเอกชน" {...field('medical_rights')} />

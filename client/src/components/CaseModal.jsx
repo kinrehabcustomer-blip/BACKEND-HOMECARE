@@ -17,7 +17,7 @@ import LineIcon from './LineIcon.jsx';
 import StaffPicker from './StaffPicker.jsx';
 import { formatPhone, formatPhoneInput } from '../lib/phone.js';
 import { caseCode } from '../lib/patientCode.js';
-import { isProcedure } from '../lib/addons.js';
+import { isProcedure, addonLabel } from '../lib/addons.js';
 
 /**
  * ชื่อบริการของเคส — สองสายเก็บคนละที่ (Homecare = รูปแบบ+เกรด, กายภาพ = ชื่อแพ็คเกจ)
@@ -52,6 +52,38 @@ function Field({ label, value, mono }) {
         {empty ? 'ไม่ได้ระบุ' : value}
       </span>
     </div>
+  );
+}
+
+/**
+ * รายการคิดเงินเพิ่ม (อุปกรณ์เสริม / หัตถการ) — ทีละบรรทัด: ชื่อซ้าย ราคาชิดขวา เลข VN เป็นบรรทัดเล็กใต้ชื่อ
+ * เดิมต่อกันเป็นประโยคเดียวคั่นด้วย · ราคากับ VN ปนอยู่กลางข้อความ อ่านไม่ออกว่าอะไรราคาเท่าไร (ผู้ใช้ขอ 6 พ.ย. 2569)
+ * มีมากกว่าหนึ่งรายการ = มีบรรทัดรวมท้ายสุด
+ */
+function ChargeList({ items }) {
+  const rows = items.map((x) => ({ ...x, amount: (x.quantity ?? 1) * (x.unit_price ?? 0) }));
+  const total = rows.reduce((s, x) => s + x.amount, 0);
+  return (
+    <span className="charge-list" role="list">
+      {rows.map((x, i) => (
+        <span className="charge-row" role="listitem" key={`${x.name}-${x.vn ?? i}`}>
+          <span className="charge-name">
+            <span>
+              {x.name}
+              {x.quantity != null && x.quantity !== 1 && <span className="charge-qty"> ×{x.quantity}</span>}
+            </span>
+            {x.vn && <span className="charge-vn mono">{x.vn}</span>}
+          </span>
+          <span className="charge-amt">{formatBaht(x.amount)}</span>
+        </span>
+      ))}
+      {rows.length > 1 && (
+        <span className="charge-row is-total">
+          <span className="charge-name">รวม {rows.length} รายการ</span>
+          <span className="charge-amt">{formatBaht(total)}</span>
+        </span>
+      )}
+    </span>
   );
 }
 
@@ -148,6 +180,7 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
   const [team, setTeam] = useState([]); // คนที่ร่วมดูแลเคส นอกเหนือจากผู้รับผิดชอบหลัก
   /* ฟอร์มแก้รายงานกางอยู่ในหน้า — Esc/Tab ต้องไม่ปิดทั้งกล่องจนที่พิมพ์ไว้หาย */
   const [reportFormOpen, setReportFormOpen] = useState(false);
+  const [reportAddOpen, setReportAddOpen] = useState(false); // popup ลงรายงานย้อนหลัง (ปุ่มอยู่ที่หัวข้อรายงาน)
   /* ใบที่กำลังจะพิมพ์ — โหลดรายงานทั้งคลังตอนกดเท่านั้น (หน้าปกติใช้แค่ไม่กี่ใบล่าสุด)
      ค้างไว้หลังพิมพ์เสร็จก็ไม่มีผล เพราะตัวใบถูกซ่อนบนจออยู่แล้ว */
   const [printReports, setPrintReports] = useState(null);
@@ -160,6 +193,7 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
   const [cancelReason, setCancelReason] = useState('');
   const [invoices, setInvoices] = useState([]);  // ใบแจ้งหนี้ของเคสนี้ (ปกติมีใบเดียว)
   const [openInvoiceId, setOpenInvoiceId] = useState(null);
+  const [extras, setExtras] = useState(null);    // ค่าใช้จ่ายเพิ่มเติมที่ยังไม่ได้ออกใบ { items, total }
   const [events, setEvents] = useState([]);      // ประวัติการทำรายการ (audit log) — ใหม่สุดอยู่บน
   const [eventsOpen, setEventsOpen] = useState(false);
 
@@ -173,11 +207,13 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
       api.listCaseEvents(caseId),
       api.listCaseReports(caseId, { per_page: 1 }),
       api.listCaseTeam(caseId),
-    ]).then(([c, list, v, inv, ev, rp, tm]) => {
+      api.unbilledExtras(caseId),
+    ]).then(([c, list, v, inv, ev, rp, tm, ex]) => {
       setItem(c);
       setStaff(list);
       setVisits(v);
       setInvoices(inv.data);
+      setExtras(ex);
       setEvents(ev);
       setReports({ total: rp.total });
       setTeam(tm);
@@ -239,13 +275,15 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
       api.listCaseEvents(caseId),
       api.listCaseReports(caseId, { per_page: 1 }),
       api.listCaseTeam(caseId),
+      api.unbilledExtras(caseId),
     ])
-      .then(([c, list, v, inv, ev, rp, tm]) => {
+      .then(([c, list, v, inv, ev, rp, tm, ex]) => {
         if (cancelled) return;
         setItem(c);
         setStaff(list);
         setVisits(v);
         setInvoices(inv.data);
+        setExtras(ex);
         setEvents(ev);
         setReports({ total: rp.total });
       setTeam(tm);
@@ -383,6 +421,28 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
       ? [...baseStaff, ...staff.filter((e) => e.employee_id === item.assigned_to)]
       : baseStaff;
 
+  /* กะถัดไปที่ยังต้องไป — ปุ่ม "ส่งเตือน" ท้ายหน้าต่างเตือนกะนี้ (เงื่อนไขเดียวกับปุ่มรายกะใน CaseVisits)
+     อยากเตือนกะอื่นให้กดที่แถวกะนั้นใน popup รายการกะ */
+  const nextVisit = visits
+    .filter((v) => v.status === 'scheduled' && !v.check_in_at && v.visit_date >= todayTH())
+    .sort((a, b) => `${a.visit_date} ${a.planned_start ?? ''}`.localeCompare(`${b.visit_date} ${b.planned_start ?? ''}`))[0];
+
+  /** ส่งเตือนนัดทาง LINE เอง — ไม่เปลี่ยนข้อมูลเคส จึงไม่ผ่าน run() · ข้อความเข้าคิว ส่งจริงเมื่อระบบแชทมารับ */
+  async function remindNext() {
+    if (!nextVisit) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await api.remindVisit(item.case_id, nextVisit.visit_id);
+      const parts = [res.staff && `พนักงาน ${res.staff}`, res.family && `ญาติ/ลูกค้า ${res.family}`].filter(Boolean);
+      toast(`เข้าคิวส่งเตือนแล้ว — ${parts.join(' · ')} คน`);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   /**
    * ยกเลิกเคส — ยืนยันด้วยฟอร์มในหน้า ไม่ใช่ prompt()
    *
@@ -401,7 +461,7 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
   return (
     <div className="modal-backdrop" onClick={requestClose}>
       <div
-        className="modal"
+        className="modal detail-modal"
         role="dialog"
         aria-modal="true"
         aria-label="รายละเอียดเคส"
@@ -542,19 +602,13 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                   {item.addons?.some((x) => !isProcedure(x)) && (
                     <Field
                       label="อุปกรณ์เสริม (คิดเพิ่มในใบแจ้งหนี้)"
-                      value={item.addons
-                        .filter((x) => !isProcedure(x))
-                        .map((x) => `${x.name}${x.quantity !== 1 ? ` ×${x.quantity}` : ''} ${formatBaht(x.quantity * x.unit_price)}`)
-                        .join(' · ')}
+                      value={<ChargeList items={item.addons.filter((x) => !isProcedure(x))} />}
                     />
                   )}
                   {item.addons?.some(isProcedure) && (
                     <Field
                       label="หัตถการ (คิดเพิ่มในใบแจ้งหนี้)"
-                      value={item.addons
-                        .filter(isProcedure)
-                        .map((x) => `${x.name} ${formatBaht(x.unit_price)}${x.vn ? ` (${x.vn})` : ''}`)
-                        .join(' · ')}
+                      value={<ChargeList items={item.addons.filter(isProcedure)} />}
                     />
                   )}
                   {/* Homecare ได้ VN เคสละหนึ่งเลข (ออกตอนลงนัดครั้งแรก) · กายภาพมี VN รายนัดในตารางนัด */}
@@ -656,25 +710,29 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                   {/* สองทางที่ต่างกันจริงๆ: อ่านในระบบ (กางดูรายใบ แก้ไขได้ กรองตามเดือน/ที่ผิดปกติ)
                       กับใบกระดาษที่ส่งออกไปข้างนอก (ญาติขอดู แพทย์ขอประวัติ เก็บเข้าแฟ้มตอนปิดเคส)
                       ทางแรกต้องอยู่ตรงนี้ด้วยเสมอ ไม่ใช่โผล่เฉพาะตอนรายงานเยอะจนล้นออกนอกหน้า */}
-                  {reports.total > 0 && (
-                    <span className="head-actions">
-                      <button className="btn tiny" onClick={() => setReportsOpen(true)}>
-                        <LineIcon name="eye" />ดูรายงานทั้งหมด ({reports.total})
-                      </button>
-                      <button className="btn tiny" disabled={printing} onClick={printReportForm}>
-                        <LineIcon name="printer" />{printing ? 'กำลังเตรียม…' : 'พิมพ์ / บันทึก PDF'}
-                      </button>
-                    </span>
-                  )}
+                  <span className="head-actions">
+                    {reports.total > 0 && (
+                      <>
+                        <button className="btn tiny" onClick={() => setReportsOpen(true)}>
+                          <LineIcon name="eye" />ดูรายงานทั้งหมด ({reports.total})
+                        </button>
+                        <button className="btn tiny" disabled={printing} onClick={printReportForm}>
+                          <LineIcon name="printer" />{printing ? 'กำลังเตรียม…' : 'พิมพ์ / บันทึก PDF'}
+                        </button>
+                      </>
+                    )}
+                    <button className="btn tiny primary" onClick={() => setReportAddOpen(true)}>
+                      + ลงรายงานย้อนหลัง
+                    </button>
+                  </span>
                 </div>
-                <p className="muted report-where">
-                  บันทึกรายงานได้ที่หน้า <strong>งานวันนี้</strong> ของกะนั้น — ตรงนี้ดูย้อนหลังและแก้ไขได้
-                </p>
                 <CaseReports
                   caseId={item.case_id}
                   caseInfo={item}
                   scope="admin"
-                  allowAdd={false}
+                  allowAdd
+                  adding={reportAddOpen}
+                  onAddingChange={setReportAddOpen}
                   inlineLimit={3}
                   archiveTitle={item.client_name}
                   onFormOpen={setReportFormOpen}
@@ -742,7 +800,7 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                               ? 'ผู้จ่ายในใบไม่ตรงกับเคส'
                               : v.fee_stale
                                 ? `ไม่ตรงกับยอดของเคส (${formatBaht(v.case_fee)})`
-                                : 'เคสเปลี่ยนแพ็คเกจ/อุปกรณ์เสริมหลังออกใบนี้'}</>
+                                : 'เคสเปลี่ยนแพ็คเกจหลังออกใบนี้'}</>
                           </p>
                         )}
                       </div>
@@ -754,6 +812,40 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                     </div>
                   ))
                 )}
+                {/* ค่าใช้จ่ายนอกแพ็คเกจที่เพิ่มหลังออกใบแพ็คเกจ — ไม่ยัดเข้าใบเดิม แอดมินกดออกเป็นใบใหม่เอง
+                    โชว์เฉพาะตอนเคสมีใบที่ใช้งานอยู่แล้ว (ยังไม่มีใบเลย = อุปกรณ์ไปอยู่ในใบแพ็คเกจตอนออกตามปกติ) */}
+                {extras?.items.length > 0 &&
+                  invoices.some((v) => v.status !== 'cancelled') &&
+                  item.status !== 'cancelled' && (
+                    <div className="history-item">
+                      <div>
+                        <strong>ค่าใช้จ่ายเพิ่มเติมที่ยังไม่ได้ออกใบ · {formatBaht(extras.total)}</strong>
+                        <ul className="muted">
+                          {extras.items.map((a, i) => (
+                            <li key={i}>
+                              {addonLabel(a)}
+                              {a.quantity !== 1 && ` × ${a.quantity}`} — {formatBaht(a.quantity * a.unit_price)}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                      <div className="invoice-row-actions">
+                        <button
+                          className="btn tiny primary"
+                          disabled={busy}
+                          onClick={() =>
+                            run(async () => {
+                              const created = await api.createExtrasInvoice(item.case_id);
+                              toast(`ออกใบค่าใช้จ่ายเพิ่มเติม ${created.invoice_id} แล้ว (ร่าง) — ตรวจแล้วกดออกใบได้เลย`);
+                              setOpenInvoiceId(created.invoice_id);
+                            })
+                          }
+                        >
+                          ออกใบค่าใช้จ่ายเพิ่มเติม
+                        </button>
+                      </div>
+                    </div>
+                  )}
               </section>
 
               {/* ประวัติการทำรายการ — ใครทำอะไรกับเคสนี้บ้าง เก็บทีละครั้ง ไม่ใช่แค่เวลาล่าสุด
@@ -922,6 +1014,18 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
               {/* ลูกค้าใช้บริการต่อ — เปิดเคสรอบใหม่ที่คัดลอกจากเคสนี้ (ต่อได้ครั้งเดียว ยกเลิกแล้วต่อไม่ได้) */}
               {status !== 'cancelled' && !item.renewed_to && (
                 <Link className="btn" to={`/cases/new?renew=${item.case_id}`}>ต่อเคส</Link>
+              )}
+
+              {/* แอดมินกดส่งเตือนนัดทาง LINE เอง (พนักงาน + ญาติ) — กะถัดไปที่ยังไม่ถึง/ยังไม่เช็คอิน */}
+              {!terminal && nextVisit && (
+                <button
+                  className="btn"
+                  disabled={busy}
+                  title={`ส่งข้อความเตือนนัด ${nextVisit.visit_date}${nextVisit.planned_start ? ` ${nextVisit.planned_start}` : ''} ทาง LINE ถึงพนักงานและญาติ`}
+                  onClick={remindNext}
+                >
+                  ส่งเตือน
+                </button>
               )}
 
               {/* เคสจบแล้ว (ปิด/ยกเลิก) — เหลือแค่เปิดใหม่ */}

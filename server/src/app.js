@@ -18,7 +18,8 @@ import { publicReviewsRouter, reviewsRouter } from './reviews/routes.js';
 import { publicBillRouter } from './invoices/publicRoutes.js';
 import { ensureReviewColumns } from './reviews/repo.js';
 import { errorHandler } from './lib/errors.js';
-import { requireAuth, requireAdmin, requireBilling, requireCaseAccess, requireManager, requirePasswordChanged, ensureRevokedSessions } from './lib/auth.js';
+import { requireAuth, requireAdmin, requireBilling, requireCaseAccess, requirePermission, requirePasswordChanged, ensureRevokedSessions } from './lib/auth.js';
+import { permissionsRouter } from './permissions/routes.js';
 
 export function createApp() {
   /* ตาราง revoked_sessions ต้องมีก่อนคำขอแรก — requireAuth อ่านมันในคิวรีเดียวกับที่อ่านพนักงาน
@@ -73,7 +74,9 @@ export function createApp() {
   app.use('/api/reviews', signedIn, requireAdmin, reviewsRouter);
   // ค่าตอบแทนและการปิดรอบทำให้เงินจริงออกจากบริษัท — HR เป็น admin แต่ไม่ใช่ผู้มีสิทธิ์ด้านการเงิน
   // วาง requireManager ก่อน router เพื่อกันก่อนแม้แต่ param loader จะอ่าน/บอกใบ้รหัสรอบที่มีอยู่
-  app.use('/api/payroll', signedIn, requireManager, payrollRouter);
+  app.use('/api/payroll', signedIn, requirePermission('payroll', 'บัญชีของคุณไม่มีสิทธิ์เข้าหน้าค่าตอบแทนพนักงาน'), payrollRouter);
+  // หน้าจัดการสิทธิ์ — Super Admin · ผู้จัดการ (ด่านอยู่ใน router เพราะเป็นรายตำแหน่ง ไม่ใช่รายสิทธิ์)
+  app.use('/api/permissions', signedIn, permissionsRouter);
 
   // ส่วนของพนักงานภาคสนาม — เห็นเฉพาะเคสของตัวเอง (กรองด้วย employee_id ในเส้น) จึงไม่ต้อง requireAdmin
   app.use('/api/my', signedIn, myRouter);

@@ -6,6 +6,7 @@ import ErrorBar from '../components/ErrorBar.jsx';
 import ConfirmButton from '../components/ConfirmButton.jsx';
 import PageRefresh from '../components/PageRefresh.jsx';
 import { useCanSeeStaffPay } from '../auth.jsx';
+import SearchSelect from '../components/SearchSelect.jsx';
 
 const TIERS = ['CG', 'NA', 'PN', 'RN'];
 const CATEGORY_LABELS = { daily: 'รายวัน', weekly: 'รายสัปดาห์', monthly: 'รายเดือน' };
@@ -623,12 +624,12 @@ function ManagePanel({ matrix, onChanged, setError }) {
               value={formatForm.name}
               onChange={(e) => setFormatForm((p) => ({ ...p, name: e.target.value }))}
             />
-            <select
+            <SearchSelect
               value={formatForm.category}
               onChange={(e) => setFormatForm((p) => ({ ...p, category: e.target.value }))}
             >
               {Object.entries(CATEGORY_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-            </select>
+            </SearchSelect>
             <label className="checkbox-row">
               <input
                 type="checkbox"

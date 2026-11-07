@@ -5,6 +5,7 @@ import { useToast } from '../toast.jsx';
 import {
   GENDER_LABELS, TITLE_LABELS, MARITAL_STATUS_LABELS, ageFromBirthDate,
 } from '../labels.js';
+import SearchSelect from '../components/SearchSelect.jsx';
 
 // customer = "ผู้ว่าจ้าง/ผู้ติดต่อ" — ข้อมูลสุขภาพ (โรคประจำตัว/แพ้ยา/กรุ๊ปเลือด/สิทธิรักษา/น้ำหนัก/ส่วนสูง)
 // ย้ายไปกรอกที่แฟ้มผู้รับการดูแล (patient) แล้ว จึงไม่มีในฟอร์มนี้
@@ -158,10 +159,10 @@ export default function CustomerFormPage() {
         <h2>ข้อมูลที่ต้องกรอก</h2>
         <div className="grid">
           <label>คำนำหน้า
-            <select name="title" {...field('title')}>
+            <SearchSelect name="title" {...field('title')}>
               <option value="">— ไม่ระบุ —</option>
               {Object.entries(TITLE_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-            </select>
+            </SearchSelect>
           </label>
           <label>ชื่อ - นามสกุล *
             <input required name="name" {...field('name')} />
@@ -175,10 +176,10 @@ export default function CustomerFormPage() {
           </label>
           <label>Line ID<input name="line_id" {...field('line_id')} /></label>
           <label>เพศ
-            <select name="gender" {...field('gender')}>
+            <SearchSelect name="gender" {...field('gender')}>
               <option value="">— ไม่ระบุ —</option>
               {Object.entries(GENDER_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-            </select>
+            </SearchSelect>
           </label>
         </div>
 
@@ -189,10 +190,10 @@ export default function CustomerFormPage() {
           <div className="grid">
             <label>ชื่อ - นามสกุล (ภาษาอังกฤษ)<input name="name_en" {...field('name_en')} /></label>
             <label>สถานภาพ
-              <select name="marital_status" {...field('marital_status')}>
+              <SearchSelect name="marital_status" {...field('marital_status')}>
                 <option value="">— ไม่ระบุ —</option>
                 {Object.entries(MARITAL_STATUS_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-              </select>
+              </SearchSelect>
             </label>
             <label>อาชีพ<input name="occupation" {...field('occupation')} /></label>
 

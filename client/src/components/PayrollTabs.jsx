@@ -27,9 +27,12 @@ import { caseCode } from '../lib/patientCode.js';
  * แต่ต้องเห็น "ธงที่ต้องดู" ของแต่ละกะก่อนกดด้วย (นอกพื้นที่/สาย/ทำงาน 0 นาที)
  * ไม่งั้นปุ่มอนุมัติทั้งหมดจะกลายเป็นตรายางที่ไม่มีใครอ่านอะไรเลย
  */
-export function Approvals({ month, employeeId, patch, employeePicker, reloadKey }) {
+/* rowFilter / filterKey = ตัวกรองเพิ่มฝั่งหน้าเว็บ (หน้าการมาทำงาน: แยกสาย Homecare / กายภาพบำบัด) — ไม่ส่ง = เห็นทุกแถวเหมือนเดิม
+   filterKey เปลี่ยน = ล้างที่ติ๊กไว้ กันอนุมัติกะที่ตัวกรองซ่อนไปแล้วติดไปด้วยโดยไม่เห็น */
+export function Approvals({ month, employeeId, patch, employeePicker, reloadKey, rowFilter = null, filterKey = '' }) {
   const toast = useToast();
-  const [rows, setRows] = useState(null);
+  const [allRows, setRows] = useState(null);
+  const rows = rowFilter && allRows ? allRows.filter(rowFilter) : allRows;
   const [picked, setPicked] = useState(() => new Set());
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -66,6 +69,8 @@ export function Approvals({ month, employeeId, patch, employeePicker, reloadKey 
     return () => { cancelled = true; };
   }, [month, employeeId, reloadKey]);
 
+  useEffect(() => setPicked(new Set()), [filterKey]);
+
   const toggle = (id) =>
     setPicked((prev) => {
       const next = new Set(prev);
@@ -81,7 +86,8 @@ export function Approvals({ month, employeeId, patch, employeePicker, reloadKey 
   const pickedMinutes = pickedRows.reduce((s, v) => s + (v.worked_minutes ?? 0), 0);
 
   async function decide(approve) {
-    const ids = [...picked];
+    // เฉพาะกะที่ยังเห็นอยู่ — ตัวกรองซ่อนแถวไหนไป แถวนั้นต้องไม่ถูกตัดสินไปด้วย
+    const ids = pickedRows.map((v) => v.visit_id);
     if (ids.length === 0) return;
 
     let reason = null;
@@ -110,7 +116,7 @@ export function Approvals({ month, employeeId, patch, employeePicker, reloadKey 
   /** ธงที่ทำให้กะนี้ควรถูกดูก่อนอนุมัติ — ไม่มีเลย = กะปกติ */
   const flags = (v) =>
     [
-      v.location_flagged && 'นอกพื้นที่',
+      v.location_flagged && (v.location_note ? `ตำแหน่ง: ${v.location_note}` : 'นอกพื้นที่'),
       v.off_schedule && 'นอกวันนัด',
       v.check_in_late_minutes > LATE_MINUTES && `สาย ${durationText(v.check_in_late_minutes)}`,
       v.worked_minutes === 0 && 'ทำงาน 0 นาที',
@@ -120,7 +126,35 @@ export function Approvals({ month, employeeId, patch, employeePicker, reloadKey 
 
   return (
     <>
-      <MonthPicker month={month} onChange={(m) => patch({ month: m })}>{employeePicker}</MonthPicker>
+      {/* คำสั่งทั้งหมดอยู่แถบเดียวกับตัวเลือกเดือน/พนักงาน ชิดขวา (ผู้ใช้ขอ 6 พ.ย. 2569):
+          [เลือกไว้ N กะ · รวม X] [เลือกทั้งหมด] [ไม่อนุมัติ] [อนุมัติ N กะ]
+          ต้องอยู่นอกหัวตาราง — จอแคบหัวตารางถูกซ่อน (แถวกลายเป็นการ์ด) ไม่งั้นมือถือเลือกทั้งหมดไม่ได้
+          ยังไม่ได้เลือก = ปุ่มอนุมัติ/ไม่อนุมัติกดไม่ได้ แต่ยังอยู่ที่เดิม ตำแหน่งปุ่มจึงไม่กระโดด */}
+      <MonthPicker month={month} onChange={(m) => patch({ month: m })}>
+        {employeePicker}
+        {rows?.length > 0 && (
+          <div className="pick-toolbar">
+            {picked.size > 0 && (
+              <span className="pick-summary">
+                เลือกไว้ <strong>{picked.size}</strong> กะ · รวม <strong>{durationText(pickedMinutes)}</strong>
+              </span>
+            )}
+            <button
+              className="btn"
+              disabled={busy}
+              onClick={() => setPicked(allPicked ? new Set() : new Set(rows.map((v) => v.visit_id)))}
+            >
+              {allPicked ? 'ล้างที่เลือก' : `เลือกทั้งหมด (${rows.length})`}
+            </button>
+            <button className="btn danger-ghost" disabled={busy || picked.size === 0} onClick={() => decide(false)}>
+              ไม่อนุมัติ
+            </button>
+            <button className="btn primary" disabled={busy || picked.size === 0} onClick={() => decide(true)}>
+              {picked.size > 0 ? `อนุมัติ ${picked.size} กะ` : 'อนุมัติ'}
+            </button>
+          </div>
+        )}
+      </MonthPicker>
 
       {error && <p className="error">{error}</p>}
 
@@ -148,21 +182,6 @@ export function Approvals({ month, employeeId, patch, employeePicker, reloadKey 
         </section>
       ) : rows?.length > 0 ? (
         <>
-          {/* ปุ่มเลือกทั้งหมดต้องอยู่นอกหัวตาราง — จอแคบหัวตารางถูกซ่อน (แถวกลายเป็นการ์ด)
-              ถ้าฝากไว้ในหัวตารางอย่างเดียว บนมือถือจะไม่มีทางเลือกทั้งหมดได้เลย */}
-          {/* att-presets — ระยะห่างของแถวนี้เมื่อยืนเดี่ยวๆ ในหน้า ไม่ใช่ตอนอยู่ติดใต้ปฏิทินในโมดัลลงกะ
-              ที่นั่นมันเกาะกับปฏิทินโดยตั้งใจ ที่นี่มันถูกขนาบด้วยข้อความอธิบายกับการ์ดกะจนดูอัดกัน */}
-          <div className="pick-presets att-presets">
-            <button
-              className="btn tiny"
-              disabled={busy}
-              onClick={() => setPicked(allPicked ? new Set() : new Set(rows.map((v) => v.visit_id)))}
-            >
-              {allPicked ? 'ล้างที่เลือก' : `เลือกทั้งหมด (${rows.length})`}
-            </button>
-            {picked.size > 0 && !allPicked && <span className="muted">เลือกไว้ {picked.size} กะ</span>}
-          </div>
-
           <div className="table-wrap">
             <table className="table table-cards table-2line">
               <thead>
@@ -237,23 +256,6 @@ export function Approvals({ month, employeeId, patch, employeePicker, reloadKey 
             </table>
           </div>
 
-          {/* แถบยืนยันติดขอบล่าง — ติ๊กมา 40 กะแล้วต้องเลื่อนกลับขึ้นไปหาปุ่มคือคนละเรื่องกัน */}
-          {picked.size > 0 && (
-            <div className="approve-bar">
-              <p className="pick-count">
-                เลือกไว้ <strong>{picked.size}</strong> กะ · รวม <strong>{durationText(pickedMinutes)}</strong>
-              </p>
-              <div className="pick-actions">
-                <button className="btn primary" disabled={busy} onClick={() => decide(true)}>
-                  อนุมัติ {picked.size} กะ
-                </button>
-                <button className="btn danger-ghost" disabled={busy} onClick={() => decide(false)}>
-                  ไม่อนุมัติ
-                </button>
-                <button className="btn" disabled={busy} onClick={() => setPicked(new Set())}>ล้าง</button>
-              </div>
-            </div>
-          )}
         </>
       ) : null}
     </>

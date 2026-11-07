@@ -1,6 +1,11 @@
 import { createHash, randomInt } from 'node:crypto';
 import { sql, transaction } from '../db/index.js';
 import { ApiError } from './errors.js';
+import { ensureLinkCodeTables } from './lineBridge.js';
+
+/* รหัสเชิญญาติ: เดาผิดได้ไม่เกินกี่ครั้งต่อ LINE ต่อชั่วโมง (ตรวจรอบ 6 พ.ย. 2569)
+   เดิมไม่มีเพดานเลย รหัสอายุ 7 วัน — ใช้ตาราง line_link_tries ร่วมกับรหัสผูกพนักงาน แยกด้วยคำนำหน้า fam: */
+const FAMILY_CODE_MAX_TRIES = 10;
 
 /**
  * ญาติดูการดูแลผ่าน LINE OA KIN HomeCare หลัก (ดร.ธงชัย 22 ต.ค. 2569 · แบบร่าง coordination/family-line-page-design-20261022.md)
@@ -60,9 +65,19 @@ export const ensureFamilyTable = () =>
     )
     // ตารางถูกสร้างไปแล้วก่อนมี 'staff' (ผู้ดูแล/นักกายภาพตอบแชทญาติ · ดร. 24 ต.ค.) — CREATE TABLE IF NOT EXISTS
     // จึงไม่ช่วย ต้องปลด constraint เดิมแล้วใส่ใหม่ ไม่งั้นผู้ดูแลกดส่งแล้ว 500 ทุกครั้ง (เจอ 25 ต.ค.)
-    .then(() => sql.run('ALTER TABLE case_family_messages DROP CONSTRAINT IF EXISTS case_family_messages_author_kind_check'))
+    /* ทำเฉพาะตอนที่ constraint ยังเป็นแบบเก่า (ไม่มี 'staff') — เดิมปลดแล้วใส่ใหม่ทุก cold start
+       ADD CONSTRAINT CHECK ต้องไล่ตรวจทุกแถวของตารางข้อความใต้ ACCESS EXCLUSIVE lock ยิ่งแชทเยอะยิ่งช้า (optimize 6 พ.ย. 2569) */
     .then(() => sql.run(
-      "ALTER TABLE case_family_messages ADD CONSTRAINT case_family_messages_author_kind_check CHECK (author_kind IN ('family','team','staff'))"))
+      `DO $$
+       BEGIN
+         IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                         WHERE conname = 'case_family_messages_author_kind_check'
+                           AND pg_get_constraintdef(oid) LIKE '%staff%') THEN
+           ALTER TABLE case_family_messages DROP CONSTRAINT IF EXISTS case_family_messages_author_kind_check;
+           ALTER TABLE case_family_messages ADD CONSTRAINT case_family_messages_author_kind_check
+             CHECK (author_kind IN ('family','team','staff'));
+         END IF;
+       END $$`))
     .then(() => sql.run('ALTER TABLE case_family_messages ADD COLUMN IF NOT EXISTS source_ref TEXT'))
     .then(() => sql.run('CREATE UNIQUE INDEX IF NOT EXISTS uq_family_message_source_ref ON case_family_messages (source_ref)'))
     .then(() => sql.run('CREATE INDEX IF NOT EXISTS idx_family_msg_case ON case_family_messages (case_id, created_at DESC)'))
@@ -181,6 +196,13 @@ export const revoke = (caseId, linkId) =>
 
 /** รับคำเชิญ — รหัสใช้ได้ครั้งเดียว · LINE เดียวกันกับเคสเดิมซ้ำ = ถือว่าสำเร็จ (กดส่งซ้ำ) */
 export async function accept(code, lineUserId, displayName) {
+  await ensureLinkCodeTables();
+  const tryKey = `fam:${lineUserId}`;
+  const tries = await sql.one(
+    `SELECT count(*)::int AS n FROM line_link_tries WHERE line_user_id = :k AND at > now() - interval '1 hour'`,
+    { k: tryKey },
+  );
+  if (tries.n >= FAMILY_CODE_MAX_TRIES) return { ok: false, reason: 'too_many' };
   const link = await sql.one(
     `SELECT l.link_id, l.case_id, l.accepted_at, l.line_user_id, l.invited_by, (l.invited_via IS NOT NULL) AS via_family,
             (l.code_expires_at < now()) AS expired, c.client_name,
@@ -194,7 +216,10 @@ export async function accept(code, lineUserId, displayName) {
      ORDER BY l.accepted_at NULLS FIRST, l.link_id DESC`,
     { hash: hashCode(code), grace: CLOSED_GRACE_DAYS },
   );
-  if (!link) return { ok: false, reason: 'not_found' };
+  if (!link) {
+    await sql.run('INSERT INTO line_link_tries (line_user_id) VALUES (:k)', { k: tryKey });
+    return { ok: false, reason: 'not_found' };
+  }
   /* เคสพ้นช่วงผ่อนผันแล้วต้องตอบว่าหมดสิทธิ์ก่อนทุกกรณี รวมคนที่เคยรับคำเชิญไปแล้ว
      ของเดิมสาขา accepted_at มาก่อน — ญาติที่เคยเข้าแล้วส่งรหัสเดิมซ้ำจะได้ ok:true
      พร้อมชื่อผู้รับบริการกลับไป ทั้งที่ทุกเส้นข้อมูลปิดด้วย FAMILY_CASE_OPEN ไปแล้ว
@@ -461,6 +486,16 @@ export const messagesFor = (caseId, limit = 60) =>
      FROM case_family_messages WHERE case_id = :id AND deleted_at IS NULL
      ORDER BY created_at DESC LIMIT :limit`,
     { id: caseId, limit },
+  );
+
+/** เหมือน messagesFor แต่บอกด้วยว่าข้อความไหนเป็นของพนักงานคนที่ถามอยู่ (mine) — ไม่ส่งรหัสพนักงานออกไป */
+export const messagesForStaff = (caseId, limit, employeeId) =>
+  sql.all(
+    `SELECT message_id, author_kind, author_name, body, (photo_data IS NOT NULL) AS has_photo, created_at,
+            (employee_id IS NOT DISTINCT FROM :me) AS mine
+     FROM case_family_messages WHERE case_id = :id AND deleted_at IS NULL
+     ORDER BY created_at DESC LIMIT :limit`,
+    { id: caseId, limit, me: employeeId },
   );
 
 export const messagePhoto = (caseId, messageId) =>

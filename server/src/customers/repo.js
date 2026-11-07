@@ -1,5 +1,6 @@
 import { sql, nextCustomerId, transaction } from '../db/index.js';
 import { likeEscape } from '../lib/likeEscape.js';
+import { ensureLedgerTables, netPaidSql, netTotalSql } from '../invoices/ledger.js';
 
 const COLUMNS = [
   // ตัวตน
@@ -74,7 +75,7 @@ export async function list({ q, has_cases, page, per_page, sort, order }) {
     `SELECT c.*,
             (SELECT COUNT(*) FROM cases WHERE customer_id = c.customer_id) AS case_count
      FROM customers c ${clause}
-     ORDER BY ${sort} ${order.toUpperCase()}
+     ORDER BY ${sort} ${order.toUpperCase()}, c.customer_id ${order.toUpperCase()}
      LIMIT :limit OFFSET :offset`,
     { ...params, limit: per_page, offset: (page - 1) * per_page },
   );
@@ -148,6 +149,7 @@ export async function update(customerId, input) {
 }
 
 export async function remove(customerId) {
+  await ensureLedgerTables();
   return transaction(async (tx) => {
     const found = await tx.one('SELECT customer_id FROM customers WHERE customer_id = :id FOR UPDATE', { id: customerId });
     if (!found) return { removed: false };
@@ -162,9 +164,7 @@ export async function remove(customerId) {
             AND c.status NOT IN ('closed', 'cancelled')) AS active_cases,
          (SELECT COUNT(*) FROM invoices i
           WHERE i.customer_id = :id AND i.status IN ('draft', 'issued')
-            AND i.total > COALESCE((
-              SELECT SUM(p.amount) FROM invoice_payments p WHERE p.invoice_id = i.invoice_id
-            ), 0)) AS unpaid_invoices`,
+            AND ${netTotalSql('i')} > ${netPaidSql('i')}) AS unpaid_invoices`,
       { id: customerId },
     );
     const normalized = Object.fromEntries(Object.entries(blockers).map(([key, value]) => [key, Number(value ?? 0)]));

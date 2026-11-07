@@ -2,9 +2,8 @@ import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { useSheetSwipe } from '../lib/sheetSwipe.js';
 import { useScrollLock } from '../lib/scrollLock.js';
-import FileButton from './FileButton.jsx';
+import CameraCapture from './CameraCapture.jsx';
 import { getPosition } from '../lib/geo.js';
-import { compressImage } from '../lib/image.js';
 import { serviceName } from './MyCaseModal.jsx';
 import LocationMap from './LocationMap.jsx';
 import { SERVICE_KIND_LABELS, serviceKindOf } from '../labels.js';
@@ -25,7 +24,7 @@ export default function CheckInModal({ visit, onDone, onClose }) {
   const [pos, setPos] = useState(null);       // ผลขอ GPS: { ok, lat, lng, accuracy, reason }
   const [locating, setLocating] = useState(true);
   const [photo, setPhoto] = useState(null);   // data URL เซลฟี่ (ย่อแล้ว)
-  const [photoBusy, setPhotoBusy] = useState(false);
+  const [cameraOn, setCameraOn] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
 
@@ -52,20 +51,6 @@ export default function CheckInModal({ visit, onDone, onClose }) {
     setLocating(false);
   }
 
-  async function pickPhoto(e) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setError(null);
-    setPhotoBusy(true);
-    try {
-      setPhoto(await compressImage(file));
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setPhotoBusy(false);
-      e.target.value = '';
-    }
-  }
 
   async function submit() {
     setBusy(true);
@@ -119,19 +104,21 @@ export default function CheckInModal({ visit, onDone, onClose }) {
           {/* เซลฟี่ — บังคับ ปุ่มยืนยันจะกดไม่ได้จนกว่าจะมีรูป */}
           <section className="checkin-photo">
             <h3>รูปเซลฟี่</h3>
-            {photo ? (
+            {/* บังคับกล้องสด (getUserMedia) — ไม่มีทางอัปโหลดไฟล์จากแกลเลอรี */}
+            {cameraOn ? (
+              <CameraCapture
+                facing="user"
+                onCapture={(dataUrl) => { setPhoto(dataUrl); setCameraOn(false); }}
+                onCancel={() => setCameraOn(false)}
+              />
+            ) : photo ? (
               <div className="checkin-photo-preview">
                 <img src={photo} alt="เซลฟี่เช็คอิน" />
                 {/* ถ่ายใหม่ได้ แต่ลบทิ้งเฉยๆ ไม่ได้ — เอาออกแล้วต้องถ่ายใหม่อยู่ดีถึงจะเช็คอินได้ */}
-                <FileButton icon="camera" capture="user" busy={photoBusy} onPick={pickPhoto}>
-                  ถ่ายใหม่
-                </FileButton>
+                <button type="button" className="btn" onClick={() => setCameraOn(true)}>ถ่ายใหม่</button>
               </div>
             ) : (
-              // capture=user = เปิดกล้องหน้าบนมือถือ
-              <FileButton icon="camera" capture="user" busy={photoBusy} onPick={pickPhoto}>
-                ถ่ายรูป
-              </FileButton>
+              <button type="button" className="btn" onClick={() => setCameraOn(true)}>เปิดกล้องถ่ายรูป</button>
             )}
             <p className="muted">
               {photo
@@ -145,7 +132,7 @@ export default function CheckInModal({ visit, onDone, onClose }) {
 
         <footer className="modal-foot">
           <button className="btn" onClick={onClose} disabled={busy}>ยกเลิก</button>
-          <button className="btn primary" onClick={submit} disabled={busy || locating || photoBusy || !photo}>
+          <button className="btn primary" onClick={submit} disabled={busy || locating || cameraOn || !photo}>
             {busy ? 'กำลังเช็คอิน…' : !photo ? 'ถ่ายรูปก่อนเช็คอิน' : 'ยืนยันเช็คอิน'}
           </button>
         </footer>

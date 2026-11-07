@@ -9,7 +9,16 @@ import {
   STAFF_TIERS,
   FORMAT_CATEGORIES,
 } from './schema.js';
-import { asyncRoute, notFound } from '../lib/errors.js';
+import { ApiError, asyncRoute, notFound } from '../lib/errors.js';
+
+/* ลบเกรด/รูปแบบที่มีเคสใช้อยู่ไม่ได้ (ตรวจรอบ 6 พ.ย. 2569) — กติกาเดียวกับแพ็กกายภาพ (physio/routes.js)
+   เปลี่ยนชื่อ/ราคา/ลำดับยังทำได้ตามปกติ เพราะเคสเก็บราคาไว้ที่ตัวเองแล้ว */
+const inUse = (what, n) =>
+  new ApiError(
+    409,
+    `${what}มีเคสใช้อยู่ ${n} เคส (นับรวมเคสที่ปิดแล้ว) ลบไม่ได้ — ลบแล้วเคสเก่าจะไม่เหลือข้อมูลบริการ` +
+      ' และใบแจ้งหนี้ของเคสเหล่านั้นจะขึ้นว่าไม่ตรงทั้งหมด · ถ้าเลิกขายแล้ว ให้คงไว้แล้วเปลี่ยนชื่อแทน (เช่น เติม "(เลิกขาย)" ท้ายชื่อ)',
+  );
 import { canSeeStaffPay, stripPayFields } from '../lib/auth.js';
 
 export const packagesRouter = Router();
@@ -52,6 +61,8 @@ packagesRouter.patch(
 packagesRouter.delete(
   '/grades/:id',
   asyncRoute(async (req, res) => {
+    const n = await repo.casesUsingGrade(req.params.id);
+    if (n > 0) throw inUse('เกรดนี้', n);
     await repo.removeGrade(req.params.id);
     res.status(204).end();
   }),
@@ -75,6 +86,8 @@ packagesRouter.patch(
 packagesRouter.delete(
   '/formats/:id',
   asyncRoute(async (req, res) => {
+    const n = await repo.casesUsingFormat(req.params.id);
+    if (n > 0) throw inUse('รูปแบบบริการนี้', n);
     await repo.removeFormat(req.params.id);
     res.status(204).end();
   }),

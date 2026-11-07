@@ -1,9 +1,10 @@
 import { useMemo, useState } from 'react';
-import { DAILY_SECTIONS, dailyValueText, isFilled } from '../lib/dailyCare.js';
-import { compressImage } from '../lib/image.js';
+import { DAILY_SECTIONS, bmiOf, dailyValueText, isFilled } from '../lib/dailyCare.js';
+import { ACCEPTED, compressImage } from '../lib/image.js';
 import { todayTH } from '../labels.js';
 import TimeSelect from './TimeSelect.jsx';
 import FileButton from './FileButton.jsx';
+import SearchSelect from './SearchSelect.jsx';
 
 /**
  * ฟอร์มบันทึกรายงานแบบมีโครงสร้าง — วาดทุกช่องจากนิยามที่ส่งเข้ามาทาง sections
@@ -11,7 +12,7 @@ import FileButton from './FileButton.jsx';
  * ใช้ได้กับทุกชุดช่องที่ประกาศไว้ใน lib/dailyCare.js (ดูแลประจำวัน / กายภาพบำบัด)
  * ตัวฟอร์มไม่รู้จักช่องไหนเป็นพิเศษเลย — เพิ่มฟอร์มใหม่ = เพิ่มนิยาม ไม่ต้องแตะไฟล์นี้
  *
- * ปุ่มชิปแทน <select> เกือบทั้งฟอร์ม เพราะพนักงานกรอกจากมือถือขณะอยู่หน้างาน
+ * ปุ่มชิปแทน <SearchSelect> เกือบทั้งฟอร์ม เพราะพนักงานกรอกจากมือถือขณะอยู่หน้างาน
  * การกดชิปหนึ่งครั้งจบเร็วกว่าเปิด dropdown แล้วเลื่อนหา และเห็นทุกตัวเลือกพร้อมกัน
  * (กดชิปที่เลือกอยู่ซ้ำ = ยกเลิกการเลือก — ไม่มีทางกรอกผิดแล้วลบไม่ออก)
  *
@@ -42,6 +43,7 @@ function toPayload(form, sections) {
   for (const s of sections) {
     for (const f of s.fields) {
       const v = form[f.key];
+      if (f.type === 'bmi') continue; // คำนวณเอง ไม่เก็บ
       if (f.type === 'number') out[f.key] = v === '' || v == null ? null : Number(v);
       else if (f.type === 'multi') out[f.key] = v?.length ? v : null;
       else if (f.type === 'bool') out[f.key] = v === '' || v == null ? null : v;
@@ -130,7 +132,7 @@ function Field({ field, value, onChange, disabled }) {
   if (field.type === 'number') {
     return (
       <label className="care-num">
-        {field.label} <span className="muted">({field.unit})</span>
+        <span className="care-num-label">{field.label} <span className="muted">({field.unit})</span></span>
         <input
           type="number"
           inputMode="decimal"
@@ -217,9 +219,15 @@ function Section({ section, form, set, disabled, photoUrl }) {
   const [open, setOpen] = useState(!section.collapsed || hasData);
 
   const body = (
-    <div className={`care-grid ${section.columns === 4 ? 'cols-4' : ''}`}>
+    <div className={`care-grid ${section.columns ? `cols-${section.columns}` : ''}`}>
       {section.fields.map((f) =>
-        f.type === 'photo' ? (
+        f.type === 'bmi' ? (
+          // BMI คำนวณจากน้ำหนัก/ส่วนสูงที่กรอกอยู่ — อ่านอย่างเดียว ไม่เก็บลงฐานข้อมูล
+          <label key={f.key} className="care-num">
+            <span className="care-num-label">{f.label}</span>
+            <input type="text" readOnly tabIndex={-1} value={bmiOf(form.weight_kg, form.height_cm) ?? ''} placeholder="อัตโนมัติ" />
+          </label>
+        ) : f.type === 'photo' ? (
           <PhotoField
             key={f.key}
             field={f}
@@ -279,23 +287,99 @@ function Review({ form, sections }) {
   );
 }
 
+const MAX_IMAGES = 10;      // ต่อรายงาน (ตรงกับ MAX_REPORT_IMAGES ฝั่ง server)
+const MAX_PER_SUBMIT = 6;   // ต่อการบันทึกหนึ่งครั้ง
+
+/**
+ * แนบรูปภาพประกอบรายงาน (หลายรูป) — ใช้ได้ทั้งฟอร์ม Homecare และกายภาพ
+ * existing = รูปที่บันทึกไว้แล้ว (ตอนแก้) · added = รูปใหม่ที่เพิ่งเลือก (ย่อในเบราว์เซอร์แล้ว เป็น data URL)
+ * กดกากบาทที่รูปเดิม = สั่งลบตอนกดบันทึก (ยังไม่ลบจริงจนกว่าจะส่งรายงาน)
+ */
+function ImageAttachments({ existing, removed, added, disabled, onAdd, onRemoveNew, onToggleExisting }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  const kept = existing.filter((e) => !removed.includes(e.id)).length;
+  const total = kept + added.length;
+
+  async function pick(e) {
+    const files = [...(e.target.files ?? [])];
+    e.target.value = '';
+    if (!files.length) return;
+    const room = Math.min(MAX_PER_SUBMIT - added.length, MAX_IMAGES - total);
+    if (room <= 0) {
+      setErr(`แนบรูปได้ไม่เกิน ${MAX_IMAGES} รูปต่อรายงาน (เพิ่มได้ครั้งละไม่เกิน ${MAX_PER_SUBMIT} รูป)`);
+      return;
+    }
+    setBusy(true);
+    setErr(files.length > room ? `แนบเพิ่มได้อีก ${room} รูป — ตัดส่วนที่เกินออกแล้ว` : null);
+    try {
+      const done = [];
+      for (const f of files.slice(0, room)) done.push(await compressImage(f));
+      onAdd(done);
+    } catch (ex) {
+      setErr(ex.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="care-section report-images">
+      <h4 className="report-images-head">แนบรูปภาพ <span className="muted">({total}/{MAX_IMAGES})</span></h4>
+      <div className="report-images-grid">
+        {existing.map((e) => {
+          const gone = removed.includes(e.id);
+          return (
+            <div className={`report-image ${gone ? 'is-removed' : ''}`} key={`e-${e.id}`}>
+              <img src={e.url} alt="รูปแนบรายงาน" loading="lazy" />
+              <button type="button" disabled={disabled} onClick={() => onToggleExisting(e.id)} aria-label={gone ? 'เอารูปกลับมา' : 'ลบรูปนี้'}>
+                {gone ? '↺' : '×'}
+              </button>
+            </div>
+          );
+        })}
+        {added.map((src, i) => (
+          <div className="report-image is-new" key={`n-${i}`}>
+            <img src={src} alt="รูปที่เพิ่งแนบ" />
+            <button type="button" disabled={disabled} onClick={() => onRemoveNew(i)} aria-label="เอารูปออก">×</button>
+          </div>
+        ))}
+        {total < MAX_IMAGES && (
+          <label className={`report-image-add ${disabled || busy ? 'is-disabled' : ''}`}>
+            <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+            <span>{busy ? 'กำลังย่อรูป…' : 'เพิ่มรูป'}</span>
+            <input type="file" accept={ACCEPTED} multiple hidden disabled={disabled || busy} onChange={pick} />
+          </label>
+        )}
+      </div>
+      {err && <p className="error">{err}</p>}
+    </section>
+  );
+}
+
 export default function DailyCareForm({
   initial,
   sections = DAILY_SECTIONS,
   busy,
   error,
   photoUrl = null,
+  existingImages = [],   // [{ id, url }] รูปแนบที่บันทึกไว้แล้ว (ตอนแก้)
   onSubmit,
   onCancel,
 }) {
   const [form, setForm] = useState(() => toForm(initial, sections));
   const [reviewing, setReviewing] = useState(false);
+  const [addedImages, setAddedImages] = useState([]);
+  const [removedImages, setRemovedImages] = useState([]);
   const set = (key, value) => setForm((prev) => ({ ...prev, [key]: value }));
 
   // ยังไม่ได้กรอกอะไรเลย = ยังส่งไม่ได้ (server ปฏิเสธใบเปล่าอยู่แล้ว แต่รู้ตั้งแต่ก่อนกดดีกว่า)
-  const blank = !sections.some((s) =>
-    s.fields.some((f) => f.key !== 'report_type' && f.key !== 'shift' && isFilled(form[f.key])),
-  );
+  const keptImages = existingImages.filter((e) => !removedImages.includes(e.id)).length;
+  const blank =
+    addedImages.length + keptImages === 0 &&
+    !sections.some((s) => s.fields.some((f) => f.key !== 'report_type' && f.key !== 'shift' && isFilled(form[f.key])));
 
   return (
     <form
@@ -303,7 +387,10 @@ export default function DailyCareForm({
       onSubmit={(e) => {
         e.preventDefault();
         if (!reviewing) return setReviewing(true);
-        onSubmit(toPayload(form, sections));
+        const payload = toPayload(form, sections);
+        if (addedImages.length) payload.attach_images = addedImages;
+        if (removedImages.length) payload.remove_image_ids = removedImages;
+        onSubmit(payload);
       }}
     >
       {error && <p className="error">{error}</p>}
@@ -319,11 +406,26 @@ export default function DailyCareForm({
         <>
           <h4 className="report-form-head">ตรวจทานก่อนส่ง</h4>
           <Review form={form} sections={sections} />
+          {(addedImages.length > 0 || keptImages > 0) && (
+            <p className="care-review-images">แนบรูปภาพ {addedImages.length + keptImages} รูป{removedImages.length > 0 && ` (ลบรูปเดิม ${removedImages.length} รูป)`}</p>
+          )}
         </>
       ) : (
         sections.map((s) => (
           <Section key={s.key} section={s} form={form} set={set} disabled={busy} photoUrl={photoUrl} />
         ))
+      )}
+
+      {!reviewing && (
+        <ImageAttachments
+          existing={existingImages}
+          removed={removedImages}
+          added={addedImages}
+          disabled={busy}
+          onAdd={(list) => setAddedImages((prev) => [...prev, ...list])}
+          onRemoveNew={(i) => setAddedImages((prev) => prev.filter((_, k) => k !== i))}
+          onToggleExisting={(id) => setRemovedImages((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))}
+        />
       )}
 
       <div className="quick-edit-actions">

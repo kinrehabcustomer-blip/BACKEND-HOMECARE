@@ -3,8 +3,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { pool, sql } from './index.js';
-import { hashPassword, generateTempPassword } from '../lib/auth.js';
-import { encryptTempPassword } from '../lib/tempPassword.js';
+import { hashPassword, DEFAULT_PASSWORD } from '../lib/auth.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const schema = readFileSync(join(here, 'schema.sql'), 'utf8');
@@ -15,17 +14,13 @@ console.log('สร้าง/อัปเดต schema บน Postgres เรี
 // พนักงานที่ยังไม่มีรหัสผ่าน — สุ่มรหัสชั่วคราวให้
 const pending = await sql.all('SELECT employee_id FROM employees WHERE password_hash IS NULL');
 
-/* สุ่มรหัสชั่วคราวให้คนละใบ — เดิมตั้งเป็น "รหัสพนักงานของตัวเอง" ซึ่งเดาได้ทันทีจากภายนอก
-   (รหัสเรียงเลขและโผล่อยู่ทุกหน้าจอ) สำเนารหัสชั่วคราวเก็บแบบเข้ารหัสจนกว่าเจ้าตัวจะเปลี่ยน */
+// ตั้งรหัสเริ่มต้นให้ (DEFAULT_PASSWORD) ไม่บังคับเปลี่ยน — ดู lib/auth.js
 for (const { employee_id } of pending) {
-  const temp = generateTempPassword();
-  await sql.run('UPDATE employees SET password_hash = :hash, temp_password_encrypted = :encrypted WHERE employee_id = :id', {
-    hash: await hashPassword(temp),
-    encrypted: encryptTempPassword(temp, employee_id),
-    id: employee_id,
-  });
-  // ไม่พิมพ์ตัวรหัสลง log (ตรวจ Codex 30 ต.ค. 2569 ข้อ 1) — หน้าพนักงานเปิดดูสำเนาที่เข้ารหัสไว้ได้
-  console.log(`ตั้งรหัสผ่านชั่วคราวให้ ${employee_id} แล้ว — ดูรหัสได้ที่หน้ารายละเอียดพนักงาน`);
+  await sql.run(
+    'UPDATE employees SET password_hash = :hash, must_change_password = FALSE, temp_password_encrypted = NULL WHERE employee_id = :id',
+    { hash: await hashPassword(DEFAULT_PASSWORD), id: employee_id },
+  );
+  console.log(`ตั้งรหัสผ่านเริ่มต้นให้ ${employee_id} แล้ว`);
 }
 
 console.log(pending.length ? `ตั้งรหัสผ่านให้ ${pending.length} คน` : 'ทุกคนมีรหัสผ่านแล้ว');
@@ -64,4 +59,13 @@ const { backfillVisitNumbers } = await import('../cases/visitNumbers.js');
 const vnIssued = await backfillVisitNumbers();
 console.log(vnIssued ? `ออกเลข VN ย้อนหลัง ${vnIssued} เลข` : 'นัดทุกนัดมีเลข VN แล้ว');
 
+/* ---------- ใบเสร็จย้อนหลัง ----------
+ * รับเงินที่บันทึกไว้ก่อนมีระบบใบเสร็จรายครั้ง ได้ใบเสร็จคนละใบ (ดู invoices/ledger.js) */
+const { backfillReceipts, backfillRefundDocs } = await import('../invoices/ledger.js');
+const receiptsIssued = await backfillReceipts();
+console.log(receiptsIssued ? `ออกใบเสร็จย้อนหลัง ${receiptsIssued} ใบ` : 'รับเงินทุกครั้งมีใบเสร็จแล้ว');
+const refundDocs = await backfillRefundDocs();
+console.log(refundDocs ? `ออกเลขใบสำคัญจ่ายย้อนหลัง ${refundDocs} ใบ` : 'เงินคืนทุกรายการมีเลขใบสำคัญจ่ายแล้ว');
+
 await pool.end();
+
