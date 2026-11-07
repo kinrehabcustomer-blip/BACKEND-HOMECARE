@@ -290,7 +290,16 @@ integrationRouter.post(
     if (p.d.line_user_id && !isLineUserId(p.d.line_user_id)) throw new ApiError(400, 'LINE userId ไม่ถูกต้อง');
     const r = await linkFromChat(p.d, typeof p.customer_id === 'string' ? p.customer_id : null);
     if (r.error) throw new ApiError(404, 'ไม่พบลูกค้ารายนี้ในระบบงาน');
-    if (r.conflict) return res.status(409).json({ error: `ลูกค้า ${r.customer_id} ${r.name} ผูก LINE คนอื่นไว้แล้ว`, ...r });
+    /* ชนได้สองทาง — ต้องบอกให้ตรงทาง ไม่งั้นแอดมินไปแก้ผิดฝั่ง
+       line_taken_by = LINE นี้ผูกกับลูกค้ารายอื่นอยู่ (ทางที่เพิ่งอุดเพิ่ม 8 พ.ย. 2569)
+       ไม่มี line_taken_by = ลูกค้ารายนี้ผูก LINE อื่นไว้ก่อน (ของเดิม) */
+    if (r.conflict) {
+      const message = r.line_taken_by
+        ? `LINE นี้ผูกกับลูกค้า ${r.line_taken_by} ${r.other_name ?? ''} ไว้แล้ว` +
+          ' — ปลดที่บัญชีนั้นก่อน หรือเลือกจับคู่กับลูกค้ารายนั้นแทน'
+        : `ลูกค้า ${r.customer_id} ${r.name} ผูก LINE คนอื่นไว้แล้ว`;
+      return res.status(409).json({ error: message, ...r });
+    }
     res.json(r);
   }),
 );

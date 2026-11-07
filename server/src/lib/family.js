@@ -195,11 +195,16 @@ export async function accept(code, lineUserId, displayName) {
     { hash: hashCode(code), grace: CLOSED_GRACE_DAYS },
   );
   if (!link) return { ok: false, reason: 'not_found' };
+  /* เคสพ้นช่วงผ่อนผันแล้วต้องตอบว่าหมดสิทธิ์ก่อนทุกกรณี รวมคนที่เคยรับคำเชิญไปแล้ว
+     ของเดิมสาขา accepted_at มาก่อน — ญาติที่เคยเข้าแล้วส่งรหัสเดิมซ้ำจะได้ ok:true
+     พร้อมชื่อผู้รับบริการกลับไป ทั้งที่ทุกเส้นข้อมูลปิดด้วย FAMILY_CASE_OPEN ไปแล้ว
+     (ไม่ใช่ข้อมูลใหม่ที่หลุด เพราะเขาเคยเป็นสมาชิกจริง แต่ข้อความบอกผิดว่ายังเข้าได้)
+     Gemini ชี้ 8 พ.ย. 2569 · ยืนยันแล้ว */
+  if (link.case_over) return { ok: false, reason: 'case_closed' };
   if (link.accepted_at) {
     return link.line_user_id === lineUserId ? { ok: true, case_id: link.case_id, client_name: link.client_name } : { ok: false, reason: 'used' };
   }
   if (link.expired) return { ok: false, reason: 'expired' };
-  if (link.case_over) return { ok: false, reason: 'case_closed' };
   /* LINE นี้เป็นญาติของเคสนี้อยู่แล้ว แต่ได้ "รหัสใบใหม่" มา (ทีมออกให้ซ้ำเพราะไม่รู้ว่าเข้าไปแล้ว)
      เดิมเดินหน้า UPDATE ต่อจนชน uq_family_case_line = 500 → ฝั่งแชทตอบ "ระบบขัดข้องชั่วคราว"
      แล้วญาติพิมพ์ซ้ำกี่ครั้งก็เจอเหมือนเดิม (ตรวจรอบ 12A) · ถือว่าสำเร็จ ไม่กินรหัสใบใหม่

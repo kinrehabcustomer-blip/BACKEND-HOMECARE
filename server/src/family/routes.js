@@ -83,6 +83,9 @@ familyRouter.post(
   '/cases/:caseId/customer-line',
   asyncRoute(async (req, res) => {
     inviteSchema.parse(req.body ?? {});
+    /* เคสที่ยกเลิกแล้วห้ามเปิดสิทธิ์ให้ใครใหม่ — ด่านเดียวกับการออกรหัสเชิญด้านบน
+       ของเดิมเส้นนี้ไม่เช็คสถานะเคสเลย (Gemini ชี้ 8 พ.ย. 2569 · ยืนยันแล้ว) */
+    if (req.caseRow.status === 'cancelled') throw new ApiError(409, 'เคสนี้ถูกยกเลิกแล้ว');
     await family.ensureFamilyTable();
     const r = await family.linkCustomerLine(req.params.caseId, req.user.name);
     if (!r.ok) {

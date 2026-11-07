@@ -86,9 +86,14 @@ const caseFields = z.object({
   // ---------- รายละเอียดการใช้บริการ ----------
   service_start_preference: optionalText,
   address: optionalText,
+  /* ต้องมีตัวเลขพอโทรออกได้จริง — กฎเดียวกับ optionalPhone ใน customers/patients
+     "ตรวจรอบ 18" แก้ให้สองที่นั้นแล้วแต่ลืมช่องนี้ (Gemini ชี้ 8 พ.ย. 2569 · ยืนยันแล้ว)
+     กฎเดิมดูแค่ "อักขระที่อนุญาต 8–20 ตัว" — "++++++++" หรือเว้นวรรคแปดตัวจึงผ่านเข้าฐาน
+     เป็นเบอร์ของเคส แล้วคนที่รับงานเห็นช่องเบอร์มีค่า แต่โทรหาบ้านลูกค้าไม่ได้ */
   client_phone: z
     .string()
     .regex(/^[0-9+\-\s]{8,20}$/, 'เบอร์โทรไม่ถูกต้อง')
+    .refine((v) => (v.match(/\d/g) ?? []).length >= 8, 'เบอร์โทรต้องมีตัวเลขอย่างน้อย 8 หลัก')
     .optional()
     .nullable(),
   nurse_call_preference: optionalText,
@@ -251,7 +256,7 @@ export const createVisitSchema = z.object({
 
 // จำนวนกะสูงสุดต่อการสร้างหนึ่งครั้ง — ตารางจริงของเคสหนึ่งเดือนอยู่ราว 30 กะ
 // เผื่อไว้ถึง 200 สำหรับเคสยาวข้ามไตรมาส แต่ไม่ปล่อยไม่จำกัด กันกรอกปีผิดแล้วได้กะเป็นพัน
-const MAX_BULK_VISITS = 200;
+export const MAX_BULK_VISITS = 200;
 
 /** ทุกวันในช่วง (รวมวันเริ่ม–วันจบ) ที่ตรงกับวันในสัปดาห์ที่เลือก — คิดบน UTC ให้วันไม่เลื่อนตามโซนเครื่อง */
 function datesInRange(from, to, weekdays) {
@@ -301,7 +306,12 @@ export const bulkVisitSchema = z
   })
   .superRefine((v, ctx) => {
     const listed = v.dates?.length ?? 0;
-    if (listed === 0 && v.from && v.count) return;
+    /* ลงตามจำนวนครั้ง (from + count ไม่มี to) — เพดานถูกบังคับที่ตัว count แล้ว (max MAX_BULK_VISITS)
+       🔴 ต้องมี !v.to ด้วย: ของเดิมส่ง from+to+count มาพร้อมกันแล้วหลุดด่านทั้งก้อน
+       ทั้งการตรวจ to < from และเพดานจำนวนกะ — ขณะที่ transform เลือกใช้ datesInRange(from, to)
+       เพราะมี to อยู่ ยิง from 2026-01-01 to 2030-12-31 count 1 จึงลงกะได้พันกว่าใบในครั้งเดียว
+       (Gemini ชี้ 8 พ.ย. 2569 · ยืนยันกับโค้ดแล้ว — ต้องกันที่ server ไม่ใช่พึ่งหน้าจอ) */
+    if (listed === 0 && v.from && v.count && !v.to) return;
     if (listed === 0 && !(v.from && v.to)) {
       ctx.addIssue({ code: 'custom', path: ['dates'], message: 'กรุณาเลือกวันที่จะลงกะ' });
       return;

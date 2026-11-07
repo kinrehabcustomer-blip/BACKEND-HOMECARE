@@ -10,6 +10,13 @@ import {
   LINK_CODE_MAX_TRIES,
 } from './lineBridge.js';
 
+/* ข้อความของกรณี "ชนกันอยู่" — โยนจากในทรานแซกชันเพื่อให้รหัสที่เพิ่ง claim ถูกคืน
+   เป็นฟังก์ชันเพราะ ApiError แต่ละใบต้องมี stack ของตัวเอง ไม่ใช่ใบเดียวใช้ซ้ำทั้งระบบ */
+const OWNER_CONFLICT = () =>
+  new ApiError(409, 'LINE นี้ยืนยันตัวตนเป็นพนักงานคนอื่นอยู่แล้ว — ติดต่อผู้ประสานงานให้ยกเลิกที่บัญชีเดิมก่อน');
+const EMPLOYEE_LINKED = () =>
+  new ApiError(409, 'พนักงานนี้ยืนยันตัวตนด้วย LINE อื่นอยู่แล้ว — ติดต่อผู้ประสานงานให้ยกเลิกบัญชีเดิมก่อน');
+
 /**
  * ผูก LINE กับพนักงานด้วยรหัส 6 หลักที่แอดมินออกในหน้าพนักงาน (ดู lib/lineBridge.js)
  * ใช้ 2 ทาง: พิมพ์รหัสในแชท LINE @kinjobs (/api/integration/line-code) · กรอกในหน้าเข้าระบบที่เปิดจาก LINE (/api/auth/line-code)
@@ -39,9 +46,13 @@ export async function linkLineByCode(lineUserId, code, { ticket = null } = {}) {
         if (!claimed) return { reason: 'invalid' };
         const emp = await tx.one('SELECT * FROM employees WHERE employee_id = :id FOR UPDATE', { id: claimed.employee_id });
         if (!emp || BLOCKED_STATUSES[emp.status]) return { reason: 'invalid' };
+        /* ชนกันอยู่ — ต้อง throw เพื่อ rollback การ DELETE รหัสด้านบน ไม่ใช่ return
+           return ใน callback ของ transaction = commit — รหัส 6 หลักหายทั้งที่การผูกไม่สำเร็จ
+           คนที่ใส่รหัสแล้วเจอข้อความนี้ แก้เสร็จแล้วกลับมาใส่รหัสเดิมก็ไม่ได้อีก โดยไม่มีอะไรบอก
+           — แบบเดียวกับกรณีตั๋วซ้ำด้านล่าง ที่ throw ไว้อย่างตั้งใจ (Gemini ชี้ 8 พ.ย. 2569 · ยืนยันแล้ว) */
         const owner = await tx.one('SELECT employee_id FROM employees WHERE line_user_id = :uid', { uid: lineUserId });
-        if (owner && owner.employee_id !== emp.employee_id) return { reason: 'owner' };
-        if (emp.line_user_id && emp.line_user_id !== lineUserId) return { reason: 'employee_linked' };
+        if (owner && owner.employee_id !== emp.employee_id) throw OWNER_CONFLICT();
+        if (emp.line_user_id && emp.line_user_id !== lineUserId) throw EMPLOYEE_LINKED();
         if (ticket) {
           const fresh = await tx.run(
             `INSERT INTO line_ticket_used (token_hash, employee_id)
@@ -57,7 +68,7 @@ export async function linkLineByCode(lineUserId, code, { ticket = null } = {}) {
             RETURNING *`,
           { uid: lineUserId, id: emp.employee_id },
         );
-        if (!linked) return { reason: 'employee_linked' };
+        if (!linked) throw EMPLOYEE_LINKED();
         await tx.run('DELETE FROM line_link_codes WHERE employee_id = :id', { id: emp.employee_id });
         await tx.run('DELETE FROM line_link_tries WHERE line_user_id = :uid', { uid: lineUserId });
         return { employee: linked };
@@ -67,12 +78,6 @@ export async function linkLineByCode(lineUserId, code, { ticket = null } = {}) {
     await sql.run('INSERT INTO line_link_tries (line_user_id) VALUES (:uid)', { uid: lineUserId });
     await sql.run(`DELETE FROM line_link_tries WHERE at < now() - interval '1 day'`);
     throw new ApiError(400, 'รหัสไม่ถูกต้องหรือหมดอายุ — ตรวจตัวเลขอีกครั้ง หรือขอรหัสใหม่จากผู้ประสานงาน');
-  }
-  if (result.reason === 'owner') {
-    throw new ApiError(409, 'LINE นี้ยืนยันตัวตนเป็นพนักงานคนอื่นอยู่แล้ว — ติดต่อผู้ประสานงานให้ยกเลิกที่บัญชีเดิมก่อน');
-  }
-  if (result.reason === 'employee_linked') {
-    throw new ApiError(409, 'พนักงานนี้ยืนยันตัวตนด้วย LINE อื่นอยู่แล้ว — ติดต่อผู้ประสานงานให้ยกเลิกบัญชีเดิมก่อน');
   }
   return result.employee;
 }
