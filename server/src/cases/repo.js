@@ -1,4 +1,5 @@
 import { sql, transaction, nextCaseId } from '../db/index.js';
+import { likeEscape } from '../lib/likeEscape.js';
 import { caseCode, caseIdForPatient, isCaseOfPatient } from './caseCode.js';
 import { issueForVisits, withProcedureNumbers } from './visitNumbers.js';
 /* รายการช่องของรายงานมาจาก schema.js ที่เดียว — ฟอร์มมี 80 กว่าช่อง การก๊อปรายชื่อมาไว้สองที่
@@ -234,7 +235,7 @@ export async function list({ q, status, case_type, service_kind, assigned_to, no
     where.push(`(
       c.case_id ILIKE :q OR c.title ILIKE :q OR c.client_name ILIKE :q OR c.client_phone ILIKE :q
     )`);
-    params.q = `%${q}%`;
+    params.q = `%${likeEscape(q)}%`;
   }
   if (CASE_STAGE_SQL[status]) {
     where.push(`(${CASE_STAGE_SQL[status]})`);

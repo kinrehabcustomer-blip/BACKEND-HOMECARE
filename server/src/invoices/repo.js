@@ -2,6 +2,7 @@ import { sql, nextInvoiceId, transaction } from '../db/index.js';
 import { PATIENT_PENDING } from '../cases/schema.js';
 import { normalizeAddons, addonAmount, addonsTotal, addonsTotalSql, addonLabel } from '../lib/addons.js';
 import { ensureShareTables } from './share.js';
+import { likeEscape } from '../lib/likeEscape.js';
 
 const NOW = `to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')`;
 /* วันนี้ตามเวลาไทย ไม่ใช่ UTC — ใช้กับวันที่ออกใบ/วันรับชำระ/เกณฑ์เลยกำหนด
@@ -451,7 +452,7 @@ function buildWhere({ q, status, customer_id, case_id, overdue, stale, draft_sta
   if (q) {
     where.push(`(i.invoice_id ILIKE :q OR i.bill_to_name ILIKE :q OR i.case_id ILIKE :q
       OR EXISTS (SELECT 1 FROM cases qc WHERE qc.case_id = i.case_id AND qc.client_name ILIKE :q))`);
-    params.q = `%${q}%`;
+    params.q = `%${likeEscape(q)}%`;
   }
   if (status) {
     where.push('i.status = :status');
