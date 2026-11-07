@@ -15,6 +15,7 @@ import {
   slipSchema,
   rejectSlipSchema,
   voidPaymentSchema,
+  cancelInvoiceSchema,
 } from './schema.js';
 import { decodeImage } from '../employees/schema.js';
 import { ApiError, asyncRoute, notFound } from '../lib/errors.js';
@@ -557,9 +558,24 @@ invoicesRouter.post(
 invoicesRouter.post(
   '/:id/cancel',
   asyncRoute(async (req, res) => {
-    const result = await repo.cancel(req.params.id);
+    const { reason } = cancelInvoiceSchema.parse(req.body ?? {});
+    const result = await repo.cancel(req.params.id, { reason }, req.user, {
+      hasMoneyPermission: can(req.user?.position, 'money'),
+    });
     throwIfInvoiceMoved(result);
     if (result.reason === 'invalid_status') throw new ApiError(409, 'ใบนี้ถูกยกเลิกไปแล้ว');
+    /* ใบที่มีเงินเข้ามาแล้ว — ยกเลิกแล้วรายได้ของบริษัทเปลี่ยน จึงจำกัดคนและบังคับเหตุผล
+       (เกณฑ์เดียวกับการยกเลิกรายการรับชำระ ดู /payments/:paymentId/void) */
+    if (result.reason === 'money_permission_required') {
+      throw new ApiError(
+        403,
+        'ใบนี้รับเงินมาแล้ว — ต้องให้ผู้จัดการหรือฝ่ายการเงินเป็นคนยกเลิก' +
+          ' ถ้าเป็นการคืนเงินให้ลูกค้า ให้ยกเลิกรายการรับชำระ (ปุ่มใต้รายการรับเงิน) แทนการยกเลิกใบ',
+      );
+    }
+    if (result.reason === 'cancel_reason_required') {
+      throw new ApiError(400, 'ใบนี้รับเงินมาแล้ว กรุณาบอกเหตุผลที่ยกเลิก (เช่น ออกใบผิดคน · คืนเงินแล้ว)');
+    }
     if (result.reason === 'sibling_has_payments') {
       throw new ApiError(
         409,

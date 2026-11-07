@@ -68,6 +68,9 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
   // รายการรับชำระที่กำลังจะยกเลิก + เหตุผล (ยกเลิกทีละรายการ จึงเก็บรหัสเดียวพอ)
   const [voidFor, setVoidFor] = useState(null);
   const [voidReason, setVoidReason] = useState('');
+  /* กล่องเหตุผลตอนยกเลิกใบที่รับเงินแล้ว (ดร.ธงชัย 8 พ.ย. 2569) */
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [cancelReason, setCancelReason] = useState('');
   /* ส่งใบเข้า LINE ลูกค้า (ดร.ธงชัย 24 ต.ค. 2569 ข้อ 4) — { can_send, reason, customer_name, history } · ดู server/src/invoices/share.js */
   const [lineInfo, setLineInfo] = useState(null);
   const [lineInfoError, setLineInfoError] = useState(null);
@@ -275,9 +278,11 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
    * ยกเลิกใบ — ใบยังอยู่ในระบบ เปลี่ยนสถานะเป็น "ยกเลิก" เก็บไว้เป็นประวัติ
    * ใช้กับใบที่ออกให้ลูกค้าไปแล้ว (ออกใบแล้ว/ชำระแล้ว) ซึ่งไม่ควรลบให้หายไปเฉยๆ
    */
-  function cancelInvoice() {
+  function cancelInvoice(reason = null) {
     return run(async () => {
-      await api.cancelInvoice(item.invoice_id);
+      await api.cancelInvoice(item.invoice_id, reason);
+      setCancelOpen(false);
+      setCancelReason('');
       toast(`ยกเลิก ${item.invoice_id} แล้ว`);
     });
   }
@@ -584,6 +589,21 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                     <strong>เคสของใบนี้ถูกยกเลิกแล้ว</strong> แต่ใบยังเปิดค้างอยู่และยังนับอยู่ในยอดค้างรวม —
                     ตรวจก่อนว่ายังต้องเก็บเงินใบนี้อยู่ไหม ถ้าไม่เก็บแล้วให้กด “ยกเลิกใบนี้”
                     ถ้าเก็บตามกะที่ไปจริง ให้แก้ยอดก่อนส่งให้ลูกค้า
+                  </p>
+                </div>
+              )}
+
+              {/* ใบนี้ถูกยกเลิกไปแล้ว — ใครสั่งและเพราะอะไร (ดร.ธงชัย 8 พ.ย. 2569)
+                  เงินที่เคยรับมายังนับเป็นรายได้ ใบที่ถูกยกเลิกจึงต้องบอกเหตุผลไว้บนตัวใบเอง
+                  ใบเก่าที่ยกเลิกไปก่อนมีช่องนี้จะไม่มีข้อมูล — ไม่ขึ้นกล่อง ไม่ใช่ขึ้นกล่องว่าง */}
+              {item.status === 'cancelled' && (item.cancel_reason || item.cancelled_by_name) && (
+                <div className="notice stale-notice no-print">
+                  <p>
+                    <LineIcon name="alert" className="text-ico" />
+                    <strong>ใบนี้ถูกยกเลิกแล้ว</strong>
+                    {item.cancel_reason && ` — ${item.cancel_reason}`}
+                    {item.cancelled_by_name && ` · โดย ${item.cancelled_by_name}`}
+                    {item.cancelled_at && ` · ${item.cancelled_at.slice(0, 16)}`}
                   </p>
                 </div>
               )}
@@ -980,17 +1000,42 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                   (ต่างจากใบร่าง/ใบที่ออกผิดซึ่งลบทิ้งได้ ตามที่ตั้งใจไว้ในโค้ดฝั่ง server)
                   ถ้าจำเป็นต้องลบจริงๆ ยกเลิกก่อนแล้วค่อยลบใบที่ยกเลิกได้ — สองจังหวะสำหรับของที่กู้ไม่ได้ */}
               {item.status === 'paid' ? (
-                <ConfirmButton
-                  className="btn danger-ghost foot-danger"
-                  disabled={busy}
-                  title={`ยกเลิกใบเสร็จ ${item.invoice_id} ที่รับชำระแล้ว?`}
-                  detail="ใบจะยังอยู่ในระบบเป็นประวัติ แต่ยอดนี้จะไม่ถูกนับเป็นรายได้อีก"
-                  confirmLabel="ยกเลิกใบนี้"
-                  cancelLabel="ไม่ยกเลิกแล้ว"
-                  onConfirm={cancelInvoice}
-                >
-                  ยกเลิกใบนี้
-                </ConfirmButton>
+                /* ใบที่รับเงินมาแล้ว — ต้องกรอกเหตุผลก่อน แล้วเซิร์ฟเวอร์เป็นคนตัดสินว่าใครยกเลิกได้
+                   (ผู้จัดการ/ฝ่ายการเงินเท่านั้น ดู assessCancelAuthority) ที่นี่แค่เปิดช่องให้กรอก
+                   เหตุผลถูกเก็บไว้บนใบพร้อมชื่อคนกดและเวลา — เงินที่หายจากรายงานต้องมีร่องรอย */
+                <div className="foot-danger invoice-cancel-paid">
+                  <button
+                    type="button"
+                    className="btn danger-ghost"
+                    disabled={busy}
+                    onClick={() => { setCancelOpen(!cancelOpen); setCancelReason(''); }}
+                  >
+                    {cancelOpen ? 'ไม่ยกเลิกแล้ว' : 'ยกเลิกใบนี้'}
+                  </button>
+                  {cancelOpen && (
+                    <div className="pay-void-form">
+                      <input
+                        type="text"
+                        value={cancelReason}
+                        maxLength={300}
+                        placeholder="เหตุผล เช่น ออกใบผิดคน · คืนเงินแล้ว"
+                        onChange={(e) => setCancelReason(e.target.value)}
+                      />
+                      <button
+                        type="button"
+                        className="btn danger"
+                        disabled={busy || cancelReason.trim().length < 3}
+                        onClick={() => cancelInvoice(cancelReason.trim())}
+                      >
+                        ยืนยันยกเลิกใบ
+                      </button>
+                      <p className="muted">
+                        ใบจะยังอยู่ในระบบเป็นประวัติ · ยอดที่รับมาแล้วยังนับเป็นรายได้ตามเดิม
+                        — ถ้าคืนเงินให้ลูกค้าไปแล้ว ให้กด “ยกเลิกรายการนี้” ใต้รายการรับเงินด้วย
+                      </p>
+                    </div>
+                  )}
+                </div>
               ) : (
                 <ConfirmButton
                   className="btn danger-ghost foot-danger"

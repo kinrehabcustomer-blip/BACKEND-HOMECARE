@@ -616,6 +616,49 @@ export const ensurePaymentVoidTable = () =>
     )`)
     .catch((err) => { voidsReady = null; throw err; }));
 
+/* ช่องบันทึกการยกเลิกใบ (ดร.ธงชัยเคาะ 8 พ.ย. 2569 "แก้เลย")
+   สร้างแบบขี้เกียจเหมือน ensurePaymentVoidTable — schema.sql มีคอลัมน์เหล่านี้อยู่แล้ว
+   แต่ deploy ที่ยังไม่ได้รัน migrate จะยังไม่มีคอลัมน์ แล้วการยกเลิกจะล้มทั้งคำสั่ง */
+let cancelAuditReady = null;
+export const ensureCancelAudit = () =>
+  (cancelAuditReady ??= sql
+    .run(`ALTER TABLE invoices
+      ADD COLUMN IF NOT EXISTS cancelled_at      TEXT,
+      ADD COLUMN IF NOT EXISTS cancelled_by      TEXT
+        REFERENCES employees (employee_id) ON DELETE SET NULL ON UPDATE CASCADE,
+      ADD COLUMN IF NOT EXISTS cancelled_by_name TEXT,
+      ADD COLUMN IF NOT EXISTS cancel_reason     TEXT`)
+    .catch((err) => { cancelAuditReady = null; throw err; }));
+
+/**
+ * ใบนี้มีเงินผูกอยู่ไหม — สถานะ paid หรือมีงวดรับชำระที่ยังไม่ถูกยกเลิก
+ * ต้องอ่านหลังจับ row lock เสมอ — งวดที่เพิ่ง commit ระหว่างรอล็อกต้องถูกนับ
+ */
+async function invoiceHasMoney(tx, invoiceId, status) {
+  if (status === 'paid') return true;
+  const { paid } = await tx.one(
+    `SELECT COALESCE(SUM(amount), 0) AS paid FROM invoice_payments WHERE invoice_id = :id`,
+    { id: invoiceId },
+  );
+  return roundMoney(paid) > 0;
+}
+
+/**
+ * ด่านของการยกเลิกใบที่ "มีเงินผูกอยู่" (ตรวจรอบ 8 พ.ย. 2569 ข้อ C1)
+ *
+ * ก่อนหน้านี้ใครก็ตามที่มีสิทธิ์หมวด billing (HR · Admin HC · การเงิน) กดยกเลิกใบที่รับเงินแล้วได้
+ * โดยไม่ต้องบอกเหตุผล ไม่มีการบันทึกว่าใครกด แล้วยอดเงินก้อนนั้นหายจากรายงานทันที
+ * เกณฑ์เดียวกับ void payment — เงินที่รับมาแล้วจะหายจากที่ไหน ต้องรู้ว่าใครสั่งและเพราะอะไร
+ *
+ * ใบที่ยังไม่มีเงินเข้าเลย (ร่าง/ออกใบแล้ว) ยกเลิกได้ตามเดิม ไม่ต้องขอสิทธิ์เพิ่ม ไม่บังคับเหตุผล
+ */
+export function assessCancelAuthority(hasMoney, reason, opts) {
+  if (!hasMoney) return {};
+  if (!opts?.hasMoneyPermission) return { reason: 'money_permission_required' };
+  if (String(reason ?? '').trim().length < 3) return { reason: 'cancel_reason_required' };
+  return {};
+}
+
 /** ประวัติรายการรับชำระที่ถูกยกเลิกของใบ — โชว์ใต้รายการรับเงิน ไม่ให้เงินหายแบบไร้ร่องรอย */
 export async function listPaymentVoids(invoiceId) {
   await ensurePaymentVoidTable();
@@ -1666,14 +1709,14 @@ export async function setDepositAmount(depositId, deposit) {
  * ลูกค้าได้บิลน้อยกว่าที่ตกลงโดยไม่มีอะไรฟ้อง) · ใบคู่รับเงินมาแล้ว = ปฏิเสธ ให้คนตัดสินใจเอง
  * เพราะเงินที่รับแล้วต้องมีใบรองรับ ยกเลิกตามให้อัตโนมัติไม่ได้
  */
-export async function cancelInvoiceForTransaction(tx, invoiceId) {
+export async function cancelInvoiceForTransaction(tx, invoiceId, { reason } = {}, actor = null, opts = {}) {
   const head = await tx.one(
     'SELECT billing_kind, parent_invoice_id FROM invoices WHERE invoice_id = :id',
     { id: invoiceId },
   );
   if (!head) return { reason: 'not_found' };
   if (head.billing_kind === 'deposit' || head.billing_kind === 'balance' || head.parent_invoice_id != null) {
-    return cancelPlanPart(tx, invoiceId);
+    return cancelPlanPart(tx, invoiceId, { reason }, actor, opts);
   }
 
   const locked = await invoiceForUpdate(tx, invoiceId, 'cancel');
@@ -1682,17 +1725,34 @@ export async function cancelInvoiceForTransaction(tx, invoiceId) {
   if (locked.invoice.billing_kind === 'deposit' || locked.invoice.billing_kind === 'balance') {
     return { reason: 'state_changed' };
   }
+
+  /* ด่านสิทธิ์/เหตุผลของใบที่มีเงินผูกอยู่ — ตัดสินจากแถวที่ล็อกแล้วเท่านั้น
+     เช็คก่อนหน้านี้ (ตอนหน้าเว็บโหลดใบ) ใช้ไม่ได้ เพราะเงินอาจเข้ามาระหว่างนั้น */
+  const hasMoney = await invoiceHasMoney(tx, invoiceId, locked.invoice.status);
+  const authority = assessCancelAuthority(hasMoney, reason, opts);
+  if (authority.reason) return { ...authority, invoice_id: invoiceId };
+
   const changed = await tx.run(
     `UPDATE invoices
-     SET status = 'cancelled', updated_at = ${NOW}
+     SET status = 'cancelled',
+         cancelled_at      = ${NOW},
+         cancelled_by      = :by,
+         cancelled_by_name = :by_name,
+         cancel_reason     = :reason,
+         updated_at = ${NOW}
      WHERE invoice_id = :id AND status <> 'cancelled'`,
-    { id: invoiceId },
+    {
+      id: invoiceId,
+      by: actor?.employee_id ?? null,
+      by_name: actorName(actor),
+      reason: String(reason ?? '').trim() || null,
+    },
   );
-  return changed === 1 ? { invoice_id: invoiceId } : { reason: 'state_changed' };
+  return changed === 1 ? { invoice_id: invoiceId, had_money: hasMoney } : { reason: 'state_changed' };
 }
 
 /** ยกเลิกงวดหนึ่งของแผน + ใบคู่ที่ยังไม่รับเงิน — ล็อกทั้งแผนตามลำดับ root → children (ดู invoicePlanForUpdate) */
-async function cancelPlanPart(tx, invoiceId) {
+async function cancelPlanPart(tx, invoiceId, { reason } = {}, actor = null, opts = {}) {
   const plan = await invoicePlanForUpdate(tx, invoiceId);
   if (plan.reason) return plan;
   const state = assessInvoiceAction('cancel', plan.target.status);
@@ -1715,19 +1775,36 @@ async function cancelPlanPart(tx, invoiceId) {
     if (blocker) return { reason: 'sibling_has_payments', invoice_id: blocker.invoice_id };
   }
 
+  /* ด่านเดียวกับใบเดี่ยว — งวดที่กำลังยกเลิกเองมีเงินเข้ามาแล้วหรือยัง
+     (ใบคู่ที่มีเงินถูกปฏิเสธไปแล้วด้านบน จึงเหลือแค่ใบเป้าหมายให้ตรวจ) */
+  const hasMoney = await invoiceHasMoney(tx, invoiceId, plan.target.status);
+  const authority = assessCancelAuthority(hasMoney, reason, opts);
+  if (authority.reason) return { ...authority, invoice_id: invoiceId };
+
   const ids = [invoiceId, ...siblings.map((row) => row.invoice_id)];
   const changed = await tx.run(
     `UPDATE invoices
-     SET status = 'cancelled', updated_at = ${NOW}
+     SET status = 'cancelled',
+         cancelled_at      = ${NOW},
+         cancelled_by      = :by,
+         cancelled_by_name = :by_name,
+         cancel_reason     = :reason,
+         updated_at = ${NOW}
      WHERE invoice_id = ANY(:ids::text[]) AND status <> 'cancelled'`,
-    { ids },
+    {
+      ids,
+      by: actor?.employee_id ?? null,
+      by_name: actorName(actor),
+      reason: String(reason ?? '').trim() || null,
+    },
   );
   if (changed !== ids.length) throw new Error('ยกเลิกสมาชิกแผนวางบิลได้ไม่ครบ แม้ถือ row lock แล้ว');
-  return { invoice_id: invoiceId };
+  return { invoice_id: invoiceId, had_money: hasMoney };
 }
 
-export async function cancel(invoiceId) {
-  const result = await transaction((tx) => cancelInvoiceForTransaction(tx, invoiceId));
+export async function cancel(invoiceId, input = {}, actor = null, opts = {}) {
+  await ensureCancelAudit();
+  const result = await transaction((tx) => cancelInvoiceForTransaction(tx, invoiceId, input, actor, opts));
   return invoiceMutationResult(result);
 }
 
@@ -1870,10 +1947,12 @@ export async function revenue({ bucket, points }) {
             COUNT(DISTINCT pay.invoice_id)   AS invoices
      FROM buckets b
      LEFT JOIN (
-       SELECT p.invoice_id, p.amount, p.paid_at
-       FROM invoice_payments p
-       JOIN invoices i ON i.invoice_id = p.invoice_id
-       WHERE i.status <> 'cancelled'
+       /* นับทุกงวดที่ยังอยู่ในตาราง ไม่กรองตามสถานะใบ (แก้ 8 พ.ย. 2569 ข้อ C1)
+          invoice_payments = เงินที่รับมาจริงและยังไม่ถูกตีกลับ — การยกเลิกเงินที่รับแล้ว
+          ย้ายแถวออกไป invoice_payment_voids อยู่แล้ว (ดู voidPaymentForTransaction)
+          ของเดิมกรอง i.status <> 'cancelled' ทำให้ "ยกเลิกใบ" ลบรายได้จริงออกจากกราฟได้
+          ทั้งที่เงินยังอยู่ในมือบริษัท — เงินคืนลูกค้าต้อง void งวดนั้น ไม่ใช่ยกเลิกใบ */
+       SELECT p.invoice_id, p.amount, p.paid_at FROM invoice_payments p
      ) pay ON date_trunc('${unit}', LEFT(pay.paid_at, 10)::date)::date = b.bucket
      GROUP BY b.bucket
      ORDER BY b.bucket`,

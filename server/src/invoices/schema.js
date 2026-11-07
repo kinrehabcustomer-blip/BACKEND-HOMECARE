@@ -143,6 +143,12 @@ export const voidPaymentSchema = z.object({
   reason: z.string().trim().min(3, 'กรุณาบอกเหตุผลที่ยกเลิกรายการนี้ (เช่น กรอกยอดผิด · บันทึกซ้ำ)').max(300),
 });
 
+/* เหตุผลตอนยกเลิกใบ (ดร.ธงชัย 8 พ.ย. 2569) — ใบที่ยังไม่มีเงินเข้าไม่บังคับ จึงเป็น optional ที่นี่
+   แล้วไปบังคับในชั้น repo เฉพาะใบที่มีเงินผูกอยู่ (ดู assessCancelAuthority) เพราะที่นี่ยังไม่รู้ว่าใบไหนมีเงิน */
+export const cancelInvoiceSchema = z.object({
+  reason: z.string().trim().max(300).optional().nullable(),
+});
+
 export const slipSchema = z.object({ image: imageSchema });
 
 export const rejectSlipSchema = z.object({

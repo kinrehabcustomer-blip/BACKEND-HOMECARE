@@ -44,6 +44,7 @@ const {
   invoicePlanForUpdate,
   invoiceMutationResult,
   assessPaymentCapacity,
+  assessCancelAuthority,
   paymentCapacityForUpdate,
   updateInvoiceForTransaction,
   issueInvoiceForTransaction,
@@ -407,6 +408,41 @@ describe('invoice mutations — สถานะ แผน และ payment ต�
     assert.equal(assessInvoiceAction('update', 'paid').reason, 'invalid_status');
     assert.equal(assessInvoiceAction('issue', 'cancelled').reason, 'invalid_status');
     assert.equal(assessInvoiceAction('cancel', 'cancelled').reason, 'invalid_status');
+  });
+
+  /* ยกเลิกใบที่รับเงินมาแล้ว — ก่อน 8 พ.ย. 2569 ใครที่มีสิทธิ์ billing (HR · Admin HC) ก็กดได้
+     โดยไม่ต้องบอกเหตุผล แล้วยอดเงินก้อนนั้นหายจากกราฟรายได้ทันที (ตรวจรอบ 8 พ.ย. ข้อ C1)
+     ดร.ธงชัยเคาะ "แก้เลย" → ใบที่มีเงินผูกอยู่ ต้องมีสิทธิ์ money + ต้องบอกเหตุผล */
+  test('ยกเลิกใบที่มีเงินผูกอยู่ ต้องมีสิทธิ์ money และต้องบอกเหตุผล', () => {
+    const money = { hasMoneyPermission: true };
+    const billingOnly = { hasMoneyPermission: false };
+
+    // ใบที่ยังไม่มีเงินเข้าเลย — ยกเลิกได้ตามเดิม ไม่ขอสิทธิ์เพิ่ม ไม่บังคับเหตุผล
+    assert.deepEqual(assessCancelAuthority(false, null, billingOnly), {});
+    assert.deepEqual(assessCancelAuthority(false, '', billingOnly), {});
+
+    // ใบที่มีเงิน + ไม่มีสิทธิ์การเงิน = ปฏิเสธ แม้จะกรอกเหตุผลมาครบ
+    assert.equal(
+      assessCancelAuthority(true, 'ออกใบผิดคน', billingOnly).reason,
+      'money_permission_required',
+    );
+    assert.equal(assessCancelAuthority(true, null, billingOnly).reason, 'money_permission_required');
+
+    // มีสิทธิ์การเงินแต่ไม่บอกเหตุผล (หรือบอกสั้นจนไม่เป็นความ) = ปฏิเสธ
+    for (const reason of [null, undefined, '', '  ', 'ขอ']) {
+      assert.equal(assessCancelAuthority(true, reason, money).reason, 'cancel_reason_required');
+    }
+    // เกณฑ์ความยาวขั้นต่ำ 3 ตัวอักษร เท่ากับ voidPaymentSchema — สองที่ต้องเท่ากัน
+    assert.deepEqual(assessCancelAuthority(true, 'ผิด', money), {});
+
+    // มีสิทธิ์ + มีเหตุผล = ผ่าน
+    assert.deepEqual(assessCancelAuthority(true, 'คืนเงินลูกค้าแล้ว', money), {});
+    // เหตุผลที่มีช่องว่างหน้า-หลังต้องถูกตัดก่อนนับความยาว ไม่ใช่ผ่านเพราะช่องว่าง
+    assert.deepEqual(assessCancelAuthority(true, '  ออกใบซ้ำ  ', money), {});
+
+    // opts ว่าง/ไม่ส่งมาเลย ต้องถือว่าไม่มีสิทธิ์ ไม่ใช่ปล่อยผ่าน
+    assert.equal(assessCancelAuthority(true, 'เหตุผลครบ', undefined).reason, 'money_permission_required');
+    assert.equal(assessCancelAuthority(true, 'เหตุผลครบ', {}).reason, 'money_permission_required');
   });
 
   test('single-row mutation อ่านสถานะล่าสุดด้วย FOR UPDATE ก่อนอนุญาต', async () => {

@@ -422,6 +422,15 @@ ALTER TABLE invoices ADD COLUMN IF NOT EXISTS paid_by        TEXT
   REFERENCES employees (employee_id) ON DELETE SET NULL ON UPDATE CASCADE;
 ALTER TABLE invoices ADD COLUMN IF NOT EXISTS paid_by_name   TEXT;
 
+-- ผู้ยกเลิกใบ + เหตุผล (ดร.ธงชัยเคาะ 8 พ.ย. 2569 "แก้เลย" · ตรวจบั๊กรอบ 8 พ.ย. ข้อ C1)
+-- ของเดิมใบที่รับเงินมาแล้วถูกยกเลิกได้โดยไม่เหลือร่องรอยว่าใครสั่งและเพราะอะไร
+-- เก็บชื่อไว้ด้วยเหตุผลเดียวกับ issued_by_name — คนยกเลิกอาจลาออกหรือเปลี่ยนชื่อไปแล้ว
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS cancelled_at      TEXT;
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS cancelled_by      TEXT
+  REFERENCES employees (employee_id) ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS cancelled_by_name TEXT;
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS cancel_reason     TEXT;
+
 CREATE INDEX IF NOT EXISTS idx_invoices_customer ON invoices (customer_id);
 CREATE INDEX IF NOT EXISTS idx_invoices_case     ON invoices (case_id);
 CREATE INDEX IF NOT EXISTS idx_invoices_status   ON invoices (status);

@@ -450,7 +450,9 @@ export const api = {
   /** ยกเลิกรายการรับชำระที่บันทึกผิด (กรอกยอดผิด/บันทึกซ้ำ) — ต้องบอกเหตุผล · คืนใบที่อัปเดตแล้ว */
   voidInvoicePayment: (id, paymentId, reason) =>
     request(`/invoices/${id}/payments/${paymentId}/void`, { method: 'POST', body: { reason } }),
-  cancelInvoice: (id) => request(`/invoices/${id}/cancel`, { method: 'POST' }),
+  /* reason บังคับเมื่อใบนั้นรับเงินมาแล้ว (เซิร์ฟเวอร์เป็นคนตัดสิน ดู assessCancelAuthority) */
+  cancelInvoice: (id, reason = null) =>
+    request(`/invoices/${id}/cancel`, { method: 'POST', body: { reason } }),
   deleteInvoice: (id) => request(`/invoices/${id}`, { method: 'DELETE' }),
   /** สลิปโอนเงินของลูกค้า — image เป็น data URL ที่ย่อแล้ว (compressImage) · คืนใบที่อัปเดตแล้ว */
   addInvoiceSlip: (id, image) => request(`/invoices/${id}/slips`, { method: 'POST', body: { image } }),
