@@ -48,6 +48,8 @@ ALTER TABLE employees ADD CONSTRAINT employees_position_check
   CHECK (position IN ('caregiver', 'assistant_nurse', 'practical_nurse', 'nurse',
                       'therapist', 'occupational_therapist', 'speech_therapist',
                       'manager', 'hr', 'admin', 'finance', 'super_admin',
+                      -- หัวหน้าพยาบาล (ดร.ธงชัย 8 พ.ย. 2569) — สายสำนักงาน เห็นงานคลินิก ไม่เห็นเรื่องเงิน
+                      'nurse_lead',
                       'unassigned'));  -- "ว่าง" = ยังไม่ได้กำหนดตำแหน่ง (นำเข้ารายชื่อ 28 ต.ค. 2569)
 
 -- ใบรับรอง / ใบประกอบวิชาชีพ ผูกกับพนักงานผ่าน employee_id

@@ -51,6 +51,11 @@ export const DEFAULT_PERMISSIONS = {
   hr: [...OFFICE_KEYS, 'invoices'],
   admin: [...OFFICE_KEYS, 'invoices', 'slip_delete'],
   finance: ['invoices', 'payroll', 'revenue', 'see_pay', 'invoice_adjust', 'slip_delete'],
+  /* หัวหน้าพยาบาล (ดร.ธงชัย 8 พ.ย. 2569 "เปิดชั้น 1+2 เลย") — งานคลินิกล้วน
+     เห็นเคส ตารางงาน การมาทำงาน ผู้รับบริการ พนักงาน และคะแนนจากญาติ
+     🔴 ไม่มีเมนูเงินสักตัว และไม่มี see_pay — เปิดหน้าพนักงานได้แต่ไม่เห็นค่าจ้าง
+     ไม่มีลูกค้า/แพ็คเกจ เพราะเป็นเรื่องผู้จ่ายเงินกับราคา ไม่ใช่เรื่องการดูแล */
+  nurse_lead: ['dashboard', 'cases', 'calendar', 'attendance', 'patients', 'employees', 'reviews'],
 };
 
 /* แคชในหน่วยความจำ — requireAuth โหลดให้ก่อนทุกคำขอ (อายุ 15 วินาที) ด่านสิทธิ์จึงอ่านแบบ sync ได้
