@@ -282,10 +282,10 @@ input[aria-invalid='true'] { border-color: var(--danger); }
   .app.has-tabbar ~ .toasts,
   body:has(.app.has-tabbar) .toasts { bottom: calc(5.25rem + env(safe-area-inset-bottom)); }
 
-  /* ---- หลังบ้าน: ปุ่ม "เมนู" อยู่บนแถบล่างแล้ว — แถบบนเหลือโลโก้ + กระดิ่ง ----
+  /* ---- ปุ่มเมนูอยู่บนแถบล่างแล้ว ("เมนู" หลังบ้าน / "ตั้งค่า" พนักงาน) — แถบบนเหลือโลโก้ + กระดิ่ง ----
      แผงเมนูเดิม (ห้อยลงจากแถบบน) กลายเป็นแผ่นที่เลื่อนขึ้นจากเหนือแถบล่าง ใกล้นิ้วที่เพิ่งกดปุ่ม */
-  .app.tabbar-admin .sidebar .nav-toggle { display: none; }
-  .app.tabbar-admin .sidebar.is-open .sidebar-panel {
+  .app.tabbar-sheet .sidebar .nav-toggle { display: none; }
+  .app.tabbar-sheet .sidebar.is-open .sidebar-panel {
     position: fixed;
     top: auto;
     left: 0.75rem;
@@ -301,7 +301,7 @@ input[aria-invalid='true'] { border-color: var(--danger); }
   }
   /* เมนูในแผงเป็นตาราง 2 คอลัมน์ — 12 รายการเรียงบรรทัดละอันสูงเกือบเต็มจอ แถวท้ายโดนตัดต้องเลื่อนหา
      สองคอลัมน์ได้แผงสูงราวครึ่งเดียว เห็นครบในครั้งเดียว (หัวข้อหมวด/แพ็คเกจกินเต็มแถว) */
-  .app.tabbar-admin .sidebar.is-open .sidebar-panel nav {
+  .app.tabbar-sheet .sidebar.is-open .sidebar-panel nav {
     display: grid;
     grid-template-columns: 1fr 1fr;
     align-content: start;
@@ -311,23 +311,25 @@ input[aria-invalid='true'] { border-color: var(--danger); }
     overflow-y: auto;
     overscroll-behavior: contain;
   }
-  .app.tabbar-admin .sidebar-panel :is(.nav-section-label, .nav-group-btn, .nav-sub) { grid-column: 1 / -1; }
-  .app.tabbar-admin .sidebar-panel .nav-section-label { padding: 0.5rem 0.625rem 0.125rem; }
+  .app.tabbar-sheet .sidebar-panel :is(.nav-section-label, .nav-group-btn, .nav-sub) { grid-column: 1 / -1; }
+  .app.tabbar-sheet .sidebar-panel .nav-section-label { padding: 0.5rem 0.625rem 0.125rem; }
   /* กลุ่มแพ็คเกจ: ไม่มีหัวข้อกางหุบบนมือถือ (ผู้ใช้ขอ 6 พ.ย. 2569) — สองเมนูย่อยโชว์เป็นเมนูปกติ ชื่อเต็ม ขนาดไอคอนเท่าเมนูอื่น
      display: contents = ลูกของ .nav-sub เข้าตาราง 2 คอลัมน์ของ nav ตรงๆ เหมือนเมนูอื่นทุกอัน (ไม่ว่าเดิมหุบอยู่หรือไม่) */
-  .app.tabbar-admin .sidebar-panel .nav-group-btn { display: none; }
-  .app.tabbar-admin .sidebar-panel .nav-sub,
-  .app.tabbar-admin .sidebar-panel .nav-sub.is-collapsed { display: contents; }
-  .app.tabbar-admin .sidebar-panel .nav-sub .nav-name-short { display: none; }
-  .app.tabbar-admin .sidebar-panel .nav-sub .nav-name-full { display: inline; }
-  .app.tabbar-admin .sidebar nav .nav-sub .nav-ico { width: 1.25rem; height: 1.25rem; }
+  .app.tabbar-sheet .sidebar-panel .nav-group-btn { display: none; }
+  .app.tabbar-sheet .sidebar-panel .nav-sub,
+  .app.tabbar-sheet .sidebar-panel .nav-sub.is-collapsed { display: contents; }
+  .app.tabbar-sheet .sidebar-panel .nav-sub .nav-name-short { display: none; }
+  .app.tabbar-sheet .sidebar-panel .nav-sub .nav-name-full { display: inline; }
+  .app.tabbar-sheet .sidebar nav .nav-sub .nav-ico { width: 1.25rem; height: 1.25rem; }
   /* ชื่อเต็มอย่าง "ค่าตอบแทนพนักงาน" ในครึ่งจอ — ให้ตกบรรทัดได้ ดีกว่าโดนตัดหรือดันคอลัมน์ล้น */
-  .app.tabbar-admin .sidebar-panel nav a { min-width: 0; padding: 0.625rem; font-size: 0.875rem; line-height: 1.3; white-space: normal; }
-  .app.tabbar-admin .sidebar-panel .sidebar-foot { flex: none; margin-top: 0.375rem; }
+  .app.tabbar-sheet .sidebar-panel nav a { min-width: 0; padding: 0.625rem; font-size: 0.875rem; line-height: 1.3; white-space: normal; }
+  .app.tabbar-sheet .sidebar-panel .sidebar-foot { flex: none; margin-top: 0.375rem; }
   /* ฉากหรี่คลุมทั้งจอ (รวมแถบบน) — เหลือสว่างแค่แผงเมนูกับแถบล่าง ซึ่งยกขึ้นเหนือฉากตอนแผงกาง
      ปุ่ม "เมนู" (✕) จึงยังกดปิดได้ และยังเห็นว่ากำลังเปิดเมนูอยู่ */
-  .app.tabbar-admin .nav-scrim { position: fixed; inset: 0; height: auto; }
+  .app.tabbar-sheet .nav-scrim { position: fixed; inset: 0; height: auto; }
   .app.menu-open .tabbar { z-index: 21; }
+  /* พนักงาน: แผงมีแค่เมนูที่ไม่ได้อยู่บนแถบล่าง (แชทญาติ) + แถวบัญชี — เมนูบนแถบไม่ต้องซ้ำ */
+  .app.tabbar-field .sidebar-panel nav .on-tabbar { display: none; }
 }
 @keyframes sheet-up { from { opacity: 0; transform: translateY(0.75rem); } }
 @media (prefers-reduced-motion: reduce) { .tabbar .tab-ico { transition: none; } }

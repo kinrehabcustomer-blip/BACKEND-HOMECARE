@@ -5194,7 +5194,7 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
 .nav-sub { display: flex; flex-direction: column; gap: 0.1875rem; padding-left: 1.25rem; }
 .sidebar nav .nav-sub a { padding-block: 0.5rem; }
 .sidebar nav .nav-sub .nav-ico { width: 1.0625rem; height: 1.0625rem; }
-/* เมนูย่อยวาดไว้เสมอ (App.jsx) — หุบ = ซ่อน · ชื่อเต็มใช้เฉพาะแผงเมนูบนมือถือ (ดู .tabbar-admin ใน warm-clarity.css) */
+/* เมนูย่อยวาดไว้เสมอ (App.jsx) — หุบ = ซ่อน · ชื่อเต็มใช้เฉพาะแผงเมนูบนมือถือ (ดู .tabbar-sheet ใน warm-clarity.css) */
 .nav-sub.is-collapsed { display: none; }
 .nav-sub .nav-name-full { display: none; }
 @media (prefers-reduced-motion: reduce) { .nav-caret { transition: none; } }
@@ -6170,3 +6170,10 @@ h1, h2, h3, h4, .page-hero-title, .cal-title, .login-heading h1 {
 }
 .modal-crumb-back:hover { background: var(--brand-soft); }
 .modal-crumb-back:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+
+/* หน้างานวันนี้ (พนักงาน): วันที่อยู่แถวบนของการ์ดสรุป แทนหัวหน้าเดิม */
+.today-top { flex-wrap: nowrap; }
+.today-date { display: inline-flex; align-items: center; gap: 0.625rem; min-width: 0; font-weight: 600; color: var(--heading, var(--text)); }
+.today-date .page-hero-icon { width: 2.25rem; height: 2.25rem; border-radius: 0.625rem; }
+.today-date .page-hero-icon svg { width: 1.125rem; height: 1.125rem; }
+@media (max-width: 600px) { .today-summary > .today-top { padding-bottom: 0.75rem; margin-bottom: 0; } }

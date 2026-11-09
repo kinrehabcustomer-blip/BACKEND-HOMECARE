@@ -141,6 +141,10 @@ const FIELD_NAV = [
   { to: '/my-calendar', icon: 'calendar', label: 'ตารางงานของฉัน', short: 'ตาราง' },
   { to: '/my-attendance', icon: 'clock', label: 'ค่าตอบแทนของฉัน', short: 'ค่าตอบแทน' },
 ];
+/* แถบล่างของพนักงาน (ผู้ใช้ขอ 9 พ.ย. 2569): ไม่มี ☰ บนแถบบนแล้ว — ช่องขวาสุดเป็นปุ่ม "ตั้งค่า"
+   ที่กางแผงเมนูขึ้นจากล่าง ในแผงมีแชทญาติ + ตั้งค่า/ออกจากระบบ · เมนูที่อยู่บนแถบแล้วไม่ซ้ำในแผง */
+const FIELD_IN_SHEET = new Set(['/my-chat']);
+const FIELD_TABS = FIELD_NAV.filter((i) => !FIELD_IN_SHEET.has(i.to));
 
 /** จำนวนเมนูหลักบนแถบล่างของหลังบ้าน — ช่องที่ 5 คือปุ่ม "เมนู" (390px แบ่ง 5 ช่อง ช่องละ ~70px ชื่อสั้นยังไม่ตกบรรทัด) */
 const ADMIN_TABS = 4;
@@ -148,7 +152,7 @@ const ADMIN_TABS = 4;
 /**
  * แถบเมนูล่างบนมือถือ (จอกว้างซ่อนด้วย CSS — warm-clarity.css) แถบลอยมุมมน อยู่ที่นิ้วโป้งเอื้อมถึง
  *
- * พนักงานภาคสนาม: 6 หน้างานของตัวเองครบทุกอัน · ตั้งค่า/ออกจากระบบยังอยู่ใต้ ☰ บนแถบบน
+ * พนักงานภาคสนาม: 5 หน้างาน + ปุ่ม "ตั้งค่า" (ขวาสุด) ที่กางแผงเมนู — แชทญาติ/ตั้งค่า/ออกจากระบบอยู่ในแผงนั้น
  * หลังบ้าน (ผู้ใช้ขอ 6 พ.ย. 2569): เมนูมีถึง 12 อัน ใส่แถบเดียวไม่พอ — 4 อันแรกที่คนนี้เข้าได้อยู่บนแถบ
  * (เรียงตาม ADMIN_NAV ซึ่งเรียงตามความถี่ใช้อยู่แล้ว) ที่เหลือ + ตั้งค่า/ออกจากระบบอยู่ในแผง "เมนู"
  * ที่เลื่อนขึ้นจากด้านล่าง (แผงเดียวกับ ☰ เดิม — แถบบนของหลังบ้านบนมือถือจึงไม่มีปุ่ม ☰ แล้ว)
@@ -158,15 +162,35 @@ function TabBar({ menuOpen, onMenu }) {
   const location = useLocation();
   const icon = (name) => <span className="tab-ico"><NavIcon name={name} /></span>;
 
+  // ปุ่มกางแผงเมนู — ใช้ร่วมกันทั้งพนักงาน ("ตั้งค่า") และหลังบ้าน ("เมนู")
+  const menuButton = (label, ico, active) => (
+    <button
+      key="menu"
+      type="button"
+      className={menuOpen || active ? 'active' : ''}
+      aria-expanded={menuOpen}
+      aria-controls="main-nav"
+      onClick={onMenu}
+    >
+      <span className="tab-ico"><LineIcon name={menuOpen ? 'close' : ico} className="nav-ico" /></span>
+      <span className="tab-label">{label}</span>
+    </button>
+  );
+  // ตอนแผงเมนูกางอยู่ ไฮไลต์ที่ปุ่มเมนูช่องเดียว — สองช่องติดพร้อมกันอ่านไม่ออกว่าอันไหนคือสิ่งที่เปิดอยู่
+  const tabLink = (i) => (
+    <NavLink key={i.to} to={i.to} className={({ isActive }) => (isActive && !menuOpen ? 'active' : '')}>
+      {icon(i.icon)}
+      <span className="tab-label">{i.short ?? i.label}</span>
+    </NavLink>
+  );
+
   if (user.role !== 'admin') {
+    // อยู่หน้าที่ไม่มีบนแถบ (แชท/ตั้งค่า) — ไฮไลต์ปุ่ม "ตั้งค่า" แทน จะได้รู้ว่าหน้านี้มาจากปุ่มไหน
+    const elsewhere = !FIELD_TABS.some((i) => location.pathname.startsWith(i.to));
     return (
       <nav className="tabbar" aria-label="เมนูพนักงาน">
-        {FIELD_NAV.map((i) => (
-          <NavLink key={i.to} to={i.to}>
-            {icon(i.icon)}
-            <span className="tab-label">{i.short}</span>
-          </NavLink>
-        ))}
+        {FIELD_TABS.map(tabLink)}
+        {menuButton('ตั้งค่า', 'settings', elsewhere)}
       </nav>
     );
   }
@@ -177,23 +201,8 @@ function TabBar({ menuOpen, onMenu }) {
   const elsewhere = !tabs.some((i) => location.pathname.startsWith(i.to));
   return (
     <nav className="tabbar" aria-label="เมนูลัด">
-      {tabs.map((i) => (
-        // ตอนแผงเมนูกางอยู่ ไฮไลต์ที่ "เมนู" ช่องเดียว — สองช่องติดพร้อมกันอ่านไม่ออกว่าอันไหนคือสิ่งที่เปิดอยู่
-        <NavLink key={i.to} to={i.to} className={({ isActive }) => (isActive && !menuOpen ? 'active' : '')}>
-          {icon(i.icon)}
-          <span className="tab-label">{i.short ?? i.label}</span>
-        </NavLink>
-      ))}
-      <button
-        type="button"
-        className={menuOpen || elsewhere ? 'active' : ''}
-        aria-expanded={menuOpen}
-        aria-controls="main-nav"
-        onClick={onMenu}
-      >
-        <span className="tab-ico"><LineIcon name={menuOpen ? 'close' : 'menu'} className="nav-ico" /></span>
-        <span className="tab-label">เมนู</span>
-      </button>
+      {tabs.map(tabLink)}
+      {menuButton('เมนู', 'menu', elsewhere)}
     </nav>
   );
 }
@@ -292,7 +301,8 @@ function Sidebar({ menuOpen, setMenuOpen }) {
                 {idx === 0 && <span className="nav-section-label">{isAdmin ? 'การดำเนินงาน' : 'พื้นที่ทำงาน'}</span>}
                 {i.to === '/packages' && <span className="nav-section-label">ข้อมูลและบริการ</span>}
                 {!i.group ? (
-                  <NavLink to={i.to}><NavIcon name={i.icon} />{i.label}</NavLink>
+                  /* on-tabbar = พนักงานภาคสนาม เมนูนี้อยู่บนแถบล่างแล้ว — แผงเมนูบนมือถือซ่อนไว้ (จอกว้างยังเห็นครบ) */
+                  <NavLink to={i.to} className={!isAdmin && !FIELD_IN_SHEET.has(i.to) ? 'on-tabbar' : undefined}><NavIcon name={i.icon} />{i.label}</NavLink>
                 ) : (
                   <>
                     <button
@@ -387,7 +397,7 @@ function ForcePasswordChange() {
 /** เนื้อในของเลย์เอาต์ — อยู่หลัง RequireAuth แล้ว จึงมั่นใจว่า user ไม่เป็น null */
 function LayoutInner({ children, perm, positions }) {
   const { user } = useAuth();
-  // เมนูพับได้เฉพาะจอแคบ — กางจาก ☰ บนแถบบน (พนักงานภาคสนาม) หรือปุ่ม "เมนู" บนแถบล่าง (หลังบ้าน)
+  // เมนูพับได้เฉพาะจอแคบ — กางจากปุ่มบนแถบล่าง ("ตั้งค่า" ของพนักงาน / "เมนู" ของหลังบ้าน)
   const [menuOpen, setMenuOpen] = useState(false);
   // เลื่อนจนสุดหน้าแล้วเด้งกลับนิดหนึ่ง (มือถือ) — ต้องเรียกก่อน return ด้านล่างตามกติกาของ hook
   const bounceRef = useBottomBounce();
@@ -402,8 +412,9 @@ function LayoutInner({ children, perm, positions }) {
   if (user.must_change_password) return <ForcePasswordChange />;
 
   return (
-    /* has-tabbar = มีแถบล่าง (ทุกคนบนมือถือ — CSS เว้นที่ให้เฉพาะจอแคบ) · tabbar-admin = แผงเมนูเลื่อนขึ้นจากล่าง ไม่ใช่ห้อยจากแถบบน */
-    <div className={`app has-tabbar${user.role === 'admin' ? ' tabbar-admin' : ''}${menuOpen ? ' menu-open' : ''}`}>
+    /* has-tabbar = มีแถบล่าง (ทุกคนบนมือถือ — CSS เว้นที่ให้เฉพาะจอแคบ)
+       tabbar-sheet = แผงเมนูเลื่อนขึ้นจากเหนือแถบล่าง ไม่มี ☰ บนแถบบน (ทั้งหลังบ้านและพนักงาน ตั้งแต่ 9 พ.ย. 2569) */
+    <div className={`app has-tabbar tabbar-sheet${user.role === 'admin' ? '' : ' tabbar-field'}${menuOpen ? ' menu-open' : ''}`}>
       <Sidebar menuOpen={menuOpen} setMenuOpen={setMenuOpen} />
       <main className="content" ref={bounceRef}>
         {children}

@@ -70,23 +70,27 @@ export default function MyTodayPage() {
   }
 
   const dateLabel = new Date().toLocaleDateString('th-TH', { weekday: 'long', day: 'numeric', month: 'long' });
+  // แถวบนของการ์ด: วันที่ทางซ้าย · เวลาอัปเดต (+ ปุ่มรีเฟรชบนเครื่องที่ใช้เมาส์) ทางขวา
+  const todayTop = (
+    <div className="hero-top today-top">
+      <span className="today-date">
+        <span className="page-hero-icon" aria-hidden="true"><LineIcon name="calendar" /></span>
+        {dateLabel}
+      </span>
+      <RefreshButton onRefresh={load} busy={loading} updatedAt={loadedAt} />
+    </div>
+  );
 
   return (
     <PageRefresh onRefresh={load} busy={loading}>
-      <header className="page-head">
-        <div className="page-hero">
-          <span className="page-hero-icon" aria-hidden="true"><LineIcon name="calendar" /></span>
-          <div>
-            <p className="page-hero-kicker">{dateLabel}</p>
-            <h1 className="page-hero-title">งานวันนี้</h1>
-          </div>
-        </div>
-        <RefreshButton onRefresh={load} busy={loading} updatedAt={loadedAt} />
-      </header>
+      {/* ไม่มีหัวหน้าบนจอ — วันที่ + เวลาอัปเดตอยู่แถวบนของการ์ดสรุป (แบบเดียวกับหน้าภาพรวมหลังบ้าน)
+          คง h1 ไว้ให้โปรแกรมอ่านหน้าจอ */}
+      <h1 className="sr-only">งานวันนี้</h1>
 
       {/* สรุปกะวันนี้ — ช่องตัวเลขชุดเดียวกับหน้าภาพรวมของหลังบ้าน */}
       {visits && visits.length > 0 && (
         <section className="hero-card today-summary">
+          {todayTop}
           <div className="hero">
             <span className="hero-label">กะวันนี้</span>
             <span className="hero-value">{visits.length}</span>
@@ -116,6 +120,7 @@ export default function MyTodayPage() {
         !error && <p className="muted">กำลังโหลด…</p>
       ) : visits.length === 0 ? (
         <section className="card empty-state">
+          {todayTop}
           <p>วันนี้คุณไม่มีกะงาน</p>
           <p className="muted">
             เมื่อผู้จัดการนัดกะให้คุณ งานจะปรากฏที่นี่ — หน้านี้ดึงข้อมูลใหม่ให้เองทุกครั้งที่กลับเข้าแอป
