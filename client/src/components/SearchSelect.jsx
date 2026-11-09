@@ -75,8 +75,9 @@ const SearchSelect = forwardRef(function SearchSelect({ children, onMouseDown, o
     setQuery('');
   }, []);
 
-  function openList() {
-    if (rest.disabled || !ref.current) return;
+  /** วางรายการใต้ช่อง (หรือเหนือช่องถ้าข้างล่างไม่พอ) — เรียกซ้ำได้ตอนจอเลื่อนเพราะคีย์บอร์ดมือถือเด้งขึ้น */
+  const measure = useCallback(() => {
+    if (!ref.current) return;
     const rect = ref.current.getBoundingClientRect();
     const below = window.innerHeight - rect.bottom;
     const width = Math.max(rect.width, 240);
@@ -88,6 +89,11 @@ const SearchSelect = forwardRef(function SearchSelect({ children, onMouseDown, o
         ? { bottom: window.innerHeight - rect.top + 4, maxHeight: Math.min(320, rect.top - 12) }
         : { top: rect.bottom + 4, maxHeight: Math.min(320, below - 12) }),
     });
+  }, []);
+
+  function openList() {
+    if (rest.disabled || !ref.current) return;
+    measure();
     const at = options.findIndex((o) => o.value === ref.current.value);
     setActive(Math.max(0, at));
     setOpen(true);
@@ -106,8 +112,10 @@ const SearchSelect = forwardRef(function SearchSelect({ children, onMouseDown, o
     refocus(el);
   }
 
+  /* จอสัมผัสไม่โฟกัสช่องค้นหาให้เอง — คีย์บอร์ดจะเด้งขึ้นมาบังรายการทันทีทั้งที่ส่วนใหญ่แค่จะแตะเลือก
+     อยากค้นหาค่อยแตะช่องค้นหาเอง */
   useLayoutEffect(() => {
-    if (open) searchRef.current?.focus();
+    if (open && !isTouch()) searchRef.current?.focus();
   }, [open]);
 
   // เลื่อนรายการให้ตัวที่ชี้อยู่เห็นเสมอ
@@ -123,18 +131,24 @@ const SearchSelect = forwardRef(function SearchSelect({ children, onMouseDown, o
       if (popRef.current?.contains(e.target) || ref.current?.contains(e.target)) return;
       close();
     };
+    /* กำลังพิมพ์ในช่องค้นหาอยู่ = จอเลื่อน/หดเพราะคีย์บอร์ดมือถือ (iOS เลื่อนหน้าให้ช่องที่โฟกัสพ้นคีย์บอร์ดเอง)
+       ไม่ใช่ผู้ใช้เลื่อนหนี — ย้ายรายการตามช่องแทนการปิดทิ้ง ไม่งั้นแตะแล้วรายการเด้งปิดทันที */
+    const typing = () => popRef.current?.contains(document.activeElement);
     const onScroll = (e) => {
-      if (!popRef.current?.contains(e.target)) close();
+      if (popRef.current?.contains(e.target)) return;
+      if (typing()) measure();
+      else close();
     };
+    const onResize = () => (typing() ? measure() : close());
     document.addEventListener('mousedown', onDown, true);
     window.addEventListener('scroll', onScroll, true);
-    window.addEventListener('resize', close);
+    window.addEventListener('resize', onResize);
     return () => {
       document.removeEventListener('mousedown', onDown, true);
       window.removeEventListener('scroll', onScroll, true);
-      window.removeEventListener('resize', close);
+      window.removeEventListener('resize', onResize);
     };
-  }, [open, close]);
+  }, [open, close, measure]);
 
   function onSearchKey(e) {
     if (e.key === 'Escape') {
