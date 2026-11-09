@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../api.js';
 import { useCanSeeStaffPay } from '../auth.jsx';
 import { useToast } from '../toast.jsx';
@@ -151,6 +151,11 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
   // ค่าจ้างพนักงานเห็นเฉพาะผู้จัดการ เหมือนหน้าแพ็คเกจและหน้าเปิดเคส
   // (server ตัดฟิลด์ออกจาก payload ให้อยู่แล้ว ตรงนี้แค่ไม่วาดช่องเปล่าค้างไว้)
   const seePay = useCanSeeStaffPay();
+  /* ปุ่มย้อนกลับในหัวป๊อปอัป — กดลิงก์ข้ามเคสในป๊อปอัป (เช่น Homecare → แพ็กกายภาพเสริม)
+     ลิงก์ฝาก fromCase ไว้ใน history state → ถอยประวัติหนึ่งก้าวก็กลับเคสเดิม (ปุ่ม back ของเบราว์เซอร์ทำแบบเดียวกัน) */
+  const location = useLocation();
+  const navigate = useNavigate();
+  const fromCase = location.state?.fromCase && location.state.fromCase !== caseId ? location.state.fromCase : null;
   /* เดิมมีแต่ QuickEdit ที่เรียก useToast() ทั้งที่ตัว CaseModal เองก็เรียก toast() อยู่
      (ปุ่ม "อนุมัติทั้งหมด") — พังเงียบมาตลอดเพราะอยู่ใน onClick จึงโยนต่อเมื่อมีคนกดจริง */
   const toast = useToast();
@@ -507,30 +512,43 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                   <p className="case-rounds muted">
                     รอบที่ {item.round_no ?? 1}
                     {item.renewed_from && (
-                      <> · ต่อจาก <Link className="link mono" to={`/cases?open=${item.renewed_from}`}>{caseCode(item.renewed_from)} (รอบที่ {(item.round_no ?? 1) - 1})</Link></>
+                      <> · ต่อจาก <Link className="link mono" to={`/cases?open=${item.renewed_from}`} state={{ fromCase: item.case_id }}>{caseCode(item.renewed_from)} (รอบที่ {(item.round_no ?? 1) - 1})</Link></>
                     )}
                     {item.renewed_to && (
-                      <> · ต่อเป็น <Link className="link mono" to={`/cases?open=${item.renewed_to}`}>{caseCode(item.renewed_to)} (รอบที่ {(item.round_no ?? 1) + 1})</Link></>
+                      <> · ต่อเป็น <Link className="link mono" to={`/cases?open=${item.renewed_to}`} state={{ fromCase: item.case_id }}>{caseCode(item.renewed_to)} (รอบที่ {(item.round_no ?? 1) + 1})</Link></>
                     )}
                   </p>
                 )}
                 {/* แพ็กกายภาพเสริม — กลับไปเคส Homecare ที่ซื้อแพ็กนี้เพิ่ม (รหัส KN เดียวกัน จึงบอกสายบริการด้วย) */}
                 {item.addon_of && (
                   <p className="case-rounds muted">
-                    แพ็กกายภาพเสริมของ <Link className="link" to={`/cases?open=${item.addon_of}`}>เคส Homecare {caseCode(item.addon_of)}</Link>
+                    แพ็กกายภาพเสริมของ <Link className="link" to={`/cases?open=${item.addon_of}`} state={{ fromCase: item.case_id }}>เคส Homecare {caseCode(item.addon_of)}</Link>
                   </p>
                 )}
               </div>
 
-              <div className="modal-head-actions">
-                {/* ไล่ดูทีละเคสได้โดยไม่ต้องปิด-เปิดใหม่ (เฉพาะเคสที่อยู่ในหน้ารายการปัจจุบัน) */}
-                {siblings.length > 1 && (
-                  <span className="modal-nav">
-                    <button className="btn icon-btn" disabled={!prevId} onClick={() => onNavigate?.(prevId)} title="เคสก่อนหน้า" aria-label="เคสก่อนหน้า"><LineIcon name="chevron-left" /></button>
-                    <button className="btn icon-btn" disabled={!nextId} onClick={() => onNavigate?.(nextId)} title="เคสถัดไป" aria-label="เคสถัดไป"><LineIcon name="chevron-right" /></button>
-                  </span>
+              <div className="modal-head-side">
+                <div className="modal-head-actions">
+                  {/* ไล่ดูทีละเคสได้โดยไม่ต้องปิด-เปิดใหม่ (เฉพาะเคสที่อยู่ในหน้ารายการปัจจุบัน) */}
+                  {siblings.length > 1 && (
+                    <span className="modal-nav">
+                      <button className="btn icon-btn" disabled={!prevId} onClick={() => onNavigate?.(prevId)} title="เคสก่อนหน้า" aria-label="เคสก่อนหน้า"><LineIcon name="chevron-left" /></button>
+                      <button className="btn icon-btn" disabled={!nextId} onClick={() => onNavigate?.(nextId)} title="เคสถัดไป" aria-label="เคสถัดไป"><LineIcon name="chevron-right" /></button>
+                    </span>
+                  )}
+                  <button className="modal-close" onClick={requestClose} aria-label="ปิด">×</button>
+                </div>
+                {/* ปุ่มย้อนกลับ มุมขวาล่างของหัวป๊อปอัป: มาจากเคสอื่นในป๊อปอัป → ถอยกลับเคสนั้น
+                    เปิดแพ็กกายภาพเสริมตรง ๆ (ไม่มีประวัติให้ถอย) → ลิงก์ไปเคส Homecare */}
+                {fromCase ? (
+                  <button type="button" className="modal-crumb-back" onClick={() => navigate(-1)}>
+                    <LineIcon name="chevron-left" />{fromCase === item.addon_of ? 'เคส Homecare' : 'ย้อนกลับ'}
+                  </button>
+                ) : item.addon_of && (
+                  <Link className="modal-crumb-back" to={`/cases?open=${item.addon_of}`}>
+                    <LineIcon name="chevron-left" />เคส Homecare
+                  </Link>
                 )}
-                <button className="modal-close" onClick={requestClose} aria-label="ปิด">×</button>
               </div>
             </header>
 
@@ -706,7 +724,7 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                                 รวมเข้าเคสนี้
                               </button>
                             )}
-                            <Link className="btn tiny" to={`/cases?open=${a.case_id}`}>{a.bill_with_parent ? 'นัด/รายละเอียด' : 'เปิดเคส'}</Link>
+                            <Link className="btn tiny" to={`/cases?open=${a.case_id}`} state={{ fromCase: item.case_id }}>{a.bill_with_parent ? 'นัด/รายละเอียด' : 'เปิดเคส'}</Link>
                           </li>
                         );
                       })}
@@ -851,7 +869,7 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                 {/* แพ็กกายภาพเสริมที่ซื้อมาพร้อมเคส Homecare — เก็บเงินเป็นบรรทัดในใบของเคส Homecare ไม่มีใบของตัวเอง */}
                 {item.bill_with_parent && item.addon_of && (
                   <p className="muted">
-                    แพ็กนี้เก็บเงินรวมในใบแจ้งหนี้ของ <Link className="link" to={`/cases?open=${item.addon_of}`}>เคส Homecare {caseCode(item.addon_of)}</Link>
+                    แพ็กนี้เก็บเงินรวมในใบแจ้งหนี้ของ <Link className="link" to={`/cases?open=${item.addon_of}`} state={{ fromCase: item.case_id }}>เคส Homecare {caseCode(item.addon_of)}</Link>
                     {' '}(บรรทัด "กายภาพบำบัด") — มัดจำหักจากค่า Homecare · เปลี่ยนแพ็ก/ราคาที่เคสนี้ ใบร่างของ Homecare ตามให้เอง
                   </p>
                 )}

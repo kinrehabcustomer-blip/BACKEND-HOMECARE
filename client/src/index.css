@@ -6158,3 +6158,15 @@ h1, h2, h3, h4, .page-hero-title, .cal-title, .login-heading h1 {
   .payroll-toolbar > * { flex: 1 1 8rem; }
   .payroll-toolbar > .btn { flex-basis: 100%; justify-content: center; }
 }
+
+/* ปุ่มย้อนกลับบนหัวป๊อปอัปเคส (มาจากเคสอื่น / แพ็กกายภาพเสริม → เคส Homecare)
+   อยู่มุมขวาล่างของหัว ใต้ปุ่มเลื่อนเคส/ปิด — ลิงก์ตัวหนังสือสีทอง ไม่ใช่ปุ่มกรอบ จะได้ไม่แย่งสายตาจากชื่อเคส */
+.modal-head-side { display: flex; flex-direction: column; align-items: flex-end; justify-content: space-between; gap: 0.5rem; align-self: stretch; flex-shrink: 0; }
+.modal-crumb-back {
+  display: inline-flex; align-items: center; gap: 2px;
+  margin-right: -8px; padding: 2px 8px 2px 4px; border: 0; border-radius: 999px;
+  background: transparent; color: var(--brand); font: inherit; font-weight: 600;
+  text-decoration: none; cursor: pointer;
+}
+.modal-crumb-back:hover { background: var(--brand-soft); }
+.modal-crumb-back:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
