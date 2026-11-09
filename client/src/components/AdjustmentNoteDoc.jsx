@@ -1,5 +1,6 @@
 import { amountText, bahtText, docDate } from '../labels.js';
 import { DocHeader } from './CustomerInvoiceDoc.jsx';
+import { withTitle } from '../lib/customerInvoice.js';
 
 /**
  * ใบลดหนี้ (HC-CN…) / ใบเพิ่มหนี้ (HC-DN…) — ทางเดียวที่ปรับยอดของใบแจ้งหนี้ที่ออกแล้ว (server invoices/ledger.js)
@@ -95,7 +96,7 @@ export default function AdjustmentNoteDoc({ item, note, refund, signer }) {
         <div className="inv-sign">
           <span className="inv-sign-role">ผู้รับเอกสาร</span>
           <span className="inv-sign-dots">(...................................................)</span>
-          <span className="inv-sign-name">( คุณ {note.bill_to_name} )</span>
+          <span className="inv-sign-name">( {withTitle(note.bill_to_name)} )</span>
         </div>
         <div className="inv-sign">
           <span className="inv-sign-role">ผู้ออกเอกสาร</span>

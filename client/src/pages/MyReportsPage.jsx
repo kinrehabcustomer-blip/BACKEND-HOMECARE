@@ -57,26 +57,22 @@ export default function MyReportsPage() {
 
   return (
     <PageRefresh onRefresh={() => Promise.all([loadCases(), loadCase()])} busy={loading}>
-      <header className="page-head">
-        <div>
-          <h1>รายงานของฉัน</h1>
-          <p className="muted">รายงานอาการผู้รับบริการของเคสที่คุณรับผิดชอบ — ลงย้อนหลังและแก้ไขรายงานของคุณได้ที่นี่</p>
-        </div>
-      </header>
+      {/* ไม่มีหัวหน้าบนจอ — ช่องเลือกเคสเป็นหัวการ์ด รายงานของเคสอยู่ในการ์ดใบเดียวกัน · h1 คงไว้ให้โปรแกรมอ่านหน้าจอ */}
+      <h1 className="sr-only">รายงานของฉัน</h1>
 
       <ErrorBar message={error} onRetry={loadCases} busy={loading} />
 
       {!cases ? (
         !error && <p className="muted">กำลังโหลด…</p>
       ) : cases.length === 0 ? (
-        <section className="card empty-state">
+        <section className="card empty-state my-card">
           <p>ยังไม่มีเคสที่คุณรับผิดชอบ</p>
           <p className="muted">เมื่อผู้จัดการจับคู่เคสให้คุณ รายงานของเคสจะปรากฏที่นี่</p>
         </section>
       ) : (
-        <>
-          <label className="backfill-visit">
-            เลือกเคส
+        <section className="card my-card my-reports">
+          <label className="my-reports-pick">
+            <span>เลือกเคส</span>
             <SearchSelect value={caseId} onChange={(e) => setCaseId(e.target.value)}>
               {cases.map((c) => (
                 <option key={c.case_id} value={c.case_id}>
@@ -84,12 +80,13 @@ export default function MyReportsPage() {
                 </option>
               ))}
             </SearchSelect>
+            <small className="muted">ดูรายงานอาการของเคส · ลงย้อนหลังและแก้ไขรายงานของคุณได้ที่นี่</small>
           </label>
 
           {!item ? (
-            <p className="muted">กำลังโหลด…</p>
+            <p className="muted my-reports-loading">กำลังโหลด…</p>
           ) : (
-            <section className="card">
+            <div className="my-reports-body">
               <CaseReports
                 key={item.case_id}
                 caseId={item.case_id}
@@ -101,9 +98,9 @@ export default function MyReportsPage() {
                 backfillVisits={backfillVisits.length > 0 ? backfillVisits : null}
                 archiveTitle={item.client_name}
               />
-            </section>
+            </div>
           )}
-        </>
+        </section>
       )}
     </PageRefresh>
   );

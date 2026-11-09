@@ -92,17 +92,17 @@ export default function MyCaseModal({ caseId, onClose }) {
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" ref={sheetRef} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+      <div className="modal my-case-modal" ref={sheetRef} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
         {!item && !error && <p className="muted modal-loading">กำลังโหลด…</p>}
         {!item && error && <pre className="error modal-loading">{error}</pre>}
 
         {item && (
           <>
             <header className="modal-head">
+              {/* ชื่อผู้รับบริการขึ้นนำ — คือสิ่งที่พนักงานใช้จำเคส (บริการ/รหัสเป็นบรรทัดรอง) */}
               <div>
-                <p className="mono muted">{caseCode(item.case_id)}</p>
-                <h2>{serviceName(item)}</h2>
-                <p className="muted">{item.client_name}</p>
+                <h2>{item.client_name}</h2>
+                <p className="muted my-case-sub">{serviceName(item)} · <span className="mono">{caseCode(item.case_id)}</span></p>
                 <span className={`badge case-${caseStage(item).key}`}>{caseStage(item).label}</span>
               </div>
               <button className="modal-close" onClick={onClose} aria-label="ปิด">×</button>
@@ -112,8 +112,8 @@ export default function MyCaseModal({ caseId, onClose }) {
               <section>
                 <h3>ผู้รับการดูแล</h3>
                 <div className="field-grid">
-                  <Field label="ชื่อผู้รับบริการ" value={item.client_name} />
                   <Field label="เพศ / อายุ" value={genderAge} />
+                  <Field label="หมู่เลือด" value={item.patient_blood_type} />
                 </div>
                 {/* แพ้ยา/แพ้อาหาร/หมู่เลือด อ่านสดจากแฟ้มผู้รับบริการ — ไม่มีสำเนาในเคส
                     ถ้ารอให้เคสคัดลอกไว้ ข้อมูลที่พยาบาลเพิ่งอัปเดตจะไปไม่ถึงคนที่กำลังจะเข้าบ้าน */}
@@ -133,7 +133,6 @@ export default function MyCaseModal({ caseId, onClose }) {
                     {item.medical_history || 'ไม่ได้ระบุ'})
                   </p>
                 )}
-                <Field label="หมู่เลือด" value={item.patient_blood_type} />
                 <Field label="อาการปัจจุบัน" value={item.current_symptoms} />
                 {item.medical_devices && <Field label="อุปกรณ์ / สายต่างๆ" value={item.medical_devices} />}
                 <Field label="จุดประสงค์ในการดูแล" value={item.care_goal} />
@@ -143,7 +142,15 @@ export default function MyCaseModal({ caseId, onClose }) {
                 <h3>สถานที่ / ติดต่อ</h3>
                 <Field label="ที่อยู่สถานที่ดูแล" value={item.address} />
                 <CaseLocationLink key={`${item.geo_lat},${item.geo_lng}`} item={item} />
-                <Field label="เบอร์ติดต่อญาติ" value={formatPhone(item.client_phone)} />
+                {/* เบอร์ญาติแตะโทรได้เลย — พนักงานหน้าบ้านต้องโทรหาญาติบ่อย ไม่ควรต้องจำเบอร์ไปกดเอง */}
+                <Field
+                  label="เบอร์ติดต่อญาติ"
+                  value={item.client_phone && (
+                    <a className="link my-case-tel" href={`tel:${String(item.client_phone).replace(/[^\d+]/g, '')}`}>
+                      {formatPhone(item.client_phone)}
+                    </a>
+                  )}
+                />
               </section>
 
               <section>

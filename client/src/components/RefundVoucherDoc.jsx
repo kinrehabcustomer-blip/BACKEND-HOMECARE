@@ -1,5 +1,6 @@
 import { amountText, bahtText, docDate } from '../labels.js';
 import { DocHeader, channelOf } from './CustomerInvoiceDoc.jsx';
+import { withTitle } from '../lib/customerInvoice.js';
 
 /**
  * ใบสำคัญจ่าย (HC-PV…) — หลักฐานเงินที่คืนลูกค้า (แผนแก้ระบบการเงิน ชุด A ข้อ 7 · server invoices/ledger.js)
@@ -21,7 +22,7 @@ export default function RefundVoucherDoc({ item, refund, note, signer }) {
         <div>
           <p>รหัสผู้รับบริการ : <span className="mono">{item.patient_id ?? '—'}</span></p>
           <p>ชื่อผู้รับบริการ : {item.patient_name ?? '—'}</p>
-          <p>จ่ายให้ /Pay to : คุณ {payee}</p>
+          <p>จ่ายให้ /Pay to : {withTitle(payee)}</p>
         </div>
         <div className="inv-parties-right">
           <p>Voucher No: <strong className="mono">{refund.refund_doc_id ?? '—'}</strong></p>
@@ -82,7 +83,7 @@ export default function RefundVoucherDoc({ item, refund, note, signer }) {
         <div className="inv-sign">
           <span className="inv-sign-role">ผู้รับเงิน</span>
           <span className="inv-sign-dots">(...................................................)</span>
-          <span className="inv-sign-name">( คุณ {payee} )</span>
+          <span className="inv-sign-name">( {withTitle(payee)} )</span>
         </div>
         <div className="inv-sign">
           <span className="inv-sign-role">ผู้จ่ายเงิน</span>

@@ -1,5 +1,6 @@
 import { amountText, bahtText, docDate } from '../labels.js';
 import { DocHeader, channelOf } from './CustomerInvoiceDoc.jsx';
+import { withTitle } from '../lib/customerInvoice.js';
 
 /**
  * ใบเสร็จของการรับเงินหนึ่งครั้ง (HC-RC…) — รับเงิน 1 ครั้ง = ใบเสร็จ 1 ใบ (4 พ.ย. 2569 · server invoices/ledger.js)
@@ -73,7 +74,7 @@ export default function ReceiptDoc({ item, receipt, signer }) {
         <span>โอน/Transfer={pay.transfer}</span>
       </p>
 
-      <p className="inv-line">ได้รับเงินจาก (Received from) คุณ {receipt.bill_to_name}</p>
+      <p className="inv-line">ได้รับเงินจาก (Received from) {withTitle(receipt.bill_to_name)}</p>
       {voided && (
         <p className="inv-line">
           <strong>ใบเสร็จนี้ถูกยกเลิก</strong> — {receipt.void_reason}
@@ -85,7 +86,7 @@ export default function ReceiptDoc({ item, receipt, signer }) {
         <div className="inv-sign">
           <span className="inv-sign-role">ผู้ชำระเงิน</span>
           <span className="inv-sign-dots">(...................................................)</span>
-          <span className="inv-sign-name">( คุณ {receipt.bill_to_name} )</span>
+          <span className="inv-sign-name">( {withTitle(receipt.bill_to_name)} )</span>
         </div>
         <div className="inv-sign">
           <span className="inv-sign-role">ผู้รับเงิน</span>

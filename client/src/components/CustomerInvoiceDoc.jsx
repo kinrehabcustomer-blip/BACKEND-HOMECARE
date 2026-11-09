@@ -1,6 +1,6 @@
 import { amountText, bahtText, docDate } from '../labels.js';
 import { ISSUER, TRANSFER_PAYMENT_INSTRUCTION, printStamp } from '../lib/issuer.js';
-import { customerAddonDescription, customerItemDescription } from '../lib/customerInvoice.js';
+import { customerAddonDescription, customerItemDescription, withTitle } from '../lib/customerInvoice.js';
 
 /**
  * ตัวเอกสารใบแจ้งหนี้/ใบเสร็จรับเงินของลูกค้า — ใช้ร่วม 2 ที่ให้ตรงกันทุกตัวอักษร (24 ต.ค. 2569)
@@ -238,14 +238,14 @@ export default function CustomerInvoiceDoc({ item, signer }) {
       <span>โอน/Transfer={pay.transfer}</span>
     </p>
 
-    {isPaymentProof && <p className="inv-line">ได้รับเงินจาก (Received from) คุณ {item.bill_to_name}</p>}
+    {isPaymentProof && <p className="inv-line">ได้รับเงินจาก (Received from) {withTitle(item.bill_to_name)}</p>}
     <p className="inv-line">หมายเหตุ : {item.note ?? ''}</p>
 
     <div className="inv-signs">
       <div className="inv-sign">
         <span className="inv-sign-role">ผู้รับบริการ</span>
         <span className="inv-sign-dots">(...................................................)</span>
-        <span className="inv-sign-name">( คุณ {item.patient_name ?? item.bill_to_name} )</span>
+        <span className="inv-sign-name">( {withTitle(item.patient_name ?? item.bill_to_name)} )</span>
       </div>
       {/* ผู้ลงนาม = คนที่กำลังสั่งพิมพ์ (บัญชีที่ล็อกอินอยู่) เพราะเป็นคนยื่นเอกสารให้ลูกค้าจริง
           ส่วนคนที่ออกใบ/รับเงินยังถูกบันทึกไว้ใน DB (issued_by/paid_by) สำหรับทำรายงาน */}

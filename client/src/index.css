@@ -6203,3 +6203,61 @@ h1, h2, h3, h4, .page-hero-title, .cal-title, .login-heading h1 {
 .staff-note-main strong { font-size: 0.875rem; font-weight: 600; line-height: 1.35; }
 .staff-note-body { font-size: 0.8125rem; line-height: 1.45; color: var(--text); }
 .staff-note-time { font-size: 0.6875rem; color: var(--muted); }
+
+/* ---------- หน้าเคส / รายงานของพนักงาน: การ์ดมุมมนมีระยะขอบ (แบบหน้างานวันนี้) ไม่ชนขอบจอแบบหน้ารายการหลังบ้าน ---------- */
+:is(.content, .content > .pull-zone > .pull-content) > .card.my-card {
+  margin-inline: 0; border: 1px solid var(--border); border-radius: var(--radius-card);
+}
+.my-list-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.25rem 0.5rem; margin: 0 0 0.75rem; font-size: 0.875rem; }
+.my-list-head strong { font-size: 1rem; color: var(--heading, var(--text)); }
+.my-case-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.75rem; grid-template-columns: repeat(auto-fill, minmax(18rem, 1fr)); }
+.my-case-card {
+  display: flex; flex-direction: column; gap: 0.375rem; width: 100%;
+  padding: 1rem 1.125rem; border: 1px solid var(--border); border-radius: var(--radius-card);
+  background: var(--surface); color: inherit; font: inherit; text-align: left; cursor: pointer;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+.my-case-card:hover { border-color: var(--brand); }
+.my-case-card:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.my-case-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem; }
+.my-case-name { min-width: 0; font-size: 1.0625rem; font-weight: 600; line-height: 1.35; color: var(--heading, var(--text)); overflow-wrap: anywhere; }
+.my-case-top .badge { flex-shrink: 0; margin: 0; }
+.my-case-meta { font-size: 0.875rem; color: var(--muted); line-height: 1.45; }
+.my-case-foot {
+  display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;
+  margin-top: 0.25rem; padding-top: 0.625rem; border-top: 1px solid var(--divider, var(--border));
+  font-size: 0.8125rem; color: var(--brand); font-weight: 600;
+}
+.my-case-chev { width: 1rem; height: 1rem; color: var(--muted); }
+
+.my-reports { padding: 0; overflow: hidden; }
+.my-reports-pick { display: grid; gap: 0.375rem; padding: 1rem 1.125rem; border-bottom: 1px solid var(--border); font-size: 0.875rem; font-weight: 600; }
+.my-reports-pick select { width: 100%; font-weight: 400; font-size: 1rem; }
+.my-reports-pick small { font-weight: 400; font-size: 0.75rem; }
+.my-reports-body { padding: 1rem 1.125rem; }
+.my-reports-loading { margin: 0; padding: 1rem 1.125rem; }
+
+/* ---------- popup รายละเอียดเคสของพนักงาน (MyCaseModal) — การ์ดขาวทีละหัวข้อบนพื้นเทาอุ่น แบบ popup เคสหลังบ้าน
+   แต่ใช้กับจอมือถือด้วย (หลังบ้านเปิดบนคอมเป็นหลัก ตัวนั้นจึงจัดเฉพาะจอกว้าง) ---------- */
+.my-case-modal .modal-head h2 { margin: 0 0 0.25rem; font-size: 1.375rem; overflow-wrap: anywhere; }
+.my-case-modal .my-case-sub { margin: 0 0 0.5rem; font-size: 0.875rem; color: var(--text); }
+.my-case-modal .my-case-sub .mono { color: var(--muted); font-size: 0.8125rem; }
+.my-case-modal .modal-body { background: var(--surface-2); }
+.my-case-modal .modal-body > section {
+  margin: 0 0 0.75rem; padding: 1rem 1.125rem;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-card);
+}
+.my-case-modal .modal-body > section:last-child { margin-bottom: 0; }
+.my-case-modal .modal-body > section > h3 {
+  margin: 0 0 0.75rem; font-family: var(--font-heading); font-size: 0.9375rem; font-weight: 600;
+  letter-spacing: 0; text-transform: none; color: var(--heading);
+}
+.my-case-modal .field-grid { grid-template-columns: 1fr 1fr; gap: 0.75rem 1rem; }
+.my-case-modal .field { padding: 0; gap: 0.125rem; }
+.my-case-modal :not(.field-grid) > :is(.field, .field-grid) + .field,
+.my-case-modal :not(.field-grid) > .field + .field-grid { margin-top: 0.75rem; }
+.my-case-modal .field-label { font-size: 0.75rem; }
+.my-case-modal .field-value { font-size: 0.9375rem; color: var(--heading); }
+.my-case-modal .field-value.is-empty { font-style: normal; font-size: 0.8125rem; color: #b3ab9d; }
+:root[data-theme="dark"] .my-case-modal .field-value.is-empty { color: var(--text-faint); }
+.my-case-tel { font-size: 1rem; }
