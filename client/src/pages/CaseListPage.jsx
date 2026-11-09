@@ -5,7 +5,7 @@ import CaseModal from '../components/CaseModal.jsx';
 import SortHead from '../components/SortHead.jsx';
 import ErrorBar from '../components/ErrorBar.jsx';
 import PageRefresh from '../components/PageRefresh.jsx';
-import { SERVICE_KIND_LABELS, MONTH_LABELS, formatBaht, formatDate, toBuddhistYear, caseStage, CASE_STATUS_FILTER_LABELS } from '../labels.js';
+import { SERVICE_KIND_LABELS, MONTH_LABELS, formatBaht, formatDate, toBuddhistYear, caseStage, CASE_STATUS_FILTER_LABELS, bundledPhysioText, totalFee } from '../labels.js';
 import { formatPhone } from '../lib/phone.js';
 import { caseCode } from '../lib/patientCode.js';
 import SearchSelect from '../components/SearchSelect.jsx';
@@ -306,12 +306,14 @@ export default function CaseListPage() {
                     ) : (
                       <span className="muted">ไม่ระบุบริการ</span>
                     )}
+                    {/* แพ็กกายภาพที่รวมอยู่ในเคสนี้ — ไม่มีแถวของตัวเอง จึงต้องบอกตรงนี้ */}
+                    {bundledPhysioText(c) && <span className="muted"> + {bundledPhysioText(c)}</span>}
                     {/* บรรทัดรองคือผู้รับบริการ (ผู้รับการดูแล) ไม่ใช่ผู้ว่าจ้าง — พนักงานจับคู่/ตามงานด้วยชื่อคนที่ไปดูแล */}
                     <span className="cell-sub">{c.client_name}</span>
                   </td>
                   <td data-label="เริ่ม / ค่าจ้าง">
                     {c.start_date ? formatDate(c.start_date) : <span className="muted">ยังไม่ระบุ</span>}
-                    {c.fee != null && <span className="cell-sub">{formatBaht(c.fee)}</span>}
+                    {totalFee(c) != null && <span className="cell-sub">{formatBaht(totalFee(c))}</span>}
                   </td>
                   <td data-label="เบอร์โทร">
                     {c.client_phone ? (

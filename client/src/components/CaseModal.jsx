@@ -12,7 +12,7 @@ import CaseLocationLink from './CaseLocationLink.jsx';
 import CaseReportDoc from './CaseReportDoc.jsx';
 import ReportArchiveModal from './ReportArchiveModal.jsx';
 import InvoiceModal from './InvoiceModal.jsx';
-import { POSITION_LABELS, GENDER_LABELS, SERVICE_KIND_LABELS, INVOICE_STATUS_LABELS, CASE_EVENT_LABELS, formatBaht, formatDate, stampText, positionsForCase, todayTH, caseStage } from '../labels.js';
+import { POSITION_LABELS, GENDER_LABELS, SERVICE_KIND_LABELS, INVOICE_STATUS_LABELS, CASE_EVENT_LABELS, formatBaht, formatDate, stampText, positionsForCase, todayTH, caseStage, serviceKindOf, bundledPhysioText, totalFee } from '../labels.js';
 import LineIcon from './LineIcon.jsx';
 import StaffPicker from './StaffPicker.jsx';
 import { formatPhone, formatPhoneInput } from '../lib/phone.js';
@@ -196,6 +196,19 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
   const [extras, setExtras] = useState(null);    // ค่าใช้จ่ายเพิ่มเติมที่ยังไม่ได้ออกใบ { items, total }
   const [events, setEvents] = useState([]);      // ประวัติการทำรายการ (audit log) — ใหม่สุดอยู่บน
   const [eventsOpen, setEventsOpen] = useState(false);
+  /* แพ็กกายภาพเสริมที่ซื้อเพิ่มในเคส Homecare นี้ — แต่ละแพ็กเป็นเคสกายภาพแยก (cases.addon_of)
+     โหลดแยกจากชุดหลัก: โหลดไม่สำเร็จ = แค่ไม่เห็นรายการ (null) ไม่ทำให้ทั้งป๊อปอัปล้ม */
+  const [physioAddons, setPhysioAddons] = useState([]);
+  useEffect(() => {
+    let cancelled = false;
+    setPhysioAddons([]);
+    api.physioAddons(caseId)
+      .then((rows) => !cancelled && setPhysioAddons(rows))
+      .catch(() => !cancelled && setPhysioAddons(null));
+    return () => {
+      cancelled = true;
+    };
+  }, [caseId]);
 
   // ดึงเคส รายชื่อพนักงาน และวันนัดพร้อมกัน — จำนวนเคสที่แต่ละคนถืออยู่เปลี่ยนทุกครั้งที่จับคู่/ยกเลิก
   const load = () =>
@@ -479,6 +492,8 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                 <p className="mono muted">{caseCode(item.case_id)}</p>
                 <h2>
                   {serviceName(item) ?? <span className="muted">ไม่ระบุบริการ</span>}
+                  {/* แพ็กกายภาพที่รวมอยู่ในเคสนี้ (ซื้อมาพร้อมกัน) — เคสเดียว ยึด Homecare เป็นหลัก */}
+                  {bundledPhysioText(item) && <span className="muted"> + {bundledPhysioText(item)}</span>}
                 </h2>
                 <p className="muted">{item.customer_name ?? item.client_name}</p>
                 <span className={`badge case-${caseStage(item).key}`}>{caseStage(item).label}</span>
@@ -497,6 +512,12 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                     {item.renewed_to && (
                       <> · ต่อเป็น <Link className="link mono" to={`/cases?open=${item.renewed_to}`}>{caseCode(item.renewed_to)} (รอบที่ {(item.round_no ?? 1) + 1})</Link></>
                     )}
+                  </p>
+                )}
+                {/* แพ็กกายภาพเสริม — กลับไปเคส Homecare ที่ซื้อแพ็กนี้เพิ่ม (รหัส KN เดียวกัน จึงบอกสายบริการด้วย) */}
+                {item.addon_of && (
+                  <p className="case-rounds muted">
+                    แพ็กกายภาพเสริมของ <Link className="link" to={`/cases?open=${item.addon_of}`}>เคส Homecare {caseCode(item.addon_of)}</Link>
                   </p>
                 )}
               </div>
@@ -598,7 +619,14 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                       value={[item.format_name, item.grade_name, item.pkg_staff_tier].filter(Boolean).join(' · ')}
                     />
                   )}
-                  <Field label="ค่าบริการที่ได้รับ" value={item.fee != null && formatBaht(item.fee)} />
+                  {item.bundled_physio?.length > 0 ? (
+                    <Field
+                      label="ค่าบริการที่ได้รับ (รวมแพ็กกายภาพ)"
+                      value={`${formatBaht(totalFee(item))} — Homecare ${formatBaht(item.fee ?? 0)} + กายภาพ ${formatBaht(totalFee(item) - Number(item.fee ?? 0))}`}
+                    />
+                  ) : (
+                    <Field label="ค่าบริการที่ได้รับ" value={item.fee != null && formatBaht(item.fee)} />
+                  )}
                   {item.addons?.some((x) => !isProcedure(x)) && (
                     <Field
                       label="อุปกรณ์เสริม (คิดเพิ่มในใบแจ้งหนี้)"
@@ -632,6 +660,72 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                 {item.status === 'cancelled' && <Field label="เหตุผลที่ยกเลิก" value={item.cancel_reason} />}
                 <Field label="หมายเหตุ" value={item.note} />
               </section>
+
+              {/* แพ็กกายภาพเสริม (เฉพาะเคส Homecare) — ลูกค้าซื้อคอร์สกายภาพเพิ่มระหว่างใช้ Homecare
+                  เปิดเป็นเคสกายภาพแยกที่ผูกกลับมาที่นี่ ไม่ยัดลงเคสนี้ เพราะเคสหนึ่งใบมีได้บริการเดียว:
+                  ค่าบริการ ใบแจ้งหนี้ ค่าจ้าง โควตาจำนวนครั้ง และเลข VN รายนัดของกายภาพคิดต่อเคส
+                  เคสปิด/ยกเลิกแล้ว = เพิ่มไม่ได้ (server ก็กัน) แต่ยังโชว์แพ็กที่เคยซื้อไว้ */}
+              {serviceKindOf(item) === 'homecare' && (!terminal || physioAddons?.length > 0) && (
+                <section>
+                  <h3>แพ็กกายภาพเสริม</h3>
+                  {physioAddons?.length > 0 && (
+                    <ul className="addon-cases">
+                      {physioAddons.map((a) => {
+                        const stage = caseStage(a);
+                        return (
+                          <li key={a.case_id}>
+                            <div>
+                              <strong>{a.physio_package_name ?? 'แพ็คเกจกายภาพบำบัด'}</strong>
+                              <span className="cell-sub">
+                                นัดแล้ว {a.booked}{a.physio_sessions ? ` / ${a.physio_sessions}` : ''} ครั้ง
+                                {' · '}มาแล้ว {a.attended} ครั้ง
+                                {a.start_date && ` · เริ่ม ${formatDate(a.start_date)}`}
+                                {a.bill_with_parent ? ' · เก็บเงินรวมในใบแจ้งหนี้ของเคสนี้' : ' · ใบแจ้งหนี้แยก'}
+                              </span>
+                            </div>
+                            <span className={`badge case-${stage.key}`}>{stage.label}</span>
+                            {/* แพ็กที่เปิดแยกไว้ → รวมเป็นส่วนหนึ่งของเคสนี้ (ไม่ขึ้นเป็นเคสแยก · เก็บเงินในใบของเคสนี้)
+                                server ตรวจว่ารวมได้จริง (ใบของแพ็กยังเป็นร่าง · ใบของเคสนี้ยังรับบรรทัดเพิ่มได้) */}
+                            {!a.bill_with_parent && !terminal && a.status !== 'cancelled' && a.status !== 'closed' && (
+                              <button
+                                className="btn tiny"
+                                disabled={busy}
+                                onClick={() => {
+                                  if (!confirm(`รวม "${a.physio_package_name ?? 'แพ็กกายภาพ'}" เข้าเป็นส่วนหนึ่งของเคสนี้?
+
+• ไม่ขึ้นเป็นเคสแยกในรายการเคสอีก
+• เก็บเงินเป็นบรรทัดในใบแจ้งหนี้ของเคสนี้ (มัดจำหักจากค่า Homecare)
+• ใบร่างของแพ็กจะถูกลบ`)) return;
+                                  run(async () => {
+                                    await api.bundleIntoParent(a.case_id);
+                                    setPhysioAddons(await api.physioAddons(caseId));
+                                    toast('รวมแพ็กกายภาพเข้าเคสนี้แล้ว — ใบแจ้งหนี้ของเคสนี้มีบรรทัดแพ็กให้แล้ว');
+                                  });
+                                }}
+                              >
+                                รวมเข้าเคสนี้
+                              </button>
+                            )}
+                            <Link className="btn tiny" to={`/cases?open=${a.case_id}`}>{a.bill_with_parent ? 'นัด/รายละเอียด' : 'เปิดเคส'}</Link>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                  <div className="visit-summary">
+                    <p className="muted">
+                      {physioAddons === null
+                        ? 'โหลดรายการแพ็กกายภาพเสริมไม่สำเร็จ — ปิดแล้วเปิดเคสนี้ใหม่'
+                        : physioAddons.length === 0
+                        ? 'ยังไม่มี — ลูกค้าซื้อคอร์สกายภาพเพิ่ม ระบบเปิดเป็นเคสกายภาพแยกให้ (ใบแจ้งหนี้ นัด และค่าจ้างแยกจาก Homecare)'
+                        : 'นัดและค่าจ้างของแต่ละแพ็ก จัดการในเคสกายภาพของแพ็กนั้น · แพ็กที่ซื้อมาพร้อมเคสนี้เก็บเงินรวมในใบแจ้งหนี้ด้านล่าง'}
+                    </p>
+                    {!terminal && (
+                      <Link className="btn" to={`/cases/new?addon_of=${item.case_id}`}>+ เพิ่มแพ็กกายภาพ</Link>
+                    )}
+                  </div>
+                </section>
+              )}
 
               {/* Homecare = ตารางกะ (วัน+เวลา+คน) · กายภาพ = ตารางนัดเข้าคอร์ส (นับ X/N ครั้ง) */}
               <section>
@@ -754,7 +848,14 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                 {/* ไม่มีใบเหลืออยู่ (ใบถูกลบ หรือยกเลิกหมดแล้ว / เคสเก่าก่อนมีระบบออกอัตโนมัติ) — ออกใบได้ตรงนี้
                     ปุ่มโผล่เฉพาะตอนไม่มีใบที่ใช้งานอยู่เลย จึงกดพลาดจนได้ใบซ้ำไม่ได้
                     และ server ยังปฏิเสธใบร่างซ้ำให้อีกชั้น (ตอบรหัสใบเดิมกลับมา — เปิดใบนั้นให้แทน) */}
-                {!invoices.some((v) => v.status !== 'cancelled') && item.status !== 'cancelled' && (
+                {/* แพ็กกายภาพเสริมที่ซื้อมาพร้อมเคส Homecare — เก็บเงินเป็นบรรทัดในใบของเคส Homecare ไม่มีใบของตัวเอง */}
+                {item.bill_with_parent && item.addon_of && (
+                  <p className="muted">
+                    แพ็กนี้เก็บเงินรวมในใบแจ้งหนี้ของ <Link className="link" to={`/cases?open=${item.addon_of}`}>เคส Homecare {caseCode(item.addon_of)}</Link>
+                    {' '}(บรรทัด "กายภาพบำบัด") — มัดจำหักจากค่า Homecare · เปลี่ยนแพ็ก/ราคาที่เคสนี้ ใบร่างของ Homecare ตามให้เอง
+                  </p>
+                )}
+                {!item.bill_with_parent && !invoices.some((v) => v.status !== 'cancelled') && item.status !== 'cancelled' && (
                   <div className="history-item">
                     <p className="muted">
                       {invoices.length === 0

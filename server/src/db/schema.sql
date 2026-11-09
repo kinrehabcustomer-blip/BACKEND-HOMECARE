@@ -1927,3 +1927,22 @@ CREATE TABLE IF NOT EXISTS role_permissions (
 ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS request_id UUID;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_case_reports_request
   ON case_reports (request_id) WHERE request_id IS NOT NULL;
+
+-- ============================================================================
+-- แพ็กกายภาพเสริมในเคส Homecare (9 พ.ย. 2569)
+--
+-- ลูกค้า Homecare ซื้อแพ็กกายภาพเพิ่ม = เปิดเป็นเคสกายภาพอีกใบของผู้รับบริการคนเดียวกัน แล้วผูกกลับมาที่เคส Homecare
+-- ไม่ยัดแพ็กลงเคสเดิม เพราะเคสหนึ่งใบถือได้บริการเดียว: ค่าบริการ/ราคา snapshot/ค่าจ้าง/ใบแจ้งหนี้ (service_key)
+-- โควตาจำนวนครั้ง (นับกะทั้งเคส) เลข VN (กายภาพ 1 VN/นัด · Homecare 1 VN/เคส) และแบบบันทึกของพนักงาน ล้วนคิดต่อเคส
+-- ไม่ใช้ renewed_from เพราะนั่นแปลว่า "ต่อเคสแล้ว" — เคส Homecare จะหลุดจากรายการใกล้ครบกำหนด/ปุ่มต่อเคสหายไป
+--
+-- addon_of = เคส Homecare ที่แพ็กนี้ซื้อเพิ่ม (ลบเคสแม่แล้วแพ็กยังอยู่ แค่หลุดจากการผูก)
+-- ============================================================================
+ALTER TABLE cases ADD COLUMN IF NOT EXISTS addon_of TEXT
+  REFERENCES cases (case_id) ON DELETE SET NULL ON UPDATE CASCADE;
+CREATE INDEX IF NOT EXISTS idx_cases_addon_of ON cases (addon_of) WHERE addon_of IS NOT NULL;
+
+-- แพ็กเสริมที่ซื้อมาพร้อมเคส Homecare ตั้งแต่แรก: เก็บเงินรวมในใบแจ้งหนี้ของเคส Homecare (ดร.ธงชัย 9 พ.ย. 2569)
+-- เคสกายภาพไม่มีใบของตัวเอง — ใบ Homecare ได้บรรทัด "กายภาพบำบัด" (addons kind 'physio' · ดู lib/addons.js)
+-- มัดจำหักจากค่า Homecare: บรรทัดนี้ย้ายไปใบส่วนที่เหลือเต็มจำนวนเหมือนอุปกรณ์เสริม
+ALTER TABLE cases ADD COLUMN IF NOT EXISTS bill_with_parent BOOLEAN NOT NULL DEFAULT FALSE;

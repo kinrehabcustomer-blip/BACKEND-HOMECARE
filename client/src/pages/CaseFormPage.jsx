@@ -60,6 +60,14 @@ const BLANK = {
    โหลดเคสมาแก้แล้วแปลงกลับเป็นช่องว่าง ให้กรอกชื่อจริงทับได้เลย ไม่ต้องลบคำนี้ออกเอง */
 const PATIENT_PENDING = 'ยังไม่ระบุผู้รับบริการ';
 
+/* ช่องที่แพ็กกายภาพเสริม (?addon_of=) คัดลอกจากเคส Homecare — ตัวตน ผู้ว่าจ้าง ที่อยู่ พิกัด และอาการ
+   เป้าหมายการดูแล (care_goal) ไม่คัดลอก: เป้าหมายของคอร์สกายภาพคนละเรื่องกับการดูแลประจำวัน */
+const ADDON_COPY = [
+  'customer_id', 'patient_id', 'client_name', 'patient_gender', 'patient_age', 'medical_history',
+  'current_symptoms', 'medical_devices',
+  'address', 'client_phone', 'nurse_call_preference', 'geo_lat', 'geo_lng', 'geofence_radius_m',
+];
+
 const BLANK_ADDON = { name: '', kind: 'rent', quantity: '1', unit_price: '' };
 const BLANK_PROCEDURE = { name: '', unit_price: '', vn: null };
 
@@ -561,6 +569,48 @@ export default function CaseFormPage() {
       .catch((err) => setError(err.message));
   }, [renewFrom]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  /* ---------- แพ็กกายภาพเสริมของเคส Homecare (?addon_of=KN…) ----------
+     เปิดเป็นเคสกายภาพแยกของผู้รับบริการคนเดิม (server ผูก addon_of และตรวจว่าเป็นคนเดียวกัน)
+     คัดลอกเฉพาะตัวตน/ผู้ว่าจ้าง/ที่อยู่/พิกัด — ไม่เอาบริการ ราคา วันที่ อุปกรณ์ หรือพนักงานของ Homecare
+     (คนดูแล Homecare ไม่ใช่นักกายภาพ · ราคา/วันที่เป็นของแพ็กใหม่ทั้งหมด) · สายบริการล็อกเป็นกายภาพ */
+  const addonOf = !isEdit && !renewFrom ? searchParams.get('addon_of') : null;
+  const [addonParent, setAddonParent] = useState(null);
+  useEffect(() => {
+    if (!addonOf) return;
+    api
+      .getCase(addonOf)
+      .then((c) => {
+        const filled = { ...BLANK };
+        for (const key of ADDON_COPY) filled[key] = c[key] ?? '';
+        if (filled.client_name === PATIENT_PENDING) filled.client_name = '';
+        filled.service_kind = 'physio';
+        setForm(filled);
+        initial.current = JSON.stringify(filled);
+        setAddonParent(c);
+        if (c.customer_id) setPayer({ customer_id: c.customer_id, name: c.customer_name });
+        if (c.patient_id) {
+          api.getPatient(c.patient_id).then((p) => { setPickedPatient(p); loadRelation(p); }).catch(() => {});
+        }
+      })
+      .catch((err) => setError(err.message));
+  }, [addonOf]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* แพ็กกายภาพเสริมที่ซื้อมาพร้อมเคส Homecare ใหม่ (ไม่บังคับ) — บันทึกแล้วเปิดเป็นเคสกายภาพแยกที่ผูก addon_of
+     ให้ทันทีหลังเคส Homecare เกิด (เส้นเดียวกับปุ่ม "+ เพิ่มแพ็กกายภาพ" ในป๊อปอัปเคส · server ตรวจซ้ำทุกข้อ)
+     เก็บแยกจาก form: ไม่ใช่ช่องของเคส Homecare และต้องไม่ถูกส่งไปกับเคสนั้น */
+  /* bill_with_parent = ออกใบแจ้งหนี้ใบเดียวกับ Homecare (แพ็กเป็นบรรทัดหนึ่งในใบ · มัดจำหักจากค่า Homecare)
+     ค่าเริ่มต้น = รวมใบ (ดร.ธงชัย 9 พ.ย. 2569) · ติ๊กออก = แพ็กมีใบแจ้งหนี้ของตัวเอง */
+  const ADDON_BLANK = { physio_package_id: '', fee: '', start_date: '', bill_with_parent: true };
+  const [physioAddon, setPhysioAddon] = useState(ADDON_BLANK);
+  const canAddPhysio = !isEdit && !addonOf && isHomecare;
+  const addonPkg = physio.find((p) => p.physio_package_id === Number(physioAddon.physio_package_id)) ?? null;
+  const wantPhysioAddon = canAddPhysio && Boolean(addonPkg);
+  function pickAddonPkg(value) {
+    const p = physio.find((x) => x.physio_package_id === Number(value));
+    // ราคาพิเศษของแพ็กเติมให้ แก้ทับได้ · เลิกเลือก = ล้างทั้งชุด
+    setPhysioAddon((prev) => (value ? { ...prev, physio_package_id: value, fee: p?.special_price != null ? String(p.special_price) : '' } : ADDON_BLANK));
+  }
+
   /* ต่อเคสแพ็คเกจ Homecare — วันสิ้นสุดรอบใหม่ตามจำนวนวันของรูปแบบบริการ (กติกาเดียวกับตอนกรอกวันเริ่ม)
      ไม่ใช่ความยาวของรอบก่อน ซึ่งอาจถูกแก้สั้น/ยาวเป็นกรณีพิเศษ · ตารางเรทโหลดคนละจังหวะกับเคส
      จึงรอให้มีทั้งคู่แล้วปรับครั้งเดียว (ผู้ใช้แก้ทับได้ตามปกติหลังจากนั้น) */
@@ -685,7 +735,8 @@ export default function CaseFormPage() {
       .catch(() => setCaseInvoices([]));
   }, [id, isEdit]);
 
-  const isDirty = () => JSON.stringify(form) !== initial.current || relation.trim() !== relationSaved.current;
+  const isDirty = () => JSON.stringify(form) !== initial.current || relation.trim() !== relationSaved.current
+    || Boolean(physioAddon.physio_package_id);
 
   /*
    * ปิดแท็บ/กดรีเฟรชทั้งที่ยังกรอกค้าง — ให้เบราว์เซอร์ถามก่อน
@@ -1088,6 +1139,7 @@ export default function CaseFormPage() {
         navigate(`/cases?open=${updated.case_id}`); // เปลี่ยนรหัสแล้วเคสเดิมไม่มีอยู่ที่รหัสเก่า
       } else {
         if (renewFrom) payload.renewed_from = renewFrom;
+        if (addonOf) payload.addon_of = addonOf;
         /* ต่อเคส: ทีมที่เลือกไว้ส่งไปกับการเปิดเคสเลย — ไม่ส่ง server จะพาทีมรอบก่อนมาทั้งหมด
            รวมคนที่ผู้ใช้เพิ่งกดนำออก (ส่ง [] = ไม่เอาใครมาเลย ซึ่งต่างจากไม่ส่ง) */
         if (renewTeamReady) payload.team = team.filter((x) => x !== payload.assigned_to);
@@ -1107,6 +1159,36 @@ export default function CaseFormPage() {
         let teamNote = teamFailed.length
           ? ` · เพิ่ม ${teamFailed.join(', ')} เข้าทีมไม่สำเร็จ — เพิ่มอีกครั้งได้ที่ป๊อปอัปเคส`
           : '';
+
+        /* แพ็กกายภาพเสริม — เคสกายภาพแยกของผู้รับบริการ/ผู้ว่าจ้างคนเดียวกับเคส Homecare ที่เพิ่งเกิด
+           ใช้ patient_id/customer_id จากเคสที่สร้างแล้ว (แฟ้มใหม่เพิ่งได้รหัสตอนเปิดเคส) · ค่าจ้างไม่ส่ง = ใช้ของแพ็กเกจ
+           ล้มไม่ล้มการเปิดเคส Homecare (เคสเกิดแล้ว) — บอกให้กดเพิ่มเองในป๊อปอัปเคส */
+        if (wantPhysioAddon) {
+          try {
+            const copied = Object.fromEntries(ADDON_COPY.map((k) => [k, payload[k] ?? null]));
+            const addon = await api.createCase({
+              ...copied,
+              patient_id: created.patient_id,
+              customer_id: created.customer_id,
+              service_kind: 'physio',
+              physio_package_id: addonPkg.physio_package_id,
+              fee: physioAddon.fee === '' ? null : Number(physioAddon.fee),
+              start_date: physioAddon.start_date || null,
+              title: [addonPkg.name, who].filter(Boolean).join(' · '),
+              addon_of: created.case_id,
+              bill_with_parent: physioAddon.bill_with_parent,
+            });
+            // ขอรวมใบแต่ใบ Homecare รับบรรทัดเพิ่มไม่ได้ = server ออกใบแยกให้แทน — บอกตามที่เกิดจริง
+            const billing = addon.billed_with_parent
+              ? 'เก็บเงินรวมในใบแจ้งหนี้ของ Homecare'
+              : physioAddon.bill_with_parent
+              ? 'รวมใบไม่ได้ ระบบออกใบแจ้งหนี้แยกให้แทน'
+              : 'ใบแจ้งหนี้แยก';
+            teamNote += ` · เพิ่มแพ็กกายภาพ ${addonPkg.name} แล้ว (${billing}) — ลงนัดได้จากหัวข้อ "แพ็กกายภาพเสริม"`;
+          } catch (err) {
+            teamNote += ` · เพิ่มแพ็กกายภาพไม่สำเร็จ (${err.message}) — กด "+ เพิ่มแพ็กกายภาพ" ในป๊อปอัปเคสอีกครั้ง`;
+          }
+        }
 
         /* ต่อเคส: ลงกะตามแบบรอบก่อนที่ติ๊กไว้ — ทีละแบบผ่านเส้นลงกะหลายวันตัวเดิม (ข้ามกะซ้ำ/เตือนชนให้เอง)
            ลงไม่สำเร็จไม่ล้มการต่อเคส เคสเกิดแล้ว แค่บอกว่าแบบไหนต้องไปลงเองที่หน้าเคส */
@@ -1137,6 +1219,8 @@ export default function CaseFormPage() {
         toast(
           (created.invoice_draft_created === false
             ? `เปิดเคส ${caseCode(created.case_id)} แล้ว แต่ใบร่างยังไม่เกิด กรุณาไปหน้าใบแจ้งหนี้แล้วกด "สร้างใบร่าง" ค่ะ`
+            : addonOf
+            ? `เพิ่มแพ็กกายภาพแล้ว · เปิดเป็นเคสกายภาพแยกของ ${caseCode(created.case_id)} พร้อมใบแจ้งหนี้ (ร่าง) ของแพ็กนี้ — ลงนัดต่อได้เลย`
             : renewFrom
             ? `ต่อเคสเป็น ${caseCode(created.case_id)} (รอบที่ ${created.round_no}) แล้ว · ระบบออกใบแจ้งหนี้ (ร่าง) ของรอบนี้ให้เรียบร้อย`
             : `เปิดเคส ${caseCode(created.case_id)} แล้ว · ระบบออกใบแจ้งหนี้ (ร่าง) ให้เรียบร้อย`) + teamNote,
@@ -1169,8 +1253,14 @@ export default function CaseFormPage() {
     <>
       <header className="page-head">
         <div>
-          <h1>{isEdit ? `แก้ไขเคส ${caseCode(id)}` : renewFrom ? `ต่อเคส ${caseCode(renewFrom)}` : 'เปิดเคสใหม่'}</h1>
-          {!isEdit && !renewFrom && <p className="muted">รหัสเคส = รหัสผู้รับบริการ (KN) · ระบบออกใบแจ้งหนี้ (ร่าง) ให้หลังบันทึก</p>}
+          <h1>{isEdit ? `แก้ไขเคส ${caseCode(id)}` : renewFrom ? `ต่อเคส ${caseCode(renewFrom)}` : addonOf ? `เพิ่มแพ็กกายภาพ · เคส Homecare ${caseCode(addonOf)}` : 'เปิดเคสใหม่'}</h1>
+          {addonOf && (
+            <p className="muted">
+              เปิดเป็นเคสกายภาพแยกของผู้รับบริการคนเดิม{addonParent ? ` (${addonParent.client_name})` : ''} — ใบแจ้งหนี้ นัด และค่าจ้างแยกจาก Homecare
+              {' '}· คัดลอกผู้ว่าจ้าง/ผู้รับบริการ/ที่อยู่มาแล้ว เหลือเลือกแพ็คเกจ วันเริ่ม และนักกายภาพ
+            </p>
+          )}
+          {!isEdit && !renewFrom && !addonOf && <p className="muted">รหัสเคส = รหัสผู้รับบริการ (KN) · ระบบออกใบแจ้งหนี้ (ร่าง) ให้หลังบันทึก</p>}
           {renewFrom && (
             <p className="muted">
               รอบที่ {(renewSource?.round_no ?? 1) + 1} — ตรวจวันที่ ราคา รายการคิดเงินเพิ่ม พนักงาน และกะ ก่อนบันทึก
@@ -1375,7 +1465,8 @@ export default function CaseFormPage() {
             </p>
           )}
           <label>ประเภทบริการ
-            <SearchSelect value={form.service_kind} disabled={serviceLocked} onChange={(e) => changeKind(e.target.value)}>
+            {/* แพ็กกายภาพเสริมของเคส Homecare = สายกายภาพเท่านั้น (server ก็กัน) */}
+            <SearchSelect value={form.service_kind} disabled={serviceLocked || Boolean(addonOf)} onChange={(e) => changeKind(e.target.value)}>
               <option value="">— ไม่ระบุ —</option>
               {Object.entries(SERVICE_KIND_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
             </SearchSelect>
@@ -1571,6 +1662,59 @@ export default function CaseFormPage() {
             </p>
           )}
         </div>
+
+        {/* แพ็กกายภาพเสริม (ไม่บังคับ) — ลูกค้า Homecare ซื้อคอร์สกายภาพพร้อมกัน
+            ไม่ได้รวมเข้าเคสนี้: บันทึกแล้วระบบเปิดเคสกายภาพแยกที่ผูกกับเคสนี้ (ใบแจ้งหนี้/นัด/ค่าจ้างแยก) */}
+        {canAddPhysio && (
+          <div className="physio-addon-form">
+            <h3>แพ็กกายภาพเสริม <span className="muted">(ไม่บังคับ)</span></h3>
+            <div className="grid">
+              <label>แพ็คเกจกายภาพบำบัด
+                <SearchSelect value={physioAddon.physio_package_id} onChange={(e) => pickAddonPkg(e.target.value)}>
+                  <option value="">— ไม่ซื้อแพ็กกายภาพ —</option>
+                  {physio.filter((p) => p.active).map((p) => (
+                    <option key={p.physio_package_id} value={p.physio_package_id}>
+                      {`${p.name} · ${p.sessions} ครั้ง${p.duration_months ? ` · ${p.duration_months} เดือน` : ''} · ${formatBaht(p.special_price)}`}
+                    </option>
+                  ))}
+                </SearchSelect>
+              </label>
+              {addonPkg && (
+                <>
+                  <label>ค่าแพ็กกายภาพ (บาท)
+                    <input
+                      type="number" min="0" step="0.01" name="physio_addon_fee"
+                      value={physioAddon.fee}
+                      onChange={(e) => setPhysioAddon((prev) => ({ ...prev, fee: e.target.value }))}
+                    />
+                  </label>
+                  <label>วันเริ่มคอร์ส (ถ้ามี)
+                    <input
+                      type="date" name="physio_addon_start"
+                      value={physioAddon.start_date}
+                      onChange={(e) => setPhysioAddon((prev) => ({ ...prev, start_date: e.target.value }))}
+                    />
+                  </label>
+                  <label className="checkbox-row full-row">
+                    <input
+                      type="checkbox"
+                      checked={physioAddon.bill_with_parent}
+                      onChange={(e) => setPhysioAddon((prev) => ({ ...prev, bill_with_parent: e.target.checked }))}
+                    />
+                    ออกใบแจ้งหนี้ใบเดียวกับ Homecare (แพ็กเป็นบรรทัดหนึ่งในใบ · มัดจำหักจากค่า Homecare)
+                  </label>
+                </>
+              )}
+            </div>
+            <p className="form-hint muted">
+              {addonPkg
+                ? physioAddon.bill_with_parent
+                  ? 'บันทึกแล้วระบบเปิดเป็นเคสกายภาพแยก (นัด/ค่าจ้างแยก) แต่เก็บเงินรวมในใบแจ้งหนี้ของ Homecare ใบเดียว — เลือกนักกายภาพและลงนัดได้ที่เคสกายภาพ'
+                  : 'บันทึกแล้วระบบเปิดเป็นเคสกายภาพแยก พร้อมใบแจ้งหนี้ (ร่าง) ของแพ็กนี้เอง — เลือกนักกายภาพและลงนัดได้ที่เคสกายภาพ'
+                : 'ลูกค้าซื้อคอร์สกายภาพพร้อม Homecare — เลือกแพ็กที่นี่ ระบบเปิดเป็นเคสกายภาพแยกให้ (ใบแจ้งหนี้ นัด และค่าจ้างแยกจาก Homecare)'}
+            </p>
+          </div>
+        )}
 
         {/* อุปกรณ์เสริม — คิดเงินแยกจากค่าบริการ แล้วบวกเข้ายอดใบแจ้งหนี้ (ใบร่าง/ใบที่ยังไม่รับเงินปรับตามให้เอง)
             อยู่นอก .grid ของรายละเอียดเคสโดยตั้งใจ: ในกริดกล่องนี้ถูกบีบเหลือหนึ่งคอลัมน์บนบางจอ
@@ -2170,7 +2314,7 @@ export default function CaseFormPage() {
         {/* ติดขอบล่างจอ — ฟอร์มนี้ยาวที่สุดในระบบ แก้คำเดียวก็ไม่ควรต้องเลื่อนสุดทางไปกดปุ่ม */}
         <div className="form-actions sticky">
           <button className="btn primary" type="submit" disabled={saving}>
-            {saving ? 'กำลังบันทึก…' : isEdit ? 'บันทึกการแก้ไข' : renewFrom ? `ต่อเคส (รอบที่ ${(renewSource?.round_no ?? 1) + 1})` : 'เปิดเคส'}
+            {saving ? 'กำลังบันทึก…' : isEdit ? 'บันทึกการแก้ไข' : renewFrom ? `ต่อเคส (รอบที่ ${(renewSource?.round_no ?? 1) + 1})` : addonOf ? 'เพิ่มแพ็กกายภาพ' : 'เปิดเคส'}
           </button>
           <Link className="btn" to="/cases" onClick={confirmLeave}>ยกเลิก</Link>
         </div>

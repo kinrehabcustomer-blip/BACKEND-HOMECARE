@@ -136,6 +136,11 @@ const caseFields = z.object({
   // ต่อเคส: รหัสเคสรอบก่อน — ตั้งได้ตอนสร้างเท่านั้น (updateCaseSchema ตัดออก)
   renewed_from: z.string().trim().min(1).optional().nullable(),
 
+  // แพ็กกายภาพเสริม: รหัสเคส Homecare ที่ซื้อแพ็กนี้เพิ่ม — ตั้งได้ตอนสร้างเท่านั้น (updateCaseSchema ตัดออก)
+  addon_of: z.string().trim().min(1).optional().nullable(),
+  // แพ็กเสริม: เก็บเงินรวมในใบแจ้งหนี้ของเคส Homecare (ไม่ออกใบของตัวเอง) — ตั้งได้ตอนสร้างเท่านั้น
+  bill_with_parent: z.boolean().optional(),
+
   /* ทีมดูแลเคส (คนที่ 2 ขึ้นไป) ที่เลือกไว้ตอนสร้าง — ตั้งได้ตอนสร้างเท่านั้น
      ไม่ส่ง = ต่อเคสแล้วทีมรอบก่อนตามมาทั้งหมดเหมือนเดิม · ส่งมา (รวม []) = เอาเฉพาะคนที่ระบุ
      หน้าต่อเคสให้ติ๊กเลือกว่าใครตามมา คนที่ไม่ติ๊กต้องไม่ถูกใส่กลับเข้าทีมเงียบๆ */
@@ -176,7 +181,7 @@ export const createCaseSchema = caseFields.superRefine((v, ctx) => {
 export const END_BEFORE_START = 'วันสิ้นสุดต้องไม่ก่อนวันเริ่ม';
 
 export const updateCaseSchema = caseFields
-  .omit({ assigned_to: true, renewed_from: true, team: true })
+  .omit({ assigned_to: true, renewed_from: true, addon_of: true, bill_with_parent: true, team: true })
   .partial()
   .extend({
     // รหัสของแฟ้มผู้รับบริการที่จะสร้างให้ ตอนเพิ่งใส่ชื่อผู้รับบริการให้เคสที่เปิดด้วยผู้ว่าจ้างอย่างเดียว

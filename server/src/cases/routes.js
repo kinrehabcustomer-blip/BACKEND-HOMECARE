@@ -66,6 +66,24 @@ const isTerminal = (caseRow) => TERMINAL_STATUSES.includes(caseRow.status);
  */
 const PAY_FIELDS = ['staff_pay', 'rate_staff_pay', 'physio_staff_pay'];
 
+/**
+ * แพ็กกายภาพเสริมที่เก็บเงินรวมในใบของเคส Homecare (bill_with_parent) เปลี่ยน -> ซิงก์ใบที่ยังแก้ได้ของเคส Homecare
+ * ใบประกอบบรรทัดแพ็กสดจากเคสกายภาพ (ดู bundledAddons ใน invoices/repo.js) จึงแค่สั่งซิงก์ฝั่ง Homecare
+ * ซิงก์ไม่สำเร็จไม่ล้มคำขอ (เคส/การเปลี่ยนแปลงเกิดแล้ว) — คืน false ให้ผู้เรียกตัดสินใจ/แจ้งเอง
+ */
+async function syncBundleParent(physioCase) {
+  if (!physioCase?.bill_with_parent || !physioCase.addon_of) return false;
+  try {
+    const parent = await repo.findById(physioCase.addon_of);
+    if (!parent) return false;
+    await invoices.syncOpenFromCase(parent, await resolvePayer(parent));
+    return true;
+  } catch (err) {
+    console.error(`[cases] ซิงก์ใบของเคส Homecare ${physioCase.addon_of} ตามแพ็กเสริม ${physioCase.case_id} ไม่สำเร็จ:`, err.message);
+    return false;
+  }
+}
+
 function visible(req, caseRow) {
   if (!caseRow || canSeeStaffPay(req.user?.position)) return caseRow;
   const shown = { ...caseRow };
@@ -263,7 +281,17 @@ casesRouter.post(
     // ทีมที่ส่งมาพร้อมการเปิดเคสใช้กติกาเดียวกับ POST /:id/team — ลาออก/พักงาน/สายสำนักงาน เข้าทีมไม่ได้
     for (const employeeId of new Set(input.team ?? [])) await ensureAssignable(employeeId);
 
-    const created = await repo.create(input, req.user);
+    let created = await repo.create(input, req.user);
+
+    /* แพ็กกายภาพเสริมที่ขอเก็บเงินรวมในใบของเคส Homecare — ซิงก์ใบร่าง Homecare ให้มีบรรทัดแพ็กนี้
+       แล้วตรวจว่าเข้าไปจริง (ใบออกไปแล้ว/แบ่งมัดจำแล้ว/รับเงินแล้ว/แก้มือไว้ = ซิงก์ข้าม)
+       ไม่เข้า = กลับไปออกใบของตัวเองตามปกติ — แพ็กต้องถูกเก็บเงินที่ใดที่หนึ่งเสมอ */
+    let billedWithParent = false;
+    if (created.bill_with_parent) {
+      billedWithParent = await syncBundleParent(created);
+      if (billedWithParent) billedWithParent = await invoices.bundleCovered(created.case_id);
+      if (!billedWithParent) created = await repo.billSeparately(created.case_id, req.user);
+    }
 
     /* เปิดเคสแล้วออกใบแจ้งหนี้ (ร่าง) ให้เลย — ทุกเคสจบด้วยการเก็บเงินอยู่แล้ว
        การต้องกลับมากดออกใบทีหลังคือขั้นตอนที่ลืมได้ และลืมเมื่อไหร่ก็ไม่มีอะไรเตือน
@@ -279,7 +307,11 @@ casesRouter.post(
       console.error(`[POST /api/cases] ออกใบแจ้งหนี้อัตโนมัติให้ ${created.case_id} ไม่สำเร็จ:`, err.message);
     }
 
-    res.status(201).json({ ...visible(req, created), invoice_draft_created: invoiceDraftCreated });
+    res.status(201).json({
+      ...visible(req, created),
+      invoice_draft_created: billedWithParent ? null : invoiceDraftCreated,
+      billed_with_parent: billedWithParent,
+    });
   }),
 );
 
@@ -574,6 +606,8 @@ casesRouter.patch(
       try {
         const customer = await resolvePayer(updated);
         await invoices.syncOpenFromCase(updated, customer);
+        // แพ็กเสริมที่เก็บรวมในใบ Homecare เปลี่ยนแพ็ก/ราคา -> ใบร่างของ Homecare ตาม
+        if (updated.bill_with_parent && !(await syncBundleParent(updated))) invoiceSyncFailed = true;
       } catch (err) {
         invoiceSyncFailed = true;
         console.error(`[PATCH /api/cases/${req.params.id}] บันทึกเคสแล้วแต่ซิงก์ใบร่างไม่สำเร็จ:`, err.message);
@@ -720,7 +754,9 @@ casesRouter.post(
   asyncRoute(async (req, res) => {
     if (isTerminal(req.case)) throw new ApiError(409, 'เคสนี้จบไปแล้ว');
     const { reason } = cancelSchema.parse(req.body ?? {});
-    res.json(visible(req, await repo.cancel(req.params.id, reason, req.user)));
+    const cancelled = await repo.cancel(req.params.id, reason, req.user);
+    await syncBundleParent(cancelled); // ยกเลิกแพ็กเสริม = บรรทัดหายจากใบร่างของ Homecare
+    res.json(visible(req, cancelled));
   }),
 );
 
@@ -728,7 +764,9 @@ casesRouter.post(
   '/:id/reopen',
   asyncRoute(async (req, res) => {
     if (!isTerminal(req.case)) throw new ApiError(409, 'เคสนี้ยังไม่ได้ปิดหรือยกเลิก');
-    res.json(visible(req, await repo.reopen(req.params.id, req.user)));
+    const reopened = await repo.reopen(req.params.id, req.user);
+    await syncBundleParent(reopened); // เปิดแพ็กเสริมที่ยกเลิกไว้กลับมา = บรรทัดกลับเข้าใบร่างของ Homecare
+    res.json(visible(req, reopened));
   }),
 );
 
@@ -779,6 +817,7 @@ casesRouter.delete(
         { payouts: result.payouts },
       );
     }
+    await syncBundleParent(req.case); // ลบแพ็กเสริม = บรรทัดหายจากใบร่างของ Homecare
     res.status(204).end();
   }),
 );
@@ -820,6 +859,62 @@ casesRouter.get(
 casesRouter.get(
   '/:id/physio-quota',
   asyncRoute(async (req, res) => res.json(await repo.physioQuota(req.params.id))),
+);
+
+/**
+ * รวมแพ็กกายภาพเสริมที่เปิดแยกไว้ เข้าเป็นส่วนหนึ่งของเคส Homecare (ดร.ธงชัย 9 พ.ย. 2569 "รวมกันเป็นเคสเดียว ยึด homecare เป็นหลัก")
+ * หลังรวม: ไม่ขึ้นเป็นแถวแยกในรายการเคส/ตัวนับ · เก็บเงินเป็นบรรทัดในใบของ Homecare · ใบร่างของแพ็กเองถูกลบ
+ * นัด/ค่าจ้าง/จำนวนครั้งยังอยู่ที่เคสกายภาพเหมือนเดิม (เปิดจากป๊อปอัปของเคส Homecare)
+ * รวมไม่ได้เมื่อ: แพ็กออกใบ/รับเงินไปแล้ว · ใบ Homecare ออก/แบ่งงวด/แก้มือไปแล้วจนรับบรรทัดเพิ่มไม่ได้
+ */
+casesRouter.post(
+  '/:id/bundle',
+  asyncRoute(async (req, res) => {
+    const c = req.case;
+    if (!c.addon_of) throw new ApiError(400, 'เคสนี้ไม่ใช่แพ็กกายภาพเสริมของเคส Homecare');
+    if (c.bill_with_parent) return res.json(visible(req, c));
+    if (c.status === 'cancelled') throw new ApiError(409, 'แพ็กนี้ถูกยกเลิกไปแล้ว');
+    const parent = await repo.findById(c.addon_of);
+    if (!parent || ['closed', 'cancelled'].includes(parent.status)) {
+      throw new ApiError(409, 'เคส Homecare ปิดหรือยกเลิกไปแล้ว — รวมแพ็กเข้าไม่ได้');
+    }
+
+    // ใบของแพ็กเองต้องยังเป็นร่างที่ไม่มีเงินเข้า — ใบที่ออก/รับเงินแล้วเป็นเอกสารจริง ลบทิ้งเพื่อย้ายไปรวมไม่ได้
+    const own = (await invoices.listForCase(c.case_id)).filter((i) => i.status !== 'cancelled');
+    const blocking = own.find((i) => i.status !== 'draft' || Number(i.paid_amount) > 0);
+    if (blocking) {
+      throw new ApiError(
+        409,
+        `แพ็กนี้มีใบแจ้งหนี้ ${blocking.invoice_id} ที่ออกหรือรับเงินไปแล้ว — รวมเข้าเคส Homecare ไม่ได้ (เก็บเงินแยกต่อไป)`,
+      );
+    }
+
+    const undo = async (message) => {
+      await repo.setBillWithParent(c.case_id, false, req.user);
+      await invoices.syncOpenFromCase(parent, await resolvePayer(parent)).catch(() => {});
+      throw new ApiError(409, message);
+    };
+
+    await repo.setBillWithParent(c.case_id, true, req.user);
+    const synced = await syncBundleParent({ ...c, bill_with_parent: true });
+    if (!synced || !(await invoices.bundleCovered(c.case_id))) {
+      await undo('ใบแจ้งหนี้ของเคส Homecare ออก/แบ่งงวด/แก้ไว้แล้ว จึงเพิ่มบรรทัดแพ็กนี้ไม่ได้ — เก็บเงินแยกต่อไป');
+    }
+    for (const inv of own) {
+      const removed = await invoices.remove(inv.invoice_id);
+      if (removed?.reason) await undo(`ลบใบร่าง ${inv.invoice_id} ของแพ็กนี้ไม่ได้ — ยังไม่ได้รวม ลองใหม่อีกครั้ง`);
+    }
+    const merged = await repo.setBillWithParent(c.case_id, true, req.user,
+      `รวมเข้าเคส Homecare (${caseCode(c.addon_of)}) — เก็บเงินเป็นบรรทัดในใบแจ้งหนี้ของ Homecare`
+        + (own.length ? ` · ลบใบร่างของแพ็ก ${own.map((i) => i.invoice_id).join(', ')}` : ''));
+    res.json(visible(req, merged));
+  }),
+);
+
+/** แพ็กกายภาพเสริมที่ซื้อเพิ่มในเคส Homecare นี้ (แต่ละแพ็กเป็นเคสกายภาพแยก ผูกด้วย addon_of) */
+casesRouter.get(
+  '/:id/physio-addons',
+  asyncRoute(async (req, res) => res.json(await repo.physioAddons(req.case.case_id))),
 );
 
 casesRouter.post(

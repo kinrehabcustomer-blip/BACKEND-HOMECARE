@@ -173,6 +173,19 @@ export const SERVICE_KIND_LABELS = {
  * ประเภทบริการของเคส ('homecare' | 'physio') — ใช้แทน "ประเภทเคส" ที่เอาออกจากหน้าเว็บแล้ว
  * เคสเก่าที่ยังไม่มี service_kind แต่ตั้งประเภทเคสเป็นกายภาพไว้ ก็นับเป็นกายภาพ (เกณฑ์เดียวกับสรุปฝั่ง server)
  */
+/**
+ * แพ็กกายภาพที่รวมอยู่ในเคส Homecare (bundled_physio จาก server — ซื้อมาพร้อมกัน เก็บเงินใบเดียว)
+ * เคสเดียวในสายตาคนใช้: ชื่อบริการต่อท้ายแพ็ก และยอดรวม = ค่า Homecare + ค่าแพ็ก (ตรงกับยอดในใบแจ้งหนี้)
+ */
+export const bundledPhysioText = (c) =>
+  (c?.bundled_physio ?? [])
+    .map((b) => `กายภาพ ${b.name ?? ''}${b.sessions && !String(b.name ?? '').includes(`${b.sessions} ครั้ง`) ? ` · ${b.sessions} ครั้ง` : ''}`.trim())
+    .join(' · ') || null;
+export const totalFee = (c) => {
+  const extra = (c?.bundled_physio ?? []).reduce((s, b) => s + Number(b.fee ?? 0), 0);
+  return c?.fee == null && extra === 0 ? null : Number(c?.fee ?? 0) + extra;
+};
+
 export const serviceKindOf = (c) =>
   c?.service_kind === 'physio' || c?.physio_package_id != null || c?.case_type === 'physiotherapy'
     ? 'physio'
@@ -235,6 +248,7 @@ export const CASE_EVENT_LABELS = {
   cancelled: 'ยกเลิกเคส',
   reopened: 'เปิดเคสใหม่',
   renewed: 'ต่อเคส',
+  physio_addon: 'แพ็กกายภาพเสริม',
   visit_adjusted: 'แก้กะ',
   visit_edited: 'แก้นัดหมายกะ',
   visit_removed: 'ลบกะ',

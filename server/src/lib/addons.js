@@ -15,6 +15,16 @@ export const PROCEDURE = 'procedure';
 export const isProcedure = (a) => a?.kind === PROCEDURE;
 
 /**
+ * แพ็กกายภาพเสริมที่เก็บเงินรวมในใบของเคส Homecare (cases.bill_with_parent — ดร.ธงชัย 9 พ.ย. 2569)
+ * ไม่เคยอยู่ใน addons ของเคส (schema ของเคสไม่รับ kind นี้) — ใบแจ้งหนี้ประกอบบรรทัดนี้เองจากเคสกายภาพ
+ * ตอนออก/ซิงก์ใบ (ดู bundledAddons ใน invoices/repo.js) · ref = case_id ของเคสกายภาพ ใช้แยกว่าใบไหนเก็บแพ็กไหนไปแล้ว
+ * อยู่ในรายการเดียวกับอุปกรณ์ จึงได้กติกาเดียวกันทุกจุด: ยอดใบ ป้าย "ไม่ตรงกับเคส" และแบ่งมัดจำ
+ * (ใบมัดจำเป็นเงินก้อน บรรทัดนี้ย้ายไปใบส่วนที่เหลือเต็มจำนวน = มัดจำหักจากค่า Homecare ล้วน)
+ */
+export const PHYSIO_BUNDLE = 'physio';
+export const isPhysioBundle = (a) => a?.kind === PHYSIO_BUNDLE;
+
+/**
  * เรียงคีย์ตายตัวและตัดค่าแปลกปลอมทิ้ง — ใช้ทั้งตอนเก็บลงฐานข้อมูลและตอนเทียบว่าเปลี่ยนไหม
  * อุปกรณ์เสริมคงรูปเดิมทุกตัวอักษร { name, quantity, unit_price } — ข้อความของรายการนี้อยู่ใน service_key
  * ของใบแจ้งหนี้ ถ้าเติมคีย์ใหม่ให้ทุกบรรทัด ใบเก่าทั้งระบบจะขึ้นป้าย "แพ็คเกจไม่ตรง" ทันที
@@ -22,7 +32,15 @@ export const isProcedure = (a) => a?.kind === PROCEDURE;
  */
 export const normalizeAddons = (addons) =>
   (Array.isArray(addons) ? addons : []).map((a) =>
-    isProcedure(a)
+    isPhysioBundle(a)
+      ? {
+          name: String(a.name ?? '').trim(),
+          quantity: 1,
+          unit_price: Number(a.unit_price ?? 0),
+          kind: PHYSIO_BUNDLE,
+          ref: a.ref ? String(a.ref) : null,
+        }
+      : isProcedure(a)
       ? {
           name: String(a.name ?? '').trim(),
           quantity: 1,
@@ -41,7 +59,9 @@ export const normalizeAddons = (addons) =>
 
 /** ข้อความบรรทัดในใบแจ้งหนี้ — ต้องตรงกับ addonLabel ใน client/src/lib/addons.js */
 export const addonLabel = (a) =>
-  isProcedure(a) ? `หัตถการ: ${a.name}${a.vn ? ` (${a.vn})` : ''}` : `อุปกรณ์เสริม: ${a.name}`;
+  isPhysioBundle(a)
+    ? `กายภาพบำบัด: ${a.name}`
+    : isProcedure(a) ? `หัตถการ: ${a.name}${a.vn ? ` (${a.vn})` : ''}` : `อุปกรณ์เสริม: ${a.name}`;
 
 export const addonAmount = (a) => round2(Number(a.quantity) * Number(a.unit_price));
 
@@ -55,7 +75,9 @@ export const addonsTotalSql = (c) => `COALESCE((
 
 /* รายการเดียวกัน = ชื่อ ราคาต่อหน่วย ชนิด และ VN ตรงกัน — จำนวนไม่อยู่ใน key เพราะนับแยกเป็นยอดคงเหลือ
    (เช่าเตียงเพิ่มจาก 1 เป็น 2 เดือน = ค้างเก็บอีก 1 ไม่ใช่รายการใหม่ทั้งก้อน) */
-const addonKey = (a) => JSON.stringify([a.name, a.unit_price, a.kind ?? null, a.vn ?? null]);
+const addonKey = (a) =>
+  // แพ็กกายภาพผูกกับเคสกายภาพใบเดียว (ref) — เปลี่ยนราคาแล้วยังเป็นแพ็กเดิม ไม่ใช่รายการใหม่
+  isPhysioBundle(a) ? JSON.stringify([PHYSIO_BUNDLE, a.ref]) : JSON.stringify([a.name, a.unit_price, a.kind ?? null, a.vn ?? null]);
 const round3 = (n) => Math.round(n * 1000) / 1000;
 
 /**

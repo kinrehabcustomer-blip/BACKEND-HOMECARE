@@ -540,6 +540,9 @@ export const api = {
   // วันนัดให้บริการของเคส — ทุกตัวคืน "รายการวันนัดล่าสุดทั้งหมด" กลับมา ไม่ต้องดึงซ้ำเอง
   listVisits: (id) => request(`/cases/${id}/visits`),
   physioQuota: (id) => request(`/cases/${id}/physio-quota`),
+  physioAddons: (id) => request(`/cases/${id}/physio-addons`),
+  /** รวมแพ็กกายภาพเสริมที่เปิดแยกไว้ เข้าเป็นส่วนหนึ่งของเคส Homecare (เก็บเงินในใบของ Homecare) */
+  bundleIntoParent: (id) => request(`/cases/${id}/bundle`, { method: 'POST' }),
   /** เพิ่มกะทีละวัน — คืน { visits, added, skipped, conflicts } */
   addVisit: (id, body) => request(`/cases/${id}/visits`, { method: 'POST', body }),
   /** ลงกะหลายวันในครั้งเดียว — ส่ง { dates: [...] } หรือ { from, to, weekdays } · คืนรูปแบบเดียวกับ addVisit */

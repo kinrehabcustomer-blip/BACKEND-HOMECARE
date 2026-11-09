@@ -1,8 +1,9 @@
 import { sql, nextInvoiceId, transaction } from '../db/index.js';
 import { PATIENT_PENDING } from '../cases/schema.js';
 import {
-  normalizeAddons, addonAmount, addonsTotal, addonsTotalSql, addonLabel, unbilledAddons,
+  normalizeAddons, addonAmount, addonsTotal, addonsTotalSql, addonLabel, unbilledAddons, isPhysioBundle, PHYSIO_BUNDLE,
 } from '../lib/addons.js';
+import { ensureAddonLink } from '../cases/repo.js';
 import { ensureShareTables, hasBeenShared } from './share.js';
 import { likeEscape } from '../lib/likeEscape.js';
 import {
@@ -325,9 +326,63 @@ export const billedAddons = (caseId, { except = null, db = sql } = {}) =>
     )
     .then((rows) => rows.flatMap((r) => r.addons ?? []));
 
+/**
+ * รายการคิดเงินเพิ่มของเคสสำหรับใบแจ้งหนี้ = อุปกรณ์/หัตถการของเคส + แพ็กกายภาพเสริมที่เก็บรวมในใบนี้
+ *
+ * แพ็กเสริมที่ซื้อมาพร้อมเคส Homecare (cases.bill_with_parent) ไม่มีใบของตัวเอง — ใบ Homecare เก็บแทน
+ * ประกอบสดจากเคสกายภาพทุกครั้งที่ออก/ซิงก์ใบ: เปลี่ยนแพ็ก/ราคาที่เคสกายภาพ ใบร่างของ Homecare ตาม
+ * ยกเลิกเคสกายภาพ = บรรทัดหายจากใบร่าง (ใบที่ออกแล้วไม่ถูกแตะ — ปรับด้วยใบลดหนี้เหมือนอุปกรณ์)
+ * ไม่ได้เขียนลง cases.addons ของ Homecare เพราะนั่นคือข้อมูลที่หน้าแก้เคสกรอก จะซ้ำกับยอดในเคสกายภาพ
+ */
+export async function bundledAddons(caseRow, db = sql) {
+  const own = normalizeAddons(caseRow?.addons);
+  if (!caseRow?.case_id) return own;
+  /* ALTER TABLE ในทรานแซกชันอื่นขณะที่ db (tx) ถือล็อกแถว cases อยู่ = รอกันเองไม่จบ
+     ผู้เรียกที่ส่ง tx มาต้องเรียก ensureAddonLink ก่อนเปิดทรานแซกชันเอง (ดู createFromCase) */
+  if (db === sql) await ensureAddonLink();
+  const rows = await db.all(
+    `SELECT c.case_id, c.fee, pp.name AS package_name, pp.sessions
+     FROM cases c
+     LEFT JOIN physio_packages pp ON pp.physio_package_id = c.physio_package_id
+     WHERE c.addon_of = :id AND c.bill_with_parent AND c.status <> 'cancelled'
+     ORDER BY c.created_at, c.case_id`,
+    { id: caseRow.case_id },
+  );
+  const lines = rows.map((r) => {
+    const name = r.package_name ?? 'แพ็คเกจกายภาพบำบัด';
+    // ชื่อแพ็กส่วนใหญ่บอกจำนวนครั้งอยู่แล้ว ("10 ครั้ง 3 เดือน") — เติมเฉพาะตอนยังไม่บอก (เกณฑ์เดียวกับ describeService)
+    const sessions = r.sessions && !name.includes(`${r.sessions} ครั้ง`) ? ` · ${r.sessions} ครั้ง` : '';
+    return { name: `${name}${sessions}`, quantity: 1, unit_price: Number(r.fee ?? 0), kind: PHYSIO_BUNDLE, ref: r.case_id };
+  });
+  return [...own, ...lines];
+}
+
+/**
+ * แพ็กกายภาพที่รวมในเคส Homecare (c = alias ของเคสกายภาพ) ถูก "ดูแลการเก็บเงิน" โดยเคส Homecare อยู่จริงไหม
+ *   - ใบที่ยังไม่ยกเลิกของ Homecare มีบรรทัดแพ็กนี้แล้ว หรือ
+ *   - Homecare ยังไม่มีใบแพ็คเกจเลย (และยังไม่ยกเลิก) — ใบที่ออกทีหลังดึงบรรทัดนี้ไปเอง (ดู bundledAddons)
+ * ไม่ทั้งสองอย่าง (ใบ Homecare ออก/แบ่งงวดไปแล้วโดยไม่มีบรรทัดนี้ หรือ Homecare ถูกยกเลิก) = แพ็กต้องออกใบของตัวเอง
+ */
+const bundleCoveredSql = (c) => `(${c}.bill_with_parent AND (
+  EXISTS (SELECT 1 FROM invoices pi
+          WHERE pi.case_id = ${c}.addon_of AND pi.status <> 'cancelled'
+            AND pi.addons @> jsonb_build_array(jsonb_build_object('kind', '${PHYSIO_BUNDLE}', 'ref', ${c}.case_id)))
+  OR (NOT EXISTS (SELECT 1 FROM invoices pi
+                  WHERE pi.case_id = ${c}.addon_of AND pi.status <> 'cancelled'
+                    AND pi.billing_kind IS DISTINCT FROM 'extra')
+      AND EXISTS (SELECT 1 FROM cases pc WHERE pc.case_id = ${c}.addon_of AND pc.status <> 'cancelled'))))`;
+
+/** เคสกายภาพนี้เก็บเงินผ่านเคส Homecare อยู่จริงไหม (ดู bundleCoveredSql) — ใช้ยืนยันหลังซิงก์/ก่อนออกใบแยก */
+export const bundleCovered = async (physioCaseId) => {
+  await ensureAddonLink();
+  return sql
+    .one(`SELECT ${bundleCoveredSql('c')} AS ok FROM cases c WHERE c.case_id = :id`, { id: physioCaseId })
+    .then((r) => Boolean(r?.ok));
+};
+
 /** ค่าใช้จ่ายนอกแพ็คเกจของเคสที่ยังไม่ได้ออกใบ — { items, total } (ดู unbilledAddons) */
 export async function unbilledExtras(caseRow) {
-  const items = unbilledAddons(caseRow.addons, await billedAddons(caseRow.case_id));
+  const items = unbilledAddons(await bundledAddons(caseRow), await billedAddons(caseRow.case_id));
   return { case_id: caseRow.case_id, items, total: addonsTotal(items) };
 }
 
@@ -659,14 +714,20 @@ export async function invoiceMutationResult(result, loadInvoice = findById) {
  * เคสที่ยกเลิกไม่นับ เพราะ POST /api/invoices ไม่ให้ออกใบให้เคสที่ยกเลิกอยู่แล้ว
  */
 export const casesWithoutInvoice = () =>
-  sql.all(
-    `SELECT c.case_id, c.title, c.client_name, c.status, c.fee
+  ensureAddonLink().then(() => sql.all(
+    `SELECT c.case_id, c.title, c.client_name, c.status,
+            -- ยอดที่ใบจะออก = ค่า Homecare + แพ็กกายภาพที่รวมอยู่ในเคสนี้ (ใบเดียวกัน)
+            c.fee + COALESCE((SELECT SUM(b.fee) FROM cases b
+                              WHERE b.addon_of = c.case_id AND b.bill_with_parent AND b.status <> 'cancelled'), 0) AS fee
      FROM cases c
      WHERE c.status <> 'cancelled'
+       -- แพ็กกายภาพที่รวมอยู่ในเคส Homecare ออกใบที่เคส Homecare (เคสเดียวกันในสายตาคนใช้)
+       -- ขึ้นเองเฉพาะตอนเคส Homecare ดูแลการเก็บเงินแพ็กนี้ไม่ได้แล้ว (ดู bundleCoveredSql)
+       AND NOT ${bundleCoveredSql('c')}
        AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.case_id = c.case_id AND i.status <> 'cancelled')
      ORDER BY c.case_id DESC
      LIMIT 50`,
-  );
+  ));
 
 /** ใบแจ้งหนี้ของเคสหนึ่งใบ — เคสหนึ่งออกได้ใบเดียว แต่ถ้ายกเลิกแล้วออกใหม่ได้ จึงคืนเป็นรายการ */
 export const listForCase = async (caseId) => {
@@ -1125,7 +1186,8 @@ export function createFromCase(caseRow, input, actor, visitItems = [], { extra =
     billing_kind: extra ? 'extra' : null,
   };
 
-  return transaction(async (tx) => {
+  // ต้องมีคอลัมน์ของแพ็กเสริมก่อนเปิดทรานแซกชัน (ดู bundledAddons)
+  return ensureAddonLink().then(() => transaction(async (tx) => {
     /* ล็อกแถวเคสก่อนเช็ค — การออกใบของเคสเดียวกันเข้าคิวทีละคำขอ
        ของเดิมเช็ค "มีใบร่างอยู่แล้วไหม" นอก transaction แล้วค่อย INSERT คำขอสองตัวที่มาพร้อมกัน
        (กดปุ่มซ้ำ / เปิดเคสซ้ำตอนเน็ตกระตุก) จึงผ่านด่านทั้งคู่ได้ใบร่างสองใบ
@@ -1146,7 +1208,7 @@ export function createFromCase(caseRow, input, actor, visitItems = [], { extra =
 
     // อ่านหลังล็อกเคส — สองคำขอที่มาพร้อมกันจะไม่เก็บอุปกรณ์ชิ้นเดียวกันซ้ำสองใบ
     const addons = caseRow.case_id
-      ? unbilledAddons(caseRow.addons, await billedAddons(caseRow.case_id, { db: tx }))
+      ? unbilledAddons(await bundledAddons(caseRow, tx), await billedAddons(caseRow.case_id, { db: tx }))
       : normalizeAddons(caseRow.addons);
     if (extra && addons.length === 0) return { reason: 'no_extras' };
 
@@ -1214,7 +1276,7 @@ export function createFromCase(caseRow, input, actor, visitItems = [], { extra =
     }
 
     return { invoice_id: invoiceId };
-  }).then((result) => (result.reason ? result : findById(result.invoice_id)));
+  })).then((result) => (result.reason ? result : findById(result.invoice_id)));
 }
 
 // ใบที่ยัง "แก้ได้" — เอกสารยังอยู่ในมือเรา ยังไม่ได้ส่งมอบให้ลูกค้าจริง
@@ -1242,8 +1304,9 @@ export async function syncOpenFromCase(caseRow, customer, { forceInvoiceId = nul
     { id: caseRow.case_id },
   );
   let changed = 0;
+  const source = open.length > 0 ? await bundledAddons(caseRow) : [];
   for (const { invoice_id: target } of open) {
-    const addons = unbilledAddons(caseRow.addons, await billedAddons(caseRow.case_id, { except: target }));
+    const addons = unbilledAddons(source, await billedAddons(caseRow.case_id, { except: target }));
     changed += await syncOneFromCase(target, { ...caseRow, addons }, customer, forceInvoiceId);
   }
   return changed;
@@ -1672,6 +1735,17 @@ export async function pay(invoiceId, input, actor) {
  * ทำใน transaction เดียว เพราะครึ่งทาง (ใบมัดจำถูกแก้แล้วแต่ใบส่วนที่เหลือยังไม่เกิด)
  * แปลว่าลูกค้าจะได้บิลที่น้อยกว่าที่ตกลงไว้โดยไม่มีอะไรตามเก็บส่วนที่เหลือ
  */
+/**
+ * มัดจำของใบที่เก็บแพ็กกายภาพเสริมรวมอยู่ด้วย ต้องหักจากค่า Homecare เท่านั้น (ดร.ธงชัย 9 พ.ย. 2569)
+ * บรรทัดแพ็กกายภาพ (และอุปกรณ์) ย้ายไปใบส่วนที่เหลือเต็มจำนวน — มัดจำเกินค่า Homecare
+ * = ใบส่วนที่เหลือเหลือเงินไม่พอให้บรรทัดเหล่านั้น บรรทัด Homecare ติดลบ/แตกบรรทัดไม่ลง
+ * คืนเพดานมัดจำ หรือ null ถ้าใบไม่มีแพ็กกายภาพ (ใบเดิมของระบบใช้กติกาเดิม ไม่เปลี่ยนพฤติกรรม)
+ */
+function depositCeiling(addons, total) {
+  if (!normalizeAddons(addons).some(isPhysioBundle)) return null;
+  return roundMoney(Number(total) - addonsTotal(addons));
+}
+
 export async function setBillingPlanForTransaction(tx, invoiceId, { mode, deposit_amount }, actor) {
   const locked = await invoiceForUpdate(tx, invoiceId, 'billing_plan');
   if (locked.reason) return locked;
@@ -1717,6 +1791,10 @@ export async function setBillingPlanForTransaction(tx, invoiceId, { mode, deposi
   const rest = roundMoney(Number(inv.total) - deposit);
   if (!Number.isFinite(deposit) || deposit <= 0 || rest <= 0) {
     return { reason: 'deposit_not_less_than_total', total: roundMoney(inv.total) };
+  }
+  const homecareMax = depositCeiling(inv.addons, inv.total);
+  if (homecareMax != null && deposit > homecareMax) {
+    return { reason: 'deposit_over_homecare', max_deposit: homecareMax };
   }
 
   // ใบแรกกลายเป็นใบมัดจำ — ส่วนลดถูกคิดไปแล้วในยอดเต็ม จึงไม่ยกมาที่งวด (ไม่งั้นลดซ้ำสองรอบ)
@@ -1841,6 +1919,11 @@ export async function setDepositAmountForTransaction(tx, depositId, deposit) {
   const restNew = roundMoney(planTotal - depositNew);
   if (!Number.isFinite(depositNew) || depositNew <= 0 || restNew <= 0) {
     return { reason: 'deposit_not_less_than_total', total: planTotal };
+  }
+
+  const homecareMax = depositCeiling(balance.addons, planTotal);
+  if (homecareMax != null && depositNew > homecareMax) {
+    return { reason: 'deposit_over_homecare', max_deposit: homecareMax };
   }
 
   const depositPaid = roundMoney(paymentFor(plan.root_id).paid);

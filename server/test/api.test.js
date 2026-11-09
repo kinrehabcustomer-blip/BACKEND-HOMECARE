@@ -817,6 +817,193 @@ if (process.env.RUN_DB_TESTS !== '1') {
       await post('/api/cases', { case_type: 'other', client_name: 'x', renewed_from: second.case_id }, MANAGER, 409);
     });
 
+    test('แพ็กกายภาพเสริม: เคส Homecare ซื้อแพ็กกายภาพเพิ่ม = เคสกายภาพแยกที่ผูก addon_of · ใบแจ้งหนี้แยก · ตรวจสาย/ผู้รับบริการ', async () => {
+      const patchCase = async (id, body, expected = 200) => {
+        const res = await fetch(`${base}/api/cases/${id}`, {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json', cookie: `${COOKIE_NAME}=${signToken(MANAGER)}` },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        assert.equal(res.status, expected, JSON.stringify(data));
+        return data;
+      };
+      await post('/api/patients', { patient_id: 'KN690300001', name: 'แพ็กเสริม' }, MANAGER, 201);
+      await post('/api/patients', { patient_id: 'KN690300002', name: 'คนอื่น' }, MANAGER, 201);
+      const pkgId = (await sql.one(
+        `INSERT INTO physio_packages (name, sessions, special_price, staff_pay)
+         VALUES ('Addon pack', 10, 9000, 600) RETURNING physio_package_id`,
+      )).physio_package_id;
+      const me = { patient_id: 'KN690300001', client_name: 'แพ็กเสริม' };
+      const home = await post('/api/cases', { ...me, service_kind: 'homecare', fee: 30000 }, MANAGER, 201);
+      const addonBody = { ...me, physio_package_id: pkgId, fee: 9000, addon_of: home.case_id };
+
+      // ต้องเลือกแพ็กกายภาพ · ผู้รับบริการคนเดียวกัน · ทำคู่กับต่อเคสไม่ได้
+      await post('/api/cases', { ...me, service_kind: 'homecare', addon_of: home.case_id }, MANAGER, 400);
+      await post('/api/cases', { ...addonBody, patient_id: 'KN690300002', client_name: 'คนอื่น' }, MANAGER, 400);
+      await post('/api/cases', { ...addonBody, renewed_from: home.case_id }, MANAGER, 400);
+
+      const addon = await post('/api/cases', addonBody, MANAGER, 201);
+      assert.equal(addon.addon_of, home.case_id);
+      assert.equal(addon.service_kind, 'physio', 'ส่งมาแค่แพ็คเกจ ก็เป็นเคสกายภาพ');
+      assert.equal(addon.case_type, 'physiotherapy', 'พนักงานได้แบบบันทึกกายภาพ');
+      assert.equal(addon.case_id, 'KN690300001-R2');
+
+      // เคส Homecare ไม่ถูกนับว่า "ต่อเคสแล้ว" และบริการไม่เปลี่ยน
+      const homeNow = (await get(`/api/cases/${home.case_id}`, MANAGER)).body;
+      assert.equal(homeNow.renewed_to, null);
+      assert.equal(homeNow.service_kind, 'homecare');
+      const list = (await get(`/api/cases/${home.case_id}/physio-addons`, MANAGER)).body;
+      assert.deepEqual(list.map((a) => [a.case_id, a.physio_package_name, a.physio_sessions, a.booked]),
+        [[addon.case_id, 'Addon pack', 10, 0]]);
+
+      // ใบแจ้งหนี้ร่างของแพ็กเสริมแยกจากเคส Homecare
+      const [inv] = (await get(`/api/invoices?case_id=${addon.case_id}`, MANAGER)).body.data;
+      assert.equal(inv.total, 9000);
+      const homeEvents = (await get(`/api/cases/${home.case_id}/events`, MANAGER)).body;
+      assert.ok(homeEvents.some((e) => e.event === 'physio_addon' && e.detail.includes('Addon pack')));
+
+      // เคสกายภาพเพิ่มแพ็กเสริมไม่ได้ (ซื้อเพิ่ม = ต่อเคส)
+      await post('/api/cases', { ...addonBody, addon_of: addon.case_id }, MANAGER, 400);
+
+      // แพ็กเสริม: สลับเป็น Homecare ไม่ได้ · ย้ายไปผู้รับบริการคนอื่นไม่ได้ · addon_of แก้ไม่ได้ · เปลี่ยนแพ็กได้
+      await patchCase(addon.case_id, { service_kind: 'homecare' }, 409);
+      await patchCase(addon.case_id, { patient_id: 'KN690300002' }, 400);
+      const kept = await patchCase(addon.case_id, { addon_of: null, note: 'x' });
+      assert.equal(kept.addon_of, home.case_id);
+
+      // ต่อรอบแพ็กเสริม = รอบใหม่ยังผูกเคส Homecare เดิม
+      const round2 = await post('/api/cases', { ...me, physio_package_id: pkgId, fee: 9000, renewed_from: addon.case_id }, MANAGER, 201);
+      assert.equal(round2.addon_of, home.case_id);
+      assert.equal(round2.round_no, 2);
+
+      // เคส Homecare ยกเลิกแล้ว = เพิ่มไม่ได้ แต่รายการเดิมยังอยู่
+      await post(`/api/cases/${home.case_id}/cancel`, { reason: 'ทดสอบ' });
+      await post('/api/cases', addonBody, MANAGER, 409);
+      assert.equal((await get(`/api/cases/${home.case_id}/physio-addons`, MANAGER)).body.length, 2);
+    });
+
+    test('แพ็กกายภาพเสริมรวมใบ: บรรทัดในใบ Homecare · ตามราคา/ยกเลิก · มัดจำหักจาก Homecare · ใบออกแล้ว = แยกใบ', async () => {
+      const patchCase = async (id, body) => {
+        const res = await fetch(`${base}/api/cases/${id}`, {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json', cookie: `${COOKIE_NAME}=${signToken(MANAGER)}` },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        assert.equal(res.status, 200, JSON.stringify(data));
+        return data;
+      };
+      const invoicesOf = async (id) => (await get(`/api/invoices?case_id=${id}`, MANAGER)).body.data
+        .filter((i) => i.status !== 'cancelled');
+      await post('/api/patients', { patient_id: 'KN690300011', name: 'รวมใบ' }, MANAGER, 201);
+      const pkgId = (await sql.one(
+        `INSERT INTO physio_packages (name, sessions, special_price, staff_pay)
+         VALUES ('10 ครั้ง 3 เดือน', 10, 15000, 600) RETURNING physio_package_id`,
+      )).physio_package_id;
+      const me = { patient_id: 'KN690300011', client_name: 'รวมใบ' };
+      const home = await post('/api/cases', { ...me, service_kind: 'homecare', fee: 45000 }, MANAGER, 201);
+      const bundle = (extra) => post('/api/cases', {
+        ...me, physio_package_id: pkgId, fee: 15000, addon_of: home.case_id, bill_with_parent: true, ...extra,
+      }, MANAGER, 201);
+
+      const physio = await bundle();
+      assert.equal(physio.billed_with_parent, true);
+      assert.equal(physio.bill_with_parent, true);
+      assert.deepEqual(await invoicesOf(physio.case_id), [], 'แพ็กที่รวมใบไม่มีใบของตัวเอง');
+      let [draft] = await invoicesOf(home.case_id);
+      assert.equal(draft.total, 60000, 'ใบ Homecare = 45,000 + แพ็กกายภาพ 15,000');
+      assert.deepEqual(draft.addons, [{ name: '10 ครั้ง 3 เดือน', quantity: 1, unit_price: 15000, kind: 'physio', ref: physio.case_id }]);
+      assert.equal(draft.fee_stale, false, 'ยอดใบตรงกับเคส (ค่า Homecare + บรรทัดในใบ)');
+      assert.equal(draft.service_stale ?? false, false);
+
+      // ไม่ขึ้นในรายการ "เคสที่ยังไม่มีใบ" · ออกใบแยกซ้ำไม่ได้
+      const missing = (await get('/api/invoices/cases-without-invoice', MANAGER)).body;
+      assert.ok(!missing.some((c) => c.case_id === physio.case_id));
+      await post('/api/invoices', { case_id: physio.case_id }, MANAGER, 409);
+
+      // เปลี่ยนราคาที่เคสกายภาพ -> ใบร่างของ Homecare ตาม · แพ็กที่สองแล้วยกเลิก -> บรรทัดหาย
+      await patchCase(physio.case_id, { fee: 16000 });
+      [draft] = await invoicesOf(home.case_id);
+      assert.equal(draft.total, 61000);
+      const second = await bundle({ fee: 9000 });
+      assert.equal((await invoicesOf(home.case_id))[0].total, 70000);
+      await post(`/api/cases/${second.case_id}/cancel`, { reason: 'ลูกค้าไม่เอาแพ็กที่สอง' });
+      [draft] = await invoicesOf(home.case_id);
+      assert.equal(draft.total, 61000);
+      assert.equal(draft.addons.length, 1);
+
+      // มัดจำหักจากค่า Homecare เท่านั้น (≤ 45,000) — บรรทัดกายภาพไปอยู่ใบส่วนที่เหลือเต็มจำนวน
+      const over = await post(`/api/invoices/${draft.invoice_id}/billing-plan`, { mode: 'deposit', deposit_amount: 50000 }, MANAGER, 400);
+      assert.equal(over.details.max_deposit, 45000);
+      await post(`/api/invoices/${draft.invoice_id}/billing-plan`, { mode: 'deposit', deposit_amount: 10000 });
+      const plan = await invoicesOf(home.case_id);
+      const deposit = plan.find((i) => i.billing_kind === 'deposit');
+      const balance = plan.find((i) => i.billing_kind === 'balance');
+      assert.equal(deposit.total, 10000);
+      assert.deepEqual(deposit.addons, []);
+      assert.equal(balance.total, 51000, 'Homecare ที่เหลือ 35,000 + กายภาพ 16,000');
+      assert.equal(balance.addons[0].ref, physio.case_id);
+      // แก้ยอดมัดจำทีหลังก็ติดเพดานเดียวกัน
+      const raise = await fetch(`${base}/api/invoices/${deposit.invoice_id}/deposit`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json', cookie: `${COOKIE_NAME}=${signToken(MANAGER)}` },
+        body: JSON.stringify({ deposit_amount: 46000 }),
+      });
+      assert.equal(raise.status, 400);
+
+      // ใบ Homecare แบ่งงวดไปแล้ว รับบรรทัดเพิ่มไม่ได้ = แพ็กใหม่ออกใบของตัวเอง (ไม่หลุดไม่เก็บเงิน)
+      const late = await bundle({ fee: 8000 });
+      assert.equal(late.billed_with_parent, false);
+      assert.equal(late.bill_with_parent, false);
+      assert.equal((await invoicesOf(late.case_id))[0].total, 8000);
+    });
+
+    test('รวมแพ็กที่เปิดแยกเข้าเคส Homecare: เหลือเคสเดียวในรายการ · ใบร่างแพ็กถูกลบ · ใบ Homecare ยอดรวม', async () => {
+      const send = async (method, path, expected) => {
+        const res = await fetch(`${base}${path}`, {
+          method, headers: { cookie: `${COOKIE_NAME}=${signToken(MANAGER)}` },
+        });
+        assert.equal(res.status, expected, `${method} ${path}`);
+      };
+      const invoicesOf = async (id) => (await get(`/api/invoices?case_id=${id}`, MANAGER)).body.data
+        .filter((i) => i.status !== 'cancelled');
+      const rows = async () => (await get('/api/cases?q=KN690300021&per_page=100', MANAGER)).body.data;
+      await post('/api/patients', { patient_id: 'KN690300021', name: 'รวมเคส' }, MANAGER, 201);
+      const pkgId = (await sql.one(
+        `INSERT INTO physio_packages (name, sessions, special_price, staff_pay)
+         VALUES ('รวมเคส 10 ครั้ง', 10, 15000, 600) RETURNING physio_package_id`,
+      )).physio_package_id;
+      const me = { patient_id: 'KN690300021', client_name: 'รวมเคส' };
+      const home = await post('/api/cases', { ...me, service_kind: 'homecare', fee: 45000 }, MANAGER, 201);
+      const physio = await post('/api/cases', { ...me, physio_package_id: pkgId, fee: 15000, addon_of: home.case_id }, MANAGER, 201);
+      assert.equal((await rows()).length, 2, 'เปิดแยก = สองแถว');
+      assert.equal((await invoicesOf(physio.case_id)).length, 1);
+
+      const merged = await post(`/api/cases/${physio.case_id}/bundle`, {}, MANAGER, 200);
+      assert.equal(merged.bill_with_parent, true);
+      assert.deepEqual(await invoicesOf(physio.case_id), [], 'ใบร่างของแพ็กถูกลบ');
+      const [draft] = await invoicesOf(home.case_id);
+      assert.equal(draft.total, 60000);
+
+      const list = await rows();
+      assert.deepEqual(list.map((c) => c.case_id), [home.case_id], 'เหลือเคส Homecare แถวเดียว');
+      assert.equal(list[0].bundled_physio.length, 1);
+      assert.equal(list[0].bundled_physio[0].fee, 15000);
+      // เปิดดูแพ็กตรงๆ ยังได้ (นัด/รายละเอียด) แต่ออกใบแยกไม่ได้
+      assert.equal((await get(`/api/cases/${physio.case_id}`, MANAGER)).body.addon_of, home.case_id);
+      await post('/api/invoices', { case_id: physio.case_id }, MANAGER, 409);
+
+      // ลบใบ Homecare = เคสเดียวขึ้นในรายการรอออกใบ ยอดรวมแพ็ก · ออกใหม่ได้บรรทัดแพ็กครบ
+      await send('DELETE', `/api/invoices/${draft.invoice_id}`, 200);
+      const missing = (await get('/api/invoices/cases-without-invoice', MANAGER)).body
+        .filter((c) => [home.case_id, physio.case_id].includes(c.case_id));
+      assert.deepEqual(missing.map((c) => [c.case_id, c.fee]), [[home.case_id, 60000]]);
+      const again = await post('/api/invoices', { case_id: home.case_id }, MANAGER, 201);
+      assert.equal(again.total, 60000);
+      assert.equal(again.addons[0].ref, physio.case_id);
+    });
+
     test('ต่อเคส: เลือกทีมที่ตามมาเองได้ ([] = ไม่เอาใคร) · คนที่รับงานไม่ได้ถูกกันทั้งคำขอ', async () => {
       for (const [id, status] of [['EMP-0084', 'active'], ['EMP-0085', 'active'], ['EMP-0086', 'on_leave']]) {
         await sql.run(

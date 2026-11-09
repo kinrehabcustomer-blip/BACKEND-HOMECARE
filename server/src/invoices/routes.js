@@ -74,6 +74,8 @@ export async function resolvePayer(caseRow) {
  * ยังไม่ได้ตั้งค่าบริการก็ออกได้ ใบจะเป็นยอด 0 แล้วซิงก์ตามทีหลังตอนแก้เคส (ดู syncOpenFromCase)
  */
 export async function createDraftForCase(caseRow, actor) {
+  // แพ็กกายภาพเสริมที่เก็บรวมในใบของเคส Homecare — ไม่มีใบของตัวเอง (ดู bundledAddons)
+  if (caseRow.bill_with_parent) return null;
   /* กันใบร่างซ้ำไว้ตรงนี้ด้วย ไม่ใช่แค่ที่ปุ่มออกใบ — เส้นนี้ทำงานเองตอนเปิดเคส
      ถ้าคำขอเปิดเคสถูกยิงซ้ำ (เน็ตหลุดกลางทางแล้วกดใหม่) จะได้ไม่เหลือใบร่างค้างสองใบเงียบๆ */
   const existing = await repo.findDraftForCase(caseRow.case_id);
@@ -214,6 +216,18 @@ invoicesRouter.post(
     if (!caseRow) throw new ApiError(400, `ไม่พบเคสรหัส ${input.case_id}`);
     if (caseRow.status === 'cancelled') {
       throw new ApiError(409, 'เคสนี้ถูกยกเลิกไปแล้ว ออกใบแจ้งหนี้ไม่ได้');
+    }
+    /* แพ็กกายภาพเสริมที่เก็บรวมในใบของเคส Homecare — ใบ Homecare ยังมีบรรทัดนี้อยู่ = ห้ามออกซ้ำ (เก็บเงินสองครั้ง)
+       ใบ Homecare ไม่มีบรรทัดนี้แล้ว (ยกเลิก/ลบทั้งชุด) = แพ็กกลับมาออกใบของตัวเอง ไม่งั้นไม่มีใครเก็บเงินแพ็กนี้ */
+    if (caseRow.bill_with_parent) {
+      if (await repo.bundleCovered(caseRow.case_id)) {
+        throw new ApiError(
+          409,
+          'แพ็กกายภาพนี้รวมอยู่ในเคส Homecare — ออก/แก้ใบแจ้งหนี้ที่เคส Homecare (แพ็กเป็นบรรทัดหนึ่งในใบนั้น)',
+          { parent_case_id: caseRow.addon_of },
+        );
+      }
+      Object.assign(caseRow, await cases.billSeparately(caseRow.case_id, req.user));
     }
 
     /* เคสนี้มีใบร่างค้างอยู่แล้ว — ออกเพิ่มจะได้ใบเหมือนกันสองใบที่แยกไม่ออกว่าใบไหนคือใบจริง
@@ -441,6 +455,13 @@ invoicesRouter.post(
     if (result.reason === 'deposit_not_less_than_total') {
       throw new ApiError(400, 'ยอดมัดจำต้องน้อยกว่ายอดเต็ม — ถ้าเก็บทั้งหมดให้เลือก "เก็บเต็มจำนวน"');
     }
+    if (result.reason === 'deposit_over_homecare') {
+      throw new ApiError(
+        400,
+        `มัดจำหักจากค่า Homecare เท่านั้น — ใบนี้มีแพ็กกายภาพรวมอยู่ มัดจำได้ไม่เกิน ${result.max_deposit.toLocaleString('th-TH')} บาท`,
+        { max_deposit: result.max_deposit },
+      );
+    }
     if (result.reason === 'has_payments') {
       throw new ApiError(409, 'ใบนี้มีรายการรับชำระแล้ว จึงเปลี่ยนวิธีเก็บเงินไม่ได้');
     }
@@ -496,6 +517,13 @@ invoicesRouter.patch(
         400,
         `ยอดมัดจำต้องน้อยกว่ายอดเต็มของแผน (${result.total.toLocaleString('th-TH')} บาท)` +
           ' — ถ้าจะเก็บทั้งหมดในใบเดียว ให้ลบใบส่วนที่เหลือแล้วออกใบใหม่',
+      );
+    }
+    if (result.reason === 'deposit_over_homecare') {
+      throw new ApiError(
+        400,
+        `มัดจำหักจากค่า Homecare เท่านั้น — ใบนี้มีแพ็กกายภาพรวมอยู่ มัดจำได้ไม่เกิน ${result.max_deposit.toLocaleString('th-TH')} บาท`,
+        { max_deposit: result.max_deposit },
       );
     }
     if (result.reason === 'deposit_below_paid') {

@@ -3,6 +3,8 @@ import { ISSUER } from './issuer.js';
 /** ชื่อรายการที่ลูกค้าเห็นบนใบ — ข้อมูลภายในหน้า staff ยังคงใช้ชื่อจริงตามเดิม */
 export function customerAddonDescription(addon) {
   if (addon?.kind === 'sale') return String(addon.name ?? '').trim() || ISSUER.customerServiceDescription;
+  // แพ็กกายภาพเสริมที่เก็บรวมในใบ Homecare — ลูกค้าต้องเห็นว่าจ่ายค่าคอร์สกายภาพอะไร ไม่ใช่ "ค่าบริการ" ซ้ำสองบรรทัด
+  if (addon?.kind === 'physio') return `กายภาพบำบัด: ${String(addon.name ?? '').trim()}`;
   return ISSUER.customerServiceDescription;
 }
 
