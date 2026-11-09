@@ -309,6 +309,9 @@ export const api = {
 
   // ตารางงาน + เช็คอิน/เอาท์
   myToday: () => request('/my/today'),
+  /** กระดิ่งแจ้งเตือนของพนักงาน — { items, unread } · ids ไม่ส่ง = อ่านทั้งหมด */
+  myNotifications: () => request('/my/notifications'),
+  readMyNotifications: (ids) => request('/my/notifications/read', { method: 'POST', body: ids ? { ids } : {} }),
   myAttendance: (month) => request(`/my/attendance${month ? `?month=${month}` : ''}`),
   /** สลิปค่าตอบแทนของตัวเอง — เฉพาะรอบที่จ่ายจริงแล้ว */
   myPayslips: () => request('/my/payslips'),

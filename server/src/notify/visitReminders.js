@@ -1,6 +1,7 @@
 import { sql } from '../db/index.js';
 import { ensureFamilyTable } from '../lib/family.js';
 import { ensureCustomerLineColumns } from '../lib/customerLine.js';
+import { ensureStaffInbox, inboxVisitChange } from './staffInbox.js';
 
 /**
  * เตือนนัดทาง LINE @kinjobs ให้พนักงานที่ถูกลงกะ (ดร.ธงชัย 26 ต.ค. 2569)
@@ -323,6 +324,8 @@ export const ensureVisitChangeTable = () =>
        )`,
     )
     .then(() => sql.run('CREATE INDEX IF NOT EXISTS idx_visit_change_pending ON visit_change_outbox (created_at) WHERE claimed_at IS NULL'))
+    // กระดิ่งในแอปของพนักงานถูกเขียนใน transaction เดียวกับ recordVisitChange — ตารางต้องมีก่อนเปิด tx
+    .then(() => ensureStaffInbox())
     .catch((err) => {
       changeReady = null;
       throw err;
@@ -349,6 +352,8 @@ export async function recordVisitChange(tx, caseId, visitId, before, after, chan
      VALUES (:visit_id, :case_id, :kind, :old_date, :old_start, :old_end, :old_assignee, :new_date, :new_start, :new_end, :new_assignee)`,
     row,
   );
+  // กระดิ่งในแอปของพนักงาน (คนเก่า/คนใหม่ของกะ) — ทุกคน ไม่ว่าจะผูก LINE หรือไม่
+  await inboxVisitChange(tx, row);
 }
 
 /** จองรายการแจ้งเลื่อน/ยกเลิกที่ยังไม่ส่ง → รวมเป็นหนึ่งรายการต่อนัด (ค่าเดิมจากรอบแรก ค่าใหม่จากรอบล่าสุด) พร้อมผู้รับ */

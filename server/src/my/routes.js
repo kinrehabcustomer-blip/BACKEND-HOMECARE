@@ -17,6 +17,7 @@ import * as family from '../lib/family.js';
 import { THERAPY_POSITIONS } from '../employees/schema.js';
 import { sql } from '../db/index.js';
 import { notifySafely, onVisitAttendance } from '../notify/caseEvents.js';
+import * as inbox from '../notify/staffInbox.js';
 
 /**
  * ส่วนของ "พนักงานภาคสนาม" (field) — เห็น/แตะได้เฉพาะกะของตัวเอง
@@ -624,5 +625,26 @@ myRouter.get(
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Cache-Control', 'private, no-store');
     res.send(row.data);
+  }),
+);
+
+/**
+ * กระดิ่งแจ้งเตือนในแอป (notify/staffInbox.js) — กะใหม่/เลื่อน/ยกเลิก + เตือนก่อนถึงกะ
+ * กรองด้วย session เสมอ — อ่าน/กดอ่านแล้วได้เฉพาะของตัวเอง
+ */
+myRouter.get(
+  '/notifications',
+  asyncRoute(async (req, res) => {
+    res.json(await inbox.listInbox(req.user.employee_id));
+  }),
+);
+
+myRouter.post(
+  '/notifications/read',
+  asyncRoute(async (req, res) => {
+    const ids = req.body?.ids;
+    if (ids !== undefined && !Array.isArray(ids)) throw new ApiError(400, 'ids ต้องเป็นรายการตัวเลข');
+    const updated = await inbox.markRead(req.user.employee_id, ids ?? null);
+    res.json({ updated });
   }),
 );

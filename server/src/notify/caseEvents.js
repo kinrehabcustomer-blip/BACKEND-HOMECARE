@@ -3,6 +3,7 @@ import { todayTh } from '../lib/dates.js';
 import { ensureFamilyTable } from '../lib/family.js';
 import { ensureCustomerLineColumns } from '../lib/customerLine.js';
 import { FAMILY_IDS, PHYSIO, START_AT, ensureVisitReminderColumns, ensureVisitNotificationOutbox } from './visitReminders.js';
+import { inboxVisitsAdded } from './staffInbox.js';
 
 /**
  * แจ้ง LINE ทันทีเมื่อเกิดเหตุการณ์ในเคส/ปฏิทิน (ต่อยอดจาก visitReminders.js ซึ่งดูแลการเตือนก่อนนัดและการเลื่อนนัด)
@@ -191,6 +192,8 @@ export async function onVisitsAdded(caseId, beforeIds, result) {
   const byStaff = new Map();
   for (const v of fresh) byStaff.set(v.assigned_to, [...(byStaff.get(v.assigned_to) ?? []), v]);
   for (const [employeeId, visits] of byStaff) {
+    // กระดิ่งในแอป — ทุกคน (ไม่ผูก LINE ก็เห็นในแอป) · พังก็ไม่ขวาง LINE
+    await inboxVisitsAdded(caseId, employeeId, visits).catch((err) => console.error('[staff-inbox] visits-added:', err?.message ?? err));
     const person = await staffInfo(employeeId);
     if (!person?.line_user_id) continue;
     const ids = visits.map((v) => v.visit_id);

@@ -2356,6 +2356,62 @@ if (process.env.RUN_DB_TESTS !== '1') {
       assert.match((await call('PATCH', futurePath, { status: 'cancelled' }, MANAGER, 409)).error, /ปล่อยค่าจ้าง/);
     });
 
+    test('กระดิ่งพนักงาน: กะใหม่ / เลื่อน / ย้ายคน / ยกเลิก / เตือนก่อนถึงกะ · กดอ่านได้เฉพาะของตัวเอง', async () => {
+      const mine = async (who, caseId) => (await get('/api/my/notifications', who)).body.items.filter((n) => n.case_id === caseId);
+      const c = await newCase();
+      const before = (await mine(LEAD_A, c.case_id)).length;
+      const sched = await post(`/api/cases/${c.case_id}/visits/bulk`,
+        { dates: [inDays(1), inDays(5)], assigned_to: LEAD_A.employee_id }, MANAGER, 201);
+      let a = await mine(LEAD_A, c.case_id);
+      const added = a.find((n) => n.kind === 'visits_added');
+      assert.ok(added, JSON.stringify(a));
+      assert.equal(added.payload.total, 2);
+      assert.equal(added.payload.date, inDays(1));
+      assert.equal(added.payload.last_date, inDays(5));
+      assert.ok(a.length > before);
+
+      const near = sched.visits.find((v) => v.visit_date === inDays(1));
+      const far = sched.visits.find((v) => v.visit_date === inDays(5));
+      const farPath = `/api/cases/${c.case_id}/visits/${far.visit_id}`;
+
+      // เลื่อนวัน → คนเดิมได้ "กะถูกเลื่อน" พร้อมวันเก่า/ใหม่
+      await call('PATCH', farPath, { visit_date: inDays(6) });
+      a = await mine(LEAD_A, c.case_id);
+      const moved = a.find((n) => n.kind === 'visit_moved');
+      assert.equal(moved?.payload.old_date, inDays(5));
+      assert.equal(moved?.payload.date, inDays(6));
+
+      // ย้ายกะไปให้อีกคน → คนเก่า "ถูกย้ายไปให้คนอื่น" · คนใหม่ "กะใหม่"
+      await call('PATCH', farPath, { assigned_to: LEAD_B.employee_id });
+      assert.ok((await mine(LEAD_A, c.case_id)).some((n) => n.kind === 'visit_removed' && n.visit_id === far.visit_id));
+      const b = await mine(LEAD_B, c.case_id);
+      assert.ok(b.some((n) => n.kind === 'visits_added' && n.visit_id === far.visit_id && n.payload.date === inDays(6)), JSON.stringify(b));
+
+      // ยกเลิกกะ → "กะถูกยกเลิก"
+      await call('PATCH', `/api/cases/${c.case_id}/visits/${near.visit_id}`, { status: 'cancelled' });
+      assert.ok((await mine(LEAD_A, c.case_id)).some((n) => n.kind === 'visit_cancelled' && n.visit_id === near.visit_id));
+
+      // เตือน 3 ชม. ก่อนกะ — สร้างตอนดึงรายการ (ไม่ต้องมี cron) และไม่ซ้ำเมื่อดึงอีกรอบ
+      const { soon } = await sql.one(`SELECT to_char((now() AT TIME ZONE 'Asia/Bangkok') + interval '1 hour', 'HH24:MI') AS soon`);
+      if (soon > '01:00') { // ข้ามช่วงใกล้เที่ยงคืน (เวลา +1 ชม. ข้ามไปวันพรุ่งนี้)
+        const s2 = await post(`/api/cases/${c.case_id}/visits/bulk`,
+          { dates: [today], assigned_to: LEAD_A.employee_id, planned_start: soon }, MANAGER, 201);
+        const v = s2.visits.find((x) => x.visit_date === today);
+        await get('/api/my/notifications', LEAD_A);
+        const r = (await mine(LEAD_A, c.case_id)).filter((n) => n.kind === 'remind_3h' && n.visit_id === v.visit_id);
+        assert.equal(r.length, 1, 'เตือนหนึ่งครั้ง ดึงซ้ำไม่สร้างเพิ่ม');
+        assert.equal(r[0].payload.start, soon);
+      }
+
+      // อ่านแล้ว: คนอื่นกดแทนไม่ได้ · ของตัวเองกดแล้วเลขแดงเป็น 0
+      const ids = (await mine(LEAD_A, c.case_id)).map((n) => n.id);
+      assert.equal((await call('POST', '/api/my/notifications/read', { ids }, LEAD_B)).updated, 0);
+      assert.ok((await get('/api/my/notifications', LEAD_A)).body.unread > 0);
+      await call('POST', '/api/my/notifications/read', {}, LEAD_A);
+      assert.equal((await get('/api/my/notifications', LEAD_A)).body.unread, 0);
+      await call('POST', '/api/my/notifications/read', { ids: 'x' }, LEAD_A, 400);
+    });
+
     test('เปลี่ยนคนดูแลเคส: กะข้างหน้าย้ายตาม · กะที่ลงตอนยังไม่มีคนได้เจ้าของ · ถอดคนแล้วไม่ค้างชื่อ', async () => {
       const c = await newCase();
       const sched = await post(`/api/cases/${c.case_id}/visits/bulk`, { dates: [inDays(-1), today, inDays(2)] }, MANAGER, 201);

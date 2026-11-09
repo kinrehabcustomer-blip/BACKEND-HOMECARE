@@ -6182,3 +6182,24 @@ h1, h2, h3, h4, .page-hero-title, .cal-title, .login-heading h1 {
 .install-row { flex-wrap: wrap; }
 .install-row > :last-child { flex-shrink: 0; max-width: 22rem; }
 .install-steps { margin: 0; padding-left: 1.25rem; line-height: 1.7; font-size: 0.875rem; }
+
+/* ---------- กระดิ่งแจ้งเตือนของพนักงาน (StaffBell.jsx) — กล่องเดียวกับกระดิ่งหลังบ้าน แถวเป็นรายการแจ้งเตือนทีละเรื่อง ---------- */
+.staff-note {
+  display: flex; align-items: flex-start; gap: 0.625rem; width: 100%;
+  padding: 0.625rem 0.75rem; border: 0; border-radius: 0.625rem;
+  background: none; color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+.staff-note + .staff-note { margin-top: 0.125rem; }
+.staff-note:hover { background: var(--surface-2); }
+.staff-note.is-new { background: var(--brand-soft); }
+.staff-note-ico {
+  display: grid; place-items: center; flex-shrink: 0; width: 2rem; height: 2rem; border-radius: 999px;
+  background: var(--surface-2); color: var(--brand);
+}
+.staff-note.is-new .staff-note-ico { background: var(--surface); }
+.staff-note.is-urgent .staff-note-ico { color: var(--danger); }
+.staff-note-ico svg { width: 1rem; height: 1rem; }
+.staff-note-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.125rem; }
+.staff-note-main strong { font-size: 0.875rem; font-weight: 600; line-height: 1.35; }
+.staff-note-body { font-size: 0.8125rem; line-height: 1.45; color: var(--text); }
+.staff-note-time { font-size: 0.6875rem; color: var(--muted); }

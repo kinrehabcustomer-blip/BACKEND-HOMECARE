@@ -6,6 +6,7 @@ import LoginPage from './pages/LoginPage.jsx';
 import LineIcon from './components/LineIcon.jsx';
 import ChangePasswordForm from './components/ChangePasswordForm.jsx';
 import NotificationBell from './components/NotificationBell.jsx';
+import StaffBell from './components/StaffBell.jsx';
 import { useBottomBounce } from './lib/edgeBounce.js';
 
 /*
@@ -251,15 +252,15 @@ function Sidebar({ menuOpen, setMenuOpen }) {
       {/* แถวบนสุด: โลโก้ซ้าย · กระดิ่งขวา — ของค้างเป็นสิ่งแรกที่ควรเห็นตอนเปิดระบบ
           ไม่ใช่ต้องกวาดตาลงไปหาที่ท้ายแถบเมนูรวมกับปุ่มตั้งค่า/ออกจากระบบ
 
-          กระดิ่งเฉพาะฝั่งหลังบ้าน — ของค้างทั้ง 4 กลุ่มเป็นงานของผู้จัดการ/HR
-          พนักงานภาคสนามเข้าหน้าพวกนั้นไม่ได้เลย (และ /api/notify/alerts เป็น requireAdmin)
-          ใส่ให้เขาก็ได้กระดิ่งที่กดแล้วเจอ 403 ทุกบรรทัด */}
+          หลังบ้าน = ของค้างทั้ง 4 กลุ่ม (NotificationBell · /api/notify/alerts เป็น requireAdmin)
+          พนักงานภาคสนาม = กะใหม่/เลื่อน/ยกเลิก/เตือนก่อนถึงกะของตัวเอง (StaffBell · /api/my/notifications) */}
       <div className="brand">
         {/* โลโก้ 2 ไฟล์ — CSS เลือกตาม data-theme (ไฟล์ -dark: ตัวอักษร HOME CARE สีครีม พื้นโปร่ง ไม่มีขอบขาว) */}
         <img className="brand-logo logo-light" src="/logo-navbar.webp" alt="KIN Home Care" />
         <img className="brand-logo logo-dark" src="/logo-navbar-dark.webp" alt="" aria-hidden="true" />
         {/* ตำแหน่งที่ยังไม่มีสิทธิ์หมวดไหนเลย ไม่มีของค้างให้ดู (และ /api/notify/alerts ตอบ 403) */}
         {isAdmin && items.length > 0 && <NotificationBell />}
+        {!isAdmin && <StaffBell />}
       </div>
 
       {/* ปุ่มพับ/กางเมนู — โผล่เฉพาะจอแคบ (ดู @media ใน index.css)
