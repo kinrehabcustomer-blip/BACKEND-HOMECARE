@@ -16,6 +16,9 @@ import ProcedureNameInput from './ProcedureNameInput.jsx';
  * รายการเดิมส่งกลับไปตามที่ server ให้มา (หัตถการคง VN เดิม) — รูปแบบเดียวกับ addonsPayload/proceduresPayload ในฟอร์มเคส
  *
  * mode: 'procedure' | 'equipment'
+ *
+ * ไม่ติดธง is-subsheet (แผ่นเต็มจอบนมือถือ) — ฟอร์มสั้น เต็มจอแล้วปุ่มลอยกลางจอเหลือที่ว่างครึ่งล่าง
+ * เป็นแผ่นสูงตามเนื้อหาที่เลื่อนขึ้นจากขอบล่างแทน (ผู้ใช้ขอ 9 พ.ย. 2569 "ดึงลงมา") แบบเดียวกับกล่องยืนยัน
  */
 const toPayload = (a) =>
   isProcedure(a)
@@ -70,7 +73,7 @@ export default function CaseChargeModal({ item, mode, onClose, onSaved }) {
 
   return (
     <div className="modal-backdrop modal-stacked" onClick={() => !saving && onClose()}>
-      <div className="modal modal-narrow is-subsheet charge-modal" ref={sheetRef} role="dialog" aria-modal="true"
+      <div className="modal modal-narrow charge-modal" ref={sheetRef} role="dialog" aria-modal="true"
         onClick={(e) => e.stopPropagation()}>
         <header className="modal-head">
           <div>
