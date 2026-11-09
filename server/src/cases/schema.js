@@ -86,9 +86,14 @@ const caseFields = z.object({
   // ---------- รายละเอียดการใช้บริการ ----------
   service_start_preference: optionalText,
   address: optionalText,
+  /* ต้องมีตัวเลขพอโทรออกได้จริง — กฎเดียวกับ optionalPhone ใน customers/patients
+     "ตรวจรอบ 18" แก้ให้สองที่นั้นแล้วแต่ลืมช่องนี้ (Gemini ชี้ 8 พ.ย. 2569 · ยืนยันแล้ว)
+     กฎเดิมดูแค่ "อักขระที่อนุญาต 8–20 ตัว" — "++++++++" หรือเว้นวรรคแปดตัวจึงผ่านเข้าฐาน
+     เป็นเบอร์ของเคส แล้วคนที่รับงานเห็นช่องเบอร์มีค่า แต่โทรหาบ้านลูกค้าไม่ได้ */
   client_phone: z
     .string()
     .regex(/^[0-9+\-\s]{8,20}$/, 'เบอร์โทรไม่ถูกต้อง')
+    .refine((v) => (v.match(/\d/g) ?? []).length >= 8, 'เบอร์โทรต้องมีตัวเลขอย่างน้อย 8 หลัก')
     .optional()
     .nullable(),
   nurse_call_preference: optionalText,
@@ -139,6 +144,20 @@ const caseFields = z.object({
 
 // สถานะเปลี่ยนผ่าน endpoint เฉพาะ (assign/unassign/close/reopen) เท่านั้น ไม่ให้แก้ตรงๆ
 // เพื่อไม่ให้เกิดกรณี 'จับคู่แล้ว' แต่ไม่มีพนักงาน
+/* วันสิ้นสุดต้องไม่มาก่อนวันเริ่ม — ของเดิมตรวจแค่ว่าแต่ละช่องเป็นวันที่มีจริงในปฏิทิน
+   สลับวันแล้วเคสจะถูกจัดเข้า "รอยืนยันปิดเคส" หรือ "กำลังให้บริการ" ผิดช่วงโดยไม่มี error
+   (Codex ข้อ 2 · 8 พ.ย. 2569) · ฝั่งแก้ไข (PATCH) ตรวจได้เฉพาะตอนส่งมาทั้งคู่
+   ส่งมาช่องเดียวต้องเทียบกับค่าในฐาน ซึ่งทำที่ชั้น route (ดู cases/routes.js) */
+const checkDateOrder = (v, ctx) => {
+  if (v.start_date && v.end_date && v.end_date < v.start_date) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['end_date'],
+      message: 'วันสิ้นสุดต้องไม่มาก่อนวันเริ่ม',
+    });
+  }
+};
+
 export const createCaseSchema = caseFields.superRefine((v, ctx) => {
   if (!v.client_name && !v.customer_id) {
     ctx.addIssue({
@@ -163,10 +182,13 @@ export const updateCaseSchema = caseFields
     // รหัสของแฟ้มผู้รับบริการที่จะสร้างให้ ตอนเพิ่งใส่ชื่อผู้รับบริการให้เคสที่เปิดด้วยผู้ว่าจ้างอย่างเดียว
     // (ไม่ใช่คอลัมน์ของเคส — ดู patientForNamedCase ใน cases/repo.js)
     patient_code: patientCode.optional().nullable(),
-  });
+  })
+  .superRefine(checkDateOrder);
 
 export const assignSchema = z.object({
   employee_id: z.string().trim().min(1, 'กรุณาเลือกพนักงาน'),
+  // ยืนยันมอบหมายทั้งที่เคสยังขาดที่อยู่/เบอร์ (ดูด่านใน routes.js · Codex ข้อ 1 · 8 พ.ย. 2569)
+  force: z.boolean().optional(),
 });
 
 /**
@@ -263,7 +285,7 @@ export const createVisitSchema = z.object({
 
 // จำนวนกะสูงสุดต่อการสร้างหนึ่งครั้ง — ตารางจริงของเคสหนึ่งเดือนอยู่ราว 30 กะ
 // เผื่อไว้ถึง 200 สำหรับเคสยาวข้ามไตรมาส แต่ไม่ปล่อยไม่จำกัด กันกรอกปีผิดแล้วได้กะเป็นพัน
-const MAX_BULK_VISITS = 200;
+export const MAX_BULK_VISITS = 200;
 
 /** ทุกวันในช่วง (รวมวันเริ่ม–วันจบ) ที่ตรงกับวันในสัปดาห์ที่เลือก — คิดบน UTC ให้วันไม่เลื่อนตามโซนเครื่อง */
 function datesInRange(from, to, weekdays) {
@@ -313,7 +335,12 @@ export const bulkVisitSchema = z
   })
   .superRefine((v, ctx) => {
     const listed = v.dates?.length ?? 0;
-    if (listed === 0 && v.from && v.count) return;
+    /* ลงตามจำนวนครั้ง (from + count ไม่มี to) — เพดานถูกบังคับที่ตัว count แล้ว (max MAX_BULK_VISITS)
+       🔴 ต้องมี !v.to ด้วย: ของเดิมส่ง from+to+count มาพร้อมกันแล้วหลุดด่านทั้งก้อน
+       ทั้งการตรวจ to < from และเพดานจำนวนกะ — ขณะที่ transform เลือกใช้ datesInRange(from, to)
+       เพราะมี to อยู่ ยิง from 2026-01-01 to 2030-12-31 count 1 จึงลงกะได้พันกว่าใบในครั้งเดียว
+       (Gemini ชี้ 8 พ.ย. 2569 · ยืนยันกับโค้ดแล้ว — ต้องกันที่ server ไม่ใช่พึ่งหน้าจอ) */
+    if (listed === 0 && v.from && v.count && !v.to) return;
     if (listed === 0 && !(v.from && v.to)) {
       ctx.addIssue({ code: 'custom', path: ['dates'], message: 'กรุณาเลือกวันที่จะลงกะ' });
       return;
@@ -628,7 +655,13 @@ export const hasReportContent = (row) =>
     return String(v).trim() !== '';
   });
 
-export const createReportSchema = reportFields.extend(reportImageFields).superRefine((v, ctx) => {
+/* รหัสคำขอจากหน้าเว็บ — กันรายงานซ้ำเมื่อเน็ตหลุดแล้วกดใหม่ หรือไคลเอนต์ retry POST เดิม
+   (Codex ข้อ 6 · 8 พ.ย. 2569) · ไม่บังคับ เพราะหน้าเว็บรุ่นเก่ายังไม่ส่งมา
+   หนึ่งกะมีรายงานหลายใบได้โดยตั้งใจ จึงกันซ้ำที่ "คำขอ" ไม่ใช่ที่ visit_id */
+export const createReportSchema = reportFields
+  .extend(reportImageFields)
+  .extend({ request_id: z.string().uuid('รหัสคำขอต้องเป็น UUID').optional() })
+  .superRefine((v, ctx) => {
   if (hasReportContent(v)) return;
   ctx.addIssue({
     code: 'custom',

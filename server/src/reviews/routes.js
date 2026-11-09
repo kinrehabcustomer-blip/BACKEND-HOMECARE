@@ -23,8 +23,18 @@ const DAILY_CAP = 30;
  * — อ่าน x-forwarded-for ก่อน แล้วค่อยตกมาที่ req.ip ตอนรันบนเครื่องตัวเอง
  */
 function fingerprint(req) {
-  const forwarded = String(req.headers['x-forwarded-for'] ?? '').split(',')[0].trim();
-  const ip = forwarded || req.ip || 'unknown';
+  /* ลำดับความน่าเชื่อ: header ที่ "แพลตฟอร์มเขียนทับเอง" ก่อนเสมอ แล้วค่อยตกมาที่ของทั่วไป
+     x-forwarded-for ตัวแรกเป็นค่าที่ผู้ส่งใส่มาเองได้ถ้า proxy ต่อท้ายแทนที่จะเขียนทับ
+     ใช้มันเป็นหลักแล้วเพดานกันกดซ้ำ/กันยิงคะแนนปลอมจะถูกข้ามได้ด้วยการสุ่ม header
+     (Codex ข้อ 12 · 8 พ.ย. 2569) · x-vercel-forwarded-for และ x-real-ip ตั้งโดย Vercel เอง
+     บนเครื่องตัวเองไม่มีสองตัวนี้ จึงตกมาที่ req.ip ตามเดิม */
+  const first = (v) => String(v ?? '').split(',')[0].trim();
+  const ip =
+    first(req.headers['x-vercel-forwarded-for']) ||
+    first(req.headers['x-real-ip']) ||
+    req.ip ||
+    first(req.headers['x-forwarded-for']) ||
+    'unknown';
   return createHash('sha256').update(`${ip}|${process.env.JWT_SECRET}`).digest('hex').slice(0, 32);
 }
 

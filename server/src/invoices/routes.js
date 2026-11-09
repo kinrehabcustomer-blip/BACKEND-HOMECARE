@@ -18,6 +18,7 @@ import {
   adjustmentSchema,
   cancelAdjustmentSchema,
   cancelInvoiceSchema,
+  revokeShareSchema,
   updateRefundSchema,
 } from './schema.js';
 import { createAdjustment, cancelAdjustment, updateRefund } from './ledger.js';
@@ -27,7 +28,7 @@ import { requirePermission, can } from '../lib/auth.js';
 
 const requireAdjust = requirePermission('invoice_adjust', 'บัญชีของคุณไม่มีสิทธิ์ออกใบลดหนี้/ยกเลิกใบ');
 import { todayTh } from '../lib/dates.js';
-import { createShareLink, lineTarget, queueLineSend, sendHistory } from './share.js';
+import { createShareLink, lineTarget, queueLineSend, sendHistory, activeShares, revokeShares } from './share.js';
 
 export const invoicesRouter = Router();
 
@@ -281,6 +282,29 @@ invoicesRouter.post(
  * ส่งใบแจ้งหนี้/ใบเสร็จเข้า LINE ลูกค้า (ดร.ธงชัย 24 ต.ค. 2569 ข้อ 4 · ดู share.js)
  * GET = ส่งได้ไหม + ประวัติการส่ง · POST = ออกลิงก์ดูเอกสาร + ใส่คิว (ระบบแชทส่งออก OA Kin HomeCare ภายในไม่กี่นาที)
  */
+/**
+ * ลิงก์ที่ยังเปิดได้ของใบ + ปิดลิงก์ (Codex ข้อ 10 · 8 พ.ย. 2569)
+ *
+ * ลิงก์บิลอายุ 180 วันตามคำเคาะ ดร. 24 ต.ค. 2569 — ไม่แตะอายุ
+ * แต่ถ้าส่งผิดห้องหรือรู้ว่าลิงก์ถูกส่งต่อออกไป ต้องมีทางปิด ไม่ใช่รอครบหกเดือน
+ * (payload มีชื่อผู้ป่วย รหัสผู้ป่วย เลขผู้เสียภาษี รายละเอียดบริการ และประวัติชำระ)
+ * ปิดแล้วไม่ลบแถวทิ้ง เก็บไว้เป็นหลักฐานว่าใครปิดและเพราะอะไร
+ */
+invoicesRouter.get(
+  '/:id/share-links',
+  asyncRoute(async (req, res) => res.json({ links: await activeShares(req.params.id) })),
+);
+
+invoicesRouter.post(
+  '/:id/share-links/revoke',
+  asyncRoute(async (req, res) => {
+    const { reason, token_hash: tokenHash } = revokeShareSchema.parse(req.body ?? {});
+    const r = await revokeShares(req.params.id, { tokenHash: tokenHash ?? null, reason }, req.user);
+    if (!r.revoked) throw notFound('ไม่มีลิงก์ที่ยังเปิดได้ของใบนี้');
+    res.json({ ...r, links: await activeShares(req.params.id) });
+  }),
+);
+
 invoicesRouter.get(
   '/:id/line',
   asyncRoute(async (req, res) => {
@@ -314,6 +338,14 @@ invoicesRouter.patch(
     throwIfInvoiceMoved(result);
     if (result.reason === 'invalid_status') {
       throw new ApiError(409, 'ใบที่ชำระ/ยกเลิกแล้วแก้ไม่ได้ — ปรับยอดด้วยใบลดหนี้/ใบเพิ่มหนี้แทน');
+    }
+    /* ใบที่ส่งลิงก์ให้ลูกค้าไปแล้ว — ลิงก์อ่านใบสด แก้แล้วลูกค้าเห็นเอกสารคนละชุด (Codex ข้อ 7) */
+    if (result.reason === 'already_shared') {
+      throw new ApiError(
+        409,
+        'ใบนี้ส่งลิงก์ให้ลูกค้าไปแล้ว แก้ข้อมูลบนเอกสารไม่ได้ — ถ้าข้อมูลผู้จ่ายหรือรายละเอียดบริการเปลี่ยน' +
+          ' ให้ยกเลิกใบนี้แล้วออกใบใหม่ (ลิงก์เดิมอ่านใบสด ถ้าแก้ตรงนี้ลูกค้าจะเห็นคนละชุดโดยไม่มีอะไรบอก)',
+      );
     }
     if (result.reason === 'amount_locked_issued') {
       throw new ApiError(409, AMOUNT_LOCKED_MESSAGE);

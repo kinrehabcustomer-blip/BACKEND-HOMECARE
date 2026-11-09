@@ -1,4 +1,5 @@
 import { sql, transaction, nextCaseId } from '../db/index.js';
+import { likeEscape } from '../lib/likeEscape.js';
 import { caseCode, caseIdForPatient, isCaseOfPatient } from './caseCode.js';
 import { issueForVisits, withProcedureNumbers } from './visitNumbers.js';
 /* รายการช่องของรายงานมาจาก schema.js ที่เดียว — ฟอร์มมี 80 กว่าช่อง การก๊อปรายชื่อมาไว้สองที่
@@ -238,7 +239,7 @@ export async function list({ q, status, case_type, service_kind, assigned_to, no
     where.push(`(
       c.case_id ILIKE :q OR c.title ILIKE :q OR c.client_name ILIKE :q OR c.client_phone ILIKE :q
     )`);
-    params.q = `%${q}%`;
+    params.q = `%${likeEscape(q)}%`;
   }
   if (CASE_STAGE_SQL[status]) {
     where.push(`(${CASE_STAGE_SQL[status]})`);
@@ -3796,7 +3797,10 @@ export function assignableEmployees() {
        ส่วน dropdown จับคู่เคส/ลงกะกรองด้วย can_take_cases */
     `SELECT e.employee_id, e.first_name, e.last_name, e.nickname, e.position, e.status,
             e.position = ANY(:field::text[]) AS can_take_cases,
-            COUNT(c.case_id) FILTER (WHERE c.status = 'assigned') AS active_cases
+            /* "ถืออยู่กี่เคส" ต้องรวมเคสที่เริ่มให้บริการแล้วด้วย (Codex ข้อ 5 · 8 พ.ย. 2569)
+               ของเดิมนับเฉพาะ 'assigned' — คนที่กำลังดูแลอยู่หลายบ้านจึงขึ้นเลขต่ำกว่าจริง
+               แล้วคนเลือกจาก popup จับคู่ก็เห็นเขาเหมือนว่าง */
+            COUNT(c.case_id) FILTER (WHERE c.status IN ('assigned', 'in_progress')) AS active_cases
      FROM employees e
      LEFT JOIN cases c ON c.assigned_to = e.employee_id
      WHERE e.status IN ('active', 'probation')
@@ -4044,9 +4048,33 @@ export async function findReport(caseId, reportId) {
  * บันทึกรายงานใหม่ — ผู้บันทึกมาจาก session (req.user) ไม่รับจาก body
  * เก็บชื่อ ณ ตอนนั้นคู่กับรหัส เพราะคนบันทึกอาจเปลี่ยนชื่อ/ลาออกทีหลัง แต่บันทึกต้องยังอ่านออก
  */
+/* คอลัมน์กันรายงานซ้ำ — สร้างแบบขี้เกียจเหมือนตารางอื่นที่เพิ่มทีหลัง
+   deploy ที่ยังไม่ได้รัน migrate ต้องไม่ล้มตอนบันทึกรายงาน (Codex ข้อ 6 · 8 พ.ย. 2569) */
+let reportIdemReady = null;
+const ensureReportIdempotency = () =>
+  (reportIdemReady ??= sql
+    .run(
+      `ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS request_id UUID;
+       CREATE UNIQUE INDEX IF NOT EXISTS uq_case_reports_request
+         ON case_reports (request_id) WHERE request_id IS NOT NULL`,
+    )
+    .catch((err) => { reportIdemReady = null; throw err; }));
+
 export async function addReport(caseId, input, actor) {
   await ensureReportSchema();
+  await ensureReportIdempotency();
   const attachments = decodeAttachments(input);
+
+  /* คำขอเดิมที่ส่งซ้ำ (เน็ต timeout แล้วกดใหม่) — คืนใบเดิม ไม่สร้างใบที่สอง
+     หนึ่งกะมีรายงานหลายใบได้โดยตั้งใจ จึงกันซ้ำที่รหัสคำขอ ไม่ใช่ที่ visit_id
+     (Codex ข้อ 6 · 8 พ.ย. 2569) */
+  if (input.request_id) {
+    const prior = await sql.one(
+      `SELECT report_id FROM case_reports WHERE case_id = :case_id AND request_id = :rid`,
+      { case_id: caseId, rid: input.request_id },
+    );
+    if (prior) return findReport(caseId, prior.report_id);
+  }
   const photo = photoColumns(input);
   const columns = [...REPORT_COLUMNS, ...Object.keys(photo)];
 
@@ -4054,20 +4082,34 @@ export async function addReport(caseId, input, actor) {
     case_id: caseId,
     reported_by: actor?.employee_id ?? null,
     reported_by_name: actor?.name ?? null,
+    request_id: input.request_id ?? null,
     ...photo,
   };
   for (const c of REPORT_COLUMNS) values[c] = blank(input[c]);
 
-  const created = await transaction(async (tx) => {
-    const row = await tx.one(
-      `INSERT INTO case_reports (case_id, reported_by, reported_by_name, ${columns.join(', ')})
-       VALUES (:case_id, :reported_by, :reported_by_name, ${columns.map(slot).join(', ')})
-       RETURNING report_id`,
-      values,
-    );
-    await saveImages(tx, row.report_id, attachments);
-    return row;
-  });
+  let created;
+  try {
+    created = await transaction(async (tx) => {
+      const row = await tx.one(
+        `INSERT INTO case_reports (case_id, reported_by, reported_by_name, request_id, ${columns.join(', ')})
+         VALUES (:case_id, :reported_by, :reported_by_name, :request_id, ${columns.map(slot).join(', ')})
+         RETURNING report_id`,
+        values,
+      );
+      await saveImages(tx, row.report_id, attachments);
+      return row;
+    });
+  } catch (err) {
+    /* สองคำขอเดียวกันมาพร้อมกันจริง ๆ — ตัวที่แพ้ชน unique index แล้วคืนใบของตัวที่ชนะ */
+    if (err?.code === '23505' && input.request_id) {
+      const prior = await sql.one(
+        `SELECT report_id FROM case_reports WHERE case_id = :case_id AND request_id = :rid`,
+        { case_id: caseId, rid: input.request_id },
+      );
+      if (prior) return findReport(caseId, prior.report_id);
+    }
+    throw err;
+  }
   return findReport(caseId, created.report_id);
 }
 

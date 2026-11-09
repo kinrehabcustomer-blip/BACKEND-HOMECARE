@@ -194,6 +194,13 @@ export const adjustmentSchema = z.object({
 });
 
 /** ยกเลิกใบแจ้งหนี้ — ต้องมีเหตุผลเสมอ (เก็บไว้กับใบ คู่กับชื่อคนที่ยกเลิก) */
+/* ปิดลิงก์บิลสาธารณะ — ไม่ระบุ token_hash = ปิดทุกลิงก์ที่ยังเปิดได้ของใบนั้น
+   (Codex ข้อ 10 · 8 พ.ย. 2569 · อายุ 180 วันคงเดิมตามคำเคาะ ดร. 24 ต.ค. 2569) */
+export const revokeShareSchema = z.object({
+  token_hash: z.string().trim().regex(/^[0-9a-f]{64}$/, 'รหัสลิงก์ไม่ถูกต้อง').optional().nullable(),
+  reason: z.string().trim().max(300).optional().nullable(),
+});
+
 export const cancelInvoiceSchema = z.object({
   reason: z.string().trim().min(3, 'กรุณาบอกเหตุผลที่ยกเลิกใบนี้').max(300),
 });

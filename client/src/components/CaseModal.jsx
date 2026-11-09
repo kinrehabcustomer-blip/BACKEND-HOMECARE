@@ -932,11 +932,22 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                       className="btn primary"
                       disabled={busy || !pick || alreadyInCase}
                       onClick={() =>
-                        run(() =>
-                          item.assigned_to
-                            ? api.addCaseTeam(item.case_id, pick)
-                            : api.assignCase(item.case_id, pick),
-                        )
+                        run(async () => {
+                          if (item.assigned_to) return api.addCaseTeam(item.case_id, pick);
+                          try {
+                            return await api.assignCase(item.case_id, pick);
+                          } catch (e) {
+                            /* เซิร์ฟเวอร์ตีกลับเพราะเคสยังไม่มีที่อยู่/เบอร์ (Codex ข้อ 1 · 8 พ.ย. 2569)
+                               ไม่ใช่ความผิดพลาดของระบบ แต่เป็นคำถามว่า "จะมอบหมายทั้งที่ยังไม่ครบไหม"
+                               ถามแล้วส่งซ้ำพร้อม force — ไม่ขวางงานจริงที่ข้อมูลทยอยมาทีหลัง */
+                            if (e.status !== 409 || !/ยังขาด/.test(e.message || '')) throw e;
+                            // eslint-disable-next-line no-alert
+                            if (!window.confirm(`${e.message}
+
+จะมอบหมายต่อเลยไหม?`)) return undefined;
+                            return api.assignCase(item.case_id, pick, true);
+                          }
+                        })
                       }
                     >
                       เพิ่มพนักงาน

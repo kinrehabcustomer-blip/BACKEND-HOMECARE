@@ -22,6 +22,8 @@ export const POSITIONS = [
   // สายสำนักงาน (กลุ่ม back) — สิทธิ์ของแต่ละตำแหน่งดูที่ lib/permissions.js (ตั้งได้ในหน้าจัดการสิทธิ์)
   // 'admin' = Admin HC (ชื่อเดิม "แอดมิน") · 'finance' = การเงิน (Admin IPD เลิกใช้แล้ว — ย้ายเป็น Admin HC)
   'manager', 'hr', 'admin', 'finance',
+  // หัวหน้าพยาบาล (ดร.ธงชัย 8 พ.ย. 2569) — ดูงานคลินิกทุกสาขา ไม่มีสิทธิ์เรื่องเงิน
+  'nurse_lead',
   // super_admin = บัญชีดูแลระบบสูงสุด (ใช้ login หลังล้างระบบ) — สิทธิ์ครบทุกหมวด และเป็นคนเดียวที่ตั้ง/แก้ super admin ได้
   'super_admin',
 ];
@@ -32,7 +34,7 @@ export const POSITIONS = [
  * front เท่านั้นที่รับเคส/ลงกะได้ และเปิดรับแบบประเมินจากญาติ
  * ประกาศ front เป็น "ทุกอย่างที่ไม่ใช่ back" — เพิ่มตำแหน่งหน้างานใหม่ที่ POSITIONS แล้วตามมาเอง
  */
-export const BACK_POSITIONS = ['super_admin', 'manager', 'hr', 'admin', 'finance'];
+export const BACK_POSITIONS = ['super_admin', 'manager', 'hr', 'admin', 'finance', 'nurse_lead'];
 export const FRONT_POSITIONS = POSITIONS.filter((p) => !BACK_POSITIONS.includes(p));
 
 export const EMPLOYMENT_TYPES = ['fulltime', 'parttime', 'contract', 'daily'];

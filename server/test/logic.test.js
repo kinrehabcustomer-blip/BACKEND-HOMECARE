@@ -18,7 +18,7 @@ await import('../src/lib/env.js');
 process.env.DATABASE_URL ||= 'postgresql://placeholder/placeholder';
 process.env.JWT_SECRET ||= 'x'.repeat(48);
 
-const { createCaseSchema, updateCaseSchema, adjustVisitSchema, bulkVisitSchema, visitRangeSchema, createReportSchema, hasReportContent, REPORT_CONTENT_FIELDS } = await import('../src/cases/schema.js');
+const { createCaseSchema, updateCaseSchema, adjustVisitSchema, bulkVisitSchema, visitRangeSchema, createReportSchema, hasReportContent, REPORT_CONTENT_FIELDS, MAX_BULK_VISITS } = await import('../src/cases/schema.js');
 const { caseCode, isCaseOfPatient } = await import('../src/cases/caseCode.js');
 const { updateInvoiceSchema, paySchema } = await import('../src/invoices/schema.js');
 const { createRunSchema } = await import('../src/payroll/schema.js');
@@ -410,6 +410,7 @@ describe('invoice mutations — สถานะ แผน และ payment ต�
     assert.equal(assessInvoiceAction('cancel', 'cancelled').reason, 'invalid_status');
   });
 
+
   test('single-row mutation อ่านสถานะล่าสุดด้วย FOR UPDATE ก่อนอนุญาต', async () => {
     const calls = [];
     const result = await invoiceForUpdate(
@@ -507,6 +508,7 @@ describe('invoice mutations — สถานะ แผน และ payment ต�
               invoice_id: 'INV-0001', status: 'draft', billing_kind: 'full', amount: 1, discount: 0,
             };
           }
+          if (query.includes('invoice_shares') || query.includes('invoice_line_outbox')) return null;
           return { paid: 0.11, last_paid_at: '2026-08-24' };
         },
         run: async (query, params) => {
@@ -2416,6 +2418,45 @@ describe('ลิงก์แผนที่ในข้อความ LINE — 
     assert.equal(mapUrlFor('abc', 100), null);
     assert.equal(mapUrlFor(91, 100), null);
     assert.equal(mapUrlFor(13, 181), null);
+  });
+});
+
+// ---------- ด่านข้อมูลที่กรอก (Gemini ชี้ 8 พ.ย. 2569 · ยืนยันกับโค้ดแล้ว) ----------
+describe('ด่านข้อมูลเคส — เบอร์ที่โทรไม่ได้ และการลงกะหลายวันที่หลุดเพดาน', () => {
+  test('client_phone ต้องมีตัวเลขอย่างน้อย 8 หลัก เหมือนช่องเบอร์ของลูกค้า/ผู้รับบริการ', () => {
+    const ok = (phone) => createCaseSchema.safeParse({ title: 'เคสทดสอบ', client_name: 'ทดสอบ', client_phone: phone });
+
+    // อักขระที่อนุญาตครบ 8 ตัวแต่ไม่มีเลขเลย — เคยผ่านเข้าฐานเป็นเบอร์ของเคส
+    assert.equal(ok('++++++++').success, false);
+    assert.equal(ok('        ').success, false);
+    assert.equal(ok('--------').success, false);
+    // เลขไม่ถึง 8 หลัก
+    assert.equal(ok('02-123-4').success, false);
+    // เบอร์จริงยังผ่าน
+    assert.equal(ok('0812345678').success, true);
+    assert.equal(ok('02-123-4567').success, true);
+  });
+
+  test('ลงกะหลายวัน: ส่ง from+to+count พร้อมกันต้องไม่หลุดเพดานจำนวนกะ', () => {
+    const parse = (body) => bulkVisitSchema.safeParse(body);
+
+    // from + count (ไม่มี to) = ลงตามจำนวนครั้ง · เพดานอยู่ที่ตัว count เอง
+    assert.equal(parse({ from: '2026-01-01', count: 5 }).success, true);
+    assert.equal(parse({ from: '2026-01-01', count: MAX_BULK_VISITS + 1 }).success, false);
+
+    /* ส่งทั้งสามค่า — ของเดิม superRefine return ทิ้งทั้งก้อน แล้ว transform ใช้ datesInRange
+       จึงลงกะได้เท่าจำนวนวันในช่วง โดยไม่มีเพดานไหนกัน */
+    const wide = parse({ from: '2026-01-01', to: '2030-12-31', count: 1 });
+    assert.equal(wide.success, false, 'ช่วงกว้างเกินเพดานต้องถูกปฏิเสธ แม้ส่ง count มาด้วย');
+
+    // และการตรวจวันสิ้นสุดก่อนวันเริ่มต้องกลับมาทำงาน
+    assert.equal(parse({ from: '2026-03-10', to: '2026-03-01', count: 3 }).success, false);
+
+    // ช่วงสั้น ๆ ที่ส่ง count มาด้วยยังลงได้ตามปกติ (ใช้ช่วงวันเป็นตัวตั้ง)
+    const narrow = parse({ from: '2026-03-01', to: '2026-03-05', count: 3 });
+    assert.equal(narrow.success, true);
+    assert.equal(narrow.data.dates.length, 5);
+
   });
 });
 

@@ -3,7 +3,8 @@ import { PATIENT_PENDING } from '../cases/schema.js';
 import {
   normalizeAddons, addonAmount, addonsTotal, addonsTotalSql, addonLabel, unbilledAddons,
 } from '../lib/addons.js';
-import { ensureShareTables } from './share.js';
+import { ensureShareTables, hasBeenShared } from './share.js';
+import { likeEscape } from '../lib/likeEscape.js';
 import {
   ensureLedgerTables, netTotalSql, netPaidSql, paymentsSumSql, refundsSumSql, adjustmentsSumSql, badDebtSumSql,
   ledgerFor, issueReceipt, voidReceiptForPayment, listReceipts, listAdjustments, listRefunds,
@@ -519,7 +520,7 @@ function buildWhere({ q, status, customer_id, case_id, overdue, stale, draft_sta
   if (q) {
     where.push(`(i.invoice_id ILIKE :q OR i.bill_to_name ILIKE :q OR i.case_id ILIKE :q
       OR EXISTS (SELECT 1 FROM cases qc WHERE qc.case_id = i.case_id AND qc.client_name ILIKE :q))`);
-    params.q = `%${q}%`;
+    params.q = `%${likeEscape(q)}%`;
   }
   if (status) {
     where.push('i.status = :status');
@@ -1431,6 +1432,21 @@ export async function updateInvoiceForTransaction(tx, invoiceId, rawInput) {
   const fields = EDITABLE.filter((c) => c in input);
   if (fields.length === 0) return { invoice_id: invoiceId };
 
+  /* ส่งลิงก์ให้ลูกค้าไปแล้ว = เอกสารออกนอกระบบแล้ว ห้ามแก้ "หน้าตาเอกสาร" อีก (Codex ข้อ 7 · 8 พ.ย. 2569)
+     ลิงก์สาธารณะอ่านใบสดจากฐาน ลูกค้าเปิด URL เดิมแล้วเห็นชื่อผู้จ่าย/ที่อยู่/รายละเอียดบริการคนละชุด
+     โดยไม่มีเลขรุ่นอะไรบอกว่าเปลี่ยนไป
+     ยอดถูกกันไปแล้วด้านบน (ต้องออกใบลดหนี้/เพิ่มหนี้) ที่เหลือคือช่องข้อความบนเอกสาร
+     ช่องภายในที่ไม่ขึ้นเอกสารลูกค้า (เช่น note, payment_method) ยังแก้ได้ตามเดิม */
+  const CUSTOMER_FACING = [
+    'bill_to_name', 'bill_to_tax_id', 'bill_to_address', 'service_description', 'issue_date', 'due_date',
+  ];
+  const changedFacing = CUSTOMER_FACING.filter(
+    (c) => c in input && (input[c] ?? null) !== (invoice[c] ?? null),
+  );
+  if (changedFacing.length && (await hasBeenShared(tx, invoiceId))) {
+    return { reason: 'already_shared', invoice_id: invoiceId, fields: changedFacing };
+  }
+
   const changesAmount = 'amount' in input || 'discount' in input;
   if (
     changesAmount &&
@@ -1490,6 +1506,8 @@ export async function updateInvoiceForTransaction(tx, invoiceId, rawInput) {
 }
 
 export async function update(invoiceId, input) {
+  // ต้องมีตาราง invoice_shares ก่อน — updateInvoiceForTransaction ถามมันว่าใบนี้ส่งลิงก์ไปแล้วหรือยัง
+  await ensureShareTables();
   const result = await transaction((tx) => updateInvoiceForTransaction(tx, invoiceId, input));
   return invoiceMutationResult(result);
 }

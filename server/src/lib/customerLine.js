@@ -31,19 +31,24 @@ export async function findByPhones(phones) {
   const list = [...new Set(phones.map(digits).filter((p) => p.length >= 9).map(phoneKey))];
   if (!list.length) return [];
   const d = (col) => `right(regexp_replace(coalesce(${col}, ''), '[^0-9]', '', 'g'), 9)`;
+  /* kind = ชนิดของการจับคู่แบบคงที่ ไว้ให้โค้ดตัดสิน (source เป็นข้อความไว้ให้คนอ่าน)
+     เบอร์ผู้ติดต่อฉุกเฉินของผู้รับบริการมักเป็นญาติ "คนละคน" กับผู้ว่าจ้าง จึงใช้เสนอให้ทีมยืนยันได้
+     แต่ห้ามใช้ผูกอัตโนมัติ (ดู linkFromChat) — Gemini ชี้ 8 พ.ย. 2569 · ยืนยันแล้ว
+     เรียง kind ก่อน source ใน ORDER BY เพื่อให้ DISTINCT ON เก็บการจับคู่ที่หนักแน่นที่สุดของลูกค้าแต่ละราย */
   return sql.all(
     `SELECT DISTINCT ON (m.phone_digits, cu.customer_id)
-            cu.customer_id, cu.name, cu.phone, cu.line_user_id, m.phone_digits, m.source
+            cu.customer_id, cu.name, cu.phone, cu.line_user_id, m.phone_digits, m.source, m.kind
      FROM (
-       SELECT customer_id, ${d('phone')} AS phone_digits, 'ลูกค้า' AS source FROM customers
+       SELECT customer_id, ${d('phone')} AS phone_digits, 'ลูกค้า' AS source, 'customer' AS kind FROM customers
        UNION ALL
-       SELECT customer_id, ${d('client_phone')}, 'เคส ' || regexp_replace(case_id, '-R[0-9]+$', '') FROM cases WHERE customer_id IS NOT NULL
+       SELECT customer_id, ${d('client_phone')}, 'เคส ' || regexp_replace(case_id, '-R[0-9]+$', ''), 'case' FROM cases WHERE customer_id IS NOT NULL
        UNION ALL
-       SELECT customer_id, ${d('emergency_contact_phone')}, 'ผู้รับบริการ ' || patient_id FROM patients WHERE customer_id IS NOT NULL
+       SELECT customer_id, ${d('emergency_contact_phone')}, 'ผู้รับบริการ ' || patient_id, 'patient_emergency' FROM patients WHERE customer_id IS NOT NULL
      ) m
      JOIN customers cu ON cu.customer_id = m.customer_id
      WHERE m.phone_digits = ANY(:phones::text[])
-     ORDER BY m.phone_digits, cu.customer_id, m.source`,
+     ORDER BY m.phone_digits, cu.customer_id,
+              CASE m.kind WHEN 'customer' THEN 0 WHEN 'case' THEN 1 ELSE 2 END, m.source`,
     { phones: list },
   );
 }
@@ -54,8 +59,62 @@ export async function findByPhones(phones) {
  */
 export async function linkFromChat(d, customerId = null) {
   await ensureCustomerLineColumns();
-  let customer = customerId ? await customers.findById(customerId) : (await findByPhones([d.phone]))[0] ?? null;
+  /* ผูกอัตโนมัติด้วยเบอร์ — รับเฉพาะเบอร์ของลูกค้าเองหรือเบอร์ติดต่อของเคส
+     เบอร์ผู้ติดต่อฉุกเฉินของผู้รับบริการเป็นญาติคนละคนได้ ผูกอัตโนมัติแล้วจะกลายเป็น
+     "LINE ของญาติ A ถูกผูกเข้าบัญชีของผู้ว่าจ้าง B" ซึ่งเห็นข้อมูลข้ามคน
+     (ยังเสนอให้ทีมยืนยันได้ตามปกติ — ทีมส่ง customer_id มาเองก็ผูกได้) */
+  let autoMatch = null;
+  if (!customerId) {
+    const hits = (await findByPhones([d.phone])).filter(
+      (m) => m.kind === 'customer' || m.kind === 'case',
+    );
+    /* เบอร์เดียวไปตรงลูกค้าหลายราย (เบอร์ญาติร่วม · แฟ้มซ้ำ) — ห้ามเดา
+       ของเดิมหยิบแถวแรกเงียบ ๆ (เรียงตามเลขลูกค้าน้อยสุด) ผูก LINE ผิดผู้ว่าจ้างแล้ว
+       พอเชิญเป็นญาติ คนนั้นเห็น timeline/รายงานของบ้านผิด = ข้อมูลผู้ป่วยข้ามบ้าน
+       (Codex ข้อ 4 · 8 พ.ย. 2569) — คืนรายชื่อให้ทีมเลือกแทน */
+    const distinct = [...new Map(hits.map((m) => [m.customer_id, m])).values()];
+    if (distinct.length > 1) {
+      return {
+        ambiguous: true,
+        matches: distinct.slice(0, 10).map((m) => ({
+          customer_id: m.customer_id,
+          name: m.name,
+          phone: m.phone,
+          source: m.source,
+        })),
+      };
+    }
+    autoMatch = distinct[0] ?? null;
+  }
+  let customer = customerId ? await customers.findById(customerId) : autoMatch;
   if (customerId && !customer) return { error: 'not_found' };
+
+  /* ทางกลับกันก็ต้องกัน: LINE นี้ผูกกับลูกค้า "รายอื่น" อยู่แล้วหรือเปล่า
+     ของเดิมดูแค่ "ลูกค้ารายนี้ผูก LINE อื่นอยู่ไหม" — LINE เดียวจึงไปอยู่บนลูกค้าหลายรายได้
+     แล้วลิงก์บิล/ข้อความที่ส่งตามบัญชีลูกค้าจะไปถึงคนที่ไม่ใช่เจ้าของเรื่อง
+     (customers.line_user_id ไม่มี unique index ต่างจาก employees.line_user_id ที่มี)
+     Gemini ชี้ 8 พ.ย. 2569 · ยืนยันแล้ว — กันที่โค้ดก่อน unique index ต้องตรวจของซ้ำในฐานจริงก่อนสร้าง
+
+     ตรวจ "ก่อน" สร้างลูกค้าใหม่ — ไม่งั้นเคสที่เบอร์ไม่ตรงใครจะได้ลูกค้าใหม่ค้างไว้หนึ่งแถว
+     ทุกครั้งที่ชน แล้วไม่มีใครรู้ว่าแถวนั้นมาจากไหน */
+  if (d.line_user_id) {
+    const other = await sql.one(
+      `SELECT customer_id, name FROM customers
+        WHERE line_user_id = :uid AND customer_id IS DISTINCT FROM :id
+        LIMIT 1`,
+      { uid: d.line_user_id, id: customer?.customer_id ?? null },
+    );
+    if (other) {
+      return {
+        conflict: true,
+        line_taken_by: other.customer_id,
+        customer_id: customer?.customer_id ?? null,
+        name: customer?.name ?? null,
+        other_name: other.name,
+      };
+    }
+  }
+
   let created = false;
   if (!customer) {
     customer = await customers.create({

@@ -30,6 +30,13 @@ export const ensureShareTables = () =>
     )`);
     await sql.run(`ALTER TABLE invoice_shares ADD COLUMN IF NOT EXISTS purpose TEXT`);
     await sql.run(`ALTER TABLE invoice_shares ADD COLUMN IF NOT EXISTS created_by_name TEXT`);
+    /* เพิกถอนลิงก์รายใบ (Codex ข้อ 10 · 8 พ.ย. 2569) — ลิงก์ส่งผิดห้องหรือถูกส่งต่อออกไป
+       ของเดิมหยุดไม่ได้เลยจนครบ 180 วัน ทั้งที่ payload มีชื่อผู้ป่วย รหัสผู้ป่วย เลขผู้เสียภาษี
+       🔴 อายุ 180 วันคงเดิมตามคำเคาะ ดร. 24 ต.ค. 2569 — เพิ่มแค่ทางปิดเมื่อรู้ว่ารั่ว */
+    await sql.run(`ALTER TABLE invoice_shares ADD COLUMN IF NOT EXISTS revoked_at TIMESTAMPTZ`);
+    await sql.run(`ALTER TABLE invoice_shares ADD COLUMN IF NOT EXISTS revoked_by TEXT`);
+    await sql.run(`ALTER TABLE invoice_shares ADD COLUMN IF NOT EXISTS revoked_by_name TEXT`);
+    await sql.run(`ALTER TABLE invoice_shares ADD COLUMN IF NOT EXISTS revoke_reason TEXT`);
     await sql.run(`CREATE TABLE IF NOT EXISTS invoice_line_outbox (
       id            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
       invoice_id    TEXT NOT NULL REFERENCES invoices (invoice_id) ON DELETE CASCADE ON UPDATE CASCADE,
@@ -207,13 +214,58 @@ export async function sendHistory(invoiceId) {
   );
 }
 
+/** ลิงก์ที่ยังเปิดได้ของใบนี้ — ให้หน้าใบแสดงว่ามีกี่ลิงก์ลอยอยู่ และเพิกถอนได้ */
+export async function activeShares(invoiceId) {
+  await ensureShareTables();
+  return sql.all(
+    `SELECT token_hash, purpose, created_by_name, created_at, expires_at, opened_at
+       FROM invoice_shares
+      WHERE invoice_id = :id AND revoked_at IS NULL AND expires_at > now()
+      ORDER BY created_at DESC`,
+    { id: invoiceId },
+  );
+}
+
+/**
+ * เพิกถอนลิงก์ของใบ (Codex ข้อ 10 · 8 พ.ย. 2569)
+ * tokenHash ว่าง = เพิกถอนทุกลิงก์ที่ยังเปิดได้ของใบนั้น (ใช้ตอนรู้ว่ารั่วแต่ไม่รู้ว่าใบไหน)
+ * ลิงก์ที่ถูกเพิกถอนแล้วเปิดไม่ได้อีก — ไม่ลบแถวทิ้ง เก็บไว้เป็นหลักฐานว่าใครปิดและเพราะอะไร
+ */
+export async function revokeShares(invoiceId, { tokenHash = null, reason = null }, user) {
+  await ensureShareTables();
+  const rows = await sql.all(
+    `UPDATE invoice_shares
+        SET revoked_at = now(), revoked_by = :by, revoked_by_name = :byName, revoke_reason = :reason
+      WHERE invoice_id = :id AND revoked_at IS NULL
+        AND (:hash::text IS NULL OR token_hash = :hash)
+      RETURNING token_hash`,
+    {
+      id: invoiceId, hash: tokenHash, reason: reason || null,
+      by: user?.employee_id ?? null, byName: actorName(user),
+    },
+  );
+  return { revoked: rows.length };
+}
+
+/** ใบนี้เคยถูกส่ง/ออกลิงก์ให้ลูกค้าไปแล้วหรือยัง — ใช้กันการแก้ยอดหลังส่ง (Codex ข้อ 7) */
+export async function hasBeenShared(tx, invoiceId) {
+  const [share, sent] = await Promise.all([
+    tx.one(`SELECT 1 AS yes FROM invoice_shares WHERE invoice_id = :id LIMIT 1`, { id: invoiceId }),
+    tx.one(
+      `SELECT 1 AS yes FROM invoice_line_outbox WHERE invoice_id = :id AND sent_at IS NOT NULL LIMIT 1`,
+      { id: invoiceId },
+    ),
+  ]);
+  return Boolean(share || sent);
+}
+
 /** ลิงก์ลูกค้า → รหัสใบ (หมดอายุ/ไม่มี = null) · จดเวลาเปิดครั้งแรก */
 export async function invoiceIdForToken(token) {
   if (typeof token !== 'string' || !/^[A-Za-z0-9_-]{20,64}$/.test(token)) return null;
   await ensureShareTables();
   const row = await sql.one(
     `UPDATE invoice_shares SET opened_at = COALESCE(opened_at, now())
-     WHERE token_hash = :h AND expires_at > now() RETURNING invoice_id`,
+     WHERE token_hash = :h AND expires_at > now() AND revoked_at IS NULL RETURNING invoice_id`,
     { h: hashToken(token) },
   );
   return row?.invoice_id ?? null;

@@ -102,16 +102,23 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
   const [lineInfo, setLineInfo] = useState(null);
   const [lineInfoError, setLineInfoError] = useState(null);
   const [copyText, setCopyText] = useState(null);
+  // ลิงก์บิลสาธารณะที่ยังเปิดได้ของใบนี้ (Codex ข้อ 10 · 8 พ.ย. 2569)
+  const [shareLinks, setShareLinks] = useState(null);
   const lineStatus = item?.status;
   useEffect(() => {
     setLineInfo(null);
     setLineInfoError(null);
     setCopyText(null);
+    setShareLinks(null);
     if (lineStatus !== 'issued' && lineStatus !== 'paid') return;
     let cancelled = false;
     api.invoiceLine(invoiceId)
       .then((v) => !cancelled && setLineInfo(v))
       .catch(() => !cancelled && setLineInfoError('ตรวจสถานะ LINE ไม่ได้'));
+    /* ล้มแล้วแค่ไม่โชว์ปุ่มปิดลิงก์ ไม่ต้องขึ้น error — เป็นข้อมูลประกอบ ไม่ใช่สิ่งที่คนเปิดใบมาเพื่อดู */
+    api.invoiceShareLinks(invoiceId)
+      .then((v) => !cancelled && setShareLinks(v.links ?? []))
+      .catch(() => {});
     return () => {
       cancelled = true;
     };
@@ -1516,6 +1523,28 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                 <button className="btn" disabled={busy} onClick={copyBill}>
                   คัดลอกบิล
                 </button>
+              )}
+              {/* ลิงก์บิลที่ส่งออกไปแล้วเปิดได้ 6 เดือน (ดร.ธงชัยเคาะ 24 ต.ค. 2569)
+                  ถ้าส่งผิดห้องหรือรู้ว่าถูกส่งต่อ ต้องปิดได้ ไม่ใช่รอครบหกเดือน
+                  ในลิงก์มีชื่อผู้ป่วย รหัสผู้ป่วย เลขผู้เสียภาษี และประวัติชำระ */}
+              {shareLinks?.length > 0 && (
+                <ConfirmButton
+                  className="btn danger-ghost"
+                  disabled={busy}
+                  title={`ปิดลิงก์บิลของ ${item.invoice_id} ทั้ง ${shareLinks.length} ลิงก์?`}
+                  detail="คนที่ถือลิงก์เดิมจะเปิดไม่ได้อีก · ส่งใหม่ได้ด้วยปุ่ม “ส่งเข้า LINE ลูกค้า” หรือ “คัดลอกบิล”"
+                  confirmLabel="ปิดลิงก์"
+                  cancelLabel="ไม่ปิดแล้ว"
+                  onConfirm={() =>
+                    run(async () => {
+                      const r = await api.revokeInvoiceShareLinks(item.invoice_id, 'ปิดจากหน้าใบแจ้งหนี้');
+                      setShareLinks(r.links ?? []);
+                      toast(`ปิดลิงก์บิลแล้ว ${r.revoked} ลิงก์`);
+                    })
+                  }
+                >
+                  ปิดลิงก์ที่ส่งไปแล้ว ({shareLinks.length})
+                </ConfirmButton>
               )}
               {lineInfoError && (
                 <button className="btn danger-ghost" disabled={busy} onClick={retryLineInfo}>

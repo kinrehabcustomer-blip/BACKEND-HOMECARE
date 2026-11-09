@@ -48,6 +48,8 @@ ALTER TABLE employees ADD CONSTRAINT employees_position_check
   CHECK (position IN ('caregiver', 'assistant_nurse', 'practical_nurse', 'nurse',
                       'therapist', 'occupational_therapist', 'speech_therapist',
                       'manager', 'hr', 'admin', 'finance', 'super_admin',
+                      -- หัวหน้าพยาบาล (ดร.ธงชัย 8 พ.ย. 2569) — สายสำนักงาน เห็นงานคลินิก ไม่เห็นเรื่องเงิน
+                      'nurse_lead',
                       'unassigned'));  -- "ว่าง" = ยังไม่ได้กำหนดตำแหน่ง (นำเข้ารายชื่อ 28 ต.ค. 2569)
 
 -- ใบรับรอง / ใบประกอบวิชาชีพ ผูกกับพนักงานผ่าน employee_id
@@ -427,6 +429,22 @@ ALTER TABLE invoices ADD COLUMN IF NOT EXISTS cancelled_by      TEXT
 ALTER TABLE invoices ADD COLUMN IF NOT EXISTS cancelled_by_name TEXT;
 ALTER TABLE invoices ADD COLUMN IF NOT EXISTS cancelled_at      TEXT;
 ALTER TABLE invoices ADD COLUMN IF NOT EXISTS cancel_reason     TEXT;
+
+-- ผู้ยกเลิกใบ + เหตุผล (ดร.ธงชัยเคาะ 8 พ.ย. 2569 "แก้เลย" · ตรวจบั๊กรอบ 8 พ.ย. ข้อ C1)
+-- ของเดิมใบที่รับเงินมาแล้วถูกยกเลิกได้โดยไม่เหลือร่องรอยว่าใครสั่งและเพราะอะไร
+-- เก็บชื่อไว้ด้วยเหตุผลเดียวกับ issued_by_name — คนยกเลิกอาจลาออกหรือเปลี่ยนชื่อไปแล้ว
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS cancelled_at      TEXT;
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS cancelled_by      TEXT
+  REFERENCES employees (employee_id) ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS cancelled_by_name TEXT;
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS cancel_reason     TEXT;
+
+-- เพดานการเรียกของหน้าสาธารณะ เก็บรวมทุก instance (Codex ข้อ 11 · ดู lib/rateLimit.js)
+CREATE TABLE IF NOT EXISTS public_rate_limits (
+  bucket       TEXT PRIMARY KEY,
+  window_start TIMESTAMPTZ NOT NULL DEFAULT now(),
+  hits         INTEGER NOT NULL DEFAULT 0
+);
 
 CREATE INDEX IF NOT EXISTS idx_invoices_customer ON invoices (customer_id);
 CREATE INDEX IF NOT EXISTS idx_invoices_case     ON invoices (case_id);
@@ -1903,3 +1921,9 @@ CREATE TABLE IF NOT EXISTS role_permissions (
   updated_by_name TEXT,
   updated_at      TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')
 );
+
+-- กันรายงานการดูแลซ้ำเมื่อเน็ตหลุดแล้วกดใหม่ (Codex ข้อ 6 · 8 พ.ย. 2569)
+-- หนึ่งกะมีรายงานหลายใบได้โดยตั้งใจ จึงกันซ้ำที่ "รหัสคำขอ" ไม่ใช่ที่ visit_id
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS request_id UUID;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_case_reports_request
+  ON case_reports (request_id) WHERE request_id IS NOT NULL;

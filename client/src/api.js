@@ -151,6 +151,8 @@ async function request(path, { empty = false, credentialCheck = false, ...option
 
     // แนบรายละเอียดรายช่องไว้ด้วย ให้ฟอร์มเอาไปแปะข้อความใต้ช่องที่ผิดได้ตรงจุด
     // (ยังคงข้อความรวมไว้เหมือนเดิม — หน้าที่ยังไม่ได้ใช้ fields จะไม่เปลี่ยนพฤติกรรม)
+    // รหัสสถานะติดไปด้วย — หน้าที่ต้องแยก "ขอยืนยัน (409)" ออกจาก error จริง จะได้ไม่ต้องเดาจากข้อความ
+    error.status = res.status;
     if (fieldList) error.fields = fieldList;
     else if (data?.details) error.details = data.details;
     throw error;
@@ -492,6 +494,11 @@ export const api = {
   /** ยกเลิกรายการรับชำระที่บันทึกผิด (กรอกยอดผิด/บันทึกซ้ำ) — ต้องบอกเหตุผล · คืนใบที่อัปเดตแล้ว */
   voidInvoicePayment: (id, paymentId, reason) =>
     request(`/invoices/${id}/payments/${paymentId}/void`, { method: 'POST', body: { reason } }),
+  /* ลิงก์บิลสาธารณะของใบนี้ — ดูว่ายังเปิดได้กี่ลิงก์ และปิดเมื่อส่งผิดห้อง/ถูกส่งต่อ
+     (Codex ข้อ 10 · 8 พ.ย. 2569 · อายุ 180 วันคงเดิมตามคำเคาะ ดร.) */
+  invoiceShareLinks: (id) => request(`/invoices/${id}/share-links`),
+  revokeInvoiceShareLinks: (id, reason = null, token_hash = null) =>
+    request(`/invoices/${id}/share-links/revoke`, { method: 'POST', body: { reason, token_hash } }),
   cancelInvoice: (id, reason) => request(`/invoices/${id}/cancel`, { method: 'POST', body: { reason } }),
   /** ใบลดหนี้/เพิ่มหนี้ — ทางเดียวที่ปรับยอดใบที่ออกแล้ว (ดู server/src/invoices/ledger.js) */
   createInvoiceAdjustment: (id, body) => request(`/invoices/${id}/adjustments`, { method: 'POST', body }),
@@ -591,7 +598,10 @@ export const api = {
   familyPhotoUrl: (caseId, id) => `/api/family/cases/${caseId}/messages/${id}/photo`,
   caseReportImageUrl: (id, reportId, imageId) => `/api/cases/${id}/reports/${reportId}/images/${imageId}`,
   caseReportPhotoUrl: (id, reportId) => `/api/cases/${id}/reports/${reportId}/photo`,
-  addCaseReport: (id, body) => request(`/cases/${id}/reports`, { method: 'POST', body }),
+  /* request_id ติดไปทุกครั้ง — เน็ตหลุดแล้วกดใหม่ (หรือเบราว์เซอร์ retry) ต้องได้รายงานใบเดิม
+     ไม่ใช่สองใบในกะเดียว (Codex ข้อ 6 · 8 พ.ย. 2569) */
+  addCaseReport: (id, body) =>
+    request(`/cases/${id}/reports`, { method: 'POST', body: { request_id: crypto.randomUUID(), ...body } }),
   updateCaseReport: (id, reportId, body) =>
     request(`/cases/${id}/reports/${reportId}`, { method: 'PATCH', body }),
   deleteCaseReport: (id, reportId) =>
@@ -599,7 +609,9 @@ export const api = {
 
   /** ประวัติการทำรายการของเคส (ใครจับคู่/ปิด/ยกเลิก เมื่อไหร่) — ใหม่สุดอยู่บน */
   listCaseEvents: (id) => request(`/cases/${id}/events`),
-  assignCase: (id, employee_id) => request(`/cases/${id}/assign`, { method: 'POST', body: { employee_id } }),
+  // force = ยืนยันมอบหมายทั้งที่เคสยังขาดที่อยู่/เบอร์ (เซิร์ฟเวอร์ตีกลับ 409 มาก่อนหนึ่งรอบ)
+  assignCase: (id, employee_id, force = false) =>
+    request(`/cases/${id}/assign`, { method: 'POST', body: { employee_id, ...(force ? { force: true } : {}) } }),
   /** ทีมพนักงานของเคส — คนที่ร่วมดูแลนอกเหนือจากผู้รับผิดชอบหลัก (ทุกตัวคืนรายชื่อทีมล่าสุด) */
   listCaseTeam: (id) => request(`/cases/${id}/team`),
   addCaseTeam: (id, employee_id) => request(`/cases/${id}/team`, { method: 'POST', body: { employee_id } }),

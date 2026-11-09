@@ -2,6 +2,7 @@ import { sql, nextEmployeeId, transaction } from '../db/index.js';
 import { hashPassword, DEFAULT_PASSWORD } from '../lib/auth.js';
 import { encryptTempPassword, tryDecryptTempPassword } from '../lib/tempPassword.js';
 import { ApiError } from '../lib/errors.js';
+import { likeEscape } from '../lib/likeEscape.js';
 
 const COLUMNS = [
   'first_name',
@@ -59,7 +60,7 @@ export async function list({ q, status, position, page, per_page, sort, order })
       OR first_name_en ILIKE :q OR last_name_en ILIKE :q
       OR nickname ILIKE :q OR phone ILIKE :q
     )`);
-    params.q = `%${q}%`;
+    params.q = `%${likeEscape(q)}%`;
   }
   if (status) {
     where.push('status = :status');
