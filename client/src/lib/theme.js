@@ -7,6 +7,8 @@ export const getTheme = () => (localStorage.getItem(KEY) === 'dark' ? 'dark' : '
 /** เขียนธีมลง <html> ให้ CSS ที่อิง [data-theme] มีผลทั้งหน้า */
 export function applyTheme(theme) {
   document.documentElement.dataset.theme = theme;
+  // แถบสถานะของแอปที่ติดตั้งลงหน้าโฮม (PWA) — สีเดียวกับแถบบนของแอป ไม่ใช่ขาวโพลนตอนโหมดกลางคืน
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'dark' ? '#1c1a15' : '#ffffff');
 }
 
 export function setTheme(theme) {

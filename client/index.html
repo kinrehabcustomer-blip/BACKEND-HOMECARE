@@ -4,6 +4,15 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- PWA — กด "เพิ่มไปยังหน้าจอโฮม" แล้วเปิดเต็มจอเหมือนแอป (manifest + service worker: public/sw.js, src/lib/pwa.js)
+         theme-color = สีแถบสถานะ/แถบบนของแอปที่ติดตั้ง · src/lib/theme.js เปลี่ยนตามโหมดกลางคืนให้ -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#ffffff" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="KIN Homecare" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <!-- บอกเบราว์เซอร์ให้เปิดการเชื่อมต่อไปหา Google Fonts ล่วงหน้า ตั้งแต่ยังอ่าน HTML ไม่จบ
          (จับมือ DNS + TLS ใช้เวลาหลักร้อยมิลลิวินาที ทำคู่ขนานไปเลยดีกว่ารอให้ถึงคิว)
          gstatic เป็นโดเมนที่เก็บไฟล์ฟอนต์จริง ต้องมี crossorigin เพราะฟอนต์โหลดแบบ CORS เสมอ -->

@@ -5,9 +5,13 @@ import './warm-clarity.css' // ชั้นดีไซน์ Warm Clarity — �
 import App from './App.jsx'
 import { ToastProvider } from './toast.jsx'
 import { applyTheme, getTheme } from './lib/theme.js'
+import { initPwa } from './lib/pwa.js'
 
 // ตั้งธีมก่อน render — กันหน้าจอกระพริบสีขาวก่อนสลับเป็นโหมดมืด
 applyTheme(getTheme())
+
+// PWA: ลง service worker + เก็บจังหวะ "ติดตั้งแอป" ไว้ให้ปุ่มในหน้าตั้งค่า
+initPwa()
 
 // เลื่อนหน้าอยู่ = ปิดไฮไลต์ตอนทาบเมาส์ (คลาส is-scrolling บน <html> · ดูท้าย warm-clarity.css)
 // ไม่งั้นช่องที่เลื่อนผ่านใต้เมาส์จะกะพริบไฮไลต์ไล่กันไป · ไฮไลต์กลับมาเมื่อขยับเมาส์จริงเท่านั้น

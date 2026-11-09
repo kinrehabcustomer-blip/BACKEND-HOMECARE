@@ -6177,3 +6177,8 @@ h1, h2, h3, h4, .page-hero-title, .cal-title, .login-heading h1 {
 .today-date .page-hero-icon { width: 2.25rem; height: 2.25rem; border-radius: 0.625rem; }
 .today-date .page-hero-icon svg { width: 1.125rem; height: 1.125rem; }
 @media (max-width: 600px) { .today-summary > .today-top { padding-bottom: 0.75rem; margin-bottom: 0; } }
+
+/* หน้าตั้งค่า: ติดตั้งแอปลงหน้าโฮม (PWA) — ข้อความ/ขั้นตอนทางขวาไม่บีบเหลือคอลัมน์แคบ จอแคบตกลงไปใต้หัวข้อ */
+.install-row { flex-wrap: wrap; }
+.install-row > :last-child { flex-shrink: 0; max-width: 22rem; }
+.install-steps { margin: 0; padding-left: 1.25rem; line-height: 1.7; font-size: 0.875rem; }

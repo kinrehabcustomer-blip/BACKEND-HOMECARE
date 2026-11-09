@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#ffffff" />
+  <title>ไม่มีสัญญาณ · KIN Homecare</title>
+  <!-- หน้านี้ service worker เก็บไว้ในเครื่อง โชว์ตอนเปิดแอปแล้วไม่มีเน็ต — ห้ามพึ่งไฟล์ภายนอก (ฟอนต์/CSS) เพราะโหลดไม่ได้อยู่แล้ว -->
+  <style>
+    :root { color-scheme: light dark; --bg: #f7f4ee; --card: #ffffff; --text: #5b5348; --head: #2b2620; --brand: #916919; --ink: #ffffff; }
+    @media (prefers-color-scheme: dark) { :root { --bg: #131210; --card: #1c1a15; --text: #c9c0b0; --head: #f3eee5; --brand: #d9a441; --ink: #1c1a15; } }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100dvh; display: grid; place-items: center; padding: 16px; background: var(--bg); color: var(--text);
+           font-family: system-ui, -apple-system, "Segoe UI", Tahoma, sans-serif; }
+    main { width: 100%; max-width: 360px; padding: 32px 24px; border-radius: 22px; background: var(--card); text-align: center; }
+    img { width: 72px; height: 72px; border-radius: 16px; }
+    h1 { margin: 16px 0 8px; font-size: 1.25rem; color: var(--head); }
+    p { margin: 0 0 24px; line-height: 1.6; }
+    button { width: 100%; min-height: 48px; border: 0; border-radius: 12px; background: var(--brand); color: var(--ink); font: inherit; font-weight: 600; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <main>
+    <img src="/icons/icon-192.png" alt="KIN Homecare" />
+    <h1>ไม่มีสัญญาณอินเทอร์เน็ต</h1>
+    <p>ระบบต้องต่อเน็ตเพื่อดึงงานและบันทึกข้อมูล ลองเปิด Wi-Fi หรือข้อมูลมือถือ แล้วกดลองใหม่</p>
+    <button type="button" onclick="location.reload()">ลองใหม่</button>
+  </main>
+  <script>addEventListener('online', () => location.reload());</script>
+</body>
+</html>
