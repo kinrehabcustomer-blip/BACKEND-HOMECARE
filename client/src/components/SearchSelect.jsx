@@ -13,6 +13,12 @@ import { createPortal } from 'react-dom';
 /** ข้อความของ <option> — ลูกเป็นสตริง/ตัวเลขล้วน */
 const textOf = (node) => Children.toArray(node).join('');
 
+/* จอสัมผัส (มือถือ/แท็บเล็ต) — iOS Safari เปิดรายการของเครื่อง (picker) ทุกครั้งที่ <select> ได้โฟกัส
+   แม้จะสั่ง focus() จากโค้ด: เลือกจากรายการของเราแล้วคืนโฟกัสให้ช่อง = picker เด้งซ้อนขึ้นมาอีกอัน
+   คืนโฟกัสจึงทำเฉพาะเครื่องที่ใช้เมาส์/คีย์บอร์ด (ที่นั่นจำเป็น — กด Tab ต่อจากช่องเดิมได้) */
+const isTouch = () => typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches;
+const refocus = (el) => { if (el && !isTouch()) el.focus(); };
+
 /** แตก <option>/<optgroup>/Fragment/อาร์เรย์ ที่ซ้อนกันอยู่ ออกมาเป็นรายการแบน */
 function flatten(children, group = null, out = []) {
   Children.forEach(children, (child) => {
@@ -97,7 +103,7 @@ const SearchSelect = forwardRef(function SearchSelect({ children, onMouseDown, o
       el.dispatchEvent(new Event('change', { bubbles: true }));
     }
     close();
-    el?.focus();
+    refocus(el);
   }
 
   useLayoutEffect(() => {
@@ -136,7 +142,7 @@ const SearchSelect = forwardRef(function SearchSelect({ children, onMouseDown, o
       e.stopPropagation(); // ไม่ให้ปิด popup/โมดัลแม่ไปด้วย
       e.nativeEvent.stopImmediatePropagation();
       close();
-      ref.current?.focus();
+      refocus(ref.current);
     } else if (e.key === 'ArrowDown') {
       e.preventDefault();
       setActive((i) => Math.min(shown.length - 1, i + 1));
@@ -164,7 +170,7 @@ const SearchSelect = forwardRef(function SearchSelect({ children, onMouseDown, o
           e.preventDefault(); // ไม่ให้รายการของเบราว์เซอร์เปิด
           if (open) close();
           else {
-            ref.current?.focus();
+            refocus(ref.current);
             openList();
           }
         }}
