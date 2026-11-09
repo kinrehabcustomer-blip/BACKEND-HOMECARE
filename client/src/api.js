@@ -319,6 +319,8 @@ export const api = {
    * แต่แก้ได้เฉพาะใบที่ตัวเองบันทึก และลบไม่ได้ (ให้ผู้จัดการลบจากหลังบ้าน)
    */
   myCaseReports: (id, params = {}) => request(`/my/cases/${id}/reports?${new URLSearchParams(params)}`),
+  /** ประวัติการรักษาของผู้รับบริการคนนี้ทั้งหมด (ทุกเคสของคนเดียวกัน ไม่ว่าใครลง) */
+  myPatientReports: (id, params = {}) => request(`/my/cases/${id}/patient-reports?${new URLSearchParams(params)}`),
   /** รายงานของกะเดียว (หน้างานวันนี้) — เคส/กะมาจากตัวกะเอง ไม่ต้องส่ง case_id */
   myVisitReports: (visitId) => request(`/my/visits/${visitId}/reports`),
   /** URL รูปแผลที่แนบในรายงาน — ใส่ใน <img src> ได้ (คุกกี้ session ไปด้วยอัตโนมัติ) */

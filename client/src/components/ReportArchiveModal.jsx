@@ -14,7 +14,7 @@ import { caseCode } from '../lib/patientCode.js';
  * ข้างในเป็น CaseReports ตัวเดิมที่ไม่ได้จำกัดจำนวน — ตัวกรองเดือน/ประเภท การแบ่งหน้า
  * และการกางดูรายใบ จึงเป็นชุดเดียวกับที่อื่นทั้งหมด ไม่ต้องเรียนรู้หน้าจอใหม่
  */
-export default function ReportArchiveModal({ caseId, caseInfo, title, scope, currentEmployeeId, readOnly, onClose }) {
+export default function ReportArchiveModal({ caseId, caseInfo, title, heading = 'รายงานอาการผู้รับบริการ', scope, currentEmployeeId, readOnly, patientWide = false, backfillVisits = null, startAdding = false, onClose }) {
   const sheetRef = useSheetSwipe(onClose); // จอแคบ: ปัดลงเพื่อปิด
   useScrollLock();
   useEffect(() => {
@@ -24,12 +24,13 @@ export default function ReportArchiveModal({ caseId, caseInfo, title, scope, cur
   }, [onClose]);
 
   return (
-    <div className="modal-backdrop modal-stacked" onClick={onClose}>
-      <div className="modal modal-wide is-subsheet" ref={sheetRef} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+    /* stopPropagation: popup นี้อาจถูกวางเป็นลูกของฉากหลังของหน้าแม่ — คลิกฉากหลังต้องปิดแค่ชั้นนี้ ไม่ใช่หน้าแม่ไปด้วย */
+    <div className="modal-backdrop modal-stacked" onClick={(e) => { e.stopPropagation(); onClose(); }}>
+      <div className="modal modal-wide is-subsheet report-archive" ref={sheetRef} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
         <header className="modal-head">
           <div>
             <p className="mono muted">{caseCode(caseId)}</p>
-            <h2>รายงานอาการผู้รับบริการ</h2>
+            <h2>{heading}</h2>
             {title && <p className="muted">{title}</p>}
           </div>
           <button className="modal-close" onClick={onClose} aria-label="ปิด">×</button>
@@ -42,6 +43,9 @@ export default function ReportArchiveModal({ caseId, caseInfo, title, scope, cur
             scope={scope}
             currentEmployeeId={currentEmployeeId}
             readOnly={readOnly}
+            patientWide={patientWide}
+            backfillVisits={backfillVisits}
+            startAdding={startAdding}
             allowAdd={false}
           />
         </div>

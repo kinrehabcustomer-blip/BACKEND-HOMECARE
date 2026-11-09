@@ -4240,7 +4240,28 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
 
 /* แถวรายงานหนึ่งใบตอนย่อ — สูงเท่าบรรทัดเดียว ไม่ใช่การ์ดที่มีขอบเต็มใบ
    เคสที่บันทึกวันละ 4 รอบ ครึ่งปีก็เกินเจ็ดร้อยใบ การ์ดใหญ่ใบละ 5 บรรทัดทำให้เลื่อนหาอะไรไม่เจอเลย */
-.report-row { border: 1px solid var(--border); border-radius: 0.5rem; background: var(--surface); }
+.report-row { border: 1px solid var(--border); border-radius: 0.75rem; background: var(--surface); }
+
+/* popup คลังรายงาน — มุมมนชัดขึ้น และตัดพื้นของหัว/ตัว/ท้ายให้อยู่ในกรอบโค้ง ไม่ให้มุมเหลี่ยมโผล่
+   (จอแคบเป็นแผ่นเต็มจอ — กฎ .modal.is-subsheet ท้ายไฟล์คืนมุมเป็น 0 ให้เอง) */
+.modal.report-archive { border-radius: 1.25rem; overflow: hidden; }
+.report-archive .modal-foot .btn { border-radius: 0.75rem; }
+/* แถบ "คัดลอกจากรายงานเก่า" เหนือฟอร์มบันทึกรายงาน */
+.report-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-bottom: 0.75rem;
+  padding: 0.75rem 0.875rem;
+  border: 1px dashed var(--border);
+  border-radius: 0.75rem;
+  background: var(--surface-2);
+}
+.report-copy label { display: flex; flex-direction: column; gap: 0.375rem; font-size: 0.8125rem; font-weight: 600; }
+.report-copy select { width: 100%; }
+.report-copy p { margin: 0; font-size: 0.75rem; }
+/* "ผิดปกติ N ใบ" ในบรรทัดสรุปประวัติการรักษา (หน้าเคสของพนักงาน) — ต้องสะดุดตาก่อนกดเปิดอ่าน */
+.history-abnormal { color: var(--danger); font-weight: 600; }
 .report-row.is-open { border-color: var(--brand); }
 
 .report-row-head {
@@ -4257,7 +4278,7 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
   text-align: left;
   cursor: pointer;
 }
-.report-row-head:hover { background: var(--bg); border-radius: 0.5rem; }
+.report-row-head:hover { background: var(--bg); border-radius: calc(0.75rem - 1px); }
 
 .report-row-time {
   flex-shrink: 0;
@@ -5951,6 +5972,16 @@ h1, h2, h3, h4, .page-hero-title, .cal-title, .login-heading h1 {
   border-radius: 1rem;
   overflow: hidden;
   box-shadow: 0 2px 14px rgba(60, 45, 15, 0.06);
+}
+/* จอกว้าง: การ์ดแชทยืดเต็มความสูงที่เหลือใต้หัวหน้า แทนตัวเลขลบคงที่ (11.5rem เดิมเหลือที่ว่างใต้การ์ดเกือบ 10rem)
+   หน้าเป็นคอลัมน์สูงพอดีจอ หัวหน้าสูงเท่าไหร่ก็ได้ การ์ดกินที่เหลือทั้งหมด — ข้อความเลื่อนในการ์ด ไม่ใช่ทั้งหน้า
+   เฉพาะ ≥901px ที่เมนูอยู่ข้างซ้าย — ≤900px เมนูพับเป็นแถบบน คอลัมน์สูง 100dvh จะล้นเท่าความสูงแถบ
+   จอแคบจึงยังใช้ calc ชุดเดิมที่จูนกับแถบบน/แถบเมนูล่างไว้แล้ว */
+@media (min-width: 901px) {
+  .content:has(.mychat) { display: flex; flex-direction: column; height: 100dvh; }
+  .content:has(.mychat) > .pull-zone,
+  .content:has(.mychat) > .pull-zone > .pull-content { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .content:has(.mychat) .mychat { flex: 1; height: auto; min-height: 24rem; }
 }
 .mychat-list { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--border); background: var(--bg, #faf7f0); }
 .mychat-search { margin: 0.75rem; width: calc(100% - 1.5rem); box-sizing: border-box; }

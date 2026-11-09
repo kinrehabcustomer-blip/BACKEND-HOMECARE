@@ -3938,9 +3938,32 @@ const withoutPhotoBytes = (row) => {
  * คลังรายงานของเคส — ล่าสุดอยู่บน แบ่งหน้า + กรองตามเดือน/ประเภท
  * (เคสดูแลต่อเนื่องบันทึกวันละหลายครั้ง ดึงทั้งหมดทุกครั้งที่เปิดดูไม่ไหว)
  */
-export async function listReports(caseId, { month, type, page = 1, per_page = 20 } = {}) {
+/* ทุกเคสของผู้รับบริการคนเดียวกับเคส :id (เคสแรก + ต่อเคส -R2, -R3 …) — ประวัติการรักษาทั้งหมดของคนนั้น
+   เคสที่ยังไม่ผูกแฟ้ม (patient_id ว่าง) เทียบ = NULL ไม่ตรงอะไร จึงเหลือแค่เคสตัวเอง */
+const PATIENT_CASES = `
+  SELECT c2.case_id FROM cases c2
+  WHERE c2.case_id = :id
+     OR c2.patient_id = (SELECT c0.patient_id FROM cases c0 WHERE c0.case_id = :id)
+`;
+const reportScope = (patientWide, alias = 'r.') =>
+  patientWide ? `${alias}case_id IN (${PATIENT_CASES})` : `${alias}case_id = :id`;
+
+/**
+ * ใบนี้อยู่ในประวัติของผู้รับบริการคนเดียวกับเคส :id ไหม — คืน case_id จริงของใบนั้น (ไม่อยู่ = null)
+ * ให้เส้นรูปแนบ/รูปแผลฝั่งพนักงานเปิดรูปของใบที่ลงไว้ในเคสก่อนหน้าของคนเดียวกันได้
+ */
+export async function reportCaseInPatientScope(caseId, reportId) {
   await ensureReportSchema();
-  const where = ['r.case_id = :id'];
+  const row = await sql.one(
+    `SELECT r.case_id FROM case_reports r WHERE r.report_id = :rid AND ${reportScope(true)}`,
+    { id: caseId, rid: reportId },
+  );
+  return row?.case_id ?? null;
+}
+
+export async function listReports(caseId, { month, type, page = 1, per_page = 20 } = {}, { patientWide = false } = {}) {
+  await ensureReportSchema();
+  const where = [reportScope(patientWide)];
   const params = { id: caseId };
 
   if (month) {
@@ -3978,13 +4001,13 @@ export async function listReports(caseId, { month, type, page = 1, per_page = 20
  * เดือนที่มีรายงานอยู่จริง + จำนวนของแต่ละเดือน — ให้หน้าเว็บทำตัวเลือก "ดูย้อนหลังเดือนไหน"
  * นับใบที่ไม่ใช่รอบปกติแยกไว้ด้วย เพื่อให้เห็นตั้งแต่ยังไม่กดว่าเดือนไหนมีเรื่องต้องตามอ่าน
  */
-export function reportMonths(caseId) {
+export function reportMonths(caseId, { patientWide = false } = {}) {
   return sql.all(
     `SELECT substr(report_date, 1, 7) AS month,
             COUNT(*)::int AS total,
             COUNT(*) FILTER (WHERE report_type <> 'routine')::int AS abnormal
      FROM case_reports
-     WHERE case_id = :id
+     WHERE ${reportScope(patientWide, '')}
      GROUP BY 1
      ORDER BY 1 DESC`,
     { id: caseId },

@@ -339,6 +339,8 @@ export const formatDate = (value) =>
  * ไม่งั้นวันที่ที่หน้าเว็บส่งไปกับวันที่ที่ server เติมให้เองจะเป็นคนละวันในช่วงเวลานั้น
  */
 export const todayTH = () => new Date(Date.now() + 7 * 3.6e6).toISOString().slice(0, 10);
+/** เวลาตอนนี้โซนไทย 'HH:MM' — ค่าเริ่มต้นของ "เวลาบันทึก" ในฟอร์มรายงาน (ไม่ขึ้นกับโซนเวลาของเครื่อง) */
+export const nowTH = () => new Date(Date.now() + 7 * 3.6e6).toISOString().slice(11, 16);
 
 /** ตัวเลขเงินบนเอกสาร — ทศนิยม 2 ตำแหน่งเสมอ ไม่มีสัญลักษณ์บาท (เช่น 12,000.00) */
 export const amountText = (value) =>

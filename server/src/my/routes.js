@@ -389,6 +389,26 @@ myRouter.get(
   }),
 );
 
+/**
+ * ประวัติการรักษาของผู้รับบริการคนนี้ทั้งหมด — รายงานทุกใบจากทุกเคสของคนเดียวกัน (เคสแรก + ต่อเคส)
+ * ไม่ว่าใครเป็นคนลง · ใช้ตาราง case_reports ชุดเดียวกับหลังบ้าน
+ * สิทธิ์ตัดสินที่เคสปัจจุบัน (myCaseRow) — คนที่ยังดูแลคนนี้อยู่ต้องรู้ว่ารอบก่อนๆ เจออะไรมาบ้าง
+ * พ้นสิทธิ์เคสปัจจุบันเมื่อไหร่ ประวัติทั้งชุดก็ปิดไปพร้อมกัน (หน้าต่าง 30 วันเดิม)
+ */
+myRouter.get(
+  '/cases/:id/patient-reports',
+  asyncRoute(async (req, res, next) => {
+    if (!(await myCaseRow(req))) return next(notFound('ไม่พบเคสนี้ หรือไม่ใช่เคสที่คุณรับผิดชอบ'));
+
+    const query = reportQuerySchema.parse(req.query);
+    const [pageData, months] = await Promise.all([
+      cases.listReports(req.params.id, query, { patientWide: true }),
+      cases.reportMonths(req.params.id, { patientWide: true }),
+    ]);
+    res.json({ ...pageData, months });
+  }),
+);
+
 /* ไม่มีเส้น "สร้างรายงานที่ระดับเคส" สำหรับพนักงานภาคสนามโดยตั้งใจ
    รายงานของพนักงานต้องผูกกับกะที่ไปทำจริงเสมอ จึงบันทึกได้จากหน้างานวันนี้ทางเดียว
    (POST /my/visits/:id/reports ด้านล่าง) — ที่นี่เหลือไว้แค่อ่านย้อนหลังกับแก้ใบของตัวเอง
@@ -445,7 +465,10 @@ myRouter.get(
   '/cases/:id/reports/:reportId/images/:imageId',
   asyncRoute(async (req, res, next) => {
     if (!(await myCaseRow(req))) return next(notFound('ไม่พบเคสนี้ หรือไม่ใช่เคสที่คุณรับผิดชอบ'));
-    const row = await cases.findReportImage(req.params.id, Number(req.params.reportId), Number(req.params.imageId));
+    // ใบในประวัติการรักษาอาจลงไว้ในเคสก่อนหน้าของคนเดียวกัน — หา case_id จริงของใบ (คนละผู้รับบริการ = ไม่เจอ)
+    const reportCase = await cases.reportCaseInPatientScope(req.params.id, Number(req.params.reportId));
+    if (!reportCase) return next(notFound('ไม่พบรูปนี้'));
+    const row = await cases.findReportImage(reportCase, Number(req.params.reportId), Number(req.params.imageId));
     if (!row) return next(notFound('ไม่พบรูปนี้'));
     res.setHeader('Content-Type', row.mime);
     res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -460,7 +483,9 @@ myRouter.get(
   asyncRoute(async (req, res, next) => {
     if (!(await myCaseRow(req))) return next(notFound('ไม่พบเคสนี้ หรือไม่ใช่เคสที่คุณรับผิดชอบ'));
 
-    const row = await cases.findReportPhoto(Number(req.params.reportId), req.params.id);
+    const reportCase = await cases.reportCaseInPatientScope(req.params.id, Number(req.params.reportId));
+    if (!reportCase) return next(notFound('รายงานนี้ไม่มีรูปแผล'));
+    const row = await cases.findReportPhoto(Number(req.params.reportId), reportCase);
     if (!row) return next(notFound('รายงานนี้ไม่มีรูปแผล'));
     res.setHeader('Content-Type', row.mime);
     res.setHeader('X-Content-Type-Options', 'nosniff');

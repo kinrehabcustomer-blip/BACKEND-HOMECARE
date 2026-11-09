@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { useToast } from '../toast.jsx';
-import { formatDate, monthText, todayTH } from '../labels.js';
+import { formatDate, monthText, todayTH, nowTH } from '../labels.js';
 import ConfirmButton from './ConfirmButton.jsx';
 import ReportArchiveModal from './ReportArchiveModal.jsx';
 import DailyCareForm from './DailyCareForm.jsx';
@@ -251,6 +251,8 @@ export default function CaseReports({
   adding: addingProp,      // ควบคุมจากภายนอก (ปุ่มเพิ่มอยู่ที่หัวข้อของหน้าแม่) — ไม่ส่ง = ใช้ปุ่มของคอมโพเนนต์เอง
   onAddingChange = null,
   backfillVisits = null,   // พนักงาน: กะของตัวเองที่ลงรายงานย้อนหลังได้ — ส่งมา = เปิดปุ่ม "ลงรายงานย้อนหลัง" แม้หน้านี้ readOnly
+  patientWide = false,     // พนักงาน: ประวัติการรักษาของผู้รับบริการทั้งหมด (ทุกเคสของคนเดียวกัน ไม่ว่าใครลง)
+  startAdding = false,     // เปิดมาพร้อมฟอร์มเลย (กดปุ่ม "ลงรายงานย้อนหลัง" จากหน้าแม่ ไม่ต้องกดซ้ำอีกรอบ)
 }) {
   const toast = useToast();
   const isAdmin = scope === 'admin';
@@ -273,7 +275,9 @@ export default function CaseReports({
   const [filters, setFilters] = useState({ month: '', type: '' });
   const [error, setError] = useState(null);            // ตอนโหลดรายการ
   const [formError, setFormError] = useState(null);    // ตอนบันทึก — คนละที่กัน ไม่งั้นกดบันทึกพลาดแล้วรายการหาย
-  const [addingLocal, setAddingLocal] = useState(false);
+  const [addingLocal, setAddingLocal] = useState(startAdding);
+  const [copyOptions, setCopyOptions] = useState([]);  // ใบล่าสุดของเคสที่เลือกมาคัดลอกได้
+  const [copyFrom, setCopyFrom] = useState(null);      // ใบที่กำลังคัดลอกมากรอก (null = ฟอร์มเปล่า)
   const adding = addingProp ?? addingLocal;
   const setAdding = (v) => { setAddingLocal(v); onAddingChange?.(v); };
   const [editingId, setEditingId] = useState(null);
@@ -297,9 +301,10 @@ export default function CaseReports({
       const params = { page, per_page: inlineLimit ?? PER_PAGE };
       if (filters.month) params.month = filters.month;
       if (filters.type) params.type = filters.type;
-      return isAdmin ? api.listCaseReports(caseId, params) : api.myCaseReports(caseId, params);
+      if (isAdmin) return api.listCaseReports(caseId, params);
+      return patientWide ? api.myPatientReports(caseId, params) : api.myCaseReports(caseId, params);
     },
-    [caseId, isAdmin, visitId, filters.month, filters.type, inlineLimit],
+    [caseId, isAdmin, patientWide, visitId, filters.month, filters.type, inlineLimit],
   );
 
   /* ตอนฟอร์มกางอยู่ ปุ่มของฟอร์ม ("ยืนยันและส่งรายงาน") คือปุ่มหลักของหน้าจอนั้น
@@ -307,6 +312,22 @@ export default function CaseReports({
   useEffect(() => {
     onFormOpen?.(adding || editingId != null);
   }, [adding, editingId, onFormOpen]);
+
+  /* คัดลอกจากรายงานเก่า — เคสดูแลต่อเนื่องอาการมักเหมือนเมื่อวานเกือบทั้งใบ กรอกใหม่หมดทุกรอบเสียเวลาหน้างาน
+     โหลดใบล่าสุดของเคส (ทุกคนที่ลง ไม่ใช่เฉพาะของฉัน) ตอนเปิดฟอร์มเท่านั้น · ปิดฟอร์ม = ล้างที่เลือกไว้ */
+  useEffect(() => {
+    if (!adding) {
+      setCopyFrom(null);
+      return undefined;
+    }
+    let cancelled = false;
+    const params = { per_page: 10 };
+    const req = isAdmin
+      ? api.listCaseReports(caseId, params)
+      : patientWide ? api.myPatientReports(caseId, params) : api.myCaseReports(caseId, params);
+    req.then((res) => !cancelled && setCopyOptions(res.data ?? [])).catch(() => !cancelled && setCopyOptions([]));
+    return () => { cancelled = true; };
+  }, [adding, caseId, isAdmin, patientWide]);
 
   // เปลี่ยนตัวกรอง = เริ่มนับหนึ่งใหม่เสมอ (ไม่ใช่ต่อท้ายของเดิมที่คนละเงื่อนไข)
   useEffect(() => {
@@ -376,7 +397,11 @@ export default function CaseReports({
   const remove = (reportId) => run(() => api.deleteCaseReport(caseId, reportId), 'ลบรายงานแล้ว');
 
   /** แก้ได้ไหม — admin ได้ทุกใบ · field ได้เฉพาะใบที่ตัวเองเป็นคนบันทึก (server ตรวจซ้ำอีกชั้น) */
-  const canEdit = (r) => !readOnly && (isAdmin || (currentEmployeeId != null && r.reported_by === currentEmployeeId));
+  const canEdit = (r) =>
+    !readOnly &&
+    // ใบจากเคสก่อนหน้าของคนเดียวกัน (โหมดประวัติการรักษา) อ่านได้อย่างเดียว — เส้นแก้ผูกกับเคสนี้
+    (!patientWide || r.case_id === caseId) &&
+    (isAdmin || (currentEmployeeId != null && r.reported_by === currentEmployeeId));
 
   /** URL รูปแผลของรายงานใบหนึ่ง — คนละเส้นกันระหว่างหลังบ้านกับพนักงาน (สิทธิ์คนละชุด) */
   const photoUrl = (r) =>
@@ -429,8 +454,46 @@ export default function CaseReports({
 
       {adding && (() => {
         const pickedVisit = backfillVisits?.find((v) => v.visit_id === backfillVisitId) ?? backfillVisits?.[0] ?? null;
+        /* ใบที่คัดลอก: เอาเนื้อหามาทั้งหมด แต่วัน/เวลาเป็นของใบใหม่ (วันของกะที่เลือก หรือวันนี้)
+           ประเภทกลับเป็นรอบปกติ — ไม่ให้ "ผิดปกติ" ของเมื่อวานติดมาเงียบๆ · รูปไม่คัดลอก (ช่องรูปเริ่มที่ "ยังไม่แตะ" เสมอ) */
+        /* เวลาบันทึกเติมให้เอง ไม่ต้องคีย์: ใบของวันนี้ = เวลาตอนเปิดฟอร์ม
+           ลงย้อนหลังของวันก่อน = เวลาเริ่มกะนั้น (เวลาตอนนี้ของอีกวันไม่มีความหมาย) · แก้เองได้เสมอ */
+        const reportDate = pickedVisit?.visit_date ?? todayTH();
+        const when = {
+          report_date: reportDate,
+          report_time: reportDate === todayTH() ? nowTH() : (pickedVisit?.planned_start ?? ''),
+        };
+        const initial = copyFrom ? { ...copyFrom, ...when, report_type: 'routine' } : when;
         const form = (
           <>
+          {copyOptions.length > 0 && (
+            <div className="report-copy">
+              <label>
+                คัดลอกจากรายงานเก่า
+                <SearchSelect
+                  value={copyFrom?.report_id ?? ''}
+                  disabled={busy}
+                  onChange={(e) => {
+                    const picked = copyOptions.find((r) => String(r.report_id) === String(e.target.value)) ?? null;
+                    setCopyFrom(picked);
+                    if (picked) toast(`คัดลอกรายงาน ${formatDate(picked.report_date)} · ${rowTime(picked)} มากรอกแล้ว — ตรวจแก้ส่วนที่ต่างก่อนส่ง`);
+                  }}
+                >
+                  <option value="">— ไม่คัดลอก (ฟอร์มเปล่า) —</option>
+                  {copyOptions.map((r) => {
+                    const text = (structured ? brief(r) : simpleBrief(r)).join(' · ');
+                    const summary = text ? ` — ${text.length > 60 ? `${text.slice(0, 60)}…` : text}` : '';
+                    return (
+                      <option key={r.report_id} value={r.report_id}>
+                        {`${formatDate(r.report_date)} · ${rowTime(r)} · ${r.reported_by_name ?? '—'}${summary}`}
+                      </option>
+                    );
+                  })}
+                </SearchSelect>
+              </label>
+              <p className="muted">เลือกแล้วข้อมูลในฟอร์มจะถูกแทนที่ด้วยใบนั้น (ยกเว้นวัน เวลา และรูป)</p>
+            </div>
+          )}
           {backfillVisits && (
             <label className="backfill-visit">
               กะที่ลงรายงานให้
@@ -444,8 +507,8 @@ export default function CaseReports({
             </label>
           )}
           <Form
-            key={pickedVisit?.visit_id ?? 'new'}
-            initial={pickedVisit ? { report_date: pickedVisit.visit_date } : null}
+            key={`${pickedVisit?.visit_id ?? 'new'}-${copyFrom?.report_id ?? 'blank'}`}
+            initial={initial}
             sections={sections}
             busy={busy}
             error={formError}
@@ -624,6 +687,7 @@ export default function CaseReports({
           scope={scope}
           currentEmployeeId={currentEmployeeId}
           readOnly={readOnly}
+          patientWide={patientWide}
           onClose={() => setArchiveOpen(false)}
         />
       )}
