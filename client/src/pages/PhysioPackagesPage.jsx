@@ -7,6 +7,8 @@ import LineIcon from '../components/LineIcon.jsx';
 import PageRefresh from '../components/PageRefresh.jsx';
 import ConfirmButton from '../components/ConfirmButton.jsx';
 import { useCanSeeStaffPay } from '../auth.jsx';
+import { useToast } from '../toast.jsx';
+import { priceRefreshText } from '../lib/customerInvoice.js';
 
 const BLANK = {
   name: '',
@@ -219,6 +221,7 @@ export default function PhysioPackagesPage() {
 
 /** ฟอร์มเพิ่ม/แก้ไข — ปุ่มบันทึกเดียว บันทึกทุกช่องพร้อมกัน */
 function PackageForm({ initial, onClose, onSaved }) {
+  const toast = useToast();
   const seePay = useCanSeeStaffPay();
   const sheetRef = useSheetSwipe(onClose); // จอแคบ: ปัดลงเพื่อปิด
   const isNew = !initial.physio_package_id;
@@ -270,7 +273,11 @@ function PackageForm({ initial, onClose, onSaved }) {
         note: form.note.trim() || null,
       };
       if (isNew) await api.createPhysioPackage(body);
-      else await api.updatePhysioPackage(initial.physio_package_id, body);
+      else {
+        const saved = await api.updatePhysioPackage(initial.physio_package_id, body);
+        const note = priceRefreshText(saved?.refreshed);
+        if (note) toast(note);
+      }
       onSaved();
     } catch (e) {
       setError(e.message);

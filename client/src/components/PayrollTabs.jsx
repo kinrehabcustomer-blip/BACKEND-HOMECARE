@@ -11,6 +11,7 @@ import MonthPicker from './MonthPicker.jsx';
 import PayrollSummaryDoc from './PayrollSummaryDoc.jsx';
 import { LATE_MINUTES } from '../lib/attendanceUi.js';
 import { caseCode } from '../lib/patientCode.js';
+import { useConfirm } from './ConfirmDialog.jsx';
 
 /**
  * สองแท็บของหน้า "รอบจ่ายค่าตอบแทน" ที่ย้ายมาจากหน้า "การมาทำงาน"
@@ -31,6 +32,7 @@ import { caseCode } from '../lib/patientCode.js';
    filterKey เปลี่ยน = ล้างที่ติ๊กไว้ กันอนุมัติกะที่ตัวกรองซ่อนไปแล้วติดไปด้วยโดยไม่เห็น */
 export function Approvals({ month, employeeId, patch, employeePicker, reloadKey, rowFilter = null, filterKey = '' }) {
   const toast = useToast();
+  const ask = useConfirm();
   const [allRows, setRows] = useState(null);
   const rows = rowFilter && allRows ? allRows.filter(rowFilter) : allRows;
   const [picked, setPicked] = useState(() => new Set());
@@ -95,7 +97,7 @@ export function Approvals({ month, employeeId, patch, employeePicker, reloadKey,
       // ไม่อนุมัติต้องมีเหตุผลเสมอ — เป็นสิ่งเดียวที่พนักงานจะได้รู้ว่าทำไมกะนั้นไม่ได้เงิน
       reason = prompt(`ไม่อนุมัติ ${ids.length} กะ — เหตุผล (พนักงานจะเห็นข้อความนี้)`);
       if (!reason?.trim()) return;
-    } else if (!confirm(`ยืนยัน ${ids.length} กะ (รวม ${durationText(pickedMinutes)})?`)) {
+    } else if (!(await ask({ title: `ยืนยัน ${ids.length} กะ?`, detail: `รวม ${durationText(pickedMinutes)}`, confirmLabel: 'ยืนยันกะ' }))) {
       return;
     }
 

@@ -16,6 +16,7 @@ import InvoiceExport from '../components/InvoiceExport.jsx';
 import LoadMore from '../components/LoadMore.jsx';
 import { useIsMobile } from '../lib/mobile.js';
 import { useLoadMore } from '../lib/loadMore.js';
+import { placeUnder } from '../lib/popover.js';
 
 const PER_PAGE_OPTIONS = [20, 50, 100];
 
@@ -507,7 +508,7 @@ function InvoiceTodo({ missing, withExtras, issuing, onIssue, onIssueExtras }) {
     if (!open) return undefined;
     const place = () => {
       const r = btnRef.current?.getBoundingClientRect();
-      if (r) setPos({ top: r.bottom + 6, right: Math.max(12, window.innerWidth - r.right) });
+      if (r) setPos(placeUnder(r));
     };
     place();
     const onDown = (e) => {
@@ -552,7 +553,7 @@ function InvoiceTodo({ missing, withExtras, issuing, onIssue, onIssueExtras }) {
           className="todo-panel"
           role="dialog"
           aria-label="งานรอออกใบแจ้งหนี้"
-          style={{ top: pos.top, right: pos.right }}
+          style={pos}
         >
           {missing.length > 0 && (
             <section>

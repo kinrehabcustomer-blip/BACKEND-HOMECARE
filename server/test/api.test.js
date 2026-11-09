@@ -201,6 +201,83 @@ if (process.env.RUN_DB_TESTS !== '1') {
     return post('/api/cases', { case_type: 'other', client_name: 'Workflow patient', fee: 2000, staff_pay: 1200 }, MANAGER, 201);
   }
 
+  test('แก้ราคาแพ็ก: เคสที่เปิดอยู่และขายราคาเดียวกับแพ็กตามราคาเต็มใหม่ · ใบร่างไม่ขึ้นส่วนลดเก่า · เคสราคาอื่น/ยกเลิกแล้วไม่แตะ', async () => {
+    const patch = async (path, body, expected = 200) => {
+      const res = await fetch(`${base}${path}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json', cookie: `${COOKIE_NAME}=${signToken(MANAGER)}` },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      assert.equal(res.status, expected, JSON.stringify(data));
+      return data;
+    };
+    const { physio_package_id: id } = await sql.one(
+      `INSERT INTO physio_packages (name, sessions, original_price, discount_amount, special_price, staff_pay)
+       VALUES ('Promo ended', 10, 18000, 3000, 15000, 9000) RETURNING physio_package_id`);
+    const open = (name, fee) => post('/api/cases', { case_type: 'other', client_name: name, service_kind: 'physio',
+      physio_package_id: id, fee }, MANAGER, 201);
+    const same = await open('Same price', 15000);
+    const deal = await open('Negotiated', 14000);
+    const gone = await open('Cancelled one', 15000);
+    await post(`/api/cases/${gone.case_id}/cancel`, { reason: 'test' });
+    const draftOf = async (caseId) => (await get(`/api/invoices?case_id=${caseId}`, MANAGER)).body.data
+      .find((i) => i.status === 'draft');
+    let d = await draftOf(same.case_id);
+    assert.equal(d.amount, 18000);
+    assert.equal(d.discount, 3000);
+
+    // เลิกโปร: ราคาเต็ม 15,000 ขาย 15,000
+    const saved = await patch(`/api/physio/packages/${id}`, { original_price: 15000, special_price: 15000, discount_amount: null, discount_percent: null });
+    assert.equal(saved.refreshed.cases, 1, JSON.stringify(saved.refreshed));
+    assert.equal(saved.refreshed.drafts, 1);
+    d = await draftOf(same.case_id);
+    assert.equal(d.amount, 15000);
+    assert.equal(d.discount, 0);
+    assert.equal(d.total, 15000, 'ยอดที่ลูกค้าจ่ายเท่าเดิม');
+    const row = await casesRepo.findById(same.case_id);
+    assert.equal(row.fee, 15000);
+    assert.equal(row.service_list_price_snapshot, 15000);
+    const events = (await get(`/api/cases/${same.case_id}/events`, MANAGER)).body;
+    assert.ok(events.some((e) => /18,000 → 15,000/.test(e.detail ?? '')), JSON.stringify(events.map((e) => e.detail)));
+
+    // เคสที่ขายราคาอื่น และเคสที่ยกเลิกแล้ว คงราคาเต็มเดิม
+    assert.equal((await casesRepo.findById(deal.case_id)).service_list_price_snapshot, 18000);
+    assert.equal((await casesRepo.findById(gone.case_id)).service_list_price_snapshot, 18000);
+
+    // แก้แพ็กแต่ไม่แตะราคา = ไม่ไล่ปรับเคส · บันทึกราคาเดิมซ้ำ = ไม่มีอะไรเปลี่ยน
+    assert.equal((await patch(`/api/physio/packages/${id}`, { note: 'just a note' })).refreshed, undefined);
+    assert.equal((await patch(`/api/physio/packages/${id}`, { original_price: 15000, special_price: 15000 })).refreshed.cases, 0);
+  });
+
+  test('popup เพิ่มหัตถการ/อุปกรณ์เสริม: PATCH เฉพาะ addons ทีละรายการ · หัตถการได้ VN และคงเลขเดิมเมื่อเพิ่มรายการถัดไป', async () => {
+    const patch = async (path, body, expected = 200) => {
+      const res = await fetch(`${base}${path}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json', cookie: `${COOKIE_NAME}=${signToken(MANAGER)}` },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      assert.equal(res.status, expected, JSON.stringify(data));
+      return data;
+    };
+    const c = await newCase();
+    const one = await patch(`/api/cases/${c.case_id}`, { addons: [
+      { kind: 'procedure', name: 'ค่าทำแผลขนาดเล็ก', quantity: 1, unit_price: 200, vn: null },
+    ] });
+    const vn = one.addons.find((a) => a.kind === 'procedure')?.vn;
+    assert.ok(vn, JSON.stringify(one.addons));
+    const two = await patch(`/api/cases/${c.case_id}`, { addons: [
+      ...one.addons,
+      { name: 'เตียงลม', kind: 'sale', quantity: 2, unit_price: 1500 },
+    ] });
+    assert.equal(two.addons.length, 2);
+    assert.equal(two.addons.find((a) => a.kind === 'procedure').vn, vn, 'VN เดิมไม่เปลี่ยน');
+    assert.equal(two.fee, 2000, 'ช่องอื่นของเคสไม่ถูกแตะ');
+    const draft = (await get(`/api/invoices?case_id=${c.case_id}`, MANAGER)).body.data.find((i) => i.status === 'draft');
+    if (draft) assert.equal(draft.total, 2000 + 200 + 3000, 'ใบร่างรวมยอดรายการที่เพิ่ม');
+  });
+
   test('legacy physio case (case_type only): unrelated edits keep it, switching to Homecare resets case_type', async () => {
     const patch = async (path, body) => {
       const res = await fetch(`${base}${path}`, {
@@ -1616,6 +1693,34 @@ if (process.env.RUN_DB_TESTS !== '1') {
       await sql.run(`UPDATE case_visits SET visit_date = '2020-01-01' WHERE case_id = :id`, { id: c.case_id });
       assert.equal((await get(`/api/my/cases/${c.case_id}`, FIELD)).status, 404);
       assert.ok(!(await get('/api/my/cases', FIELD)).body.some((x) => x.case_id === c.case_id));
+    });
+
+    test('มาสาย → บันทึกเวลามาถึงจริง: แก้แค่เวลาเข้า ระบบคิดนาทีที่สายใหม่ · เวลาออกไม่ถูกแตะ', async () => {
+      const c = await newCase();
+      const yesterday = await dayTH(-1);
+      const s = await post(`/api/cases/${c.case_id}/visits/bulk`,
+        { dates: [yesterday], assigned_to: FIELD.employee_id, planned_start: '09:00', planned_end: '17:00' }, MANAGER, 201);
+      const v = s.visits[0];
+      const path = `/api/cases/${c.case_id}/visits/${v.visit_id}/adjust`;
+      // เช็คอินช้า 95 นาที + เช็คเอาท์แล้ว
+      await sql.run(`UPDATE case_visits SET check_in_at = :in, checked_in_by = :emp, check_in_late_minutes = 95, off_schedule = FALSE,
+                     check_out_at = :out, status = 'done' WHERE visit_id = :id`,
+        { in: `${yesterday}T10:35:00+07:00`, out: `${yesterday}T17:00:00+07:00`, emp: FIELD.employee_id, id: v.visit_id });
+      const row = () => sql.one('SELECT check_in_late_minutes AS late, off_schedule, check_out_at FROM case_visits WHERE visit_id = :id', { id: v.visit_id });
+      const outBefore = (await row()).check_out_at;
+
+      const r1 = await send('PATCH', path, { check_in_at: `${yesterday}T09:05:00+07:00`, reason: 'มาถึงตรงเวลา แต่กดเช็คอินช้า' }, MANAGER);
+      assert.equal(r1.status, 200, JSON.stringify(r1.body));
+      assert.equal((await row()).late, 5);
+      assert.equal(String((await row()).check_out_at), String(outBefore), 'เวลาออกเดิม');
+
+      await send('PATCH', path, { check_in_at: `${yesterday}T08:50:00+07:00`, reason: 'มาก่อนเวลา' }, MANAGER);
+      assert.equal((await row()).late, 0);
+      assert.ok(!(await get('/api/cases/attendance/exceptions', MANAGER)).body?.some?.((x) => x.visit_id === v.visit_id),
+        'ไม่สายแล้ว = ไม่อยู่ในรายการต้องตรวจ');
+
+      // เวลาเข้าหลังเวลาออก = ปฏิเสธ
+      assert.equal((await send('PATCH', path, { check_in_at: `${yesterday}T18:00:00+07:00`, reason: 'ทดสอบ' }, MANAGER)).status, 400);
     });
 
     test('แก้เวลากะต้องมีเหตุผล และประวัติเก็บค่าเดิม → ค่าใหม่', async () => {

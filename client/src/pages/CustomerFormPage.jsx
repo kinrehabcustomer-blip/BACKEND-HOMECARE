@@ -6,6 +6,7 @@ import {
   GENDER_LABELS, TITLE_LABELS, MARITAL_STATUS_LABELS, ageFromBirthDate,
 } from '../labels.js';
 import SearchSelect from '../components/SearchSelect.jsx';
+import { useConfirm, LEAVE_UNSAVED } from '../components/ConfirmDialog.jsx';
 
 // customer = "ผู้ว่าจ้าง/ผู้ติดต่อ" — ข้อมูลสุขภาพ (โรคประจำตัว/แพ้ยา/กรุ๊ปเลือด/สิทธิรักษา/น้ำหนัก/ส่วนสูง)
 // ย้ายไปกรอกที่แฟ้มผู้รับการดูแล (patient) แล้ว จึงไม่มีในฟอร์มนี้
@@ -42,6 +43,7 @@ const toPayload = (form) =>
 export default function CustomerFormPage() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const ask = useConfirm();
   const toast = useToast();
   const isEdit = Boolean(id);
 
@@ -99,9 +101,13 @@ export default function CustomerFormPage() {
     fieldErrors[key] ? <span className="field-error">{fieldErrors[key]}</span> : null;
 
   /** ออกจากหน้าโดยยังไม่บันทึก — ถามก่อน */
-  const confirmLeave = (e) => {
-    if (isDirty() && !window.confirm('ยังไม่ได้บันทึก — ออกจากหน้านี้แล้วข้อมูลที่กรอกไว้จะหาย')) {
-      e.preventDefault();
+  const confirmLeave = async (e) => {
+    if (!isDirty()) return;
+    // ถามด้วยกล่องของระบบ (ไม่ใช่ confirm ของเบราว์เซอร์) — กันการเปลี่ยนหน้าไว้ก่อน ตอบ "ออก" ค่อยพาไปเอง
+    e.preventDefault();
+    const to = e.currentTarget.getAttribute('href');
+    if (await ask(LEAVE_UNSAVED)) {
+      navigate(to);
     }
   };
 

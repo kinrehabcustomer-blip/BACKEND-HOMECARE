@@ -9,6 +9,7 @@ import {
 } from '../labels.js';
 import { formatPhoneInput } from '../lib/phone.js';
 import SearchSelect from '../components/SearchSelect.jsx';
+import { useConfirm, LEAVE_UNSAVED } from '../components/ConfirmDialog.jsx';
 
 const BLANK = {
   // รหัสผู้รับบริการ KN + ปี พ.ศ. 2 หลัก + เลข 7 หลัก (กรอกเอง) — ตอนแก้คือรหัสเดิม (อาจยังเป็น PAT-xxxx)
@@ -49,6 +50,7 @@ const toPayload = (form) =>
 export default function PatientFormPage() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const ask = useConfirm();
   const toast = useToast();
   const isEdit = Boolean(id);
 
@@ -214,9 +216,13 @@ export default function PatientFormPage() {
     fieldErrors[key] ? <span className="field-error">{fieldErrors[key]}</span> : null;
 
   /** ออกจากหน้าโดยยังไม่บันทึก — ถามก่อน */
-  const confirmLeave = (e) => {
-    if (isDirty() && !window.confirm('ยังไม่ได้บันทึก — ออกจากหน้านี้แล้วข้อมูลที่กรอกไว้จะหาย')) {
-      e.preventDefault();
+  const confirmLeave = async (e) => {
+    if (!isDirty()) return;
+    // ถามด้วยกล่องของระบบ (ไม่ใช่ confirm ของเบราว์เซอร์) — กันการเปลี่ยนหน้าไว้ก่อน ตอบ "ออก" ค่อยพาไปเอง
+    e.preventDefault();
+    const to = e.currentTarget.getAttribute('href');
+    if (await ask(LEAVE_UNSAVED)) {
+      navigate(to);
     }
   };
 

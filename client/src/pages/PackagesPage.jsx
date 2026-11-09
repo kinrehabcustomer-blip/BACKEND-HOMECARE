@@ -6,6 +6,8 @@ import ErrorBar from '../components/ErrorBar.jsx';
 import ConfirmButton from '../components/ConfirmButton.jsx';
 import PageRefresh from '../components/PageRefresh.jsx';
 import { useCanSeeStaffPay } from '../auth.jsx';
+import { useToast } from '../toast.jsx';
+import { priceRefreshText } from '../lib/customerInvoice.js';
 import SearchSelect from '../components/SearchSelect.jsx';
 
 const TIERS = ['CG', 'NA', 'PN', 'RN'];
@@ -266,6 +268,7 @@ function RateTable({ label, formats, gradeId, editing, rateMap, draft, dirty, on
 }
 
 export default function PackagesPage() {
+  const toast = useToast();
   // ค่าจ้างพนักงาน/กำไร = เฉพาะผู้จัดการ · คนอื่นเห็นแต่ราคาที่ขายลูกค้า (server ตัดฟิลด์ออกให้แล้ว)
   const seePay = useCanSeeStaffPay();
   const narrow = useIsNarrow(); // จอแคบเท่านั้นที่พับกลุ่มเรทได้ — จอกว้างเหมือนเดิมทุกอย่าง
@@ -391,6 +394,8 @@ export default function PackagesPage() {
     try {
       const updated = await api.saveRates(rates);
       setMatrix(updated);
+      const note = priceRefreshText(updated?.refreshed);
+      if (note) toast(note);
       stopEdit();
     } catch (err) {
       setError(err.message);

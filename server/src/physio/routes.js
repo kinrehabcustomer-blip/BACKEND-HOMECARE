@@ -3,6 +3,7 @@ import * as repo from './repo.js';
 import { physioPackageSchema, physioPackageUpdateSchema, reorderSchema } from './schema.js';
 import { ApiError, asyncRoute, notFound } from '../lib/errors.js';
 import { canSeeStaffPay, stripPayFields } from '../lib/auth.js';
+import { refreshCasePrices } from '../cases/priceRefresh.js';
 
 export const physioRouter = Router();
 
@@ -88,7 +89,12 @@ physioRouter.patch(
     }
     await repo.ensureUniquePackageName();
     try {
-      res.json(visible(req, await repo.updatePackage(req.params.id, input)));
+      const updated = await repo.updatePackage(req.params.id, input);
+      /* แก้ราคา → เคสที่เปิดอยู่และขายราคาเดียวกับแพ็กตามราคาเต็มใหม่ (ส่วนลดบนใบแจ้งหนี้ร่างตรงกับระบบ) */
+      const priceChanged = ['original_price', 'special_price', 'discount_percent', 'discount_amount', 'english_fee']
+        .some((k) => k in input);
+      const refreshed = priceChanged ? await refreshCasePrices({ physioPackageId: Number(req.params.id) }, req.user) : null;
+      res.json({ ...visible(req, updated), ...(refreshed ? { refreshed } : {}) });
     } catch (err) {
       if (repo.isDuplicateNameError(err)) throw new ApiError(409, DUP_NAME(input.name));
       throw err;

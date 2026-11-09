@@ -11,6 +11,7 @@ import { EMPLOYEE_CODE_RE } from '../lib/employeeCode.js';
 import { POSITION_LABELS, EMPLOYMENT_TYPE_LABELS, STATUS_LABELS, GENDER_LABELS } from '../labels.js';
 import { formatPhoneInput } from '../lib/phone.js';
 import SearchSelect from '../components/SearchSelect.jsx';
+import { useConfirm, LEAVE_UNSAVED } from '../components/ConfirmDialog.jsx';
 
 const BLANK = {
   // รหัสที่กรอกเอง (add-on) — ว่าง = ให้ระบบออกรหัส / ตอนแก้ = ไม่เปลี่ยนรหัส
@@ -33,6 +34,7 @@ function toPayload(form) {
 export default function EmployeeFormPage() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const ask = useConfirm();
   const toast = useToast();
   const { user } = useAuth();
   const isEdit = Boolean(id);
@@ -108,9 +110,13 @@ export default function EmployeeFormPage() {
     fieldErrors[key] ? <span className="field-error">{fieldErrors[key]}</span> : null;
 
   /** ออกจากหน้าโดยยังไม่บันทึก — ถามก่อน */
-  const confirmLeave = (e) => {
-    if (isDirty() && !window.confirm('ยังไม่ได้บันทึก — ออกจากหน้านี้แล้วข้อมูลที่กรอกไว้จะหาย')) {
-      e.preventDefault();
+  const confirmLeave = async (e) => {
+    if (!isDirty()) return;
+    // ถามด้วยกล่องของระบบ (ไม่ใช่ confirm ของเบราว์เซอร์) — กันการเปลี่ยนหน้าไว้ก่อน ตอบ "ออก" ค่อยพาไปเอง
+    e.preventDefault();
+    const to = e.currentTarget.getAttribute('href');
+    if (await ask(LEAVE_UNSAVED)) {
+      navigate(to);
     }
   };
 

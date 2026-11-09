@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../api.js';
 import { useCanSeeStaffPay } from '../auth.jsx';
 import { useToast } from '../toast.jsx';
+import { useConfirm } from './ConfirmDialog.jsx';
 import { useSheetSwipe } from '../lib/sheetSwipe.js';
 import { useScrollLock } from '../lib/scrollLock.js';
 import CaseVisitsModal from './CaseVisitsModal.jsx';
@@ -12,6 +13,7 @@ import CaseLocationLink from './CaseLocationLink.jsx';
 import CaseReportDoc from './CaseReportDoc.jsx';
 import ReportArchiveModal from './ReportArchiveModal.jsx';
 import InvoiceModal from './InvoiceModal.jsx';
+import CaseChargeModal from './CaseChargeModal.jsx';
 import { POSITION_LABELS, GENDER_LABELS, SERVICE_KIND_LABELS, INVOICE_STATUS_LABELS, CASE_EVENT_LABELS, formatBaht, formatDate, stampText, positionsForCase, todayTH, caseStage, serviceKindOf, bundledPhysioText, totalFee } from '../labels.js';
 import LineIcon from './LineIcon.jsx';
 import StaffPicker from './StaffPicker.jsx';
@@ -159,10 +161,13 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
   /* เดิมมีแต่ QuickEdit ที่เรียก useToast() ทั้งที่ตัว CaseModal เองก็เรียก toast() อยู่
      (ปุ่ม "อนุมัติทั้งหมด") — พังเงียบมาตลอดเพราะอยู่ใน onClick จึงโยนต่อเมื่อมีคนกดจริง */
   const toast = useToast();
+  const ask = useConfirm();
   const boxRef = useRef(null);
   // จอแคบ: ปัดลงเพื่อปิด — ใช้ ref เดียวกับ focus trap เพราะ element เดียวแปะสอง ref ไม่ได้
   useSheetSwipe(onClose, boxRef);
   const [editing, setEditing] = useState(false);
+  // popup เพิ่มหัตถการ / อุปกรณ์เสริม ('procedure' | 'equipment' | null)
+  const [chargeMode, setChargeMode] = useState(null);
   const [item, setItem] = useState(null);
   // รวมหน้าหลังบ้าน ข้อ 3 (ดร. 24 ต.ค. 2569) — ปุ่มกลับไปห้องแชทลูกค้าในแดชบอร์ด admin (ลูกค้าที่ส่งมาจากแชท LINE Kin HomeCare)
   const [chatUrl, setChatUrl] = useState(null);
@@ -244,9 +249,15 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
    * แต่ฟอร์มที่กางอยู่ใน popup ไม่มีอะไรกันเลย — เผลอกดพื้นหลังหรือปุ่มกากบาททีเดียว
    * ที่พิมพ์ไว้หายทันทีโดยไม่มีจังหวะให้ยั้ง ซึ่งเป็นการกดที่พลาดง่ายกว่าการปิดทั้งแท็บมาก
    */
-  const requestClose = () => {
+  const requestClose = async () => {
     const pending = editing ? 'ข้อมูลเคสที่แก้ค้างไว้' : reportFormOpen ? 'รายงานที่กรอกค้างไว้' : null;
-    if (pending && !confirm(`ยังไม่ได้บันทึก${pending} — ปิดแล้วจะหาย ปิดเลยไหม?`)) return;
+    if (pending && !(await ask({
+      title: `ยังไม่ได้บันทึก${pending} — ปิดเลยไหม?`,
+      detail: 'ปิดแล้วสิ่งที่กรอกไว้จะหาย',
+      cancelLabel: 'อยู่ต่อ',
+      confirmLabel: 'ปิดโดยไม่บันทึก',
+      danger: true,
+    }))) return;
     onClose();
   };
 
@@ -605,7 +616,17 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                   <h3>รายละเอียดเคส</h3>
                   {/* เคสที่ปิด/ยกเลิกแล้วเป็นข้อเท็จจริงที่จบไปแล้ว — ต้องเปิดเคสใหม่ก่อนถึงจะแก้ได้ */}
                   {!editing && !terminal && (
-                    <button className="btn tiny" onClick={() => setEditing(true)}>แก้ด่วน</button>
+                    <span className="section-actions">
+                      {/* เพิ่มหัตถการ/อุปกรณ์เสริมได้จากตรงนี้เลย (popup) — แพ็กกายภาพที่เก็บเงินรวมในใบของเคส Homecare
+                          เพิ่มที่เคส Homecare แทน (server ก็กัน) */}
+                      {!item.bill_with_parent && (
+                        <>
+                          <button className="btn tiny" onClick={() => setChargeMode('procedure')}>+ หัตถการ</button>
+                          <button className="btn tiny" onClick={() => setChargeMode('equipment')}>+ อุปกรณ์เสริม</button>
+                        </>
+                      )}
+                      <button className="btn tiny" onClick={() => setEditing(true)}>แก้ด่วน</button>
+                    </span>
                   )}
                 </div>
 
@@ -708,12 +729,16 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                               <button
                                 className="btn tiny"
                                 disabled={busy}
-                                onClick={() => {
-                                  if (!confirm(`รวม "${a.physio_package_name ?? 'แพ็กกายภาพ'}" เข้าเป็นส่วนหนึ่งของเคสนี้?
-
-• ไม่ขึ้นเป็นเคสแยกในรายการเคสอีก
-• เก็บเงินเป็นบรรทัดในใบแจ้งหนี้ของเคสนี้ (มัดจำหักจากค่า Homecare)
-• ใบร่างของแพ็กจะถูกลบ`)) return;
+                                onClick={async () => {
+                                  if (!(await ask({
+                                    title: `รวม "${a.physio_package_name ?? 'แพ็กกายภาพ'}" เข้าเป็นส่วนหนึ่งของเคสนี้?`,
+                                    items: [
+                                      'ไม่ขึ้นเป็นเคสแยกในรายการเคสอีก',
+                                      'เก็บเงินเป็นบรรทัดในใบแจ้งหนี้ของเคสนี้ (มัดจำหักจากค่า Homecare)',
+                                      'ใบร่างของแพ็กจะถูกลบ',
+                                    ],
+                                    confirmLabel: 'รวมเข้าเคสนี้',
+                                  }))) return;
                                   run(async () => {
                                     await api.bundleIntoParent(a.case_id);
                                     setPhysioAddons(await api.physioAddons(caseId));
@@ -789,8 +814,8 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                     <button
                       className="btn primary"
                       disabled={busy}
-                      onClick={() => {
-                        if (!confirm(`อนุมัติ ${pendingPay.length} กะ?`)) return;
+                      onClick={async () => {
+                        if (!(await ask({ title: `อนุมัติ ${pendingPay.length} กะ?`, confirmLabel: 'อนุมัติ' }))) return;
                         run(async () => {
                           const { changed } = await api.approveCasePay(item.case_id);
                           toast(`อนุมัติแล้ว ${changed} กะ`);
@@ -1060,10 +1085,16 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                                ไม่ใช่ความผิดพลาดของระบบ แต่เป็นคำถามว่า "จะมอบหมายทั้งที่ยังไม่ครบไหม"
                                ถามแล้วส่งซ้ำพร้อม force — ไม่ขวางงานจริงที่ข้อมูลทยอยมาทีหลัง */
                             if (e.status !== 409 || !/ยังขาด/.test(e.message || '')) throw e;
-                            // eslint-disable-next-line no-alert
-                            if (!window.confirm(`${e.message}
-
-จะมอบหมายต่อเลยไหม?`)) return undefined;
+                            const ok = await ask({
+                              title: 'ข้อมูลเคสยังไม่ครบ — มอบหมายเลยไหม?',
+                              detail: 'พนักงานอาจไปถึงบ้านหรือโทรหาญาติไม่ได้ ถ้ายังไม่มีข้อมูลเหล่านี้',
+                              items: (e.fields ?? []).map((f) => f.message),
+                              itemsTone: 'warn',
+                              note: 'กรอกเพิ่มได้ทีหลังที่ "แก้ไขข้อมูล" ของเคส',
+                              cancelLabel: 'กลับไปกรอกก่อน',
+                              confirmLabel: 'มอบหมายเลย',
+                            });
+                            if (!ok) return undefined;
                             return api.assignCase(item.case_id, pick, true);
                           }
                         })
@@ -1177,7 +1208,7 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                 <button
                   className={`btn ${caseStage(item).key === 'awaiting_close' ? 'primary' : ''}`}
                   disabled={busy}
-                  onClick={() => {
+                  onClick={async () => {
                     /* ปิดเคส = ตรึงค่าจ้างของกะที่ทำไปแล้ว — บอกให้รู้ตัวก่อนกด
                        คนที่ไม่เห็นค่าจ้างไม่มีตัวเลขมาให้เทียบ (server ตัดออกจาก payload)
                        จึงบอกแค่ว่าเกิดอะไรขึ้น ไม่ใช่ทึกทักว่า "ยังไม่ได้ระบุค่าจ้าง" ทั้งที่อาจระบุไว้แล้ว */
@@ -1198,9 +1229,14 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                       upcoming > 0 && `• ${upcoming} กะที่ยังไม่ถึงวันนัด จะถูกยกเลิก`,
                       openShifts > 0 && `• ${openShifts} กะที่เช็คอินแล้วแต่ยังไม่เช็คเอาท์ จะไม่ถูกนับชั่วโมง/ค่าจ้าง`,
                     ].filter(Boolean);
-                    const pending = warn.length ? `\n\nยังมีของค้าง:\n${warn.join('\n')}` : '';
-
-                    if (!confirm(`ปิดเคส ${caseCode(item.case_id)}?${pay}${pending}\nเคสจะยังอยู่ในระบบเป็นประวัติ และเปิดใหม่ได้ภายหลัง`)) return;
+                    if (!(await ask({
+                      title: `ปิดเคส ${caseCode(item.case_id)}?`,
+                      detail: pay.trim() || undefined,
+                      items: warn.map((w) => w.replace(/^•\s*/, '')),
+                      itemsTone: 'warn',
+                      note: 'เคสจะยังอยู่ในระบบเป็นประวัติ และเปิดใหม่ได้ภายหลัง',
+                      confirmLabel: 'ปิดเคส',
+                    }))) return;
                     run(() => api.closeCase(item.case_id, today, warn.length > 0));
                   }}
                 >
@@ -1208,6 +1244,19 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                 </button>
               )}
             </footer>
+
+            {chargeMode && item && (
+              <CaseChargeModal
+                item={item}
+                mode={chargeMode}
+                onClose={() => setChargeMode(null)}
+                onSaved={(msg) => {
+                  setChargeMode(null);
+                  toast(msg);
+                  run(() => Promise.resolve()); // โหลดเคสใหม่ (VN ที่เพิ่งออก · ยอดใบแจ้งหนี้) + บอกหน้ารายการให้รีเฟรช
+                }}
+              />
+            )}
 
             {/* popup ย่อยของการลงวันนัด — ปิดแล้วดึงข้อมูลใหม่ ตัวเลขสรุปบนปุ่มจะได้ตรง */}
             {visitsOpen && (

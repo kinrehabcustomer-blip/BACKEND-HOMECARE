@@ -4,6 +4,7 @@ import './index.css'
 import './warm-clarity.css' // ชั้นดีไซน์ Warm Clarity — ลบบรรทัดนี้ = กลับหน้าตาเดิม
 import App from './App.jsx'
 import { ToastProvider } from './toast.jsx'
+import { ConfirmProvider } from './components/ConfirmDialog.jsx'
 import { applyTheme, getTheme } from './lib/theme.js'
 import { initPwa } from './lib/pwa.js'
 
@@ -32,7 +33,10 @@ createRoot(document.getElementById('root')).render(
   <StrictMode>
     {/* ครอบไว้นอกสุด — toast ต้องขึ้นได้ทั้งจากหน้า login และหน้าหลังบ้าน */}
     <ToastProvider>
-      <App />
+      {/* กล่องยืนยันของระบบ (แทน window.confirm) — ใช้ผ่าน useConfirm() */}
+      <ConfirmProvider>
+        <App />
+      </ConfirmProvider>
     </ToastProvider>
   </StrictMode>,
 )

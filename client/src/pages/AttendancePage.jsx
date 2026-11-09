@@ -369,12 +369,14 @@ const stamp = (date, time, nextDay = false) => {
  *
  * บันทึกแล้วกะจะออกจากคิวนี้ไปเข้าคิว "รออนุมัติค่าจ้าง" ตามทางปกติ — ไม่ได้ข้ามขั้นอนุมัติ
  */
-function TimeFix({ visit, busy, onClose, onSave }) {
+/* lateOnly = กะที่มาสาย (เช็คอินแล้ว) — แก้แค่เวลาเข้าเป็นเวลาที่มาถึงจริง ไม่แตะเวลาออก/สถานะ
+   ใช้เมื่อพนักงานมาถึงตรงเวลาแต่กดเช็คอินช้า (สัญญาณหาย/ลืมกด) · server คิดนาทีที่สายใหม่ให้ */
+function TimeFix({ visit, busy, onClose, onSave, lateOnly = false }) {
   const sheetRef = useSheetSwipe(onClose);
-  const [start, setStart] = useState(clockValue(visit.check_in_at) || visit.planned_start || '');
+  const [start, setStart] = useState(lateOnly ? visit.planned_start || clockValue(visit.check_in_at) : clockValue(visit.check_in_at) || visit.planned_start || '');
   const [end, setEnd] = useState(clockValue(visit.check_out_at) || visit.planned_end || '');
   // เหตุผลลงประวัติเคส (server บังคับ) — เติมกรณีที่พบบ่อยไว้ให้ แก้ได้
-  const [reason, setReason] = useState('พนักงานลืมเช็คอิน/เช็คเอาท์');
+  const [reason, setReason] = useState(lateOnly ? 'มาถึงตรงเวลา แต่กดเช็คอินช้า' : 'พนักงานลืมเช็คอิน/เช็คเอาท์');
 
   useScrollLock();
   useEffect(() => {
@@ -385,9 +387,9 @@ function TimeFix({ visit, busy, onClose, onSave }) {
 
   /* กะ 24 ชม. มีจริงในแพ็คเกจ (รายวัน/รายเดือน 24 ชม.) เวลาออกจึงเป็นวันถัดไปได้
      ไม่ถามเป็นช่องติ๊ก — เดาให้จากเวลาที่กรอก แล้วบอกไว้ในบรรทัดสรุปว่าจะบันทึกเป็นวันไหน */
-  const ready = isTime(start) && isTime(end); // กรอกครบทั้งสองช่องและอยู่ในช่วงที่เป็นเวลาจริง
-  const nextDay = ready && end <= start;
-  const minutes = ready
+  const ready = lateOnly ? isTime(start) : isTime(start) && isTime(end); // กรอกครบและอยู่ในช่วงที่เป็นเวลาจริง
+  const nextDay = !lateOnly && ready && end <= start;
+  const minutes = ready && !lateOnly
     ? (Number(end.slice(0, 2)) * 60 + Number(end.slice(3)) + (nextDay ? 1440 : 0))
       - (Number(start.slice(0, 2)) * 60 + Number(start.slice(3)))
     : null;
@@ -395,14 +397,21 @@ function TimeFix({ visit, busy, onClose, onSave }) {
   /* ไม่มีพนักงานผูกกับกะนี้ = บันทึกไปก็ไม่รู้ว่าใครทำ และค่าตอบแทนจะไม่เข้าใคร
      (สรุปค่าตอบแทนนับจากคนที่เช็คอิน ซึ่ง server จะเติมจากพนักงานที่ถูกจัดให้กะนี้) */
   const noStaff = !visit.employee_id;
-  const canSave = ready && !noStaff && !busy && reason.trim().length >= 3;
+  /* มาสาย: เวลาเข้าใหม่ต้องมาก่อนเวลาออกที่บันทึกไว้ (ถ้าออกแล้ว) */
+  const newIn = lateOnly && isTime(start) ? stamp(visit.visit_date, start) : null;
+  const afterOut = Boolean(newIn && visit.check_out_at && Date.parse(newIn) >= Date.parse(visit.check_out_at));
+  const toMin = (t) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3));
+  const lateBy = lateOnly && isTime(start) && visit.planned_start && isTime(visit.planned_start)
+    ? Math.max(0, toMin(start) - toMin(visit.planned_start))
+    : null;
+  const canSave = ready && !noStaff && !busy && !afterOut && reason.trim().length >= 3;
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal modal-narrow" ref={sheetRef} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
         <header className="modal-head">
           <div>
-            <h2>บันทึกเวลาจริง</h2>
+            <h2>{lateOnly ? 'บันทึกเวลามาถึงจริง' : 'บันทึกเวลาจริง'}</h2>
             <p className="muted">
               {formatDate(visit.visit_date)} · {visit.employee_name ?? 'ยังไม่มีพนักงาน'} · {visit.client_name}
             </p>
@@ -415,6 +424,11 @@ function TimeFix({ visit, busy, onClose, onSave }) {
             <p className="error timefix-hint">
               กะนี้ยังไม่มีพนักงานรับผิดชอบ — จับคู่พนักงานที่หน้าเคสก่อน ไม่งั้นค่าตอบแทนจะไม่เข้าใคร
             </p>
+          ) : lateOnly ? (
+            <p className="muted timefix-hint">
+              ใช้เมื่อพนักงานมาถึงตรงเวลาแต่กดเช็คอินช้า · เช็คอินในระบบ {timeText(visit.check_in_at)}
+              {visit.planned_start && ` · เวลานัด ${visit.planned_start}`} — แก้เป็นเวลาที่มาถึงจริง ระบบคิดนาทีที่สายใหม่ให้
+            </p>
           ) : (
             <p className="muted timefix-hint">
               ใช้เมื่อพนักงานไปทำงานจริงแต่ลืมกดเช็คอิน · กะจะเข้าคิว
@@ -426,12 +440,19 @@ function TimeFix({ visit, busy, onClose, onSave }) {
               (<SearchSelect> ของเบราว์เซอร์กางยาวเท่าจำนวนรายการ 24 บรรทัดจนทับทั้งกล่อง สั่งความสูงไม่ได้)
               และเป็นตัวเดียวกับที่ผู้จัดการใช้ตอนลงเวลานัด จึงกรอกด้วยท่าเดิมไม่ต้องเรียนรู้ใหม่ */}
           <div className="grid cols-2 timefix-times">
-            <label>เวลาเข้า *
+            <label>{lateOnly ? 'เวลามาถึงจริง *' : 'เวลาเข้า *'}
               <TimeSelect label="เวลาเข้า" value={start} disabled={noStaff} onChange={setStart} />
             </label>
-            <label>เวลาออก *
-              <TimeSelect label="เวลาออก" value={end} disabled={noStaff} onChange={setEnd} />
-            </label>
+            {lateOnly ? (
+              <div className="field timefix-out">
+                <span className="field-label">เวลาออก</span>
+                <span className="field-value">{visit.check_out_at ? `${timeText(visit.check_out_at)} (ไม่เปลี่ยน)` : 'ยังไม่เช็คเอาท์'}</span>
+              </div>
+            ) : (
+              <label>เวลาออก *
+                <TimeSelect label="เวลาออก" value={end} disabled={noStaff} onChange={setEnd} />
+              </label>
+            )}
           </div>
 
           <label>
@@ -440,6 +461,16 @@ function TimeFix({ visit, busy, onClose, onSave }) {
           </label>
 
           {/* ยืนยันสิ่งที่จะถูกบันทึกก่อนกด — โดยเฉพาะกรณีข้ามวัน ซึ่งระบบเดาให้เอง */}
+          {lateOnly && isTime(start) && (
+            afterOut ? (
+              <p className="error timefix-sum">เวลามาถึงต้องก่อนเวลาเช็คเอาท์ ({timeText(visit.check_out_at)})</p>
+            ) : (
+              <p className="notice timefix-sum">
+                {formatDate(visit.visit_date)} เข้า {start}
+                {lateBy != null && (lateBy > 0 ? ` · ยังสาย ${durationText(lateBy)}` : ' · ตรงเวลา')}
+              </p>
+            )
+          )}
           {minutes != null && (
             <p className="notice timefix-sum">
               {formatDate(visit.visit_date)} {start} → {nextDay && 'วันถัดไป '}{end}
@@ -454,12 +485,14 @@ function TimeFix({ visit, busy, onClose, onSave }) {
             className="btn primary"
             disabled={!canSave}
             onClick={() =>
-              onSave({
-                check_in_at: stamp(visit.visit_date, start),
-                check_out_at: stamp(visit.visit_date, end, nextDay),
-                status: 'done',
-                reason: reason.trim(),
-              })
+              onSave(lateOnly
+                ? { check_in_at: newIn, reason: reason.trim() }
+                : {
+                  check_in_at: stamp(visit.visit_date, start),
+                  check_out_at: stamp(visit.visit_date, end, nextDay),
+                  status: 'done',
+                  reason: reason.trim(),
+                })
             }
           >
             {busy ? 'กำลังบันทึก…' : 'บันทึกเวลา'}
@@ -475,6 +508,7 @@ function Exceptions({ rows, error, onReload, filters }) {
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState(null);
   const [fixing, setFixing] = useState(null); // กะที่กำลังลงเวลาย้อนหลัง (null = ปิดฟอร์ม)
+  const [fixingLate, setFixingLate] = useState(null); // กะที่มาสาย — แก้เวลาเข้าเป็นเวลามาถึงจริง
 
   async function adjust(v, body, done) {
     setBusy(true);
@@ -573,6 +607,12 @@ function Exceptions({ rows, error, onReload, filters }) {
                         บันทึกเวลาจริง
                       </button>
                     )}
+                    {/* มาสาย (เช็คอินแล้ว) — แก้เวลาเข้าเป็นเวลาที่มาถึงจริง ถ้ามาตรงเวลาแต่กดเช็คอินช้า */}
+                    {v.check_in_at && v.check_in_late_minutes > LATE_MINUTES && (
+                      <button className="btn tiny" disabled={busy} onClick={() => setFixingLate(v)}>
+                        บันทึกเวลาจริง
+                      </button>
+                    )}
                     {v.state === 'stale' && (
                       <ConfirmButton
                         className="btn tiny"
@@ -595,7 +635,9 @@ function Exceptions({ rows, error, onReload, filters }) {
                     )}
                     {/* ยกเลิกกะ = กะนี้ไม่ได้เกิดขึ้นจริง (ลูกค้าเลื่อน/ยกเลิก) อยู่ท้ายสุดเสมอ
                         เป็นทางเลือกสุดท้ายหลังจากดูแล้วว่าไม่ใช่กรณีลืมเช็คอิน */}
-                    {v.state === 'missed' && (
+                    {/* กะที่มาสาย (เช็คอินแล้ว) ยกเลิกได้ด้วย (ผู้ใช้ขอ 9 พ.ย. 2569) — เช่น เช็คอินผิดกะ/ผิดเคส
+                        หรือตกลงกันว่ากะนี้ไม่นับ · บอกชัดว่าชั่วโมงและค่าจ้างของกะนี้จะหายไปทั้งที่เช็คอินแล้ว */}
+                    {(v.state === 'missed' || (v.check_in_at && v.check_in_late_minutes > LATE_MINUTES)) && (
                       <ConfirmButton
                         className="btn tiny danger-ghost"
                         disabled={busy}
@@ -603,10 +645,19 @@ function Exceptions({ rows, error, onReload, filters }) {
                         /* เตือนเรื่องใบแจ้งหนี้ด้วย — ดร.ธงชัย 25 ต.ค. 2569 เคาะว่า "ยกเลิกได้ครับ" (ไม่ห้าม)
                            แต่ใบที่ออกให้ลูกค้าไปแล้วเป็นสำเนา ณ วันออก ยกเลิกกะตรงนี้ไม่ได้ไปลบบรรทัดในใบนั้นให้
                            ถ้าไม่บอกตรงนี้ ทีมจะยกเลิกกะแล้วเข้าใจว่าใบปรับตามเอง ลูกค้าได้ใบที่เก็บเงินวันที่ไม่ได้ไป (ตรวจรอบ 11A) */
-                        detail={`${v.employee_name ?? 'ยังไม่มีพนักงาน'} · ${formatDate(v.visit_date)} — กะที่ยกเลิกจะไม่เข้าสรุปค่าตอบแทน · ถ้าวันนี้อยู่ในใบแจ้งหนี้ที่ออกให้ลูกค้าไปแล้ว ใบนั้นจะยังเก็บเงินของวันนี้อยู่ ต้องไปแก้ใบเอง`}
+                        detail={`${v.employee_name ?? 'ยังไม่มีพนักงาน'} · ${formatDate(v.visit_date)} — ${
+                          v.check_in_at
+                            ? `พนักงานเช็คอินแล้ว (${timeText(v.check_in_at)}) ยกเลิกแล้วกะนี้จะไม่นับชั่วโมงและค่าจ้าง`
+                            : 'กะที่ยกเลิกจะไม่เข้าสรุปค่าตอบแทน'
+                        } · ถ้าวันนี้อยู่ในใบแจ้งหนี้ที่ออกให้ลูกค้าไปแล้ว ใบนั้นจะยังเก็บเงินของวันนี้อยู่ ต้องไปแก้ใบเอง`}
                         confirmLabel="ยกเลิกกะ"
                         cancelLabel="ไม่ยกเลิก"
-                        onConfirm={() => adjust(v, { status: 'cancelled', reason: 'ไม่ได้ไปทำงานกะนี้ (ยกเลิกจากรายการต้องตรวจ)' }, 'ยกเลิกกะแล้ว')}
+                        onConfirm={() => adjust(v, {
+                          status: 'cancelled',
+                          reason: v.check_in_at
+                            ? 'ยกเลิกกะที่มาสาย (จากรายการต้องตรวจ)'
+                            : 'ไม่ได้ไปทำงานกะนี้ (ยกเลิกจากรายการต้องตรวจ)',
+                        }, 'ยกเลิกกะแล้ว')}
                       >
                         ยกเลิกกะ
                       </ConfirmButton>
@@ -621,6 +672,17 @@ function Exceptions({ rows, error, onReload, filters }) {
         </div>
       )}
 
+      {fixingLate && (
+        <TimeFix
+          lateOnly
+          visit={fixingLate}
+          busy={busy}
+          onClose={() => setFixingLate(null)}
+          onSave={async (body) => {
+            if (await adjust(fixingLate, body, 'บันทึกเวลามาถึงจริงแล้ว')) setFixingLate(null);
+          }}
+        />
+      )}
       {fixing && (
         <TimeFix
           visit={fixing}

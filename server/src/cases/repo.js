@@ -116,6 +116,63 @@ async function servicePriceSnapshot(db, s) {
 
 const NOW = `to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')`;
 
+/* ราคาเต็มกับราคาขายของแพ็กกายภาพ (รวมค่าภาษาอังกฤษถ้าเคสเลือก) — สูตรเดียวกับ servicePriceSnapshot */
+const PHYSIO_ENGLISH = `(CASE WHEN c.pkg_english THEN COALESCE(p.english_fee, 0) ELSE 0 END)`;
+const PHYSIO_LIST = `(p.original_price + ${PHYSIO_ENGLISH})`;
+const PHYSIO_NET = `(COALESCE(p.special_price, p.original_price) + ${PHYSIO_ENGLISH})`;
+/* ตารางเรท Homecare — ราคาตั้ง และราคาหลังส่วนลดของแถวนั้น */
+const RATE_NET = `GREATEST(0, r.customer_price - CASE WHEN r.discount_percent IS NOT NULL
+                    THEN r.customer_price * r.discount_percent / 100 ELSE COALESCE(r.discount_amount, 0) END)`;
+const money = (v) => (v == null ? 'ไม่มี' : Number(v).toLocaleString('th-TH'));
+
+/**
+ * แก้ราคาแพ็ก/เรทแล้ว → เคสที่ยังเปิดอยู่ "ที่ขายในราคาเดียวกับแพ็กตอนนี้" ปรับราคาเต็ม (ตัวตั้งของส่วนลดบนใบแจ้งหนี้) ตาม
+ *
+ * เคสจำราคาไว้ ณ วันเปิด (service_*_price_snapshot) เพื่อไม่ให้การขึ้น/ลดราคาแพ็กไปเปลี่ยนยอดของลูกค้าที่ซื้อไปแล้ว
+ * แต่ราคาเต็มเป็นแค่ "ที่มาของส่วนลด" ที่โชว์บนใบ ไม่ใช่ยอดที่เก็บ — เจอจริง 9 พ.ย. 2569: แพ็ก 10 ครั้ง 3 เดือน
+ * เลิกโปร (ราคาเต็ม 18,000 → 15,000 ขาย 15,000 เท่าเดิม) แต่ใบของเคสเก่ายังขึ้น "ส่วนลด 3,000" ทั้งที่ระบบไม่มีส่วนลดแล้ว
+ *
+ * ปรับเฉพาะเคสที่ยอดขาย (snapshot ราคาลูกค้า) = ราคาขายของแพ็กตอนนี้ — ยอดที่ลูกค้าจ่ายจึงไม่ขยับแม้แต่บาทเดียว
+ * เคสที่ขายราคาอื่น (ขึ้นราคาแพ็ก · ต่อรองราคาเอง) ไม่แตะ — ส่วนลดบนใบของเขายังเป็นของจริง ณ วันที่ซื้อ
+ * เคสปิด/ยกเลิกแล้วไม่แตะ (ตัวเลขถูกใช้ไปแล้ว) · ลงประวัติเคสทุกเคสที่ปรับ
+ * คืนรหัสเคสที่ปรับ — ผู้เรียกเอาไปซิงก์ใบร่างต่อ (ใบที่ออก/ส่งลูกค้าแล้วไม่ซิงก์ทับอยู่แล้ว)
+ */
+export async function refreshListPriceSnapshots({ physioPackageId = null, homecareRates = false }, actor = null) {
+  if (!physioPackageId && !homecareRates) return [];
+  return transaction(async (tx) => {
+    const rows = physioPackageId
+      ? await tx.all(
+        `UPDATE cases c
+         SET service_list_price_snapshot = ${PHYSIO_LIST}, updated_at = ${NOW}
+         FROM physio_packages p, (SELECT case_id, service_list_price_snapshot AS old_list FROM cases) o
+         WHERE p.physio_package_id = :id AND c.physio_package_id = p.physio_package_id AND o.case_id = c.case_id
+           AND c.status NOT IN ('closed', 'cancelled')
+           AND abs(c.service_customer_price_snapshot - ${PHYSIO_NET}) < 0.005
+           AND c.service_list_price_snapshot IS DISTINCT FROM ${PHYSIO_LIST}
+         RETURNING c.case_id, o.old_list, c.service_list_price_snapshot AS new_list, c.service_customer_price_snapshot AS net, p.name`,
+        { id: physioPackageId },
+      )
+      : await tx.all(
+        `UPDATE cases c
+         SET service_list_price_snapshot = r.customer_price, updated_at = ${NOW}
+         FROM pkg_rates r, (SELECT case_id, service_list_price_snapshot AS old_list FROM cases) o
+         WHERE r.format_id = c.pkg_format_id AND r.grade_id IS NOT DISTINCT FROM c.pkg_grade_id
+           AND r.staff_tier = c.pkg_staff_tier AND c.physio_package_id IS NULL AND o.case_id = c.case_id
+           AND c.status NOT IN ('closed', 'cancelled')
+           AND r.customer_price IS NOT NULL
+           AND abs(c.service_customer_price_snapshot - ${RATE_NET}) < 0.005
+           AND c.service_list_price_snapshot IS DISTINCT FROM r.customer_price
+         RETURNING c.case_id, o.old_list, c.service_list_price_snapshot AS new_list, c.service_customer_price_snapshot AS net, NULL AS name`,
+      );
+    for (const r of rows) {
+      await logEvent(tx, r.case_id, 'edited',
+        `ราคาเต็มตาม${r.name ? `แพ็ก ${r.name}` : 'ตารางเรท'}ที่แก้ใหม่: ${money(r.old_list)} → ${money(r.new_list)}`
+          + ` (ยอดที่ลูกค้าจ่าย ${money(r.net)} เท่าเดิม — เปลี่ยนแค่ส่วนลดที่แสดงบนใบแจ้งหนี้)`, actor);
+    }
+    return rows.map((r) => r.case_id);
+  });
+}
+
 /**
  * ข้อมูลความปลอดภัยของผู้รับบริการที่ต้อง "อ่านสดจากแฟ้ม" ไม่ใช่ snapshot ของเคส
  *
@@ -2561,6 +2618,21 @@ export async function adjustVisit(caseId, visitId, input, admin) {
         ? 'checked_in_by = NULL'
         : 'checked_in_by = COALESCE(checked_in_by, assigned_to)',
     );
+    /* แก้เวลาเข้า = คิด "สายกี่นาที / นอกวันนัด" ใหม่จากเวลาที่บันทึก (กติกาเดียวกับตอนเช็คอิน · my/routes.js)
+       เดิมค่าเก่าค้างอยู่ — กะที่ผู้จัดการบันทึกเวลาจริงแล้ว (มาตรงเวลาแต่กดช้า) ยังขึ้น "มาสาย" ในรายการต้องตรวจตลอด
+       สายเทียบได้เฉพาะกะที่ระบุเวลานัดและเวลาเข้าอยู่ในวันนัด · ล้างเวลาเข้า = ล้างทั้งสองค่า */
+    if (input.check_in_at == null) {
+      sets.push('check_in_late_minutes = NULL', 'off_schedule = FALSE');
+    } else {
+      const day = `to_char(:check_in_at::timestamptz AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD')`;
+      sets.push(
+        `check_in_late_minutes = CASE WHEN planned_start IS NOT NULL AND ${day} = visit_date
+           THEN GREATEST(0, floor(extract(epoch FROM (:check_in_at::timestamptz
+                 - ((visit_date || ' ' || planned_start)::timestamp AT TIME ZONE 'Asia/Bangkok'))) / 60))::int
+           ELSE NULL END`,
+        `off_schedule = (${day} <> visit_date)`,
+      );
+    }
   }
 
   /* ช่องที่เป็น "ฐานของค่าจ้าง" — เวลาเข้า/ออกและสถานะกะ คือสิ่งที่คิวอนุมัติเอาไปตัดสิน

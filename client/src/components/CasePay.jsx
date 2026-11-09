@@ -4,6 +4,7 @@ import { allocateShares, entitlements, round } from '../lib/payShare.js';
 import { formatBaht, formatDate, openDatePicker } from '../labels.js';
 import ConfirmButton from './ConfirmButton.jsx';
 import SearchSelect from './SearchSelect.jsx';
+import { useConfirm } from './ConfirmDialog.jsx';
 
 /**
  * แผงจัดการค่าจ้างของเคสหนึ่งใบ — ใช้ที่แท็บ "ปล่อยค่าจ้าง" ของหน้ารอบจ่าย
@@ -530,6 +531,7 @@ export default function CasePayPanel({ caseId, busy, run, toast }) {
  * ตัวเลขไหนเป็นของงวดที่กำลังจะปล่อย
  */
 function ShareAgreement({ caseId, pay, entitled, busy, run, toast, onSaved }) {
+  const ask = useConfirm();
   const { shares, staff_pay: total, has_agreement: hasAgreement, agreed_total: agreedTotal, agreement_matches: agreementOk } = pay;
   const [draft, setDraft] = useState(null); // null = ไม่ได้กำลังแก้
 
@@ -548,8 +550,8 @@ function ShareAgreement({ caseId, pay, entitled, busy, run, toast, onSaved }) {
     });
   }
 
-  function clear() {
-    if (!confirm('ล้างข้อตกลง แล้วกลับไปหารเท่ากันทุกคน?')) return;
+  async function clear() {
+    if (!(await ask({ title: 'ล้างข้อตกลงส่วนแบ่ง แล้วกลับไปหารเท่ากันทุกคน?', confirmLabel: 'ล้างข้อตกลง', danger: true }))) return;
     run(async () => {
       onSaved(await api.setCasePayShares(caseId, []));
       setDraft(null);

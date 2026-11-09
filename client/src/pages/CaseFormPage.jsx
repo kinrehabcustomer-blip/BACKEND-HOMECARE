@@ -18,6 +18,7 @@ import { useScrollLock } from '../lib/scrollLock.js';
 import { formatPhone, formatPhoneInput } from '../lib/phone.js';
 import SearchSelect from '../components/SearchSelect.jsx';
 import ProcedureNameInput from '../components/ProcedureNameInput.jsx';
+import { useConfirm, LEAVE_UNSAVED } from '../components/ConfirmDialog.jsx';
 
 const TIERS = ['CG', 'NA', 'PN', 'RN'];
 const CATEGORY_LABELS = { daily: 'รายวัน', weekly: 'รายสัปดาห์', monthly: 'รายเดือน' };
@@ -136,6 +137,7 @@ const shownAge = (p) => {
 export default function CaseFormPage() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const ask = useConfirm();
   const toast = useToast();
   const isEdit = Boolean(id);
 
@@ -887,9 +889,13 @@ export default function CaseFormPage() {
     fieldErrors[key] ? <span className="field-error">{fieldErrors[key]}</span> : null;
 
   /** ออกจากหน้าโดยยังไม่บันทึก — ถามก่อน */
-  const confirmLeave = (e) => {
-    if (isDirty() && !window.confirm('ยังไม่ได้บันทึก — ออกจากหน้านี้แล้วข้อมูลที่กรอกไว้จะหาย')) {
-      e.preventDefault();
+  const confirmLeave = async (e) => {
+    if (!isDirty()) return;
+    // ถามด้วยกล่องของระบบ (ไม่ใช่ confirm ของเบราว์เซอร์) — กันการเปลี่ยนหน้าไว้ก่อน ตอบ "ออก" ค่อยพาไปเอง
+    e.preventDefault();
+    const to = e.currentTarget.getAttribute('href');
+    if (await ask(LEAVE_UNSAVED)) {
+      navigate(to);
     }
   };
 

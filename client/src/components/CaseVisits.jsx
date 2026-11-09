@@ -8,6 +8,7 @@ import LineIcon from './LineIcon.jsx';
 import TimeSelect from './TimeSelect.jsx';
 import { caseCode } from '../lib/patientCode.js';
 import SearchSelect from './SearchSelect.jsx';
+import { useConfirm } from './ConfirmDialog.jsx';
 
 const WEEKDAYS = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
 
@@ -84,6 +85,7 @@ function dayClass(list) {
  */
 export default function CaseVisits({ caseId, caseItem = null, target = null, readOnly = false, mode = 'shift' }) {
   const toast = useToast();
+  const ask = useConfirm();
   // ค่าจ้างรายกะเห็น/แก้ได้เฉพาะผู้จัดการ เหมือนค่าจ้างของเคส (server ตัดฟิลด์ให้อยู่แล้ว)
   const isAppt = mode === 'appointment';
   /* เปิดปฏิทินที่เดือนของ "วันแรกที่ลงนัดได้จริง" ไม่ใช่เดือนปัจจุบันเสมอไป
@@ -708,11 +710,16 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
                 type="button"
                 className="btn danger-ghost"
                 disabled={busy}
-                onClick={() => {
+                onClick={async () => {
                   // ลบถาวรทุกนัดที่ยังไม่เช็คอินในวันที่เลือก — ถามก่อน (ตรวจ Codex 30 ต.ค. 2569 ข้อ 7)
                   // ดูตารางของคนเดียวอยู่ = ลบเฉพาะนัดของคนนั้น ไม่ไปลบนัดของคนอื่นในวันเดียวกัน
                   const whose = multi && view ? ` ของ ${nameOf(view)}` : '';
-                  if (!window.confirm(`ลบนัดที่ยังไม่เช็คอิน${whose} ${pickedWithVisits.length} วันที่เลือก? ลบแล้วกู้คืนไม่ได้`)) return;
+                  if (!(await ask({
+                    title: `ลบนัดที่ยังไม่เช็คอิน${whose} ${pickedWithVisits.length} วันที่เลือก?`,
+                    detail: 'ลบแล้วกู้คืนไม่ได้',
+                    confirmLabel: 'ลบนัด',
+                    danger: true,
+                  }))) return;
                   run(() => api.deleteVisitsOn(caseId, pickedWithVisits, multi && view ? view : null), { clearPicked: true });
                 }}
               >

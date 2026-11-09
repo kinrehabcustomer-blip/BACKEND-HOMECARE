@@ -4,6 +4,7 @@ import { api } from '../api.js';
 import { formatDate, todayTH, invoiceStatusLabel, MONTH_LABELS, toBuddhistYear } from '../labels.js';
 import { downloadCsv } from '../lib/attendanceUi.js';
 import LineIcon from './LineIcon.jsx';
+import { placeUnder } from '../lib/popover.js';
 
 /**
  * ดาวน์โหลดใบแจ้งหนี้เป็น CSV แบบรายวัน / รายสัปดาห์ / รายเดือน (ผู้ใช้ขอ 6 พ.ย. 2569)
@@ -61,9 +62,7 @@ export default function InvoiceExport({ filters, filterNote }) {
     const place = () => {
       const r = btnRef.current?.getBoundingClientRect();
       if (!r) return;
-      // มือถือ: แผงกว้างเต็มจอ (เว้นขอบ 12px) — ยึดขอบขวาของปุ่มแล้วแผงล้นจอซ้าย
-      if (window.innerWidth <= 600) setPos({ top: r.bottom + 6, left: 12, right: 12 });
-      else setPos({ top: r.bottom + 6, right: Math.max(12, window.innerWidth - r.right) });
+      setPos(placeUnder(r, { maxWidth: 304 })); // 19rem เท่าความกว้างเดิมของแผงนี้
     };
     place();
     const onDown = (e) => {
@@ -166,10 +165,10 @@ export default function InvoiceExport({ filters, filterNote }) {
       {open && pos && createPortal(
         <div
           ref={panelRef}
-          className={`todo-panel export-panel${pos.left != null ? ' is-wide' : ''}`}
+          className="todo-panel export-panel"
           role="dialog"
           aria-label="ดาวน์โหลดใบแจ้งหนี้เป็น CSV"
-          style={{ top: pos.top, right: pos.right, left: pos.left }}
+          style={pos}
         >
           {/* กะทัดรัด (ผู้ใช้ขอ 6 พ.ย. 2569): ไม่มีหัวแผง (ปุ่มที่กดเปิดบอกอยู่แล้วว่า CSV)
               แถว 1 = ช่วงเวลา · แถว 2 = วันที่ + ปุ่มดาวน์โหลด · แถว 3 = ช่วงที่ได้จริง + ตัวกรองที่ใช้ บรรทัดเล็กบรรทัดเดียว */}

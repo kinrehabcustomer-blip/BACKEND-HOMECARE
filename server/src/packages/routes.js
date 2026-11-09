@@ -20,6 +20,7 @@ const inUse = (what, n) =>
       ' และใบแจ้งหนี้ของเคสเหล่านั้นจะขึ้นว่าไม่ตรงทั้งหมด · ถ้าเลิกขายแล้ว ให้คงไว้แล้วเปลี่ยนชื่อแทน (เช่น เติม "(เลิกขาย)" ท้ายชื่อ)',
   );
 import { canSeeStaffPay, stripPayFields } from '../lib/auth.js';
+import { refreshCasePrices } from '../cases/priceRefresh.js';
 
 export const packagesRouter = Router();
 
@@ -105,6 +106,8 @@ packagesRouter.patch(
        ถ้าปล่อยผ่าน ค่าที่ส่งมาจะเป็นว่างเปล่าแล้วไปล้างค่าจ้างเดิมที่ผู้จัดการตั้งไว้ทิ้งทั้งแถว */
     const safe = seePay ? rates : rates.map(({ staff_pay, ...r }) => r);
     const updated = await repo.upsertRates(safe);
-    res.json(seePay ? updated : { ...updated, rates: updated.rates.map(stripPayFields) });
+    // แก้ราคา → เคส Homecare ที่เปิดอยู่และขายราคาเดียวกับเรทตามราคาตั้งใหม่ (ดู cases/priceRefresh.js)
+    const refreshed = await refreshCasePrices({ homecareRates: true }, req.user);
+    res.json({ ...(seePay ? updated : { ...updated, rates: updated.rates.map(stripPayFields) }), refreshed });
   }),
 );
