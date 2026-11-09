@@ -9,7 +9,7 @@
  *
  * แก้ไฟล์นี้เมื่อไร ให้เลื่อน VERSION — เบราว์เซอร์จะลงตัวใหม่และล้างแคชรุ่นเก่าทิ้งเอง
  */
-const VERSION = 'v1';
+const VERSION = 'v2';
 const SHELL = `kin-shell-${VERSION}`;
 const ASSETS = `kin-assets-${VERSION}`;
 const PRECACHE = ['/offline.html', '/icons/icon-192.png'];
