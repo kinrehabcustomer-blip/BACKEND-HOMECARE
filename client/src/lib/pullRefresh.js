@@ -97,7 +97,8 @@ export function usePullToRefresh(onRefresh, enabled = true) {
       // popup เปิดอยู่ (ตัวที่ล็อกการเลื่อนของหน้าหลังไว้) — ห้ามดึงหน้าที่ถูกบังอยู่
       if (document.body.style.overflow === 'hidden') return;
       // เมนูข้างที่กางอยู่เป็นแผ่นลอยทับหน้า ปัดในนั้นไม่ใช่การสั่งรีเฟรชหน้าที่อยู่ข้างหลัง
-      if (e.target.closest?.('.sidebar, input, textarea, select, [contenteditable]')) return;
+      // ตารางเดือนบนมือถือ (.mcal-grid) ใช้ท่าปัดซ้าย/ขวาเปลี่ยนเดือน — ปัดเฉียงลงนิดเดียวต้องไม่กลายเป็นรีเฟรช
+      if (e.target.closest?.('.sidebar, .mcal-grid, input, textarea, select, [contenteditable]')) return;
 
       startY = e.touches[0].clientY;
       pull = 0;

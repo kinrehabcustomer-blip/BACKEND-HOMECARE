@@ -6,6 +6,7 @@ import PageRefresh from '../components/PageRefresh.jsx';
 import { SERVICE_KIND_LABELS, serviceKindOf, VISIT_STATE_LABELS, MONTH_LABELS, toBuddhistYear } from '../labels.js';
 import { CAL_STATES, dayLabel, timeRange } from '../lib/calendarUi.js';
 import { caseCode } from '../lib/patientCode.js';
+import MobileCalendar, { useNarrow } from '../components/MobileCalendar.jsx';
 
 const WEEKDAYS = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
 
@@ -26,6 +27,8 @@ export default function MyCalendarPage() {
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
   const [openId, setOpenId] = useState(null);
+  const [selected, setSelected] = useState(todayISO); // วันที่เลือกบนมือถือ — รายการงานเริ่มจากวันนี้
+  const narrow = useNarrow();
 
   const mm = String(month).padStart(2, '0');
   const today = todayISO();
@@ -57,16 +60,22 @@ export default function MyCalendarPage() {
     const d = new Date(year, month - 1 + delta, 1);
     setYear(d.getFullYear());
     setMonth(d.getMonth() + 1);
+    setSelected(iso(d.getFullYear(), d.getMonth() + 1, 1));
   }
 
   function goToday() {
     const t = new Date();
     setYear(t.getFullYear());
     setMonth(t.getMonth() + 1);
+    setSelected(todayISO());
   }
 
   const leading = new Date(year, month - 1, 1).getDay();
   const daysInMonth = new Date(year, month, 0).getDate();
+  const monthDays = useMemo(
+    () => Array.from({ length: daysInMonth }, (_, i) => iso(year, month, i + 1)),
+    [year, month, daysInMonth],
+  );
 
   const byDay = useMemo(() => {
     const map = new Map();
@@ -88,12 +97,14 @@ export default function MyCalendarPage() {
               : 'กดที่งานเพื่อดูรายละเอียดเคส'}
           </p>
         </div>
-        {/* cal-nav — ดูคำอธิบายที่ CalendarPage: ปุ่มเลื่อนเดือนไม่ต้องยืดเต็มบรรทัดบนมือถือ */}
-        <div className="actions cal-nav">
-          <button className="btn" onClick={() => shiftMonth(-1)} aria-label="เดือนก่อนหน้า">←</button>
-          <button className="btn" onClick={goToday}>วันนี้</button>
-          <button className="btn" onClick={() => shiftMonth(1)} aria-label="เดือนถัดไป">→</button>
-        </div>
+        {/* ปุ่มเลื่อนเดือน — เฉพาะจอกว้าง · มือถือปัดตารางซ้าย/ขวาแทน (ผู้ใช้ขอ 10 พ.ย. 2569 เหมือนหน้า admin) */}
+        {!narrow && (
+          <div className="actions cal-nav">
+            <button className="btn" onClick={() => shiftMonth(-1)} aria-label="เดือนก่อนหน้า">←</button>
+            <button className="btn" onClick={goToday}>วันนี้</button>
+            <button className="btn" onClick={() => shiftMonth(1)} aria-label="เดือนถัดไป">→</button>
+          </div>
+        )}
       </header>
 
       {/* error เป็นแถบเหนือปฏิทิน ไม่ทับทั้งหน้า — ปุ่มเลื่อนเดือนต้องยังกดได้
@@ -118,6 +129,22 @@ export default function MyCalendarPage() {
 
       {cases?.length === 0 && <p className="notice">คุณไม่มีงานในเดือนนี้</p>}
 
+      {/* มือถือ: ตารางเดือนย่อ (จุดสีใต้วัน) + รายการงานจากวันที่เลือก */}
+      {narrow ? (
+        <MobileCalendar
+          days={monthDays}
+          byDay={byDay}
+          today={today}
+          selected={selected}
+          onSelect={setSelected}
+          onShift={shiftMonth}
+          itemText={(c) => ({
+            title: c.client_name,
+            sub: [caseCode(c.case_id), SERVICE_KIND_LABELS[serviceKindOf(c)], VISIT_STATE_LABELS[c.state]].filter(Boolean).join(' · '),
+          })}
+          onOpen={(c) => setOpenId(c.case_id)}
+        />
+      ) : (
       <div className="table-wrap">
         <div className="cal-grid">
           {WEEKDAYS.map((w) => (
@@ -182,6 +209,7 @@ export default function MyCalendarPage() {
           })}
         </div>
       </div>
+      )}
 
       <p className="muted cal-note">
         งานแสดงตาม<strong>วันนัดที่ลงไว้</strong>ในเคส — ถ้าวันไหนควรมีงานแต่ไม่ขึ้น แจ้งผู้จัดการให้ลงวันนัดให้

@@ -873,6 +873,121 @@ input[aria-invalid='true'] { border-color: var(--danger); }
 :root[data-theme="dark"] .cal-grid:not(.is-week) > .cal-cell:nth-child(7n + 1) { background: var(--surface-2); }
 
 /* =====================================================================================
+   ปฏิทินบนมือถือ (MobileCalendar.jsx) — แบบแอปปฏิทินบนโทรศัพท์ (ผู้ใช้ขอ 10 พ.ย. 2569)
+   บน: ตารางเดือนย่อ เลขวัน + จุดสีสถานะกะ · วันนี้วงทอง · วันที่เลือกพื้นเทาอ่อน
+   ล่าง: รายการงานแบ่งตามวัน เริ่มจากวันที่เลือก — จุดสี · เวลา · ชื่อ · รายละเอียด
+   ===================================================================================== */
+.mcal { display: flex; flex-direction: column; gap: 0.75rem; }
+
+.mcal-grid {
+  touch-action: pan-y;   /* ปัดแนวนอน = เปลี่ยนเดือน (MobileCalendar จัดการเอง) · แนวตั้งยังเลื่อนหน้าได้ */
+  transition: transform 0.2s ease, opacity 0.2s ease;   /* ปล่อยนิ้วแล้วดีดกลับนุ่มๆ */
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  row-gap: 0.125rem;
+  padding: 0.375rem 0.25rem 0.5rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+}
+/* ตารางเดือนใหม่เลื่อนเข้ามาจากทิศที่ปัด — ปัดซ้าย (เดือนถัดไป) เข้ามาจากขวา */
+.mcal-grid.is-enter-next { animation: mcal-in-next 0.24s ease-out; }
+.mcal-grid.is-enter-prev { animation: mcal-in-prev 0.24s ease-out; }
+@keyframes mcal-in-next { from { transform: translateX(2.5rem); opacity: 0; } }
+@keyframes mcal-in-prev { from { transform: translateX(-2.5rem); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .mcal-grid { transition: none; }
+  .mcal-grid.is-enter-next, .mcal-grid.is-enter-prev { animation: none; }
+}
+.mcal-hint { margin: -0.375rem 0 0; text-align: center; font-size: 0.6875rem; color: var(--text-faint); }
+.mcal-head {
+  padding: 0.25rem 0 0.375rem;
+  text-align: center;
+  font-size: 0.6875rem; font-weight: 600; letter-spacing: 0.02em; color: var(--muted);
+}
+.mcal-head.is-weekend { color: #a8542c; }
+
+.mcal-day {
+  display: flex; flex-direction: column; align-items: center; gap: 0.1875rem;
+  min-width: 0; min-height: 2.875rem; padding: 0.1875rem 0 0.25rem;
+  border: 0; border-radius: 0.625rem; background: none;
+  font: inherit; color: var(--heading); cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.12s ease;
+}
+.mcal-num {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 1.875rem; height: 1.875rem; border-radius: 999px;
+  font-size: 0.9375rem; font-weight: 500; font-variant-numeric: tabular-nums;
+}
+.mcal-day.is-weekend .mcal-num { color: #a8542c; }
+.mcal-day.is-out { cursor: default; }
+.mcal-day.is-out .mcal-num { color: var(--text-faint); opacity: 0.6; }
+.mcal-day.is-selected { background: var(--surface-2); }
+.mcal-day.is-selected .mcal-num { font-weight: 700; }
+.mcal-day.is-today .mcal-num { background: var(--brand); color: var(--brand-ink); font-weight: 700; }
+.mcal-day:not(.is-out):active { background: var(--brand-soft); }
+.mcal-day:focus-visible,
+.mcal-item:focus-visible,
+.mcal-dayhead-btn:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }
+
+.mcal-dots { display: flex; justify-content: center; gap: 0.125rem; height: 0.3125rem; }
+.mcal-dot {
+  flex: none; display: block;
+  width: 0.3125rem; height: 0.3125rem; border-radius: 999px;
+  background: var(--muted);
+}
+.mcal-dot.visit-scheduled { background: #d99a1e; }
+.mcal-dot.visit-working   { background: #1e7a4c; }
+.mcal-dot.visit-done      { background: #8a8378; }
+.mcal-dot.visit-stale     { background: #7b52b9; }
+.mcal-dot.visit-missed    { background: #c0392b; }
+
+.mcal-agenda {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  overflow: hidden;
+}
+.mcal-group + .mcal-group { border-top: 1px solid var(--border); }
+.mcal-dayhead {
+  display: flex; align-items: center; gap: 0.375rem;
+  min-height: 2.5rem; padding: 0.375rem 0.875rem;
+  background: var(--surface-2);
+  font-size: 0.8125rem; font-weight: 700; color: var(--heading);
+}
+.mcal-dayhead-tag { color: var(--brand); }
+.mcal-dayhead.is-today { color: var(--brand); }
+.mcal-dayhead-count { margin-left: auto; font-size: 0.75rem; font-weight: 600; color: var(--muted); }
+.mcal-dayhead-btn {
+  min-height: 2rem; padding: 0 0.625rem;
+  border: 1px solid var(--border); border-radius: 999px;
+  background: var(--surface);
+  font: inherit; font-size: 0.75rem; font-weight: 600; color: var(--brand);
+  cursor: pointer;
+}
+
+.mcal-item {
+  display: flex; align-items: flex-start; gap: 0.75rem;
+  width: 100%; padding: 0.6875rem 0.875rem;
+  border: 0; border-top: 1px solid var(--divider);
+  background: none; text-align: left;
+  font: inherit; color: var(--text); cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.mcal-dayhead + .mcal-item { border-top: 0; }
+.mcal-item:active { background: var(--surface-2); }
+.mcal-item > .mcal-dot { width: 0.625rem; height: 0.625rem; margin-top: 0.3125rem; }
+.mcal-item-body { display: flex; flex-direction: column; flex: 1; min-width: 0; gap: 0.0625rem; }
+.mcal-item-time { font-size: 0.75rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.mcal-item-title { font-size: 0.9375rem; font-weight: 600; line-height: 1.35; color: var(--heading); }
+.mcal-item-sub { font-size: 0.75rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.mcal-empty,
+.mcal-end { margin: 0; padding: 0.75rem 0.875rem; font-size: 0.8125rem; color: var(--text-faint); }
+.mcal-end { border-top: 1px solid var(--border); text-align: center; }
+
+/* =====================================================================================
    หน้าการมาทำงาน 3 แท็บ (รายการต้องตรวจ · ยืนยันกะ · ประวัติเช็คอิน) — ดีไซน์ใหม่ (ผู้ใช้ขอ 6 พ.ย. 2569)
    แท็บแบบเส้นใต้ · แถบตัวกรองสูงเท่ากันทุกช่อง (36px) ปุ่มคำสั่งชิดขวา · ช่องติ๊กไม่ถูกตัดเป็น ".."
    ปุ่มท้ายแถวชิดขวาขนาดย่อ · รูปหลักฐานเป็นการ์ดเล็กมุมมน · แถวรวมเกาะขอบล่าง · ไม่แตะการทำงาน
@@ -1380,24 +1495,17 @@ input[aria-invalid='true'] { border-color: var(--danger); }
 @media (prefers-reduced-motion: reduce) { .fbar-sheet, .fbar-scrim { animation: none; } }
 
 /* ---------- หน้าตารางงานบนมือถือ (ผู้ใช้ขอ 6 พ.ย. 2569) ----------
-   หัว: [📅] ชื่อเดือน ............ [‹ วันนี้ ›]   ← ปุ่มเลื่อนเดือนย้ายมาติดชื่อเดือนที่มันเปลี่ยน
+   หัว: [📅] ชื่อเดือน                           ← ไม่มีปุ่มเลื่อนเดือน — ปัดตารางแทน (10 พ.ย. 2569)
         ● รอเช็คอิน ● กำลังทำงาน …                 ← คำอธิบายสีแถวเดียว ปัดได้
    แถบ: [เดือน|สัปดาห์] [ตัวกรอง ②] ........ [🖨]   ← dropdown 4 ช่องอยู่ในแผ่น "ตัวกรอง" (FilterBar) */
-.cal-hero-nav-m { display: none; }
 @media (max-width: 600px) {
   .cal-hero { flex-direction: column; align-items: stretch; flex-wrap: nowrap; gap: 0.625rem; }
   .cal-hero-main { flex-wrap: nowrap; gap: 0.75rem; }
   .cal-hero-main > div:not(.cal-hero-nav) { flex: 1; min-width: 0; }
   .cal-hero-icon { width: 2.5rem; height: 2.5rem; border-radius: 0.75rem; }
 
-  /* ‹ วันนี้ › ในหัว — แคปซูลเล็กกะทัดรัด กดด้วยนิ้วได้ (สูง 2.5rem) */
-  .cal-hero-nav.cal-hero-nav-m {
-    display: inline-flex; flex: none; align-self: center;
-    border-radius: 999px; background: var(--surface);
-  }
-  .cal-hero-nav-m button { min-height: 2.5rem; min-width: 2.375rem; padding: 0 0.625rem; }
-  .cal-hero-nav-m button:nth-child(2) { padding: 0 0.75rem; font-size: 0.8125rem; }
-  /* ชุดเดิมท้ายแถบตัวกรองซ่อน (กันไปโดนกฎปุ่มกลมทองของ .toolbar-action ใน FilterBar ด้วย) */
+  /* มือถือไม่มีปุ่ม ‹ วันนี้ › แล้ว — เปลี่ยนเดือนด้วยการปัดตาราง (MobileCalendar · ผู้ใช้ขอ 10 พ.ย. 2569)
+     ชุดท้ายแถบตัวกรองก็ซ่อน (กันไปโดนกฎปุ่มกลมทองของ .toolbar-action ใน FilterBar ด้วย) */
   .toolbar.fbar .cal-hero-nav.toolbar-action { display: none; }
 
   /* คำอธิบายสีแถวเดียว ปัดซ้ายขวา — เดิมห่อสองบรรทัดกินที่เหนือปฏิทิน */
@@ -1423,10 +1531,9 @@ input[aria-invalid='true'] { border-color: var(--danger); }
     overflow: hidden; clip-path: inset(50%); white-space: nowrap;
   }
 }
-/* จอแคบมาก (≤380px) ชื่อเดือนย่อลงนิด ไม่งั้น "พฤศจิกายน 2569" หักสองบรรทัดเพราะปุ่ม ‹ วันนี้ › กินที่ข้างๆ */
+/* จอแคบมาก (≤380px) ชื่อเดือนย่อลงนิด */
 @media (max-width: 380px) {
   .cal-hero .cal-title { font-size: 1.125rem; }
-  .cal-hero-nav-m button { min-width: 2.125rem; padding: 0 0.5rem; }
 }
 
 /* ---------- ท้ายรายการยาวบนมือถือ (components/LoadMore.jsx) — แทนแถบเลื่อนหน้า (ผู้ใช้ขอ 6 พ.ย. 2569) ---------- */

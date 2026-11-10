@@ -16,6 +16,7 @@ import { useToast } from '../toast.jsx';
 import TimeComboInput from '../components/TimeComboInput.jsx';
 import SearchSelect from '../components/SearchSelect.jsx';
 import FilterBar from '../components/FilterBar.jsx';
+import MobileCalendar, { useNarrow } from '../components/MobileCalendar.jsx';
 
 const WEEKDAYS = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
 
@@ -55,19 +56,6 @@ const hh = (h) => `${String(h).padStart(2, '0')}:00`;
 const toMin = (t) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
 const fromMin = (m) => `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 const nowMinutes = () => { const d = new Date(); return d.getHours() * 60 + d.getMinutes(); };
-
-/** จอแคบ = จุดเดียวกับที่ CSS เปลี่ยนปฏิทินเป็นโหมดรายการ (@media max-width: 600px ใน index.css) */
-const NARROW = '(max-width: 600px)';
-function useNarrow() {
-  const [narrow, setNarrow] = useState(() => window.matchMedia(NARROW).matches);
-  useEffect(() => {
-    const mq = window.matchMedia(NARROW);
-    const onChange = () => setNarrow(mq.matches);
-    mq.addEventListener('change', onChange);
-    return () => mq.removeEventListener('change', onChange);
-  }, []);
-  return narrow;
-}
 
 /**
  * เวลาใหม่เมื่อวางกะลงช่องชั่วโมง h — เริ่มตรงต้นชั่วโมง ความยาวกะเท่าเดิม
@@ -127,17 +115,20 @@ export default function CalendarPage() {
   // ช่วงวันที่แสดงอยู่ — มุมมองสัปดาห์เริ่มวันอาทิตย์ตามหัวตาราง
   const weekStart = new Date(anchorDate);
   weekStart.setDate(weekStart.getDate() - weekStart.getDay());
+  const weekStartKey = isoOf(weekStart);
+  /* deps เป็นปี/เดือน (หรือวันแรกของสัปดาห์) ไม่ใช่ anchor ทั้งวัน — บนมือถือการกดเลือกวันเปลี่ยน anchor
+     ถ้า days เปลี่ยนตามทุกครั้ง ปฏิทินจะโหลดข้อมูลทั้งเดือนใหม่ทุกครั้งที่แตะวัน */
   const days = useMemo(() => {
     if (view === 'week') {
       return Array.from({ length: 7 }, (_, i) => {
-        const d = new Date(weekStart);
+        const d = new Date(`${weekStartKey}T00:00:00`);
         d.setDate(d.getDate() + i);
         return isoOf(d);
       });
     }
     const total = new Date(year, month, 0).getDate();
     return Array.from({ length: total }, (_, i) => iso(year, month, i + 1));
-  }, [view, anchor, year, month]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [view, view === 'week' ? weekStartKey : '', year, month]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     api.assignableEmployees().then(setStaff).catch(() => {});
@@ -311,8 +302,8 @@ export default function CalendarPage() {
       ? `${formatDate(days[0])} – ${formatDate(days[6])}`
       : `${MONTH_LABELS[mm]} ${toBuddhistYear(year)}`;
 
-  /* ปุ่มเลื่อนช่วงเวลา ‹ วันนี้ › — วาดสองที่: ท้ายแถบตัวกรอง (จอกว้าง) · ข้างชื่อเดือนในหัวปฏิทิน (มือถือ)
-     CSS เลือกโชว์ทีละที่ (.cal-hero-nav-m) — บนมือถือแถบตัวกรองเหลือแถวเดียว ปุ่มเลื่อนเดือนไปอยู่ติดชื่อเดือนที่มันเปลี่ยน */
+  /* ปุ่มเลื่อนช่วงเวลา ‹ วันนี้ › — ท้ายแถบตัวกรอง เฉพาะจอกว้าง
+     มือถือไม่มีปุ่มนี้ (ผู้ใช้ขอ 10 พ.ย. 2569) — ปัดตารางใน MobileCalendar ซ้าย/ขวาเพื่อเปลี่ยนเดือนแทน */
   const navButtons = (
     <>
       <button type="button" onClick={() => shift(-1)} aria-label={view === 'week' ? 'สัปดาห์ก่อนหน้า' : 'เดือนก่อนหน้า'}>
@@ -345,7 +336,6 @@ export default function CalendarPage() {
               )}
             </h2>
           </div>
-          <div className="cal-hero-nav cal-hero-nav-m no-print">{navButtons}</div>
         </div>
 
         {/* คำอธิบายสี — ชิปมี 5 สีตามสถานะกะ ไม่มีอะไรบอกก็เดาไม่ถูก */}
@@ -412,7 +402,25 @@ export default function CalendarPage() {
       {/* error เป็นแถบเหนือปฏิทิน ไม่ทับทั้งหน้า — ตัวกรองที่ตั้งไว้ต้องไม่หายเพราะเน็ตสะดุด */}
       {error && <p className="error no-print">{error}</p>}
 
-      {/* จอแคบ: ให้ปฏิทินเลื่อนแนวนอนในกล่องของตัวเอง ไม่ดันทั้งหน้าให้เลื่อนตาม */}
+      {/* มือถือ: ตารางเดือนย่อ (จุดสีใต้วัน) + รายการงานจากวันที่เลือก — วันที่เลือก = anchor ใน URL */}
+      {narrow ? (
+        <MobileCalendar
+          days={days}
+          byDay={byDay}
+          today={today}
+          selected={anchor}
+          onSelect={(key) => patch({ date: key })}
+          onShift={shift}
+          rangeName={view === 'week' ? 'สัปดาห์นี้' : 'เดือนนี้'}
+          itemText={(c) => ({
+            title: c.assigned_name ?? '— ยังไม่จับคู่พนักงาน —',
+            sub: [c.client_name, SERVICE_KIND_LABELS[kindOf(c)], VISIT_STATE_LABELS[c.state]].filter(Boolean).join(' · '),
+          })}
+          onOpen={(c) => patch({ open: c.case_id })}
+          onDayOpen={(key) => patch({ day: key })}
+        />
+      ) : (
+      /* จอแคบ: ให้ปฏิทินเลื่อนแนวนอนในกล่องของตัวเอง ไม่ดันทั้งหน้าให้เลื่อนตาม */
       <div className="table-wrap cal-print">
         {/* --cal-rows = จำนวนแถวสัปดาห์ของเดือนนี้ (4–6) — CSS ใช้แบ่งความสูงจอให้ทั้งเดือนพอดีจอเดียว */}
         <div
@@ -488,6 +496,7 @@ export default function CalendarPage() {
           })}
         </div>
       </div>
+      )}
 
       {openDay && (
         <DayPanel
