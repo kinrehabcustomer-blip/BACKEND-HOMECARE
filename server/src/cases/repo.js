@@ -9,6 +9,7 @@ import { REPORT_CONTENT_FIELDS, PATIENT_PENDING, MAX_REPORT_IMAGES, END_BEFORE_S
 import { ensurePatientCodeFree } from '../patients/repo.js';
 import { decodeImage, FRONT_POSITIONS } from '../employees/schema.js';
 import { ApiError } from '../lib/errors.js';
+import { ensureAddonLink } from './addonLink.js';
 import { physioQuota } from './physioQuota.js';
 import { ensureVisitReminderColumns, ensureVisitChangeTable, recordVisitChange } from '../notify/visitReminders.js';
 export { physioQuota };
@@ -66,23 +67,9 @@ export const ensureCasePriceSnapshots = () =>
     await sql.run('ALTER TABLE cases ADD COLUMN IF NOT EXISTS service_customer_price_snapshot DOUBLE PRECISION');
   })().catch((err) => { priceSnapshotReady = null; throw err; }));
 
-/* แพ็กกายภาพเสริมของเคส Homecare (cases.addon_of — ดูท้าย schema.sql)
-   เติมคอลัมน์ให้เองตอนใช้ครั้งแรก ฐานที่ยังไม่ได้ migrate จะไม่ล้มกลางการเปิดเคส */
-let addonLinkReady = null;
-export const ensureAddonLink = () =>
-  (addonLinkReady ??= (async () => {
-    /* findById/รายการเคสเรียกตัวนี้ทุกครั้ง (หลัง cold start ทุกรอบ) — ALTER TABLE ขอล็อกทั้งตารางแม้คอลัมน์มีแล้ว
-       ถ้ามีทรานแซกชันอื่นถือล็อกแถว cases อยู่จะต้องรอ จึงดูจาก catalog ก่อน (ไม่ล็อกอะไร) มีครบแล้ว = จบ */
-    const { n } = await sql.one(
-      `SELECT COUNT(*)::int AS n FROM information_schema.columns
-       WHERE table_schema = current_schema() AND table_name = 'cases' AND column_name IN ('addon_of', 'bill_with_parent')`,
-    );
-    if (n === 2) return;
-    await sql.run(`ALTER TABLE cases ADD COLUMN IF NOT EXISTS addon_of TEXT
-      REFERENCES cases (case_id) ON DELETE SET NULL ON UPDATE CASCADE`);
-    await sql.run('CREATE INDEX IF NOT EXISTS idx_cases_addon_of ON cases (addon_of) WHERE addon_of IS NOT NULL');
-    await sql.run('ALTER TABLE cases ADD COLUMN IF NOT EXISTS bill_with_parent BOOLEAN NOT NULL DEFAULT FALSE');
-  })().catch((err) => { addonLinkReady = null; throw err; }));
+/* แพ็กกายภาพเสริมของเคส Homecare (cases.addon_of) — ตัวเติมคอลัมน์ย้ายไป ./addonLink.js (repo อื่นใช้ร่วม)
+   export ต่อจากที่นี่ด้วย ที่อื่นที่ import จาก cases/repo.js อยู่แล้วไม่ต้องแก้ */
+export { ensureAddonLink };
 
 async function servicePriceSnapshot(db, s) {
   if (s.physio_package_id) {
@@ -234,6 +221,21 @@ const SELECT_CASE = `
           FROM cases b
           LEFT JOIN physio_packages bp ON bp.physio_package_id = b.physio_package_id
           WHERE b.addon_of = c.case_id AND b.bill_with_parent AND b.status <> 'cancelled') AS bundled_physio,
+         /* แพ็กกายภาพเสริมทุกแพ็กของเคสนี้ — ทั้งที่เก็บเงินรวมและใบแยก (ผู้ใช้ขอ 10 พ.ย. 2569)
+            หน้ารายการเคสโชว์ในแถวเดียวกับเคส Homecare แทนการแยกเป็นแถวของตัวเอง
+            เฉพาะการแสดงผล — ยอดเงิน/การเก็บเงินยังใช้ bundled_physio ข้างบน (เฉพาะ bill_with_parent) เหมือนเดิม */
+         (SELECT json_agg(json_build_object(
+                   'case_id', a.case_id, 'status', a.status, 'fee', a.fee,
+                   'start_date', a.start_date, 'end_date', a.end_date,
+                   'bill_with_parent', a.bill_with_parent,
+                   'name', ap.name, 'sessions', ap.sessions,
+                   'assigned_to', a.assigned_to, 'assigned_name', ae.first_name || ' ' || ae.last_name)
+                 ORDER BY a.created_at, a.case_id)
+          FROM cases a
+          LEFT JOIN physio_packages ap ON ap.physio_package_id = a.physio_package_id
+          LEFT JOIN employees ae ON ae.employee_id = a.assigned_to
+          /* แม่ที่ยกเลิกแล้วไม่ถือแพ็ก — แพ็กกลับไปเป็นแถวของตัวเองในรายการ (list()) ถ้ายังโชว์ที่แม่ด้วยจะเห็นซ้ำสองที่ */
+          WHERE a.addon_of = c.case_id AND a.status <> 'cancelled' AND c.status <> 'cancelled') AS physio_addons,
          ${PATIENT_LIVE}
   FROM cases c
   LEFT JOIN employees e           ON e.employee_id  = c.assigned_to
@@ -314,6 +316,17 @@ const NO_STAFF_PAY_SQL = `
     รายการเคส กระดิ่ง และสรุปหน้าภาพรวมใช้เกณฑ์นี้ร่วมกัน ตัวเลขจึงตรงกันเสมอ */
 const MAIN_CASE_SQL = 'NOT c.bill_with_parent';
 
+/**
+ * ตัวเลข "ปริมาณเคส" นับแพ็กกายภาพเสริมรวมกับเคส Homecare แม่ (ตรวจ 10 พ.ย. 2569 · ผู้ใช้ "ยึด homecare เป็นหลัก")
+ * แพ็กหายเข้าแถวแม่เฉพาะเมื่อแม่ "อยู่ในชุดเดียวกัน" — ผ่านเงื่อนไข where ชุดเดียวกัน (ช่วงเวลา/ตัวกรอง) และยังไม่ยกเลิก
+ * ไม่งั้นตัวกรองที่แม่ไม่ผ่านจะทำให้แพ็กหายไปทั้งที่ตรงเงื่อนไข (เช่น เดือนที่เปิดแพ็กแต่แม่เปิดเดือนก่อน)
+ * ใช้ร่วมกันทั้งรายการเคส (list) และสรุปหน้าภาพรวม (summary) — ตัวเลขสองหน้านี้จึงตรงกันเสมอ
+ * คิวงานทีละเคส (กระดิ่ง · ตัวกรองของค้าง · ยังไม่จับคู่) ไม่ใช้ตัวนี้ — แพ็กเป็นงานของตัวเอง
+ * ซับคิวรีตั้งชื่อตาราง c ซ้ำ — ก้อนเงื่อนไขทุกก้อนอ้าง c. จึงผูกกับแถวแม่ในซับคิวรี ไม่ใช่แถวแพ็กข้างนอก
+ */
+const foldAddonsSql = (where) => `NOT COALESCE(c.addon_of IN (
+  SELECT c.case_id FROM cases c WHERE c.status <> 'cancelled' AND ${where.join(' AND ')}), FALSE)`;
+
 const CLOSED_NO_INVOICE_SQL = `
   c.status = 'closed'
   AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.case_id = c.case_id AND i.status <> 'cancelled')`;
@@ -367,6 +380,14 @@ export async function list({ q, status, case_type, service_kind, assigned_to, no
     params.today = isoDateTH(new Date());
     params.soon = soonTH();
   }
+
+  /* แพ็กกายภาพเสริม (addon_of) ไปอยู่ในแถวของเคส Homecare แม่ ไม่ขึ้นเป็นแถวของตัวเอง (ผู้ใช้ขอ 10 พ.ย. 2569)
+     กติกาเดียวกับสรุปหน้าภาพรวม (foldAddonsSql) — แม่ต้องอยู่ในรายการเดียวกันและยังไม่ยกเลิก
+     คิวงานทีละเคสไม่รวมแถว (ตรวจ 10 พ.ย. 2569) — ตัวกรองของค้างจากกระดิ่ง (ยังไม่ตั้งค่าจ้าง · เลยกำหนดปิด · ปิดแล้วไม่มีใบ
+     · ใกล้ครบกำหนด) และ "ยังไม่จับคู่พนักงาน": แพ็กเป็นงานของตัวเอง (ต้องหานักกายภาพ/ตั้งค่าจ้าง/ออกใบของมันเอง)
+     ถ้าแม่กับแพ็กติดพร้อมกัน การรวมทำให้งานของแพ็กหาย และกระดิ่งนับ 2 แต่รายการเห็น 1 */
+  const workQueue = Boolean(no_staff_pay || overdue_close || closed_no_invoice || ending_soon || status === 'unassigned');
+  if (!workQueue) where.push(foldAddonsSql(where));
 
   const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
   const { total } = await sql.one(`SELECT COUNT(*) AS total FROM cases c ${clause}`, params);
@@ -929,6 +950,114 @@ export async function setBillWithParent(caseId, on, actor, note = null) {
   await ensureAddonLink();
   await sql.run(`UPDATE cases SET bill_with_parent = :on, updated_at = ${NOW} WHERE case_id = :id`, { id: caseId, on });
   if (note) await logEvent(sql, caseId, 'physio_addon', note, actor);
+  return findById(caseId);
+}
+
+/**
+ * เคส Homecare ของผู้รับบริการคนเดียวกันที่เคสกายภาพนี้ผูกเป็นแพ็กเสริมได้ (ผู้ใช้ขอ 10 พ.ย. 2569)
+ * — เคสกายภาพที่เปิดแยกไว้ก่อน (ไม่ได้เปิดจาก "+ เพิ่มแพ็กกายภาพ") ไม่มี addon_of จึงไม่ถูกรวมแถวในรายการเคส
+ * ว่าง = ผูกไม่ได้ (ผูกไปแล้ว · ไม่มีผู้รับบริการ · ไม่มีเคส Homecare ที่ยังเดินอยู่)
+ */
+export async function addonParentCandidates(caseId) {
+  await ensureAddonLink();
+  return sql.all(
+    `SELECT p.case_id, p.status, p.start_date, p.end_date, f.name AS format_name, g.name AS grade_name
+     FROM cases c
+     JOIN cases p ON p.patient_id = c.patient_id AND p.case_id <> c.case_id
+     LEFT JOIN pkg_service_formats f ON f.format_id = p.pkg_format_id
+     LEFT JOIN pkg_grades g          ON g.grade_id  = p.pkg_grade_id
+     WHERE c.case_id = :id AND c.addon_of IS NULL AND c.patient_id IS NOT NULL
+       AND p.status NOT IN ('closed', 'cancelled')
+       AND NOT (COALESCE(p.service_kind, '') = 'physio' OR p.physio_package_id IS NOT NULL
+                OR COALESCE(p.case_type, '') = 'physiotherapy')
+     ORDER BY p.created_at DESC, p.case_id DESC`,
+    { id: caseId },
+  );
+}
+
+/** มุมกลับของ addonParentCandidates — จากเคส Homecare: เคสกายภาพของคนเดียวกันที่เปิดแยกไว้ ยังไม่ผูก ยังเดินอยู่ */
+export async function linkableAddons(caseId) {
+  await ensureAddonLink();
+  return sql.all(
+    `SELECT a.case_id, a.status, a.start_date, a.end_date, a.fee,
+            pp.name AS physio_package_name, pp.sessions AS physio_sessions
+     FROM cases h
+     JOIN cases a ON a.patient_id = h.patient_id AND a.case_id <> h.case_id
+     LEFT JOIN physio_packages pp ON pp.physio_package_id = a.physio_package_id
+     WHERE h.case_id = :id AND h.patient_id IS NOT NULL
+       AND h.status NOT IN ('closed', 'cancelled')
+       AND NOT (COALESCE(h.service_kind, '') = 'physio' OR h.physio_package_id IS NOT NULL
+                OR COALESCE(h.case_type, '') = 'physiotherapy')
+       AND a.addon_of IS NULL AND a.status NOT IN ('closed', 'cancelled')
+       AND (COALESCE(a.service_kind, '') = 'physio' OR a.physio_package_id IS NOT NULL
+            OR (a.service_kind IS NULL AND a.case_type = 'physiotherapy'))
+     ORDER BY a.created_at, a.case_id`,
+    { id: caseId },
+  );
+}
+
+/**
+ * ผูกเคสกายภาพที่เปิดแยกไว้ ให้เป็นแพ็กเสริมของเคส Homecare (cases.addon_of) — ผู้ใช้ขอ 10 พ.ย. 2569
+ * กติกาของแม่เหมือนตอนเปิดแพ็กเสริม (addonParent): เป็น Homecare · ยังไม่ปิด/ยกเลิก · ผู้รับบริการคนเดียวกัน
+ * ตัวเอง: เป็นเคสกายภาพ · ยังไม่ผูกกับใคร · ยังไม่ปิด/ยกเลิก
+ * ผูกแล้วยังเก็บเงินใบแยกเหมือนเดิม (ไม่แตะ bill_with_parent) — จะรวมใบให้กด "รวมเข้าเคส Homecare" (/bundle) ต่อ
+ */
+export async function linkAddon(caseId, parentId, actor) {
+  await ensureAddonLink();
+  await transaction(async (tx) => {
+    const c = await tx.one(
+      `SELECT case_id, status, addon_of, patient_id, service_kind, physio_package_id, case_type
+       FROM cases WHERE case_id = :id FOR UPDATE`,
+      { id: caseId },
+    );
+    if (!c) throw new ApiError(404, `ไม่พบเคสรหัส ${caseCode(caseId)}`);
+    if (c.addon_of === parentId) return; // ผูกไว้แล้ว — กดซ้ำไม่ error
+    if (c.addon_of) throw new ApiError(409, `เคสนี้เป็นแพ็กเสริมของเคส Homecare ${caseCode(c.addon_of)} อยู่แล้ว`);
+    if (!isPhysioCase(c)) throw new ApiError(400, 'ผูกเป็นแพ็กเสริมได้เฉพาะเคสกายภาพ');
+    if (['closed', 'cancelled'].includes(c.status)) throw new ApiError(409, 'เคสกายภาพนี้ปิดหรือยกเลิกไปแล้ว — ผูกไม่ได้');
+    if (!c.patient_id) throw new ApiError(400, 'เคสนี้ยังไม่ได้ผูกแฟ้มผู้รับบริการ — ผูกแฟ้มก่อนจึงจะตรวจได้ว่าเป็นคนเดียวกัน');
+    if (parentId === caseId) throw new ApiError(400, 'ผูกเคสกับตัวเองไม่ได้');
+
+    // physio_package_id: เคสกายภาพแบบเก่าที่ไม่มีแพ็กยังผูกได้ — ส่ง true กันกติกา "ต้องเลือกแพ็ก" ของการเปิดใหม่
+    const parent = await addonParent(tx, parentId, { physio_package_id: c.physio_package_id ?? true, patient_id: c.patient_id });
+    // addonParent ข้ามการเทียบตัวตนเมื่อแม่ไม่มีแฟ้ม (เปิดแพ็กใหม่ยอมได้) — ผูกเคสที่มีอยู่แล้วต้องเป็นคนเดียวกันแน่ๆ (ตรวจ 10 พ.ย. 2569)
+    if (parent.patient_id !== c.patient_id) {
+      throw new ApiError(400, 'เคส Homecare นี้ไม่ได้ผูกแฟ้มผู้รับบริการคนเดียวกัน — ผูกแฟ้มให้ตรงกันก่อน');
+    }
+    await tx.run(`UPDATE cases SET addon_of = :parent, updated_at = ${NOW} WHERE case_id = :id`, { id: caseId, parent: parent.case_id });
+
+    const pkg = c.physio_package_id
+      ? await tx.one('SELECT name, sessions FROM physio_packages WHERE physio_package_id = :id', { id: c.physio_package_id })
+      : null;
+    const label = pkg ? `${pkg.name} (${pkg.sessions} ครั้ง)` : 'เคสกายภาพ';
+    await logEvent(tx, caseId, 'physio_addon', `ผูกเป็นแพ็กกายภาพเสริมของเคส Homecare (${caseCode(parent.case_id)}) · ${label} · ใบแจ้งหนี้แยกเหมือนเดิม`, actor);
+    await logEvent(tx, parent.case_id, 'physio_addon', `ผูกเคสกายภาพที่เปิดแยกไว้ (${caseCode(caseId)}) เป็นแพ็กเสริม · ${label}`, actor);
+  });
+  return findById(caseId);
+}
+
+/**
+ * ยกเลิกการผูกแพ็กกายภาพเสริม (ผูกผิดเคส/ผิดคน) — กลับเป็นเคสกายภาพแยก (ตรวจ 10 พ.ย. 2569)
+ * ทำได้เฉพาะแพ็กที่เก็บเงินใบแยก: แพ็กที่รวมใบแล้วมีบรรทัดอยู่ในใบแจ้งหนี้ของ Homecare
+ * ถอดออกเฉยๆ จะทิ้งยอดค้างในใบนั้นและแพ็กจะไม่มีใบของตัวเอง — ต้องจัดการใบก่อน จึงไม่ให้ทำจากปุ่มนี้
+ * ใบแจ้งหนี้/นัด/ค่าจ้างของแพ็กอยู่ที่เคสกายภาพอยู่แล้ว ไม่ต้องย้ายอะไร แค่ล้าง addon_of
+ */
+export async function unlinkAddon(caseId, actor) {
+  await ensureAddonLink();
+  await transaction(async (tx) => {
+    const c = await tx.one(
+      'SELECT case_id, addon_of, bill_with_parent FROM cases WHERE case_id = :id FOR UPDATE',
+      { id: caseId },
+    );
+    if (!c) throw new ApiError(404, `ไม่พบเคสรหัส ${caseCode(caseId)}`);
+    if (!c.addon_of) return; // ไม่ได้ผูกอยู่แล้ว — กดซ้ำไม่ error
+    if (c.bill_with_parent) {
+      throw new ApiError(409, 'แพ็กนี้เก็บเงินรวมอยู่ในใบแจ้งหนี้ของเคส Homecare — ยกเลิกการผูกไม่ได้ (บรรทัดแพ็กในใบนั้นจะค้าง) ติดต่อการเงินเพื่อแยกใบก่อน');
+    }
+    await tx.run(`UPDATE cases SET addon_of = NULL, updated_at = ${NOW} WHERE case_id = :id`, { id: caseId });
+    await logEvent(tx, caseId, 'physio_addon', `ยกเลิกการผูกกับเคส Homecare (${caseCode(c.addon_of)}) — กลับเป็นเคสกายภาพแยก`, actor);
+    await logEvent(tx, c.addon_of, 'physio_addon', `ยกเลิกการผูกแพ็กกายภาพ (${caseCode(caseId)}) — แพ็กกลับเป็นเคสแยก`, actor);
+  });
   return findById(caseId);
 }
 
@@ -3896,6 +4025,8 @@ export async function summary(period) {
   const where = [MAIN_CASE_SQL];
   const params = {};
   periodFilter(period, where, params);
+  // แพ็กกายภาพเสริมนับรวมกับเคส Homecare แม่ — กติกาเดียวกับรายการเคส ตัวเลขสองหน้าจึงตรงกัน (ตรวจ 10 พ.ย. 2569)
+  where.push(foldAddonsSql(where));
   const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
   const [byStatus, byType, totals] = await Promise.all([

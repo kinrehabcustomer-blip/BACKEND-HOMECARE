@@ -3,6 +3,7 @@ import { hashPassword, DEFAULT_PASSWORD } from '../lib/auth.js';
 import { encryptTempPassword, tryDecryptTempPassword } from '../lib/tempPassword.js';
 import { ApiError } from '../lib/errors.js';
 import { likeEscape } from '../lib/likeEscape.js';
+import { ensureAddonLink, ADDON_LIST_COLUMNS } from '../cases/addonLink.js';
 
 const COLUMNS = [
   'first_name',
@@ -103,16 +104,20 @@ export async function findDetailById(employeeId, includeTempPassword = false, pr
   const employee = preloaded ?? (await findById(employeeId));
   if (!employee) return null;
 
+  await ensureAddonLink(); // คอลัมน์ addon_of ที่รายการเคสข้างล่างใช้ (ฐานที่ยังไม่ migrate)
   const [certificates, portfolio, cases] = await Promise.all([
     certificates_.listFor(employeeId),
     portfolio_.listFor(employeeId),
     // ประวัติการทำงาน: เคสที่กำลังทำอยู่และที่ปิดไปแล้ว — เรียงใหม่สุดขึ้นก่อน
     sql.all(
-      `SELECT case_id, title, case_type, service_kind, physio_package_id, client_name, status,
-              start_date, end_date, assigned_at, closed_at, fee
-       FROM cases
-       WHERE assigned_to = :id
-       ORDER BY case_id DESC`,
+      /* addon_of + ชื่อแพ็ก — หน้าเว็บรวมแพ็กกายภาพเสริมเข้าแถวเคส Homecare เมื่อคนนี้ถือทั้งสองเคส (lib/caseAddons.js) */
+      `SELECT c.case_id, c.title, c.case_type, c.service_kind, c.physio_package_id, c.client_name, c.status,
+              c.start_date, c.end_date, c.assigned_at, c.closed_at, c.fee,
+              ${ADDON_LIST_COLUMNS}
+       FROM cases c
+       LEFT JOIN physio_packages pp ON pp.physio_package_id = c.physio_package_id
+       WHERE c.assigned_to = :id
+       ORDER BY c.case_id DESC`,
       { id: employeeId },
     ),
   ]);

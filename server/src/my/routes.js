@@ -57,6 +57,11 @@ function stripFinancial(row) {
   if (Array.isArray(shown.addons)) {
     shown.addons = shown.addons.map(({ unit_price, ...rest }) => rest);
   }
+  /* แพ็กกายภาพเสริมที่พ่วงมากับเคส Homecare (SELECT_CASE) — มีราคาแพ็ก (fee) อยู่ข้างใน
+     MONEY_FIELDS ตัดได้แค่ช่องระดับบน จึงต้องตัดในรายการด้วย (ตรวจ 10 พ.ย. 2569: เดิมราคาแพ็กหลุดถึงพนักงานภาคสนาม) */
+  for (const key of ['physio_addons', 'bundled_physio']) {
+    if (Array.isArray(shown[key])) shown[key] = shown[key].map(({ fee, ...rest }) => rest);
+  }
   return shown;
 }
 

@@ -187,6 +187,10 @@ if (process.env.RUN_DB_TESTS !== '1') {
 
 
   async function post(path, body, who = MANAGER, expected = 200) {
+    /* ด่าน "เคสขาดที่อยู่/เบอร์ ห้ามจับคู่" (8 พ.ย. 2569) มาทีหลัง test ชุดนี้ — เคสทดสอบส่วนใหญ่ไม่มีที่อยู่ จึงล้มที่ /assign ทั้งชุด
+       (ตรวจ 10 พ.ย. 2569: 27 test ล้มด้วยเหตุนี้ ทำให้ระบบจับคู่/กะ/ค่าจ้างไม่มี test คุ้มครองจริง)
+       ใส่ force ให้เองเฉพาะ /assign ที่ไม่ได้ระบุ — ตัวด่านมี test ของตัวเอง ("จับคู่เคสที่ขาดที่อยู่/เบอร์") ที่ส่ง force เองชัดๆ */
+    if (/\/api\/cases\/[^/]+\/assign$/.test(path) && body && !('force' in body)) body = { ...body, force: true };
     const res = await fetch(`${base}${path}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', cookie: `${COOKIE_NAME}=${signToken(who)}` },
@@ -200,6 +204,18 @@ if (process.env.RUN_DB_TESTS !== '1') {
   async function newCase() {
     return post('/api/cases', { case_type: 'other', client_name: 'Workflow patient', fee: 2000, staff_pay: 1200 }, MANAGER, 201);
   }
+
+  test('จับคู่เคสที่ขาดที่อยู่/เบอร์: ไม่ยืนยัน = 409 บอกช่องที่ขาด · ยืนยัน (force) = จับคู่ได้ · กรอกครบ = ไม่ต้องยืนยัน', async () => {
+    const bare = await newCase();
+    const refused = await post(`/api/cases/${bare.case_id}/assign`, { employee_id: FIELD.employee_id, force: false }, MANAGER, 409);
+    assert.deepEqual(refused.details.map((d) => d.field).sort(), ['address', 'client_phone']);
+    await post(`/api/cases/${bare.case_id}/assign`, { employee_id: FIELD.employee_id, force: true }, MANAGER, 200);
+
+    const full = await post('/api/cases', {
+      case_type: 'other', client_name: 'Complete', address: '1 ถนนทดสอบ', client_phone: '0812345678',
+    }, MANAGER, 201);
+    await post(`/api/cases/${full.case_id}/assign`, { employee_id: FIELD.employee_id, force: false }, MANAGER, 200);
+  });
 
   test('แก้ราคาแพ็ก: เคสที่เปิดอยู่และขายราคาเดียวกับแพ็กตามราคาเต็มใหม่ · ใบร่างไม่ขึ้นส่วนลดเก่า · เคสราคาอื่น/ยกเลิกแล้วไม่แตะ', async () => {
     const patch = async (path, body, expected = 200) => {
@@ -346,15 +362,24 @@ if (process.env.RUN_DB_TESTS !== '1') {
       assert.deepEqual(Object.keys(alerts.groups).sort(), ['attendance', 'cases', 'invoices']);
     });
 
-    test('รหัสผ่านชั่วคราวของบัญชีผู้จัดการ/การเงิน HR และ Admin HC มองไม่เห็น — ผู้จัดการเห็น', async () => {
+    /* ตั้งแต่ 2 พ.ย. 2569 (da606a5 · "ตั้งรหัสผ่านทุกคนเป็น 12345678") บัญชีใหม่ไม่มีรหัสชั่วคราวแล้ว
+       ด่านซ่อนรหัสชั่วคราวยังต้องทำงานกับแถวเก่าที่ยังค้างรหัสชั่วคราว (must_change_password + สำเนาเข้ารหัส) */
+    test('บัญชีใหม่ไม่มีรหัสชั่วคราว · รหัสชั่วคราวค้างของบัญชีผู้จัดการ/การเงิน HR และ Admin HC มองไม่เห็น — ผู้จัดการเห็น', async () => {
+      const { encryptTempPassword } = await import('../src/lib/tempPassword.js');
+      const legacy = async (employeeId, plain) => sql.run(
+        `UPDATE employees SET must_change_password = TRUE, temp_password_encrypted = :enc WHERE employee_id = :id`,
+        { id: employeeId, enc: encryptTempPassword(plain, employeeId) },
+      );
       const fin = await post('/api/employees', { first_name: 'Temp', last_name: 'Finance', position: 'finance' }, MANAGER, 201);
-      assert.ok(fin.temp_password);
+      assert.equal(fin.temp_password, undefined, 'บัญชีใหม่ใช้รหัสเริ่มต้น ไม่ออกรหัสชั่วคราว');
+      await legacy(fin.employee_id, 'Legacy-fin-1');
       assert.equal((await get(`/api/employees/${fin.employee_id}`, HR)).body.temp_password, undefined);
       assert.equal((await get(`/api/employees/${fin.employee_id}`, HC)).body.temp_password, undefined);
-      assert.equal((await get(`/api/employees/${fin.employee_id}`, MANAGER)).body.temp_password, fin.temp_password);
+      assert.equal((await get(`/api/employees/${fin.employee_id}`, MANAGER)).body.temp_password, 'Legacy-fin-1');
       // บัญชีทั่วไป HR ยังเห็นเหมือนเดิม (ไว้บอกพนักงานใหม่)
       const cg = await post('/api/employees', { first_name: 'Temp', last_name: 'Carer', position: 'caregiver' }, MANAGER, 201);
-      assert.equal((await get(`/api/employees/${cg.employee_id}`, HR)).body.temp_password, cg.temp_password);
+      await legacy(cg.employee_id, 'Legacy-cg-1');
+      assert.equal((await get(`/api/employees/${cg.employee_id}`, HR)).body.temp_password, 'Legacy-cg-1');
     });
 
     test('ประวัติเคส: เหตุการณ์ที่มียอดค่าจ้าง ซ่อนจากคนที่ไม่มีสิทธิ์ดูค่าจ้าง', async () => {
@@ -421,13 +446,19 @@ if (process.env.RUN_DB_TESTS !== '1') {
   });
 
   describe('Authentication fixture states', () => {
-    test('temporary password is visible only to office roles and erased after password change', async () => {
+    test('legacy temporary password is visible only to office roles and erased after password change', async () => {
+      const { encryptTempPassword } = await import('../src/lib/tempPassword.js');
+      const { DEFAULT_PASSWORD } = await import('../src/lib/auth.js');
       const created = await post('/api/employees', { first_name: 'Temporary', last_name: 'Employee', position: 'caregiver' }, MANAGER, 201);
       const id = created.employee_id;
-      assert.ok(created.temp_password);
-      const stored = await sql.one('SELECT temp_password_encrypted FROM employees WHERE employee_id = :id', { id });
-      assert.ok(stored.temp_password_encrypted);
-      assert.notEqual(stored.temp_password_encrypted, created.temp_password);
+      // บัญชีใหม่: รหัสเริ่มต้น ไม่มีรหัสชั่วคราว/สำเนาเข้ารหัส (da606a5 · 2 พ.ย. 2569)
+      assert.equal(created.temp_password, undefined);
+      assert.equal((await sql.one('SELECT temp_password_encrypted FROM employees WHERE employee_id = :id', { id })).temp_password_encrypted, null);
+      await post('/api/auth/login', { email: id, password: DEFAULT_PASSWORD });
+      // แถวเก่าที่ยังค้างรหัสชั่วคราว — ด่านการมองเห็นยังต้องถูกต้อง
+      created.temp_password = 'Legacy-temp-1';
+      await sql.run(`UPDATE employees SET must_change_password = TRUE, temp_password_encrypted = :enc WHERE employee_id = :id`,
+        { id, enc: encryptTempPassword(created.temp_password, id) });
       for (const who of [MANAGER, HR]) {
         const detail = await get(`/api/employees/${id}`, who);
         assert.equal(detail.status, 200);
@@ -441,18 +472,19 @@ if (process.env.RUN_DB_TESTS !== '1') {
       assert.equal((await get(`/api/employees/${id}`, FIELD)).status, 403);
       const list = (await get('/api/employees', MANAGER)).body;
       assert.ok(list.data.every((row) => !('temp_password' in row) && !('temp_password_encrypted' in row)));
+      // รหัสในฐานคือรหัสเริ่มต้น (สำเนาเข้ารหัสข้างบนเป็นแถวจำลอง) — เปลี่ยนรหัสแล้วสำเนาต้องถูกลบ
       await post('/api/auth/change-password', {
-        current_password: created.temp_password, new_password: 'Changed-password-456!',
+        current_password: DEFAULT_PASSWORD, new_password: 'Changed-password-456!',
       }, emp(id, 'caregiver'));
       const detail = (await get(`/api/employees/${id}`, MANAGER)).body;
       assert.equal(detail.must_change_password, false);
       assert.equal('temp_password' in detail, false);
       assert.equal((await sql.one('SELECT temp_password_encrypted FROM employees WHERE employee_id = :id', { id })).temp_password_encrypted, null);
     });
-    test('fresh employee must change password; suspended employee cannot access work', async () => {
+    // ยกเลิกการบังคับเปลี่ยนรหัสแล้ว (da606a5 · 2 พ.ย. 2569 — requirePasswordChanged ไม่บล็อก) · พักงานยังเข้าไม่ได้
+    test('fresh employee is no longer forced to change password; suspended employee cannot access work', async () => {
       const fresh = await get('/api/my/today', emp('EMP-0004', 'caregiver'));
-      assert.equal(fresh.status, 403);
-      assert.match(fresh.body.error, /รหัสผ่าน/);
+      assert.equal(fresh.status, 200);
       assert.equal((await get('/api/my/today', emp('EMP-0005', 'caregiver'))).status, 401);
     });
     test('login succeeds with fixture credentials, wrong password returns 401', async () => {
@@ -460,7 +492,8 @@ if (process.env.RUN_DB_TESTS !== '1') {
       const user = await post('/api/auth/login', { email: 'EMP-0001@example.invalid', password: 'Fixture-password-123!' });
       assert.equal(user.employee_id, MANAGER.employee_id);
     });
-    test('employee ID is a temporary username only while email is missing', async () => {
+    // ตั้งแต่ da606a5 (2 พ.ย. 2569) รหัสพนักงานใช้เป็น username ได้ทุกคน แม้มีอีเมลแล้ว
+    test('employee ID works as username with or without email; wrong password/unknown ID = 401', async () => {
       const password = 'Fixture-password-123!';
       const original = await sql.one('SELECT email FROM employees WHERE employee_id = :id', { id: FIELD.employee_id });
       try {
@@ -472,7 +505,7 @@ if (process.env.RUN_DB_TESTS !== '1') {
         await post('/api/auth/login', { email: FIELD.employee_id, password: 'wrong' }, MANAGER, 401);
         await post('/api/auth/login', { email: 'EMP-9999', password }, MANAGER, 401);
         await sql.run('UPDATE employees SET email = :email WHERE employee_id = :id', { email: original.email, id: FIELD.employee_id });
-        await post('/api/auth/login', { email: FIELD.employee_id, password }, MANAGER, 401);
+        assert.equal((await post('/api/auth/login', { email: FIELD.employee_id, password })).employee_id, FIELD.employee_id);
         const user = await post('/api/auth/login', { email: original.email, password });
         assert.equal(user.employee_id, FIELD.employee_id);
       } finally {
@@ -954,10 +987,25 @@ if (process.env.RUN_DB_TESTS !== '1') {
       assert.equal(round2.addon_of, home.case_id);
       assert.equal(round2.round_no, 2);
 
+      // รายการเคส: แพ็กเสริม (ใบแยกก็ตาม) อยู่ในแถวของเคส Homecare ไม่ขึ้นแถวของตัวเอง (10 พ.ย. 2569)
+      const listIds = async (query) =>
+        (await get(`/api/cases?q=KN690300001${query}`, MANAGER)).body.data.map((c) => c.case_id).sort();
+      const merged = (await get('/api/cases?q=KN690300001', MANAGER)).body;
+      assert.deepEqual(merged.data.map((c) => c.case_id), [home.case_id]);
+      assert.equal(merged.pagination.total, 1, 'ตัวนับรวมหน้าตรงกับแถวที่เห็น');
+      assert.deepEqual(
+        merged.data[0].physio_addons.map((a) => [a.case_id, a.name, a.bill_with_parent]),
+        [[addon.case_id, 'Addon pack', false], [round2.case_id, 'Addon pack', false]],
+      );
+      // ตัวกรองที่แถวแม่ไม่ผ่าน (สายกายภาพ) — แพ็กต้องยังขึ้นเป็นแถวของตัวเอง ไม่หายไปพร้อมแม่
+      assert.deepEqual(await listIds('&service_kind=physio'), [addon.case_id, round2.case_id].sort());
+
       // เคส Homecare ยกเลิกแล้ว = เพิ่มไม่ได้ แต่รายการเดิมยังอยู่
       await post(`/api/cases/${home.case_id}/cancel`, { reason: 'ทดสอบ' });
       await post('/api/cases', addonBody, MANAGER, 409);
       assert.equal((await get(`/api/cases/${home.case_id}/physio-addons`, MANAGER)).body.length, 2);
+      // แม่ยกเลิกแล้ว แพ็กที่ยังเดินอยู่กลับมาเป็นแถวของตัวเอง
+      assert.deepEqual(await listIds(''), [home.case_id, addon.case_id, round2.case_id].sort());
     });
 
     test('แพ็กกายภาพเสริมรวมใบ: บรรทัดในใบ Homecare · ตามราคา/ยกเลิก · มัดจำหักจาก Homecare · ใบออกแล้ว = แยกใบ', async () => {
@@ -1036,6 +1084,106 @@ if (process.env.RUN_DB_TESTS !== '1') {
       assert.equal((await invoicesOf(late.case_id))[0].total, 8000);
     });
 
+    test('ผูกเคสกายภาพที่เปิดแยกไว้ก่อนเข้าเคส Homecare: เสนอได้ทั้งสองฝั่ง · ผูกแล้วรายการเหลือแถวเดียว · ใบยังแยก', async () => {
+      const rows = async () => (await get('/api/cases?q=KN690300031&per_page=100', MANAGER)).body.data;
+      await post('/api/patients', { patient_id: 'KN690300031', name: 'ผูกทีหลัง' }, MANAGER, 201);
+      await post('/api/patients', { patient_id: 'KN690300032', name: 'อีกคน' }, MANAGER, 201);
+      const pkgId = (await sql.one(
+        `INSERT INTO physio_packages (name, sessions, special_price, staff_pay)
+         VALUES ('ผูกทีหลัง 20 ครั้ง', 20, 29000, 600) RETURNING physio_package_id`,
+      )).physio_package_id;
+      const me = { patient_id: 'KN690300031', client_name: 'ผูกทีหลัง' };
+      // แบบในเคสจริง KN690202502: เปิดเคสกายภาพก่อน (ได้รหัสฐาน) แล้วค่อยเปิด Homecare (-R2) — ไม่มี addon_of
+      const physio = await post('/api/cases', { ...me, physio_package_id: pkgId, fee: 29000 }, MANAGER, 201);
+      const home = await post('/api/cases', { ...me, service_kind: 'homecare', fee: 41000 }, MANAGER, 201);
+      const other = await post('/api/cases', { patient_id: 'KN690300032', client_name: 'อีกคน', service_kind: 'homecare' }, MANAGER, 201);
+      assert.equal(physio.addon_of, null);
+      assert.equal((await rows()).length, 2, 'ยังไม่ผูก = สองแถว');
+
+      // เสนอได้ทั้งสองฝั่ง — เฉพาะคนเดียวกัน
+      assert.deepEqual((await get(`/api/cases/${home.case_id}/linkable-addons`, MANAGER)).body.map((a) => a.case_id), [physio.case_id]);
+      assert.deepEqual((await get(`/api/cases/${physio.case_id}/addon-parents`, MANAGER)).body.map((p) => p.case_id), [home.case_id]);
+      assert.deepEqual((await get(`/api/cases/${other.case_id}/linkable-addons`, MANAGER)).body, []);
+
+      // ผูกผิด: แม่เป็นคนอื่น · ผูก Homecare เข้า Homecare · ไม่ส่งแม่
+      await post(`/api/cases/${physio.case_id}/link-addon`, { parent_id: other.case_id }, MANAGER, 400);
+      await post(`/api/cases/${home.case_id}/link-addon`, { parent_id: other.case_id }, MANAGER, 400);
+      await post(`/api/cases/${physio.case_id}/link-addon`, {}, MANAGER, 400);
+
+      const linked = await post(`/api/cases/${physio.case_id}/link-addon`, { parent_id: home.case_id }, MANAGER, 200);
+      assert.equal(linked.addon_of, home.case_id);
+      assert.equal(linked.bill_with_parent, false, 'ใบแจ้งหนี้ยังแยก');
+      await post(`/api/cases/${physio.case_id}/link-addon`, { parent_id: home.case_id }, MANAGER, 200); // กดซ้ำไม่ error
+
+      const list = await rows();
+      assert.deepEqual(list.map((c) => c.case_id), [home.case_id], 'ผูกแล้วเหลือแถวเดียว');
+      assert.deepEqual(list[0].physio_addons.map((a) => [a.case_id, a.name, a.fee]), [[physio.case_id, 'ผูกทีหลัง 20 ครั้ง', 29000]]);
+      // ตัวเลขปริมาณเคส: หน้าภาพรวม (summary) = รายการเคส — กติการวมแพ็กชุดเดียวกัน (ตรวจ 10 พ.ย. 2569)
+      // ย้ายไปปี 2001 ที่ไม่มีเคสอื่น · แม่เปิด มี.ค. แพ็กเปิด เม.ย.
+      await sql.run(`UPDATE cases SET created_at = '2001-03-05 10:00:00' WHERE case_id = :id`, { id: home.case_id });
+      await sql.run(`UPDATE cases SET created_at = '2001-04-05 10:00:00' WHERE case_id = :id`, { id: physio.case_id });
+      const totals = async (query) => [
+        (await get(`/api/cases/summary?${query}`, MANAGER)).body.total,
+        (await get(`/api/cases?${query}`, MANAGER)).body.pagination.total,
+      ];
+      assert.deepEqual(await totals('year=2001'), [1, 1], 'ทั้งปี: แพ็กรวมกับแม่');
+      assert.deepEqual(await totals('year=2001&month=04'), [1, 1], 'เดือนของแพ็ก (แม่อยู่เดือนก่อน): แพ็กนับเป็นของตัวเอง');
+      assert.deepEqual(await totals('year=2001&month=03'), [1, 1]);
+      // "ยังไม่จับคู่พนักงาน" = คิวงานทีละเคส — แม่และแพ็กยังไม่จับคู่ทั้งคู่ → เห็นทั้งสองแถว (ตรงกับกระดิ่ง)
+      const unassigned = (await get('/api/cases?q=KN690300031&status=unassigned', MANAGER)).body.data.map((c) => c.case_id);
+      assert.deepEqual(unassigned.sort(), [home.case_id, physio.case_id].sort());
+
+      // ผูกแล้วไม่ถูกเสนอซ้ำ และย้ายไปแม่อื่นไม่ได้
+      assert.deepEqual((await get(`/api/cases/${home.case_id}/linkable-addons`, MANAGER)).body, []);
+      assert.deepEqual((await get(`/api/cases/${physio.case_id}/addon-parents`, MANAGER)).body, []);
+      const events = (await get(`/api/cases/${home.case_id}/events`, MANAGER)).body;
+      assert.ok(events.some((e) => e.event === 'physio_addon' && e.detail.includes('ผูกเคสกายภาพที่เปิดแยกไว้')));
+
+      // หน้าผู้รับบริการได้ addon_of + ชื่อแพ็ก — หน้าเว็บรวมแถวแพ็กเข้าเคส Homecare เอง (lib/caseAddons.js)
+      const patientCases = (await get('/api/patients/KN690300031', MANAGER)).body.cases;
+      const pack = patientCases.find((c) => c.case_id === physio.case_id);
+      assert.equal(pack.addon_of, home.case_id);
+      assert.equal(pack.physio_package_name, 'ผูกทีหลัง 20 ครั้ง');
+      assert.equal(pack.bill_with_parent, false);
+
+      // ---- ตรวจ 10 พ.ย. 2569 ----
+      // 1) พนักงานภาคสนามไม่ได้ราคาแพ็ก (fee ใน physio_addons) — เดิม stripFinancial ตัดแค่ช่องระดับบน
+      await sql.run(`UPDATE cases SET status = 'assigned', assigned_to = :emp WHERE case_id = :id`,
+        { id: home.case_id, emp: FIELD.employee_id });
+      const mineList = (await get('/api/my/cases', FIELD)).body.find((c) => c.case_id === home.case_id);
+      assert.ok(mineList, 'เคสที่ถืออยู่ขึ้นใน /api/my/cases');
+      assert.equal(mineList.physio_addons.length, 1);
+      assert.ok(!('fee' in mineList.physio_addons[0]), 'ราคาแพ็กต้องไม่ถึงพนักงานภาคสนาม');
+      const mineOne = (await get(`/api/my/cases/${home.case_id}`, FIELD)).body;
+      assert.ok(mineOne.physio_addons.every((a) => !('fee' in a)));
+
+      // 2) ตัวกรองของค้างจากกระดิ่ง = คิวงานทีละเคส ไม่รวมแถว (แม่กับแพ็กเลยกำหนดปิดทั้งคู่ → เห็นทั้งสองแถว)
+      await sql.run(`UPDATE cases SET status = 'assigned', assigned_to = :emp, end_date = '2020-01-01' WHERE case_id IN (:a, :b)`,
+        { a: home.case_id, b: physio.case_id, emp: FIELD.employee_id });
+      const overdue = (await get('/api/cases?q=KN690300031&overdue_close=yes', MANAGER)).body;
+      assert.deepEqual(overdue.data.map((c) => c.case_id).sort(), [home.case_id, physio.case_id].sort());
+      assert.equal(overdue.pagination.total, 2);
+      assert.deepEqual((await rows()).map((c) => c.case_id), [home.case_id], 'ไม่มีตัวกรองของค้าง = ยังรวมแถว');
+
+      // 3) แม่ยกเลิกแล้ว — แพ็กกลับเป็นแถวของตัวเอง และไม่ซ้ำอยู่ในแถวแม่
+      await sql.run(`UPDATE cases SET status = 'cancelled' WHERE case_id = :id`, { id: home.case_id });
+      const afterCancel = await rows();
+      assert.deepEqual(afterCancel.map((c) => c.case_id).sort(), [home.case_id, physio.case_id].sort());
+      assert.equal(afterCancel.find((c) => c.case_id === home.case_id).physio_addons, null, 'ไม่โชว์ซ้ำในแถวแม่ที่ยกเลิก');
+
+      // 4) ผูกกับเคส Homecare ที่ไม่มีแฟ้มผู้รับบริการ = ไม่ได้ (ตรวจตัวตนไม่ได้)
+      const loose = await post('/api/cases', { client_name: 'ไม่มีแฟ้ม', service_kind: 'homecare' }, MANAGER, 201);
+      const lonePack = await post('/api/cases', { ...me, physio_package_id: pkgId, fee: 1000 }, MANAGER, 201);
+      await post(`/api/cases/${lonePack.case_id}/link-addon`, { parent_id: loose.case_id }, MANAGER, 400);
+
+      // 5) ยกเลิกการผูก (ผูกผิด) — ใบแยกยกเลิกได้ · กดซ้ำไม่ error · ลงประวัติทั้งสองเคส
+      const unlinked = await post(`/api/cases/${physio.case_id}/unlink-addon`, {}, MANAGER, 200);
+      assert.equal(unlinked.addon_of, null);
+      await post(`/api/cases/${physio.case_id}/unlink-addon`, {}, MANAGER, 200);
+      assert.ok((await get(`/api/cases/${physio.case_id}/events`, MANAGER)).body
+        .some((e) => e.event === 'physio_addon' && e.detail.includes('ยกเลิกการผูก')));
+    });
+
     test('รวมแพ็กที่เปิดแยกเข้าเคส Homecare: เหลือเคสเดียวในรายการ · ใบร่างแพ็กถูกลบ · ใบ Homecare ยอดรวม', async () => {
       const send = async (method, path, expected) => {
         const res = await fetch(`${base}${path}`, {
@@ -1054,7 +1202,10 @@ if (process.env.RUN_DB_TESTS !== '1') {
       const me = { patient_id: 'KN690300021', client_name: 'รวมเคส' };
       const home = await post('/api/cases', { ...me, service_kind: 'homecare', fee: 45000 }, MANAGER, 201);
       const physio = await post('/api/cases', { ...me, physio_package_id: pkgId, fee: 15000, addon_of: home.case_id }, MANAGER, 201);
-      assert.equal((await rows()).length, 2, 'เปิดแยก = สองแถว');
+      // เปิดแยก (ใบแยก) ก็ยังเป็นแถวเดียว — แพ็กอยู่ใน physio_addons ของแถว Homecare (10 พ.ย. 2569)
+      const separate = await rows();
+      assert.deepEqual(separate.map((c) => c.case_id), [home.case_id], 'เปิดแยกก็แถวเดียว');
+      assert.deepEqual(separate[0].physio_addons.map((a) => [a.case_id, a.bill_with_parent]), [[physio.case_id, false]]);
       assert.equal((await invoicesOf(physio.case_id)).length, 1);
 
       const merged = await post(`/api/cases/${physio.case_id}/bundle`, {}, MANAGER, 200);
@@ -1067,6 +1218,9 @@ if (process.env.RUN_DB_TESTS !== '1') {
       assert.deepEqual(list.map((c) => c.case_id), [home.case_id], 'เหลือเคส Homecare แถวเดียว');
       assert.equal(list[0].bundled_physio.length, 1);
       assert.equal(list[0].bundled_physio[0].fee, 15000);
+      // รวมใบแล้ว = ยกเลิกการผูกเฉยๆ ไม่ได้ (บรรทัดแพ็กในใบ Homecare จะค้าง)
+      const refused = await post(`/api/cases/${physio.case_id}/unlink-addon`, {}, MANAGER, 409);
+      assert.match(refused.error, /ใบแจ้งหนี้/);
       // เปิดดูแพ็กตรงๆ ยังได้ (นัด/รายละเอียด) แต่ออกใบแยกไม่ได้
       assert.equal((await get(`/api/cases/${physio.case_id}`, MANAGER)).body.addon_of, home.case_id);
       await post('/api/invoices', { case_id: physio.case_id }, MANAGER, 409);
@@ -1818,7 +1972,7 @@ if (process.env.RUN_DB_TESTS !== '1') {
       assert.equal((await send('GET', '/api/permissions', undefined, HR)).status, 403);
       const res = await send('GET', '/api/permissions');
       assert.equal(res.status, 200);
-      assert.deepEqual(res.body.positions.map((p) => p.position).sort(), ['admin', 'finance', 'hr', 'manager', 'super_admin']);
+      assert.deepEqual(res.body.positions.map((p) => p.position).sort(), ['admin', 'finance', 'hr', 'manager', 'nurse_lead', 'super_admin']); // nurse_lead เพิ่ม 8 พ.ย. 2569 (c851870)
       const hr = res.body.positions.find((p) => p.position === 'hr');
       assert.ok(hr.permissions.includes('cases') && !hr.permissions.includes('payroll'), 'ค่าตั้งต้นเท่าสิทธิ์เดิม');
       assert.equal((await send('PUT', '/api/permissions/super_admin', { permissions: [] })).status, 403);
@@ -2889,7 +3043,9 @@ if (process.env.RUN_DB_TESTS !== '1') {
       const created = await post('/api/employees', { first_name: 'Rotated', last_name: 'Secret', position: 'caregiver' }, MANAGER, 201);
       // ค่าที่เข้ารหัสด้วยกุญแจอื่น — auth tag ไม่ผ่าน เหมือนหลังหมุน secret
       await sql.run(
-        `UPDATE employees SET temp_password_encrypted = 'AAAAAAAAAAAAAAAA.AAAAAAAAAAAAAAAAAAAAAA==.AAAA'
+        // must_change_password = TRUE — สำเนาถูกอ่านเฉพาะแถวที่ยังค้างรหัสชั่วคราว (บัญชีใหม่ตั้ง FALSE ตั้งแต่ da606a5)
+        `UPDATE employees SET must_change_password = TRUE,
+           temp_password_encrypted = 'AAAAAAAAAAAAAAAA.AAAAAAAAAAAAAAAAAAAAAA==.AAAA'
          WHERE employee_id = :id`,
         { id: created.employee_id },
       );
@@ -3212,7 +3368,8 @@ if (process.env.RUN_DB_TESTS !== '1') {
       const changed = await fetch(`${base}/api/auth/change-password`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', cookie: `${COOKIE_NAME}=${signToken(who)}` },
-        body: JSON.stringify({ current_password: created.temp_password, new_password: 'Same-second-789!' }),
+        // บัญชีใหม่ใช้รหัสเริ่มต้น (da606a5) — ไม่มี temp_password ให้ใช้แล้ว
+        body: JSON.stringify({ current_password: (await import('../src/lib/auth.js')).DEFAULT_PASSWORD, new_password: 'Same-second-789!' }),
       });
       assert.equal(changed.status, 200);
       const fresh = changed.headers.get('set-cookie').split(';')[0];

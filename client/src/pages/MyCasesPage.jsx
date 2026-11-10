@@ -3,9 +3,11 @@ import { api } from '../api.js';
 import MyCaseModal, { serviceName } from '../components/MyCaseModal.jsx';
 import ErrorBar from '../components/ErrorBar.jsx';
 import PageRefresh from '../components/PageRefresh.jsx';
-import { formatDate, caseStage } from '../labels.js';
+import { formatDate } from '../labels.js';
 import { caseCode } from '../lib/patientCode.js';
 import LineIcon from '../components/LineIcon.jsx';
+import { groupAddons } from '../lib/caseAddons.js';
+import { AddonLines, CaseStatus } from '../components/CaseAddons.jsx';
 
 const CLOSED = ['closed', 'cancelled'];
 
@@ -30,7 +32,10 @@ export default function MyCasesPage() {
 
   useEffect(() => { load(); }, [load]);
 
-  const active = list ? list.filter((c) => !CLOSED.includes(c.status)).length : 0;
+  /* แพ็กกายภาพเสริมรวมเข้าการ์ดเคส Homecare เมื่อคนนี้ถือทั้งสองเคส (ผู้ใช้ขอ 10 พ.ย. 2569 — lib/caseAddons.js)
+     ใช้เฉพาะแพ็กที่อยู่ในรายการของคนนี้ (ไม่ใช้ physio_addons จาก server ที่มีแพ็กของคนอื่นด้วย) */
+  const rows = list ? groupAddons(list) : null;
+  const active = rows ? rows.filter((c) => !CLOSED.includes(c.status)).length : 0;
 
   return (
     <PageRefresh onRefresh={load} busy={loading}>
@@ -41,9 +46,9 @@ export default function MyCasesPage() {
           เคสที่โหลดมาได้แล้วต้องยังเปิดดูได้ และต้องมีปุ่มลองใหม่ ไม่ใช่ต้องรีเฟรชเบราว์เซอร์เอง */}
       <ErrorBar message={error} onRetry={load} busy={loading} />
 
-      {!list ? (
+      {!rows ? (
         !error && <p className="muted">กำลังโหลด…</p>
-      ) : list.length === 0 ? (
+      ) : rows.length === 0 ? (
         <section className="card empty-state my-card">
           <p>ยังไม่มีเคสที่คุณรับผิดชอบ</p>
           <p className="muted">เมื่อผู้จัดการจับคู่เคสให้คุณ เคสจะปรากฏที่นี่</p>
@@ -53,23 +58,24 @@ export default function MyCasesPage() {
           <p className="my-list-head">
             <strong>เคสของฉัน</strong>
             <span className="muted">
-              {list.length} เคส{active > 0 && active < list.length ? ` · กำลังดูแล ${active}` : ''} — แตะเพื่อดูรายละเอียด
+              {rows.length} เคส{active > 0 && active < rows.length ? ` · กำลังดูแล ${active}` : ''} — แตะเพื่อดูรายละเอียด
             </span>
           </p>
           {/* การ์ดรายเคส (เดิมเป็นตารางที่แปลงเป็นการ์ด ชื่อผู้รับบริการไปอยู่ชิดขวาเล็กๆ) — ชื่อคือสิ่งที่พนักงานมองหา จึงขึ้นนำ */}
           <ul className="my-case-list">
-            {list.map((c) => {
-              const stage = caseStage(c);
+            {rows.map((c) => {
               return (
                 <li key={c.case_id}>
                   <button type="button" className="my-case-card" onClick={() => setOpenId(c.case_id)}>
                     <span className="my-case-top">
                       <strong className="my-case-name">{c.client_name}</strong>
-                      <span className={`badge case-${stage.key}`}>{stage.label}</span>
+                      <CaseStatus c={c} />
                     </span>
                     <span className="my-case-meta">
                       {serviceName(c)}{c.start_date ? ` · เริ่ม ${formatDate(c.start_date)}` : ''}
                     </span>
+                    {/* พนักงานภาคสนามไม่เห็นราคาบริการ — บอกแค่ชื่อแพ็ก */}
+                    <AddonLines addons={c.addons} showFee={false} />
                     <span className="my-case-foot">
                       <span className="mono">{caseCode(c.case_id)}</span>
                       <LineIcon name="chevron-right" className="my-case-chev" />

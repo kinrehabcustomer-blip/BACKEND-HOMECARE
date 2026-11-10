@@ -1,5 +1,6 @@
 import { sql, transaction } from '../db/index.js';
 import { likeEscape } from '../lib/likeEscape.js';
+import { ensureAddonLink, ADDON_LIST_COLUMNS } from '../cases/addonLink.js';
 import { ApiError } from '../lib/errors.js';
 
 /** เจ้าของรหัสผู้รับบริการนี้ (ถ้ามี) — ใช้ทั้งตอนบันทึก และเส้นตรวจซ้ำที่หน้าฟอร์มเรียกระหว่างพิมพ์ */
@@ -117,6 +118,7 @@ export async function findDetailById(patientId) {
   const patient = await findById(patientId);
   if (!patient) return null;
 
+  await ensureAddonLink(); // คอลัมน์ addon_of ที่รายการเคสข้างล่างใช้ (ฐานที่ยังไม่ migrate)
   const [customer, cases] = await Promise.all([
     patient.customer_id
       ? sql.one(
@@ -126,10 +128,13 @@ export async function findDetailById(patientId) {
         )
       : Promise.resolve(null),
     sql.all(
+      /* addon_of + ชื่อแพ็ก — หน้าเว็บรวมแพ็กกายภาพเสริมเข้าแถวเคส Homecare (lib/caseAddons.js · 10 พ.ย. 2569) */
       `SELECT c.case_id, c.title, c.case_type, c.service_kind, c.physio_package_id, c.status, c.start_date, c.end_date, c.fee,
-              e.first_name || ' ' || e.last_name AS assigned_name
+              e.first_name || ' ' || e.last_name AS assigned_name,
+              ${ADDON_LIST_COLUMNS}
        FROM cases c
        LEFT JOIN employees e ON e.employee_id = c.assigned_to
+       LEFT JOIN physio_packages pp ON pp.physio_package_id = c.physio_package_id
        WHERE c.patient_id = :id
        ORDER BY c.case_id DESC`,
       { id: patientId },

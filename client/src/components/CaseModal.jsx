@@ -17,6 +17,7 @@ import CaseChargeModal from './CaseChargeModal.jsx';
 import { POSITION_LABELS, GENDER_LABELS, SERVICE_KIND_LABELS, INVOICE_STATUS_LABELS, CASE_EVENT_LABELS, formatBaht, formatDate, stampText, positionsForCase, todayTH, caseStage, serviceKindOf, bundledPhysioText, totalFee } from '../labels.js';
 import LineIcon from './LineIcon.jsx';
 import StaffPicker from './StaffPicker.jsx';
+import { AddonLines, CaseStatus } from './CaseAddons.jsx';
 import { formatPhone, formatPhoneInput } from '../lib/phone.js';
 import { caseCode } from '../lib/patientCode.js';
 import { isProcedure, addonLabel } from '../lib/addons.js';
@@ -219,6 +220,31 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
       cancelled = true;
     };
   }, [caseId]);
+
+  /* เคสกายภาพที่เปิดแยกไว้ก่อน (ไม่ได้เปิดจาก "+ เพิ่มแพ็กกายภาพ") ไม่มี addon_of — ผูกเข้าเคส Homecare ภายหลังได้ (10 พ.ย. 2569)
+     linkable = จากเคส Homecare: เคสกายภาพของคนเดียวกันที่ยังไม่ผูก · linkParents = จากเคสกายภาพ: เคส Homecare ที่ผูกเข้าได้
+     โหลดตามสายของเคสที่เปิดอยู่ · โหลดไม่สำเร็จ = แค่ไม่เห็นตัวเลือกนี้ */
+  const [linkable, setLinkable] = useState([]);
+  const [linkParents, setLinkParents] = useState([]);
+  const itemKind = item ? serviceKindOf(item) : null;
+  const linkKey = item ? `${itemKind}|${item.addon_of ?? ''}|${item.status}|${item.patient_id ?? ''}` : '';
+  const loadLinkOptions = () => {
+    if (!item || ['closed', 'cancelled'].includes(item.status) || !item.patient_id) {
+      setLinkable([]);
+      setLinkParents([]);
+      return Promise.resolve();
+    }
+    return Promise.all([
+      itemKind === 'homecare' ? api.linkableAddons(caseId).catch(() => []) : [],
+      itemKind === 'physio' && !item.addon_of ? api.addonParents(caseId).catch(() => []) : [],
+    ]).then(([a, p]) => {
+      setLinkable(a);
+      setLinkParents(p);
+    });
+  };
+  useEffect(() => {
+    loadLinkOptions();
+  }, [caseId, linkKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ดึงเคส รายชื่อพนักงาน และวันนัดพร้อมกัน — จำนวนเคสที่แต่ละคนถืออยู่เปลี่ยนทุกครั้งที่จับคู่/ยกเลิก
   const load = () =>
@@ -508,16 +534,19 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                 <p className="mono muted">{caseCode(item.case_id)}</p>
                 <h2>
                   {serviceName(item) ?? <span className="muted">ไม่ระบุบริการ</span>}
-                  {/* แพ็กกายภาพที่รวมอยู่ในเคสนี้ (ซื้อมาพร้อมกัน) — เคสเดียว ยึด Homecare เป็นหลัก */}
-                  {bundledPhysioText(item) && <span className="muted"> + {bundledPhysioText(item)}</span>}
+                  {/* server รุ่นเก่า (ไม่มี physio_addons) — บอกแพ็กที่เก็บเงินรวมแบบเดิม */}
+                  {!item.physio_addons && bundledPhysioText(item) && <span className="muted"> + {bundledPhysioText(item)}</span>}
                 </h2>
                 <p className="muted">{item.customer_name ?? item.client_name}</p>
-                <span className={`badge case-${caseStage(item).key}`}>{caseStage(item).label}</span>
+                <CaseStatus c={item} />
                 {chatUrl && (
                   <a className="btn tiny primary" style={{ marginLeft: 8 }} href={chatUrl} target="_blank" rel="noreferrer">
                     💬 เปิดห้องแชทลูกค้า (Admin)
                   </a>
                 )}
+                {/* แพ็กกายภาพเสริมทุกแพ็ก (รวมใบ/ใบแยก) — กล่องเต็มความกว้างใต้บรรทัด "ลูกค้า · สถานะ" (จัดผังใหม่ 10 พ.ย. 2569)
+                    เดิมวางก่อนชื่อลูกค้า หัวป๊อปอัปเป็น flex ห่อบรรทัด บรรทัดแพ็กเลยไปเบียดชื่อลูกค้า แล้วดันสถานะตกบรรทัด */}
+                <AddonLines addons={item.physio_addons} showStaff />
                 {/* สายของเคสต่อเนื่อง — กดไปรอบก่อน/รอบถัดไปได้ */}
                 {(item.renewed_from || item.renewed_to || item.round_no > 1) && (
                   <p className="case-rounds muted">
@@ -534,6 +563,35 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                 {item.addon_of && (
                   <p className="case-rounds muted">
                     แพ็กกายภาพเสริมของ <Link className="link" to={`/cases?open=${item.addon_of}`} state={{ fromCase: item.case_id }}>เคส Homecare {caseCode(item.addon_of)}</Link>
+                    {/* ผูกผิด → ยกเลิกได้เอง (เฉพาะใบแยก — แพ็กที่รวมใบแล้วมีบรรทัดในใบของ Homecare ต้องให้การเงินแยกใบก่อน) */}
+                    {!item.bill_with_parent && (
+                      <>
+                        {' · '}
+                        <button
+                          type="button"
+                          className="btn link-btn"
+                          disabled={busy}
+                          onClick={async () => {
+                            if (!(await ask({
+                              title: 'ยกเลิกการผูกกับเคส Homecare?',
+                              items: [
+                                'เคสกายภาพนี้กลับเป็นเคสแยก ขึ้นเป็นแถวของตัวเองในรายการเคส',
+                                'ใบแจ้งหนี้ นัด และค่าจ้างของเคสนี้ไม่เปลี่ยน',
+                                'ผูกใหม่ภายหลังได้',
+                              ],
+                              confirmLabel: 'ยกเลิกการผูก',
+                              danger: true,
+                            }))) return;
+                            run(async () => {
+                              await api.unlinkAddon(item.case_id);
+                              toast('ยกเลิกการผูกแล้ว — เคสกายภาพนี้กลับเป็นเคสแยก');
+                            });
+                          }}
+                        >
+                          ยกเลิกการผูก
+                        </button>
+                      </>
+                    )}
                   </p>
                 )}
               </div>
@@ -565,6 +623,47 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
 
             <div className="modal-body">
               {error && <p className="error">{error}</p>}
+
+              {/* เคสกายภาพที่เปิดแยกไว้ ทั้งที่คนเดียวกันมีเคส Homecare เดินอยู่ — เสนอให้ผูกเป็นแพ็กเสริม
+                  ผูกแล้วรายการเคสรวมเป็นแถวเดียวกับ Homecare · ใบแจ้งหนี้/นัด/ค่าจ้างยังอยู่ที่เคสนี้เหมือนเดิม */}
+              {itemKind === 'physio' && !item.addon_of && linkParents.length > 0 && (
+                <div className="link-addon-hint">
+                  <p>
+                    <strong>ผู้รับบริการคนนี้มีเคส Homecare ที่ยังให้บริการอยู่</strong> — ผูกเคสกายภาพนี้เป็นแพ็กเสริมของเคส Homecare
+                    แล้วรายการเคสจะแสดงเป็นแถวเดียวกัน (ใบแจ้งหนี้ นัด และค่าจ้างยังแยกเหมือนเดิม)
+                  </p>
+                  <div className="link-addon-actions">
+                    {linkParents.map((p) => {
+                      const label = [p.format_name, p.grade_name].filter(Boolean).join(' · ') || 'Homecare';
+                      return (
+                        <button
+                          key={p.case_id}
+                          type="button"
+                          className="btn tiny primary"
+                          disabled={busy}
+                          onClick={async () => {
+                            if (!(await ask({
+                              title: `ผูกเคสกายภาพนี้เป็นแพ็กเสริมของ Homecare "${label}"?`,
+                              items: [
+                                'รายการเคสแสดงเป็นแถวเดียวกับเคส Homecare',
+                                'ใบแจ้งหนี้ยังแยกเหมือนเดิม — รวมใบได้ภายหลังจากหน้าเคส Homecare',
+                                'นัดและค่าจ้างยังจัดการในเคสนี้',
+                              ],
+                              confirmLabel: 'ผูกเป็นแพ็กเสริม',
+                            }))) return;
+                            run(async () => {
+                              await api.linkAddon(item.case_id, p.case_id);
+                              toast(`ผูกเป็นแพ็กเสริมของเคส Homecare ${caseCode(p.case_id)} แล้ว`);
+                            });
+                          }}
+                        >
+                          ผูกกับ {label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
               <section>
                 <h3>รายละเอียดผู้รับบริการ</h3>
@@ -750,10 +849,92 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                               </button>
                             )}
                             <Link className="btn tiny" to={`/cases?open=${a.case_id}`} state={{ fromCase: item.case_id }}>{a.bill_with_parent ? 'นัด/รายละเอียด' : 'เปิดเคส'}</Link>
+                            {/* ผูกผิด → ยกเลิกได้ (เฉพาะใบแยก · server กันซ้ำ) */}
+                            {!a.bill_with_parent && (
+                              <button
+                                type="button"
+                                className="btn tiny"
+                                disabled={busy}
+                                onClick={async () => {
+                                  if (!(await ask({
+                                    title: `ยกเลิกการผูก "${a.physio_package_name ?? 'แพ็กกายภาพ'}" กับเคสนี้?`,
+                                    items: [
+                                      'แพ็กกลับเป็นเคสกายภาพแยก ขึ้นเป็นแถวของตัวเองในรายการเคส',
+                                      'ใบแจ้งหนี้ นัด และค่าจ้างของแพ็กไม่เปลี่ยน',
+                                    ],
+                                    confirmLabel: 'ยกเลิกการผูก',
+                                    danger: true,
+                                  }))) return;
+                                  run(async () => {
+                                    await api.unlinkAddon(a.case_id);
+                                    setPhysioAddons(await api.physioAddons(caseId));
+                                    await loadLinkOptions();
+                                    toast('ยกเลิกการผูกแล้ว — แพ็กกลับเป็นเคสกายภาพแยก');
+                                  });
+                                }}
+                              >
+                                ยกเลิกการผูก
+                              </button>
+                            )}
                           </li>
                         );
                       })}
                     </ul>
+                  )}
+                  {/* เคสกายภาพของคนเดียวกันที่เปิดแยกไว้ก่อน (ไม่ได้เปิดจาก "+ เพิ่มแพ็กกายภาพ") — ผูกเข้าเคสนี้ได้ (10 พ.ย. 2569) */}
+                  {linkable.length > 0 && (
+                    <div className="link-addon-hint">
+                      <p>
+                        <strong>เคสกายภาพของผู้รับบริการคนนี้ที่เปิดแยกไว้</strong> — ผูกเป็นแพ็กเสริมของเคสนี้
+                        แล้วรายการเคสจะแสดงเป็นแถวเดียวกัน (ใบแจ้งหนี้ยังแยก — รวมใบได้ด้วยปุ่ม "รวมเข้าเคสนี้" หลังผูก)
+                      </p>
+                      <ul className="addon-cases">
+                        {linkable.map((a) => {
+                          const stage = caseStage(a);
+                          const name = a.physio_package_name ?? 'เคสกายภาพ';
+                          return (
+                            <li key={a.case_id}>
+                              <div>
+                                <strong>{name}</strong>
+                                <span className="cell-sub">
+                                  {[
+                                    a.physio_sessions && `${a.physio_sessions} ครั้ง`,
+                                    a.fee != null && formatBaht(a.fee),
+                                    a.start_date && `เริ่ม ${formatDate(a.start_date)}`,
+                                  ].filter(Boolean).join(' · ') || 'ยังไม่ระบุวันเริ่ม'}
+                                </span>
+                              </div>
+                              <span className={`badge case-${stage.key}`}>{stage.label}</span>
+                              <button
+                                type="button"
+                                className="btn tiny primary"
+                                disabled={busy}
+                                onClick={async () => {
+                                  if (!(await ask({
+                                    title: `ผูก "${name}" เป็นแพ็กเสริมของเคสนี้?`,
+                                    items: [
+                                      'รายการเคสแสดงเป็นแถวเดียวกับเคสนี้',
+                                      'ใบแจ้งหนี้ยังแยกเหมือนเดิม — กด "รวมเข้าเคสนี้" ภายหลังถ้าจะเก็บเงินรวมใบ',
+                                      'นัดและค่าจ้างยังจัดการในเคสกายภาพนั้น',
+                                    ],
+                                    confirmLabel: 'ผูกเข้าเคสนี้',
+                                  }))) return;
+                                  run(async () => {
+                                    await api.linkAddon(a.case_id, item.case_id);
+                                    setPhysioAddons(await api.physioAddons(caseId));
+                                    await loadLinkOptions();
+                                    toast(`ผูก "${name}" เป็นแพ็กเสริมของเคสนี้แล้ว`);
+                                  });
+                                }}
+                              >
+                                ผูกเข้าเคสนี้
+                              </button>
+                              <Link className="btn tiny" to={`/cases?open=${a.case_id}`} state={{ fromCase: item.case_id }}>เปิดเคส</Link>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
                   )}
                   <div className="visit-summary">
                     <p className="muted">

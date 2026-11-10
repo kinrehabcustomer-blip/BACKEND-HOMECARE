@@ -911,6 +911,37 @@ casesRouter.post(
   }),
 );
 
+/** เคส Homecare ของผู้รับบริการคนเดียวกันที่เคสกายภาพนี้ (เปิดแยกไว้) ผูกเป็นแพ็กเสริมได้ — ว่าง = ผูกไม่ได้ */
+casesRouter.get(
+  '/:id/addon-parents',
+  asyncRoute(async (req, res) => res.json(await repo.addonParentCandidates(req.case.case_id))),
+);
+
+/** จากเคส Homecare: เคสกายภาพของผู้รับบริการคนเดียวกันที่เปิดแยกไว้และยังไม่ผูก — ผูกเข้าเคสนี้ได้ */
+casesRouter.get(
+  '/:id/linkable-addons',
+  asyncRoute(async (req, res) => res.json(await repo.linkableAddons(req.case.case_id))),
+);
+
+/**
+ * ผูกเคสกายภาพที่เปิดแยกไว้ เป็นแพ็กเสริมของเคส Homecare (ผู้ใช้ขอ 10 พ.ย. 2569)
+ * หลังผูก: รายการเคสโชว์ในแถวเดียวกับเคส Homecare · ใบแจ้งหนี้ยังแยกเหมือนเดิม (รวมใบใช้ /bundle ต่อ)
+ */
+casesRouter.post(
+  '/:id/link-addon',
+  asyncRoute(async (req, res) => {
+    const parentId = String(req.body?.parent_id ?? '').trim();
+    if (!parentId) throw new ApiError(400, 'กรุณาเลือกเคส Homecare ที่จะผูก');
+    res.json(visible(req, await repo.linkAddon(req.case.case_id, parentId, req.user)));
+  }),
+);
+
+/** ยกเลิกการผูกแพ็กกายภาพเสริม (ผูกผิด) — เฉพาะแพ็กใบแยก · ดู unlinkAddon ใน repo.js */
+casesRouter.post(
+  '/:id/unlink-addon',
+  asyncRoute(async (req, res) => res.json(visible(req, await repo.unlinkAddon(req.case.case_id, req.user)))),
+);
+
 /** แพ็กกายภาพเสริมที่ซื้อเพิ่มในเคส Homecare นี้ (แต่ละแพ็กเป็นเคสกายภาพแยก ผูกด้วย addon_of) */
 casesRouter.get(
   '/:id/physio-addons',

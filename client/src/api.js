@@ -546,6 +546,14 @@ export const api = {
   physioAddons: (id) => request(`/cases/${id}/physio-addons`),
   /** รวมแพ็กกายภาพเสริมที่เปิดแยกไว้ เข้าเป็นส่วนหนึ่งของเคส Homecare (เก็บเงินในใบของ Homecare) */
   bundleIntoParent: (id) => request(`/cases/${id}/bundle`, { method: 'POST' }),
+  /** เคส Homecare ของคนเดียวกันที่เคสกายภาพ (เปิดแยกไว้) นี้ผูกเป็นแพ็กเสริมได้ */
+  addonParents: (id) => request(`/cases/${id}/addon-parents`),
+  /** จากเคส Homecare: เคสกายภาพของคนเดียวกันที่เปิดแยกไว้และยังไม่ผูก */
+  linkableAddons: (id) => request(`/cases/${id}/linkable-addons`),
+  /** ผูกเคสกายภาพที่เปิดแยกไว้ เป็นแพ็กเสริมของเคส Homecare (ใบแจ้งหนี้ยังแยก) */
+  linkAddon: (id, parentId) => request(`/cases/${id}/link-addon`, { method: 'POST', body: { parent_id: parentId } }),
+  /** ยกเลิกการผูกแพ็กกายภาพเสริม (ผูกผิด) — เฉพาะแพ็กที่เก็บเงินใบแยก */
+  unlinkAddon: (id) => request(`/cases/${id}/unlink-addon`, { method: 'POST' }),
   /** เพิ่มกะทีละวัน — คืน { visits, added, skipped, conflicts } */
   addVisit: (id, body) => request(`/cases/${id}/visits`, { method: 'POST', body }),
   /** ลงกะหลายวันในครั้งเดียว — ส่ง { dates: [...] } หรือ { from, to, weekdays } · คืนรูปแบบเดียวกับ addVisit */

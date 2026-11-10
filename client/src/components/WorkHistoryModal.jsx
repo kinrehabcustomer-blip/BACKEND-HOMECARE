@@ -2,8 +2,10 @@ import { useEffect, useState } from 'react';
 import CaseModal from './CaseModal.jsx';
 import { useSheetSwipe } from '../lib/sheetSwipe.js';
 import { useScrollLock } from '../lib/scrollLock.js';
-import { SERVICE_KIND_LABELS, serviceKindOf, formatBaht, formatDate, caseStage } from '../labels.js';
+import { SERVICE_KIND_LABELS, serviceKindOf, formatBaht, formatDate } from '../labels.js';
 import { caseCode } from '../lib/patientCode.js';
+import { groupAddons } from '../lib/caseAddons.js';
+import { AddonLines, CaseStatus } from './CaseAddons.jsx';
 
 /**
  * หน้าต่างประวัติการทำงานฉบับเต็มของพนักงานหนึ่งคน — ตารางแบบเดียวกับหน้าเคส
@@ -22,9 +24,11 @@ export default function WorkHistoryModal({ employeeName, cases = [], onClose }) 
     return () => document.removeEventListener('keydown', onKeyDown);
   }, [onClose, openCaseId]);
 
-  const active = cases.filter((c) => c.status === 'assigned' || c.status === 'in_progress');
-  const closed = cases.filter((c) => c.status === 'closed');
-  const earned = closed.reduce((sum, c) => sum + (c.fee ?? 0), 0);
+  // แพ็กกายภาพเสริมรวมเข้าแถวเคส Homecare (ผู้ใช้ขอ 10 พ.ย. 2569 — lib/caseAddons.js) · มูลค่ายังรวมทุกเคสที่ปิด
+  const rows = groupAddons(cases);
+  const active = rows.filter((c) => c.status === 'assigned' || c.status === 'in_progress');
+  const closed = rows.filter((c) => c.status === 'closed');
+  const earned = cases.filter((c) => c.status === 'closed').reduce((sum, c) => sum + (c.fee ?? 0), 0);
 
   /**
    * วันที่ที่สนใจต่างกันตามสถานะ: เคสจบแล้วสนใจว่าจบเมื่อไหร่ เคสที่ทำอยู่สนใจว่ารับมาเมื่อไหร่
@@ -47,7 +51,7 @@ export default function WorkHistoryModal({ employeeName, cases = [], onClose }) 
               <h2>ประวัติการทำงาน</h2>
               <p className="muted">
                 {employeeName && <>{employeeName} · </>}
-                ทั้งหมด {cases.length} เคส · กำลังดำเนินการ {active.length} · ปิดแล้ว {closed.length}
+                ทั้งหมด {rows.length} เคส · กำลังดำเนินการ {active.length} · ปิดแล้ว {closed.length}
                 {earned > 0 && ` · รายได้จากเคสที่ปิดแล้ว ${formatBaht(earned)}`}
               </p>
             </div>
@@ -74,7 +78,7 @@ export default function WorkHistoryModal({ employeeName, cases = [], onClose }) 
                   </tr>
                 </thead>
                 <tbody>
-                  {cases.map((c) => (
+                  {rows.map((c) => (
                     <tr
                       key={c.case_id}
                       className="row-clickable"
@@ -91,6 +95,7 @@ export default function WorkHistoryModal({ employeeName, cases = [], onClose }) 
                       <td>
                         {c.title}
                         <span className="cell-sub">{c.client_name}</span>
+                        <AddonLines addons={c.addons} />
                       </td>
                       <td>{SERVICE_KIND_LABELS[serviceKindOf(c)]}</td>
                       <td title={`${whenLabel(c)} ${whenOf(c)}`}>
@@ -98,7 +103,7 @@ export default function WorkHistoryModal({ employeeName, cases = [], onClose }) 
                         {c.fee != null && <span className="cell-sub">{formatBaht(c.fee)}</span>}
                       </td>
                       <td>
-                        <span className={`badge case-${caseStage(c).key}`}>{caseStage(c).label}</span>
+                        <CaseStatus c={c} />
                       </td>
                     </tr>
                   ))}

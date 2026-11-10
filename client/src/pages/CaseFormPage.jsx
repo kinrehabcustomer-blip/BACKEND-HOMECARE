@@ -5,7 +5,7 @@ import { useToast } from '../toast.jsx';
 import MapPicker from '../components/MapPicker.jsx';
 import {
   POSITION_LABELS, GENDER_LABELS, SERVICE_KIND_LABELS, ENGLISH_SURCHARGE, CASE_STATUS_LABELS, INVOICE_STATUS_LABELS,
-  formatBaht, ageFromBirthDate, positionsForCase, todayTH,
+  formatBaht, ageFromBirthDate, positionsForCase, todayTH, serviceKindOf,
 } from '../labels.js';
 import LineIcon from '../components/LineIcon.jsx';
 import StaffPicker from '../components/StaffPicker.jsx';
@@ -607,6 +607,42 @@ export default function CaseFormPage() {
   const canAddPhysio = !isEdit && !addonOf && isHomecare;
   const addonPkg = physio.find((p) => p.physio_package_id === Number(physioAddon.physio_package_id)) ?? null;
   const wantPhysioAddon = canAddPhysio && Boolean(addonPkg);
+
+  /* ---------- เคสอีกสายของผู้รับบริการคนเดียวกัน (ทางเลือก A · ผู้ใช้เลือก 10 พ.ย. 2569) ----------
+     ต้นเหตุของเคสกายภาพที่ไม่ได้ผูก (เช่น KN690202502): เปิดเคสใหม่โดยไม่รู้ว่าคนนี้มีเคสอีกสายเดินอยู่
+     ทักในฟอร์มตั้งแต่ก่อนบันทึก — สองทิศทาง:
+       1) เปิดกายภาพ ขณะมี Homecare เดินอยู่ → เลือก "เปิดเป็นแพ็กเสริมของเคสนั้น" (ค่าเริ่มต้น) หรือ "เคสแยก"
+       2) เปิด Homecare ขณะมีกายภาพเดินอยู่ (ยังไม่ผูก) → ติ๊กผูกเป็นแพ็กเสริมของเคสใหม่ (ติ๊กไว้ให้แล้ว)
+     ไม่ทำตอนแก้เคส / ต่อเคส / เปิดจาก "+ เพิ่มแพ็กกายภาพ" (มีแม่อยู่แล้ว) · server ตรวจซ้ำทุกข้อตอนผูก */
+  const offerLink = !isEdit && !renewFrom && !addonOf;
+  const [patientCases, setPatientCases] = useState([]);
+  useEffect(() => {
+    if (!offerLink || !form.patient_id) {
+      setPatientCases([]);
+      return undefined;
+    }
+    let stale = false;
+    api.getPatient(form.patient_id)
+      .then((p) => !stale && setPatientCases(p.cases ?? []))
+      .catch(() => !stale && setPatientCases([])); // โหลดไม่ได้ = ไม่ทัก (เปิดเคสได้ตามปกติ ผูกทีหลังในป๊อปอัปได้)
+    return () => { stale = true; };
+  }, [offerLink, form.patient_id]);
+  const openCase = (c) => !['closed', 'cancelled'].includes(c.status) && !c.addon_of;
+  const homecareParents = isPhysio ? patientCases.filter((c) => openCase(c) && serviceKindOf(c) === 'homecare') : [];
+  const orphanPhysio = isHomecare ? patientCases.filter((c) => openCase(c) && serviceKindOf(c) === 'physio') : [];
+  // ทิศทาง 1: null = ยังไม่ได้เลือกเอง → ค่าเริ่มต้นคือเคส Homecare แรก · '' = เคสแยก
+  const [linkChoice, setLinkChoice] = useState(null);
+  const [linkBill, setLinkBill] = useState(false); // รวมใบกับ Homecare — ปริยายใบแยก (ใบ Homecare อาจออกไปแล้ว)
+  const linkParent = linkChoice === null || (linkChoice && !homecareParents.some((c) => c.case_id === linkChoice))
+    ? homecareParents[0]?.case_id ?? ''
+    : linkChoice;
+  // ทิศทาง 2: เก็บรายการที่ "ติ๊กออก" — ค่าเริ่มต้นผูกทุกเคส
+  const [orphanSkip, setOrphanSkip] = useState(() => new Set());
+  const orphansToLink = orphanPhysio.filter((c) => !orphanSkip.has(c.case_id));
+  // ชื่อบริการของเคสอีกสาย — title ตั้งอัตโนมัติเป็น "บริการ · ชื่อผู้รับบริการ" จึงเอาท่อนแรก
+  const caseLabel = (c) => c.physio_package_name
+    || String(c.title ?? '').split(' · ')[0]
+    || caseCode(c.case_id);
   function pickAddonPkg(value) {
     const p = physio.find((x) => x.physio_package_id === Number(value));
     // ราคาพิเศษของแพ็กเติมให้ แก้ทับได้ · เลิกเลือก = ล้างทั้งชุด
@@ -1146,6 +1182,13 @@ export default function CaseFormPage() {
       } else {
         if (renewFrom) payload.renewed_from = renewFrom;
         if (addonOf) payload.addon_of = addonOf;
+        // ทิศทาง 1: เปิดกายภาพเป็นแพ็กเสริมของเคส Homecare ที่เดินอยู่ (เลือกไว้ในกล่องทัก) — server ตรวจคนเดียวกัน/สาย/สถานะ
+        // แพ็กเสริมต้องมีแพ็คเกจ (server บังคับ) — ยังไม่เลือก = เปิดเป็นเคสแยกตามปกติ ไม่ให้ทั้งการเปิดเคสล้ม
+        const linkedTo = offerLink && isPhysio && linkParent && form.physio_package_id ? linkParent : null;
+        if (linkedTo) {
+          payload.addon_of = linkedTo;
+          payload.bill_with_parent = linkBill;
+        }
         /* ต่อเคส: ทีมที่เลือกไว้ส่งไปกับการเปิดเคสเลย — ไม่ส่ง server จะพาทีมรอบก่อนมาทั้งหมด
            รวมคนที่ผู้ใช้เพิ่งกดนำออก (ส่ง [] = ไม่เอาใครมาเลย ซึ่งต่างจากไม่ส่ง) */
         if (renewTeamReady) payload.team = team.filter((x) => x !== payload.assigned_to);
@@ -1196,6 +1239,29 @@ export default function CaseFormPage() {
           }
         }
 
+        // ทิศทาง 1: บอกผลการผูก/การเก็บเงินตามที่เกิดจริง (ขอรวมใบแต่ใบ Homecare รับไม่ได้ = server ออกใบแยกให้)
+        if (linkedTo) {
+          teamNote += ` · เปิดเป็นแพ็กเสริมของเคส Homecare ${caseCode(linkedTo)} แล้ว (${
+            created.billed_with_parent ? 'เก็บเงินรวมในใบแจ้งหนี้ของ Homecare'
+              : linkBill ? 'รวมใบไม่ได้ ระบบออกใบแจ้งหนี้แยกให้แทน' : 'ใบแจ้งหนี้แยก'})`;
+        }
+
+        /* ทิศทาง 2: เคสกายภาพที่เปิดแยกไว้ก่อน (ติ๊กไว้ในกล่องทัก) → ผูกเป็นแพ็กเสริมของเคส Homecare ที่เพิ่งเกิด
+           ผูกไม่สำเร็จไม่ล้มการเปิดเคส — บอกให้กดผูกเองในป๊อปอัป (ปุ่ม "ผูกเข้าเคสนี้") */
+        if (offerLink && isHomecare && orphansToLink.length > 0) {
+          const linkFailed = [];
+          for (const c of orphansToLink) {
+            try {
+              await api.linkAddon(c.case_id, created.case_id);
+            } catch {
+              linkFailed.push(caseLabel(c));
+            }
+          }
+          const linked = orphansToLink.length - linkFailed.length;
+          if (linked > 0) teamNote += ` · ผูกเคสกายภาพเดิม ${linked} เคสเป็นแพ็กเสริมแล้ว`;
+          if (linkFailed.length) teamNote += ` · ผูก ${linkFailed.join(', ')} ไม่สำเร็จ — กด "ผูกเข้าเคสนี้" ในป๊อปอัปเคส`;
+        }
+
         /* ต่อเคส: ลงกะตามแบบรอบก่อนที่ติ๊กไว้ — ทีละแบบผ่านเส้นลงกะหลายวันตัวเดิม (ข้ามกะซ้ำ/เตือนชนให้เอง)
            ลงไม่สำเร็จไม่ล้มการต่อเคส เคสเกิดแล้ว แค่บอกว่าแบบไหนต้องไปลงเองที่หน้าเคส */
         if (renewFrom && patternsOn.length > 0) {
@@ -1227,6 +1293,8 @@ export default function CaseFormPage() {
             ? `เปิดเคส ${caseCode(created.case_id)} แล้ว แต่ใบร่างยังไม่เกิด กรุณาไปหน้าใบแจ้งหนี้แล้วกด "สร้างใบร่าง" ค่ะ`
             : addonOf
             ? `เพิ่มแพ็กกายภาพแล้ว · เปิดเป็นเคสกายภาพแยกของ ${caseCode(created.case_id)} พร้อมใบแจ้งหนี้ (ร่าง) ของแพ็กนี้ — ลงนัดต่อได้เลย`
+            : linkedTo
+            ? `เปิดเคสกายภาพ ${caseCode(created.case_id)} แล้ว` // รายละเอียดการผูก/ใบแจ้งหนี้อยู่ใน teamNote
             : renewFrom
             ? `ต่อเคสเป็น ${caseCode(created.case_id)} (รอบที่ ${created.round_no}) แล้ว · ระบบออกใบแจ้งหนี้ (ร่าง) ของรอบนี้ให้เรียบร้อย`
             : `เปิดเคส ${caseCode(created.case_id)} แล้ว · ระบบออกใบแจ้งหนี้ (ร่าง) ให้เรียบร้อย`) + teamNote,
@@ -1668,6 +1736,71 @@ export default function CaseFormPage() {
             </p>
           )}
         </div>
+
+        {/* ทิศทาง 1 — เปิดกายภาพ ขณะผู้รับบริการมีเคส Homecare เดินอยู่ (ทางเลือก A · 10 พ.ย. 2569) */}
+        {homecareParents.length > 0 && (
+          <div className="link-addon-hint" role="group" aria-label="ผูกกับเคส Homecare">
+            <p>
+              <strong>{form.client_name || 'ผู้รับบริการคนนี้'} มีเคส Homecare ที่ยังให้บริการอยู่</strong>
+              {' '}— เปิดเคสกายภาพนี้เป็นแพ็กเสริมของเคสนั้น รายการเคสจะแสดงเป็นแถวเดียวกัน
+            </p>
+            <div className="link-addon-choices">
+              {homecareParents.map((c) => (
+                <label key={c.case_id} className="checkbox-row">
+                  <input
+                    type="radio"
+                    name="link_parent"
+                    checked={linkParent === c.case_id}
+                    onChange={() => setLinkChoice(c.case_id)}
+                  />
+                  เปิดเป็นแพ็กเสริมของ <strong>{caseLabel(c)}</strong>
+                  <span className="muted"> · {caseCode(c.case_id)}</span>
+                </label>
+              ))}
+              {linkParent && !form.physio_package_id && (
+                <p className="form-hint link-addon-sub">เลือกแพ็คเกจกายภาพก่อน จึงจะเปิดเป็นแพ็กเสริมได้ (ยังไม่เลือก = บันทึกเป็นเคสแยก)</p>
+              )}
+              {linkParent && (
+                <label className="checkbox-row link-addon-sub">
+                  <input type="checkbox" checked={linkBill} onChange={(e) => setLinkBill(e.target.checked)} />
+                  เก็บเงินรวมในใบแจ้งหนี้ของ Homecare (ใบ Homecare ออกไปแล้ว = ระบบออกใบแยกให้แทน)
+                </label>
+              )}
+              <label className="checkbox-row">
+                <input type="radio" name="link_parent" checked={!linkParent} onChange={() => setLinkChoice('')} />
+                เปิดเป็นเคสแยก <span className="muted">(ไม่เกี่ยวกับเคส Homecare เช่น คนละผู้จ่าย)</span>
+              </label>
+            </div>
+          </div>
+        )}
+
+        {/* ทิศทาง 2 — เปิด Homecare ขณะผู้รับบริการมีเคสกายภาพเดินอยู่ที่ยังไม่ผูก (ทางเลือก A · 10 พ.ย. 2569) */}
+        {orphanPhysio.length > 0 && (
+          <div className="link-addon-hint" role="group" aria-label="ผูกเคสกายภาพเดิม">
+            <p>
+              <strong>{form.client_name || 'ผู้รับบริการคนนี้'} มีเคสกายภาพที่ยังเดินอยู่</strong>
+              {' '}— ผูกเป็นแพ็กเสริมของเคส Homecare นี้ รายการเคสจะแสดงเป็นแถวเดียวกัน (ใบแจ้งหนี้/นัด/ค่าจ้างของกายภาพไม่เปลี่ยน)
+            </p>
+            <div className="link-addon-choices">
+              {orphanPhysio.map((c) => (
+                <label key={c.case_id} className="checkbox-row">
+                  <input
+                    type="checkbox"
+                    checked={!orphanSkip.has(c.case_id)}
+                    onChange={(e) => setOrphanSkip((prev) => {
+                      const next = new Set(prev);
+                      if (e.target.checked) next.delete(c.case_id);
+                      else next.add(c.case_id);
+                      return next;
+                    })}
+                  />
+                  ผูก <strong>{caseLabel(c)}</strong>
+                  <span className="muted"> · {caseCode(c.case_id)}{c.fee != null ? ` · ${formatBaht(c.fee)}` : ''}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* แพ็กกายภาพเสริม (ไม่บังคับ) — ลูกค้า Homecare ซื้อคอร์สกายภาพพร้อมกัน
             ไม่ได้รวมเข้าเคสนี้: บันทึกแล้วระบบเปิดเคสกายภาพแยกที่ผูกกับเคสนี้ (ใบแจ้งหนี้/นัด/ค่าจ้างแยก) */}

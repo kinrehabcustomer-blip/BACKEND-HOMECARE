@@ -1,5 +1,6 @@
 import { sql, nextCustomerId, transaction } from '../db/index.js';
 import { likeEscape } from '../lib/likeEscape.js';
+import { ensureAddonLink, ADDON_LIST_COLUMNS } from '../cases/addonLink.js';
 import { ensureLedgerTables, netPaidSql, netTotalSql } from '../invoices/ledger.js';
 
 const COLUMNS = [
@@ -96,6 +97,7 @@ export async function findDetailById(customerId) {
   const customer = await findById(customerId);
   if (!customer) return null;
 
+  await ensureAddonLink(); // คอลัมน์ addon_of ที่รายการเคสข้างล่างใช้ (ฐานที่ยังไม่ migrate)
   const [patients, cases] = await Promise.all([
     // ผู้รับการดูแลที่อยู่ใต้ลูกค้ารายนี้ (ลูกค้าหนึ่งคนดูแลได้หลายคน)
     sql.all(
@@ -104,10 +106,13 @@ export async function findDetailById(customerId) {
       { id: customerId },
     ),
     sql.all(
+      /* addon_of + ชื่อแพ็ก — หน้าเว็บรวมแพ็กกายภาพเสริมเข้าแถวเคส Homecare (lib/caseAddons.js · 10 พ.ย. 2569) */
       `SELECT c.case_id, c.title, c.case_type, c.service_kind, c.physio_package_id, c.status, c.start_date, c.end_date, c.fee,
-              e.first_name || ' ' || e.last_name AS assigned_name
+              e.first_name || ' ' || e.last_name AS assigned_name,
+              ${ADDON_LIST_COLUMNS}
        FROM cases c
        LEFT JOIN employees e ON e.employee_id = c.assigned_to
+       LEFT JOIN physio_packages pp ON pp.physio_package_id = c.physio_package_id
        WHERE c.customer_id = :id
        ORDER BY c.case_id DESC`,
       { id: customerId },

@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import WorkHistoryModal from './WorkHistoryModal.jsx';
-import { SERVICE_KIND_LABELS, serviceKindOf, formatBaht, formatDate, caseStage } from '../labels.js';
+import { SERVICE_KIND_LABELS, serviceKindOf, formatBaht, formatDate } from '../labels.js';
 import { caseCode } from '../lib/patientCode.js';
+import { groupAddons } from '../lib/caseAddons.js';
+import { AddonLines, CaseStatus } from './CaseAddons.jsx';
 
 /**
  * ประวัติการทำงาน = เคสที่พนักงานคนนี้ถืออยู่ ทั้งที่กำลังทำและที่ปิดไปแล้ว
@@ -21,12 +23,15 @@ export default function WorkHistory({ cases = [], limit, collapsible = false, em
   }
 
   // กำลังดำเนินการ = จับคู่แล้วรอเริ่ม หรือกำลังให้บริการอยู่ (เคสยกเลิกไม่นับเป็นทั้งสองกลุ่ม)
-  const active = cases.filter((c) => c.status === 'assigned' || c.status === 'in_progress');
-  const closed = cases.filter((c) => c.status === 'closed');
-  const earned = closed.reduce((sum, c) => sum + (c.fee ?? 0), 0);
+  /* แพ็กกายภาพเสริมรวมเข้าแถวเคส Homecare เมื่อคนนี้ถือทั้งสองเคส (ผู้ใช้ขอ 10 พ.ย. 2569 — lib/caseAddons.js)
+     นับจำนวนเคสตามแถวที่เห็น · มูลค่างานยังรวมทุกเคสที่ปิดแล้ว (รวมแพ็ก) */
+  const rows = groupAddons(cases);
+  const active = rows.filter((c) => c.status === 'assigned' || c.status === 'in_progress');
+  const closed = rows.filter((c) => c.status === 'closed');
+  const earned = cases.filter((c) => c.status === 'closed').reduce((sum, c) => sum + (c.fee ?? 0), 0);
 
-  const shown = limit ? cases.slice(0, limit) : cases;
-  const hidden = cases.length - shown.length;
+  const shown = limit ? rows.slice(0, limit) : rows;
+  const hidden = rows.length - shown.length;
 
   return (
     <>
@@ -53,15 +58,16 @@ export default function WorkHistory({ cases = [], limit, collapsible = false, em
                 : `รับเคสเมื่อ ${formatDate(c.assigned_at)}`}
               {c.fee != null && ` · ${formatBaht(c.fee)}`}
             </p>
+            <AddonLines addons={c.addons} />
           </div>
-          <span className={`badge case-${caseStage(c).key}`}>{caseStage(c).label}</span>
+          <CaseStatus c={c} />
         </div>
       ))}
 
       {/* หน้าเต็ม: เปิดประวัติฉบับเต็มเป็นหน้าต่างแยก (ตาราง + คลิกดูรายละเอียดเคสได้) */}
       {collapsible && (
         <button className="btn history-toggle" onClick={() => setFullOpen(true)}>
-          ดูประวัติทั้งหมด ({cases.length} เคส)
+          ดูประวัติทั้งหมด ({rows.length} เคส)
         </button>
       )}
 

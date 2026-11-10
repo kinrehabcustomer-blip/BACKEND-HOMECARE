@@ -11,6 +11,7 @@ import { caseCode } from '../lib/patientCode.js';
 import SearchSelect from '../components/SearchSelect.jsx';
 import FilterBar from '../components/FilterBar.jsx';
 import LoadMore from '../components/LoadMore.jsx';
+import { AddonLines } from '../components/CaseAddons.jsx';
 import { useIsMobile } from '../lib/mobile.js';
 import { useLoadMore } from '../lib/loadMore.js';
 
@@ -19,7 +20,10 @@ const PER_PAGE_OPTIONS = [20, 50, 100];
 // คอลัมน์ที่กดเรียงได้ — ต้องตรงกับ enum ของ sort ฝั่ง server (cases/schema.js)
 // title ของเคสถูกตั้งอัตโนมัติเป็น "บริการ · ชื่อผู้รับบริการ" การเรียงตาม title จึงคือการเรียงตามบริการ
 const SORTABLE = {
-  case_id: { label: 'รหัสเคส', hint: 'เรียงตามลำดับที่เปิดเคส' },
+  /* "#" = เรียงตามวันที่เปิดเคส (ผู้ใช้ขอ 10 พ.ย. 2569) — รหัสเคสคือรหัส KN ของผู้รับบริการ ไม่ได้ไล่ตามเวลาที่เปิด
+     กดครั้งแรกได้ "ใหม่ → เก่า" เลย เพราะคนกดอยากเห็นเคสล่าสุด */
+  created_at: { label: '#', hint: 'เรียงตามวันที่เปิดเคส (กดสลับ ใหม่ → เก่า / เก่า → ใหม่)', firstOrder: 'desc' },
+  case_id: { label: 'รหัสเคส', hint: 'เรียงตามรหัสผู้รับบริการ (KN)' },
   title: { label: 'บริการ / ผู้รับบริการ', hint: 'เรียงตามชื่อบริการ' },
   start_date: { label: 'เริ่ม / ค่าจ้าง', hint: 'เรียงตามวันเริ่มให้บริการ' },
 };
@@ -177,6 +181,31 @@ export default function CaseListPage() {
   const rows = more.rows;
   const visibleIds = rows.map((c) => c.case_id);
 
+  /* dropdown เรียงลำดับ (ผู้ใช้ขอ 10 พ.ย. 2569) — "ล่าสุด" = เคสที่เพิ่มเข้ามาใหม่สุดก่อน (ตามวันที่เปิดเคส ไม่ใช่รหัส)
+     จอกว้าง: ขวาของหัวคอลัมน์สถานะ · มือถือ (หัวตารางถูกซ่อน): ในแผ่นตัวกรอง
+     การเรียงที่ตั้งจากการกดหัวคอลัมน์ (บริการ / วันเริ่ม) ไม่มีในรายการ — โชว์เป็นตัวเลือก "ตามคอลัมน์" ไม่ให้ช่องว่างเปล่า */
+  const sortValue = `${sort}:${order}`;
+  const SORT_PRESETS = [
+    ['created_at:desc', 'ล่าสุด'],
+    ['created_at:asc', 'เก่าสุด'],
+    ['case_id:desc', 'รหัสเคส'],
+  ];
+  const sortSelect = (
+    <SearchSelect value={sortValue} onChange={(e) => sortBy(...e.target.value.split(':'))} aria-label="เรียงลำดับเคส">
+      {SORT_PRESETS.map(([value, label]) => <option key={value} value={value}>{mobile ? `เรียง: ${label}` : label}</option>)}
+      {!SORT_PRESETS.some(([value]) => value === sortValue) && (
+        <option value={sortValue}>{mobile ? 'เรียง: ' : ''}ตามคอลัมน์{SORTABLE[sort].label === '#' ? '' : ` ${SORTABLE[sort].label}`}</option>
+      )}
+    </SearchSelect>
+  );
+  // จอกว้าง: ป้าย "เรียง" + dropdown เล็กในหัวตาราง · มือถือ: dropdown เปล่าแบบเดียวกับช่องอื่นในแผ่นตัวกรอง (คำว่า "เรียง:" อยู่ในตัวเลือก)
+  const sortPicker = mobile ? sortSelect : (
+    <label className="sort-pick">
+      <span className="sort-pick-label">เรียง</span>
+      {sortSelect}
+    </label>
+  );
+
   return (
     <PageRefresh onRefresh={() => setReloadKey((k) => k + 1)} busy={loading}>
       {/* ไม่มีหัวหน้าบนจอ (แถบตัวกรองเป็นส่วนบนสุด) — คง h1 ไว้ให้โปรแกรมอ่านหน้าจอ */}
@@ -246,6 +275,8 @@ export default function CaseListPage() {
               </option>
             ))}
           </SearchSelect>
+          {/* มือถือ: หัวตารางถูกซ่อน (โหมดการ์ด) กดเรียงที่หัวคอลัมน์ไม่ได้ — ให้เลือกการเรียงในแผ่นตัวกรองแทน */}
+          {mobile && sortPicker}
           </>)}
         />
 
@@ -269,13 +300,18 @@ export default function CaseListPage() {
             </colgroup>
             <thead>
               <tr>
-                <th>#</th>
+                <th><SortHead column="created_at" {...SORTABLE.created_at} sort={sort} order={order} onSort={sortBy} /></th>
                 <th><SortHead column="case_id" {...SORTABLE.case_id} sort={sort} order={order} onSort={sortBy} /></th>
                 <th><SortHead column="title" {...SORTABLE.title} sort={sort} order={order} onSort={sortBy} /></th>
                 <th><SortHead column="start_date" {...SORTABLE.start_date} sort={sort} order={order} onSort={sortBy} /></th>
                 <th>เบอร์โทร</th>
                 <th>พนักงานที่รับ</th>
-                <th>สถานะ</th>
+                <th>
+                  <div className="th-tools">
+                    <span>สถานะ</span>
+                    {!mobile && sortPicker}
+                  </div>
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -306,10 +342,14 @@ export default function CaseListPage() {
                     ) : (
                       <span className="muted">ไม่ระบุบริการ</span>
                     )}
-                    {/* แพ็กกายภาพที่รวมอยู่ในเคสนี้ — ไม่มีแถวของตัวเอง จึงต้องบอกตรงนี้ */}
-                    {bundledPhysioText(c) && <span className="muted"> + {bundledPhysioText(c)}</span>}
+                    {/* server รุ่นเก่า (ไม่มี physio_addons) — ยังบอกแพ็กที่เก็บเงินรวมแบบเดิม */}
+                    {!c.physio_addons && bundledPhysioText(c) && <span className="muted"> + {bundledPhysioText(c)}</span>}
                     {/* บรรทัดรองคือผู้รับบริการ (ผู้รับการดูแล) ไม่ใช่ผู้ว่าจ้าง — พนักงานจับคู่/ตามงานด้วยชื่อคนที่ไปดูแล */}
                     <span className="cell-sub">{c.client_name}</span>
+                    {/* แพ็กกายภาพเสริมของเคส Homecare นี้ — อยู่ในแถวเดียวกับเคสแม่ ไม่ขึ้นเป็นแถวแยก (ผู้ใช้ขอ 10 พ.ย. 2569)
+                        ช่องนี้บอกแค่ "แพ็กอะไร ราคาเท่าไร" · คนรับอยู่คอลัมน์พนักงาน · สถานะอยู่คอลัมน์สถานะ (แต่ละอย่างอยู่ในคอลัมน์ของมัน)
+                        (server ซ่อนแถวแพ็กเฉพาะเมื่อแถวแม่อยู่ในรายการเดียวกัน — ดู list() ใน cases/repo.js) */}
+                    <AddonLines addons={c.physio_addons} />
                   </td>
                   <td data-label="เริ่ม / ค่าจ้าง">
                     {c.start_date ? formatDate(c.start_date) : <span className="muted">ยังไม่ระบุ</span>}
@@ -336,8 +376,16 @@ export default function CaseListPage() {
                     ) : (
                       <span className="muted">—</span>
                     )}
+                    {/* นักกายภาพของแพ็กเสริม — บรรทัดรองใต้คนดูแล Homecare (ยังไม่จับคู่ = ไม่ขึ้น · สถานะบอกอยู่แล้ว) */}
+                    {c.physio_addons?.filter((a) => a.assigned_name).map((a) => (
+                      <span key={a.case_id} className="cell-sub case-addon-staff">
+                        <span className="case-addon-mini">กายภาพ</span> {a.assigned_name}
+                      </span>
+                    ))}
                   </td>
                   <td data-label="สถานะ">
+                    {/* สถานะของเคส (Homecare) — สถานะของแพ็กกายภาพเสริมอยู่ท้ายบรรทัด "+ กายภาพ" ในช่องบริการ
+                        ป้ายเป็นลูกตรงของ td — กฎโหมดการ์ดใช้ "td > .badge" ย้ายสถานะไปมุมขวาบนของการ์ด */}
                     <span className={`badge case-${caseStage(c).key}`}>{caseStage(c).label}</span>
                     {/* รายการ "ใกล้ครบกำหนด" มีไว้ถามลูกค้าว่าจะต่อไหม — ตอบว่าต่อแล้วกดต่อจากแถวนี้ได้เลย ไม่ต้องเปิดป๊อปอัปก่อน */}
                     {pseudo === 'ending_soon' && (

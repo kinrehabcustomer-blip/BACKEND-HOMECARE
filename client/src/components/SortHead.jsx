@@ -5,6 +5,7 @@
  * (ปุ่มลอยอ่านเหมือนเรียงตามคอลัมน์ที่มันไปนั่งอยู่ข้างๆ ซึ่งมักไม่ใช่คอลัมน์นั้น — เคยทำแบบนั้นแล้วเลิกใช้)
  *
  * กดคอลัมน์ที่เรียงอยู่แล้ว = สลับทิศ · กดคอลัมน์อื่น = เริ่มที่ asc (ชื่อ ก-ฮ, วันเก่าไปใหม่ อ่านเป็นธรรมชาติกว่า)
+ * ยกเว้นคอลัมน์ที่ส่ง firstOrder="desc" — เช่น "#" ของหน้าเคส ที่คนกดเพราะอยากเห็น "เคสใหม่ล่าสุด" ก่อน
  */
 
 /** สามเหลี่ยมทึบมุมมน — วาดเป็นเส้นหนาทับ path เดียวกัน มุมจึงมนตาม stroke-linejoin */
@@ -16,8 +17,9 @@ function Triangle({ down }) {
   );
 }
 
-export default function SortHead({ column, label, hint, sort, order, onSort }) {
+export default function SortHead({ column, label, hint, sort, order, onSort, firstOrder = 'asc' }) {
   const active = sort === column;
+  const flip = (o) => (o === 'asc' ? 'desc' : 'asc');
 
   return (
     <button
@@ -25,7 +27,7 @@ export default function SortHead({ column, label, hint, sort, order, onSort }) {
       className={`sort-head ${active ? 'on' : ''}`}
       title={hint}
       aria-sort={active ? (order === 'asc' ? 'ascending' : 'descending') : 'none'}
-      onClick={() => onSort(column, active && order === 'asc' ? 'desc' : 'asc')}
+      onClick={() => onSort(column, active ? flip(order) : firstOrder)}
     >
       {label}
       {/* จองที่ของลูกศรไว้เสมอ ไม่งั้นหัวตารางขยับตอนสลับคอลัมน์ที่เรียง */}

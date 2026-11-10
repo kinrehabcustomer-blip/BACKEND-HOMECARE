@@ -1,5 +1,7 @@
-import { SERVICE_KIND_LABELS, serviceKindOf, formatBaht, formatDate, caseStage } from '../labels.js';
+import { SERVICE_KIND_LABELS, serviceKindOf, formatBaht, formatDate } from '../labels.js';
 import { caseCode } from '../lib/patientCode.js';
+import { groupAddons } from '../lib/caseAddons.js';
+import { AddonLines, CaseStatus } from './CaseAddons.jsx';
 
 /**
  * เคสที่ลูกค้ารายนี้เคยใช้บริการ — มุมของลูกค้า จึงโชว์ "พนักงานที่รับ" ไม่ใช่ชื่อผู้รับบริการ
@@ -13,16 +15,18 @@ export default function CustomerCases({ cases = [], limit }) {
     return <p className="muted">ยังไม่เคยเปิดเคสให้ลูกค้ารายนี้</p>;
   }
 
-  const closed = cases.filter((c) => c.status === 'closed');
-  const spent = closed.reduce((sum, c) => sum + (c.fee ?? 0), 0);
+  const spent = cases.filter((c) => c.status === 'closed').reduce((sum, c) => sum + (c.fee ?? 0), 0);
 
-  const shown = limit ? cases.slice(0, limit) : cases;
-  const hidden = cases.length - shown.length;
+  /* แพ็กกายภาพเสริมรวมเข้าแถวเคส Homecare (ผู้ใช้ขอ 10 พ.ย. 2569 — lib/caseAddons.js)
+     นับจำนวนเคสตามแถวที่เห็น · ยอดเงินยังรวมทุกเคส (แพ็กที่ปิดแล้วก็เป็นเงินที่ลูกค้าจ่ายจริง) */
+  const rows = groupAddons(cases);
+  const shown = limit ? rows.slice(0, limit) : rows;
+  const hidden = rows.length - shown.length;
 
   return (
     <>
       <p className="muted history-summary">
-        ทั้งหมด {cases.length} เคส · ปิดแล้ว {closed.length} เคส
+        ทั้งหมด {rows.length} เคส · ปิดแล้ว {rows.filter((c) => c.status === 'closed').length} เคส
         {spent > 0 && ` · ยอดจากเคสที่ปิดแล้ว ${formatBaht(spent)}`}
       </p>
 
@@ -39,8 +43,9 @@ export default function CustomerCases({ cases = [], limit }) {
               {c.start_date ? `เริ่ม ${formatDate(c.start_date)}` : 'ยังไม่ระบุวันเริ่ม'}
               {c.fee != null && ` · ${formatBaht(c.fee)}`}
             </p>
+            <AddonLines addons={c.addons} showStaff />
           </div>
-          <span className={`badge case-${caseStage(c).key}`}>{caseStage(c).label}</span>
+          <CaseStatus c={c} />
         </div>
       ))}
 
