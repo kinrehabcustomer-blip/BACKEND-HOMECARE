@@ -6,7 +6,7 @@
  *
  * หน้ารายการเคสหลัก (CaseListPage) รวมที่ server เพราะแบ่งหน้า (ดู list() ใน cases/repo.js)
  * หน้าอื่นที่โหลดเคสมาครบทั้งรายการ (ผู้ว่าจ้าง · ผู้รับบริการ · พนักงาน · เคสของฉัน) รวมที่นี่ด้วยกติกาเดียวกัน:
- *   ซ่อนแถวแพ็กเฉพาะเมื่อ "แม่อยู่ในรายการเดียวกัน" และแม่ยังไม่ถูกยกเลิก
+ *   ซ่อนแถวแพ็กเฉพาะเมื่อ "แม่อยู่ในรายการเดียวกัน" · แพ็กและแม่ไม่ถูกยกเลิก · และ (แม่ยังเดิน หรือ ปิดแล้วทั้งคู่)
  *   แม่ไม่อยู่ (เช่น ประวัติของนักกายภาพที่ถือแค่แพ็ก) = แพ็กยังเป็นแถวของตัวเอง ไม่หายไปไหน
  */
 
@@ -23,7 +23,10 @@ export function groupAddons(cases = []) {
   const kids = new Map();
   for (const c of cases) {
     const parent = c.addon_of ? parents.get(c.addon_of) : null;
-    if (!parent || parent.status === 'cancelled') continue;
+    /* กติกาเดียวกับ server (foldAddonsSql ใน cases/repo.js · ตรวจ 10 พ.ย. 2569): รวมเมื่อแพ็กไม่ถูกยกเลิก
+       และ (แม่ยังเดินอยู่ หรือ ปิดแล้วทั้งคู่) — แพ็กยังเดินแต่แม่ปิดแล้ว (ต่อรอบ Homecare) ต้องเห็นเป็นแถวของตัวเอง */
+    if (!parent || parent.status === 'cancelled' || c.status === 'cancelled') continue;
+    if (parent.status === 'closed' && c.status !== 'closed') continue;
     if (!kids.has(parent.case_id)) kids.set(parent.case_id, []);
     kids.get(parent.case_id).push(c);
   }

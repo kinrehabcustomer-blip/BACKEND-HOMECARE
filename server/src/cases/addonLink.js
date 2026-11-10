@@ -1,10 +1,12 @@
-import { sql } from '../db/index.js';
+import { sql, transaction } from '../db/index.js';
+import { caseCode } from './caseCode.js';
 
-/* แพ็กกายภาพเสริมของเคส Homecare (cases.addon_of — ดูท้าย schema.sql)
+/* แพ็กกายภาพเสริมของเคส Homecare (cases.addon_of / addon_next — ดูท้าย schema.sql)
    เติมคอลัมน์ให้เองตอนใช้ครั้งแรก ฐานที่ยังไม่ได้ migrate จะไม่ล้มกลางการเปิดเคส
 
    แยกเป็นไฟล์ของตัวเอง (10 พ.ย. 2569) — repo ของผู้ว่าจ้าง/ผู้รับบริการ/พนักงานต้องเรียกด้วย (รายการเคสในหน้าของคนนั้นๆ
    ดึง addon_of มารวมแถวแพ็กเสริม) แต่ cases/repo.js import patients/repo.js อยู่แล้ว import กลับจะวนกัน */
+const ADDON_COLUMNS = ['addon_of', 'bill_with_parent', 'addon_next'];
 let addonLinkReady = null;
 export const ensureAddonLink = () =>
   (addonLinkReady ??= (async () => {
@@ -12,13 +14,17 @@ export const ensureAddonLink = () =>
        ถ้ามีทรานแซกชันอื่นถือล็อกแถว cases อยู่จะต้องรอ จึงดูจาก catalog ก่อน (ไม่ล็อกอะไร) มีครบแล้ว = จบ */
     const { n } = await sql.one(
       `SELECT COUNT(*)::int AS n FROM information_schema.columns
-       WHERE table_schema = current_schema() AND table_name = 'cases' AND column_name IN ('addon_of', 'bill_with_parent')`,
+       WHERE table_schema = current_schema() AND table_name = 'cases' AND column_name = ANY(:cols::text[])`,
+      { cols: ADDON_COLUMNS },
     );
-    if (n === 2) return;
+    if (n === ADDON_COLUMNS.length) return;
     await sql.run(`ALTER TABLE cases ADD COLUMN IF NOT EXISTS addon_of TEXT
       REFERENCES cases (case_id) ON DELETE SET NULL ON UPDATE CASCADE`);
     await sql.run('CREATE INDEX IF NOT EXISTS idx_cases_addon_of ON cases (addon_of) WHERE addon_of IS NOT NULL');
     await sql.run('ALTER TABLE cases ADD COLUMN IF NOT EXISTS bill_with_parent BOOLEAN NOT NULL DEFAULT FALSE');
+    await sql.run(`ALTER TABLE cases ADD COLUMN IF NOT EXISTS addon_next TEXT
+      REFERENCES cases (case_id) ON DELETE SET NULL ON UPDATE CASCADE`);
+    await sql.run('CREATE INDEX IF NOT EXISTS idx_cases_addon_next ON cases (addon_next) WHERE addon_next IS NOT NULL');
   })().catch((err) => { addonLinkReady = null; throw err; }));
 
 /**
@@ -27,3 +33,84 @@ export const ensureAddonLink = () =>
  */
 export const ADDON_LIST_COLUMNS = `c.addon_of, c.bill_with_parent,
        pp.name AS physio_package_name, pp.sessions AS physio_sessions`;
+
+/* ---------- ย้ายคอร์สกายภาพตามรอบ Homecare (ผู้ใช้เลือกวิธี A แบบจองย้าย · 10 พ.ย. 2569) ----------
+   ต่อเคส Homecare → แพ็กที่ยังเดิน + เก็บเงินใบแยก ถูก "จองย้าย" (addon_next = รอบใหม่) — ดู create() ใน repo.js
+   ย้ายจริงเมื่อรอบใหม่เริ่ม อย่างใดอย่างหนึ่งก่อน:
+     ① รอบใหม่เริ่มงานแล้ว (เช็คอินกะแรก = in_progress / ปิดไปแล้ว)  ② ถึงวันเริ่มของรอบใหม่  ③ รอบเก่าปิดหรือถูกยกเลิก
+   ต่อเคสล่วงหน้าแล้วแพ็กจึงยังอยู่กับรอบที่ให้บริการจริงจนถึงวันเปลี่ยนรอบ — ไม่โผล่ในรอบที่ยัง "รอเริ่ม"
+
+   ทำแบบ "ตรวจเมื่อมีคนเปิดดู" (รายการ/ป๊อปอัป/หน้าภาพรวม เรียกก่อนอ่าน) ไม่แทรกในทุกเส้นที่เปลี่ยนสถานะ
+   — ข้อมูลที่ทุกหน้าเห็นถูกเสมอ โดยไม่ต้องตามแก้ทุกจุดที่เคสเริ่ม/ปิด/ยกเลิก · ตรวจไม่ถี่กว่านาทีละครั้งต่อเครื่อง
+   แพ็กที่เก็บเงินรวมใบไม่จอง/ไม่ย้าย — บรรทัดเงินอยู่ในใบของรอบเก่า ย้ายแล้วใบรอบใหม่จะดึงไปเก็บซ้ำ */
+const PROMOTE_EVERY_MS = process.env.NODE_ENV === 'test' ? 0 : 60_000;
+let lastPromote = 0;
+let promoting = null;
+
+export function promoteDueAddons() {
+  if (promoting) return promoting;
+  if (Date.now() - lastPromote < PROMOTE_EVERY_MS) return Promise.resolve(0);
+  lastPromote = Date.now();
+  promoting = runPromotion()
+    .catch((err) => {
+      lastPromote = 0; // ล้มแล้วให้ลองใหม่รอบหน้าได้เลย — ไม่ทำให้คำขอที่เปิดดูอยู่ล้มตาม
+      console.error('[addon-promote]', err?.message ?? err);
+      return 0;
+    })
+    .finally(() => { promoting = null; });
+  return promoting;
+}
+
+const TODAY_TH = "to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD')";
+
+async function runPromotion() {
+  await ensureAddonLink();
+  // ล้างการจองที่ไม่มีความหมายแล้ว: รอบใหม่ถูกยกเลิก · แพ็กจบ/ยกเลิก · แพ็กเปลี่ยนเป็นรวมใบ · ถูกยกเลิกการผูก
+  await sql.run(
+    `UPDATE cases p SET addon_next = NULL
+      WHERE p.addon_next IS NOT NULL
+        AND (p.status IN ('closed', 'cancelled') OR p.bill_with_parent OR p.addon_of IS NULL
+             OR EXISTS (SELECT 1 FROM cases n WHERE n.case_id = p.addon_next AND n.status = 'cancelled'))`,
+  );
+  let moved = 0;
+  // ต่อหลายรอบติดกัน (รอบ 2 → 3 ผ่านไปแล้วทั้งคู่) = เลื่อนทีละรอบจนถึงรอบปัจจุบัน
+  for (let step = 0; step < 6; step += 1) {
+    const rows = await transaction(async (tx) => {
+      const done = await tx.all(
+        `UPDATE cases p
+            SET addon_of = n.case_id,
+                /* รอบใหม่ต่อรอบถัดไปไว้แล้ว = จองต่อทันที (แพ็กตามรอบที่ให้บริการจริงเสมอ) */
+                addon_next = (SELECT r.case_id FROM cases r
+                               WHERE r.renewed_from = n.case_id AND r.status <> 'cancelled'
+                               ORDER BY r.created_at DESC LIMIT 1),
+                updated_at = to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')
+           FROM cases n, cases o
+          WHERE p.addon_next = n.case_id AND o.case_id = p.addon_of
+            AND p.status NOT IN ('closed', 'cancelled') AND NOT p.bill_with_parent
+            AND n.status <> 'cancelled'
+            AND (n.status IN ('in_progress', 'closed')
+                 OR n.start_date <= ${TODAY_TH}
+                 OR o.status IN ('closed', 'cancelled'))
+          RETURNING p.case_id, p.physio_package_id, o.case_id AS old_parent, n.case_id AS new_parent, n.round_no`,
+      );
+      for (const r of done) {
+        const pkg = r.physio_package_id
+          ? await tx.one('SELECT name FROM physio_packages WHERE physio_package_id = :id', { id: r.physio_package_id })
+          : null;
+        const name = pkg?.name ? `"${pkg.name}"` : 'กายภาพ';
+        const log = (caseId, detail) => tx.run(
+          `INSERT INTO case_events (case_id, event, detail, actor_id, actor_name)
+           VALUES (:case_id, 'physio_addon', :detail, NULL, 'ระบบ (ย้ายตามรอบ)')`,
+          { case_id: caseId, detail },
+        );
+        await log(r.case_id, `รอบที่ ${r.round_no} ของเคส Homecare ${caseCode(r.new_parent)} เริ่มแล้ว — ย้ายคอร์สกายภาพนี้ไปอยู่รอบนั้น`);
+        await log(r.new_parent, `รอบนี้เริ่มแล้ว — ย้ายคอร์สกายภาพ ${name} มาอยู่รอบนี้`);
+        await log(r.old_parent, `ย้ายคอร์สกายภาพ ${name} ไปอยู่รอบที่ ${r.round_no} แล้ว`);
+      }
+      return done.length;
+    });
+    moved += rows;
+    if (!rows) break;
+  }
+  return moved;
+}

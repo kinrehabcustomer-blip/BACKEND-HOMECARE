@@ -1,6 +1,6 @@
 import { sql, nextCustomerId, transaction } from '../db/index.js';
 import { likeEscape } from '../lib/likeEscape.js';
-import { ensureAddonLink, ADDON_LIST_COLUMNS } from '../cases/addonLink.js';
+import { ensureAddonLink, promoteDueAddons, ADDON_LIST_COLUMNS } from '../cases/addonLink.js';
 import { ensureLedgerTables, netPaidSql, netTotalSql } from '../invoices/ledger.js';
 
 const COLUMNS = [
@@ -98,6 +98,7 @@ export async function findDetailById(customerId) {
   if (!customer) return null;
 
   await ensureAddonLink(); // คอลัมน์ addon_of ที่รายการเคสข้างล่างใช้ (ฐานที่ยังไม่ migrate)
+  await promoteDueAddons(); // คอร์สกายภาพที่ถึงเวลาย้ายรอบแล้ว ย้ายก่อนอ่าน
   const [patients, cases] = await Promise.all([
     // ผู้รับการดูแลที่อยู่ใต้ลูกค้ารายนี้ (ลูกค้าหนึ่งคนดูแลได้หลายคน)
     sql.all(

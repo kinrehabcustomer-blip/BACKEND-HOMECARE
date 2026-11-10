@@ -9,7 +9,7 @@ import { REPORT_CONTENT_FIELDS, PATIENT_PENDING, MAX_REPORT_IMAGES, END_BEFORE_S
 import { ensurePatientCodeFree } from '../patients/repo.js';
 import { decodeImage, FRONT_POSITIONS } from '../employees/schema.js';
 import { ApiError } from '../lib/errors.js';
-import { ensureAddonLink } from './addonLink.js';
+import { ensureAddonLink, promoteDueAddons } from './addonLink.js';
 import { physioQuota } from './physioQuota.js';
 import { ensureVisitReminderColumns, ensureVisitChangeTable, recordVisitChange } from '../notify/visitReminders.js';
 export { physioQuota };
@@ -234,8 +234,12 @@ const SELECT_CASE = `
           FROM cases a
           LEFT JOIN physio_packages ap ON ap.physio_package_id = a.physio_package_id
           LEFT JOIN employees ae ON ae.employee_id = a.assigned_to
-          /* แม่ที่ยกเลิกแล้วไม่ถือแพ็ก — แพ็กกลับไปเป็นแถวของตัวเองในรายการ (list()) ถ้ายังโชว์ที่แม่ด้วยจะเห็นซ้ำสองที่ */
-          WHERE a.addon_of = c.case_id AND a.status <> 'cancelled' AND c.status <> 'cancelled') AS physio_addons,
+          /* กติกาเดียวกับ foldAddonsSql — แม่ยกเลิก / แพ็กยกเลิก / แพ็กยังเดินแต่แม่ปิดแล้ว = แพ็กเป็นแถวของตัวเอง
+             ถ้ายังโชว์ที่แม่ด้วยจะเห็นซ้ำสองที่ */
+          WHERE a.addon_of = c.case_id AND a.status <> 'cancelled' AND c.status <> 'cancelled'
+            AND (c.status <> 'closed' OR a.status = 'closed')) AS physio_addons,
+         /* แพ็กที่จองย้ายไปรอบใหม่ของเคส Homecare (addon_next) — ป๊อปอัปบอก "จะย้ายไปรอบที่ N เมื่อรอบนั้นเริ่ม" */
+         (SELECT n.round_no FROM cases n WHERE n.case_id = c.addon_next) AS addon_next_round,
          ${PATIENT_LIVE}
   FROM cases c
   LEFT JOIN employees e           ON e.employee_id  = c.assigned_to
@@ -324,8 +328,14 @@ const MAIN_CASE_SQL = 'NOT c.bill_with_parent';
  * คิวงานทีละเคส (กระดิ่ง · ตัวกรองของค้าง · ยังไม่จับคู่) ไม่ใช้ตัวนี้ — แพ็กเป็นงานของตัวเอง
  * ซับคิวรีตั้งชื่อตาราง c ซ้ำ — ก้อนเงื่อนไขทุกก้อนอ้าง c. จึงผูกกับแถวแม่ในซับคิวรี ไม่ใช่แถวแพ็กข้างนอก
  */
-const foldAddonsSql = (where) => `NOT COALESCE(c.addon_of IN (
-  SELECT c.case_id FROM cases c WHERE c.status <> 'cancelled' AND ${where.join(' AND ')}), FALSE)`;
+/* รวมเมื่อ: แพ็กไม่ถูกยกเลิก และ (แม่ยังเดินอยู่ หรือ ปิดแล้วทั้งคู่) — ตรวจ 10 พ.ย. 2569
+     แพ็กยกเลิก = แถวของตัวเอง (ในแถวแม่ไม่โชว์แพ็กยกเลิก ถ้ารวมก็หายไปทั้งสองที่)
+     แพ็กยังเดินแต่แม่ปิดแล้ว (เช่น ต่อรอบ Homecare รายเดือน รอบเก่าปิด) = แถวของตัวเอง — ไม่งั้นงานที่ยังเดินไปซ่อนในแถวเคสที่ปิด
+   ต้องตรงกับ physio_addons ใน SELECT_CASE และ groupAddons ฝั่งหน้าเว็บ (client/src/lib/caseAddons.js) */
+const foldAddonsSql = (where) => `NOT COALESCE(c.status <> 'cancelled' AND (
+  c.addon_of IN (SELECT c.case_id FROM cases c WHERE c.status NOT IN ('cancelled', 'closed') AND ${where.join(' AND ')})
+  OR (c.status = 'closed' AND c.addon_of IN (SELECT c.case_id FROM cases c WHERE c.status = 'closed' AND ${where.join(' AND ')}))
+), FALSE)`;
 
 const CLOSED_NO_INVOICE_SQL = `
   c.status = 'closed'
@@ -333,6 +343,7 @@ const CLOSED_NO_INVOICE_SQL = `
 
 export async function list({ q, status, case_type, service_kind, assigned_to, no_staff_pay, overdue_close, closed_no_invoice, ending_soon, year, month, page, per_page, sort, order }) {
   await ensureAddonLink();
+  await promoteDueAddons(); // คอร์สกายภาพที่จองย้ายรอบไว้ ถึงเวลาแล้วย้ายก่อนอ่าน (ดู addonLink.js)
   // แพ็กกายภาพที่รวมอยู่ในเคส Homecare ไม่ขึ้นเป็นแถวของตัวเอง — อยู่ในแถว/ป๊อปอัปของเคส Homecare
   const where = [MAIN_CASE_SQL];
   const params = {};
@@ -418,7 +429,9 @@ export async function list({ q, status, case_type, service_kind, assigned_to, no
 }
 
 export function findById(caseId) {
-  return ensureAddonLink().then(() => sql.one(`${SELECT_CASE} WHERE c.case_id = :id`, { id: caseId }));
+  return ensureAddonLink()
+    .then(() => promoteDueAddons())
+    .then(() => sql.one(`${SELECT_CASE} WHERE c.case_id = :id`, { id: caseId }));
 }
 
 /**
@@ -442,6 +455,7 @@ export async function backfillCustomerForPatient(patientId, customerId) {
  */
 export async function listForEmployee(employeeId) {
   await ensureAddonLink();
+  await promoteDueAddons();
   return sql.all(
     `${SELECT_CASE}
      WHERE ((c.assigned_to = :id
@@ -831,6 +845,27 @@ export async function create(rawInput, actor) {
       await logEvent(tx, prev.case_id, 'renewed', `ต่อเป็น ${caseCode(caseId)} (รอบที่ ${values.round_no})`, actor);
     }
 
+    /* ต่อเคส Homecare → จองย้ายคอร์สกายภาพของรอบก่อนมารอบนี้ (ผู้ใช้เลือกวิธี A แบบจองย้าย · 10 พ.ย. 2569)
+       ยังไม่ย้ายตอนนี้ — ย้ายจริงเมื่อรอบนี้เริ่ม (promoteDueAddons ใน addonLink.js) แพ็กจึงอยู่กับรอบที่ให้บริการจริงเสมอ
+       เฉพาะแพ็กที่ยังเดิน + เก็บเงินใบแยก (แพ็กรวมใบมีบรรทัดเงินในใบรอบก่อน ย้ายแล้วใบรอบนี้จะดึงไปเก็บซ้ำ)
+       carry_addons = รายการที่ฟอร์มติ๊กไว้ · ไม่ส่ง (เรียก API ตรง) = จองให้ทุกแพ็กที่ย้ายได้ */
+    if (prev && !addonOf && !isPhysioCase(values)) {
+      const eligible = await tx.all(
+        `SELECT c.case_id, pp.name AS package_name
+         FROM cases c LEFT JOIN physio_packages pp ON pp.physio_package_id = c.physio_package_id
+         WHERE c.addon_of = :prev AND c.status NOT IN ('closed', 'cancelled') AND NOT c.bill_with_parent
+         ORDER BY c.created_at, c.case_id`,
+        { prev: prev.case_id },
+      );
+      const wanted = Array.isArray(input.carry_addons) ? new Set(input.carry_addons) : null;
+      for (const pack of eligible.filter((r) => !wanted || wanted.has(r.case_id))) {
+        await tx.run('UPDATE cases SET addon_next = :next WHERE case_id = :id', { id: pack.case_id, next: caseId });
+        const name = pack.package_name ? `"${pack.package_name}"` : 'กายภาพ';
+        await logEvent(tx, pack.case_id, 'physio_addon', `จองย้ายไปรอบที่ ${values.round_no} ของเคส Homecare — ย้ายเมื่อรอบนั้นเริ่ม`, actor);
+        await logEvent(tx, caseId, 'physio_addon', `คอร์สกายภาพ ${name} ของรอบก่อน จะย้ายมาอยู่รอบนี้เมื่อรอบนี้เริ่ม`, actor);
+      }
+    }
+
     if (addonOf) {
       const pkg = await tx.one(
         'SELECT name, sessions FROM physio_packages WHERE physio_package_id = :id',
@@ -923,8 +958,10 @@ async function inheritedAddonParent(tx, prev, input) {
  */
 export async function physioAddons(caseId) {
   await ensureAddonLink();
+  await promoteDueAddons();
   return sql.all(
     `SELECT c.case_id, c.status, c.start_date, c.end_date, c.created_at, c.bill_with_parent,
+            c.addon_next, (SELECT n.round_no FROM cases n WHERE n.case_id = c.addon_next) AS addon_next_round,
             pp.name AS physio_package_name, pp.sessions AS physio_sessions,
             (SELECT COUNT(*) FROM case_visits v WHERE v.case_id = c.case_id AND v.status <> 'cancelled')::int AS booked,
             (SELECT COUNT(*) FROM case_visits v WHERE v.case_id = c.case_id AND v.check_in_at IS NOT NULL)::int AS attended
@@ -1024,7 +1061,7 @@ export async function linkAddon(caseId, parentId, actor) {
     if (parent.patient_id !== c.patient_id) {
       throw new ApiError(400, 'เคส Homecare นี้ไม่ได้ผูกแฟ้มผู้รับบริการคนเดียวกัน — ผูกแฟ้มให้ตรงกันก่อน');
     }
-    await tx.run(`UPDATE cases SET addon_of = :parent, updated_at = ${NOW} WHERE case_id = :id`, { id: caseId, parent: parent.case_id });
+    await tx.run(`UPDATE cases SET addon_of = :parent, addon_next = NULL, updated_at = ${NOW} WHERE case_id = :id`, { id: caseId, parent: parent.case_id });
 
     const pkg = c.physio_package_id
       ? await tx.one('SELECT name, sessions FROM physio_packages WHERE physio_package_id = :id', { id: c.physio_package_id })
@@ -1054,7 +1091,7 @@ export async function unlinkAddon(caseId, actor) {
     if (c.bill_with_parent) {
       throw new ApiError(409, 'แพ็กนี้เก็บเงินรวมอยู่ในใบแจ้งหนี้ของเคส Homecare — ยกเลิกการผูกไม่ได้ (บรรทัดแพ็กในใบนั้นจะค้าง) ติดต่อการเงินเพื่อแยกใบก่อน');
     }
-    await tx.run(`UPDATE cases SET addon_of = NULL, updated_at = ${NOW} WHERE case_id = :id`, { id: caseId });
+    await tx.run(`UPDATE cases SET addon_of = NULL, addon_next = NULL, updated_at = ${NOW} WHERE case_id = :id`, { id: caseId });
     await logEvent(tx, caseId, 'physio_addon', `ยกเลิกการผูกกับเคส Homecare (${caseCode(c.addon_of)}) — กลับเป็นเคสกายภาพแยก`, actor);
     await logEvent(tx, c.addon_of, 'physio_addon', `ยกเลิกการผูกแพ็กกายภาพ (${caseCode(caseId)}) — แพ็กกลับเป็นเคสแยก`, actor);
   });
@@ -1226,6 +1263,27 @@ export async function update(caseId, rawInput, actor) {
        ทั้งที่งานเกิดขึ้นไปแล้วตามแพ็คเกจเดิม ต้องเปิดเคสใหม่ก่อน (กติกาเดียวกับการจับคู่/เริ่มงาน) */
     if (['closed', 'cancelled'].includes(current.status) && serviceChanged(current, values)) {
       throw new ApiError(409, 'เคสนี้ปิดหรือยกเลิกไปแล้ว จึงเปลี่ยนแพ็คเกจไม่ได้ — ต้องเปิดเคสใหม่ก่อน');
+    }
+
+    /* ฝั่งเคส Homecare "แม่" ที่มีแพ็กกายภาพเสริมผูกอยู่ (ตรวจ 10 พ.ย. 2569 — เดิมไม่มีด่านฝั่งนี้):
+       สลับเป็นสายกายภาพ = กลายเป็นเคสกายภาพที่มีแพ็กกายภาพซ้อน · เปลี่ยนผู้รับบริการ = แพ็กไปผูกกับเคสของอีกคน
+       ทั้งสองอย่างทำให้แพ็ก (และบรรทัดในใบแจ้งหนี้ถ้ารวมใบ) ผิดเจ้าของ — ต้องยกเลิกการผูก/ยกเลิกแพ็กก่อน */
+    if (!current.addon_of) {
+      const linked = await tx.all(
+        "SELECT case_id FROM cases WHERE addon_of = :id AND status <> 'cancelled'",
+        { id: caseId },
+      );
+      if (linked.length) {
+        const next = { ...current, ...values };
+        if (serviceChanged(current, values) && isPhysioCase(next)) {
+          throw new ApiError(409, `เคสนี้มีแพ็กกายภาพเสริมผูกอยู่ ${linked.length} แพ็ก จึงเปลี่ยนเป็นสายกายภาพไม่ได้ — ยกเลิกการผูกหรือยกเลิกแพ็กก่อน`);
+        }
+        // '' กับ null = ไม่มีแฟ้มเหมือนกัน (ฟอร์มส่งค่าว่างมาได้) — ไม่นับเป็นการเปลี่ยน
+        if ('patient_id' in values && (values.patient_id || null) !== (current.patient_id || null)) {
+          const msg = `เคสนี้มีแพ็กกายภาพเสริมผูกอยู่ ${linked.length} แพ็ก จึงเปลี่ยนผู้รับบริการไม่ได้ — ยกเลิกการผูกก่อน (แพ็กต้องเป็นของคนเดียวกัน)`;
+          throw new ApiError(409, msg, [{ field: 'patient_id', message: msg }]);
+        }
+      }
     }
 
     /* แพ็กกายภาพเสริมของเคส Homecare — เปลี่ยนแพ็กกายภาพได้ แต่สลับเป็น Homecare/ไม่ระบุไม่ได้
@@ -4022,6 +4080,7 @@ export async function calendar({ year, month, employee_id }) {
 /** สรุปเคส — ไม่ส่งปีมาคือรวมทุกปี, ส่งปีอย่างเดียวคือทั้งปีนั้น, ส่งปี+เดือนคือเดือนนั้น */
 export async function summary(period) {
   await ensureAddonLink();
+  await promoteDueAddons();
   const where = [MAIN_CASE_SQL];
   const params = {};
   periodFilter(period, where, params);

@@ -1946,3 +1946,10 @@ CREATE INDEX IF NOT EXISTS idx_cases_addon_of ON cases (addon_of) WHERE addon_of
 -- เคสกายภาพไม่มีใบของตัวเอง — ใบ Homecare ได้บรรทัด "กายภาพบำบัด" (addons kind 'physio' · ดู lib/addons.js)
 -- มัดจำหักจากค่า Homecare: บรรทัดนี้ย้ายไปใบส่วนที่เหลือเต็มจำนวนเหมือนอุปกรณ์เสริม
 ALTER TABLE cases ADD COLUMN IF NOT EXISTS bill_with_parent BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- addon_next = รอบใหม่ของเคส Homecare ที่แพ็กนี้ "จองย้ายไป" ตอนต่อเคส (ผู้ใช้เลือกวิธี A แบบจองย้าย · 10 พ.ย. 2569)
+-- ย้ายจริง (addon_of = addon_next) เมื่อรอบใหม่เริ่ม: เช็คอินกะแรก / ถึงวันเริ่ม / รอบเก่าปิดหรือยกเลิก
+-- — ต่อเคสล่วงหน้าแล้วแพ็กยังอยู่กับรอบที่ให้บริการจริงจนถึงวันเปลี่ยนรอบ (ดู promoteDueAddons ใน cases/addonLink.js)
+ALTER TABLE cases ADD COLUMN IF NOT EXISTS addon_next TEXT
+  REFERENCES cases (case_id) ON DELETE SET NULL ON UPDATE CASCADE;
+CREATE INDEX IF NOT EXISTS idx_cases_addon_next ON cases (addon_next) WHERE addon_next IS NOT NULL;

@@ -3,7 +3,7 @@ import { hashPassword, DEFAULT_PASSWORD } from '../lib/auth.js';
 import { encryptTempPassword, tryDecryptTempPassword } from '../lib/tempPassword.js';
 import { ApiError } from '../lib/errors.js';
 import { likeEscape } from '../lib/likeEscape.js';
-import { ensureAddonLink, ADDON_LIST_COLUMNS } from '../cases/addonLink.js';
+import { ensureAddonLink, promoteDueAddons, ADDON_LIST_COLUMNS } from '../cases/addonLink.js';
 
 const COLUMNS = [
   'first_name',
@@ -105,6 +105,7 @@ export async function findDetailById(employeeId, includeTempPassword = false, pr
   if (!employee) return null;
 
   await ensureAddonLink(); // คอลัมน์ addon_of ที่รายการเคสข้างล่างใช้ (ฐานที่ยังไม่ migrate)
+  await promoteDueAddons(); // คอร์สกายภาพที่ถึงเวลาย้ายรอบแล้ว ย้ายก่อนอ่าน
   const [certificates, portfolio, cases] = await Promise.all([
     certificates_.listFor(employeeId),
     portfolio_.listFor(employeeId),

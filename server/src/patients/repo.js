@@ -1,6 +1,6 @@
 import { sql, transaction } from '../db/index.js';
 import { likeEscape } from '../lib/likeEscape.js';
-import { ensureAddonLink, ADDON_LIST_COLUMNS } from '../cases/addonLink.js';
+import { ensureAddonLink, promoteDueAddons, ADDON_LIST_COLUMNS } from '../cases/addonLink.js';
 import { ApiError } from '../lib/errors.js';
 
 /** เจ้าของรหัสผู้รับบริการนี้ (ถ้ามี) — ใช้ทั้งตอนบันทึก และเส้นตรวจซ้ำที่หน้าฟอร์มเรียกระหว่างพิมพ์ */
@@ -119,6 +119,7 @@ export async function findDetailById(patientId) {
   if (!patient) return null;
 
   await ensureAddonLink(); // คอลัมน์ addon_of ที่รายการเคสข้างล่างใช้ (ฐานที่ยังไม่ migrate)
+  await promoteDueAddons(); // คอร์สกายภาพที่ถึงเวลาย้ายรอบแล้ว ย้ายก่อนอ่าน
   const [customer, cases] = await Promise.all([
     patient.customer_id
       ? sql.one(

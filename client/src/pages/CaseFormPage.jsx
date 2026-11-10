@@ -639,6 +639,22 @@ export default function CaseFormPage() {
   // ทิศทาง 2: เก็บรายการที่ "ติ๊กออก" — ค่าเริ่มต้นผูกทุกเคส
   const [orphanSkip, setOrphanSkip] = useState(() => new Set());
   const orphansToLink = orphanPhysio.filter((c) => !orphanSkip.has(c.case_id));
+  /* ต่อเคส Homecare: คอร์สกายภาพของรอบก่อน "จองย้าย" มารอบใหม่ — ย้ายจริงเมื่อรอบใหม่เริ่ม (วิธี A แบบจองย้าย · 10 พ.ย. 2569)
+     ย้ายได้ = ยังเดิน + เก็บเงินใบแยก · แพ็กรวมใบเทาไว้พร้อมเหตุผล (บรรทัดเงินอยู่ในใบรอบก่อน ย้ายแล้วเก็บซ้ำ)
+     ติ๊กไว้ให้แล้วทุกแพ็ก — เก็บรายการที่ "ติ๊กออก" · server ตรวจซ้ำว่าย้ายได้จริง */
+  const [prevPacks, setPrevPacks] = useState([]);
+  useEffect(() => {
+    if (!renewFrom) return undefined;
+    let stale = false;
+    api.physioAddons(renewFrom)
+      .then((rows) => !stale && setPrevPacks(rows.filter((a) => !['closed', 'cancelled'].includes(a.status))))
+      .catch(() => !stale && setPrevPacks([]));
+    return () => { stale = true; };
+  }, [renewFrom]);
+  const [carrySkip, setCarrySkip] = useState(() => new Set());
+  const carryable = isHomecare ? prevPacks.filter((a) => !a.bill_with_parent) : [];
+  const carryIds = carryable.filter((a) => !carrySkip.has(a.case_id)).map((a) => a.case_id);
+
   // ชื่อบริการของเคสอีกสาย — title ตั้งอัตโนมัติเป็น "บริการ · ชื่อผู้รับบริการ" จึงเอาท่อนแรก
   const caseLabel = (c) => c.physio_package_name
     || String(c.title ?? '').split(' · ')[0]
@@ -1181,6 +1197,8 @@ export default function CaseFormPage() {
         navigate(`/cases?open=${updated.case_id}`); // เปลี่ยนรหัสแล้วเคสเดิมไม่มีอยู่ที่รหัสเก่า
       } else {
         if (renewFrom) payload.renewed_from = renewFrom;
+        // ต่อเคส Homecare: ส่งรายการที่ติ๊กเสมอ (รวม [] = ไม่ย้ายเลย) — ไม่ส่ง server จะจองให้ทุกแพ็ก
+        if (renewFrom && isHomecare && carryable.length) payload.carry_addons = carryIds;
         if (addonOf) payload.addon_of = addonOf;
         // ทิศทาง 1: เปิดกายภาพเป็นแพ็กเสริมของเคส Homecare ที่เดินอยู่ (เลือกไว้ในกล่องทัก) — server ตรวจคนเดียวกัน/สาย/สถานะ
         // แพ็กเสริมต้องมีแพ็คเกจ (server บังคับ) — ยังไม่เลือก = เปิดเป็นเคสแยกตามปกติ ไม่ให้ทั้งการเปิดเคสล้ม
@@ -1736,6 +1754,42 @@ export default function CaseFormPage() {
             </p>
           )}
         </div>
+
+        {/* ต่อเคส Homecare: คอร์สกายภาพของรอบก่อนย้ายตามมา เมื่อรอบใหม่เริ่ม (วิธี A แบบจองย้าย · 10 พ.ย. 2569) */}
+        {renewFrom && isHomecare && prevPacks.length > 0 && (
+          <div className="link-addon-hint" role="group" aria-label="คอร์สกายภาพของรอบก่อน">
+            <p>
+              <strong>คอร์สกายภาพของรอบก่อน</strong>
+              {' '}— จะย้ายมาอยู่กับรอบนี้<strong>เมื่อรอบนี้เริ่ม</strong> (ระหว่างนี้ยังอยู่กับรอบก่อนที่กำลังให้บริการ)
+            </p>
+            <div className="link-addon-choices">
+              {prevPacks.map((a) => (
+                a.bill_with_parent ? (
+                  <p key={a.case_id} className="form-hint link-addon-sub" style={{ paddingLeft: 0 }}>
+                    <strong>{a.physio_package_name ?? 'คอร์สกายภาพ'}</strong> — ไม่ย้าย: เก็บเงินอยู่ในใบแจ้งหนี้ของรอบก่อนแล้ว (ย้ายแล้วจะถูกเก็บซ้ำ)
+                  </p>
+                ) : (
+                  <label key={a.case_id} className="checkbox-row">
+                    <input
+                      type="checkbox"
+                      checked={!carrySkip.has(a.case_id)}
+                      onChange={(e) => setCarrySkip((prev) => {
+                        const next = new Set(prev);
+                        if (e.target.checked) next.delete(a.case_id);
+                        else next.add(a.case_id);
+                        return next;
+                      })}
+                    />
+                    ย้าย <strong>{a.physio_package_name ?? 'คอร์สกายภาพ'}</strong>
+                    <span className="muted">
+                      {' · '}นัดแล้ว {a.booked}{a.physio_sessions ? `/${a.physio_sessions}` : ''} ครั้ง · มาแล้ว {a.attended} ครั้ง
+                    </span>
+                  </label>
+                )
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* ทิศทาง 1 — เปิดกายภาพ ขณะผู้รับบริการมีเคส Homecare เดินอยู่ (ทางเลือก A · 10 พ.ย. 2569) */}
         {homecareParents.length > 0 && (

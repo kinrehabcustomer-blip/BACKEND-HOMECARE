@@ -563,6 +563,12 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                 {item.addon_of && (
                   <p className="case-rounds muted">
                     แพ็กกายภาพเสริมของ <Link className="link" to={`/cases?open=${item.addon_of}`} state={{ fromCase: item.case_id }}>เคส Homecare {caseCode(item.addon_of)}</Link>
+                    {/* ต่อเคส Homecare แล้ว — จองย้ายไปรอบใหม่ ย้ายจริงเมื่อรอบนั้นเริ่ม (วิธี A แบบจองย้าย) */}
+                    {item.addon_next && (
+                      <> · <Link className="link" to={`/cases?open=${item.addon_next}`} state={{ fromCase: item.case_id }}>
+                        จะย้ายไปรอบที่ {item.addon_next_round ?? 'ถัดไป'}
+                      </Link> เมื่อรอบนั้นเริ่ม</>
+                    )}
                     {/* ผูกผิด → ยกเลิกได้เอง (เฉพาะใบแยก — แพ็กที่รวมใบแล้วมีบรรทัดในใบของ Homecare ต้องให้การเงินแยกใบก่อน) */}
                     {!item.bill_with_parent && (
                       <>
@@ -819,6 +825,7 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                                 {' · '}มาแล้ว {a.attended} ครั้ง
                                 {a.start_date && ` · เริ่ม ${formatDate(a.start_date)}`}
                                 {a.bill_with_parent ? ' · เก็บเงินรวมในใบแจ้งหนี้ของเคสนี้' : ' · ใบแจ้งหนี้แยก'}
+                                {a.addon_next && ` · จะย้ายไปรอบที่ ${a.addon_next_round ?? 'ถัดไป'} เมื่อรอบนั้นเริ่ม`}
                               </span>
                             </div>
                             <span className={`badge case-${stage.key}`}>{stage.label}</span>
