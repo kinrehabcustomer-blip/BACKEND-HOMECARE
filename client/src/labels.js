@@ -17,6 +17,13 @@ export const POSITION_LABELS = {
   super_admin: 'Super Admin', // ผู้ดูแลระบบสูงสุด — สิทธิ์ครบ และตั้ง/แก้ Super Admin ได้คนเดียว
 };
 
+/** ผู้เขียนรายงาน "ชื่อ (ตำแหน่ง)" — ไม่ซ้ำคำเมื่อชื่อบัญชีคือชื่อตำแหน่งเอง (เช่น บัญชี "Super Admin") */
+export function reportAuthor(r) {
+  const name = r?.reported_by_name ?? '—';
+  const pos = POSITION_LABELS[r?.reported_by_position];
+  return pos && pos !== name ? `${name} (${pos})` : name;
+}
+
 /**
  * สายบำบัด — ทั้งสามตำแหน่งทำงานเหมือนกันทุกข้อ (รับเคสกายภาพได้ · ไม่มีระดับในตารางราคา ·
  * เปิดรับแบบประเมินจากญาติ) · ต้องตรงกับ THERAPY_POSITIONS ใน server/src/employees/schema.js

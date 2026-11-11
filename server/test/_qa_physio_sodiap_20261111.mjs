@@ -25,5 +25,7 @@ const up = await call('PATCH', `/api/cases/${c.case_id}/reports/${id}`, { assess
 const again = ((await call('GET', `/api/cases/${c.case_id}/reports`)).body);
 const row2 = (Array.isArray(again) ? again : again.data ?? again.reports)[0];
 console.log(`${row2.assessment === 'ปวดลด 6→2' ? 'PASS' : 'BUG '} | แก้ Assessment (${up.status}) → ${row2.assessment}`);
-console.log(`\nสรุป: พบปัญหา ${bad + (row2.assessment === 'ปวดลด 6→2' ? 0 : 1)} ข้อ`);
+const posOk = row2.reported_by_position === 'manager';
+console.log(`${posOk ? 'PASS' : 'BUG '} | ตำแหน่งผู้เขียน = ${row2.reported_by_position}`);
+console.log(`\nสรุป: พบปัญหา ${bad + (row2.assessment === 'ปวดลด 6→2' ? 0 : 1) + (posOk ? 0 : 1)} ข้อ`);
 server.close(); await pool.end();

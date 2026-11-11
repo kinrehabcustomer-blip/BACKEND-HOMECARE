@@ -1,6 +1,6 @@
 import { useAuth } from '../auth.jsx';
 import { ISSUER, printStamp } from '../lib/issuer.js';
-import { formatDate } from '../labels.js';
+import { formatDate, reportAuthor } from '../labels.js';
 import { TEXTS, vitalChips } from './CaseReports.jsx';
 import DailyCareView from './DailyCareView.jsx';
 import { usesDailyRecord, usesPhysioRecord, DAILY_SECTIONS, PHYSIO_SECTIONS, PHYSIO_VIEW_SECTIONS } from '../lib/dailyCare.js';
@@ -89,7 +89,7 @@ export default function CaseReportDoc({ caseItem, reports }) {
           <h4 className="report-doc-item-head">
             ครั้งที่ {i + 1} · {formatDate(r.report_date)} เวลา {rowTime(r)} น.
             {r.report_type && r.report_type !== 'routine' && ` · (${TYPE_LABELS[r.report_type] ?? r.report_type})`}
-            <span className="report-doc-by">ผู้บันทึก: {r.reported_by_name ?? '—'}</span>
+            <span className="report-doc-by">ผู้บันทึก: {reportAuthor(r)}</span>
           </h4>
 
           {structured ? (

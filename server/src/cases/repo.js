@@ -4576,6 +4576,9 @@ const REPORT_BASE_COLS = [
   "(SELECT COALESCE(json_agg(i.image_id ORDER BY i.image_id), '[]'::json) FROM case_report_images i WHERE i.report_id = r.report_id) AS image_ids",
   'r.reported_by',
   'r.reported_by_name',
+  /* ตำแหน่งผู้เขียน (11 พ.ย. 2569) — โชว์คู่ชื่อในรายการรายงาน/ตัวเลือกคัดลอก ให้รู้ว่าเป็นบันทึกของ CG/RN/นักกายภาพ
+     ตำแหน่งปัจจุบันของพนักงาน (รายงานไม่ได้จดตำแหน่งไว้ตอนเขียน) · พนักงานถูกลบ = null */
+  '(SELECT e.position FROM employees e WHERE e.employee_id = r.reported_by) AS reported_by_position',
   'r.created_at',
   'r.updated_at',
 ].join(', ');

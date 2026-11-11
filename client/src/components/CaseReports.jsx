@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { useToast } from '../toast.jsx';
-import { formatDate, monthText, todayTH, nowTH } from '../labels.js';
+import { formatDate, monthText, todayTH, nowTH, reportAuthor } from '../labels.js';
 import ConfirmButton from './ConfirmButton.jsx';
 import ReportArchiveModal from './ReportArchiveModal.jsx';
 import DailyCareForm from './DailyCareForm.jsx';
@@ -485,7 +485,7 @@ export default function CaseReports({
                     const summary = text ? ` — ${text.length > 60 ? `${text.slice(0, 60)}…` : text}` : '';
                     return (
                       <option key={r.report_id} value={r.report_id}>
-                        {`${formatDate(r.report_date)} · ${rowTime(r)} · ${r.reported_by_name ?? '—'}${summary}`}
+                        {`${formatDate(r.report_date)} · ${rowTime(r)} · ${reportAuthor(r)}${summary}`}
                       </option>
                     );
                   })}
@@ -580,7 +580,7 @@ export default function CaseReports({
                   </span>
 
                   {r.image_ids?.length > 0 && <span className="report-row-imgs" title="มีรูปภาพแนบ">รูป {r.image_ids.length}</span>}
-                  <span className="report-row-by">{r.reported_by_name ?? '—'}</span>
+                  <span className="report-row-by">{reportAuthor(r)}</span>
                   {/* บอกว่าแถวนี้กางได้ — ไม่มีอะไรบอกเลยคนจะไม่รู้ว่ากดได้
                       กางอยู่แล้วไม่ต้องมีค้างไว้ ปุ่มที่ใช้จริงตอนนั้นคือ "ย่อรายงาน" ท้ายใบ */}
                   <span className="report-row-more">ดูทั้งหมด</span>
@@ -625,7 +625,7 @@ export default function CaseReports({
   
                       <div className="report-row-foot">
                         <span className="cell-sub">
-                          บันทึกโดย {r.reported_by_name ?? '—'}
+                          บันทึกโดย {reportAuthor(r)}
                           {/* แก้ทีหลังแล้วต้องเห็น ไม่งั้นบันทึกที่ถูกแก้จะดูเหมือนของดั้งเดิม */}
                           {r.updated_at !== r.created_at && ` · แก้ล่าสุด ${editedAt(r.updated_at)}`}
                         </span>

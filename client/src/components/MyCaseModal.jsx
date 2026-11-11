@@ -5,7 +5,7 @@ import CaseLocationLink from './CaseLocationLink.jsx';
 import ReportArchiveModal from './ReportArchiveModal.jsx';
 import { useSheetSwipe } from '../lib/sheetSwipe.js';
 import { useScrollLock } from '../lib/scrollLock.js';
-import { SERVICE_KIND_LABELS, serviceKindOf, GENDER_LABELS, VISIT_STATE_LABELS, formatDate, timeText, caseStage, todayTH } from '../labels.js';
+import { SERVICE_KIND_LABELS, serviceKindOf, GENDER_LABELS, VISIT_STATE_LABELS, formatDate, timeText, caseStage, todayTH, reportAuthor } from '../labels.js';
 import { formatPhone } from '../lib/phone.js';
 import { caseCode } from '../lib/patientCode.js';
 
@@ -216,7 +216,7 @@ export default function MyCaseModal({ caseId, onClose }) {
                           <span className="cell-sub">
                             ล่าสุด {formatDate(history.latest.report_date)}
                             {history.latest.report_time && ` · ${history.latest.report_time}`}
-                            {history.latest.reported_by_name && ` · ${history.latest.reported_by_name}`}
+                            {history.latest.reported_by_name && ` · ${reportAuthor(history.latest)}`}
                           </span>
                         )}
                       </>
