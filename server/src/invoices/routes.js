@@ -85,6 +85,7 @@ export async function createDraftForCase(caseRow, actor) {
   const created = await repo.createFromCase({ ...caseRow, customer }, {}, actor);
   // คำขอซ้ำที่มาพร้อมกันแพ้ล็อกของเคส (ดู createFromCase) — คืนใบร่างที่อีกคำขอเพิ่งสร้างแทน
   if (created.reason === 'draft_exists') return repo.findById(created.invoice_id);
+  if (created.reason) return null; // มีใบแพ็คเกจอยู่แล้ว — ไม่ต้องเตรียมใบร่างเพิ่ม
   return created;
 }
 
@@ -267,6 +268,14 @@ invoicesRouter.post(
       throw new ApiError(
         409,
         `เคสนี้มีใบร่าง ${created.invoice_id} ค้างอยู่แล้ว — แก้ใบเดิมหรือลบทิ้งก่อนจึงจะออกใบใหม่ได้`,
+        { existing_invoice_id: created.invoice_id },
+      );
+    }
+    if (created.reason === 'package_exists') {
+      throw new ApiError(
+        409,
+        `เคสนี้มีใบ ${created.invoice_id} ที่${created.status === 'paid' ? 'ชำระแล้ว' : 'ออกไปแล้ว'}อยู่ — ออกใบเต็มจำนวนซ้ำจะเรียกเก็บลูกค้าสองรอบ` +
+          ' ถ้ายอดเปลี่ยนให้ออกใบเพิ่มหนี้/ลดหนี้ที่ใบเดิม ถ้าจะออกใหม่ทั้งใบให้ยกเลิกใบเดิมก่อน',
         { existing_invoice_id: created.invoice_id },
       );
     }

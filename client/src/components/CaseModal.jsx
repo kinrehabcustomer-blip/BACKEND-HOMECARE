@@ -1144,8 +1144,12 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                             <><LineIcon name="alert" className="text-ico" />{v.payer_stale
                               ? 'ผู้จ่ายในใบไม่ตรงกับเคส'
                               : v.fee_stale
-                                ? `ไม่ตรงกับยอดของเคส (${formatBaht(v.case_fee)})`
-                                : 'เคสเปลี่ยนแพ็คเกจหลังออกใบนี้'}</>
+                                ? v.plan_stale
+                                  ? `มัดจำ + ส่วนที่เหลือ ไม่ตรงกับค่าบริการของเคส (${formatBaht(v.plan_case_fee)})`
+                                  : `ไม่ตรงกับยอดของเคส (${formatBaht(v.case_fee)})`
+                                : v.service_stale
+                                  ? 'เคสเปลี่ยนแพ็คเกจหลังออกใบนี้'
+                                  : `แพ็กกายภาพในใบถูกยกเลิกแล้ว — ยังไม่ได้ลดหนี้ (${formatBaht(v.cancelled_bundle_amount)})`}</>
                           </p>
                         )}
                       </div>
@@ -1430,10 +1434,16 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                       upcoming > 0 && `• ${upcoming} กะที่ยังไม่ถึงวันนัด จะถูกยกเลิก`,
                       openShifts > 0 && `• ${openShifts} กะที่เช็คอินแล้วแต่ยังไม่เช็คเอาท์ จะไม่ถูกนับชั่วโมง/ค่าจ้าง`,
                     ].filter(Boolean);
+                    /* ใบร่างที่ยังไม่ได้ออกให้ลูกค้า — ไม่ห้ามปิด (บางเคสไม่เก็บเงินจริง) แต่ต้องเห็นก่อนกด (ตรวจ 11 พ.ย. 2569)
+                       ไม่ส่งผลกับ force: server ถามซ้ำเฉพาะเรื่องกะค้าง */
+                    const drafts = invoices.filter((v) => v.status === 'draft');
+                    const billWarn = drafts.length > 0
+                      ? [`ใบแจ้งหนี้ ${drafts.map((v) => v.invoice_id).join(', ')} ยังเป็นร่าง ยังไม่ได้ออกให้ลูกค้า — ปิดแล้วอย่าลืมออกใบ`]
+                      : [];
                     if (!(await ask({
                       title: `ปิดเคส ${caseCode(item.case_id)}?`,
                       detail: pay.trim() || undefined,
-                      items: warn.map((w) => w.replace(/^•\s*/, '')),
+                      items: [...warn.map((w) => w.replace(/^•\s*/, '')), ...billWarn],
                       itemsTone: 'warn',
                       note: 'เคสจะยังอยู่ในระบบเป็นประวัติ และเปิดใหม่ได้ภายหลัง',
                       confirmLabel: 'ปิดเคส',

@@ -331,6 +331,13 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
      ใบงวด/ใบรายครั้ง/ใบที่รับเงินแล้วถูกข้าม ปุ่มรีเฟรชจะกดแล้วไม่เกิดอะไร (หรือ error) จึงไม่โชว์ */
   const refreshable =
     canEdit && !item?.has_items && !item?.is_plan_part && Number(item?.paid_amount ?? 0) === 0;
+  /* ยอด (ก่อนส่วนลด) ที่ทำให้แผนมัดจำทั้งแผนเท่าค่าบริการของเคสตอนนี้ — ต้องตรงกับ balanceRealignsPlan ฝั่ง server */
+  const balanceTarget = (() => {
+    if (!canEdit || !item?.plan_stale || item?.billing_kind !== 'balance') return null;
+    const others = Number(item.plan_net_total) - Number(item.net_total ?? item.total);
+    const target = Math.round((Number(item.plan_case_fee) - others + Number(item.discount ?? 0)) * 100) / 100;
+    return target - Number(item.discount ?? 0) > 0 ? target : null;
+  })();
   // ใบที่ออกแล้ว server ดึงจากเคสได้แค่ผู้จ่าย (ชื่อ/เลขผู้เสียภาษี/ที่อยู่) — ยอดไม่แตะ
   const payerRefreshable = item?.status === 'issued' && item?.payer_stale;
   // ยกเลิกใบได้เมื่อไม่ถือเงินลูกค้าอยู่ — ที่รับไว้ต้องลดหนี้พร้อมคืนเงินก่อน (server ตรวจซ้ำ)
@@ -870,10 +877,24 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                       {' '}แต่ใบนี้ออกในชื่อ <strong>{item.bill_to_name}</strong> — ยังไม่ตรงกัน
                     </p>
                   )}
-                  {item.fee_stale && (
+                  {item.fee_stale && item.plan_stale && (
+                    <p>
+                      <LineIcon name="alert" className="text-ico" />ค่าบริการของเคสตอนนี้คือ <strong>{amountText(item.plan_case_fee)}</strong>
+                      {' '}แต่ใบมัดจำกับใบส่วนที่เหลือรวมกันเป็น <strong>{amountText(item.plan_net_total)}</strong> — ยังไม่ตรงกัน
+                    </p>
+                  )}
+                  {item.fee_stale && !item.plan_stale && (
                     <p>
                       <LineIcon name="alert" className="text-ico" />ยอดตามเคสตอนนี้ (ค่าบริการ + อุปกรณ์เสริมในใบนี้) คือ <strong>{amountText(item.case_fee)}</strong>
                       {' '}แต่ยอดสุทธิของใบนี้เป็น <strong>{amountText(item.net_total ?? item.total)}</strong> — ยังไม่ตรงกัน
+                    </p>
+                  )}
+                  {item.bundle_stale && (
+                    <p>
+                      <LineIcon name="alert" className="text-ico" />แพ็กกายภาพในใบนี้ถูกยกเลิกไปแล้ว
+                      {' '}(ยอด <strong>{amountText(item.cancelled_bundle_amount)}</strong>) — ออกใบลดหนี้
+                      {Number(item.paid_amount ?? 0) > 0 ? 'พร้อมบันทึกคืนเงิน' : ''} ตามส่วนที่ไม่ได้ให้บริการ
+                      {' '}ป้ายนี้จะหายเมื่อออกใบลดหนี้แล้ว
                     </p>
                   )}
                   {item.service_stale && (
@@ -882,7 +903,7 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                       {' '}รายการและยอดในใบยังเป็นของชุดเดิม
                     </p>
                   )}
-                  <p>
+                  {(item.fee_stale || item.payer_stale || item.service_stale) && (<p>
                     {refreshable
                       ? 'กดรีเฟรชเพื่อดึงข้อมูลล่าสุดจากเคสมาใส่ใบนี้'
                       : canEdit
@@ -890,7 +911,7 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                         : `ใบที่ออกแล้วแก้ยอดในใบไม่ได้ — ${item.fee_stale ? 'ลดยอดให้ออกใบลดหนี้ เพิ่มยอดให้ออกใบเพิ่มหนี้' : 'ปรับยอดด้วยใบลดหนี้/ใบเพิ่มหนี้'}`
                           + (payerRefreshable ? ' · ผู้จ่ายดึงจากเคสได้ด้วยปุ่มด้านล่าง' : '')}
                     {item.service_stale && ' · ถ้ายอดเดิมยังถูกต้อง (เช่น ส่วนต่างออกใบแยก) กด "รับทราบ" เพื่อปิดคำเตือนเรื่องแพ็คเกจ'}
-                  </p>
+                  </p>)}
                   <div className="stale-actions">
                     {item.service_stale && (
                       <button
@@ -910,6 +931,16 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                         รีเฟรชจากเคส
                       </button>
                     )}
+                    {/* ใบส่วนที่เหลือที่ยังเป็นร่าง ปรับยอดให้ทั้งแผนเท่าค่าบริการของเคสได้ (server ยอมเฉพาะยอดนี้) */}
+                    {balanceTarget != null && (
+                      <button
+                        className="btn primary"
+                        disabled={busy}
+                        onClick={() => run(() => api.updateInvoice(item.invoice_id, { amount: balanceTarget }))}
+                      >
+                        ปรับใบนี้เป็น {amountText(balanceTarget - Number(item.discount ?? 0))} ให้ตรงกับเคส
+                      </button>
+                    )}
                     {payerRefreshable && (
                       <button
                         className="btn"
@@ -919,7 +950,7 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                         ดึงผู้จ่ายจากเคส
                       </button>
                     )}
-                    {canAdjust && (item.fee_stale || item.service_stale) && (
+                    {canAdjust && (item.fee_stale || item.service_stale || item.bundle_stale) && (
                       <button className="btn primary" disabled={busy} onClick={openAdjustForm}>
                         ออกใบลดหนี้/เพิ่มหนี้
                       </button>

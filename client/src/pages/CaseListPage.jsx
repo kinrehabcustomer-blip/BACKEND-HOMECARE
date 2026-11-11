@@ -185,24 +185,31 @@ export default function CaseListPage() {
      จอกว้าง: ขวาของหัวคอลัมน์สถานะ · มือถือ (หัวตารางถูกซ่อน): ในแผ่นตัวกรอง
      การเรียงที่ตั้งจากการกดหัวคอลัมน์ (บริการ / วันเริ่ม) ไม่มีในรายการ — โชว์เป็นตัวเลือก "ตามคอลัมน์" ไม่ให้ช่องว่างเปล่า */
   const sortValue = `${sort}:${order}`;
+  /* ไม่มีคำว่า "เรียง" นำหน้าแล้ว (ผู้ใช้ขอ 11 พ.ย. 2569) — ไอคอนลูกศรขึ้น-ลงหน้าปุ่มบอกแทนว่าเป็นตัวเรียงลำดับ
+     ชื่อสั้นโดยตั้งใจ: ปุ่มอยู่ในหัวคอลัมน์สถานะ (16% ของตาราง) คู่กับคำว่า "สถานะ" — ชื่อยาวแล้วปุ่มล้นขอบตาราง */
   const SORT_PRESETS = [
-    ['created_at:desc', 'ล่าสุด'],
+    ['created_at:desc', 'ใหม่สุด'],
     ['created_at:asc', 'เก่าสุด'],
     ['case_id:desc', 'รหัสเคส'],
   ];
-  const sortSelect = (
-    <SearchSelect value={sortValue} onChange={(e) => sortBy(...e.target.value.split(':'))} aria-label="เรียงลำดับเคส">
-      {SORT_PRESETS.map(([value, label]) => <option key={value} value={value}>{mobile ? `เรียง: ${label}` : label}</option>)}
-      {!SORT_PRESETS.some(([value]) => value === sortValue) && (
-        <option value={sortValue}>{mobile ? 'เรียง: ' : ''}ตามคอลัมน์{SORTABLE[sort].label === '#' ? '' : ` ${SORTABLE[sort].label}`}</option>
-      )}
-    </SearchSelect>
-  );
-  // จอกว้าง: ป้าย "เรียง" + dropdown เล็กในหัวตาราง · มือถือ: dropdown เปล่าแบบเดียวกับช่องอื่นในแผ่นตัวกรอง (คำว่า "เรียง:" อยู่ในตัวเลือก)
-  const sortPicker = mobile ? sortSelect : (
-    <label className="sort-pick">
-      <span className="sort-pick-label">เรียง</span>
-      {sortSelect}
+  // ปุ่มเดียวกันทั้งสองจอ: จอกว้างเป็นปุ่มเม็ดยาในหัวคอลัมน์สถานะ · มือถือเต็มแถวในแผ่นตัวกรอง (is-sheet)
+  const sortPicker = (
+    <label className={`sort-pick${mobile ? ' is-sheet' : ''}`} title="เรียงลำดับเคส">
+      <svg className="sort-pick-icon" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M7 20V4M3.5 7.5 7 4l3.5 3.5M17 4v16m-3.5-3.5L17 20l3.5-3.5" />
+      </svg>
+      <SearchSelect
+        className="sort-pick-select"
+        searchable={false}
+        value={sortValue}
+        onChange={(e) => sortBy(...e.target.value.split(':'))}
+        aria-label="เรียงลำดับเคส"
+      >
+        {SORT_PRESETS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+        {!SORT_PRESETS.some(([value]) => value === sortValue) && (
+          <option value={sortValue}>ตามคอลัมน์{SORTABLE[sort].label === '#' ? '' : ` ${SORTABLE[sort].label}`}</option>
+        )}
+      </SearchSelect>
     </label>
   );
 
@@ -290,13 +297,15 @@ export default function CaseListPage() {
               {/* สถานะกว้าง 16% เพราะป้ายที่ยาวที่สุด ("ยังไม่จับคู่พนักงาน") ต้องการ 139px
                   ที่ 13% บนจอ 1280/1440 ได้ไม่ถึง แล้วป้ายโดน … ตัดจนอ่านไม่ออกว่าเคสอยู่สถานะไหน
                   ที่ยืมมาคือคอลัมน์บริการ ซึ่งเป็นข้อความอิสระ ตัดท้ายแล้วยังเดาความได้ */}
+              {/* สถานะขยับเป็น 18% (11 พ.ย. 2569) — หัวคอลัมน์มีปุ่มเรียงลำดับนั่งข้างคำว่า "สถานะ" ด้วย ที่ 16% ปุ่มถูกตัดชื่อเหลือ "รหัส…"
+                  ยืมมาจากคอลัมน์บริการอีก 2% (ข้อความอิสระ ตัดท้ายแล้วยังเดาความได้) */}
               <col style={{ width: '6%' }} />
               <col style={{ width: '12%' }} />
-              <col style={{ width: '23%' }} />
+              <col style={{ width: '21%' }} />
               <col style={{ width: '14%' }} />
               <col style={{ width: '13%' }} />
               <col style={{ width: '16%' }} />
-              <col style={{ width: '16%' }} />
+              <col style={{ width: '18%' }} />
             </colgroup>
             <thead>
               <tr>

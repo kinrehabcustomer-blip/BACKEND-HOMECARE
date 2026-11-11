@@ -43,7 +43,9 @@ function flatten(children, group = null, out = []) {
   return out;
 }
 
-const SearchSelect = forwardRef(function SearchSelect({ children, onMouseDown, onKeyDown, onClick, ...rest }, forwardedRef) {
+/* searchable = false → ไม่มีช่องค้นหาในรายการ (11 พ.ย. 2569 · ปุ่มเรียงลำดับหน้าเคสมี 3 ตัวเลือก ช่องค้นหาเกินจำเป็น)
+   ปุ่มลูกศร/Enter/Esc ยังใช้ได้ — ช่อง select จริงรับคีย์แทนช่องค้นหา */
+const SearchSelect = forwardRef(function SearchSelect({ children, onMouseDown, onKeyDown, onClick, searchable = true, ...rest }, forwardedRef) {
   const ref = useRef(null);
   const setRef = useCallback(
     (node) => {
@@ -80,16 +82,23 @@ const SearchSelect = forwardRef(function SearchSelect({ children, onMouseDown, o
     if (!ref.current) return;
     const rect = ref.current.getBoundingClientRect();
     const below = window.innerHeight - rect.bottom;
-    const width = Math.max(rect.width, 240);
     const up = below < 220 && rect.top > below; // ที่ล่างไม่พอและด้านบนกว้างกว่า = กางขึ้น
+    const vertical = up
+      ? { bottom: window.innerHeight - rect.top + 4, maxHeight: Math.min(320, rect.top - 12) }
+      : { top: rect.bottom + 4, maxHeight: Math.min(320, below - 12) };
+    /* ไม่มีช่องค้นหา = กว้างเท่าตัวเลือกที่ยาวสุด (อย่างน้อยเท่าช่อง) ชิดขอบขวาของช่อง (11 พ.ย. 2569)
+       ความกว้างขั้นต่ำ 240px มีไว้ให้ช่องค้นหาพิมพ์ได้ — ไม่มีช่องค้นหาแล้วเหลือเป็นพื้นว่างข้างตัวเลือกสั้นๆ */
+    if (!searchable) {
+      setPos({ right: Math.max(8, window.innerWidth - rect.right), minWidth: rect.width, ...vertical });
+      return;
+    }
+    const width = Math.max(rect.width, 240);
     setPos({
       left: Math.max(8, Math.min(rect.left, window.innerWidth - width - 8)),
       width,
-      ...(up
-        ? { bottom: window.innerHeight - rect.top + 4, maxHeight: Math.min(320, rect.top - 12) }
-        : { top: rect.bottom + 4, maxHeight: Math.min(320, below - 12) }),
+      ...vertical,
     });
-  }, []);
+  }, [searchable]);
 
   function openList() {
     if (rest.disabled || !ref.current) return;
@@ -195,6 +204,11 @@ const SearchSelect = forwardRef(function SearchSelect({ children, onMouseDown, o
         onKeyDown={(e) => {
           onKeyDown?.(e);
           if (e.defaultPrevented) return;
+          // ไม่มีช่องค้นหา = รายการเปิดอยู่แล้ว คีย์ของช่องนี้ทำหน้าที่แทนช่องค้นหา (เลื่อน/เลือก/ปิด)
+          if (open && !searchable) {
+            onSearchKey(e);
+            return;
+          }
           if (['ArrowDown', 'ArrowUp', ' ', 'Enter'].includes(e.key)) {
             if (e.key === 'Enter' && e.target.form && !open) return; // Enter ส่งฟอร์มตามปกติ
             e.preventDefault();
@@ -206,21 +220,23 @@ const SearchSelect = forwardRef(function SearchSelect({ children, onMouseDown, o
       </select>
 
       {open && pos && createPortal(
-        <div className="ss-pop" style={pos} role="listbox" ref={popRef}>
-          <input
-            ref={searchRef}
-            className="ss-search"
-            type="text"
-            placeholder="พิมพ์เพื่อค้นหา…"
-            value={query}
-            autoComplete="off"
-            spellCheck={false}
-            onChange={(e) => {
-              setQuery(e.target.value);
-              setActive(0);
-            }}
-            onKeyDown={onSearchKey}
-          />
+        <div className={`ss-pop${searchable ? '' : ' no-search'}`} style={pos} role="listbox" ref={popRef}>
+          {searchable && (
+            <input
+              ref={searchRef}
+              className="ss-search"
+              type="text"
+              placeholder="พิมพ์เพื่อค้นหา…"
+              value={query}
+              autoComplete="off"
+              spellCheck={false}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                setActive(0);
+              }}
+              onKeyDown={onSearchKey}
+            />
+          )}
           <ul className="ss-list" ref={listRef}>
             {shown.length === 0 && <li className="ss-empty">ไม่พบรายการที่ตรงกับ “{query}”</li>}
             {shown.map((o, i) => {

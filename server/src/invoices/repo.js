@@ -3,7 +3,7 @@ import { PATIENT_PENDING } from '../cases/schema.js';
 import {
   normalizeAddons, addonAmount, addonsTotal, addonsTotalSql, addonLabel, unbilledAddons, isPhysioBundle, PHYSIO_BUNDLE,
 } from '../lib/addons.js';
-import { ensureAddonLink } from '../cases/repo.js';
+import { ensureAddonLink, ensureCasePriceSnapshots } from '../cases/repo.js';
 import { bundleCoveredSql } from '../cases/addonLink.js';
 import { ensureShareTables, hasBeenShared } from './share.js';
 import { likeEscape } from '../lib/likeEscape.js';
@@ -218,9 +218,62 @@ const SYNCED_FIELDS = [
    ใบแพ็คเกจที่ไม่มีอุปกรณ์ตัวนั้นจึงยังถูกต้อง ไม่ต้องขึ้นป้าย "ยอดไม่ตรง"
    ไม่ได้ตั้งค่าบริการและใบไม่มีอุปกรณ์ = NULL (ยังไม่มีราคาให้เทียบ ไม่ขึ้นป้าย "ยอดไม่ตรง")
    ไม่ได้ตั้งค่าบริการแต่มีอุปกรณ์ = ค่าอุปกรณ์ล้วน เหมือนที่ priceParts ใช้ fee ?? 0 */
+/* ค่าบริการ "ที่ใบใช้จริง" = ราคาที่จดไว้ตอนเลือกบริการ ถ้าไม่มีจึงใช้ fee — ลำดับเดียวกับ priceParts (ตรวจ 11 พ.ย. 2569)
+   เดิมเทียบกับ fee ล้วน: เคสที่ไม่ได้กรอก fee เอง (ใช้ราคาตามตารางเรท) ใบคิด 2,000 ตามราคาที่จดไว้
+   แต่ป้ายเทียบกับ fee ว่าง = 0 → ใบที่ถูกต้องขึ้น "ยอดไม่ตรงกับเคส" ทั้งที่ไม่ผิด */
+/* คอลัมน์ราคาที่จดไว้ของเคสเติมแบบ lazy (ดู ensureCasePriceSnapshots) — คิวรีอ่านใบอ้างถึงมันแล้ว (caseNetFeeSql)
+   ดู catalog ก่อนแทน ALTER ทุก cold start (ALTER ขอล็อกทั้งตารางแม้คอลัมน์มีแล้ว — เหตุผลเดียวกับ ensureAddonLink) */
+let priceSnapshotColumnsReady = null;
+const ensurePriceSnapshotColumns = () =>
+  (priceSnapshotColumnsReady ??= (async () => {
+    const { n } = await sql.one(
+      `SELECT COUNT(*)::int AS n FROM information_schema.columns
+        WHERE table_schema = current_schema() AND table_name = 'cases'
+          AND column_name IN ('service_list_price_snapshot', 'service_customer_price_snapshot')`,
+    );
+    if (n < 2) await ensureCasePriceSnapshots();
+  })().catch((err) => { priceSnapshotColumnsReady = null; throw err; }));
+
+const caseNetFeeSql = (c) => `COALESCE(${c}.service_customer_price_snapshot, ${c}.fee)`;
 const caseBillableSql = (c, i) =>
-  `CASE WHEN ${c}.fee IS NULL AND ${i}.addons = '[]'::jsonb THEN NULL
-        ELSE COALESCE(${c}.fee, 0) + ${addonsTotalSql(i)} END`;
+  `CASE WHEN ${caseNetFeeSql(c)} IS NULL AND ${i}.addons = '[]'::jsonb THEN NULL
+        ELSE COALESCE(${caseNetFeeSql(c)}, 0) + ${addonsTotalSql(i)} END`;
+
+/* บรรทัดแพ็กกายภาพเสริมในใบนี้ ที่เคสกายภาพถูกยกเลิกไปแล้ว และยังไม่มีใครจัดการ (ตรวจ 11 พ.ย. 2569)
+   เดิมเตือนแค่ popup ครั้งเดียวตอนกดยกเลิกแพ็ก — กดปิดไปแล้วไม่ได้ออกใบลดหนี้ เงินค่าแพ็กที่ไม่ได้ให้บริการ
+   ค้างอยู่กับเราโดยไม่มีอะไรเตือนอีก · ป้ายค้างบนใบจนกว่าจะ "จัดการแล้ว" =
+   มีใบลดหนี้ (ที่ไม่ใช่ตัดหนี้สูญ) ของใบนี้ออกหลังเวลายกเลิกแพ็ก — ลดเต็ม/บางส่วนเป็นการตัดสินใจของคนทำ
+   หรือเปิดแพ็กกลับมาใหม่ (สถานะไม่ใช่ยกเลิกแล้ว) · ใบร่างไม่นับ: ใบร่างซิงก์ตามเคสเอาบรรทัดออกเอง/แก้ในใบได้
+   คืนยอดรวมของบรรทัดพวกนั้น (0 = ไม่มี) */
+/* ใบนี้มีบรรทัดแพ็กกายภาพที่เคสถูกยกเลิกแล้ว (จัดการแล้วหรือยังก็ตาม) — ใบแบบนี้ไม่เทียบ "ยอดไม่ตรงกับเคส"
+   ยอดที่ถูกต้องหลังยกเลิกแพ็กคือการตัดสินใจของคนทำ (ลดเต็ม/ลดบางส่วนตามครั้งที่ทำไปแล้ว) ระบบเดาไม่ได้
+   ป้าย bundle_stale ทำหน้าที่เตือนแทนจนกว่าจะออกใบลดหนี้ — ไม่ให้สองป้ายซ้อนกันหรือค้างหลังจัดการแล้ว */
+const hasCancelledBundleSql = (i) => `EXISTS (
+    SELECT 1 FROM jsonb_array_elements(${i}.addons) hb JOIN cases hbc ON hbc.case_id = hb ->> 'ref'
+     WHERE hb ->> 'kind' = '${PHYSIO_BUNDLE}' AND hbc.status = 'cancelled')`;
+const cancelledBundleSql = (i) => `CASE WHEN ${i}.status IN ('issued', 'paid') THEN COALESCE((
+    SELECT SUM(ROUND((a ->> 'quantity')::numeric * (a ->> 'unit_price')::numeric, 2))
+      FROM jsonb_array_elements(${i}.addons) a
+      JOIN cases bc ON bc.case_id = a ->> 'ref'
+     WHERE a ->> 'kind' = '${PHYSIO_BUNDLE}' AND bc.status = 'cancelled'
+       AND NOT EXISTS (
+         SELECT 1 FROM invoice_adjustments bla
+          WHERE bla.invoice_id = ${i}.invoice_id AND bla.kind = 'credit' AND bla.status = 'issued'
+            AND bla.reason_code <> 'bad_debt' AND bla.created_at >= COALESCE(bc.cancelled_at, ''))
+  ), 0)::double precision ELSE 0 END`;
+
+/* แผนมัดจำ–ส่วนที่เหลือ: เทียบ "ทั้งแผน" กับเคส ไม่ใช่ทีละใบ (ตรวจ 11 พ.ย. 2569)
+   ใบงวดตั้งใจให้ยอดน้อยกว่าค่าบริการอยู่แล้ว จึงเคยถูกยกเว้นจากป้าย "ยอดไม่ตรง" ทั้งหมด
+   ผลคือขึ้นค่าบริการเคส 30,000 → 36,000 หลังแบ่งมัดจำแล้ว ไม่มีอะไรเตือนเลย ส่วนต่าง 6,000 หลุดไม่มีใครเก็บ
+   (ใบงวดไม่ซิงก์ตามเคสโดยตั้งใจ — ดู syncOpenFromCase) · รากของแผน = COALESCE(parent_invoice_id, invoice_id)
+   ไม่นับใบในแผนที่ถูกยกเลิก · อุปกรณ์เสริมของแผนอยู่ที่ใบส่วนที่เหลือ (ใบมัดจำเป็น '[]') รวมทั้งแผนจึงได้ครบ */
+const planRowsSql = (i) =>
+  `FROM invoices pi WHERE COALESCE(pi.parent_invoice_id, pi.invoice_id) = COALESCE(${i}.parent_invoice_id, ${i}.invoice_id)
+     AND pi.status <> 'cancelled'`;
+const planNetTotalSql = (i) => `(SELECT SUM(${netTotalSql('pi')}) ${planRowsSql(i)})`;
+const planBillableSql = (c, i) =>
+  `CASE WHEN ${caseNetFeeSql(c)} IS NULL THEN NULL
+        ELSE ${caseNetFeeSql(c)} + COALESCE((SELECT SUM(${addonsTotalSql('pi')}) ${planRowsSql(i)}), 0) END`;
 
 /* ส่วนแพ็คเกจ/เรทของ service_key (4 ช่องแรก) — ตัดรายการอุปกรณ์ที่ต่อท้ายทิ้งก่อนเทียบ
    อุปกรณ์ที่เพิ่มทีหลังไม่ทำให้ใบแพ็คเกจ "ไม่ตรง" แล้ว เพราะไปออกเป็นใบค่าใช้จ่ายเพิ่มเติมแยก
@@ -258,6 +311,11 @@ const SELECT_INVOICE = `
          c.status      AS case_status,
          /* ยอดที่ใบควรเป็นตามเคสตอนนี้ = ค่าบริการ + อุปกรณ์เสริมของใบนี้ (ดู caseBillableSql) */
          ${caseBillableSql('c', 'i')} AS case_fee,
+         /* ใบงวด: ยอดรวมทั้งแผน กับยอดที่แผนควรเป็นตามเคสตอนนี้ (ดู planBillableSql) */
+         CASE WHEN i.billing_kind IN ('deposit', 'balance') THEN ${planNetTotalSql('i')} END AS plan_net_total,
+         ${cancelledBundleSql('i')} AS cancelled_bundle_amount,
+         ${hasCancelledBundleSql('i')} AS has_cancelled_bundle,
+         CASE WHEN i.billing_kind IN ('deposit', 'balance') THEN ${planBillableSql('c', 'i')} END AS plan_case_fee,
          CASE WHEN c.case_id IS NOT NULL THEN ${serviceKeySql('c')} END AS case_service_key,
          cu.name       AS customer_name,
          cu.phone      AS customer_phone,
@@ -436,9 +494,16 @@ const withComputed = (row) => {
   const isPart = row.billing_kind === 'deposit' || row.billing_kind === 'balance';
   /* เทียบกับยอดสุทธิหลังลดหนี้/เพิ่มหนี้ — เคสขึ้นราคาแล้วออกใบเพิ่มหนี้ตามแล้ว ป้ายต้องหาย */
   const netTotal = Math.round(Number(row.net_total ?? row.total ?? 0) * 100) / 100;
+  const planNet = row.plan_net_total == null ? null : Math.round(Number(row.plan_net_total) * 100) / 100;
+  const planFee = row.plan_case_fee == null ? null : Math.round(Number(row.plan_case_fee) * 100) / 100;
+  /* ใบงวดเทียบทั้งแผน — มัดจำ + ส่วนที่เหลือรวมกันต้องเท่าค่าบริการของเคส (ดู planBillableSql) */
+  const bundleLeft = Math.round(Number(row.cancelled_bundle_amount ?? 0) * 100) / 100;
+  const bundleStale = bundleLeft > 0;
+  const planStale = isPart && !row.has_cancelled_bundle && row.case_id != null && planNet != null && planFee != null && planFee !== planNet;
   const feeStale =
-    !row.has_items && !isPart &&
-    row.case_id != null && row.case_fee != null && Number(row.case_fee) !== netTotal;
+    planStale || (
+      !row.has_items && !isPart && !row.has_cancelled_bundle &&
+      row.case_id != null && row.case_fee != null && Number(row.case_fee) !== netTotal);
   const payerStale =
     row.case_id != null && row.case_payer_name != null && row.case_payer_name !== row.bill_to_name;
   /* เคสเปลี่ยนแพ็คเกจ/เรทหลังออกใบนี้ — เช็คทุกแบบใบ รวมใบงวดและใบรายครั้งที่ fee_stale ไม่ครอบ
@@ -473,10 +538,15 @@ const withComputed = (row) => {
        ไม่มีอะไรบอกว่าเคสล่มไปแล้ว แล้วโทรไปทวงลูกค้าที่ยกเลิกบริการไปแล้ว (ตรวจรอบ 13)
        ใบที่ชำระ/ยกเลิกแล้วไม่ต้องเตือน — ไม่มีเงินให้ตามแล้ว */
     case_cancelled: row.case_status === 'cancelled' && (row.status === 'draft' || row.status === 'issued'),
+    plan_net_total: planNet,
+    plan_case_fee: planFee,
+    plan_stale: planStale,
+    cancelled_bundle_amount: bundleLeft,
+    bundle_stale: bundleStale,
     fee_stale: feeStale,
     payer_stale: payerStale,
     service_stale: serviceStale,
-    is_stale: feeStale || payerStale || serviceStale,
+    is_stale: feeStale || payerStale || serviceStale || bundleStale,
   };
 };
 
@@ -504,8 +574,13 @@ const STALE_SQL = `
       (NOT EXISTS (SELECT 1 FROM invoice_items ii WHERE ii.invoice_id = i.invoice_id)
          AND i.billing_kind IS DISTINCT FROM 'deposit'
          AND i.billing_kind IS DISTINCT FROM 'balance'
+         AND NOT ${hasCancelledBundleSql('i')}
          AND (${caseBillableSql('sc', 'i')}) IS NOT NULL
          AND (${caseBillableSql('sc', 'i')}) <> ${netTotalSql('i')})
+      OR (i.billing_kind IN ('deposit', 'balance') AND NOT ${hasCancelledBundleSql('i')}
+         AND (${planBillableSql('sc', 'i')}) IS NOT NULL
+         AND ROUND((${planBillableSql('sc', 'i')})::numeric, 2) <> ROUND((${planNetTotalSql('i')})::numeric, 2))
+      OR (${cancelledBundleSql('i')}) > 0
       OR (COALESCE(sccu.name, spcu.name, sc.client_name) IS NOT NULL
           AND COALESCE(sccu.name, spcu.name, sc.client_name) <> i.bill_to_name)
       OR (i.service_key IS NOT NULL
@@ -534,6 +609,7 @@ const draftStaleCutoff = () =>
  * overdue ใช้เกณฑ์เดียวกับ is_overdue ของแถวและกับอีเมลสรุปประจำวัน (notify/repo.js)
  */
 export async function alertCounts() {
+  await ensurePriceSnapshotColumns();
   const today = TODAY();
 
   const row = await sql.one(
@@ -630,7 +706,7 @@ export async function list({
   q, status, customer_id, case_id, overdue, stale, draft_stale, pending_slip, hide_cancelled, service_kind, issued_from, issued_to,
   page, per_page, sort, order,
 }) {
-  await Promise.all([ensureSlipSchema(), ensureLedgerTables()]);
+  await Promise.all([ensureSlipSchema(), ensureLedgerTables(), ensurePriceSnapshotColumns()]);
   const { clause, params } = buildWhere({
     q, status, customer_id, case_id, overdue, stale, draft_stale, pending_slip, hide_cancelled, service_kind, issued_from, issued_to,
   });
@@ -672,7 +748,7 @@ export const EXPORT_LIMIT = 5000;
  * คืน { data, truncated } — truncated = มีเกินเพดาน (ไฟล์มีแค่ EXPORT_LIMIT ใบแรก)
  */
 export async function exportRows(filters) {
-  await Promise.all([ensureSlipSchema(), ensureLedgerTables()]);
+  await Promise.all([ensureSlipSchema(), ensureLedgerTables(), ensurePriceSnapshotColumns()]);
   const { clause, params } = buildWhere(filters);
   const rows = await sql.all(
     `${SELECT_INVOICE} ${clause}
@@ -688,7 +764,7 @@ export async function exportRows(filters) {
  * items ว่าง = ใบแบบแพ็คเกจบรรทัดเดียว (ส่วนใหญ่เป็นแบบนี้)
  */
 export const findById = async (id) => {
-  await Promise.all([ensureSlipSchema(), ensureLedgerTables()]);
+  await Promise.all([ensureSlipSchema(), ensureLedgerTables(), ensurePriceSnapshotColumns()]);
   const row = await sql.one(`${SELECT_INVOICE} WHERE i.invoice_id = :id`, { id });
   if (!row) return null;
   /* รายการรับชำระที่ถูกยกเลิกไปแล้วมาด้วย — เงินที่เคยบันทึกแล้วหายไปจากใบต้องมีร่องรอยให้เห็น
@@ -733,7 +809,7 @@ export const casesWithoutInvoice = () =>
 
 /** ใบแจ้งหนี้ของเคสหนึ่งใบ — เคสหนึ่งออกได้ใบเดียว แต่ถ้ายกเลิกแล้วออกใหม่ได้ จึงคืนเป็นรายการ */
 export const listForCase = async (caseId) => {
-  await Promise.all([ensureSlipSchema(), ensureLedgerTables()]);
+  await Promise.all([ensureSlipSchema(), ensureLedgerTables(), ensurePriceSnapshotColumns()]);
   return sql
     .all(`${SELECT_INVOICE} WHERE i.case_id = :id ORDER BY i.created_at DESC, i.invoice_id DESC`, { id: caseId })
     .then((rows) => rows.map(withComputed));
@@ -1207,6 +1283,19 @@ export function createFromCase(caseRow, input, actor, visitItems = [], { extra =
       );
       if (draft) return { reason: 'draft_exists', invoice_id: draft.invoice_id };
     }
+    /* ใบแพ็คเกจ (ยอดเต็มของเคส) มีได้ชุดเดียว — เคสมีใบที่ออก/ชำระแล้วอยู่ แล้วกดออกใบแพ็คเกจใหม่
+       ได้บิลยอดเต็มซ้ำอีกใบ ลูกค้าโดนเก็บสองรอบ (ตรวจ 11 พ.ย. 2569) · ยอดเปลี่ยน = ใบเพิ่มหนี้/ลดหนี้
+       ออกใหม่ทั้งใบ = ยกเลิกใบเดิมก่อน · ใบรายครั้ง (มีกะเป็นบรรทัด) และใบค่าใช้จ่ายเพิ่มเติม ออกหลายใบได้ตามปกติ */
+    if (caseRow.case_id && !extra && visitItems.length === 0) {
+      const pkg = await tx.one(
+        `SELECT invoice_id, status FROM invoices i
+         WHERE i.case_id = :id AND i.status <> 'cancelled' AND i.billing_kind IS DISTINCT FROM 'extra'
+           AND NOT EXISTS (SELECT 1 FROM invoice_items ii WHERE ii.invoice_id = i.invoice_id)
+         ORDER BY i.invoice_id LIMIT 1`,
+        { id: caseRow.case_id },
+      );
+      if (pkg) return { reason: 'package_exists', invoice_id: pkg.invoice_id, status: pkg.status };
+    }
 
     // อ่านหลังล็อกเคส — สองคำขอที่มาพร้อมกันจะไม่เก็บอุปกรณ์ชิ้นเดียวกันซ้ำสองใบ
     const addons = caseRow.case_id
@@ -1477,6 +1566,28 @@ export function billingSignature(c) {
   ]);
 }
 
+/* ทางออกเดียวที่ปลดล็อกยอดใบงวด (ตรวจ 11 พ.ย. 2569): ใบส่วนที่เหลือที่ยังเป็นร่าง แก้ยอดได้
+   เฉพาะเมื่อยอดใหม่ทำให้ "ทั้งแผน" เท่ากับค่าบริการของเคสตอนนี้พอดี (ดู planBillableSql)
+   เคสขึ้นราคาหลังรับมัดจำแล้ว — ช่อง "ยอดมัดจำ" แก้ไม่ได้ (รับเงินแล้ว) และใบร่างออกใบเพิ่มหนี้ไม่ได้
+   เดิมจึงต้องออกใบส่วนที่เหลือด้วยยอดที่รู้ว่าผิด แล้วค่อยตามด้วยใบเพิ่มหนี้
+   ยอดอื่นที่ไม่ทำให้แผนตรงกับเคสยังล็อกเหมือนเดิม — ยอดรวมของแผนยังขยับเองตามใจไม่ได้ */
+async function balanceRealignsPlan(tx, invoice, input) {
+  if (invoice.billing_kind !== 'balance' || invoice.status !== 'draft') return false;
+  if ('discount' in input && Number(input.discount ?? 0) !== Number(invoice.discount ?? 0)) return false;
+  if (!('amount' in input)) return false;
+  const row = await tx.one(
+    `SELECT ${planBillableSql('c', 'i')} AS plan_fee,
+            ${planNetTotalSql('i')} - ${netTotalSql('i')} AS others
+       FROM invoices i JOIN cases c ON c.case_id = i.case_id
+      WHERE i.invoice_id = :id`,
+    { id: invoice.invoice_id },
+  );
+  if (row?.plan_fee == null) return false;
+  // ยอดสุทธิที่ใบนี้ควรเป็น = ค่าบริการทั้งแผน − ใบอื่นในแผน · ช่อง amount คือยอดก่อนหักส่วนลด
+  const target = roundMoney(Number(row.plan_fee) - Number(row.others ?? 0) + Number(invoice.discount ?? 0));
+  return target > 0 && roundMoney(input.amount) === target;
+}
+
 export async function updateInvoiceForTransaction(tx, invoiceId, rawInput) {
   const locked = await invoiceForUpdate(tx, invoiceId, 'update');
   if (locked.reason) return locked;
@@ -1515,7 +1626,8 @@ export async function updateInvoiceForTransaction(tx, invoiceId, rawInput) {
   const changesAmount = 'amount' in input || 'discount' in input;
   if (
     changesAmount &&
-    (invoice.parent_invoice_id != null || invoice.billing_kind === 'deposit' || invoice.billing_kind === 'balance')
+    (invoice.parent_invoice_id != null || invoice.billing_kind === 'deposit' || invoice.billing_kind === 'balance') &&
+    !(await balanceRealignsPlan(tx, invoice, input))
   ) {
     return { reason: 'plan_amount_locked', invoice_id: invoiceId };
   }
@@ -1572,7 +1684,7 @@ export async function updateInvoiceForTransaction(tx, invoiceId, rawInput) {
 
 export async function update(invoiceId, input) {
   // ต้องมีตาราง invoice_shares ก่อน — updateInvoiceForTransaction ถามมันว่าใบนี้ส่งลิงก์ไปแล้วหรือยัง
-  await ensureShareTables();
+  await Promise.all([ensureShareTables(), ensurePriceSnapshotColumns()]);
   const result = await transaction((tx) => updateInvoiceForTransaction(tx, invoiceId, input));
   return invoiceMutationResult(result);
 }
@@ -1711,7 +1823,7 @@ export async function payInvoiceForTransaction(tx, invoiceId, input, actor) {
 }
 
 export async function pay(invoiceId, input, actor) {
-  await Promise.all([ensureSlipSchema(), ensureLedgerTables()]);
+  await Promise.all([ensureSlipSchema(), ensureLedgerTables(), ensurePriceSnapshotColumns()]);
   let result;
   try {
     result = await transaction((tx) => payInvoiceForTransaction(tx, invoiceId, input, actor));
@@ -2143,7 +2255,7 @@ export async function remove(invoiceId) {
  * ไม่ส่งตัวกรองมา = นับทั้งระบบเหมือนเดิม
  */
 export async function summary(filters = {}) {
-  await Promise.all([ensureSlipSchema(), ensureLedgerTables()]);
+  await Promise.all([ensureSlipSchema(), ensureLedgerTables(), ensurePriceSnapshotColumns()]);
   const { clause, params } = buildWhere(filters);
   const rows = await sql.all(
     /* outstanding = เงินที่ยังไม่ได้รับจริง (ยอดสุทธิ − ที่รับมาแล้ว)

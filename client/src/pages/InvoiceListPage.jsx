@@ -334,7 +334,13 @@ export default function InvoiceListPage() {
                         หน้ารายการเคยทิ้งไปเหลือ "ไม่ตรงกับเคส" กลางๆ ซึ่งต้องเปิดใบดูอยู่ดีว่าเรื่องอะไร
 
                         ใบที่ยกเลิกแล้วไม่ต้องเตือน ไม่มีใครต้องไปรีเฟรชมัน (เกณฑ์เดียวกับอีกสองที่) */}
-                    {v.is_stale && v.status !== 'cancelled' && (
+                    {/* แพ็กกายภาพในใบถูกยกเลิกแล้ว ยังไม่ได้ลดหนี้/คืนเงิน — คนละเรื่องกับ "ไม่ตรง" ทางแก้คือใบลดหนี้ */}
+                    {v.bundle_stale && v.status !== 'cancelled' && (
+                      <span className="stale-flag" title="แพ็กกายภาพในใบนี้ถูกยกเลิกแล้ว — ออกใบลดหนี้/คืนเงิน">
+                        แพ็กกายภาพถูกยกเลิก
+                      </span>
+                    )}
+                    {v.is_stale && (v.fee_stale || v.payer_stale || v.service_stale) && v.status !== 'cancelled' && (
                       <span className="stale-flag" title="ข้อมูลในใบไม่ตรงกับเคสแล้ว — เปิดใบแล้วกด “รีเฟรชจากเคส”">
                         {[
                           v.service_stale && 'แพ็คเกจ',

@@ -5407,17 +5407,43 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
 .link-addon-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
 /* หัวคอลัมน์ที่มีเครื่องมือ — dropdown เรียงลำดับขวาของหัวคอลัมน์สถานะ (CaseListPage · ผู้ใช้ขอ 10 พ.ย. 2569) */
 .table th .th-tools { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+/* ปุ่มเรียงลำดับ (ออกแบบใหม่ 11 พ.ย. 2569 · ผู้ใช้ขอเอาคำว่า "เรียง" ออก)
+   ปุ่มเม็ดยา: ไอคอนลูกศรขึ้น-ลงสีทองหน้าข้อความ แทนป้ายคำ · ชี้แล้วขอบทอง พื้นทองจาง = รู้ว่ากดได้
+   ไอคอนวางทับในช่อง (absolute) แล้วเว้นที่ซ้ายของ select ไว้ให้ — select จริงยังกินพื้นที่กดทั้งปุ่ม */
 .sort-pick {
-  display: inline-flex; align-items: center; gap: 0.375rem; margin: 0;
-  font-size: 0.75rem; font-weight: 600; color: var(--muted); letter-spacing: normal; text-transform: none;
+  position: relative;
+  display: inline-flex; align-items: center; margin: 0;
+  /* หดได้ในหัวคอลัมน์ที่แคบ — ข้อความตัดเป็น … แทนที่ปุ่มจะล้นออกนอกขอบตารางจนโดนตัดครึ่ง */
+  flex: 0 1 auto; min-width: 0;
+  letter-spacing: normal; text-transform: none;
 }
-.table th .sort-pick select {
-  width: auto; min-width: 0; height: 1.875rem; min-height: 0;
-  padding: 0 1.875rem 0 0.75rem;
+.sort-pick-icon {
+  position: absolute; left: 0.625rem; z-index: 1;
+  width: 0.9375rem; height: 0.9375rem;
+  fill: none; stroke: var(--brand); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+  pointer-events: none;
+}
+/* จอกว้าง (หัวคอลัมน์สถานะ): ปุ่มเม็ดยาเล็ก ไม่มีลูกศร dropdown — ไอคอนเรียงลำดับหน้าปุ่มบอกแล้วว่ากดเลือกได้ ประหยัดที่ */
+.sort-pick:not(.is-sheet) select.sort-pick-select {
+  width: auto; min-width: 0; max-width: 100%; height: 2rem; min-height: 0;
+  padding: 0 0.75rem 0 1.875rem;
+  background-image: none;
+  text-overflow: ellipsis; white-space: nowrap; overflow: hidden;
+  border: 1px solid var(--border);
   border-radius: 999px;
   font-size: 0.8125rem; font-weight: 600; color: var(--text);
   background-color: var(--surface);
+  box-shadow: 0 1px 2px rgba(60, 45, 15, 0.06);
+  cursor: pointer;
+  transition: border-color 0.15s, background-color 0.15s;
 }
+.sort-pick:not(.is-sheet) select.sort-pick-select:hover,
+.sort-pick:not(.is-sheet) select.sort-pick-select:focus-visible { border-color: var(--brand); background-color: var(--brand-soft); }
+.table th .th-tools:has(.sort-pick) { gap: 0.375rem; }
+/* มือถือ (แผ่นตัวกรอง): หน้าตาเหมือนช่องอื่นในแผ่นทุกอย่าง (ขนาด ขอบ ลูกศร dropdown) — ต่างแค่ไอคอนเรียงลำดับนำหน้า */
+.sort-pick.is-sheet { display: flex; width: 100%; }
+.sort-pick.is-sheet .sort-pick-icon { left: 0.75rem; width: 1rem; height: 1rem; }
+.sort-pick.is-sheet select.sort-pick-select { width: 100%; padding-left: 2.25rem; }
 
 /* ฟอร์มเปิดเคส: ตัวเลือกผูกกับเคสอีกสาย (CaseFormPage · ทางเลือก A) */
 .link-addon-choices { display: flex; flex-direction: column; gap: 0.375rem; }
@@ -6005,6 +6031,10 @@ h1, h2, h3, h4, .page-hero-title, .cal-title, .login-heading h1 {
 }
 .ss-search { margin: 0.5rem; width: calc(100% - 1rem); box-sizing: border-box; }
 .ss-list { list-style: none; margin: 0; padding: 0 0.25rem 0.375rem; overflow-y: auto; }
+/* ไม่มีช่องค้นหา (searchable={false}) — เว้นขอบบนเท่าขอบล่างแทนที่ช่องค้นหาเคยกินไว้ · ข้อความไม่ตัดบรรทัด (กว้างตามตัวเลือก) */
+.ss-pop.no-search { width: max-content; }
+.ss-pop.no-search .ss-list { padding-top: 0.375rem; }
+.ss-pop.no-search .ss-item { white-space: nowrap; padding-right: 1.25rem; }
 .ss-item { padding: 0.5rem 0.625rem; border-radius: 0.375rem; cursor: pointer; font-size: 0.9375rem; color: var(--text); }
 .ss-item[data-active="true"] { background: var(--brand-soft); }
 .ss-item.is-selected { color: var(--brand); font-weight: 600; }
