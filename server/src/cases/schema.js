@@ -617,6 +617,9 @@ const reportFields = z.object({
   physical_exam: reportText,
   diagnosis: reportText,
   treatment_plan: reportText,
+  /* SODIAP (11 พ.ย. 2569) — S/O/D/P ใช้ 4 คอลัมน์ข้างบนต่อ · เพิ่ม Intervention กับ Assessment */
+  intervention: reportText,
+  assessment: reportText,
 
   // ---------- ข้อความสรุป (ใช้ทั้งฟอร์มสั้นและฟอร์มเต็ม) ----------
   symptoms: reportText,

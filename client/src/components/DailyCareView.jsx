@@ -26,7 +26,7 @@ export default function DailyCareView({ report: raw, sections = DAILY_SECTIONS, 
           <h5>{b.title}</h5>
           <ul>
             {b.rows.map(([f, text]) => (
-              <li key={f.key}>
+              <li key={f.key} className={f.type === 'text' ? 'is-text' : undefined}>
                 <span className="field-label">{f.label}</span>
                 {/* ข้อความยาวขึ้นบรรทัดตามที่พิมพ์ไว้ — พนักงานเขียนเป็นข้อๆ กันเป็นปกติ */}
                 <span className={f.type === 'text' ? 'care-view-text' : ''}>{text}</span>

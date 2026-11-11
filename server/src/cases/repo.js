@@ -4484,6 +4484,8 @@ export const ensureReportSchema = () =>
       'ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS physical_exam TEXT',
       'ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS diagnosis TEXT',
       'ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS treatment_plan TEXT',
+      'ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS intervention TEXT',
+      'ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS assessment TEXT',
       `CREATE TABLE IF NOT EXISTS case_report_images (
          image_id   INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
          report_id  INTEGER NOT NULL REFERENCES case_reports (report_id) ON DELETE CASCADE,

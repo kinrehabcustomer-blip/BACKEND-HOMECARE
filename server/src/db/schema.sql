@@ -1142,6 +1142,9 @@ ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS chief_complaint TEXT;
 ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS physical_exam   TEXT;
 ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS diagnosis       TEXT;
 ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS treatment_plan  TEXT;
+-- SODIAP (11 พ.ย. 2569): S/O/D/P = chief_complaint/physical_exam/diagnosis/treatment_plan · เพิ่ม I และ A
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS intervention    TEXT;
+ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS assessment      TEXT;
 
 -- รูปที่แนบกับรายงาน (หลายรูปต่อใบ) — รายงานถูกลบ รูปลบตาม
 CREATE TABLE IF NOT EXISTS case_report_images (

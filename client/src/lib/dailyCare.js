@@ -436,8 +436,10 @@ export const PHYSIO_INCIDENT_TYPES = opts(
 );
 
 /**
- * แบบบันทึกการตรวจรักษา (นักกายภาพบำบัด) — สัญญาณชีพ/ร่างกาย + บันทึกการตรวจรักษา 4 ช่อง
- * (Chief Complaint · ตรวจร่างกาย · วินิจฉัย · แผนการรักษา) ใช้แทนแบบเดิมทั้งชุด (ดร.ธงชัย 2 พ.ย. 2569)
+ * แบบบันทึกการตรวจรักษา (นักกายภาพบำบัด) — สัญญาณชีพ/ร่างกาย + บันทึกการตรวจรักษาแบบ SODIAP 6 ช่อง
+ * (11 พ.ย. 2569 · เดิม 4 ช่อง 2 พ.ย. 2569) ช่องเดิมใช้คอลัมน์เดิมต่อ ใบที่บันทึกไว้แล้วจึงขึ้นในหัวข้อใหม่ครบ:
+ *   Subjective ← chief_complaint · Objective ← physical_exam · Diagnosis ← diagnosis · Plan ← treatment_plan
+ *   Intervention / Assessment = คอลัมน์ใหม่ (intervention / assessment)
  * ใบเก่าที่บันทึกด้วยแบบเดิมยังเปิดอ่านได้ — ดู PHYSIO_LEGACY_SECTIONS ด้านล่าง
  */
 export const PHYSIO_SECTIONS = [
@@ -462,10 +464,12 @@ export const PHYSIO_SECTIONS = [
     key: 'exam',
     title: 'บันทึกการตรวจรักษา',
     fields: [
-      { key: 'chief_complaint', label: 'อาการสำคัญ (Chief Complaint)', type: 'text', rows: 3, placeholder: 'ระบุอาการสำคัญ (Chief Complaint)…' },
-      { key: 'physical_exam', label: 'ตรวจร่างกาย', type: 'text', rows: 3, placeholder: 'ระบุตรวจร่างกาย…' },
-      { key: 'diagnosis', label: 'วินิจฉัย', type: 'text', rows: 3, placeholder: 'ระบุวินิจฉัย…' },
-      { key: 'treatment_plan', label: 'แผนการรักษา', type: 'text', rows: 3, placeholder: 'ระบุแผนการรักษา…' },
+      { key: 'chief_complaint', label: 'Subjective - อาการและข้อมูลจากผู้รับบริการ', type: 'text', rows: 3 },
+      { key: 'physical_exam', label: 'Objective - ผลการตรวจประเมิน', type: 'text', rows: 3 },
+      { key: 'diagnosis', label: 'Diagnosis - การวินิจฉัย', type: 'text', rows: 3 },
+      { key: 'intervention', label: 'Intervention - การบำบัดและฟื้นฟูที่ให้บริการ', type: 'text', rows: 3 },
+      { key: 'assessment', label: 'Assessment - สรุปผล', type: 'text', rows: 3 },
+      { key: 'treatment_plan', label: 'Plan - แผนการบำบัดและฟื้นฟู', type: 'text', rows: 3 },
     ],
   },
 ];
@@ -702,7 +706,7 @@ export function physioBrief(r) {
   const parts = [];
 
   // แบบใหม่ (2 พ.ย. 2569): อาการสำคัญ / วินิจฉัย เป็นสิ่งแรกที่คนอยากรู้ก่อนกาง
-  if (r.chief_complaint) parts.push(`CC: ${r.chief_complaint}`);
+  if (r.chief_complaint) parts.push(`S: ${r.chief_complaint}`);
   if (r.diagnosis) parts.push(`Dx: ${r.diagnosis}`);
   if (r.bp_systolic != null || r.bp_diastolic != null) parts.push(`BP ${r.bp_systolic ?? '—'}/${r.bp_diastolic ?? '—'}`);
 

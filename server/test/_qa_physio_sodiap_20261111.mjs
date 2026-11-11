@@ -1,0 +1,29 @@
+/** แบบบันทึกกายภาพ SODIAP — 6 ช่องบันทึก/อ่านกลับได้ (11 พ.ย. 2569) · node test/_run_probe.mjs test/_qa_physio_sodiap_20261111.mjs */
+import assert from 'node:assert/strict';
+import { createServer } from 'node:http';
+assert.equal(new URL(process.env.DATABASE_URL).hostname, '127.0.0.1');
+const { createApp } = await import('../src/app.js');
+const { signToken, COOKIE_NAME, hashPassword } = await import('../src/lib/auth.js');
+const { pool } = await import('../src/db/index.js');
+const { seedFixtures } = await import('./fixtures.js');
+await seedFixtures(pool, hashPassword);
+const server = createServer(createApp());
+await new Promise((r) => server.listen(0, '127.0.0.1', r));
+const base = `http://127.0.0.1:${server.address().port}`;
+const cookie = `${COOKIE_NAME}=${signToken({ employee_id: 'EMP-0001', position: 'manager', name: 'ผจก' })}`;
+const call = async (m, p, b) => { const r = await fetch(base + p, { method: m, headers: { cookie, 'content-type': 'application/json' }, body: b && JSON.stringify(b) }); return { status: r.status, body: await r.json() }; };
+const c = (await call('POST', '/api/cases', { case_id: 'VN900000666', case_type: 'other', client_name: 'คุณกายภาพ', service_kind: 'physio', fee: 15000 })).body;
+const S = { chief_complaint: 'ปวดเข่าขวาเวลาลุกนั่ง', physical_exam: 'ROM knee 0-110', diagnosis: 'OA knee', intervention: 'Quad set 3x10, US 5 min', assessment: 'ปวดลด 6→3', treatment_plan: 'เพิ่ม closed chain ครั้งหน้า' };
+const r = await call('POST', `/api/cases/${c.case_id}/reports`, { report_date: new Date(Date.now() + 7 * 3600e3).toISOString().slice(0, 10), report_type: 'routine', ...S });
+console.log('create', r.status, r.status >= 300 ? JSON.stringify(r.body).slice(0, 300) : '');
+const list = (await call('GET', `/api/cases/${c.case_id}/reports`)).body;
+const row = (Array.isArray(list) ? list : list.data ?? list.reports)[0];
+let bad = 0;
+for (const [k, v] of Object.entries(S)) { const ok = row?.[k] === v; if (!ok) bad++; console.log(`${ok ? 'PASS' : 'BUG '} | ${k} = ${row?.[k]}`); }
+const id = row.report_id;
+const up = await call('PATCH', `/api/cases/${c.case_id}/reports/${id}`, { assessment: 'ปวดลด 6→2' });
+const again = ((await call('GET', `/api/cases/${c.case_id}/reports`)).body);
+const row2 = (Array.isArray(again) ? again : again.data ?? again.reports)[0];
+console.log(`${row2.assessment === 'ปวดลด 6→2' ? 'PASS' : 'BUG '} | แก้ Assessment (${up.status}) → ${row2.assessment}`);
+console.log(`\nสรุป: พบปัญหา ${bad + (row2.assessment === 'ปวดลด 6→2' ? 0 : 1)} ข้อ`);
+server.close(); await pool.end();

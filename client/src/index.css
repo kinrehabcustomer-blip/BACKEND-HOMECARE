@@ -4231,6 +4231,12 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
 /* ป้ายชื่อช่องกว้างเท่ากันทั้งบล็อก ค่าจึงเรียงตรงกันเป็นคอลัมน์ — กวาดตาหาค่าที่เปลี่ยนได้เร็ว */
 .care-review-block li .field-label, .care-view-block li .field-label { min-width: 11rem; flex-shrink: 0; }
 .care-view-text { white-space: pre-wrap; }
+/* ช่องข้อความยาว (เช่น Subjective / Objective ของกายภาพ) — หัวข้อเข้มและหนา ขึ้นบรรทัดของตัวเองเหนือเนื้อหา
+   หัวข้อสีจางกลืนกับเนื้อหาหลายบรรทัด อ่านไม่ออกว่าข้อไหนเริ่มตรงไหน (11 พ.ย. 2569) */
+.care-review-block li.is-text, .care-view-block li.is-text { flex-direction: column; gap: 0.125rem; padding: 0.375rem 0; }
+.care-review-block li.is-text .field-label, .care-view-block li.is-text .field-label {
+  min-width: 0; color: var(--heading); font-weight: 700; font-size: 0.875rem;
+}
 
 .care-photo { display: block; max-width: 16rem; }
 .care-photo img { width: 100%; border-radius: var(--radius); border: 1px solid var(--border); display: block; }

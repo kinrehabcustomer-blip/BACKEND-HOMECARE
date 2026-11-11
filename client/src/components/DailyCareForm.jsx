@@ -275,9 +275,9 @@ function Review({ form, sections }) {
           <h5>{s.title}</h5>
           <ul>
             {s.rows.map(([f, text]) => (
-              <li key={f.key}>
+              <li key={f.key} className={f.type === 'text' ? 'is-text' : undefined}>
                 <span className="field-label">{f.label}</span>
-                <span>{text}</span>
+                <span className={f.type === 'text' ? 'care-view-text' : undefined}>{text}</span>
               </li>
             ))}
           </ul>
