@@ -756,7 +756,16 @@ casesRouter.post(
     const { reason } = cancelSchema.parse(req.body ?? {});
     const cancelled = await repo.cancel(req.params.id, reason, req.user);
     await syncBundleParent(cancelled); // ยกเลิกแพ็กเสริม = บรรทัดหายจากใบร่างของ Homecare
-    res.json(visible(req, cancelled));
+    /* ใบ Homecare ที่ระบบแก้ให้ไม่ได้ (ออกใบ/รับเงิน/แบ่งมัดจำ/แก้มือแล้ว) ยังมีค่าแพ็กนี้อยู่
+       — ส่งรายชื่อกลับไปให้หน้าเว็บเด้งเตือนทันทีว่าต้องออกใบลดหนี้ (ผู้ใช้เลือก 11 พ.ย. 2569) */
+    let bundleInvoices = [];
+    if (cancelled?.bill_with_parent && cancelled.addon_of) {
+      bundleInvoices = await invoices.invoicesHoldingBundle(cancelled.case_id, cancelled.addon_of).catch((err) => {
+        console.error(`[cases] ตรวจใบ Homecare ที่ยังมีแพ็ก ${cancelled.case_id} ไม่สำเร็จ:`, err.message);
+        return [];
+      });
+    }
+    res.json({ ...visible(req, cancelled), bundle_invoices_to_credit: bundleInvoices });
   }),
 );
 

@@ -5,6 +5,7 @@ import { useAuth, useCan } from '../auth.jsx';
 import { useToast } from '../toast.jsx';
 import { useSheetSwipe } from '../lib/sheetSwipe.js';
 import { useScrollLock } from '../lib/scrollLock.js';
+import { usePrintFit } from '../lib/printFit.js';
 import {
   ADJUSTMENT_REASON_LABELS, ADJUSTMENT_REASON_OPTIONS, amountText, docDate, invoiceStatusLabel, todayTH,
 } from '../labels.js';
@@ -51,6 +52,8 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
   const boxRef = useRef(null);
   // จอแคบ: ปัดลงเพื่อปิด — ใช้ ref เดียวกับ focus trap เพราะ element เดียวแปะสอง ref ไม่ได้
   useSheetSwipe(onClose, boxRef);
+  // พิมพ์ใบแจ้งหนี้/ใบเสร็จให้จบใน A4 แผ่นเดียว (ตัวใบใน .print-sheet ครอบด้วย .inv-fit)
+  usePrintFit();
   const [item, setItem] = useState(null);
   /* เอกสารที่ดู/พิมพ์อยู่: 'customer' = ใบแจ้งหนี้ (ชำระแล้วขึ้นเป็นใบเสร็จ) · 'finance' = ใบเสร็จส่วนที่ 2 ของฝ่ายการเงิน
      'rc:<เลขที่>' = ใบเสร็จของการรับเงินครั้งนั้น · 'note:<เลขที่>' = ใบลดหนี้/เพิ่มหนี้ */
@@ -523,7 +526,8 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
     createPortal(
       <div className="print-sheet" aria-hidden="true">
         <div className="invoice-doc">
-          {shownBody}
+          {/* ตัวใบต้องจบในแผ่นเดียว (usePrintFit ย่อถ้าเกิน) — สลิปแนบอยู่นอกกรอบนี้ ขึ้นแผ่นใหม่ของตัวเองตามเดิม */}
+          <div className="inv-fit">{shownBody}</div>
 
           {/* สลิปโอนเงินแนบท้ายเอกสาร — มีเฉพาะในสำเนาที่พิมพ์ แต่ละใบขึ้นแผ่นใหม่ต่อจากตัวใบ
               บนจอไม่ต้องเห็นซ้ำ ส่วน "สลิปโอนเงิน" ด้านบนโชว์อยู่แล้ว (รูปเป็น URL เดียวกัน จึงโหลดค้างไว้แล้วตอนกดพิมพ์) */}

@@ -6,6 +6,7 @@ import ReceiptDoc from '../components/ReceiptDoc.jsx';
 import AdjustmentNoteDoc from '../components/AdjustmentNoteDoc.jsx';
 import { ISSUER } from '../lib/issuer.js';
 import { amountText } from '../labels.js';
+import { usePrintFit } from '../lib/printFit.js';
 
 /**
  * ใบแจ้งหนี้/ใบเสร็จที่ส่งเข้า LINE ลูกค้า (ดร.ธงชัย 24 ต.ค. 2569 ข้อ 4) — /bill/:token
@@ -24,6 +25,7 @@ export default function PublicBillPage() {
   /* เอกสารที่ลูกค้าเลือกดู — 'invoice' = ใบแจ้งหนี้ · 'rc:<เลขที่>' = ใบเสร็จรายครั้ง · 'note:<เลขที่>' = ใบลดหนี้/เพิ่มหนี้
      ลิงก์เดียวเห็นเอกสารทุกใบของบิลนี้ ไม่ต้องส่งลิงก์ใหม่ทุกครั้งที่รับเงิน (แผนแก้ระบบการเงิน ข้อ 8) */
   const [docView, setDocView] = useState('invoice');
+  usePrintFit();
 
   useEffect(() => {
     api.publicBill(token).then(setItem).catch((e) => setError(e.message));
@@ -136,6 +138,8 @@ export default function PublicBillPage() {
       )}
       <div className="bill-scroll">
         <div className="invoice-doc">
+          {/* พิมพ์/บันทึก PDF ให้จบใน A4 แผ่นเดียว (usePrintFit) */}
+          <div className="inv-fit">
           {viewReceipt ? (
             <ReceiptDoc item={item} receipt={viewReceipt} signer={item.signer} />
           ) : viewNote ? (
@@ -148,6 +152,7 @@ export default function PublicBillPage() {
           ) : (
             <CustomerInvoiceDoc item={item} signer={item.signer} />
           )}
+          </div>
         </div>
       </div>
       {canAttachSlip && (

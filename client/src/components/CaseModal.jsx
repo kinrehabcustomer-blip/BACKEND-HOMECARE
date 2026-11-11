@@ -507,9 +507,22 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
    */
   function cancelCase() {
     run(async () => {
-      await api.cancelCase(item.case_id, cancelReason.trim() || null);
+      const res = await api.cancelCase(item.case_id, cancelReason.trim() || null);
       setCancelOpen(false);
       setCancelReason('');
+      /* แพ็กกายภาพที่เก็บเงินรวมในใบ Homecare — ใบที่ออก/รับเงิน/แบ่งมัดจำไปแล้ว ระบบแก้ให้ไม่ได้
+         ยังเรียกเก็บค่าแพ็กที่เพิ่งยกเลิกอยู่ → เด้งเตือนทันทีให้ออกใบลดหนี้ (ผู้ใช้เลือก 11 พ.ย. 2569) */
+      const held = res?.bundle_invoices_to_credit ?? [];
+      if (held.length > 0) {
+        ask({
+          notice: true,
+          title: 'ใบแจ้งหนี้ของเคส Homecare ยังเรียกเก็บค่าแพ็กนี้อยู่',
+          detail: 'ยกเลิกแพ็กแล้ว แต่ใบด้านล่างออกไปแล้ว/รับเงินแล้ว/แบ่งมัดจำแล้ว ระบบจึงไม่ได้ลบค่าแพ็กออกให้',
+          items: held.map((inv) => `ใบ ${inv.invoice_id}${inv.status === 'draft' ? ' (ใบร่างที่แก้ไว้เอง/แบ่งงวด)' : ''}`),
+          itemsTone: 'warn',
+          note: 'ให้ออก "ใบลดหนี้" ที่ใบนั้น (หรือแก้ใบเอง ถ้ายังเป็นใบร่าง) — ไม่งั้นลูกค้าจะถูกเก็บเงินค่าแพ็กที่ยกเลิกไปแล้ว',
+        });
+      }
     });
   }
 

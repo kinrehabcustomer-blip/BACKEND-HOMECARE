@@ -4,6 +4,7 @@ import {
   normalizeAddons, addonAmount, addonsTotal, addonsTotalSql, addonLabel, unbilledAddons, isPhysioBundle, PHYSIO_BUNDLE,
 } from '../lib/addons.js';
 import { ensureAddonLink } from '../cases/repo.js';
+import { bundleCoveredSql } from '../cases/addonLink.js';
 import { ensureShareTables, hasBeenShared } from './share.js';
 import { likeEscape } from '../lib/likeEscape.js';
 import {
@@ -357,28 +358,29 @@ export async function bundledAddons(caseRow, db = sql) {
   return [...own, ...lines];
 }
 
-/**
- * แพ็กกายภาพที่รวมในเคส Homecare (c = alias ของเคสกายภาพ) ถูก "ดูแลการเก็บเงิน" โดยเคส Homecare อยู่จริงไหม
- *   - ใบที่ยังไม่ยกเลิกของ Homecare มีบรรทัดแพ็กนี้แล้ว หรือ
- *   - Homecare ยังไม่มีใบแพ็คเกจเลย (และยังไม่ยกเลิก) — ใบที่ออกทีหลังดึงบรรทัดนี้ไปเอง (ดู bundledAddons)
- * ไม่ทั้งสองอย่าง (ใบ Homecare ออก/แบ่งงวดไปแล้วโดยไม่มีบรรทัดนี้ หรือ Homecare ถูกยกเลิก) = แพ็กต้องออกใบของตัวเอง
- */
-const bundleCoveredSql = (c) => `(${c}.bill_with_parent AND (
-  EXISTS (SELECT 1 FROM invoices pi
-          WHERE pi.case_id = ${c}.addon_of AND pi.status <> 'cancelled'
-            AND pi.addons @> jsonb_build_array(jsonb_build_object('kind', '${PHYSIO_BUNDLE}', 'ref', ${c}.case_id)))
-  OR (NOT EXISTS (SELECT 1 FROM invoices pi
-                  WHERE pi.case_id = ${c}.addon_of AND pi.status <> 'cancelled'
-                    AND pi.billing_kind IS DISTINCT FROM 'extra')
-      AND EXISTS (SELECT 1 FROM cases pc WHERE pc.case_id = ${c}.addon_of AND pc.status <> 'cancelled'))))`;
-
-/** เคสกายภาพนี้เก็บเงินผ่านเคส Homecare อยู่จริงไหม (ดู bundleCoveredSql) — ใช้ยืนยันหลังซิงก์/ก่อนออกใบแยก */
+/** เคสกายภาพนี้เก็บเงินผ่านเคส Homecare อยู่จริงไหม (ดู bundleCoveredSql ใน cases/addonLink.js) — ใช้ยืนยันหลังซิงก์/ก่อนออกใบแยก */
 export const bundleCovered = async (physioCaseId) => {
   await ensureAddonLink();
   return sql
     .one(`SELECT ${bundleCoveredSql('c')} AS ok FROM cases c WHERE c.case_id = :id`, { id: physioCaseId })
     .then((r) => Boolean(r?.ok));
 };
+
+/**
+ * ใบแจ้งหนี้ของเคส Homecare ที่ยังมีบรรทัดแพ็กกายภาพนี้อยู่ (ไม่นับใบยกเลิก) — ใช้หลังยกเลิกแพ็ก (11 พ.ย. 2569)
+ * ใบร่างปกติถูกซิงก์เอาบรรทัดออกไปแล้ว ที่เหลือคือใบที่ระบบแก้ให้ไม่ได้: ออกใบ/รับเงินแล้ว · แบ่งมัดจำ · แก้มือไว้
+ * = ลูกค้ายังถูกเรียกเก็บค่าแพ็กที่ยกเลิกไปแล้ว ต้องมีคนออกใบลดหนี้หรือแก้ใบเอง
+ */
+export async function invoicesHoldingBundle(physioCaseId, parentCaseId) {
+  if (!physioCaseId || !parentCaseId) return [];
+  return sql.all(
+    `SELECT invoice_id, status FROM invoices
+     WHERE case_id = :parent AND status <> 'cancelled'
+       AND addons @> jsonb_build_array(jsonb_build_object('kind', '${PHYSIO_BUNDLE}', 'ref', :ref::text))
+     ORDER BY invoice_id`,
+    { parent: parentCaseId, ref: physioCaseId },
+  );
+}
 
 /** ค่าใช้จ่ายนอกแพ็คเกจของเคสที่ยังไม่ได้ออกใบ — { items, total } (ดู unbilledAddons) */
 export async function unbilledExtras(caseRow) {

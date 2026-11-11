@@ -76,11 +76,19 @@ export function ConfirmProvider({ children }) {
                 {req.note && <p className="muted confirm-note">{req.note}</p>}
               </div>
               <footer className="modal-foot">
-                <button type="button" className="btn" ref={cancelRef} onClick={() => answer(false)}>
-                  {req.cancelLabel ?? 'ยกเลิก'}
-                </button>
-                <button type="button" className={`btn ${req.danger ? 'danger' : 'primary'}`} onClick={() => answer(true)}>
-                  {req.confirmLabel ?? 'ยืนยัน'}
+                {/* notice: true = กล่องแจ้งเตือนปุ่มเดียว (รับทราบ) ไม่มีอะไรให้เลือก เช่น เตือนหลังทำรายการเสร็จแล้ว */}
+                {!req.notice && (
+                  <button type="button" className="btn" ref={cancelRef} onClick={() => answer(false)}>
+                    {req.cancelLabel ?? 'ยกเลิก'}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className={`btn ${req.danger ? 'danger' : 'primary'}`}
+                  ref={req.notice ? cancelRef : undefined}
+                  onClick={() => answer(true)}
+                >
+                  {req.confirmLabel ?? (req.notice ? 'รับทราบ' : 'ยืนยัน')}
                 </button>
               </footer>
             </div>

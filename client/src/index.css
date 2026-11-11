@@ -2863,6 +2863,30 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
 .inv-sign-dots { letter-spacing: 0.02rem; }
 .inv-sign-name { grid-column: 2; text-align: center; }
 
+/* ---------- ใบแจ้งหนี้/ใบเสร็จตอนสั่งพิมพ์: อัดให้จบใน A4 แผ่นเดียว (11 พ.ย. 2569) ----------
+   html.inv-printing ถูกใส่ระหว่างพิมพ์โดย lib/printFit.js — ไม่ใช้ @media print เพราะ printFit ต้องวัดความสูง
+   ด้วยสไตล์ชุดนี้ก่อนเบราว์เซอร์จัดหน้าพิมพ์ (ถ้ายังเกินแผ่นจะย่อทั้งใบด้วย zoom ต่อ)
+   ของเดิมโลโก้สูง/ระยะห่างเผื่อจอ ทำให้ช่องลายเซ็นตกไปแผ่นที่สอง */
+.inv-print-probe { position: absolute; top: 0; left: -10000px; padding: 0; visibility: hidden; pointer-events: none; }
+/* ขอบกระดาษ 15mm อยู่ตรงนี้แทน @page (printFit ตั้ง @page margin: 0 เพื่อตัดหัว/ท้ายกระดาษของเบราว์เซอร์ทิ้ง)
+   สลิปแนบแต่ละแผ่นก็ต้องมีขอบของตัวเอง ไม่งั้นชิดขอบกระดาษ */
+.inv-printing .inv-fit { line-height: 1.4; padding: 15mm; }
+.inv-printing .inv-slip { padding: 15mm; }
+.inv-printing .inv-fit .inv-printed { font-size: 0.625rem; }
+.inv-printing .inv-fit .inv-logo { margin: 0 0 0.25rem; }
+.inv-printing .inv-fit .inv-logo img.inv-logo-kin { height: 3.75rem; }
+.inv-printing .inv-fit .inv-title { font-size: 1.125rem; }
+.inv-printing .inv-fit .inv-org { margin-top: 0.125rem !important; }
+.inv-printing .inv-fit .inv-org-line { font-size: 0.6875rem; }
+.inv-printing .inv-fit .inv-rule { margin-top: 0.375rem; }
+.inv-printing .inv-fit .inv-parties { margin: 0.5rem 0 0.25rem; }
+.inv-printing .inv-fit .inv-table th,
+.inv-printing .inv-fit .inv-table td { padding: 0.1875rem 0.5rem; }
+.inv-printing .inv-fit .inv-payment-channel { margin-top: 0.5rem; padding: 0.375rem 0.625rem; }
+.inv-printing .inv-fit .inv-methods { margin-top: 0.5rem !important; }
+.inv-printing .inv-fit .inv-line { margin-top: 0.25rem !important; }
+.inv-printing .inv-fit .inv-signs { margin-top: 1.5rem; gap: 1.125rem; }
+
 /* ---------- สำเนาใบแจ้งหนี้/ใบเสร็จสำหรับพิมพ์ (InvoiceModal → printSheet) ----------
    ลูกตรงของ <body> — บนจอไม่แสดง ตอนพิมพ์แสดงตัวนี้ตัวเดียวแล้วซ่อนทั้งแอป (ดูใน @media print)
    display: none บนจอได้ เพราะตอนพิมพ์มันถูกเปิดกลับเป็น block เอง (ต่างจาก .payroll-doc ที่พิมพ์จากในหน้า) */

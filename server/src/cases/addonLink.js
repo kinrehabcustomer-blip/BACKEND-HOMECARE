@@ -1,5 +1,6 @@
 import { sql, transaction } from '../db/index.js';
 import { caseCode } from './caseCode.js';
+import { PHYSIO_BUNDLE } from '../lib/addons.js';
 
 /* แพ็กกายภาพเสริมของเคส Homecare (cases.addon_of / addon_next — ดูท้าย schema.sql)
    เติมคอลัมน์ให้เองตอนใช้ครั้งแรก ฐานที่ยังไม่ได้ migrate จะไม่ล้มกลางการเปิดเคส
@@ -33,6 +34,57 @@ export const ensureAddonLink = () =>
  */
 export const ADDON_LIST_COLUMNS = `c.addon_of, c.bill_with_parent,
        pp.name AS physio_package_name, pp.sessions AS physio_sessions`;
+
+/**
+ * แพ็กกายภาพที่รวมในเคส Homecare (c = alias ของเคสกายภาพ) ถูก "ดูแลการเก็บเงิน" โดยเคส Homecare อยู่จริงไหม
+ *   - ใบที่ยังไม่ยกเลิกของ Homecare มีบรรทัดแพ็กนี้แล้ว หรือ
+ *   - Homecare ยังไม่มีใบแพ็คเกจเลย (และยังไม่ยกเลิก) — ใบที่ออกทีหลังดึงบรรทัดนี้ไปเอง (ดู bundledAddons ใน invoices/repo.js)
+ * ไม่ทั้งสองอย่าง (ใบ Homecare ออก/แบ่งงวดไปแล้วโดยไม่มีบรรทัดนี้ หรือ Homecare ถูกยกเลิก/ลบ) = แพ็กต้องออกใบของตัวเอง
+ * อยู่ที่นี่ (ไม่ใช่ invoices/repo.js) เพราะรายการเคส/กระดิ่ง "ปิดแล้วไม่มีใบ" ต้องใช้เกณฑ์เดียวกัน (11 พ.ย. 2569)
+ */
+export const bundleCoveredSql = (c) => `(${c}.bill_with_parent AND (
+  EXISTS (SELECT 1 FROM invoices pi
+          WHERE pi.case_id = ${c}.addon_of AND pi.status <> 'cancelled'
+            AND pi.addons @> jsonb_build_array(jsonb_build_object('kind', '${PHYSIO_BUNDLE}', 'ref', ${c}.case_id)))
+  OR (NOT EXISTS (SELECT 1 FROM invoices pi
+                  WHERE pi.case_id = ${c}.addon_of AND pi.status <> 'cancelled'
+                    AND pi.billing_kind IS DISTINCT FROM 'extra')
+      AND EXISTS (SELECT 1 FROM cases pc WHERE pc.case_id = ${c}.addon_of AND pc.status <> 'cancelled'))))`;
+
+/**
+ * รอบปัจจุบันของเคส Homecare ที่แพ็กกายภาพควรผูกอยู่ — ไล่ตามสายต่อรอบ (renewed_from) จากเคสที่ให้มา (11 พ.ย. 2569)
+ *
+ * เดิมต่อรอบแพ็กกายภาพ/ผูกแพ็กแล้ว ผูกกับรอบ Homecare ที่ส่งมาตรงๆ ไม่มีการจองย้าย:
+ *   - Homecare ต่อรอบไว้แล้ว (รอเริ่ม) → แพ็กใหม่ค้างอยู่รอบเก่า ไม่ย้ายตามเมื่อรอบใหม่เริ่ม
+ *   - รอบเก่าปิดแล้ว รอบใหม่กำลังเดิน → แพ็กใหม่หลุดเป็นเคสเดี่ยว แทนที่จะผูกกับรอบที่ให้บริการอยู่
+ * ตอนนี้: รอบที่ปิดแล้วแต่ต่อไว้ = เดินหน้าไปรอบถัดไป · หยุดที่รอบที่ยังไม่ปิด/ยกเลิก
+ * คืน { parent, next } — parent = แถวรอบที่ผูก (null = ไม่มีรอบที่ยังเดิน) · next = รอบถัดไปที่ต่อไว้แล้ว (ให้จองย้าย)
+ * รอบถัดไปที่เริ่มไปแล้วก็จองไว้ได้ — promoteDueAddons ย้ายให้ตอนอ่านครั้งถัดไปตามกติกาเดิม
+ */
+export async function currentAddonRound(db, caseId) {
+  const nextOf = (id) => db.one(
+    `SELECT r.case_id FROM cases r WHERE r.renewed_from = :id AND r.status <> 'cancelled'
+     ORDER BY r.created_at DESC LIMIT 1`,
+    { id },
+  );
+  let parent = await db.one(
+    'SELECT case_id, status, patient_id FROM cases WHERE case_id = :id FOR SHARE',
+    { id: caseId },
+  );
+  // กันวนไม่จบถ้าข้อมูลสายต่อรอบเพี้ยน — ต่อรอบติดกันเกินนี้ในการผูกครั้งเดียวไม่มีจริง
+  for (let step = 0; parent && step < 24; step += 1) {
+    const next = await nextOf(parent.case_id);
+    if (!['closed', 'cancelled'].includes(parent.status) || !next) {
+      if (['closed', 'cancelled'].includes(parent.status)) return { parent: null, next: null };
+      return { parent, next: next?.case_id ?? null };
+    }
+    parent = await db.one(
+      'SELECT case_id, status, patient_id FROM cases WHERE case_id = :id FOR SHARE',
+      { id: next.case_id },
+    );
+  }
+  return { parent: null, next: null };
+}
 
 /* ---------- ย้ายคอร์สกายภาพตามรอบ Homecare (ผู้ใช้เลือกวิธี A แบบจองย้าย · 10 พ.ย. 2569) ----------
    ต่อเคส Homecare → แพ็กที่ยังเดิน + เก็บเงินใบแยก ถูก "จองย้าย" (addon_next = รอบใหม่) — ดู create() ใน repo.js

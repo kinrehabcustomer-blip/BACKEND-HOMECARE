@@ -1169,7 +1169,7 @@ if (process.env.RUN_DB_TESTS !== '1') {
       await sql.run(`UPDATE cases SET status = 'cancelled' WHERE case_id = :id`, { id: home.case_id });
       const afterCancel = await rows();
       assert.deepEqual(afterCancel.map((c) => c.case_id).sort(), [home.case_id, physio.case_id].sort());
-      assert.equal(afterCancel.find((c) => c.case_id === home.case_id).physio_addons, null, 'ไม่โชว์ซ้ำในแถวแม่ที่ยกเลิก');
+      assert.deepEqual(afterCancel.find((c) => c.case_id === home.case_id).physio_addons, [], 'ไม่โชว์ซ้ำในแถวแม่ที่ยกเลิก');
 
       // 4) ผูกกับเคส Homecare ที่ไม่มีแฟ้มผู้รับบริการ = ไม่ได้ (ตรวจตัวตนไม่ได้)
       const loose = await post('/api/cases', { client_name: 'ไม่มีแฟ้ม', service_kind: 'homecare' }, MANAGER, 201);
@@ -1216,7 +1216,7 @@ if (process.env.RUN_DB_TESTS !== '1') {
       // แม่ปิด (เช่น ต่อรอบรายเดือนแล้วรอบเก่าปิด) แต่แพ็กยังเดิน → แพ็กต้องเห็นเป็นแถวของตัวเอง ไม่ซ่อนในเคสที่ปิด
       await setStatus(home.case_id, 'closed');
       assert.deepEqual(await ids(), both);
-      assert.equal((await rows()).find((c) => c.case_id === home.case_id).physio_addons, null, 'ไม่โชว์ซ้ำในแถวแม่');
+      assert.deepEqual((await rows()).find((c) => c.case_id === home.case_id).physio_addons, [], 'ไม่โชว์ซ้ำในแถวแม่');
       // ปิดทั้งคู่ → รวมเป็นประวัติแถวเดียว
       await setStatus(pack.case_id, 'closed');
       assert.deepEqual(await ids(), [home.case_id]);
@@ -1226,7 +1226,7 @@ if (process.env.RUN_DB_TESTS !== '1') {
       await setStatus(home.case_id, 'unassigned');
       await setStatus(pack.case_id, 'cancelled');
       assert.deepEqual(await ids(), both);
-      assert.equal((await rows()).find((c) => c.case_id === home.case_id).physio_addons, null);
+      assert.deepEqual((await rows()).find((c) => c.case_id === home.case_id).physio_addons, []);
 
       // เคสแม่ที่มีแพ็กผูกอยู่: เปลี่ยนผู้รับบริการ / สลับเป็นสายกายภาพไม่ได้ · แก้อย่างอื่นได้
       await setStatus(pack.case_id, 'unassigned');
@@ -1263,7 +1263,7 @@ if (process.env.RUN_DB_TESTS !== '1') {
       assert.equal(p.addon_next, r2.case_id);
       assert.equal(p.addon_next_round, 2);
       assert.equal((await one(bundled.case_id)).addon_next, null, 'แพ็กรวมใบไม่ย้าย (กันเก็บเงินซ้ำ)');
-      assert.equal((await one(r2.case_id)).physio_addons, null, 'รอบที่ยัง "รอเริ่ม" ยังไม่มีแพ็ก');
+      assert.deepEqual((await one(r2.case_id)).physio_addons, [], 'รอบที่ยัง "รอเริ่ม" ยังไม่มีแพ็ก');
 
       // ③ ถึงวันเริ่มของรอบใหม่ → ย้าย · ลงประวัติทั้งสามเคส
       await sql.run(`UPDATE cases SET start_date = '2026-02-01' WHERE case_id = :id`, { id: r2.case_id });
@@ -1295,6 +1295,102 @@ if (process.env.RUN_DB_TESTS !== '1') {
       const r5 = await post('/api/cases', { ...me, service_kind: 'homecare', fee: 41000, renewed_from: r3.case_id, start_date: '2099-03-01', carry_addons: [] }, MANAGER, 201);
       assert.ok(r5.case_id);
       assert.equal((await one(pack.case_id)).addon_next, null);
+    });
+
+    test('ตรวจ 11 พ.ย. 2569: แพ็กรวมใบขึ้นกระดิ่ง/คิวงาน · แม่ปิด/ถูกลบแล้วแพ็กยังเห็นในรายการ · ต่อรอบแพ็กตามรอบ Homecare · ยกเลิกแพ็กหลังออกใบแล้วเตือน', async () => {
+      const one = async (id) => (await get(`/api/cases/${id}`, MANAGER)).body;
+      const ids = async (query = '') =>
+        (await get(`/api/cases?q=KN690300061&per_page=100${query}`, MANAGER)).body.data.map((c) => c.case_id).sort();
+      const caseAlerts = async () => (await get('/api/notify/alerts', MANAGER)).body.groups.cases;
+      const setStatus = (id, status) => sql.run(
+        `UPDATE cases SET status = :status, assigned_to = CASE WHEN :status = 'unassigned' THEN NULL ELSE :emp END WHERE case_id = :id`,
+        { id, status, emp: FIELD.employee_id },
+      );
+      await post('/api/patients', { patient_id: 'KN690300061', name: 'ตรวจรอบสอง' }, MANAGER, 201);
+      const pkgId = (await sql.one(
+        `INSERT INTO physio_packages (name, sessions, special_price, staff_pay)
+         VALUES ('ตรวจรอบสอง 10 ครั้ง', 10, 12000, 600) RETURNING physio_package_id`,
+      )).physio_package_id;
+      const me = { patient_id: 'KN690300061', client_name: 'ตรวจรอบสอง' };
+
+      // ---- ข้อ 1: แพ็กรวมใบ (ยังไม่มีนักกายภาพ) ต้องขึ้นกระดิ่ง "ยังไม่จับคู่" และตัวกรองคิวงาน ----
+      const home = await post('/api/cases', { ...me, service_kind: 'homecare', fee: 30000, start_date: '2026-01-01' }, MANAGER, 201);
+      await setStatus(home.case_id, 'assigned'); // แม่มีคนแล้ว — เหลือแค่แพ็กที่ยังไม่มีคน
+      const before = (await caseAlerts()).unassigned;
+      const bundled = await post('/api/cases', { ...me, physio_package_id: pkgId, fee: 12000, addon_of: home.case_id, bill_with_parent: true }, MANAGER, 201);
+      assert.equal(bundled.bill_with_parent, true);
+      assert.equal((await caseAlerts()).unassigned, before + 1, 'กระดิ่งนับแพ็กรวมใบที่ยังไม่มีนักกายภาพ');
+      assert.deepEqual(await ids('&status=unassigned'), [bundled.case_id], 'คิว "ยังไม่จับคู่" เห็นแพ็ก');
+      assert.deepEqual(await ids(), [home.case_id], 'รายการปกติยังรวมแพ็กไว้ในแถวแม่');
+
+      // แพ็กรวมใบที่ปิดแล้ว แต่ใบ Homecare เก็บเงินแทนอยู่ = ไม่ใช่ "ปิดแล้วไม่มีใบ"
+      await setStatus(bundled.case_id, 'closed');
+      assert.deepEqual(await ids('&closed_no_invoice=yes'), [], 'ใบ Homecare เก็บเงินแพ็กนี้อยู่แล้ว');
+      await setStatus(bundled.case_id, 'unassigned');
+
+      // ---- ข้อ 2: แม่ปิดแล้วแต่แพ็กรวมใบยังเดิน → แพ็กต้องเป็นแถวของตัวเอง ไม่หายไป ----
+      await setStatus(home.case_id, 'closed');
+      assert.deepEqual(await ids(), [home.case_id, bundled.case_id].sort());
+      assert.deepEqual(await ids('&status=unassigned'), [bundled.case_id]);
+      await setStatus(home.case_id, 'assigned');
+
+      // ---- ข้อ 3: ต่อรอบแพ็ก ตอนที่ Homecare ต่อรอบไว้แล้ว (รอเริ่ม) → แพ็กใหม่จองย้ายไปรอบนั้นด้วย ----
+      const pack = await post('/api/cases', { ...me, physio_package_id: pkgId, fee: 12000, addon_of: home.case_id }, MANAGER, 201);
+      const h2 = await post('/api/cases', { ...me, service_kind: 'homecare', fee: 30000, renewed_from: home.case_id, start_date: '2099-01-01' }, MANAGER, 201);
+      assert.equal((await one(pack.case_id)).addon_next, h2.case_id, 'แพ็กเดิมจองย้ายตามปกติ');
+      const pack2 = await post('/api/cases', { ...me, physio_package_id: pkgId, fee: 12000, renewed_from: pack.case_id }, MANAGER, 201);
+      assert.equal(pack2.addon_of, home.case_id, 'ยังอยู่กับรอบที่ให้บริการจริง');
+      assert.equal(pack2.addon_next, h2.case_id, 'จองย้ายไปรอบใหม่ด้วย (เดิมไม่จอง = ค้างรอบเก่า)');
+      // เปิดแพ็กใหม่จากเคส Homecare ที่ต่อรอบไว้แล้ว ก็จองเหมือนกัน
+      const fresh = await post('/api/cases', { ...me, physio_package_id: pkgId, fee: 12000, addon_of: home.case_id }, MANAGER, 201);
+      assert.equal(fresh.addon_next, h2.case_id);
+      // รอบใหม่เริ่ม → ย้ายตามกันหมด
+      await sql.run(`UPDATE cases SET start_date = '2026-02-01' WHERE case_id = :id`, { id: h2.case_id });
+      assert.equal((await one(pack2.case_id)).addon_of, h2.case_id);
+      assert.equal((await one(fresh.case_id)).addon_of, h2.case_id);
+
+      // รอบเก่าปิดแล้ว รอบใหม่กำลังเดิน → ต่อรอบแพ็กที่ยังผูกรอบเก่า ต้องผูกกับรอบปัจจุบัน (เดิมหลุดเป็นเคสเดี่ยว)
+      const stale = await post('/api/cases', { ...me, physio_package_id: pkgId, fee: 12000 }, MANAGER, 201);
+      await sql.run('UPDATE cases SET addon_of = :old WHERE case_id = :id', { id: stale.case_id, old: home.case_id });
+      await setStatus(home.case_id, 'closed');
+      const stale2 = await post('/api/cases', { ...me, physio_package_id: pkgId, fee: 12000, renewed_from: stale.case_id }, MANAGER, 201);
+      assert.equal(stale2.addon_of, h2.case_id);
+
+      // ผูกเคสกายภาพที่เปิดแยกไว้ เข้ากับ Homecare ที่ต่อรอบไว้แล้ว → จองย้ายด้วย
+      const h3 = await post('/api/cases', { ...me, service_kind: 'homecare', fee: 30000, renewed_from: h2.case_id, start_date: '2099-03-01' }, MANAGER, 201);
+      const loose = await post('/api/cases', { ...me, physio_package_id: pkgId, fee: 12000 }, MANAGER, 201);
+      const linked = await post(`/api/cases/${loose.case_id}/link-addon`, { parent_id: h2.case_id }, MANAGER, 200);
+      assert.equal(linked.addon_of, h2.case_id);
+      assert.equal(linked.addon_next, h3.case_id);
+
+      // ---- ข้อ 4: ยกเลิกแพ็กรวมใบหลังใบ Homecare ออกไปแล้ว → server ส่งรายชื่อใบให้หน้าเว็บเด้งเตือน ----
+      await post('/api/patients', { patient_id: 'KN690300062', name: 'ตรวจใบลดหนี้' }, MANAGER, 201);
+      const you = { patient_id: 'KN690300062', client_name: 'ตรวจใบลดหนี้' };
+      const hc = await post('/api/cases', { ...you, service_kind: 'homecare', fee: 30000 }, MANAGER, 201);
+      const inBill = await post('/api/cases', { ...you, physio_package_id: pkgId, fee: 12000, addon_of: hc.case_id, bill_with_parent: true }, MANAGER, 201);
+      const [hcDraft] = (await get(`/api/invoices?case_id=${hc.case_id}`, MANAGER)).body.data;
+      assert.equal(hcDraft.total, 42000);
+      await post(`/api/invoices/${hcDraft.invoice_id}/billing-plan`, { mode: 'full' });
+      await post(`/api/invoices/${hcDraft.invoice_id}/issue`, {});
+      const res = await post(`/api/cases/${inBill.case_id}/cancel`, { reason: 'ลูกค้ายกเลิกกายภาพ' });
+      assert.deepEqual(res.bundle_invoices_to_credit.map((i) => i.invoice_id), [hcDraft.invoice_id]);
+      // ใบร่างปกติ: ระบบเอาบรรทัดออกให้เอง → ไม่ต้องเตือน (bundled ของข้อ 1 ยังอยู่ในใบร่างของ home)
+      const quiet = await post(`/api/cases/${bundled.case_id}/cancel`, { reason: 'x' });
+      assert.deepEqual(quiet.bundle_invoices_to_credit, []);
+      // แพ็กใบแยก ยกเลิกแล้วไม่ต้องเตือนเรื่องใบ Homecare
+      const sep = await post('/api/cases', { ...you, physio_package_id: pkgId, fee: 5000, addon_of: hc.case_id }, MANAGER, 201);
+      assert.deepEqual((await post(`/api/cases/${sep.case_id}/cancel`, { reason: 'x' })).bundle_invoices_to_credit, []);
+
+      // ---- ข้อ 2 ต่อ: เคส Homecare ถูกลบทิ้ง → แพ็กรวมใบยังเห็นในรายการ (เดิมหายไปเลย) ----
+      await post('/api/patients', { patient_id: 'KN690300063', name: 'ลบแม่' }, MANAGER, 201);
+      const gone = await post('/api/cases', { patient_id: 'KN690300063', client_name: 'ลบแม่', service_kind: 'homecare', fee: 1000 }, MANAGER, 201);
+      const orphan = await post('/api/cases', { patient_id: 'KN690300063', client_name: 'ลบแม่', physio_package_id: pkgId, fee: 12000, addon_of: gone.case_id, bill_with_parent: true }, MANAGER, 201);
+      const del = await fetch(`${base}/api/cases/${gone.case_id}?force=true`, {
+        method: 'DELETE', headers: { cookie: `${COOKIE_NAME}=${signToken(MANAGER)}` },
+      });
+      assert.equal(del.status, 204);
+      const left = (await get('/api/cases?q=KN690300063&per_page=100', MANAGER)).body.data.map((c) => c.case_id);
+      assert.deepEqual(left, [orphan.case_id]);
     });
 
     test('รวมแพ็กที่เปิดแยกเข้าเคส Homecare: เหลือเคสเดียวในรายการ · ใบร่างแพ็กถูกลบ · ใบ Homecare ยอดรวม', async () => {
