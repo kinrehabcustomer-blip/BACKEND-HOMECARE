@@ -63,7 +63,7 @@ export default function CustomerDetailPage() {
       <header className="page-head">
         <div>
           <p className="mono muted">{customer.customer_id}</p>
-          <h1>
+          <h1 className="entity-title">
             {[TITLE_LABELS[customer.title], customer.name].filter(Boolean).join('')}
             {customer.nickname && <span className="muted"> ({customer.nickname})</span>}
           </h1>

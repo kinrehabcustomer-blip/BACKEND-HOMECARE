@@ -156,7 +156,8 @@ export function KpiRow({ data }) {
         label="นัดล่วงหน้า · 7 วัน"
         value={num(upcoming)}
         unit="กะ"
-        sub={busiest ? `แน่นสุด ${dayText(busiest.date)} (${busiest.scheduled} กะ)` : 'ยังไม่มีนัดใน 7 วันข้างหน้า'}
+        // เว้นวรรคแบบไม่ตัดบรรทัด — การ์ดครึ่งจอบนมือถือเคยตัด "(3" กับ "กะ)" ไว้คนละบรรทัด
+        sub={busiest ? `แน่นสุด ${dayText(busiest.date)} (${busiest.scheduled} กะ)` : 'ยังไม่มีนัดใน 7 วันข้างหน้า'}
       >
         <Spark kind="bar" color={tokens.viz.scheduled} format={(v) => `${v} กะ`}
                points={next.map((d) => ({ label: dayText(d.date), value: d.scheduled }))} />

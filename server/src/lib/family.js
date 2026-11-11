@@ -188,11 +188,24 @@ export async function familyInvite(lineUserId, caseId) {
   return { ok: true, ...inv };
 }
 
-export const revoke = (caseId, linkId) =>
-  sql.run('UPDATE case_family_links SET revoked_at = now() WHERE case_id = :case_id AND link_id = :id AND revoked_at IS NULL', {
-    case_id: caseId,
-    id: linkId,
-  });
+/**
+ * ปลดญาติ — รหัสเชิญที่ญาติคนนี้แจกไว้แต่ยังไม่มีใครใช้ ถูกปลดไปด้วย (ตรวจ 11 พ.ย. 2569)
+ * เดิมปลดแค่ตัวเขา รหัสที่เขาชวนต่อไว้ (อายุ 7 วัน) ยังใช้เข้าดูข้อมูลสุขภาพของผู้รับบริการได้ต่อ
+ * ญาติที่รับคำเชิญจากเขาไปแล้วไม่ถูกปลดอัตโนมัติ — เป็นคนละคนที่อาจมีสิทธิ์จริง แอดมินปลดรายคนได้ในหน้าเคส
+ * คืนจำนวนแถวของตัวญาติที่ถูกปลด (0 = ไม่พบ/ปลดไปแล้ว) เหมือนเดิม
+ */
+export async function revoke(caseId, linkId) {
+  const changed = await sql.run(
+    'UPDATE case_family_links SET revoked_at = now() WHERE case_id = :case_id AND link_id = :id AND revoked_at IS NULL',
+    { case_id: caseId, id: linkId },
+  );
+  await sql.run(
+    `UPDATE case_family_links SET revoked_at = now()
+     WHERE case_id = :case_id AND invited_via = :id AND accepted_at IS NULL AND revoked_at IS NULL`,
+    { case_id: caseId, id: linkId },
+  );
+  return changed;
+}
 
 /** รับคำเชิญ — รหัสใช้ได้ครั้งเดียว · LINE เดียวกันกับเคสเดิมซ้ำ = ถือว่าสำเร็จ (กดส่งซ้ำ) */
 export async function accept(code, lineUserId, displayName) {
@@ -211,6 +224,10 @@ export async function accept(code, lineUserId, displayName) {
             (c.status IN ('closed', 'cancelled') AND NOT (${WITHIN_GRACE})) AS case_over
      FROM case_family_links l JOIN cases c ON c.case_id = l.case_id
      WHERE l.code_hash = :hash AND l.revoked_at IS NULL
+       /* รหัสที่ญาติชวนต่อ ใช้ได้เฉพาะตอนคนชวนยังมีสิทธิ์อยู่ — คนชวนถูกปลดแล้ว รหัสที่ค้างอยู่ใช้ไม่ได้ (ตรวจ 11 พ.ย. 2569)
+          revoke() ปลดรหัสพวกนี้ให้แล้ว ตรงนี้กันรหัสเก่าที่ออกไว้ก่อนมีกติกานี้ */
+       AND (l.accepted_at IS NOT NULL OR l.invited_via IS NULL
+            OR EXISTS (SELECT 1 FROM case_family_links p WHERE p.link_id = l.invited_via AND p.revoked_at IS NULL))
      /* รหัสเก็บเป็น hash และไม่ถูกล้างทิ้งหลังใช้ (ดูหมายเหตุที่ UPDATE ข้างล่าง) ใบที่ยังไม่มีคนรับ
         จึงต้องมาก่อนเสมอ เผื่อวันหนึ่ง newCode() สุ่มได้ซ้ำกับใบเก่าที่ใช้ไปแล้ว (1 ใน 887 ล้าน) */
      ORDER BY l.accepted_at NULLS FIRST, l.link_id DESC`,

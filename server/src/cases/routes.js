@@ -695,6 +695,13 @@ casesRouter.delete(
     await notifySafely('team-remove', () =>
       caseEvents.onCaseStaffChanged(req.params.id, { from: req.params.employeeId, role: 'team' }),
     );
+    /* กะข้างหน้าของคนที่ออกตกเป็นของคนหลัก — แจ้งคนหลักว่าได้กะเพิ่ม (LINE + กระดิ่งในแอป) เหมือนถูกลงกะใหม่
+       เดิมรับไปเงียบๆ คนหลักไม่รู้ว่ามีงานเพิ่ม (ตรวจ 11 พ.ย. 2569) */
+    if (removed.moved?.length) {
+      await notifySafely('team-remove-handover', () =>
+        caseEvents.onVisitsAdded(req.params.id, new Set(), { added: removed.moved.length, visits: removed.moved }),
+      );
+    }
     res.json(await repo.listTeam(req.params.id));
   }),
 );

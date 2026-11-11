@@ -5848,6 +5848,12 @@ h1, h2, h3, h4, .page-hero-title, .cal-title, .login-heading h1 {
   .packages-card > .rate-section:first-of-type { border-top: 0; }
   .packages-card > :not(.toolbar):not(.rate-section):not(.error):not(.notice):not(.packages-empty) { padding: 0.875rem var(--gx); }
 }
+/* ปุ่มหัวหน้าแพ็คเกจ (จัดการเกรด/รูปแบบ · แก้ไขราคา) บนมือถือ เต็มแถวแบ่งครึ่ง — เดิมลอยเยื้องอยู่ใต้ชื่อหน้า ไม่ตรงกับขอบอะไรเลย
+   (ตรวจจอมือถือ 11 พ.ย. 2569 · ให้เหมือนปุ่ม "+ เพิ่มแพ็คเกจ" ของหน้ากายภาพที่เต็มแถวอยู่แล้ว) */
+@media (max-width: 600px) {
+  .packages-card > .toolbar .toolbar-action { width: 100%; margin: 0; align-self: stretch; }
+  .packages-card > .toolbar .toolbar-action .btn { flex: 1 1 0; justify-content: center; white-space: nowrap; }
+}
 
 @media (max-width: 600px) {
   .content { --gx: 0.75rem; --gt: 1rem; }

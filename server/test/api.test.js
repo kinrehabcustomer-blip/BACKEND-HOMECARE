@@ -1393,6 +1393,138 @@ if (process.env.RUN_DB_TESTS !== '1') {
       assert.deepEqual(left, [orphan.case_id]);
     });
 
+    test('ตรวจ 11 พ.ย. 2569 รอบสอง: กะ 24 ชม. · งวดค่าจ้าง · ลบกะเคสจบ · ยกเลิก-เปิดเคสคืนใบ · เปิดเคสที่ต่อรอบ · ย้ายคน · ปลดญาติ', async () => {
+      const FIELD_B = emp('EMP-0004', 'caregiver');
+      const day = async (n) => (await sql.one(
+        `SELECT to_char((now() AT TIME ZONE 'Asia/Bangkok')::date + :n::int, 'YYYY-MM-DD') AS d`, { n },
+      )).d;
+      const send = async (method, path, expected) => {
+        const res = await fetch(`${base}${path}`, { method, headers: { cookie: `${COOKIE_NAME}=${signToken(MANAGER)}` } });
+        assert.equal(res.status, expected, `${method} ${path}`);
+      };
+      const visitsOn = async (caseId, dates, who = FIELD) =>
+        (await post(`/api/cases/${caseId}/visits/bulk`, { dates, assigned_to: who.employee_id }, MANAGER, 201)).visits;
+      const visitRow = (id) => sql.one('SELECT status, assigned_to, remind_day_at FROM case_visits WHERE visit_id = :id', { id });
+
+      // ---- ข้อ 6: กะ 24 ชม. ส่งเวรช้าไปไม่กี่นาที ยังกดเช็คเอาท์เองได้ · ไม่ขึ้น "ค้างผิดปกติ" ตั้งแต่ชั่วโมงที่ 16 ----
+      const c24 = await newCase();
+      await post(`/api/cases/${c24.case_id}/assign`, { employee_id: FIELD.employee_id });
+      const [long] = await visitsOn(c24.case_id, [await day(-1)]);
+      await sql.run(
+        `UPDATE case_visits SET planned_start = '08:00', planned_end = '08:00', checked_in_by = :emp,
+                check_in_at = now() - interval '24 hours 10 minutes' WHERE visit_id = :id`,
+        { id: long.visit_id, emp: FIELD.employee_id },
+      );
+      await post(`/api/my/visits/${long.visit_id}/check-out`, {}, FIELD);
+      const at = (h) => new Date(Date.now() - h * 3.6e6).toISOString();
+      const state = (v) => casesRepo.withVisitState({ visit_status: 'scheduled', visit_date: '2026-01-01', ...v }).state;
+      assert.equal(state({ planned_start: '08:00', planned_end: '08:00', check_in_at: at(20) }), 'working', 'กะ 24 ชม. ชั่วโมงที่ 20 ยังปกติ');
+      assert.equal(state({ planned_start: '08:00', planned_end: '08:00', check_in_at: at(29) }), 'stale');
+      assert.equal(state({ planned_start: '08:00', planned_end: '12:00', check_in_at: at(17) }), 'stale', 'กะสั้นยังใช้เกณฑ์ 16 ชม. เดิม');
+      assert.equal(casesRepo.checkOutLimitHours({ planned_start: '08:00', planned_end: '12:00' }), 24);
+      assert.equal(casesRepo.checkOutLimitHours({ planned_start: '20:00', planned_end: '20:00' }), 30);
+
+      // ---- ข้อ 7: ถอนงวดกลาง (งวด 3 จาก 5) แล้วยังปล่อยเงินที่เหลือได้ ----
+      const c7 = await newCase();
+      await post(`/api/cases/${c7.case_id}/assign`, { employee_id: FIELD.employee_id });
+      for (let i = 0; i < 5; i += 1) {
+        await post(`/api/cases/${c7.case_id}/pay/release`, { request_id: randomUUID(), amount: 100 }, MANAGER, 201);
+      }
+      await post(`/api/cases/${c7.case_id}/pay/release`, { request_id: randomUUID(), amount: 100 }, MANAGER, 409);
+      const third = (await casesRepo.payStatus(c7.case_id)).payouts.find((p) => p.installment_no === 3);
+      await send('DELETE', `/api/cases/${c7.case_id}/pay/${third.payout_id}`, 200);
+      let pay = await casesRepo.payStatus(c7.case_id);
+      assert.equal(pay.installments_left, 1, 'งวดที่ถอนคืนได้ช่องคืน');
+      assert.equal(pay.next_installment, 3);
+      await post(`/api/cases/${c7.case_id}/pay/release`, { request_id: randomUUID(), amount: 100 }, MANAGER, 201);
+      pay = await casesRepo.payStatus(c7.case_id);
+      assert.deepEqual(pay.payouts.map((p) => p.installment_no).sort(), [1, 2, 3, 4, 5]);
+      assert.equal(pay.installments_left, 0);
+
+      // ---- ข้อ 8: เคสที่ยกเลิกแล้ว ลบกะไม่ได้ (กะที่เหลือคือฐานค่าจ้างตามสัดส่วน) ----
+      const c8 = await newCase();
+      await post(`/api/cases/${c8.case_id}/assign`, { employee_id: FIELD.employee_id });
+      const [v8] = await visitsOn(c8.case_id, [await day(2), await day(3)]);
+      await post(`/api/cases/${c8.case_id}/cancel`, { reason: 'ทดสอบ' });
+      await send('DELETE', `/api/cases/${c8.case_id}/visits?from=${await day(2)}&to=${await day(3)}`, 409);
+      await send('DELETE', `/api/cases/${c8.case_id}/visits/${v8.visit_id}`, 409);
+
+      // ---- ข้อ 9: แผนมัดจำ — ยกเลิกเคสแล้วเปิดกลับ ใบร่างที่ระบบยกเลิกให้กลับมา ----
+      const invoicesOf = async (id) => (await get(`/api/invoices?case_id=${id}`, MANAGER)).body.data;
+      const live = async (id) => (await invoicesOf(id)).filter((i) => i.status !== 'cancelled')
+        .map((i) => [i.billing_kind, i.status, i.total]).sort();
+      const c9 = await newCase();
+      const [d9] = await invoicesOf(c9.case_id);
+      await post(`/api/invoices/${d9.invoice_id}/billing-plan`, { mode: 'deposit', deposit_amount: 500 });
+      const plan9 = await live(c9.case_id);
+      await post(`/api/cases/${c9.case_id}/cancel`, { reason: 'ทดสอบ' });
+      assert.deepEqual(await live(c9.case_id), [], 'ใบร่างถูกยกเลิกตามเคส');
+      await post(`/api/cases/${c9.case_id}/reopen`, {});
+      assert.deepEqual(await live(c9.case_id), plan9, 'เปิดเคสกลับ = ใบร่างทั้งแผนกลับมา (ไม่หายเงียบ)');
+      // มัดจำออกใบแล้ว → ยกเลิกเคสไม่ยกเลิกใบส่วนที่เหลือ (ไม่ทิ้งแผนไว้ครึ่งเดียว)
+      const deposit9 = (await invoicesOf(c9.case_id)).find((i) => i.billing_kind === 'deposit');
+      await post(`/api/invoices/${deposit9.invoice_id}/issue`, {});
+      await post(`/api/cases/${c9.case_id}/cancel`, { reason: 'ทดสอบ' });
+      assert.deepEqual((await live(c9.case_id)).map(([k, s]) => [k, s]), [['balance', 'draft'], ['deposit', 'issued']]);
+
+      // ---- ข้อ 12: เปิดเคสที่ต่อรอบไปแล้ว — ไม่คืนกะที่ซ้ำกับรอบใหม่ ----
+      const c12 = await newCase();
+      await post(`/api/cases/${c12.case_id}/assign`, { employee_id: FIELD.employee_id });
+      const v12 = await visitsOn(c12.case_id, [await day(2), await day(3)]);
+      await post(`/api/cases/${c12.case_id}/close`, { force: true });
+      const r12 = await post('/api/cases', { case_type: 'other', client_name: 'Workflow patient', renewed_from: c12.case_id }, MANAGER, 201);
+      await post(`/api/cases/${c12.case_id}/reopen`, {});
+      for (const v of v12) assert.equal((await visitRow(v.visit_id)).status, 'cancelled', 'ไม่คืนกะ — งานช่วงนั้นอยู่รอบใหม่แล้ว');
+
+      // ---- ข้อ 13: เปลี่ยนคนหลัก → กะที่ย้ายล้างธง "เตือนแล้ว" คนใหม่จึงได้เตือน ----
+      const c13 = await newCase();
+      await post(`/api/cases/${c13.case_id}/assign`, { employee_id: FIELD.employee_id });
+      const [v13] = await visitsOn(c13.case_id, [await day(1)]);
+      await sql.run("UPDATE case_visits SET remind_day_at = 'sent' WHERE visit_id = :id", { id: v13.visit_id });
+      await post(`/api/cases/${c13.case_id}/assign`, { employee_id: FIELD_B.employee_id });
+      assert.deepEqual(await visitRow(v13.visit_id), { status: 'scheduled', assigned_to: FIELD_B.employee_id, remind_day_at: null });
+
+      // ---- ข้อ 14: เปิดเคสกลับ — กะของคนที่ถูกถอด/รับงานไม่ได้แล้ว ไปที่คนหลัก ไม่คืนให้คนเดิม ----
+      const c14 = await newCase();
+      await post(`/api/cases/${c14.case_id}/assign`, { employee_id: FIELD.employee_id });
+      await post(`/api/cases/${c14.case_id}/team`, { employee_id: FIELD_B.employee_id });
+      const onDay = async (n, who = FIELD) => {
+        const d = await day(n);
+        return (await visitsOn(c14.case_id, [d], who)).find((v) => v.visit_date === d);
+      };
+      const mine = await onDay(2);
+      const theirs = await onDay(3, FIELD_B);
+      const resigned = await onDay(4);
+      await post(`/api/cases/${c14.case_id}/close`, { force: true });
+      // จำลองกะของคนที่ถูกพักงานไประหว่างที่เคสปิด
+      await sql.run("UPDATE case_visits SET assigned_to = 'EMP-0005' WHERE visit_id = :id", { id: resigned.visit_id });
+      await send('DELETE', `/api/cases/${c14.case_id}/team/${FIELD_B.employee_id}`, 200);
+      await post(`/api/cases/${c14.case_id}/reopen`, {});
+      assert.deepEqual(await visitRow(mine.visit_id), { status: 'scheduled', assigned_to: FIELD.employee_id, remind_day_at: null },
+        'คนหลักได้กะของตัวเองคืน');
+      assert.deepEqual(await visitRow(theirs.visit_id), { status: 'scheduled', assigned_to: FIELD.employee_id, remind_day_at: null },
+        'คนที่ถูกถอดออกจากทีมไม่ได้กะคืน — ไปที่คนหลัก');
+      assert.equal((await visitRow(resigned.visit_id)).assigned_to, FIELD.employee_id, 'คนที่ถูกพักงานไม่ได้กะคืน');
+
+      // ---- ข้อ 15: ปลดญาติ → รหัสที่เขาชวนต่อไว้ใช้ไม่ได้ ----
+      const familyLib = await import('../src/lib/family.js');
+      const c15 = await newCase();
+      const { code } = await familyLib.createInvite(c15.case_id, 'แอดมิน');
+      assert.equal((await familyLib.accept(code, 'U-REVOKE-1', 'ญาติคนแรก')).ok, true);
+      const first = await familyLib.memberLink('U-REVOKE-1', c15.case_id);
+      const passOn = await familyLib.familyInvite('U-REVOKE-1', c15.case_id);
+      assert.equal(passOn.ok, true);
+      assert.equal(await familyLib.revoke(c15.case_id, first.link_id), 1);
+      const late = await familyLib.accept(passOn.code, 'U-REVOKE-2', 'ญาติที่ถูกชวน');
+      assert.equal(late.ok, false, 'รหัสที่ญาติที่ถูกปลดแจกไว้ ใช้ไม่ได้แล้ว');
+
+      // เก็บกวาด — เทสต์ชุดหลังนับยอดรวมทั้งระบบ (ค่าจ้างที่ปล่อยค้าง · ภาระงานของพนักงาน) ห้ามติดข้อมูลของชุดนี้ไป
+      for (const p of (await casesRepo.payStatus(c7.case_id)).payouts) {
+        await send('DELETE', `/api/cases/${c7.case_id}/pay/${p.payout_id}`, 200);
+      }
+      for (const c of [r12, c24, c7, c8, c9, c12, c13, c14, c15]) await send('DELETE', `/api/cases/${c.case_id}?force=true`, 204);
+    });
+
     test('รวมแพ็กที่เปิดแยกเข้าเคส Homecare: เหลือเคสเดียวในรายการ · ใบร่างแพ็กถูกลบ · ใบ Homecare ยอดรวม', async () => {
       const send = async (method, path, expected) => {
         const res = await fetch(`${base}${path}`, {

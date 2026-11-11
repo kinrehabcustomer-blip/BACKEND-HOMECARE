@@ -102,25 +102,35 @@ const DUE_BASE = `v.assigned_to = :me AND v.status = 'scheduled' AND v.check_in_
   AND v.visit_date BETWEEN to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD')
                        AND to_char((now() AT TIME ZONE 'Asia/Bangkok') + interval '2 days', 'YYYY-MM-DD')`;
 
-/** สร้างแจ้งเตือนก่อนนัดที่ถึงเวลาแล้วของพนักงานคนนี้ · กุญแจผูกวัน+เวลานัด → เลื่อนนัดแล้วได้เตือนใหม่ตามนัดใหม่ */
+/**
+ * สร้างแจ้งเตือนก่อนนัดที่ถึงเวลาแล้วของพนักงานคนนี้ · กุญแจผูกวัน+เวลานัด → เลื่อนนัดแล้วได้เตือนใหม่ตามนัดใหม่
+ * กุญแจผูกตัวพนักงานด้วย (ตรวจ 11 พ.ย. 2569) — เดิมกุญแจมีแค่กะ+วัน คนเดิมได้เตือนไปแล้ว ย้ายกะให้คนใหม่
+ * คนใหม่จะไม่ได้เตือนเลย (ชนกุญแจเดิม) · NOT EXISTS กันคนเดิมได้ซ้ำจากแถวที่สร้างด้วยกุญแจรูปแบบเก่า
+ */
 async function materializeReminders(me) {
   const payload = `jsonb_build_object('client', c.client_name, 'date', v.visit_date, 'start', v.planned_start, 'end', v.planned_end)`;
+  const legacy = (kind, key) => `NOT EXISTS (SELECT 1 FROM staff_notifications o
+    WHERE o.employee_id = v.assigned_to AND o.kind = '${kind}' AND o.dedupe_key = ${key})`;
+  const dayKey = `'remind-day:' || v.visit_id || ':' || v.visit_date`;
+  const threeKey = `'remind-3h:' || v.visit_id || ':' || v.visit_date || ':' || v.planned_start`;
   // วันก่อนนัด — ยังห่างนัดเกิน 3 ชม. (ใกล้กว่านั้นรอบ 3 ชม. แจ้งแทน ไม่ซ้อนสองอัน)
   await sql.run(
     `INSERT INTO staff_notifications (employee_id, kind, case_id, visit_id, payload, dedupe_key)
      SELECT v.assigned_to, 'remind_day', v.case_id, v.visit_id, ${payload},
-            'remind-day:' || v.visit_id || ':' || v.visit_date
+            ${dayKey} || ':' || v.assigned_to
      FROM case_visits v JOIN cases c ON c.case_id = v.case_id
      WHERE ${DUE_BASE} AND now() >= ${DAY_AT} AND now() < ${START_AT} - interval '3 hours'
+       AND ${legacy('remind_day', dayKey)}
      ON CONFLICT (dedupe_key) DO NOTHING`,
     { me },
   );
   await sql.run(
     `INSERT INTO staff_notifications (employee_id, kind, case_id, visit_id, payload, dedupe_key)
      SELECT v.assigned_to, 'remind_3h', v.case_id, v.visit_id, ${payload},
-            'remind-3h:' || v.visit_id || ':' || v.visit_date || ':' || v.planned_start
+            ${threeKey} || ':' || v.assigned_to
      FROM case_visits v JOIN cases c ON c.case_id = v.case_id
      WHERE ${DUE_BASE} AND v.planned_start IS NOT NULL AND now() >= ${START_AT} - interval '3 hours'
+       AND ${legacy('remind_3h', threeKey)}
      ON CONFLICT (dedupe_key) DO NOTHING`,
     { me },
   );

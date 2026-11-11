@@ -340,11 +340,13 @@ myRouter.post(
 
     /* กะที่เปิดค้างนานเกินกว่าที่หน้า "งานวันนี้" ยังแสดง — กดออกเองตอนนี้จะได้ชั่วโมงทำงานหลักร้อย
        ไหลเข้าค่าตอบแทนทันที ต้องให้ผู้จัดการแก้เวลาออกให้ (ของเดิมกันแค่ที่หน้าเว็บ เรียก API ตรงก็ผ่าน) */
+    // เพดานตามความยาวกะที่นัดไว้ — กะ 24 ชม. ส่งเวรช้าไปบ้างยังกดออกเองได้ (ดู checkOutLimitHours · 11 พ.ย. 2569)
     const openHours = (Date.now() - new Date(visit.check_in_at).getTime()) / 3.6e6;
-    if (openHours > cases.OPEN_SHIFT_CARRY_HOURS) {
+    const limit = cases.checkOutLimitHours(visit);
+    if (openHours > limit) {
       throw new ApiError(
         409,
-        `กะนี้เช็คอินไว้เกิน ${cases.OPEN_SHIFT_CARRY_HOURS} ชั่วโมงแล้ว — แจ้งผู้จัดการให้แก้เวลาออกให้แทน`,
+        `กะนี้เช็คอินไว้เกิน ${Math.round(limit)} ชั่วโมงแล้ว — แจ้งผู้จัดการให้แก้เวลาออกให้แทน`,
       );
     }
 

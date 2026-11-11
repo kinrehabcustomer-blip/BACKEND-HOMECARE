@@ -63,7 +63,7 @@ export default function PatientDetailPage() {
       <header className="page-head">
         <div>
           <p className="mono muted">{patient.patient_id}</p>
-          <h1>
+          <h1 className="entity-title">
             {[TITLE_LABELS[patient.title], patient.name].filter(Boolean).join('')}
             {patient.nickname && <span className="muted"> ({patient.nickname})</span>}
           </h1>

@@ -111,6 +111,17 @@
   overflow: hidden;
   clip-path: inset(50%);
 }
+/* หน้ารายละเอียด (ลูกค้า · ผู้รับบริการ · พนักงาน · ผลประเมิน) — h1 คือ "ชื่อคน" ไม่ใช่ชื่อหน้า ต้องเห็นเสมอ (ตรวจ 11 พ.ย. 2569)
+   กติกาซ่อนชื่อหน้าด้านบนเผลอซ่อนชื่อคนไปด้วย หน้าเหลือแค่รหัส (KN… / EMP-…) ไม่รู้ว่ากำลังดูแฟ้มของใคร */
+.page-head h1.entity-title {
+  position: static;
+  width: auto; height: auto;
+  margin: 0 0 0.25rem;
+  overflow: visible;
+  clip-path: none;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 
 /* ---------- ปุ่ม: สูง 40px เท่าช่องกรอก · ปุ่มหลักทองเข้ม ---------- */
 .btn {
@@ -1574,12 +1585,19 @@ input[aria-invalid='true'] { border-color: var(--danger); }
   .toolbar.fbar .cal-hero-nav.toolbar-action { display: none; }
 
   /* คำอธิบายสีแถวเดียว ปัดซ้ายขวา — เดิมห่อสองบรรทัดกินที่เหนือปฏิทิน */
+  /* ช่องไฟแคบลง (ตรวจ 11 พ.ย. 2569) — เดิมห่าง 0.875rem สีสุดท้าย "ขาดงาน" โดนตัดครึ่งคำที่ขอบจอ 390px
+     ดูเหมือนหน้าเพี้ยนมากกว่าปัดได้ · ตอนนี้ครบ 5 สีในจอ 390px · จอแคบกว่านั้นยังปัดได้ และขอบขวาจางลงบอกว่ามีต่อ */
   .cal-hero .cal-legend {
     flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; white-space: nowrap;
-    gap: 0 0.875rem; margin: 0 calc(-1 * var(--gx, 0.75rem)); padding: 0 var(--gx, 0.75rem);
+    gap: 0 0.5rem; margin: 0 calc(-1 * var(--gx, 0.75rem)); padding: 0 var(--gx, 0.75rem);
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - var(--gx, 0.75rem)), transparent);
+    mask-image: linear-gradient(to right, #000 calc(100% - var(--gx, 0.75rem)), transparent);
   }
   .cal-hero .cal-legend::-webkit-scrollbar { display: none; }
-  .cal-hero .cal-legend-item { flex: none; }
+  .cal-hero .cal-legend-item { flex: none; gap: 0.25rem; }
+  /* คำอธิบายสีของตารางงานพนักงาน (ไม่อยู่ในหัว .cal-hero) — ช่องไฟเท่ากัน เดิม "ขาดงาน" ตกไปอยู่บรรทัดสองตัวเดียว */
+  .cal-legend { gap: 0.25rem 0.5rem; }
+  .cal-legend-item { gap: 0.25rem; }
 
   /* แถวตัวกรอง: ปุ่มสลับมุมมองสูงเท่าปุ่มอื่นในแถว (2.75rem) · ปุ่มพิมพ์เป็นปุ่มกลมไอคอนชิดขวา */
   .fbar-row > .seg { flex: none; border-radius: 999px; }

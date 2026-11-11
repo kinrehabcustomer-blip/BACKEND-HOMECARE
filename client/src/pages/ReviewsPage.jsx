@@ -87,13 +87,12 @@ export default function ReviewsPage() {
           </div>
           <div className="tile is-static">
             <span className="tile-label">แบบประเมินทั้งหมด</span>
-            <span className="tile-value">{totalReviews}</span>
-            <span className="tile-frac">ใบ</span>
+            {/* หน่วยต่อท้ายตัวเลขในบรรทัดเดียวกัน (เหมือนช่องตัวเลขหน้าภาพรวม) — เดิมแยกเป็นอีกบรรทัด ตัวเลขลอยโดดๆ บนจอมือถือ */}
+            <span className="tile-value">{totalReviews} <span className="tile-frac">ใบ</span></span>
           </div>
           <div className="tile is-static">
             <span className="tile-label">มีคะแนนแล้ว</span>
-            <span className="tile-value">{rated.length}</span>
-            <span className="tile-frac">จาก {rows.length} คน</span>
+            <span className="tile-value">{rated.length} <span className="tile-frac">จาก {rows.length} คน</span></span>
           </div>
         </div>
 

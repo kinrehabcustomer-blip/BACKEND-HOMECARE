@@ -98,7 +98,7 @@ export default function EmployeeDetailPage() {
           <Avatar employee={employee} size="avatar-lg" clickable />
           <div>
             <p className="mono muted">{employee.employee_id}</p>
-            <h1>
+            <h1 className="entity-title">
               {employee.first_name} {employee.last_name}
               {employee.nickname && <span className="muted"> ({employee.nickname})</span>}
             </h1>

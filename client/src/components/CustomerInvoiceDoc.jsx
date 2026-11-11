@@ -1,4 +1,4 @@
-import { amountText, bahtText, docDate } from '../labels.js';
+import { amountText, bahtText, docDate, isPaidReceipt, isClosedWithoutPayment } from '../labels.js';
 import { ISSUER, TRANSFER_PAYMENT_INSTRUCTION, printStamp } from '../lib/issuer.js';
 import { customerAddonDescription, customerItemDescription, withTitle } from '../lib/customerInvoice.js';
 
@@ -81,11 +81,13 @@ export function DocHeader({ title, copy }) {
 }
 
 export default function CustomerInvoiceDoc({ item, signer }) {
-  const isReceipt = item.status === 'paid';
+  // ใบเสร็จต้องมีเงินรับจริง — ปิดยอดด้วยหนี้สูญ/ลดหนี้จนหมดยังเป็นใบแจ้งหนี้ที่ไม่มียอดค้าง (ดู isPaidReceipt)
+  const isReceipt = isPaidReceipt(item);
+  const closedNoPay = isClosedWithoutPayment(item);
   const isCancelled = item.status === 'cancelled';
   const hasPayment = Number(item.paid_amount ?? 0) > 0;
   const isPaymentProof = isReceipt || (isCancelled && hasPayment);
-  const pay = paidBy(item.payments, item.payment_method, item.total, item.status, item.paid_amount);
+  const pay = paidBy(item.payments, item.payment_method, item.total, closedNoPay ? 'issued' : item.status, item.paid_amount);
   const { addons, serviceAmount } = splitAddons(item);
   const printerName = signer ?? '';
   /* ใบลดหนี้/เพิ่มหนี้ที่มีผลอยู่ — ยอดหน้าใบ (total) ไม่เปลี่ยน ยอดที่ต้องจ่ายจริงคือ net_total (ดู server ledger.js) */
@@ -199,8 +201,15 @@ export default function CustomerInvoiceDoc({ item, signer }) {
           <td colSpan={3} className="inv-r">
             {isPaymentProof ? 'รับชำระแล้ว/Paid' : isCancelled ? 'สถานะ/Status' : 'ยอดที่ต้องชำระ/Amount Due'}
           </td>
-          <td className="inv-r"><strong>{isPaymentProof ? amountText(item.paid_amount ?? netTotal) : isCancelled ? 'ยกเลิกแล้ว' : amountText(netTotal)}</strong></td>
+          <td className="inv-r"><strong>{isPaymentProof ? amountText(item.paid_amount ?? netTotal) : isCancelled ? 'ยกเลิกแล้ว' : closedNoPay ? amountText(0) : amountText(netTotal)}</strong></td>
         </tr>
+        {closedNoPay && (
+          <tr>
+            <td colSpan={4} className="inv-r">
+              ปิดยอดแล้ว — {Number(item.bad_debt_amount ?? 0) > 0 ? 'ตัดหนี้สูญ' : 'ลดหนี้/คืนเงินเต็มจำนวน'} ไม่มียอดค้างชำระ (เอกสารนี้ไม่ใช่ใบเสร็จรับเงิน)
+            </td>
+          </tr>
+        )}
         {/* ใบที่รับเงินมาบางส่วนแล้ว ต้องอ่านออกจากตัวเอกสารว่ารับไปเท่าไหร่และค้างเท่าไหร่
             ไม่งั้นลูกค้าถือใบที่เขียนยอดเต็มไว้ ทั้งที่จ่ายมัดจำไปแล้ว */}
         {!isCancelled && item.paid_amount > 0 && item.balance > 0 && (
@@ -218,7 +227,7 @@ export default function CustomerInvoiceDoc({ item, signer }) {
         {(!isCancelled || hasPayment) && (
           <tr>
             <td colSpan={4} className="inv-r inv-words">
-              ( {bahtText(isCancelled ? item.paid_amount : item.balance > 0 && item.paid_amount > 0 ? item.balance : isPaymentProof ? (item.paid_amount ?? netTotal) : netTotal)} )
+              ( {bahtText(isCancelled ? item.paid_amount : closedNoPay ? 0 : item.balance > 0 && item.paid_amount > 0 ? item.balance : isPaymentProof ? (item.paid_amount ?? netTotal) : netTotal)} )
             </td>
           </tr>
         )}

@@ -5,7 +5,7 @@ import CustomerInvoiceDoc from '../components/CustomerInvoiceDoc.jsx';
 import ReceiptDoc from '../components/ReceiptDoc.jsx';
 import AdjustmentNoteDoc from '../components/AdjustmentNoteDoc.jsx';
 import { ISSUER } from '../lib/issuer.js';
-import { amountText } from '../labels.js';
+import { amountText, isPaidReceipt } from '../labels.js';
 import { usePrintFit } from '../lib/printFit.js';
 
 /**
@@ -38,7 +38,7 @@ export default function PublicBillPage() {
      ลูกค้าที่จ่ายเงินมาแล้วต้องไม่เสียหลักฐานเพราะทีมยกเลิกใบ แต่ต้องรู้ด้วยว่ามันถูกยกเลิกแล้ว */
   const invoiceName = item?.status === 'cancelled'
     ? (Number(item.paid_amount) > 0 ? 'หลักฐานการชำระเงิน (ใบถูกยกเลิก)' : 'ใบแจ้งหนี้ที่ถูกยกเลิก')
-    : item?.status === 'paid' ? 'ใบเสร็จรับเงิน' : 'ใบแจ้งหนี้';
+    : isPaidReceipt(item) ? 'ใบเสร็จรับเงิน' : 'ใบแจ้งหนี้';
   const docName = viewReceipt ? 'ใบเสร็จรับเงิน' : viewNote ? (viewNote.kind === 'credit' ? 'ใบลดหนี้' : 'ใบเพิ่มหนี้') : invoiceName;
   const docNo = viewReceipt?.receipt_id ?? viewNote?.note_id ?? item?.invoice_id;
 

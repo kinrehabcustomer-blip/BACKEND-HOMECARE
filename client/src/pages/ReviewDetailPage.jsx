@@ -123,7 +123,7 @@ export default function ReviewDetailPage() {
       <header className="page-head">
         <div>
           <p className="muted"><Link className="link" to="/reviews">← คะแนนประเมินจากญาติ</Link></p>
-          <h1>{employee.first_name} {employee.last_name}</h1>
+          <h1 className="entity-title">{employee.first_name} {employee.last_name}</h1>
           <p className="muted">
             <span className="mono">{employee.employee_id}</span>
             {employee.status !== 'active' && ` · ${STATUS_LABELS[employee.status] ?? employee.status}`}

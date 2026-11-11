@@ -157,6 +157,16 @@ export const ADJUSTMENT_REASON_LABELS = Object.fromEntries(
   [...ADJUSTMENT_REASON_OPTIONS.credit, ...ADJUSTMENT_REASON_OPTIONS.debit],
 );
 
+/**
+ * ใบนี้พิมพ์/ส่งเป็น "ใบเสร็จรับเงิน" ได้ไหม — ต้องปิดยอดแล้ว และมีเงินรับมาจริงหลังหักเงินคืน (ตรวจ 11 พ.ย. 2569)
+ * ใบที่ปิดเพราะตัดหนี้สูญ/ลดหนี้จนเหลือ 0 โดยไม่ได้รับเงิน (หรือรับแล้วคืนหมด) สถานะเป็น paid ก็จริง
+ * แต่เดิมพิมพ์ออกมาเป็นใบเสร็จ "รับชำระแล้ว 0.00" ทั้งเอกสาร ลิงก์ลูกค้า และใบฝ่ายการเงิน — ไม่มีการรับเงินให้เป็นหลักฐาน
+ * server ใช้เกณฑ์เดียวกันตอนส่ง LINE (billKind ใน invoices/share.js)
+ */
+export const isPaidReceipt = (item) => item?.status === 'paid' && Number(item?.paid_amount ?? 0) > 0;
+/** ปิดยอดแล้วแต่ไม่มีเงินรับจริง (ตัดหนี้สูญ / ลดหนี้เต็มจำนวน / รับแล้วคืนหมด) */
+export const isClosedWithoutPayment = (item) => item?.status === 'paid' && !isPaidReceipt(item);
+
 /** ป้ายสถานะของใบ — ใบที่ปิดด้วยหนี้สูญต้องไม่ขึ้นว่า "ชำระแล้ว" เฉย ๆ (แผนแก้ระบบการเงิน L4) */
 export function invoiceStatusLabel(item) {
   if (item?.status === 'paid' && Number(item.bad_debt_amount ?? 0) > 0) return 'ปิดยอด · ตัดหนี้สูญ';

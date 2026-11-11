@@ -2199,8 +2199,11 @@ describe('อุปกรณ์เสริมของเคส', () => {
       unbilledAddons([gloves], [{ ...gloves, quantity: 1 }, { ...gloves, quantity: 2 }]),
       [],
     );
-    // ราคาเปลี่ยน = คนละรายการ · หัตถการแยกกันด้วย VN
-    assert.deepEqual(unbilledAddons([{ ...bed, unit_price: 4000 }], [bed]), [{ ...bed, unit_price: 4000 }]);
+    // ราคาเปลี่ยนหลังเก็บไปแล้ว = รายการเดิม ไม่ค้างเก็บซ้ำทั้งก้อน (ส่วนต่างปรับด้วยใบเพิ่มหนี้/ลดหนี้ · ตรวจ 11 พ.ย. 2569)
+    assert.deepEqual(unbilledAddons([{ ...bed, unit_price: 4000 }], [bed]), []);
+    // ชื่อเดียวกันคนละราคา 2 บรรทัด เก็บไปแล้ว 1 = ค้างอีก 1 บรรทัด
+    assert.deepEqual(unbilledAddons([bed, { ...bed, unit_price: 4000 }], [bed]), [{ ...bed, unit_price: 4000 }]);
+    // หัตถการแยกกันด้วย VN
     const wound2 = { ...wound, vn: 'VN690000002' };
     assert.deepEqual(unbilledAddons([wound, wound2], [wound]), [wound2]);
     // ข้อมูลเก่าที่ติด kind: 'rent' นับเป็นรายการเดียวกับของที่ไม่ติด kind

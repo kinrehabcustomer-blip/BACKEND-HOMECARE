@@ -85,6 +85,10 @@ export default function RevenueChart() {
       yAxis: {
         type: 'value',
         min: 0,
+        /* เงินเป็นบาทเต็ม — ช่วงที่ยังไม่มีเงินเข้าเลย แกนเคยแบ่งเป็น ฿0.2 ฿0.4 … ฿1 ดูเหมือนกราฟเพี้ยน (ตรวจ 11 พ.ย. 2569)
+           ไม่มีเงินเข้าทั้งช่วง = ตรึงเพดาน 1,000 (เส้นแบนที่ ฿0 กับแกนที่อ่านรู้เรื่อง) · มีเงินเข้า = ให้กราฟคิดช่วงเองเหมือนเดิม */
+        minInterval: 1,
+        ...(data.every((r) => !Number(r.revenue)) ? { max: 1000 } : {}),
         axisLabel: { color: tokens.muted, fontFamily: tokens.font, formatter: axisMoney },
         // เส้นตารางแนวนอนอย่างเดียว จางๆ พอให้กวาดตาไปหาค่าได้ ไม่แย่งสายตาไปจากเส้นข้อมูล
         splitLine: { lineStyle: { color: tokens.divider } },

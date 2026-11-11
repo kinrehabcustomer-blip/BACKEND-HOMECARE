@@ -3,6 +3,7 @@ import { api } from '../api.js';
 import CaseFamilyChat from '../components/CaseFamilyChat.jsx';
 import ErrorBar from '../components/ErrorBar.jsx';
 import { caseCode } from '../lib/patientCode.js';
+import { SERVICE_KIND_LABELS, serviceKindOf } from '../labels.js';
 
 const CLOSED = ['closed', 'cancelled'];
 
@@ -85,7 +86,9 @@ export default function MyChatPage() {
                       <span className={`mychat-avatar ${closed ? 'is-closed' : ''}`}>{initialOf(c.client_name)}</span>
                       <span className="mychat-meta">
                         <strong>{c.client_name}</strong>
-                        <span className="muted mono">{caseCode(c.case_id)}</span>
+                        {/* บอกสายบริการด้วย — เคส Homecare กับแพ็กกายภาพเสริมของคนเดียวกันขึ้นรหัส KN เดียวกัน (ตัด -R)
+                            เดิมเห็นสองแถวหน้าตาเหมือนกันทุกตัวอักษร ไม่รู้ว่าแถวไหนคือห้องแชทของเคสไหน (ตรวจจอมือถือ 11 พ.ย. 2569) */}
+                        <span className="muted mono">{caseCode(c.case_id)} · {SERVICE_KIND_LABELS[serviceKindOf(c)]}</span>
                       </span>
                       {closed && <span className="badge">จบแล้ว</span>}
                     </button>

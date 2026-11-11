@@ -94,11 +94,18 @@ async function invoiceSnapshot(tx, invoiceId, { lock = true } = {}) {
   );
 }
 
+/**
+ * ข้อความ LINE ส่งเป็น "ใบเสร็จ" เฉพาะใบที่ปิดยอดด้วยเงินที่รับมาจริง (ตรวจ 11 พ.ย. 2569)
+ * ใบที่ปิดเพราะตัดหนี้สูญ/ลดหนี้จนเหลือ 0 โดยไม่มีเงินเข้า (หรือรับแล้วคืนหมด) สถานะเป็น paid ก็จริง
+ * แต่ส่งเป็นใบเสร็จ "รับชำระแล้ว 0.00" ไม่ได้ — ไม่มีการรับเงินให้เป็นหลักฐาน
+ */
+const billKind = (invoice) => (invoice.status === 'paid' && Number(invoice.paid_amount ?? 0) > 0 ? 'receipt' : 'invoice');
+
 function shareSummary(invoice, url) {
   const total = Number(invoice.total ?? 0);
   const paid = Number(invoice.paid_amount ?? 0);
   return {
-    kind: invoice.status === 'paid' ? 'receipt' : 'invoice',
+    kind: billKind(invoice),
     invoice_id: invoice.invoice_id,
     patient_name: invoice.patient_name ?? null,
     total,
@@ -165,7 +172,7 @@ async function queueLineSendTx(tx, invoiceId, user) {
      FOR UPDATE`,
     { id: invoice.invoice_id },
   );
-  const currentKind = invoice.status === 'paid' ? 'receipt' : 'invoice';
+  const currentKind = billKind(invoice);
   if (pending?.payload?.kind === currentKind) {
     return { queued: false, already: true, pending_id: pending.id, url: pending.payload.url };
   }
@@ -281,6 +288,8 @@ export function publicInvoice(inv) {
     amount: inv.amount, discount: inv.discount, total: inv.total,
     net_total: inv.net_total ?? inv.total, refunded_amount: inv.refunded_amount ?? 0,
     paid_amount: inv.paid_amount ?? 0, balance: inv.balance ?? 0,
+    // ใบที่ปิดยอดโดยไม่มีเงินเข้า เอกสารบอกว่า "ตัดหนี้สูญ" หรือ "ลดหนี้เต็มจำนวน" (CustomerInvoiceDoc)
+    bad_debt_amount: inv.bad_debt_amount ?? 0,
     /* ใบลดหนี้/เพิ่มหนี้ที่มีผลอยู่ — ยอดบนเอกสารลูกค้าต้องอ่านออกว่าทำไมไม่เท่ายอดหน้าใบ
        ส่งครบเท่าที่พิมพ์บนตัวเอกสาร (AdjustmentNoteDoc) ลูกค้าเปิดดูทีละใบได้ · ไม่ส่งใบที่ยกเลิก/เหตุผลยกเลิก */
     adjustments: (inv.adjustments ?? [])

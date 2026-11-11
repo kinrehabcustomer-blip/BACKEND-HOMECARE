@@ -7,7 +7,7 @@ import { useSheetSwipe } from '../lib/sheetSwipe.js';
 import { useScrollLock } from '../lib/scrollLock.js';
 import { usePrintFit } from '../lib/printFit.js';
 import {
-  ADJUSTMENT_REASON_LABELS, ADJUSTMENT_REASON_OPTIONS, amountText, docDate, invoiceStatusLabel, todayTH,
+  ADJUSTMENT_REASON_LABELS, ADJUSTMENT_REASON_OPTIONS, amountText, docDate, invoiceStatusLabel, todayTH, isPaidReceipt,
 } from '../labels.js';
 import LineIcon from './LineIcon.jsx';
 import ConfirmButton from './ConfirmButton.jsx';
@@ -297,7 +297,8 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
   }
 
   // ชำระแล้วถือเป็น "ใบเสร็จรับเงิน" ตามธรรมเนียมเอกสารไทย · ยังไม่ชำระคือ "ใบแจ้งหนี้"
-  const isReceipt = item?.status === 'paid';
+  // ใบเสร็จ = ปิดยอดด้วยเงินที่รับมาจริง · ปิดด้วยหนี้สูญ/ลดหนี้จนหมดยังเป็นใบแจ้งหนี้ (ดู isPaidReceipt)
+  const isReceipt = isPaidReceipt(item);
   const showFinance = isReceipt && docView === 'finance';
   // ใบเสร็จรายครั้ง / ใบลดหนี้-เพิ่มหนี้ที่เลือกดูอยู่ (ไม่พบ = ใบถูกโหลดใหม่แล้วเอกสารนั้นหาย → กลับไปดูใบแจ้งหนี้)
   const viewReceipt = docView.startsWith('rc:') ? item?.receipts?.find((r) => r.receipt_id === docView.slice(3)) : null;

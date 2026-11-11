@@ -1,7 +1,7 @@
 import { sql } from '../db/index.js';
 import { can, loadPermissions } from '../lib/auth.js';
 import { BACK_POSITIONS } from '../employees/schema.js';
-import { LATE_THRESHOLD_MINUTES } from '../cases/repo.js';
+import { LATE_THRESHOLD_MINUTES, staleAfterMinutesSql } from '../cases/repo.js';
 
 /**
  * ข้อมูลของ "สรุปประจำวัน" ที่ส่งให้ผู้จัดการทางอีเมล
@@ -38,12 +38,12 @@ export const missedShifts = ({ today, since }) =>
     { today, since },
   );
 
-/** เช็คอินแล้วไม่เช็คเอาท์เกิน 16 ชม. — ตรงกับเกณฑ์ 'stale' ที่หน้าเว็บใช้ */
+/** เช็คอินแล้วไม่เช็คเอาท์เกินความยาวกะ + 4 ชม. (อย่างน้อย 16 ชม.) — ตรงกับเกณฑ์ 'stale' ที่หน้าเว็บใช้ (staleAfterHours) */
 export const staleShifts = () =>
   sql.all(
     `${VISIT_ROW}
      WHERE v.status = 'scheduled' AND v.check_in_at IS NOT NULL AND v.check_out_at IS NULL
-       AND v.check_in_at < now() - interval '16 hours'
+       AND v.check_in_at < now() - make_interval(mins => ${staleAfterMinutesSql('v')})
      ORDER BY v.check_in_at`,
   );
 

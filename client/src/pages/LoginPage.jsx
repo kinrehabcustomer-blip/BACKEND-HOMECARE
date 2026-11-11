@@ -156,7 +156,8 @@ export default function LoginPage() {
             required
             autoCapitalize="none"
             spellCheck={false}
-            placeholder="you@kin.co.th หรือรหัสพนักงาน เช่น A6901059"
+            // สั้นพอให้จบในช่องบนจอมือถือ — เดิมยาวจนถูกตัดเหลือ "…เช่น A6" (ป้ายเหนือช่องบอกแล้วว่ากรอกอีเมลหรือรหัสก็ได้)
+            placeholder="เช่น A6901059 หรืออีเมล"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
           />

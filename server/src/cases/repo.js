@@ -1463,21 +1463,31 @@ async function caseForTransition(tx, caseId, allowed) {
  * และกะที่ยกเลิก — ต้องเรียกหลังล็อกแถวเคสแล้ว (caseForTransition) ลำดับล็อกจึงเหมือนเช็คอิน/ปิดเคส
  */
 async function moveFutureVisits(tx, caseId, { from, to, includeUnassigned = false }) {
-  if (!from && !includeUnassigned) return 0;
-  return tx.run(
+  if (!from && !includeUnassigned) return [];
+  /* ล้างธง "เตือนพนักงานแล้ว" ของกะที่ย้ายคน (ตรวจ 11 พ.ย. 2569) — กติกาเดียวกับ updateVisit
+     เดิมไม่ล้าง: คนเดิมได้เตือนวันก่อนนัดไปแล้ว → ย้ายกะให้คนใหม่ → คนใหม่ไม่ได้เตือนเลยเพราะธงบอกว่าเตือนแล้ว
+     ธงเตือนญาติไม่แตะ — วันเวลานัดไม่ได้เปลี่ยน ญาติรู้นัดอยู่แล้ว
+     ผู้เรียกต้อง ensureVisitReminderColumns() ก่อนเปิด transaction (คอลัมน์สร้างแบบ lazy)
+     คืนแถวที่ย้าย — removeTeamMember ใช้แจ้งคนหลักที่รับกะต่อ */
+  return tx.all(
     `UPDATE case_visits
-     SET assigned_to = :to, updated_at = ${NOW}
+     SET assigned_to = :to, remind_day_at = NULL, remind_3h_at = NULL, updated_at = ${NOW}
      WHERE case_id = :case_id AND status <> 'cancelled' AND check_in_at IS NULL
        AND visit_date >= :today
        AND (assigned_to = :from ${includeUnassigned ? 'OR assigned_to IS NULL' : ''})
-       AND assigned_to IS DISTINCT FROM :to`,
+       AND assigned_to IS DISTINCT FROM :to
+     RETURNING visit_id, visit_date, planned_start, planned_end, assigned_to, status`,
     { case_id: caseId, from: from ?? null, to: to ?? null, today: isoDateTH(new Date()) },
   );
 }
 
-const movedNote = (n, who) => (n > 0 ? ` · ย้ายกะที่ยังไม่ถึงวัน ${n} กะ${who ? `ให้ ${who}` : ' (ยังไม่มีคนรับ)'}` : '');
+const movedNote = (rows, who) => {
+  const n = rows?.length ?? 0;
+  return n > 0 ? ` · ย้ายกะที่ยังไม่ถึงวัน ${n} กะ${who ? `ให้ ${who}` : ' (ยังไม่มีคนรับ)'}` : '';
+};
 
 export async function assign(caseId, employeeId, actor) {
+  await ensureVisitReminderColumns(); // moveFutureVisits ล้างธงเตือน — คอลัมน์ต้องมีก่อนเปิด transaction
   await transaction(async (tx) => {
     const previous = await caseForTransition(tx, caseId, ACTIVE_CASE_STATES);
 
@@ -1538,6 +1548,9 @@ export async function start(caseId, actor) {
 }
 
 /** ยกเลิกเคส — เก็บพนักงานที่เคยรับและเหตุผลไว้เป็นประวัติ ไม่ล้างทิ้ง */
+/** ป้ายของใบร่างที่ระบบยกเลิกให้ตอนยกเลิกเคส — reopen คืนเฉพาะใบที่มีป้ายนี้และเวลาตรงกับการยกเลิกเคสครั้งนั้น */
+const AUTO_CANCEL_INVOICE_REASON = 'ระบบยกเลิกอัตโนมัติ — เคสถูกยกเลิก';
+
 export async function cancel(caseId, reason, actor) {
   await transaction(async (tx) => {
     await caseForTransition(tx, caseId, ACTIVE_CASE_STATES);
@@ -1567,12 +1580,25 @@ export async function cancel(caseId, reason, actor) {
 
     /* ใบแจ้งหนี้ร่างของเคสนี้ (ยังไม่ส่งลูกค้า ไม่มีเงินเข้า) ยกเลิกตามไปด้วย — เคยค้างไว้แล้วกดออกใบ/รับเงินได้
        ทั้งที่เคสถูกยกเลิกแล้ว · ใบที่ออกไปแล้วหรือรับเงินมาแล้วไม่แตะ (เป็นเอกสารที่ลูกค้าถืออยู่ ต้องจัดการที่ใบเอง) */
+    /* (ตรวจ 11 พ.ย. 2569) ติดป้ายว่า "ระบบยกเลิกตามเคส" + เวลาเดียวกับเคส — เปิดเคสกลับแล้วคืนใบพวกนี้ได้ (ดู reopen)
+       เดิมไม่ติดป้าย: แบ่งมัดจำไว้ (มัดจำจ่ายแล้ว · ส่วนที่เหลือยังร่าง) → ยกเลิกเคส → ใบส่วนที่เหลือถูกยกเลิก
+       → เปิดเคสกลับ ใบไม่กลับมา และไม่มีอะไรเตือนว่าเงินก้อนนั้นไม่มีใบเก็บแล้ว
+       ไม่แตะใบร่างที่เป็นงวดหนึ่งของแผนวางบิลซึ่งอีกงวดออก/รับเงินไปแล้ว — ยกเลิกครึ่งแผนแล้วยอดสองใบไม่รวมเท่ายอดเต็ม
+       (กติกาเดียวกับ cancelPlanPart) ปล่อยให้คนตัดสินที่ใบเอง หน้าใบแจ้งหนี้ขึ้นป้าย "เคสถูกยกเลิก" อยู่แล้ว */
     const draftsCancelled = await tx.run(
       `UPDATE invoices
-       SET status = 'cancelled', updated_at = ${NOW}
+       SET status = 'cancelled', cancel_reason = :auto_reason, cancelled_at = ${NOW},
+           cancelled_by = :by, cancelled_by_name = :by_name, updated_at = ${NOW}
        WHERE case_id = :case_id AND status = 'draft'
-         AND NOT EXISTS (SELECT 1 FROM invoice_payments ip WHERE ip.invoice_id = invoices.invoice_id)`,
-      { case_id: caseId },
+         AND NOT EXISTS (SELECT 1 FROM invoice_payments ip WHERE ip.invoice_id = invoices.invoice_id)
+         AND NOT EXISTS (
+           SELECT 1 FROM invoices sib
+           WHERE sib.invoice_id <> invoices.invoice_id
+             AND COALESCE(sib.parent_invoice_id, sib.invoice_id) = COALESCE(invoices.parent_invoice_id, invoices.invoice_id)
+             AND (invoices.parent_invoice_id IS NOT NULL OR sib.parent_invoice_id IS NOT NULL)
+             AND (sib.status IN ('issued', 'paid')
+                  OR EXISTS (SELECT 1 FROM invoice_payments sp WHERE sp.invoice_id = sib.invoice_id)))`,
+      { case_id: caseId, auto_reason: AUTO_CANCEL_INVOICE_REASON, by: actor?.employee_id ?? null, by_name: actor?.name ?? null },
     );
 
     const dropped = (Number(n) > 0 ? ` — ยกเลิกกะที่ยังไม่ได้ไป ${Number(n)} กะด้วย` : '')
@@ -1628,7 +1654,12 @@ export async function addTeamMember(caseId, employeeId, actor) {
 }
 
 /** นำคนออกจากทีม — ไม่แตะผู้รับผิดชอบหลัก (คนหลักถอดด้วย unassign เท่านั้น) */
+/**
+ * นำคนออกจากทีม — คืน false ถ้าไม่ได้อยู่ในทีม · ไม่งั้นคืน { moved } = กะข้างหน้าที่ย้ายไปให้คนหลัก
+ * (route แจ้งคนหลักว่าได้กะเพิ่ม — เดิมคนหลักรับกะไปเงียบๆ ไม่มีใครบอก · ตรวจ 11 พ.ย. 2569)
+ */
 export async function removeTeamMember(caseId, employeeId, actor) {
+  await ensureVisitReminderColumns();
   return transaction(async (tx) => {
     // Serialize with unassign, which may promote this member to lead worker.
     const row = await caseForTransition(tx, caseId, [...ACTIVE_CASE_STATES, 'closed', 'cancelled']);
@@ -1637,6 +1668,15 @@ export async function removeTeamMember(caseId, employeeId, actor) {
       { case_id: caseId, employee_id: employeeId },
     );
     if (removed === 0) return false;
+
+    /* กะที่ระบบยกเลิกให้ตอนปิด/ยกเลิกเคส ซึ่งยังเป็นชื่อคนนี้ — ปล่อยว่างไว้ ไม่งั้นเปิดเคสกลับแล้วคนที่ถูกถอดได้กะคืน
+       (reopen ตรวจคนในกะอีกชั้นอยู่แล้ว ตรงนี้กันอีกทางให้ข้อมูลไม่ค้างชื่อคนที่ไม่อยู่ในเคสแล้ว) */
+    await tx.run(
+      `UPDATE case_visits SET assigned_to = NULL, updated_at = ${NOW}
+       WHERE case_id = :case_id AND assigned_to = :emp AND auto_cancelled_at IS NOT NULL
+         AND status = 'cancelled' AND check_in_at IS NULL`,
+      { case_id: caseId, emp: employeeId },
+    );
 
     // คนที่ออกจากทีมไม่ควรมีงานข้างหน้าของเคสนี้ค้างอยู่ — คืนให้คนหลักของเคส (ไม่มีคนหลัก = ปล่อยว่างรอจัดคน)
     const moved = await moveFutureVisits(tx, caseId, { from: employeeId, to: row.assigned_to });
@@ -1649,11 +1689,12 @@ export async function removeTeamMember(caseId, employeeId, actor) {
       `นำ ${await staffLabel(tx, employeeId)} ออกจากทีมดูแลเคส` + movedNote(moved, lead),
       actor,
     );
-    return true;
+    return { moved: row.assigned_to ? moved : [] };
   });
 }
 
 export async function unassign(caseId, actor) {
+  await ensureVisitReminderColumns();
   await transaction(async (tx) => {
     const previous = await caseForTransition(tx, caseId, ACTIVE_CASE_STATES);
 
@@ -1798,6 +1839,9 @@ export async function reopen(caseId, actor) {
       );
     }
 
+    // ค่าก่อนล้าง — ใช้หาใบแจ้งหนี้ที่ระบบยกเลิกให้ตอนยกเลิกเคสครั้งนี้ (ดูด้านล่าง)
+    const before = await tx.one('SELECT status, cancelled_at FROM cases WHERE case_id = :id', { id: caseId });
+
     await tx.run(
       `UPDATE cases
        SET status = CASE WHEN assigned_to IS NULL THEN 'unassigned' ELSE 'assigned' END,
@@ -1809,29 +1853,67 @@ export async function reopen(caseId, actor) {
       { case_id: caseId },
     );
 
+    /* เคสนี้ต่อเป็นรอบใหม่ไปแล้ว (ตรวจ 11 พ.ย. 2569) — งานช่วงหลังวันปิดย้ายไปอยู่รอบใหม่แล้ว
+       เดิมคืนกะทุกกะที่ถูกยกเลิกตอนปิด → กะวันเดียวกันขึ้นทั้งรอบเก่าและรอบใหม่ พนักงานเห็นงานซ้ำ ได้แจ้งเตือนซ้ำ
+       ตอนนี้: มีรอบใหม่ที่ยังไม่ยกเลิก = ไม่คืนกะ (เปิดเคสกลับมาเพื่อแก้ข้อมูล ไม่ใช่เพื่อกลับไปทำงานซ้ำ) */
+    const renewal = await tx.one(
+      `SELECT case_id FROM cases WHERE renewed_from = :id AND status <> 'cancelled'
+       ORDER BY created_at DESC LIMIT 1`,
+      { id: caseId },
+    );
+
     /* กะที่ระบบยกเลิกให้ตอนปิด/ยกเลิกเคส (auto_cancelled_at) คืนกลับเป็น "นัดไว้" — เปิดเคสใหม่ส่วนใหญ่
        คือกดปิดผิดหรือลูกค้ากลับมา ถ้าไม่คืน ตารางทั้งเดือนข้างหน้าหายไปแล้วต้องลงใหม่ทีละวัน
        คืนเฉพาะวันนี้เป็นต้นไป (วันที่ผ่านไปแล้วไม่มีใครไปทำย้อนหลังได้) และไม่แตะกะที่คนกดยกเลิกเอง
-       ล้างธงทั้งเคสทิ้ง — กะเก่าที่ไม่ได้คืนต้องไม่ถูกคืนตอนปิด–เปิดรอบหน้า */
-    const restored = await tx.run(
-      `UPDATE case_visits
-       SET status = 'scheduled', updated_at = ${NOW}
-       WHERE case_id = :case_id AND auto_cancelled_at IS NOT NULL AND status = 'cancelled'
-         AND check_in_at IS NULL AND visit_date >= :today`,
-      { case_id: caseId, today: isoDateTH(new Date()) },
+       ล้างธงทั้งเคสทิ้ง — กะเก่าที่ไม่ได้คืนต้องไม่ถูกคืนตอนปิด–เปิดรอบหน้า
+
+       คนในกะ (ตรวจ 11 พ.ย. 2569): คืนให้คนเดิมเฉพาะคนที่ยังอยู่ในเคส (คนหลัก/ทีม) และยังรับงานได้
+       ไม่งั้นคนที่ถูกถอดออกจากเคส/ลาออกระหว่างที่เคสปิด ได้กะคืน เช็คอินได้ และกลับมาเห็นข้อมูลผู้รับบริการ
+       คนที่ไม่อยู่แล้ว → กะไปที่คนหลักของเคส (ถ้ายังรับงานได้) ไม่งั้นปล่อยว่างให้จับคู่ใหม่ */
+    const ableSql = (col) => `EXISTS (SELECT 1 FROM employees e WHERE e.employee_id = ${col}
+                                        AND e.status IN ('active', 'probation') AND e.position = ANY(:front::text[]))`;
+    const restored = renewal ? 0 : await tx.run(
+      `UPDATE case_visits v
+       SET status = 'scheduled',
+           assigned_to = CASE
+             WHEN (v.assigned_to = c.assigned_to
+                   OR EXISTS (SELECT 1 FROM case_team t WHERE t.case_id = v.case_id AND t.employee_id = v.assigned_to))
+                  AND ${ableSql('v.assigned_to')} THEN v.assigned_to
+             WHEN c.assigned_to IS NOT NULL AND ${ableSql('c.assigned_to')} THEN c.assigned_to
+             ELSE NULL
+           END,
+           updated_at = ${NOW}
+       FROM cases c
+       WHERE c.case_id = v.case_id
+         AND v.case_id = :case_id AND v.auto_cancelled_at IS NOT NULL AND v.status = 'cancelled'
+         AND v.check_in_at IS NULL AND v.visit_date >= :today`,
+      { case_id: caseId, today: isoDateTH(new Date()), front: FRONT_POSITIONS },
     );
     await tx.run(
       'UPDATE case_visits SET auto_cancelled_at = NULL WHERE case_id = :case_id AND auto_cancelled_at IS NOT NULL',
       { case_id: caseId },
     );
 
-    await logEvent(
-      tx,
-      caseId,
-      'reopened',
-      restored > 0 ? `เปิดเคสใหม่ · คืนกะที่ถูกยกเลิกตอนปิดเคส ${restored} กะ` : 'เปิดเคสใหม่',
-      actor,
-    );
+    /* ใบแจ้งหนี้ร่างที่ระบบยกเลิกให้ตอนยกเลิกเคสครั้งนี้ คืนกลับเป็นร่าง (ตรวจ 11 พ.ย. 2569)
+       เช่น ใบส่วนที่เหลือของแผนมัดจำ — ไม่คืน = เงินก้อนนั้นไม่มีใบเก็บ และไม่มีอะไรเตือน
+       ระหว่างที่เคสถูกยกเลิก ออกใบใหม่ไม่ได้ (POST /api/invoices กันไว้) คืนแล้วจึงไม่ซ้ำกับใบอื่น */
+    const invoicesRestored = before?.status === 'cancelled' && before.cancelled_at
+      ? await tx.run(
+        `UPDATE invoices
+         SET status = 'draft', cancel_reason = NULL, cancelled_at = NULL,
+             cancelled_by = NULL, cancelled_by_name = NULL, updated_at = ${NOW}
+         WHERE case_id = :case_id AND status = 'cancelled'
+           AND cancel_reason = :auto_reason AND cancelled_at = :cancelled_at`,
+        { case_id: caseId, auto_reason: AUTO_CANCEL_INVOICE_REASON, cancelled_at: before.cancelled_at },
+      )
+      : 0;
+
+    const notes = [
+      restored > 0 && `คืนกะที่ถูกยกเลิกตอนปิดเคส ${restored} กะ`,
+      renewal && `ไม่คืนกะที่ถูกยกเลิกตอนปิดเคส เพราะต่อเป็นรอบใหม่แล้ว (${caseCode(renewal.case_id)})`,
+      invoicesRestored > 0 && `คืนใบแจ้งหนี้ร่างที่ถูกยกเลิกตามเคส ${invoicesRestored} ใบ`,
+    ].filter(Boolean);
+    await logEvent(tx, caseId, 'reopened', ['เปิดเคสใหม่', ...notes].join(' · '), actor);
   });
 
   return findById(caseId);
@@ -2069,6 +2151,20 @@ function removedDetail(rows) {
  * ไม่งั้นลบทิ้งแล้วไม่เหลือหลักฐานว่าวันนั้นมีนัดแต่ไม่มีใครไป
  * กะที่เช็คอินไปแล้วไม่ลบให้ (เป็นบันทึกการทำงานจริงและเป็นฐานค่าจ้าง) — คืนจำนวนที่ข้ามไปให้บอกผู้ใช้
  */
+/**
+ * ลบกะได้เฉพาะเคสที่ยังเดินอยู่ (ตรวจ 11 พ.ย. 2569) — ล็อกแถวเคสก่อน (ลำดับล็อกเดียวกับเช็คอิน/ปิดเคส)
+ * เคสที่ปิด/ยกเลิกแล้ว กะที่เหลือคือฐานของ "ค่าจ้างตามสัดส่วน" ของเคสที่ยกเลิกกลางคัน (กะที่ไป ÷ กะที่นัดทั้งหมด)
+ * เดิมลบกะที่ถูกยกเลิกทิ้งได้ → ตัวหารเหลือเท่ากะที่ไปจริง → ระบบเสนอจ่ายเต็มยอดเหมาทั้งที่ทำไม่ครบ
+ * จะเปลี่ยนนัดของเคสที่จบแล้วต้องเปิดเคสกลับมาก่อน (กติกาเดียวกับลงกะเพิ่ม)
+ */
+async function lockCaseForVisitDelete(tx, caseId) {
+  const row = await tx.one('SELECT status FROM cases WHERE case_id = :id FOR UPDATE', { id: caseId });
+  if (!row) throw new ApiError(404, 'ไม่พบเคสนี้');
+  if (['closed', 'cancelled'].includes(row.status)) {
+    throw new ApiError(409, 'เคสนี้จบไปแล้ว ลบกะไม่ได้ — กะที่เหลือเป็นฐานคิดค่าจ้างตามกะที่ไปจริง (ต้องเปิดเคสกลับมาก่อน)');
+  }
+}
+
 export async function removeVisitsOn(caseId, dates, actor = null, employeeId = null) {
   if (dates.length === 0) return { visits: await listVisits(caseId), deleted: 0, kept: 0, past: 0 };
 
@@ -2078,6 +2174,7 @@ export async function removeVisitsOn(caseId, dates, actor = null, employeeId = n
   await ensureVisitChangeTable();
   // ลบนัด = แจ้งพนักงาน + ญาติเหมือน "ยกเลิก" (ดร.ธงชัย 2 พ.ย. 2569 ข้อ 1) — เดิมลบเงียบ นักกายภาพยังเดินทางไป ญาติยังรอ
   const deleted = await transaction(async (tx) => {
+    await lockCaseForVisitDelete(tx, caseId);
     const gone = await tx.all(
       `DELETE FROM case_visits
        WHERE case_id = :id AND visit_date IN (${slots}) AND check_in_at IS NULL
@@ -2302,6 +2399,7 @@ export async function removeVisit(caseId, visitId, actor = null) {
   await ensureVisitChangeTable();
   // ลบนัด = แจ้งเหมือนยกเลิก (ดร.ธงชัย 2 พ.ย. 2569 ข้อ 1) · นัดที่ยกเลิกอยู่แล้ว/อยู่ในอดีต recordVisitChange ข้ามเอง
   return transaction(async (tx) => {
+    await lockCaseForVisitDelete(tx, caseId);
     const gone = await tx.one(
       `DELETE FROM case_visits
        WHERE visit_id = :visit_id AND case_id = :case_id AND check_in_at IS NULL
@@ -2358,9 +2456,47 @@ export const serverNowTH = () =>
             to_char(now() AT TIME ZONE 'Asia/Bangkok', 'HH24:MI')    AS time`,
   );
 
+/* ---------- กะยาว (24 ชม.) — เกณฑ์ "ค้างเช็คเอาท์" และเพดานกดออกเอง ตามความยาวกะที่นัดไว้ (11 พ.ย. 2569) ----------
+   เดิมตายตัว: ค้างเกิน 16 ชม. = ผิดปกติ · เกิน 24 ชม. = กดออกเองไม่ได้
+   กะ 24 ชม. (แพ็คเกจรายวัน/รายเดือน 24 ชม.) จึงขึ้นป้ายผิดปกติทุกกะตั้งแต่ชั่วโมงที่ 16
+   และส่งเวรช้าไปไม่กี่นาทีก็กดเช็คเอาท์ไม่ได้ ปุ่มหายจากหน้า "งานวันนี้" ต้องให้ผู้จัดการแก้ให้ทุกครั้ง
+   ตอนนี้: ค้างผิดปกติ = เกินความยาวกะ + 4 ชม. (อย่างน้อย 16 ชม. เหมือนเดิม)
+           กดออกเองได้ถึง ความยาวกะ + 6 ชม. (อย่างน้อย 24 ชม. เหมือนเดิม) — กะ 24 ชม. ได้ถึง 30 ชม. */
+const STALE_MIN_HOURS = 16;
+const STALE_GRACE_HOURS = 4;
+const CHECKOUT_GRACE_HOURS = 6;
+
+/** ความยาวกะที่นัดไว้ (ชั่วโมง) จาก planned_start/planned_end 'HH:MM' — ข้ามเที่ยงคืน/เวลาเท่ากัน = +24 ชม. · ไม่ได้นัดเวลา = null */
+export function plannedShiftHours(v) {
+  const mins = (t) => {
+    const m = /^(\d{1,2}):(\d{2})/.exec(String(t ?? ''));
+    return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+  };
+  const s = mins(v?.planned_start);
+  const e = mins(v?.planned_end);
+  if (s == null || e == null) return null;
+  const d = e - s;
+  return (d <= 0 ? d + 1440 : d) / 60;
+}
+
+/** ค้างเช็คเอาท์เกินกี่ชั่วโมงถือว่าผิดปกติ (สถานะ 'stale') */
+export const staleAfterHours = (v) => Math.max(STALE_MIN_HOURS, (plannedShiftHours(v) ?? 0) + STALE_GRACE_HOURS);
+
+/** ฉบับ SQL ของ staleAfterHours (นาที) — v = alias ของ case_visits · รูปแบบเวลาไม่ถูก = ใช้ค่าขั้นต่ำ */
+export const staleAfterMinutesSql = (v) => `GREATEST(${STALE_MIN_HOURS * 60}, ${STALE_GRACE_HOURS * 60} + COALESCE(
+  CASE WHEN ${v}.planned_start ~ '^[0-9]{1,2}:[0-9]{2}' AND ${v}.planned_end ~ '^[0-9]{1,2}:[0-9]{2}' THEN
+    (SELECT CASE WHEN d <= 0 THEN d + 1440 ELSE d END
+       FROM (SELECT (split_part(${v}.planned_end, ':', 1)::int * 60 + substr(split_part(${v}.planned_end, ':', 2), 1, 2)::int)
+                  - (split_part(${v}.planned_start, ':', 1)::int * 60 + substr(split_part(${v}.planned_start, ':', 2), 1, 2)::int) AS d) x)
+  END, 0))`;
+
+/** กดเช็คเอาท์เองได้ภายในกี่ชั่วโมงหลังเช็คอิน — เกินนี้ต้องให้ผู้จัดการแก้เวลาออก */
+export const checkOutLimitHours = (v) =>
+  Math.max(OPEN_SHIFT_CARRY_HOURS, (plannedShiftHours(v) ?? 0) + CHECKOUT_GRACE_HOURS);
+
 /**
  * สถานะกะที่คำนวณตอนอ่าน (ไม่เก็บใน DB) — จาก timestamps เทียบกับตอนนี้
- * cancelled · done (เช็คเอาท์แล้ว) · working (เช็คอินแล้วยังไม่ออก) · stale (ค้างเช็คเอาท์เกิน 16 ชม.)
+ * cancelled · done (เช็คเอาท์แล้ว) · working (เช็คอินแล้วยังไม่ออก) · stale (ค้างเช็คเอาท์เกินกะ + 4 ชม. ดู staleAfterHours)
  * · missed (เลยวันแล้วไม่เช็คอิน) · scheduled (รอเช็คอิน)
  * worked_minutes = นาทีที่ทำงานจริง (มีค่าเมื่อเช็คเอาท์แล้วเท่านั้น)
  */
@@ -2369,7 +2505,7 @@ export function withVisitState(v, now = new Date()) {
   let state;
   if (vStatus === 'cancelled') state = 'cancelled';
   else if (v.check_out_at) state = 'done';
-  else if (v.check_in_at) state = (now - new Date(v.check_in_at)) / 3.6e6 > 16 ? 'stale' : 'working';
+  else if (v.check_in_at) state = (now - new Date(v.check_in_at)) / 3.6e6 > staleAfterHours(v) ? 'stale' : 'working';
   else state = v.visit_date < isoDateTH(now) ? 'missed' : 'scheduled';
 
   const worked =
@@ -2393,6 +2529,8 @@ export const findVisit = (visitId) =>
  * จะได้ชั่วโมงทำงานเป็นหลักร้อย ซึ่งไหลเข้าสรุปค่าตอบแทนทันที ต้องให้ผู้จัดการแก้เวลาให้แทน
  */
 export const OPEN_SHIFT_CARRY_HOURS = 24;
+/** เพดานสูงสุดของกะที่ยาวที่สุด (24 ชม. + CHECKOUT_GRACE_HOURS) — ใช้ดึงกะค้างข้ามวันมาก่อน แล้วกรองรายกะด้วย checkOutLimitHours */
+const OPEN_SHIFT_MAX_HOURS = 24 + CHECKOUT_GRACE_HOURS;
 
 /**
  * กะของพนักงานคนหนึ่งในวันที่กำหนด — ตารางงาน "วันนี้"
@@ -2423,10 +2561,14 @@ export const visitsForEmployeeOn = (employeeId, date, { carryOpen = false } = {}
          )
        ORDER BY v.visit_date, v.planned_start NULLS FIRST, v.visit_id`,
       carryOpen
-        ? { emp: employeeId, date, carry_hours: OPEN_SHIFT_CARRY_HOURS }
+        ? { emp: employeeId, date, carry_hours: OPEN_SHIFT_MAX_HOURS }
         : { emp: employeeId, date },
     )
-    .then((rows) => rows.map((v) => withVisitState(v)));
+    .then((rows) => rows
+      // กะค้างข้ามวันอยู่บนหน้าได้เท่าที่ยังกดออกเองได้ (ตามความยาวกะ — ดู checkOutLimitHours)
+      .filter((v) => v.visit_date === date || !v.check_in_at
+        || (Date.now() - new Date(v.check_in_at).getTime()) / 3.6e6 <= checkOutLimitHours(v))
+      .map((v) => withVisitState(v)));
 
 /**
  * กะของ "คนที่ทำงานกะนั้นจริง" ในวันที่กำหนด — คนที่ถูกจัดไว้ (assigned_to) หรือคนที่กดเช็คอินแทน (checked_in_by)
@@ -3112,7 +3254,7 @@ export function payoutCases(month, employeeId) {
                  FROM (SELECT DISTINCT p.installment_no AS no FROM case_payouts p
                        WHERE p.case_id = c.case_id AND p.employee_id = :emp
                          AND substr(p.released_at, 1, 7) = :month) x) AS installments,
-              COALESCE((SELECT MAX(p.installment_no) FROM case_payouts p
+              COALESCE((SELECT COUNT(DISTINCT p.installment_no) FROM case_payouts p
                         WHERE p.case_id = c.case_id), 0) AS case_installments
        FROM cases c
        LEFT JOIN case_visits v
@@ -3274,7 +3416,7 @@ export function payQueue() {
               ${PLANNED_SHIFTS}           AS planned_shifts
        FROM cases c
        LEFT JOIN (
-         SELECT case_id, SUM(amount) AS released, MAX(installment_no) AS installments
+         SELECT case_id, SUM(amount) AS released, COUNT(DISTINCT installment_no) AS installments
          FROM case_payouts GROUP BY case_id
        ) p ON p.case_id = c.case_id
 
@@ -3509,13 +3651,12 @@ export function allocateShares(shares, amount) {
 export async function payStatus(caseId) {
   const [row, split, payouts] = await Promise.all([
     sql.one(
-      /* นับงวดจาก MAX ไม่ใช่ COUNT — ถอนงวดกลางคืนแล้วเลขงวดของงวดหลังต้องไม่เลื่อนตาม
-         (ถ้านับจำนวนแถว งวดที่ 3 จะกลายเป็นงวดที่ 2 ทั้งที่บนสลิปที่ปล่อยไปแล้วเขียนว่า 3) */
+      /* เลขงวดที่ใช้อยู่ทั้งหมด — ดู installmentSlots (เลขงวดเดิมไม่เลื่อน แต่งวดที่ถอนคืนแล้วได้ช่องคืน) */
       `SELECT c.staff_pay, c.fee, c.status,
               ${WORKED_SHIFTS}  AS worked_shifts,
               ${PLANNED_SHIFTS} AS planned_shifts,
               COALESCE((SELECT SUM(p.amount) FROM case_payouts p WHERE p.case_id = c.case_id), 0) AS released,
-              COALESCE((SELECT MAX(p.installment_no) FROM case_payouts p WHERE p.case_id = c.case_id), 0) AS last_installment
+              ${INSTALLMENT_NOS_SQL('c.case_id')} AS installment_nos
        FROM cases c WHERE c.case_id = :id`,
       { id: caseId },
     ),
@@ -3527,7 +3668,7 @@ export async function payStatus(caseId) {
   const total = row.staff_pay == null ? null : Number(row.staff_pay);
   const fee = row.fee == null ? null : Number(row.fee);
   const released = round(Number(row.released));
-  const last = Number(row.last_installment);
+  const slots = installmentSlots(row.installment_nos);
 
   /* ข้อตกลงส่วนแบ่ง: มีแถวไหม และรวมแล้วเท่ากับค่าจ้างของเคสหรือเปล่า
      ไม่ตรงได้จริงเมื่อค่าจ้างของเคสถูกแก้ทีหลัง หรือคนที่ตกลงไว้ถูกลบออกจากทะเบียน —
@@ -3571,12 +3712,30 @@ export async function payStatus(caseId) {
     payouts,
 
     max_installments: MAX_INSTALLMENTS,
-    installments_used: last,
-    // เคสเก่าที่ปล่อยเกิน 3 งวดมาก่อนกติกานี้มีอยู่จริง — คุมไม่ให้เหลือติดลบ
-    installments_left: Math.max(0, MAX_INSTALLMENTS - last),
-    next_installment: last + 1,
-    is_final_installment: last + 1 === MAX_INSTALLMENTS,
+    installments_used: slots.used,
+    // เคสเก่าที่ปล่อยเกินเพดานมาก่อนกติกานี้มีอยู่จริง — คุมไม่ให้เหลือติดลบ
+    installments_left: slots.left,
+    next_installment: slots.next,
+    is_final_installment: slots.left === 1,
   };
+}
+
+/** เลขงวดที่ยังใช้อยู่ของเคส (ไม่ซ้ำ) — c = นิพจน์ case_id */
+const INSTALLMENT_NOS_SQL = (c) =>
+  `ARRAY(SELECT DISTINCT p.installment_no FROM case_payouts p WHERE p.case_id = ${c} ORDER BY 1)`;
+
+/**
+ * ช่องงวดของเคส (ตรวจ 11 พ.ย. 2569) — เดิมงวดถัดไป = เลขงวดสูงสุด + 1
+ * ถอนงวดกลาง (เช่น งวด 3 จาก 5) แล้วช่องไม่ถูกคืน: เลขสูงสุดยังเป็น 5 → ปล่อยเงินที่เหลือไม่ได้อีกเลย
+ * ตอนนี้: เลขงวดที่ปล่อยไปแล้วไม่เลื่อน (สลิปที่ออกไปแล้วยังตรง) · งวดถัดไป = เลขที่ว่างตัวแรก
+ *         นับงวดที่ใช้ = จำนวนเลขงวดที่ยังมีเงินอยู่จริง (งวดที่ถอนหมดแล้วไม่นับ)
+ */
+export function installmentSlots(nos) {
+  const used = new Set((nos ?? []).map(Number));
+  let next = 1;
+  while (used.has(next)) next += 1;
+  const left = next > MAX_INSTALLMENTS ? 0 : Math.max(0, MAX_INSTALLMENTS - used.size);
+  return { used: used.size, next, left };
 }
 
 /**
@@ -3873,12 +4032,12 @@ export async function releasePay(caseId, { request_id, amount: requestedAmount, 
         : { released: [], reason: 'idempotency_conflict' };
     }
 
-    const { last, released: releasedAmount } = await tx.one(
-      `SELECT COALESCE(MAX(installment_no), 0) AS last,
-              COALESCE(SUM(amount), 0) AS released
-       FROM case_payouts WHERE case_id = :id`,
+    const { installment_nos: installmentNos, released: releasedAmount } = await tx.one(
+      `SELECT ${INSTALLMENT_NOS_SQL(':id')} AS installment_nos,
+              COALESCE((SELECT SUM(amount) FROM case_payouts WHERE case_id = :id), 0) AS released`,
       { id: caseId },
     );
+    const slots = installmentSlots(installmentNos);
 
     /* นับกะใหม่ในทรานแซกชันเดียวกัน ไม่ใช้เลขที่หน้าเว็บถือมา — ยกเลิกเคสหรือเพิ่ม/ลบกะ
        ระหว่างที่ผู้จัดการเปิดหน้าค้างไว้ แล้วตัวหารเปลี่ยนไปโดยไม่มีใครเห็น */
@@ -3898,9 +4057,10 @@ export async function releasePay(caseId, { request_id, amount: requestedAmount, 
     if (capacity.reason) return { released: [], ...capacity };
     const { amount } = capacity;
 
-    const installment = Number(last) + 1;
-    if (installment > MAX_INSTALLMENTS) {
-      return { released: [], reason: 'installment_limit', installments_used: Number(last) };
+    // งวดถัดไป = เลขงวดที่ว่างตัวแรก (งวดที่ถอนคืนแล้วได้ช่องคืน · ดู installmentSlots)
+    const installment = slots.next;
+    if (slots.left === 0) {
+      return { released: [], reason: 'installment_limit', installments_used: slots.used };
     }
 
     /* เหลือด่านเดียว: ต้องรู้ว่าจะจ่ายให้ใคร — เคสที่ไม่มีทั้งคนเช็คอิน ไม่มีคนถูกนัด
@@ -4175,7 +4335,7 @@ export async function dashboardCharts(now = new Date()) {
 
   const [visitRows, monthRows, workRows] = await Promise.all([
     sql.all(
-      `SELECT v.visit_date, v.status, v.check_in_at, v.check_out_at
+      `SELECT v.visit_date, v.status, v.check_in_at, v.check_out_at, v.planned_start, v.planned_end
        FROM case_visits v
        WHERE v.status <> 'cancelled' AND v.visit_date BETWEEN :from AND :to`,
       { from, to },
