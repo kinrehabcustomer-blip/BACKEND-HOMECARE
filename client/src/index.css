@@ -168,6 +168,14 @@ body { overflow-x: clip; }
 .pw-toggle:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; border-radius: var(--radius); }
 .login-submit { justify-content: center; margin-top: 0.375rem; padding: 0.6875rem; }
 .login-note { margin-top: 0.25rem; text-align: center; line-height: 1.6; }
+/* คำเตือนให้เปลี่ยนรหัสเริ่มต้น — ใต้รหัสในกล่องเดียวกัน คั่นเส้นบาง สีเตือนอ่านชัดบนพื้นครีม */
+.login-hint-warn {
+  display: flex; align-items: flex-start; gap: 0.375rem;
+  margin: 0.5rem 0 0; padding-top: 0.5rem; border-top: 1px dashed rgb(145 105 25 / 35%);
+  color: #9a3412; font-weight: 600; line-height: 1.5;
+}
+.login-hint-warn .text-ico { flex: none; margin-top: 0.2em; }
+:root[data-theme='dark'] .login-hint-warn { color: #f4a76a; }
 .login-note a { color: var(--brand); font-weight: 600; text-decoration: none; }
 .login-note a:hover { text-decoration: underline; }
 
@@ -287,6 +295,8 @@ body { overflow-x: clip; }
    เขียนให้ตรงกับสิ่งที่ฟอนต์ทำได้จริง จะได้ไม่เข้าใจผิดว่าตรงนี้หนากว่าที่อื่นทั้งที่เท่ากัน */
 .brand-mark { font-size: 1.5rem; font-weight: 700; letter-spacing: 2px; color: var(--brand); }
 .brand-logo { height: 2.5rem; width: auto; max-width: 100%; display: block; object-fit: contain; }
+/* หน้าเข้าระบบ — โลโก้ใหญ่กว่าแถบเมนู เป็นจุดเด่นของการ์ด */
+.brand-logo.login-logo { height: 3.5rem; }
 .login-logo { height: 2.75rem; margin: 0 auto; }
 .brand-sub { font-size: 0.75rem; color: var(--muted); }
 /* เมนู minimal + มีลูกเล่น — ไอคอนหน้าเมนู, hover ขยับ+ไอคอนเด้ง, ตัวที่เลือกมีแถบทองด้านซ้าย */

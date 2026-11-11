@@ -3,6 +3,7 @@ import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth.jsx';
 import { api } from '../api.js';
 import PasswordInput from '../components/PasswordInput.jsx';
+import LineIcon from '../components/LineIcon.jsx';
 
 export default function LoginPage() {
   const { user, loading, login, setUser } = useAuth();
@@ -86,10 +87,11 @@ export default function LoginPage() {
   return (
     <div className="login-page">
       <form className="login-card" onSubmit={handleSubmit}>
-        {/* ชื่อหน้าเข้าระบบ = KIN Jobs (ดร.ธงชัย 23 ต.ค. 2569 "ตัว Login ไม่น่าชื่อ Kin Home Care แล้ว น่าจะชื่อ Kin Job")
-            ใช้ชื่อเดียวกับ LINE @kinjobs ที่เจ้าหน้าที่กดเข้ามา · โลโก้เดิมมีคำว่า HOME CARE จึงใช้ตัวอักษรแทน */}
+        {/* โลโก้ KIN Home Care ชุดเดียวกับแถบเมนู (11 พ.ย. 2569 · แทนตัวอักษร "KIN Jobs" ที่ใช้ตั้งแต่ 23 ต.ค. 2569)
+            สองรูปสลับตามธีม — กฎ .brand-logo.logo-light/.logo-dark ใน warm-clarity.css */}
         <div className="login-brand">
-          <div style={{ fontFamily: 'Prompt, sans-serif', fontWeight: 800, fontSize: 34, letterSpacing: 1, color: '#7a5a1e' }}>KIN Jobs</div>
+          <img className="brand-logo login-logo logo-light" src="/logo-navbar.webp" alt="KIN Home Care" />
+          <img className="brand-logo login-logo logo-dark" src="/logo-navbar-dark.webp" alt="" aria-hidden="true" />
         </div>
 
         <div className="login-heading">
@@ -188,6 +190,11 @@ export default function LoginPage() {
           <b>เข้าใช้งานครั้งแรก</b>
           <div>Username : รหัสพนักงาน</div>
           <div>Password : 12345678</div>
+          {/* รหัสเริ่มต้นเหมือนกันทุกคน — ย้ำให้เปลี่ยนหลังเข้าได้แล้ว (11 พ.ย. 2569) */}
+          <p className="login-hint-warn">
+            <LineIcon name="alert" className="text-ico" />
+            <span>กรุณาเปลี่ยนรหัสผ่านเมื่อเข้าใช้งานแล้ว<br />เปลี่ยนรหัสผ่านได้ที่ เมนูตั้งค่า</span>
+          </p>
         </div>
         <p className="muted login-note">
           <Link to="/forgot-password">ลืมรหัสผ่าน?</Link>
