@@ -2353,6 +2353,14 @@ export async function updateVisit(caseId, visitId, input, actor) {
     const values = { case_id: caseId, visit_id: visitId };
     for (const c of changed) values[c] = input[c] ?? null;
     const sets = changed.map((c) => `${c} = :${c}`);
+    /* ยกเลิกพร้อมเหตุผล (11 พ.ย. 2569) — ต่อท้ายหมายเหตุของกะ ไม่ทับของเดิม · ใช้เฉพาะตอนเปลี่ยนเป็นยกเลิกจริง */
+    const cancelReason = changed.includes('status') && input.status === 'cancelled' && visit.status !== 'cancelled'
+      ? (input.cancel_reason?.trim() || null)
+      : null;
+    if (cancelReason && !changed.includes('note')) {
+      sets.push(`note = CASE WHEN COALESCE(note, '') = '' THEN :cancel_note ELSE note || ' · ' || :cancel_note END`);
+      values.cancel_note = `ยกเลิก: ${cancelReason}`;
+    }
     // ย้ายวัน/เวลา/คน = นัดใหม่ → เตือน LINE ใหม่ตามนัดใหม่ (notify/visitReminders.js)
     if (changed.some((c) => ['visit_date', 'planned_start', 'assigned_to'].includes(c)) || (changed.includes('status') && input.status === 'scheduled')) {
       sets.push('remind_day_at = NULL', 'remind_3h_at = NULL', 'remind_family_at = NULL', 'remind_family_3h_at = NULL');
@@ -2382,9 +2390,10 @@ export async function updateVisit(caseId, visitId, input, actor) {
         parts.push(`${VISIT_EDIT_LABELS[c]} ${await show(c, visit[c])} → ${await show(c, input[c])}`);
       }
     }
+    if (cancelReason) parts.push(`เหตุผล: ${cancelReason}`);
     await logEvent(tx, caseId, 'visit_edited', `แก้กะวันที่ ${visit.visit_date} — ${parts.join(' · ')}`, actor);
     // แจ้ง LINE พนักงาน + ญาติ เมื่อเลื่อน/ยกเลิก/เปลี่ยนคน (notify/visitReminders.js · cron chat.kinorigin.com ส่ง)
-    await recordVisitChange(tx, caseId, visitId, visit, input, changed);
+    await recordVisitChange(tx, caseId, visitId, visit, input, changed, { reason: cancelReason });
   });
 
   return listVisits(caseId);
@@ -2395,7 +2404,7 @@ export async function updateVisit(caseId, visitId, input, actor) {
  * (เป็นบันทึกการทำงานจริง เป็นฐานค่าจ้าง และมีรูปเซลฟี่เป็นหลักฐานติดอยู่)
  * คืน false เมื่อไม่ได้ลบ ให้ชั้น route ตอบ 409 พร้อมบอกเหตุผล
  */
-export async function removeVisit(caseId, visitId, actor = null) {
+export async function removeVisit(caseId, visitId, actor = null, reason = null) {
   await ensureVisitChangeTable();
   // ลบนัด = แจ้งเหมือนยกเลิก (ดร.ธงชัย 2 พ.ย. 2569 ข้อ 1) · นัดที่ยกเลิกอยู่แล้ว/อยู่ในอดีต recordVisitChange ข้ามเอง
   return transaction(async (tx) => {
@@ -2408,8 +2417,8 @@ export async function removeVisit(caseId, visitId, actor = null) {
       { visit_id: visitId, case_id: caseId, today: isoDateTH(new Date()) },
     );
     if (!gone) return false;
-    await recordVisitChange(tx, caseId, visitId, gone, { status: 'cancelled' }, ['status']);
-    await logEvent(tx, caseId, 'visit_removed', removedDetail([gone]), actor);
+    await recordVisitChange(tx, caseId, visitId, gone, { status: 'cancelled' }, ['status'], { reason });
+    await logEvent(tx, caseId, 'visit_removed', `${removedDetail([gone])}${reason ? ` · เหตุผล: ${reason}` : ''}`, actor);
     return true;
   });
 }
@@ -3411,9 +3420,11 @@ export function payQueue() {
               w.worker_names,
               lv.last_visit_date,
               lv.first_visit_date,
-              /* ฐานของ "ยอดที่ระบบเสนอ" ของเคสที่ยกเลิกกลางคัน — ดู WORKED_SHIFTS/PLANNED_SHIFTS */
-              ${WORKED_SHIFTS}            AS worked_shifts,
-              ${PLANNED_SHIFTS}           AS planned_shifts
+              /* ฐานของ "ยอดที่ระบบเสนอ" ของเคสที่ยกเลิกกลางคัน — เกณฑ์เดียวกับ WORKED_SHIFTS/PLANNED_SHIFTS
+                 แต่นับใน lv ก้อนเดียวกับวันกะแรก/ล่าสุด (optimize 11 พ.ย. 2569) — ฉบับซับคิวรีนับทีละเคส
+                 สองรอบต่อแถว ทั้งคิวคือทุกเคสในประวัติ (3,000 เคส ≈ 80 ms ของ 145 ms) */
+              COALESCE(lv.worked_shifts, 0)  AS worked_shifts,
+              COALESCE(lv.planned_shifts, 0) AS planned_shifts
        FROM cases c
        LEFT JOIN (
          SELECT case_id, SUM(amount) AS released, COUNT(DISTINCT installment_no) AS installments
@@ -3457,9 +3468,13 @@ export function payQueue() {
        /* กะแรก = จุดเริ่มนับว่าค้างมานานแค่ไหน · กะล่าสุดยังใช้ที่อื่น ดึงมาพร้อมกันในซับคิวรีเดียว */
        LEFT JOIN (
          SELECT v.case_id,
-                MAX(v.visit_date) AS last_visit_date,
-                MIN(v.visit_date) AS first_visit_date
-         FROM case_visits v WHERE ${NOT_CANCELLED}
+                MAX(v.visit_date) FILTER (WHERE ${NOT_CANCELLED}) AS last_visit_date,
+                MIN(v.visit_date) FILTER (WHERE ${NOT_CANCELLED}) AS first_visit_date,
+                /* = PLANNED_SHIFTS (ทุกกะรวมที่ยกเลิก) · = WORKED_SHIFTS (ทำจบจริงและไม่ถูกปฏิเสธ) */
+                COUNT(*) AS planned_shifts,
+                COUNT(*) FILTER (WHERE v.check_in_at IS NOT NULL AND v.check_out_at IS NOT NULL
+                                   AND v.status <> 'cancelled' AND v.pay_status IS DISTINCT FROM 'rejected') AS worked_shifts
+         FROM case_visits v
          GROUP BY v.case_id
        ) lv ON lv.case_id = c.case_id
 

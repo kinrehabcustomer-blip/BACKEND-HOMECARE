@@ -45,17 +45,32 @@ export default function PayQueue({ reloadKey, openCase, onOpenCase }) {
   const filtering = from !== '' || to !== '';
   const clearRange = () => { setFrom(''); setTo(''); };
 
+  /* โหลดเฉพาะเคสที่ค้างจ่ายก่อน (optimize 11 พ.ย. 2569) — เคสที่จ่ายครบสะสมทั้งประวัติ ขอแบบเต็มเมื่อ
+     กด "รวมที่จ่ายครบ" หรือเมื่อลิงก์ ?open= ชี้เคสที่ไม่อยู่ในรายการค้าง (เช่น เปิดดูเพื่อถอนงวดที่ปล่อยผิด) */
+  const [needFull, setNeedFull] = useState(false);
+  const [doneCount, setDoneCount] = useState(null);
+  const full = showDone || needFull;
   const load = useCallback(
     () =>
       api
-        .payrollCaseQueue()
+        .payrollCaseQueue({ pendingOnly: !full })
         .then((r) => {
-          setRows(r);
+          if (Array.isArray(r)) {
+            setRows(r);
+            setDoneCount(null);
+          } else {
+            setRows(r.rows);
+            setDoneCount(r.done_count);
+          }
           setError(null);
         })
         .catch((e) => setError(e.message)),
-    [],
+    [full],
   );
+
+  useEffect(() => {
+    if (openCase && rows && doneCount != null && !rows.some((r) => r.case_id === openCase)) setNeedFull(true);
+  }, [openCase, rows, doneCount]);
 
   useEffect(() => {
     load();
@@ -82,6 +97,8 @@ export default function PayQueue({ reloadKey, openCase, onOpenCase }) {
   const leftToPay = (r) => r.suggested_remaining ?? r.remaining;
   const pending = rows?.filter((r) => leftToPay(r) > 0) ?? [];
   const done = rows?.filter((r) => leftToPay(r) <= 0) ?? [];
+  // โหลดแบบค้างอย่างเดียว = ไม่มีแถวที่จ่ายครบในมือ ใช้จำนวนที่ server นับให้
+  const doneTotal = doneCount ?? done.length;
   const inScope = showDone ? [...pending, ...done] : pending;
 
   const shown = inScope.filter((c) => {
@@ -98,7 +115,7 @@ export default function PayQueue({ reloadKey, openCase, onOpenCase }) {
 
       {!rows ? (
         <p className="muted">กำลังโหลด…</p>
-      ) : rows.length === 0 ? (
+      ) : pending.length + doneTotal === 0 ? (
         <section className="card empty-state">
           <p><LineIcon name="check" className="text-ico" />ยังไม่มีเคสที่พร้อมปล่อยค่าจ้าง</p>
           <p className="muted">
@@ -150,7 +167,7 @@ export default function PayQueue({ reloadKey, openCase, onOpenCase }) {
             {/* สองมุมมองที่เลือกได้ทีเดียวอันเดียว — เดิมเป็นช่องติ๊ก "แสดงเคสที่ปล่อยครบแล้วด้วย"
                 ซึ่งบอกได้แค่สถานะของตัวเอง คนอ่านต้องเดาว่าถ้าไม่ติ๊กแล้วเห็นอะไร
                 ปุ่มคู่บอกทั้งสองทางพร้อมจำนวน จึงเลือกได้โดยไม่ต้องลองกดดูก่อน */}
-            {done.length > 0 && (
+            {doneTotal > 0 && (
               <div className="seg" role="group" aria-label="ขอบเขตของรายการ">
                 <button
                   type="button"
@@ -168,7 +185,7 @@ export default function PayQueue({ reloadKey, openCase, onOpenCase }) {
                   aria-pressed={showDone}
                   onClick={() => setShowDone(true)}
                 >
-                  รวมที่จ่ายครบ <span className="seg-count">{rows.length}</span>
+                  รวมที่จ่ายครบ <span className="seg-count">{pending.length + doneTotal}</span>
                 </button>
               </div>
             )}

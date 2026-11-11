@@ -78,7 +78,7 @@ export async function inboxVisitChange(tx, row) {
   const sameStaff = row.old_assignee === row.new_assignee;
 
   if (row.kind === 'cancelled') {
-    await push(tx, { ...base, employeeId: row.old_assignee, kind: 'visit_cancelled', payload: old });
+    await push(tx, { ...base, employeeId: row.old_assignee, kind: 'visit_cancelled', payload: { ...old, reason: row.reason ?? null } });
     return;
   }
   if (sameStaff) {

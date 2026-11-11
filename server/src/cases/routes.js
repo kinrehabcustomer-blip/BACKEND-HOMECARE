@@ -1042,7 +1042,9 @@ casesRouter.delete(
   '/:id/visits/:visitId',
   asyncRoute(async (req, res) => {
     const visitId = Number(req.params.visitId);
-    const deleted = await repo.removeVisit(req.params.id, visitId, req.user);
+    // หมายเหตุที่ส่งไปกับข้อความแจ้งยกเลิกนัด (ไม่บังคับ — เรียกแบบเดิมไม่มี body ก็ลบได้)
+    const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim().slice(0, 300) || null : null;
+    const deleted = await repo.removeVisit(req.params.id, visitId, req.user, reason);
 
     if (!deleted) {
       const visit = await repo.findVisit(visitId);

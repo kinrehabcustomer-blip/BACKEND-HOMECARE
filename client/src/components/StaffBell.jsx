@@ -29,7 +29,7 @@ function describe(n) {
     case 'visit_moved':
       return { icon: 'calendar', title: 'กะถูกเลื่อน', body: `${who} · ${whenText(p.old_date, p.old_start)} → ${whenText(p.date, p.start)}` };
     case 'visit_cancelled':
-      return { icon: 'close', title: 'กะถูกยกเลิก', body: `${who} · ${whenText(p.date, p.start)}`, urgent: true };
+      return { icon: 'close', title: 'กะถูกยกเลิก', body: `${who} · ${whenText(p.date, p.start)}${p.reason ? ` · ${p.reason}` : ''}`, urgent: true };
     case 'visit_removed':
       return { icon: 'close', title: 'กะถูกย้ายไปให้คนอื่น', body: `${who} · ${whenText(p.date, p.start)}`, urgent: true };
     case 'remind_day':

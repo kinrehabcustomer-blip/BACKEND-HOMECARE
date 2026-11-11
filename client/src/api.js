@@ -580,7 +580,9 @@ export const api = {
   // ---------- ค่าจ้างของเคส (ก้อนเดียว ผู้จัดการกดปล่อย) ----------
   /** ยอดเหมา · ปล่อยไปแล้ว · คงเหลือ · ถ้าปล่อยตอนนี้ใครได้เท่าไหร่ */
   /* คิวค่าจ้าง — เคสที่มีเงินให้จัดการทั้งหมด ใช้ที่แท็บ "ปล่อยค่าจ้าง" ของหน้ารอบจ่าย */
-  payrollCaseQueue: () => request('/payroll/case-queue'),
+  /* pendingOnly = { rows, done_count } เฉพาะเคสที่ค้างจ่าย · ไม่ส่ง = ทุกเคสรวมที่จ่ายครบ (อาร์เรย์) */
+  payrollCaseQueue: ({ pendingOnly = false } = {}) =>
+    request(`/payroll/case-queue${pendingOnly ? '?view=pending' : ''}`),
   /* ที่มาของยอดรายคนในแท็บสรุป — เคสอะไรบ้าง ใบละเท่าไหร่ */
   payrollEmployeeCases: (month, employeeId) =>
     request(`/payroll/employee-cases?month=${month}&employee_id=${employeeId}`),
@@ -591,7 +593,9 @@ export const api = {
   setCasePayShares: (id, shares) => request(`/cases/${id}/pay/shares`, { method: 'PUT', body: { shares } }),
   /** ถอนก้อนที่ปล่อยผิดคืน (ได้เฉพาะก้อนที่ยังไม่ถูกจ่ายออกไป) */
   cancelCasePayout: (id, payoutId) => request(`/cases/${id}/pay/${payoutId}`, { method: 'DELETE' }),
-  deleteVisit: (id, visitId) => request(`/cases/${id}/visits/${visitId}`, { method: 'DELETE' }),
+  // reason = หมายเหตุที่ส่งไปกับข้อความแจ้งยกเลิกนัดทาง LINE (11 พ.ย. 2569) · ไม่ส่ง = ลบแบบเดิม
+  deleteVisit: (id, visitId, reason) =>
+    request(`/cases/${id}/visits/${visitId}`, { method: 'DELETE', body: reason ? { reason } : undefined }),
   // ---------- รายงานอาการผู้รับบริการ (บันทึกทีละครั้งในเคส) ----------
   /**
    * คลังรายงานของเคส — ล่าสุดอยู่บน แบ่งหน้าเสมอ

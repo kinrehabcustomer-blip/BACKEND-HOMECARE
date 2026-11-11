@@ -57,7 +57,17 @@ payrollRouter.get(
 payrollRouter.get(
   '/case-queue',
   asyncRoute(async (req, res) => {
-    res.json(await cases.payQueue());
+    const rows = await cases.payQueue();
+    /* ?view=pending = ส่งเฉพาะเคสที่ยังค้างจ่าย + จำนวนเคสที่จ่ายครบ (optimize 11 พ.ย. 2569)
+       เคสที่จ่ายครบสะสมไปตลอดอายุระบบ แต่หน้าเว็บซ่อนไว้หลังปุ่ม "รวมที่จ่ายครบ" —
+       เดิมส่งทุกเคสในประวัติทุกครั้งที่เปิดแท็บ (3,000 เคส ≈ 1.8 MB) · กดปุ่มนั้นค่อยขอแบบเต็ม (ไม่ส่ง view)
+       เกณฑ์ "ค้าง" ต้องตรงกับ leftToPay ใน PayQueue.jsx — ยอดที่ระบบเสนอ ไม่ใช่ยอดเหมา */
+    if (req.query.view === 'pending') {
+      const left = (r) => r.suggested_remaining ?? r.remaining;
+      const pending = rows.filter((r) => left(r) > 0);
+      return res.json({ rows: pending, done_count: rows.length - pending.length });
+    }
+    res.json(rows);
   }),
 );
 

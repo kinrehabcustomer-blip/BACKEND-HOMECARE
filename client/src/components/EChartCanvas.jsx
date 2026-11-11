@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import * as echarts from 'echarts/core';
-import { LineChart, BarChart, PieChart } from 'echarts/charts';
-import { GridComponent, TooltipComponent, LegendComponent, TitleComponent, MarkAreaComponent } from 'echarts/components';
+import { LineChart, PieChart } from 'echarts/charts';
+import { GridComponent, TooltipComponent, TitleComponent } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
 
 /*
@@ -12,8 +12,11 @@ import { CanvasRenderer } from 'echarts/renderers';
  * ไฟล์นี้ถูกแยกออกมาจาก EChart.jsx เพื่อให้ไลบรารีกราฟกลายเป็นไฟล์ก้อนของตัวเอง
  * ที่ดาวน์โหลดตอนจะวาดกราฟจริงเท่านั้น — ดู EChart.jsx ว่าทำไม
  */
-// PieChart = วงแหวนสัดส่วนบริการ/ผลการเข้างานในหน้าภาพรวม (DashboardCharts.jsx) · MarkArea = แถบแรเงาช่วงเวลา
-echarts.use([LineChart, BarChart, PieChart, GridComponent, TooltipComponent, LegendComponent, TitleComponent, MarkAreaComponent, CanvasRenderer]);
+// PieChart = วงแหวนสัดส่วนบริการ/ผลการเข้างานในหน้าภาพรวม (DashboardCharts.jsx) · Title = ตัวเลขกลางวงแหวน
+/* ตัดออก 11 พ.ย. 2569 (ไม่มีกราฟไหนใช้แล้ว): Bar — กราฟแท่งในการ์ดเป็น SVG ของเราเอง (Spark ใน DashboardCharts)
+   · Legend — คำอธิบายสีเป็น <ul className="donut-legend"> · MarkArea — ไม่มี option ไหนอ้างถึง
+   จะใช้อีกเมื่อไหร่ต้องเติมกลับที่บรรทัดนี้ ไม่งั้นกราฟจะว่างเฉยๆ (ดูคำเตือนด้านบน) */
+echarts.use([LineChart, PieChart, GridComponent, TooltipComponent, TitleComponent, CanvasRenderer]);
 
 /**
  * ครอบ ECharts หนึ่ง instance ให้ใช้แบบ React ได้

@@ -756,6 +756,8 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
                   {v.check_out_at && ` · ออก ${timeText(v.check_out_at)}`}
                   {v.location_flagged && <> · <LineIcon name="alert" className="text-ico" />{v.location_note ?? 'นอกพื้นที่'}</>}
                   {v.off_schedule && <> · <LineIcon name="alert" className="text-ico" />นอกวันนัด</>}
+                  {/* นัดที่ยกเลิก: หมายเหตุมีเหตุผลที่กรอกตอนกดยกเลิก ("ยกเลิก: …") — เห็นได้โดยไม่ต้องเปิดประวัติเคส */}
+                  {v.state === 'cancelled' && v.note && <span className="visit-note"> · {v.note}</span>}
                 </span>
                 <span className={`badge visit-${v.state}`}>{VISIT_STATE_LABELS[v.state]}</span>
                 {!readOnly && v.state === 'scheduled' && v.visit_date >= today && (
@@ -775,7 +777,19 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
                     type="button"
                     className="btn tiny danger-ghost"
                     disabled={busy}
-                    onClick={() => run(() => api.deleteVisit(caseId, v.visit_id))}
+                    onClick={async () => {
+                      /* ลบนัดที่ยังไม่ถึงวัน = แจ้งยกเลิกทาง LINE อยู่แล้ว — ขอหมายเหตุส่งไปด้วย เหมือนปุ่มยกเลิก (11 พ.ย. 2569) */
+                      const reason = await ask({
+                        title: `ลบ${unit}วันที่ ${formatDate(v.visit_date)}?`,
+                        detail: `${unit}นี้จะหายจากตาราง และระบบจะแจ้งยกเลิกทาง LINE ถึง${v.assigned_name ? ` ${v.assigned_name} ` : 'พนักงาน'}และญาติที่ผูกเคสไว้ พร้อมหมายเหตุนี้`,
+                        input: { label: 'หมายเหตุ / เหตุผลที่ยกเลิก', placeholder: 'เช่น ลูกค้าขอเลื่อนนัด', required: true },
+                        confirmLabel: `ลบ${unit}และแจ้ง`,
+                        cancelLabel: 'ไม่ลบ',
+                        danger: true,
+                      });
+                      if (reason == null) return;
+                      run(() => api.deleteVisit(caseId, v.visit_id, reason));
+                    }}
                   >
                     ลบ
                   </button>
@@ -786,7 +800,19 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
                     className="btn tiny danger-ghost"
                     disabled={busy}
                     title="วันนั้นไม่ได้ไปจริง — เปลี่ยนเป็นยกเลิก (ยังเก็บเป็นประวัติ)"
-                    onClick={() => run(() => api.updateVisit(caseId, v.visit_id, { status: 'cancelled' }))}
+                    onClick={async () => {
+                      /* หมายเหตุส่งไปกับข้อความแจ้งยกเลิกนัดทาง LINE (พนักงาน + ญาติ) และเก็บไว้ในกะ (11 พ.ย. 2569) */
+                      const reason = await ask({
+                        title: `ยกเลิก${unit}วันที่ ${formatDate(v.visit_date)}?`,
+                        detail: `ระบบจะแจ้งยกเลิก${unit}ทาง LINE ถึง${v.assigned_name ? ` ${v.assigned_name} ` : 'พนักงาน'}และญาติที่ผูกเคสไว้ พร้อมหมายเหตุนี้`,
+                        input: { label: 'หมายเหตุ / เหตุผลที่ยกเลิก', placeholder: 'เช่น ผู้รับบริการไม่สบาย ขอเลื่อนไปก่อน', required: true },
+                        confirmLabel: `ยกเลิก${unit}และแจ้ง`,
+                        cancelLabel: 'ไม่ยกเลิก',
+                        danger: true,
+                      });
+                      if (reason == null) return;
+                      run(() => api.updateVisit(caseId, v.visit_id, { status: 'cancelled', cancel_reason: reason }));
+                    }}
                   >
                     ยกเลิก
                   </button>

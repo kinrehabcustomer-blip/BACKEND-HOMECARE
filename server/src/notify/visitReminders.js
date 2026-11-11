@@ -324,6 +324,8 @@ export const ensureVisitChangeTable = () =>
        )`,
     )
     .then(() => sql.run('CREATE INDEX IF NOT EXISTS idx_visit_change_pending ON visit_change_outbox (created_at) WHERE claimed_at IS NULL'))
+    // เหตุผลที่ยกเลิก (11 พ.ย. 2569) — ส่งไปกับข้อความแจ้งยกเลิก · ตารางเดิมในฐานจริงไม่มีคอลัมน์นี้
+    .then(() => sql.run('ALTER TABLE visit_change_outbox ADD COLUMN IF NOT EXISTS reason TEXT'))
     // กระดิ่งในแอปของพนักงานถูกเขียนใน transaction เดียวกับ recordVisitChange — ตารางต้องมีก่อนเปิด tx
     .then(() => ensureStaffInbox())
     .catch((err) => {
@@ -332,7 +334,7 @@ export const ensureVisitChangeTable = () =>
     }));
 
 /** เรียกใน transaction ของ updateVisit หลัง UPDATE แล้ว — before = แถวกะก่อนแก้ · after = ค่าที่ส่งมาแก้ (เฉพาะช่องที่เปลี่ยน) */
-export async function recordVisitChange(tx, caseId, visitId, before, after, changed) {
+export async function recordVisitChange(tx, caseId, visitId, before, after, changed, { reason = null } = {}) {
   const cancelled = changed.includes('status') && after.status === 'cancelled' && before.status !== 'cancelled';
   const moved = changed.some((c) => ['visit_date', 'planned_start'].includes(c));
   const reassigned = changed.includes('assigned_to');
@@ -346,14 +348,17 @@ export async function recordVisitChange(tx, caseId, visitId, before, after, chan
     new_date: pick('visit_date'), new_start: pick('planned_start'), new_end: pick('planned_end'), new_assignee: pick('assigned_to'),
   };
   const today = new Date(Date.now() + 7 * 3600e3).toISOString().slice(0, 10);
-  if (row.old_date < today && row.new_date < today) return;
+  /* นัดในอดีตปกติไม่แจ้ง (แก้บันทึกย้อนหลัง) — ยกเว้นแอดมินกดยกเลิกพร้อมใส่เหตุผลเอง (11 พ.ย. 2569)
+     ปุ่ม "ยกเลิก" ในตารางนัดขึ้นเฉพาะนัดที่เลยวันแล้ว (ขาดงาน) ตั้งใจแจ้งพนักงาน/ญาติว่านัดนั้นยกเลิกเพราะอะไร */
+  const announce = cancelled && Boolean(reason);
+  if (!announce && row.old_date < today && row.new_date < today) return;
   await tx.run(
-    `INSERT INTO visit_change_outbox (visit_id, case_id, kind, old_date, old_start, old_end, old_assignee, new_date, new_start, new_end, new_assignee)
-     VALUES (:visit_id, :case_id, :kind, :old_date, :old_start, :old_end, :old_assignee, :new_date, :new_start, :new_end, :new_assignee)`,
-    row,
+    `INSERT INTO visit_change_outbox (visit_id, case_id, kind, old_date, old_start, old_end, old_assignee, new_date, new_start, new_end, new_assignee, reason)
+     VALUES (:visit_id, :case_id, :kind, :old_date, :old_start, :old_end, :old_assignee, :new_date, :new_start, :new_end, :new_assignee, :reason)`,
+    { ...row, reason: cancelled ? reason : null },
   );
   // กระดิ่งในแอปของพนักงาน (คนเก่า/คนใหม่ของกะ) — ทุกคน ไม่ว่าจะผูก LINE หรือไม่
-  await inboxVisitChange(tx, row);
+  await inboxVisitChange(tx, { ...row, reason: cancelled ? reason : null });
 }
 
 /** จองรายการแจ้งเลื่อน/ยกเลิกที่ยังไม่ส่ง → รวมเป็นหนึ่งรายการต่อนัด (ค่าเดิมจากรอบแรก ค่าใหม่จากรอบล่าสุด) พร้อมผู้รับ */
@@ -374,7 +379,8 @@ export async function claimVisitChanges() {
   for (const r of rows.sort((a, b) => a.change_id - b.change_id)) {
     const prev = byVisit.get(r.visit_id);
     byVisit.set(r.visit_id, prev ? { ...r, old_date: prev.old_date, old_start: prev.old_start, old_end: prev.old_end, old_assignee: prev.old_assignee,
-      kind: r.kind === 'cancelled' ? 'cancelled' : prev.kind === 'moved' || r.kind === 'moved' ? 'moved' : r.kind } : r);
+      kind: r.kind === 'cancelled' ? 'cancelled' : prev.kind === 'moved' || r.kind === 'moved' ? 'moved' : r.kind,
+      reason: r.reason ?? prev.reason ?? null } : r);
   }
   const out = [];
   for (const r of byVisit.values()) {
@@ -394,6 +400,8 @@ export async function claimVisitChanges() {
     const find = (id) => staff.find((s) => s.employee_id === id) ?? null;
     const change = {
       kind: r.kind, visit_id: r.visit_id, case_id: r.case_id, client_name: info.client_name,
+      // เหตุผลที่แอดมินใส่ตอนกดยกเลิก (ไม่มี = null) — ฝั่ง chat แสดงในข้อความแจ้งยกเลิก
+      reason: r.kind === 'cancelled' ? r.reason ?? null : null,
       old: { date: r.old_date, start: r.old_start, end: r.old_end, staff: find(r.old_assignee) },
       new: { date: r.new_date, start: r.new_start, end: r.new_end, staff: find(r.new_assignee) },
       // เปลี่ยนแค่คน = เรื่องภายใน ไม่แจ้งญาติ

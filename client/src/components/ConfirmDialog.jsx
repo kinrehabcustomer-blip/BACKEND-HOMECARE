@@ -18,30 +18,36 @@ import { useScrollLock } from '../lib/scrollLock.js';
 const ConfirmContext = createContext(null);
 
 export function ConfirmProvider({ children }) {
-  const [req, setReq] = useState(null); // { title, detail, items, confirmLabel, cancelLabel, danger, resolve }
+  const [req, setReq] = useState(null); // { title, detail, items, confirmLabel, cancelLabel, danger, input, resolve }
+  const [text, setText] = useState('');
   const cancelRef = useRef(null);
+  const inputRef = useRef(null);
 
   const ask = useCallback(
     (opts) =>
       new Promise((resolve) => {
         const o = typeof opts === 'string' ? { title: opts } : opts;
+        setText(o.input?.initial ?? '');
         setReq({ ...o, resolve });
       }),
     [],
   );
 
+  /* input = มีช่องกรอกข้อความ → ตอบตกลงได้ข้อความ (string) · ยกเลิกได้ null แทน false
+     ผู้เรียกแบบเดิม (ไม่มี input) ยังได้ true/false เหมือนเดิม */
   const answer = useCallback((value) => {
     setReq((cur) => {
-      cur?.resolve(value);
+      cur?.resolve(cur?.input ? (value ? value : null) : value);
       return null;
     });
   }, []);
+  const needText = Boolean(req?.input?.required) && text.trim() === '';
 
   useScrollLock(Boolean(req));
 
   useEffect(() => {
     if (!req) return undefined;
-    cancelRef.current?.focus();
+    (req.input ? inputRef : cancelRef).current?.focus();
     // Esc ปิดเฉพาะกล่องนี้ ไม่ให้ popup แม่ข้างหลังปิดตามไปด้วย (ดักช่วง capture แล้วหยุด)
     const onKeyDown = (e) => {
       if (e.key !== 'Escape') return;
@@ -73,6 +79,19 @@ export function ConfirmProvider({ children }) {
                     {req.items.map((t) => <li key={t}>{t}</li>)}
                   </ul>
                 )}
+                {req.input && (
+                  <label className="confirm-input">
+                    <span className="field-label">{req.input.label}</span>
+                    <textarea
+                      ref={inputRef}
+                      rows={3}
+                      maxLength={req.input.maxLength ?? 300}
+                      placeholder={req.input.placeholder}
+                      value={text}
+                      onChange={(e) => setText(e.target.value)}
+                    />
+                  </label>
+                )}
                 {req.note && <p className="muted confirm-note">{req.note}</p>}
               </div>
               <footer className="modal-foot">
@@ -86,7 +105,8 @@ export function ConfirmProvider({ children }) {
                   type="button"
                   className={`btn ${req.danger ? 'danger' : 'primary'}`}
                   ref={req.notice ? cancelRef : undefined}
-                  onClick={() => answer(true)}
+                  disabled={needText}
+                  onClick={() => answer(req.input ? text.trim() : true)}
                 >
                   {req.confirmLabel ?? (req.notice ? 'รับทราบ' : 'ยืนยัน')}
                 </button>
@@ -99,11 +119,12 @@ export function ConfirmProvider({ children }) {
   );
 }
 
-/** คืนฟังก์ชัน ask(opts) → Promise<boolean> · opts เป็นข้อความเฉยๆ ก็ได้ (ใช้เป็นหัวข้อ) */
+/** คืนฟังก์ชัน ask(opts) → Promise<boolean> · opts เป็นข้อความเฉยๆ ก็ได้ (ใช้เป็นหัวข้อ)
+ *  opts.input = { label, placeholder, required, maxLength } → Promise<string | null> (ข้อความที่กรอก / ยกเลิก) */
 export function useConfirm() {
   const ask = useContext(ConfirmContext);
   // ไม่มี Provider (เช่นในเทสต์) — ถอยไปใช้กล่องของเบราว์เซอร์ ดีกว่าโยน error ทั้งหน้า
-  return ask ?? ((o) => Promise.resolve(window.confirm(typeof o === 'string' ? o : [o.title, o.detail, ...(o.items ?? [])].filter(Boolean).join('\n'))));
+  return ask ?? ((o) => Promise.resolve(o?.input ? window.prompt(o.title, '') : window.confirm(typeof o === 'string' ? o : [o.title, o.detail, ...(o.items ?? [])].filter(Boolean).join('\n'))));
 }
 
 /** ออกจากฟอร์มที่ยังไม่บันทึก — ข้อความชุดเดียวกันทุกฟอร์ม · ปุ่มปลอดภัยคือ "อยู่ต่อ" */

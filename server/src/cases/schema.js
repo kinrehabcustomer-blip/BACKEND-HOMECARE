@@ -428,6 +428,8 @@ export const updateVisitSchema = z
     planned_end: time.nullable(),
     status: z.enum(VISIT_STATUSES, { errorMap: () => ({ message: 'สถานะวันนัดไม่ถูกต้อง' }) }),
     note: optionalText,
+    /* เหตุผลที่ยกเลิก (ใช้คู่กับ status = cancelled) — ต่อท้ายหมายเหตุของกะ และส่งไปกับข้อความแจ้งยกเลิกทาง LINE */
+    cancel_reason: z.string().trim().max(300, 'หมายเหตุยาวเกิน 300 ตัวอักษร').optional().nullable(),
   })
   .partial();
 

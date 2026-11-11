@@ -248,10 +248,12 @@ const caseBillableSql = (c, i) =>
 /* ใบนี้มีบรรทัดแพ็กกายภาพที่เคสถูกยกเลิกแล้ว (จัดการแล้วหรือยังก็ตาม) — ใบแบบนี้ไม่เทียบ "ยอดไม่ตรงกับเคส"
    ยอดที่ถูกต้องหลังยกเลิกแพ็กคือการตัดสินใจของคนทำ (ลดเต็ม/ลดบางส่วนตามครั้งที่ทำไปแล้ว) ระบบเดาไม่ได้
    ป้าย bundle_stale ทำหน้าที่เตือนแทนจนกว่าจะออกใบลดหนี้ — ไม่ให้สองป้ายซ้อนกันหรือค้างหลังจัดการแล้ว */
-const hasCancelledBundleSql = (i) => `EXISTS (
+/* ${i}.addons @> … ตัดใบที่ไม่มีบรรทัดแพ็กกายภาพเลย (เกือบทุกใบ) ก่อนแตก jsonb ทีละบรรทัด — นับทั้งระบบในกระดิ่ง */
+const physioLineGuardSql = (i) => `${i}.addons @> '[{"kind": "${PHYSIO_BUNDLE}"}]'::jsonb`;
+const hasCancelledBundleSql = (i) => `(${physioLineGuardSql(i)} AND EXISTS (
     SELECT 1 FROM jsonb_array_elements(${i}.addons) hb JOIN cases hbc ON hbc.case_id = hb ->> 'ref'
-     WHERE hb ->> 'kind' = '${PHYSIO_BUNDLE}' AND hbc.status = 'cancelled')`;
-const cancelledBundleSql = (i) => `CASE WHEN ${i}.status IN ('issued', 'paid') THEN COALESCE((
+     WHERE hb ->> 'kind' = '${PHYSIO_BUNDLE}' AND hbc.status = 'cancelled'))`;
+const cancelledBundleSql = (i) => `CASE WHEN ${i}.status IN ('issued', 'paid') AND ${physioLineGuardSql(i)} THEN COALESCE((
     SELECT SUM(ROUND((a ->> 'quantity')::numeric * (a ->> 'unit_price')::numeric, 2))
       FROM jsonb_array_elements(${i}.addons) a
       JOIN cases bc ON bc.case_id = a ->> 'ref'
@@ -563,14 +565,15 @@ const withComputed = (row) => {
    ชื่อย่อ sc/scu/… กันชนกับ c ของคิวรีที่ครอบอยู่
 
    i.case_id IS NOT NULL ยกขึ้นมาข้างนอก เพราะทุกสาขาต้องการเหมือนกัน */
-const STALE_SQL = `
-  i.case_id IS NOT NULL AND EXISTS (
-    SELECT 1
-    FROM cases sc
+/* แยกเป็นตาราง (STALE_PAYER_JOINS) + เงื่อนไข (STALE_COND) ให้กระดิ่งนับแบบ JOIN ตรงๆ ได้ (optimize 11 พ.ย. 2569)
+   ฉบับ EXISTS ทำให้ planner ไล่ค้นเคส/ผู้ว่าจ้าง/ผู้รับบริการทีละใบ (nested loop · 3 index lookup ต่อใบ)
+   นับทั้งระบบทุกครั้งที่เปลี่ยนหน้า เวลาจึงโตตามจำนวนใบ · ฉบับ JOIN ให้ hash join ทั้งก้อนได้
+   ผลเท่ากันทุกกรณี: case_id เป็น PK — ใบหนึ่งจับคู่เคสได้ไม่เกินหนึ่งแถว (ไม่มีนับซ้ำ) · ไม่มีเคส = ไม่ stale ทั้งสองแบบ */
+const STALE_PAYER_JOINS = `
     LEFT JOIN customers sccu ON sccu.customer_id = sc.customer_id
     LEFT JOIN patients spp   ON spp.patient_id   = sc.patient_id
-    LEFT JOIN customers spcu ON spcu.customer_id = spp.customer_id
-    WHERE sc.case_id = i.case_id AND (
+    LEFT JOIN customers spcu ON spcu.customer_id = spp.customer_id`;
+const STALE_COND = `
       (NOT EXISTS (SELECT 1 FROM invoice_items ii WHERE ii.invoice_id = i.invoice_id)
          AND i.billing_kind IS DISTINCT FROM 'deposit'
          AND i.billing_kind IS DISTINCT FROM 'balance'
@@ -585,15 +588,19 @@ const STALE_SQL = `
           AND COALESCE(sccu.name, spcu.name, sc.client_name) <> i.bill_to_name)
       OR (i.service_key IS NOT NULL
           AND ${serviceCoreSql(`(${serviceKeySql('sc')})`)} <> ${serviceCoreSql('i.service_key')})
-    )
-  )
 `;
+/* ใบที่ยังไม่ยกเลิกและไม่ตรงกับเคส — คิดทั้งชุดครั้งเดียว (hash join) ใช้ทั้งกระดิ่งและตัวกรอง ?stale=yes
+   ตัวกรองใช้ในรูป i.invoice_id IN (…) — ซับคิวรีไม่อ้างแถวข้างนอก Postgres จึงคิดครั้งเดียวแล้วค้นด้วย hash */
+const STALE_ROWS_SQL = `
+  SELECT i.invoice_id FROM invoices i
+  JOIN cases sc ON sc.case_id = i.case_id ${STALE_PAYER_JOINS}
+  WHERE i.status <> 'cancelled' AND (${STALE_COND})`;
 
 /** ใบร่างที่ออกไม่ทันกี่วันถือว่า "ลืม" — หนึ่งสัปดาห์คือรอบการทำงานของฝ่ายบัญชี */
 const DRAFT_STALE_DAYS = 7;
 
 /* เกณฑ์ "ใบร่างค้างนานเกินไป" — ใช้ทั้งใน alertCounts() และตัวกรอง ?draft_stale=yes
-   เขียนที่เดียวเหมือน STALE_SQL ข้างบน ไม่งั้นกระดิ่งกับหน้าที่มันลิงก์ไปบอกไม่ตรงกัน
+   เขียนที่เดียวเหมือน STALE_ROWS_SQL ข้างบน ไม่งั้นกระดิ่งกับหน้าที่มันลิงก์ไปบอกไม่ตรงกัน
    (เคยลิงก์ไป ?status=draft เฉยๆ ซึ่งไม่มีเงื่อนไขอายุ จึงนับ 7 แต่แสดงใบร่างทั้งหมด —
     บังเอิญตรงกันเพราะใบร่างทุกใบเก่ากว่า 7 วันพอดี ระบบเตรียมใบร่างให้เองตอนเปิดเคส
     เปิดเคสใหม่ทีเดียวก็เพี้ยนทันที) */
@@ -621,8 +628,7 @@ export async function alertCounts() {
           ลูกค้าก็ไม่เคยได้รับบิล และไม่มีอะไรบนหน้าจอฟ้องว่ามันค้าง */
        (SELECT COUNT(*) FROM invoices i WHERE ${DRAFT_STALE_SQL}) AS draft_stale,
 
-       (SELECT COUNT(*) FROM invoices i
-        WHERE i.status <> 'cancelled' AND (${STALE_SQL})) AS data_stale`,
+       (SELECT COUNT(*) FROM (${STALE_ROWS_SQL}) stale_rows) AS data_stale`,
     { today, draft_cutoff: draftStaleCutoff() },
   );
 
@@ -672,10 +678,10 @@ function buildWhere({ q, status, customer_id, case_id, overdue, stale, draft_sta
     where.push("i.status = 'issued' AND i.due_date IS NOT NULL AND i.due_date < :today");
     params.today = TODAY();
   }
-  /* ใบที่ยอด/ผู้จ่ายไม่ตรงกับเคสแล้ว — ใช้เกณฑ์ก้อนเดียวกับที่กระดิ่งนับ (STALE_SQL)
+  /* ใบที่ยอด/ผู้จ่ายไม่ตรงกับเคสแล้ว — ใช้เกณฑ์ก้อนเดียวกับที่กระดิ่งนับ (STALE_ROWS_SQL)
      ใบที่ยกเลิกไม่นับ เพราะไม่มีใครต้องไปแก้ใบที่ยกเลิกไปแล้ว */
   if (stale === 'yes') {
-    where.push(`i.status <> 'cancelled' AND (${STALE_SQL})`);
+    where.push(`i.invoice_id IN (${STALE_ROWS_SQL})`);
   }
   /* ใบร่างที่ลืมออก — ใช้เกณฑ์ก้อนเดียวกับที่กระดิ่งนับ (DRAFT_STALE_SQL)
      ไม่ต้องเช็คสถานะเพิ่ม เพราะก้อนนั้นบังคับ status = 'draft' อยู่แล้ว */
