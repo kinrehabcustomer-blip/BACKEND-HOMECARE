@@ -3517,7 +3517,10 @@ export function payQueue() {
                 /* = PLANNED_SHIFTS (ทุกกะรวมที่ยกเลิก) · = WORKED_SHIFTS (ทำจบจริงและไม่ถูกปฏิเสธ) */
                 COUNT(*) AS planned_shifts,
                 COUNT(*) FILTER (WHERE v.check_in_at IS NOT NULL AND v.check_out_at IS NOT NULL
-                                   AND v.status <> 'cancelled' AND v.pay_status IS DISTINCT FROM 'rejected') AS worked_shifts
+                                   AND v.status <> 'cancelled' AND v.pay_status IS DISTINCT FROM 'rejected') AS worked_shifts,
+                /* = เงื่อนไขกะใน CANCELLED_WITH_WORK (เช็คอินแล้วและกะไม่ถูกยกเลิก) — ใช้ใน WHERE ข้างล่างเท่านั้น
+                   ไม่อยู่ในรายการคอลัมน์ของ q จึงไม่ออกไปกับคำตอบ */
+                COUNT(*) FILTER (WHERE v.check_in_at IS NOT NULL AND v.status <> 'cancelled') AS checked_in_shifts
          FROM case_visits v
          GROUP BY v.case_id
        ) lv ON lv.case_id = c.case_id
@@ -3532,8 +3535,12 @@ export function payQueue() {
             ทันทีที่กดยกเลิกเคส ไม่มี error ไม่มีกระดิ่ง (พนักงานเห็นในหน้าค่าตอบแทนของตัวเองอยู่
             ฝ่ายเดียว) · เอากลับเข้าคิวเฉพาะใบที่มีคนไปทำจริงหรือเคยปล่อยเงินไปแล้ว
             เคสที่ยกเลิกก่อนเริ่มงาน (ส่วนใหญ่) ยังไม่ขึ้นคิวเหมือนเดิม */
+         /* "ยกเลิกแต่มีงานจริง" = CANCELLED_WITH_WORK เป๊ะ แต่อ่านจากก้อนที่ JOIN ไว้แล้ว (ปรับความเร็ว 13 พ.ย. 2569):
+              มีกะที่เช็คอินและไม่ถูกยกเลิก  ⇔ lv.checked_in_shifts > 0
+              เคยปล่อยค่าจ้าง               ⇔ มีแถวใน p (GROUP BY case_id ของ case_payouts)
+            เดิม planner แปลง EXISTS เป็น hash ของกะที่เช็คอินแล้ว "ทั้งตาราง" เพื่อเช็คเคสยกเลิกไม่กี่ใบ */
          AND (c.status IN ('assigned', 'in_progress', 'closed')
-              OR (c.status = 'cancelled' AND (${CANCELLED_WITH_WORK})))
+              OR (c.status = 'cancelled' AND (COALESCE(lv.checked_in_shifts, 0) > 0 OR p.case_id IS NOT NULL)))
       )
       SELECT r.*,
              /* คิดฝั่ง server ด้วยวันที่ไทย — นาฬิกาเครื่องผู้ใช้ตั้งผิดแล้วตัวเลขนี้เพี้ยนทันที */
@@ -4360,33 +4367,26 @@ export async function summary(period) {
   where.push(foldAddonsSql(where));
   const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
-  /* ยอดตามสถานะ · ตามประเภทบริการ · ยอดรวม — สแกนตารางรอบเดียวด้วย GROUPING SETS (ปรับความเร็ว 13 พ.ย. 2569)
-     เดิมสามคิวรีที่ต่างก็กรอง foldAddonsSql ชุดเดียวกัน = สแกน cases สามรอบ และกิน connection ครบทั้ง pool (max 3)
-     แยกตามประเภทบริการ (ประเภทเคสไม่มีให้เลือกแล้ว) — เคสเก่าที่ตั้งแค่ประเภทเคสเป็นกายภาพก็นับเป็นกายภาพ
-     GROUPING(...) บอกว่าแถวนั้นเป็นของชุดไหน (0 = จัดกลุ่มด้วยคอลัมน์นั้น) — status เป็น NOT NULL จึงไม่ปนกับแถวรวม */
-  const rows = await sql.all(
-    `SELECT c.status,
-            CASE WHEN ${PHYSIO_CASE_SQL} THEN 'physio' ELSE 'homecare' END AS service_kind,
-            GROUPING(c.status) AS g_status,
-            GROUPING(CASE WHEN ${PHYSIO_CASE_SQL} THEN 'physio' ELSE 'homecare' END) AS g_service,
-            COUNT(*) AS count
-       FROM cases c ${clause}
-      GROUP BY GROUPING SETS ((c.status), (CASE WHEN ${PHYSIO_CASE_SQL} THEN 'physio' ELSE 'homecare' END), ())`,
-    params,
-  );
+  const [byStatus, byType, totals] = await Promise.all([
+    sql.all(`SELECT status, COUNT(*) AS count FROM cases c ${clause} GROUP BY status`, params),
+    /* แยกตามประเภทบริการ (ประเภทเคสไม่มีให้เลือกแล้ว) — เคสเก่าที่ตั้งแค่ประเภทเคสเป็นกายภาพก็นับเป็นกายภาพ */
+    sql.all(
+      `SELECT CASE WHEN ${PHYSIO_CASE_SQL} THEN 'physio' ELSE 'homecare' END AS service_kind,
+              COUNT(*) AS count
+       FROM cases c ${clause} GROUP BY 1`,
+      params,
+    ),
+    sql.one(`SELECT COUNT(*) AS total FROM cases c ${clause}`, params),
+  ]);
 
-  const byStatus = rows.filter((r) => Number(r.g_status) === 0).map((r) => ({ status: r.status, count: Number(r.count) }));
-  const byService = rows
-    .filter((r) => Number(r.g_service) === 0)
-    .map((r) => ({ service_kind: r.service_kind, count: Number(r.count) }));
-  const total = rows.find((r) => Number(r.g_status) === 1 && Number(r.g_service) === 1);
+  const toNumber = (rows) => rows.map((row) => ({ ...row, count: Number(row.count) }));
 
   return {
     year: period?.year ?? null,
     month: period?.month ?? null,
-    total: Number(total?.count ?? 0),
-    by_status: byStatus,
-    by_service: byService,
+    total: Number(totals.total),
+    by_status: toNumber(byStatus),
+    by_service: toNumber(byType),
   };
 }
 
