@@ -92,13 +92,22 @@ export function findById(customerId) {
   return sql.one('SELECT * FROM customers WHERE customer_id = :id', { id: customerId });
 }
 
-/** ลูกค้าพร้อมผู้รับการดูแล (patients) และเคสทั้งหมดที่เคยใช้บริการ (ผูกด้วย customer_id) */
-export async function findDetailById(customerId) {
-  const customer = await findById(customerId);
-  if (!customer) return null;
+/**
+ * ลูกค้าพร้อมผู้รับการดูแล (patients) และเคสทั้งหมดที่เคยใช้บริการ (ผูกด้วย customer_id)
+ *
+ * preloaded = แถวลูกค้าที่ route โหลดไว้แล้วตอนตรวจว่ามีอยู่จริง (router.param) — ส่งมาแล้วไม่อ่านซ้ำ
+ * แบบเดียวกับ employees.findDetailById (ปรับความเร็ว 13 พ.ย. 2569 · เดิมอ่านแถวเดียวกันสองครั้งต่อคำขอ)
+ * งานย้ายรอบแพ็กกายภาพแก้แค่ตาราง cases — เริ่มพร้อมกับอ่านแถวลูกค้าได้ ส่วนรายการเคสยังอ่านหลังมันเสร็จเหมือนเดิม
+ */
+export async function findDetailById(customerId, preloaded = null) {
+  const casesReady = ensureAddonLink().then(() => promoteDueAddons()); // คอลัมน์ addon_of + ย้ายรอบที่ถึงเวลาแล้ว ก่อนอ่านเคส
+  const customer = preloaded ?? (await findById(customerId));
+  if (!customer) {
+    await casesReady;
+    return null;
+  }
 
-  await ensureAddonLink(); // คอลัมน์ addon_of ที่รายการเคสข้างล่างใช้ (ฐานที่ยังไม่ migrate)
-  await promoteDueAddons(); // คอร์สกายภาพที่ถึงเวลาย้ายรอบแล้ว ย้ายก่อนอ่าน
+  await casesReady;
   const [patients, cases] = await Promise.all([
     // ผู้รับการดูแลที่อยู่ใต้ลูกค้ารายนี้ (ลูกค้าหนึ่งคนดูแลได้หลายคน)
     sql.all(

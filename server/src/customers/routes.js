@@ -36,7 +36,8 @@ customersRouter.post(
 customersRouter.get(
   '/:id',
   asyncRoute(async (req, res) => {
-    res.json(await repo.findDetailById(req.params.id));
+    // req.customer = แถวที่ param loader ข้างบนเพิ่งอ่าน — ไม่ต้องอ่านซ้ำ
+    res.json(await repo.findDetailById(req.params.id, req.customer));
   }),
 );
 

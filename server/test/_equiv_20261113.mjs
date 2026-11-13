@@ -126,6 +126,9 @@ const CHECKS = (process.env.EQUIV_ONLY ? (x) => x.filter((c) => new RegExp(proce
   { file: 'notify/alerts.js', name: 'กระดิ่ง (ผู้จัดการ)', call: (m) => m.collectAlerts({ employee_id: 'EMP-0001', position: 'manager' }) },
   { file: 'notify/alerts.js', name: 'กระดิ่ง (HR)', call: (m) => m.collectAlerts({ employee_id: 'EMP-0007', position: 'hr' }) },
   { file: 'notify/alerts.js', name: 'กระดิ่ง (การเงิน)', call: (m) => m.collectAlerts({ employee_id: 'EMP-0098', position: 'finance' }) },
+  { file: 'customers/repo.js', name: 'ลูกค้า findDetailById', call: (m) => Promise.all(['CUS-P10', 'CUS-P11', 'CUS-NOPE'].map((id) => m.findDetailById(id))) },
+  { file: 'patients/repo.js', name: 'ผู้รับบริการ findDetailById', call: (m) => Promise.all(['PT-P10', 'PT-P11', 'PT-NOPE'].map((id) => m.findDetailById(id))) },
+  { file: 'employees/repo.js', name: 'พนักงาน findDetailById', call: (m) => Promise.all([['EMP-0110', false], ['EMP-0111', true], ['EMP-0001', true], ['EMP-NOPE', false]].map(([id, t]) => m.findDetailById(id, t))) },
   { file: 'invoices/repo.js', name: 'invoices.findById', call: async (m) => Promise.all(['HC-IVP11', 'HC-IVP22', 'HC-IVP33', 'HC-IVP6'].map((id) => m.findById(id))) },
 ]);
 

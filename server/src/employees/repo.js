@@ -104,13 +104,20 @@ export async function findDetailById(employeeId, includeTempPassword = false, pr
   const employee = preloaded ?? (await findById(employeeId));
   if (!employee) return null;
 
-  await ensureAddonLink(); // คอลัมน์ addon_of ที่รายการเคสข้างล่างใช้ (ฐานที่ยังไม่ migrate)
-  await promoteDueAddons(); // คอร์สกายภาพที่ถึงเวลาย้ายรอบแล้ว ย้ายก่อนอ่าน
-  const [certificates, portfolio, cases] = await Promise.all([
+  /* ใบรับรอง/ผลงาน/รหัสชั่วคราวไม่เกี่ยวกับตาราง cases — ยิงพร้อมกับงานย้ายรอบแพ็กกายภาพได้เลย
+     เฉพาะประวัติเคสที่ต้องรอให้ย้ายรอบเสร็จก่อนอ่าน (เหมือนเดิม) · ปรับความเร็ว 13 พ.ย. 2569 */
+  const casesReady = ensureAddonLink().then(() => promoteDueAddons()); // คอลัมน์ addon_of + ย้ายรอบที่ถึงเวลาแล้ว
+  const credentialQuery = includeTempPassword
+    ? sql.one(
+      `SELECT temp_password_encrypted FROM employees
+       WHERE employee_id = :id AND must_change_password = TRUE`, { id: employeeId },
+    )
+    : null;
+  const [certificates, portfolio, cases, credential] = await Promise.all([
     certificates_.listFor(employeeId),
     portfolio_.listFor(employeeId),
     // ประวัติการทำงาน: เคสที่กำลังทำอยู่และที่ปิดไปแล้ว — เรียงใหม่สุดขึ้นก่อน
-    sql.all(
+    casesReady.then(() => sql.all(
       /* addon_of + ชื่อแพ็ก — หน้าเว็บรวมแพ็กกายภาพเสริมเข้าแถวเคส Homecare เมื่อคนนี้ถือทั้งสองเคส (lib/caseAddons.js) */
       `SELECT c.case_id, c.title, c.case_type, c.service_kind, c.physio_package_id, c.client_name, c.status,
               c.start_date, c.end_date, c.assigned_at, c.closed_at, c.fee,
@@ -120,15 +127,12 @@ export async function findDetailById(employeeId, includeTempPassword = false, pr
        WHERE c.assigned_to = :id
        ORDER BY c.case_id DESC`,
       { id: employeeId },
-    ),
+    )),
+    credentialQuery,
   ]);
 
   const result = { ...employee, certificates, portfolio, cases };
   if (includeTempPassword) {
-    const credential = await sql.one(
-      `SELECT temp_password_encrypted FROM employees
-       WHERE employee_id = :id AND must_change_password = TRUE`, { id: employeeId },
-    );
     if (credential?.temp_password_encrypted) {
       const plain = tryDecryptTempPassword(credential.temp_password_encrypted, employeeId);
       // ถอดไม่ออก (หมุน JWT_SECRET ไปแล้ว) — ไม่ส่งรหัส แต่บอกว่ามีอยู่และต้องออกรหัสใหม่ให้
