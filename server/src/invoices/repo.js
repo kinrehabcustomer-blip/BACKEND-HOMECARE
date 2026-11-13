@@ -721,7 +721,8 @@ export async function list({
   const { clause, params } = buildWhere({
     q, status, customer_id, case_id, overdue, stale, draft_stale, pending_slip, hide_cancelled, service_kind, issued_from, issued_to,
   });
-  const { total } = await sql.one(`SELECT COUNT(*) AS total FROM invoices i ${clause}`, params);
+  // นับยอดทั้งหมดพร้อมกับดึงหน้านี้ (ไม่ขึ้นต่อกัน) — ประหยัดรอบไป-กลับฐานข้อมูลหนึ่งรอบ (ปรับความเร็ว 13 พ.ย. 2569)
+  const totalQuery = sql.one(`SELECT COUNT(*) AS total FROM invoices i ${clause}`, params);
 
   // NULLS LAST — due_date/paid_at ว่างได้ ถ้าไม่ใส่ การเรียงจากมากไปน้อยจะเอาใบที่ยังไม่ได้ระบุขึ้นก่อน
   const orderBy = sort === 'invoice_id'
@@ -733,15 +734,18 @@ export async function list({
      — เดิมคิดคอลัมน์คำนวณของ "ทุกใบที่เข้าเงื่อนไข" ก่อนแล้วค่อยตัดเหลือ 20 (9,000 ใบ ≈ 150 ms ต่อการเปิดหน้า · optimize 6 พ.ย. 2569)
      orderBy อ้างแค่คอลัมน์ของ i (sort ถูกจำกัดใน schema) และมี invoice_id ตัดสินเสมอ ลำดับจึงเหมือนเดิมทุกแถว
      = ANY(ARRAY(…)) ไม่ใช่ IN (…) — IN ให้ planner เลือก hash semi join ที่คิดทุกใบก่อนได้ · ARRAY ถูกคิดครั้งเดียวแล้วค้นด้วย PK */
-  const rows = await sql.all(
-    `${SELECT_INVOICE}
-     WHERE i.invoice_id = ANY(ARRAY(
-       SELECT i.invoice_id FROM invoices i ${clause}
-       ORDER BY ${orderBy}
-       LIMIT :limit OFFSET :offset))
-     ORDER BY ${orderBy}`,
-    { ...params, limit: per_page, offset: (page - 1) * per_page },
-  );
+  const [{ total }, rows] = await Promise.all([
+    totalQuery,
+    sql.all(
+      `${SELECT_INVOICE}
+       WHERE i.invoice_id = ANY(ARRAY(
+         SELECT i.invoice_id FROM invoices i ${clause}
+         ORDER BY ${orderBy}
+         LIMIT :limit OFFSET :offset))
+       ORDER BY ${orderBy}`,
+      { ...params, limit: per_page, offset: (page - 1) * per_page },
+    ),
+  ]);
 
   const count = Number(total);
   return {

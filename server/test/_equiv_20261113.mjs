@@ -76,9 +76,26 @@ await sql.run(`INSERT INTO case_payouts (case_id, employee_id, employee_name, am
 await sql.run(`INSERT INTO case_payouts (case_id, employee_id, employee_name, amount, installment_no)
   SELECT case_id, assigned_to, 'พนักงาน', staff_pay / 2, 2 FROM cases
   WHERE case_id LIKE 'VNP%' AND staff_pay IS NOT NULL AND assigned_to IS NOT NULL AND substr(case_id, 4)::int % 6 = 0`);
+// ใบแจ้งหนี้ทุกสถานะ · ยอดไม่ตรงเคสบางใบ (stale) · รับเงินบางส่วน/ครบ · ใบลดหนี้/เพิ่มหนี้
+await sql.run(`INSERT INTO invoices (invoice_id, case_id, customer_id, issue_date, due_date, bill_to_name, service_description, amount, discount, total, status, billing_kind, created_at)
+  SELECT 'HC-IVP' || g, 'VNP' || g, 'CUS-P' || (1 + g % ${H}), to_char(current_date - (g % 360), 'YYYY-MM-DD'),
+         CASE WHEN g % 4 = 0 THEN to_char(current_date - (g % 360) + 7, 'YYYY-MM-DD') END,
+         CASE WHEN g % 10 = 0 THEN 'ชื่อเก่า ' || g ELSE 'ผู้ป่วย ' || g END, 'บริการ',
+         20000 + (g % 10) * 1000 + CASE WHEN g % 8 = 0 THEN 500 ELSE 0 END, 0,
+         20000 + (g % 10) * 1000 + CASE WHEN g % 8 = 0 THEN 500 ELSE 0 END,
+         (ARRAY['draft','issued','paid','paid','issued','cancelled'])[1 + g % 6], 'full',
+         to_char(now() - make_interval(days => g % 360, secs => g), 'YYYY-MM-DD HH24:MI:SS')
+  FROM generate_series(1, ${N}) g`);
+await sql.run(`INSERT INTO invoice_payments (invoice_id, request_id, amount, paid_at)
+  SELECT invoice_id, gen_random_uuid(), CASE WHEN status = 'paid' THEN total ELSE total / 3 END, issue_date
+  FROM invoices WHERE invoice_id LIKE 'HC-IVP%' AND (status = 'paid' OR (status = 'issued' AND substr(invoice_id, 7)::int % 5 = 0))`);
+await sql.run(`INSERT INTO invoice_adjustments (note_id, invoice_id, kind, amount, reason, issue_date, total_before, total_after, bill_to_name)
+  SELECT 'HC-CNP' || substr(invoice_id, 7), invoice_id, CASE WHEN substr(invoice_id, 7)::int % 2 = 0 THEN 'credit' ELSE 'debit' END,
+         700, 'ทดสอบ', issue_date, total, total + 700, bill_to_name
+  FROM invoices WHERE invoice_id LIKE 'HC-IVP%' AND status IN ('issued', 'paid') AND substr(invoice_id, 7)::int % 11 = 0`);
 await sql.run('ANALYZE');
-const counts = await sql.one(`SELECT (SELECT COUNT(*) FROM cases) c, (SELECT COUNT(*) FROM case_visits) v, (SELECT COUNT(*) FROM case_payouts) p`);
-console.log(`ข้อมูลทดสอบ: เคส ${counts.c} · กะ ${counts.v} · งวด ${counts.p}`);
+const counts = await sql.one(`SELECT (SELECT COUNT(*) FROM cases) c, (SELECT COUNT(*) FROM case_visits) v, (SELECT COUNT(*) FROM case_payouts) p, (SELECT COUNT(*) FROM invoices) i`);
+console.log(`ข้อมูลทดสอบ: เคส ${counts.c} · กะ ${counts.v} · งวด ${counts.p} · ใบ ${counts.i}`);
 
 /* ไฟล์ฉบับเก่าจาก git วางข้างฉบับใหม่ (import สัมพัทธ์ของมันจึงชี้ไฟล์ข้างเคียงเดิม) แล้วลบทิ้งตอนจบ */
 const root = fileURLToPath(new URL('../..', import.meta.url));
@@ -101,6 +118,12 @@ const CHECKS = (process.env.EQUIV_ONLY ? (x) => x.filter((c) => new RegExp(proce
   { file: 'cases/repo.js', name: 'attendanceList(month)', call: (m) => m.attendanceList({ month: ym }) },
   { file: 'cases/repo.js', name: 'list(page1)', call: (m) => m.list({ page: 1, per_page: 50, sort: 'created_at', order: 'desc' }) },
   { file: 'cases/repo.js', name: 'list(q)', call: (m) => m.list({ q: 'ผู้ป่วย 1', page: 2, per_page: 20, sort: 'start_date', order: 'asc' }) },
+  { file: 'invoices/repo.js', name: 'invoices.list(page)', call: (m) => m.list({ page: 1, per_page: 50, sort: 'invoice_id', order: 'desc' }) },
+  { file: 'invoices/repo.js', name: 'invoices.list(stale)', call: (m) => m.list({ stale: true, page: 1, per_page: 100, sort: 'total', order: 'desc' }) },
+  { file: 'invoices/repo.js', name: 'invoices.list(overdue)', call: (m) => m.list({ overdue: true, page: 2, per_page: 20, sort: 'issue_date', order: 'asc' }) },
+  { file: 'invoices/repo.js', name: 'invoices.summary', call: (m) => m.summary({}) },
+  { file: 'invoices/repo.js', name: 'invoices.alertCounts', call: (m) => m.alertCounts() },
+  { file: 'invoices/repo.js', name: 'invoices.findById', call: async (m) => Promise.all(['HC-IVP11', 'HC-IVP22', 'HC-IVP33', 'HC-IVP6'].map((id) => m.findById(id))) },
 ]);
 
 let failed = 0;
