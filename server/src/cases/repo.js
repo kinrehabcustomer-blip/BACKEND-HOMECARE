@@ -412,7 +412,6 @@ export async function list({ q, status, case_type, service_kind, assigned_to, no
   if (!workQueue) where.push(foldAddonsSql(where));
 
   const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
-  const { total } = await sql.one(`SELECT COUNT(*) AS total FROM cases c ${clause}`, params);
 
   // NULLS LAST — start_date/title ว่างได้ ถ้าไม่ใส่ การเรียงจากใหม่ไปเก่าจะเอาเคสที่ยังไม่ได้ระบุวันเริ่ม
   // ขึ้นก่อนเคสที่เริ่มจริง (ค่าปริยายของ Postgres คือ NULLS FIRST เมื่อเรียงจากมากไปน้อย)
@@ -422,15 +421,19 @@ export async function list({ q, status, case_type, service_kind, assigned_to, no
      = ANY(ARRAY(…)) ไม่ใช่ IN (…) — IN ให้ planner เลือก hash semi join ได้ ซึ่ง JOIN ครบทุกเคสก่อนแล้วค่อยจับคู่ (ช้ากว่าเดิมอีก)
      ARRAY(ซับคิวรี) ถูกคิดครั้งเดียวก่อน แล้วค้นด้วย PK แค่ 20 ตัว */
   const orderBy = `c.${sort} ${order.toUpperCase()} NULLS LAST, c.case_id ${order.toUpperCase()}`;
-  const rows = await sql.all(
-    `${SELECT_CASE}
-     WHERE c.case_id = ANY(ARRAY(
-       SELECT c.case_id FROM cases c ${clause}
-       ORDER BY ${orderBy}
-       LIMIT :limit OFFSET :offset))
-     ORDER BY ${orderBy}`,
-    { ...params, limit: per_page, offset: (page - 1) * per_page },
-  );
+  // นับกับดึงหน้านี้ไม่ขึ้นต่อกัน — ยิงพร้อมกัน ประหยัดรอบไป-กลับฐานข้อมูลหนึ่งรอบ (ปรับความเร็ว 13 พ.ย. 2569)
+  const [{ total }, rows] = await Promise.all([
+    sql.one(`SELECT COUNT(*) AS total FROM cases c ${clause}`, params),
+    sql.all(
+      `${SELECT_CASE}
+       WHERE c.case_id = ANY(ARRAY(
+         SELECT c.case_id FROM cases c ${clause}
+         ORDER BY ${orderBy}
+         LIMIT :limit OFFSET :offset))
+       ORDER BY ${orderBy}`,
+      { ...params, limit: per_page, offset: (page - 1) * per_page },
+    ),
+  ]);
 
   const count = Number(total);
   return {
@@ -2768,7 +2771,11 @@ export function attendanceList({ month, employee_id }) {
   const where = ['v.check_in_at IS NOT NULL'];
   const params = {};
   if (month) {
-    where.push(`to_char(v.check_in_at AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM') = :month`);
+    /* ช่วงเวลา [ต้นเดือน, ต้นเดือนถัดไป) ตามเวลาไทย แทน to_char(check_in_at …) = 'YYYY-MM' (ปรับความเร็ว 13 พ.ย. 2569)
+       ห่อคอลัมน์ด้วยฟังก์ชันแล้วใช้ดัชนีไม่ได้ = สแกนกะที่เคยเช็คอินทั้งหมดทุกครั้งที่เปิดหน้า · ผลเท่าเดิมทุกแถว
+       (เดือนไทยเริ่ม 00:00 น. เวลาไทย = 17:00 UTC ของวันก่อน — AT TIME ZONE แปลงให้) ดัชนี: idx_case_visits_checkin_at */
+    where.push(`v.check_in_at >= (:month || '-01')::timestamp AT TIME ZONE 'Asia/Bangkok'`);
+    where.push(`v.check_in_at < ((:month || '-01')::timestamp + interval '1 month') AT TIME ZONE 'Asia/Bangkok'`);
     params.month = month;
   }
   if (employee_id) {
@@ -4306,23 +4313,24 @@ export async function calendar({ year, month, employee_id }) {
   const staffFilter = employee_id ? 'AND COALESCE(v.assigned_to, c.assigned_to) = :employee_id' : '';
   if (employee_id) params.employee_id = employee_id;
 
+  /* ส่งเฉพาะช่องที่หน้าปฏิทิน (CalendarPage/MobileCalendar) ใช้จริง (ปรับความเร็ว 13 พ.ย. 2569)
+     เดือนหนึ่งมีกะหลักพัน — ช่องที่ไม่มีใครอ่าน (ประเภทเคส ชื่อผู้ว่าจ้าง ตำแหน่ง เวลาเช็คอิน-ออก …)
+     ทำให้คำตอบหนักราว 2 เท่า ทั้งเวลาส่งผ่านเน็ตมือถือและเวลาแปลง JSON ทั้งสองฝั่ง
+     เวลาเช็คอิน-ออก/สถานะกะยังอ่านจากฐาน เพื่อคิด state (สีบนปฏิทิน) แล้วตัดทิ้งก่อนส่ง (ดูท้ายฟังก์ชัน)
+     ไม่ JOIN customers แล้ว — ไม่มีช่องไหนใช้ชื่อผู้ว่าจ้าง */
   const visits = await sql.all(
-    `SELECT c.case_id, c.title, c.case_type, c.status, c.service_kind, c.physio_package_id,
-            c.client_name,
-            cu.name AS customer_name,
+    `SELECT c.case_id, c.status, c.service_kind, c.physio_package_id, c.client_name,
             v.visit_id, v.visit_date, v.status AS visit_status,
             v.planned_start, v.planned_end,
             v.check_in_at, v.check_out_at,
             -- คนที่ไปทำงานกะนี้จริง = คนที่ถูกนัดในกะ ถ้าไม่ได้ระบุก็ใช้ผู้รับผิดชอบของเคส
             -- (ต้องตรงกับเงื่อนไขกรองด้านบน ไม่งั้นกรองชื่อหนึ่งแต่เห็นอีกชื่อ)
             COALESCE(v.assigned_to, c.assigned_to)   AS assigned_to,
-            COALESCE(ve.first_name || ' ' || ve.last_name, ce.first_name || ' ' || ce.last_name) AS assigned_name,
-            COALESCE(ve.position, ce.position)       AS assigned_position
+            COALESCE(ve.first_name || ' ' || ve.last_name, ce.first_name || ' ' || ce.last_name) AS assigned_name
      FROM case_visits v
      JOIN cases c ON c.case_id = v.case_id
      LEFT JOIN employees ve ON ve.employee_id = v.assigned_to
      LEFT JOIN employees ce ON ce.employee_id = c.assigned_to
-     LEFT JOIN customers cu ON cu.customer_id = c.customer_id
      WHERE v.status <> 'cancelled'
        AND v.visit_date >= :month_start
        AND v.visit_date <  :next_month
@@ -4332,7 +4340,13 @@ export async function calendar({ year, month, employee_id }) {
   );
 
   // แนบ state (รอเช็คอิน/กำลังทำงาน/เสร็จ/ขาดงาน) ให้ปฏิทินระบายสีตามการเช็คอินได้
-  return visits.map((v) => ({ ...withVisitState(v), kind: 'visit' }));
+  // แล้วตัดวัตถุดิบที่ใช้คิด state ทิ้ง (หน้าปฏิทินอ่านแค่ state)
+  const now = new Date();
+  return visits.map((v) => {
+    // eslint-disable-next-line no-unused-vars
+    const { visit_status, check_in_at, check_out_at, worked_minutes, ...rest } = withVisitState(v, now);
+    return rest;
+  });
 }
 
 /** สรุปเคส — ไม่ส่งปีมาคือรวมทุกปี, ส่งปีอย่างเดียวคือทั้งปีนั้น, ส่งปี+เดือนคือเดือนนั้น */
@@ -4346,26 +4360,33 @@ export async function summary(period) {
   where.push(foldAddonsSql(where));
   const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
-  const [byStatus, byType, totals] = await Promise.all([
-    sql.all(`SELECT status, COUNT(*) AS count FROM cases c ${clause} GROUP BY status`, params),
-    /* แยกตามประเภทบริการ (ประเภทเคสไม่มีให้เลือกแล้ว) — เคสเก่าที่ตั้งแค่ประเภทเคสเป็นกายภาพก็นับเป็นกายภาพ */
-    sql.all(
-      `SELECT CASE WHEN ${PHYSIO_CASE_SQL} THEN 'physio' ELSE 'homecare' END AS service_kind,
-              COUNT(*) AS count
-       FROM cases c ${clause} GROUP BY 1`,
-      params,
-    ),
-    sql.one(`SELECT COUNT(*) AS total FROM cases c ${clause}`, params),
-  ]);
+  /* ยอดตามสถานะ · ตามประเภทบริการ · ยอดรวม — สแกนตารางรอบเดียวด้วย GROUPING SETS (ปรับความเร็ว 13 พ.ย. 2569)
+     เดิมสามคิวรีที่ต่างก็กรอง foldAddonsSql ชุดเดียวกัน = สแกน cases สามรอบ และกิน connection ครบทั้ง pool (max 3)
+     แยกตามประเภทบริการ (ประเภทเคสไม่มีให้เลือกแล้ว) — เคสเก่าที่ตั้งแค่ประเภทเคสเป็นกายภาพก็นับเป็นกายภาพ
+     GROUPING(...) บอกว่าแถวนั้นเป็นของชุดไหน (0 = จัดกลุ่มด้วยคอลัมน์นั้น) — status เป็น NOT NULL จึงไม่ปนกับแถวรวม */
+  const rows = await sql.all(
+    `SELECT c.status,
+            CASE WHEN ${PHYSIO_CASE_SQL} THEN 'physio' ELSE 'homecare' END AS service_kind,
+            GROUPING(c.status) AS g_status,
+            GROUPING(CASE WHEN ${PHYSIO_CASE_SQL} THEN 'physio' ELSE 'homecare' END) AS g_service,
+            COUNT(*) AS count
+       FROM cases c ${clause}
+      GROUP BY GROUPING SETS ((c.status), (CASE WHEN ${PHYSIO_CASE_SQL} THEN 'physio' ELSE 'homecare' END), ())`,
+    params,
+  );
 
-  const toNumber = (rows) => rows.map((row) => ({ ...row, count: Number(row.count) }));
+  const byStatus = rows.filter((r) => Number(r.g_status) === 0).map((r) => ({ status: r.status, count: Number(r.count) }));
+  const byService = rows
+    .filter((r) => Number(r.g_service) === 0)
+    .map((r) => ({ service_kind: r.service_kind, count: Number(r.count) }));
+  const total = rows.find((r) => Number(r.g_status) === 1 && Number(r.g_service) === 1);
 
   return {
     year: period?.year ?? null,
     month: period?.month ?? null,
-    total: Number(totals.total),
-    by_status: toNumber(byStatus),
-    by_service: toNumber(byType),
+    total: Number(total?.count ?? 0),
+    by_status: byStatus,
+    by_service: byService,
   };
 }
 

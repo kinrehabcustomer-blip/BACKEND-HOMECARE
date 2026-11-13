@@ -739,6 +739,10 @@ ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS staff_pay DOUBLE PRECISION CHEC
 -- ดึงกะของคนที่เช็คอินตามเดือน (สรุปค่าตอบแทน) — ของเดิมมีแต่ index ตาม assigned_to
 CREATE INDEX IF NOT EXISTS idx_case_visits_checkin ON case_visits (checked_in_by, check_in_at);
 
+-- หน้าการมาทำงาน (ทุกคน) กรองตามช่วงเวลาเช็คอินของเดือน + เรียงใหม่ไปเก่า — ไม่มีดัชนีที่ขึ้นต้นด้วย check_in_at
+-- เดิมจึงสแกนกะทั้งตาราง (ปรับความเร็ว 13 พ.ย. 2569 · ดู attendanceList ใน cases/repo.js)
+CREATE INDEX IF NOT EXISTS idx_case_visits_checkin_at ON case_visits (check_in_at DESC) WHERE check_in_at IS NOT NULL;
+
 -- ============================================================================
 -- ประวัติการทำรายการของเคส (audit log)
 --

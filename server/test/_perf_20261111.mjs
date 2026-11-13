@@ -22,17 +22,23 @@ const base = `http://127.0.0.1:${server.address().port}`;
 const cookie = `${COOKIE_NAME}=${signToken(MANAGER)}`;
 const pg = (await import('pg')).default;
 let queries = 0;
-for (const proto of [pg.Client.prototype, pg.Pool.prototype]) {
-  const orig = proto.query;
-  proto.query = function (...a) {
-    if (proto === pg.Client.prototype) {
-      queries += 1;
-      const text = typeof a[0] === 'string' ? a[0] : a[0]?.text;
-      if (text && (process.env.EXPLAIN_MATCH ? text.includes(process.env.EXPLAIN_MATCH) : /data_stale/.test(text))) globalThis.lastStale = { text, values: Array.isArray(a[1]) ? a[1] : a[0]?.values };
-    }
-    return orig.apply(this, a);
-  };
-}
+/* PERF_LATENCY_MS = หน่วงทุกคิวรีเท่ารอบไป-กลับฐานจริง (Vercel sin1 → Neon) — ฐานในเครื่องตอบแทบ 0 ms
+   จึงมองไม่เห็นต้นทุนของ "จำนวนคิวรีต่อคำขอ" ซึ่งเป็นตัวกินเวลาหลักบนของจริง (ตั้งหลังเติมข้อมูลเสร็จ ดู latencyOn) */
+const LATENCY = Number(process.env.PERF_LATENCY_MS ?? 0);
+let latencyOn = false;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// นับ/ติดตาม/หน่วงที่ Client.query ตัวเดียว — ทุกคิวรีผ่านตรงนี้ ทั้งของ pool (ส่ง callback มา) และของ transaction (promise)
+const ClientProto = pg.Client.prototype;
+const origQuery = ClientProto.query;
+ClientProto.query = function (...a) {
+  const text = typeof a[0] === 'string' ? a[0] : a[0]?.text;
+  queries += 1;
+  if (globalThis.traceQueries) globalThis.traceQueries.push(String(text).replace(/\s+/g, ' ').slice(0, 160));
+  if (text && (process.env.EXPLAIN_MATCH ? text.includes(process.env.EXPLAIN_MATCH) : /data_stale/.test(text))) globalThis.lastStale = { text, values: Array.isArray(a[1]) ? a[1] : a[0]?.values };
+  if (!(latencyOn && LATENCY > 0)) return origQuery.apply(this, a);
+  if (typeof a[a.length - 1] === 'function') { setTimeout(() => origQuery.apply(this, a), LATENCY); return undefined; }
+  return sleep(LATENCY).then(() => origQuery.apply(this, a));
+};
 const get = async (p) => {
   const t = performance.now();
   const r = await fetch(base + p, { headers: { cookie } });
@@ -120,7 +126,11 @@ const ROUTES = [
   '/api/reviews/summary',
 ];
 const rows = [];
-for (const p of ROUTES) {
+latencyOn = true;
+if (LATENCY) console.log(`หน่วงคิวรีละ ${LATENCY} ms (จำลองฐานข้อมูลบนเครือข่าย)\n`);
+// PERF_ONLY = regex กรองเส้นที่จะวัด (วัดทีละโมดูล) เช่น PERF_ONLY='^/api/cases'
+const only = process.env.PERF_ONLY ? new RegExp(process.env.PERF_ONLY) : null;
+for (const p of ROUTES.filter((r) => !only || only.test(r))) {
   const runs = [];
   let last;
   let q = 0;
@@ -129,6 +139,18 @@ for (const p of ROUTES) {
   rows.push({ route: p, status: last.status, median: runs[2], kb: Math.round(last.size / 1024), q });
 }
 rows.sort((a, b) => b.median - a.median);
+// PERF_TRACE = regex — พิมพ์คิวรีทุกตัวของเส้นที่ตรง (ครั้งเดียว ตอนอุ่นแล้ว) ไว้ดูว่าคำขอหนึ่งยิงอะไรบ้าง
+if (process.env.PERF_TRACE) {
+  const tr = new RegExp(process.env.PERF_TRACE);
+  for (const p of ROUTES.filter((r) => tr.test(r))) {
+    globalThis.traceQueries = [];
+    await get(p);
+    console.log(`\n▶ ${p}`);
+    globalThis.traceQueries.forEach((q, i) => console.log(`  ${i + 1}. ${q}`));
+    globalThis.traceQueries = null;
+  }
+  console.log('');
+}
 for (const r of rows) console.log(`${r.median.toFixed(0).padStart(6)} ms  ${String(r.q).padStart(3)} q  ${String(r.kb).padStart(5)} KB  ${r.status}  ${r.route}`);
 
 console.log('\n— ส่วนประกอบของกระดิ่ง —');

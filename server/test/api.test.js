@@ -3002,6 +3002,47 @@ if (process.env.RUN_DB_TESTS !== '1') {
     });
   });
 
+  describe('ความเร็ว: ผลต้องเหมือนเดิม (ปรับความเร็ว 13 พ.ย. 2569)', () => {
+    test('การมาทำงานรายเดือนนับตามเวลาไทย — เช็คอิน 23:30 น. วันสิ้นเดือนอยู่เดือนนั้น · 00:10 น. วันที่ 1 อยู่เดือนถัดไป', async () => {
+      const c = await newCase();
+      const rows = await sql.all(
+        `INSERT INTO case_visits (case_id, visit_date, status, check_in_at, check_out_at)
+         VALUES (:id, '2025-10-31', 'done', '2025-10-31 23:30:00+07', '2025-11-01 07:00:00+07'),
+                (:id, '2025-11-01', 'done', '2025-11-01 00:10:00+07', '2025-11-01 08:00:00+07')
+         RETURNING visit_id`,
+        { id: c.case_id },
+      );
+      const [lateOct, earlyNov] = rows.map((r) => r.visit_id);
+      const oct = (await get('/api/cases/attendance?month=2025-10', MANAGER)).body.map((v) => v.visit_id);
+      const nov = (await get('/api/cases/attendance?month=2025-11', MANAGER)).body.map((v) => v.visit_id);
+      assert.ok(oct.includes(lateOct) && !oct.includes(earlyNov), JSON.stringify(oct));
+      assert.ok(nov.includes(earlyNov) && !nov.includes(lateOct), JSON.stringify(nov));
+    });
+
+    test('สรุปเคส (สแกนรอบเดียว) — ยอดรวม = ผลรวมตามสถานะ = ผลรวมตามบริการ', async () => {
+      const s = (await get('/api/cases/summary', MANAGER)).body;
+      const sum = (rows) => rows.reduce((n, r) => n + r.count, 0);
+      assert.ok(s.total > 0);
+      assert.equal(sum(s.by_status), s.total);
+      assert.equal(sum(s.by_service), s.total);
+      assert.ok(s.by_status.every((r) => typeof r.status === 'string'));
+      assert.ok(s.by_service.every((r) => ['physio', 'homecare'].includes(r.service_kind)));
+    });
+
+    test('ปฏิทินส่งช่องที่หน้าจอใช้ครบ และไม่มีกะที่ยกเลิก', async () => {
+      const c = await newCase();
+      const { today } = await sql.one(`SELECT to_char(now() AT TIME ZONE 'Asia/Bangkok','YYYY-MM-DD') AS today`);
+      await post(`/api/cases/${c.case_id}/visits/bulk`, { dates: [today], planned_start: '09:00', planned_end: '12:00' }, MANAGER, 201);
+      const cal = (await get(`/api/cases/calendar?year=${today.slice(0, 4)}&month=${today.slice(5, 7)}`, MANAGER)).body;
+      const mine = cal.find((v) => v.case_id === c.case_id);
+      for (const k of ['case_id', 'status', 'client_name', 'visit_id', 'visit_date', 'planned_start', 'planned_end', 'state']) {
+        assert.ok(k in mine, `ขาด ${k}`);
+      }
+      assert.equal(mine.state, 'scheduled');
+      assert.ok(cal.every((v) => v.state !== 'cancelled'));
+    });
+  });
+
   describe('กะของเคส — แก้นัดหมาย / ย้ายตามคนดูแล / ส่วนแบ่งทีม / เปิดเคสคืนกะ / กะข้ามเที่ยงคืน', () => {
     const LEAD_A = emp('EMP-0082', 'caregiver');
     const LEAD_B = emp('EMP-0083', 'caregiver');

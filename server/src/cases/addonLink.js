@@ -117,6 +117,11 @@ const TODAY_TH = "to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD')";
 
 async function runPromotion() {
   await ensureAddonLink();
+  /* ส่วนใหญ่ไม่มีแพ็กไหนจองย้ายรอบอยู่เลย — ถามคำเดียวก่อน (ใช้ดัชนีบางส่วน idx_cases_addon_next)
+     แทนที่จะ UPDATE ล้าง + เปิด transaction ย้ายทุกครั้ง (4 คิวรี + ล็อกแถวเขียน) ทั้งที่ไม่มีอะไรให้ทำ
+     (ปรับความเร็ว 13 พ.ย. 2569 — ทุกเส้นที่อ่านเคส/ลูกค้า/ผู้รับบริการ/พนักงานเรียกตัวนี้ก่อนอ่าน) */
+  const pending = await sql.one('SELECT EXISTS (SELECT 1 FROM cases WHERE addon_next IS NOT NULL) AS yes');
+  if (!pending?.yes) return 0;
   // ล้างการจองที่ไม่มีความหมายแล้ว: รอบใหม่ถูกยกเลิก · แพ็กจบ/ยกเลิก · แพ็กเปลี่ยนเป็นรวมใบ · ถูกยกเลิกการผูก
   await sql.run(
     `UPDATE cases p SET addon_next = NULL
