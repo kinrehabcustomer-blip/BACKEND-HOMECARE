@@ -296,12 +296,21 @@ myRouter.post(
       throw new ApiError(409, 'ยังไม่ถึงวันนัดของกะนี้ — เช็คอินได้ตั้งแต่วันที่นัดไว้');
     }
 
-    const offSchedule = visit.visit_date !== now.date;
-    // สายเทียบได้เฉพาะกะที่ระบุเวลานัดและเช็คอินในวันนัดจริง
+    /* กะที่นัดเวลาไว้ เทียบเป็นวัน-เวลาเต็ม ไม่ใช่แค่วันที่ (ตรวจ 13 พ.ย. 2569)
+       เดิมเทียบแค่ visit_date กับวันนี้ — กะ 23:30 ที่มาถึง 00:10 ของวันถัดไป (สาย 40 นาที)
+       กลายเป็น "นอกวันนัด" และไม่มีตัวเลขสาย ทั้งที่เป็นกะดึกที่มาสายนิดเดียว
+       ข้ามเที่ยงคืนไม่เกิน 12 ชม. นับเป็นสายตามจริง · เกินกว่านั้นยังเป็นนอกวันนัดเหมือนเดิม */
+    const minutesFromPlan = visit.planned_start
+      ? (Date.parse(`${now.date}T${now.time}:00Z`) - Date.parse(`${visit.visit_date}T${visit.planned_start}:00Z`)) / 60000
+      : null;
+    const lateOvernight =
+      visit.visit_date < now.date && minutesFromPlan != null && minutesFromPlan >= 0 && minutesFromPlan <= 12 * 60;
+    const offSchedule = visit.visit_date !== now.date && !lateOvernight;
+    // สายเทียบได้เฉพาะกะที่ระบุเวลานัดและเช็คอินในวันนัดจริง (หรือกะดึกที่สายข้ามเที่ยงคืน)
     // กะที่กดย้อนวันจะได้ตัวเลข "สาย" เป็นพันนาทีซึ่งไม่มีความหมาย ใช้ธงนอกวันนัดแทน
     const lateMinutes =
       visit.planned_start && !offSchedule
-        ? Math.max(0, minutesBetween(visit.planned_start, now.time))
+        ? Math.max(0, lateOvernight ? Math.round(minutesFromPlan) : minutesBetween(visit.planned_start, now.time))
         : null;
 
     const input = checkInSchema.parse(req.body ?? {});
@@ -464,6 +473,14 @@ myRouter.patch(
 
     const input = updateReportSchema.parse(req.body ?? {});
     await ensureVisitInCase(req.params.id, input.visit_id);
+    /* ย้ายรายงานไปกะอื่นได้เฉพาะกะของตัวเอง — เกณฑ์เดียวกับตอนลงรายงาน (POST ข้างบน) · ตรวจ 13 พ.ย. 2569
+       ไม่งั้นรายงานของเราไปโผล่เป็นรายงานของกะเพื่อนในเคสเดียวกัน */
+    if (input.visit_id != null && input.visit_id !== report.visit_id) {
+      const visit = await cases.findVisit(input.visit_id);
+      if (!visit || visit.assigned_to !== req.user.employee_id) {
+        return next(notFound('ไม่พบกะนี้ หรือไม่ใช่กะที่คุณรับผิดชอบในเคสนี้'));
+      }
+    }
     res.json(await editReport(req.params.id, report, input));
   }),
 );

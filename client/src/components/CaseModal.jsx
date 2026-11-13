@@ -247,17 +247,22 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
   }, [caseId, linkKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ดึงเคส รายชื่อพนักงาน และวันนัดพร้อมกัน — จำนวนเคสที่แต่ละคนถืออยู่เปลี่ยนทุกครั้งที่จับคู่/ยกเลิก
-  const load = () =>
-    Promise.all([
-      api.getCase(caseId),
+  /* เคสที่กล่องกำลังแสดงอยู่ — ผลโหลดของเคสเดิมที่กลับมาช้า (กดเคสถัดไประหว่างบันทึก) ต้องไม่ทับเคสใหม่ (ตรวจ 13 พ.ย. 2569) */
+  const currentIdRef = useRef(caseId);
+  currentIdRef.current = caseId;
+  const load = () => {
+    const id = caseId;
+    return Promise.all([
+      api.getCase(id),
       api.assignableEmployees(),
-      api.listVisits(caseId),
-      api.listInvoices({ case_id: caseId }),
-      api.listCaseEvents(caseId),
-      api.listCaseReports(caseId, { per_page: 1 }),
-      api.listCaseTeam(caseId),
-      api.unbilledExtras(caseId),
+      api.listVisits(id),
+      api.listInvoices({ case_id: id }),
+      api.listCaseEvents(id),
+      api.listCaseReports(id, { per_page: 1 }),
+      api.listCaseTeam(id),
+      api.unbilledExtras(id),
     ]).then(([c, list, v, inv, ev, rp, tm, ex]) => {
+      if (currentIdRef.current !== id) return;
       setItem(c);
       setStaff(list);
       setVisits(v);
@@ -267,6 +272,7 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
       setReports({ total: rp.total });
       setTeam(tm);
     });
+  };
 
   /**
    * ปิดกล่อง — ถามก่อนถ้ายังมีฟอร์มกางค้างอยู่
@@ -620,8 +626,8 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                   {/* ไล่ดูทีละเคสได้โดยไม่ต้องปิด-เปิดใหม่ (เฉพาะเคสที่อยู่ในหน้ารายการปัจจุบัน) */}
                   {siblings.length > 1 && (
                     <span className="modal-nav">
-                      <button className="btn icon-btn" disabled={!prevId} onClick={() => onNavigate?.(prevId)} title="เคสก่อนหน้า" aria-label="เคสก่อนหน้า"><LineIcon name="chevron-left" /></button>
-                      <button className="btn icon-btn" disabled={!nextId} onClick={() => onNavigate?.(nextId)} title="เคสถัดไป" aria-label="เคสถัดไป"><LineIcon name="chevron-right" /></button>
+                      <button className="btn icon-btn" disabled={!prevId || busy} onClick={() => onNavigate?.(prevId)} title="เคสก่อนหน้า" aria-label="เคสก่อนหน้า"><LineIcon name="chevron-left" /></button>
+                      <button className="btn icon-btn" disabled={!nextId || busy} onClick={() => onNavigate?.(nextId)} title="เคสถัดไป" aria-label="เคสถัดไป"><LineIcon name="chevron-right" /></button>
                     </span>
                   )}
                   <button className="modal-close" onClick={requestClose} aria-label="ปิด">×</button>

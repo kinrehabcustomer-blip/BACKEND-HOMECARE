@@ -267,7 +267,8 @@ export async function queueManualReminder(caseId, visitId, actor) {
             ${FAMILY_IDS} AS family
      FROM case_visits v
      JOIN cases c ON c.case_id = v.case_id
-     LEFT JOIN employees e ON e.employee_id = v.assigned_to
+     -- คนที่ลาออก/ถูกพักงานไม่ไปแล้ว — ไม่ส่งที่อยู่ลูกค้าให้เขา และไม่บอกชื่อเขาให้ญาติ (เหมือนกะที่ยังไม่มีคน) · ตรวจ 13 พ.ย. 2569
+     LEFT JOIN employees e ON e.employee_id = v.assigned_to AND e.status NOT IN ('resigned', 'suspended')
      LEFT JOIN physio_packages pp ON pp.physio_package_id = c.physio_package_id
      WHERE v.visit_id = :visitId AND v.case_id = :caseId`,
     { visitId, caseId },
@@ -340,6 +341,19 @@ export async function claimDueFamily3hReminders() {
   ).map((r) => r.visit_id);
   if (!ids.length) return 0;
 
+  /* ประทับตราไปแล้วก่อนเข้าคิว — เข้าคิวพังกลางทาง (ฐานสะดุด) ต้องคืนตรา ไม่งั้นกะพวกนี้ไม่ถูกหยิบอีกเลย
+     และญาติไม่ได้ข้อความ 3 ชม. · เข้าคิวซ้ำปลอดภัย เพราะ dedupe_key กันแถวซ้ำอยู่แล้ว (ตรวจ 13 พ.ย. 2569) */
+  try {
+    return await queueFamily3h(ids);
+  } catch (err) {
+    await sql
+      .run('UPDATE case_visits SET remind_family_3h_at = NULL WHERE visit_id = ANY(:ids::int[])', { ids })
+      .catch(() => {});
+    throw err;
+  }
+}
+
+async function queueFamily3h(ids) {
   const rows = await sql.all(
     `SELECT v.visit_id, v.case_id, v.visit_date, v.planned_start, v.planned_end,
             c.client_name, pp.sessions AS package_sessions,
@@ -351,7 +365,8 @@ export async function claimDueFamily3hReminders() {
             ${FAMILY_IDS} AS family
      FROM case_visits v
      JOIN cases c ON c.case_id = v.case_id
-     LEFT JOIN employees e ON e.employee_id = v.assigned_to
+     -- คนที่ลาออก/ถูกพักงานไม่ไปแล้ว — ไม่ส่งที่อยู่ลูกค้าให้เขา และไม่บอกชื่อเขาให้ญาติ (เหมือนกะที่ยังไม่มีคน) · ตรวจ 13 พ.ย. 2569
+     LEFT JOIN employees e ON e.employee_id = v.assigned_to AND e.status NOT IN ('resigned', 'suspended')
      LEFT JOIN physio_packages pp ON pp.physio_package_id = c.physio_package_id
      WHERE v.visit_id = ANY(:ids::int[])`,
     { ids },
@@ -369,7 +384,10 @@ export async function claimDueFamily3hReminders() {
   return queued;
 }
 
-/** lease 10 นาที + เพิ่ม attempts ตอน claim — แบบเดียวกับ claimVisitNotificationOutbox */
+/** lease 10 นาที + เพิ่ม attempts ตอน claim — แบบเดียวกับ claimVisitNotificationOutbox
+ *  ส่งไม่ผ่านแล้วเว้นช่วงห่างขึ้น 10 → 20 → 40 → 80 นาที ได้ 5 รอบ (ตรวจ 13 พ.ย. 2569)
+ *  เดิมคืนคิวทันที (claimed_at = NULL) และได้แค่ 3 รอบ — LINE ตอบ 429 ช่วงสั้น ๆ ก็เผาครบในรอบ cron ติดกัน
+ *  แล้วแจ้งญาติ 3 ชม./ถึงบ้านแล้ว/จับคู่พนักงานหายถาวร · คิวเตือนนัดแก้แบบนี้ไปแล้วตั้งแต่ 30 ต.ค. */
 export async function claimCaseEventOutbox(limit = 120) {
   await ensureCaseEventOutbox();
   return sql.all(
@@ -377,8 +395,9 @@ export async function claimCaseEventOutbox(limit = 120) {
         SET claimed_at = now(), attempts = attempts + 1
        FROM (
          SELECT id FROM case_event_outbox
-          WHERE sent_at IS NULL AND attempts < 3
-            AND (claimed_at IS NULL OR claimed_at < now() - interval '10 minutes')
+          WHERE sent_at IS NULL AND attempts < 5
+            AND (claimed_at IS NULL
+                 OR claimed_at < now() - interval '10 minutes' * power(2, GREATEST(attempts - 1, 0)))
           ORDER BY created_at, id
           LIMIT :limit FOR UPDATE SKIP LOCKED
        ) q
@@ -401,7 +420,8 @@ export async function ackCaseEventOutbox(results) {
           { id },
         )
       : await sql.run(
-          `UPDATE case_event_outbox SET claimed_at = NULL, error = left(:error, 1000)
+          // claimed_at = now() ไม่ใช่ NULL — ให้รอบถัดไปรอตามช่วงเว้นใน claimCaseEventOutbox
+          `UPDATE case_event_outbox SET claimed_at = now(), error = left(:error, 1000)
             WHERE id = :id AND sent_at IS NULL`,
           { id, error: String(r?.error || 'ส่งไม่สำเร็จ') },
         );

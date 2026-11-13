@@ -256,10 +256,17 @@ authRouter.post(
     if (owner && owner.employee_id !== req.user.employee_id) {
       throw new ApiError(409, 'LINE นี้ยืนยันตัวตนเป็นพนักงานคนอื่นอยู่แล้ว — ติดต่อผู้ประสานงานให้ยกเลิกที่บัญชีเดิมก่อน');
     }
-    await sql.run('UPDATE employees SET line_user_id = :uid WHERE employee_id = :id', {
-      uid: lineUserId,
-      id: req.user.employee_id,
-    });
+    /* บัญชีนี้ผูก LINE อื่นอยู่แล้ว = ห้ามทับ (เกณฑ์เดียวกับ EMPLOYEE_LINKED ใน lineLinkCode.js · ตรวจ 13 พ.ย. 2569)
+       เดิมทับเงียบ ๆ — ใครได้เซสชันของบัญชีนี้ไปครั้งเดียวผูก LINE ตัวเองแทนได้ แล้วเข้าทาง /auth/line
+       ต่อได้แม้เจ้าของจะเปลี่ยนรหัสผ่านแล้ว · เงื่อนไขอยู่ใน WHERE ด้วย กันคำขอสองตัวที่มาพร้อมกัน */
+    const changed = await sql.run(
+      `UPDATE employees SET line_user_id = :uid
+        WHERE employee_id = :id AND (line_user_id IS NULL OR line_user_id = :uid)`,
+      { uid: lineUserId, id: req.user.employee_id },
+    );
+    if (changed !== 1) {
+      throw new ApiError(409, 'บัญชีนี้ผูกกับ LINE อื่นอยู่แล้ว — ติดต่อผู้ประสานงานให้ยกเลิกการผูกเดิมก่อน');
+    }
     res.json({ ok: true });
   }),
 );

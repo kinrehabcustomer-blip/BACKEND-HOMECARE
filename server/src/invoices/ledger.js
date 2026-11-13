@@ -108,6 +108,9 @@ const DDL = [
   `ALTER TABLE invoice_adjustments ADD COLUMN IF NOT EXISTS reason_code TEXT NOT NULL DEFAULT 'other'
      CHECK (reason_code IN ('discount', 'correction', 'not_rendered', 'bad_debt', 'extra_service', 'other'))`,
   'ALTER TABLE invoices ADD COLUMN IF NOT EXISTS issued_at TEXT',
+  /* กันออกใบลดหนี้/เพิ่มหนี้ (และเงินคืน) ซ้ำเมื่อกดซ้ำหลังหมดเวลา — แบบเดียวกับ invoice_payments.request_id (ตรวจ 13 พ.ย. 2569) */
+  'ALTER TABLE invoice_adjustments ADD COLUMN IF NOT EXISTS request_id UUID',
+  'CREATE UNIQUE INDEX IF NOT EXISTS uq_invoice_adjustments_request ON invoice_adjustments (request_id) WHERE request_id IS NOT NULL',
 ];
 
 let ledgerReady = null;
@@ -392,6 +395,22 @@ export async function createAdjustmentForTransaction(tx, invoiceId, input, actor
   );
   if (!inv) return { reason: 'not_found' };
 
+  /* คำขอเดิม (กดซ้ำหลังหมดเวลา ทั้งที่ server ออกเอกสารไปแล้ว) = คืนเอกสารเดิม ไม่ออกใบที่สอง
+     ตรวจหลังล็อกใบ — คำขอซ้ำที่มาพร้อมกันรอคิวกันที่ล็อก แล้วตัวที่สองเห็นแถวของตัวแรก */
+  if (input.request_id) {
+    const prior = await tx.one(
+      `SELECT a.note_id, a.invoice_id, r.refund_doc_id, COALESCE(r.amount, 0) AS refund_amount
+         FROM invoice_adjustments a
+         LEFT JOIN invoice_refunds r ON r.note_id = a.note_id
+        WHERE a.request_id = :rid`,
+      { rid: input.request_id },
+    );
+    if (prior) {
+      if (prior.invoice_id !== invoiceId) return { reason: 'idempotency_conflict' };
+      return { invoice_id: invoiceId, note_id: prior.note_id, refund_amount: Number(prior.refund_amount), refund_doc_id: prior.refund_doc_id, replayed: true };
+    }
+  }
+
   const ledger = await ledgerFor(tx, invoiceId);
   const verdict = assessAdjustment(inv.status, ledger, input);
   if (verdict.reason) return verdict;
@@ -408,10 +427,11 @@ export async function createAdjustmentForTransaction(tx, invoiceId, input, actor
   await tx.run(
     `INSERT INTO invoice_adjustments
        (note_id, invoice_id, kind, amount, reason, reason_code, items, ref_receipt_id, issue_date,
-        total_before, total_after, bill_to_name, bill_to_tax_id, bill_to_address, issued_by, issued_by_name)
+        total_before, total_after, bill_to_name, bill_to_tax_id, bill_to_address, issued_by, issued_by_name, request_id)
      VALUES (:note_id, :invoice_id, :kind, :amount, :reason, :reason_code, :items, :ref_receipt_id, :issue_date,
-             :total_before, :total_after, :bill_to_name, :bill_to_tax_id, :bill_to_address, :by, :by_name)`,
+             :total_before, :total_after, :bill_to_name, :bill_to_tax_id, :bill_to_address, :by, :by_name, :request_id)`,
     {
+      request_id: input.request_id ?? null,
       note_id: noteId,
       invoice_id: invoiceId,
       kind: input.kind,

@@ -2,6 +2,7 @@ import { sql, transaction } from '../db/index.js';
 import { likeEscape } from '../lib/likeEscape.js';
 import { ensureAddonLink, promoteDueAddons, ADDON_LIST_COLUMNS } from '../cases/addonLink.js';
 import { ApiError } from '../lib/errors.js';
+import { renameCaseRefs } from '../lib/caseRefs.js';
 
 /** เจ้าของรหัสผู้รับบริการนี้ (ถ้ามี) — ใช้ทั้งตอนบันทึก และเส้นตรวจซ้ำที่หน้าฟอร์มเรียกระหว่างพิมพ์ */
 export const patientCodeOwner = (db, code, exceptId = null) =>
@@ -190,6 +191,13 @@ export async function update(patientId, input) {
       await tx.run(
         `UPDATE cases SET case_id = :next_id || substr(case_id, length(:patient_id) + 1)
          WHERE patient_id = :next_id AND (case_id = :patient_id OR case_id LIKE :pattern)`,
+        { patient_id: patientId, next_id: nextId, pattern: `${patientId}-R%` },
+      );
+      // คิวแจ้งเตือนไม่มี FK cascade — ย้ายตามรหัสใหม่ด้วยสูตรเดียวกัน (ดู lib/caseRefs.js)
+      await renameCaseRefs(
+        tx,
+        (col) => `:next_id || substr(${col}, length(:patient_id) + 1)`,
+        (col) => `(${col} = :patient_id OR ${col} LIKE :pattern)`,
         { patient_id: patientId, next_id: nextId, pattern: `${patientId}-R%` },
       );
     }

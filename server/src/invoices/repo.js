@@ -111,7 +111,7 @@ export function assessPaymentCapacity(status, totalAmount, paidAmount, requested
 
 async function paymentInvoiceForUpdate(tx, invoiceId) {
   return tx.one(
-    `SELECT invoice_id, total, billing_kind, status
+    `SELECT invoice_id, case_id, total, billing_kind, status
      FROM invoices WHERE invoice_id = :id FOR UPDATE`,
     { id: invoiceId },
   );
@@ -402,7 +402,11 @@ export async function bundledAddons(caseRow, db = sql) {
      ผู้เรียกที่ส่ง tx มาต้องเรียก ensureAddonLink ก่อนเปิดทรานแซกชันเอง (ดู createFromCase) */
   if (db === sql) await ensureAddonLink();
   const rows = await db.all(
-    `SELECT c.case_id, c.fee, pp.name AS package_name, pp.sessions
+    /* ราคาสุทธิ = snapshot ก่อน fee เหมือน caseNetFeeSql — อ่านผ่าน to_jsonb เพราะคอลัมน์ snapshot
+       เติมแบบ lazy และฟังก์ชันนี้ถูกเรียกใน tx ที่ ALTER ไม่ได้ (ฐานที่ยังไม่มีคอลัมน์ = ได้ fee ตามเดิม) */
+    `SELECT c.case_id,
+            COALESCE((to_jsonb(c)->>'service_customer_price_snapshot')::double precision, c.fee) AS fee,
+            pp.name AS package_name, pp.sessions
      FROM cases c
      LEFT JOIN physio_packages pp ON pp.physio_package_id = c.physio_package_id
      WHERE c.addon_of = :id AND c.bill_with_parent AND c.status <> 'cancelled'
@@ -579,7 +583,8 @@ const STALE_COND = `
          AND i.billing_kind IS DISTINCT FROM 'balance'
          AND NOT ${hasCancelledBundleSql('i')}
          AND (${caseBillableSql('sc', 'i')}) IS NOT NULL
-         AND (${caseBillableSql('sc', 'i')}) <> ${netTotalSql('i')})
+         -- ปัดสตางค์ก่อนเทียบเหมือน withComputed — ยอดที่เก็บเป็น double (1939.0299999…) ไม่งั้นกระดิ่งนับใบที่หน้ารายการบอกว่าตรง
+         AND ROUND((${caseBillableSql('sc', 'i')})::numeric, 2) <> ROUND((${netTotalSql('i')})::numeric, 2))
       OR (i.billing_kind IN ('deposit', 'balance') AND NOT ${hasCancelledBundleSql('i')}
          AND (${planBillableSql('sc', 'i')}) IS NOT NULL
          AND ROUND((${planBillableSql('sc', 'i')})::numeric, 2) <> ROUND((${planNetTotalSql('i')})::numeric, 2))
@@ -798,11 +803,14 @@ export async function invoiceMutationResult(result, loadInvoice = findById) {
  * เคสที่ยกเลิกไม่นับ เพราะ POST /api/invoices ไม่ให้ออกใบให้เคสที่ยกเลิกอยู่แล้ว
  */
 export const casesWithoutInvoice = () =>
-  ensureAddonLink().then(() => sql.all(
+  Promise.all([ensureAddonLink(), ensurePriceSnapshotColumns()]).then(() => sql.all(
     `SELECT c.case_id, c.title, c.client_name, c.status,
             -- ยอดที่ใบจะออก = ค่า Homecare + แพ็กกายภาพที่รวมอยู่ในเคสนี้ (ใบเดียวกัน)
-            c.fee + COALESCE((SELECT SUM(b.fee) FROM cases b
-                              WHERE b.addon_of = c.case_id AND b.bill_with_parent AND b.status <> 'cancelled'), 0) AS fee
+            -- ราคาสุทธิเดียวกับที่ใบใช้ (snapshot ก่อน fee) — เคสที่ราคามาจากตารางราคาไม่มี fee (ตรวจ 13 พ.ย. 2569)
+            -- ไม่มีราคาเลยทั้งคู่ = NULL (หน้าเว็บแสดงว่ายังไม่ตั้งราคา) เหมือนเดิม
+            CASE WHEN ${caseNetFeeSql('c')} IS NULL THEN NULL ELSE
+            ${caseNetFeeSql('c')} + COALESCE((SELECT SUM(${caseNetFeeSql('b')}) FROM cases b
+                              WHERE b.addon_of = c.case_id AND b.bill_with_parent AND b.status <> 'cancelled'), 0) END AS fee
      FROM cases c
      WHERE c.status <> 'cancelled'
        -- แพ็กกายภาพที่รวมอยู่ในเคส Homecare ออกใบที่เคส Homecare (เคสเดียวกันในสายตาคนใช้)
@@ -1201,14 +1209,22 @@ export async function visitLines(caseRow, { from, to } = {}) {
 
   if (visits.length === 0) return { lines: [], amount: 0 };
 
-  const perVisit = Number(booked.n) > 0 ? (caseRow.fee ?? 0) / Number(booked.n) : 0;
-  const rounded = Math.round(perVisit * 100) / 100;
+  // ราคาสุทธิเดียวกับใบแพ็คเกจ (priceParts/caseNetFeeSql) — เคสที่ราคามาจากตารางราคาอาจไม่มี fee
+  // ถ้าใช้ fee ตรงๆ ทุกบรรทัดจะเป็น 0 บาท (ตรวจ 13 พ.ย. 2569)
+  const fee = Number(caseRow.service_customer_price_snapshot ?? caseRow.fee ?? 0);
+  const perVisit = Number(booked.n) > 0 ? fee / Number(booked.n) : 0;
+  let rounded = Math.round(perVisit * 100) / 100;
   // เก็บเฉพาะครั้งที่ไปจริง — ยอดรวมจึงเป็นสัดส่วนของกะที่ทำ ไม่ใช่ทั้งแพ็คเกจ
   const isFinalUnbilledBatch = Number(remaining.n) === visits.length;
-  const outstanding = Math.max(0, Math.round(((caseRow.fee ?? 0) - Number(billed.amount ?? 0)) * 100) / 100);
+  const outstanding = Math.max(0, Math.round((fee - Number(billed.amount ?? 0)) * 100) / 100);
   const total = isFinalUnbilledBatch
     ? outstanding
     : Math.round(rounded * visits.length * 100) / 100;
+  /* ชุดสุดท้ายที่ยอดค้างน้อยกว่าราคาต่อครั้ง × จำนวนกะ (เพิ่มกะ/ลดค่าบริการหลังออกใบไปแล้ว)
+     บรรทัดสุดท้ายจะติดลบแล้วชน CHECK (amount >= 0) — เกลี่ยยอดค้างเท่าๆ กันแทน */
+  if (total - rounded * (visits.length - 1) < 0) {
+    rounded = Math.floor((total / visits.length) * 100) / 100;
+  }
 
   const lines = visits.map((v, i) => ({
     seq: i + 1,
@@ -1292,15 +1308,28 @@ export function createFromCase(caseRow, input, actor, visitItems = [], { extra =
     /* ใบแพ็คเกจ (ยอดเต็มของเคส) มีได้ชุดเดียว — เคสมีใบที่ออก/ชำระแล้วอยู่ แล้วกดออกใบแพ็คเกจใหม่
        ได้บิลยอดเต็มซ้ำอีกใบ ลูกค้าโดนเก็บสองรอบ (ตรวจ 11 พ.ย. 2569) · ยอดเปลี่ยน = ใบเพิ่มหนี้/ลดหนี้
        ออกใหม่ทั้งใบ = ยกเลิกใบเดิมก่อน · ใบรายครั้ง (มีกะเป็นบรรทัด) และใบค่าใช้จ่ายเพิ่มเติม ออกหลายใบได้ตามปกติ */
-    if (caseRow.case_id && !extra && visitItems.length === 0) {
+    if (caseRow.case_id && !extra) {
       const pkg = await tx.one(
         `SELECT invoice_id, status FROM invoices i
          WHERE i.case_id = :id AND i.status <> 'cancelled' AND i.billing_kind IS DISTINCT FROM 'extra'
-           AND NOT EXISTS (SELECT 1 FROM invoice_items ii WHERE ii.invoice_id = i.invoice_id)
+           AND NOT EXISTS (SELECT 1 FROM invoice_items ii WHERE ii.invoice_id = i.invoice_id AND ii.visit_id IS NOT NULL)
          ORDER BY i.invoice_id LIMIT 1`,
         { id: caseRow.case_id },
       );
+      /* ใบแพ็คเกจ (ยอดเต็ม/มัดจำ/ส่วนที่เหลือ) เก็บค่าบริการทั้งเคสไปแล้ว — ออกใบตามกะต่อจะเก็บซ้ำ
+         เพราะ visitLines นับเฉพาะใบที่มีบรรทัดกะว่า "เก็บไปแล้ว" (ตรวจ 13 พ.ย. 2569) */
       if (pkg) return { reason: 'package_exists', invoice_id: pkg.invoice_id, status: pkg.status };
+      // กลับกัน: เก็บตามกะไปบางส่วนแล้ว แล้วกดออกใบแพ็คเกจยอดเต็ม = ลูกค้าจ่ายส่วนที่เก็บไปแล้วซ้ำ
+      if (visitItems.length === 0) {
+        const byVisit = await tx.one(
+          `SELECT i.invoice_id, i.status FROM invoices i
+           WHERE i.case_id = :id AND i.status <> 'cancelled' AND i.billing_kind IS DISTINCT FROM 'extra'
+             AND EXISTS (SELECT 1 FROM invoice_items ii WHERE ii.invoice_id = i.invoice_id AND ii.visit_id IS NOT NULL)
+           ORDER BY i.invoice_id LIMIT 1`,
+          { id: caseRow.case_id },
+        );
+        if (byVisit) return { reason: 'visits_billed', invoice_id: byVisit.invoice_id, status: byVisit.status };
+      }
     }
 
     // อ่านหลังล็อกเคส — สองคำขอที่มาพร้อมกันจะไม่เก็บอุปกรณ์ชิ้นเดียวกันซ้ำสองใบ
@@ -1423,8 +1452,14 @@ async function syncOneFromCase(target, caseRow, customer, forceInvoiceId) {
 
      หมายเหตุ: ห้ามเขียนคอมเมนต์ที่มีข้อความหน้าตาแบบ :ชื่อ ไว้ในสตริง SQL —
      ตัวแปลง :name เป็น $n ใน db/index.js ข้ามแค่ string literal กับ cast ไม่ได้ข้ามคอมเมนต์ของ SQL
-     ข้อความในคอมเมนต์จึงถูกนับเป็นพารามิเตอร์ไปด้วย แล้วลำดับ $n จะเพี้ยนทั้งคำสั่ง */
-  return sql.run(
+     ข้อความในคอมเมนต์จึงถูกนับเป็นพารามิเตอร์ไปด้วย แล้วลำดับ $n จะเพี้ยนทั้งคำสั่ง
+
+     ล็อกแถวใบก่อน UPDATE (ตรวจ 13 พ.ย. 2569) — บันทึกรับเงินที่มาพร้อมกันล็อกแถวนี้อยู่
+     ถ้า UPDATE รอล็อกเอง Postgres ตรวจซ้ำแค่แถวใบ ส่วน NOT EXISTS invoice_payments ยังใช้ snapshot เก่า
+     จึงทับยอดของใบที่เพิ่งรับเงินได้ · ล็อกด้วย SELECT ก่อน คำสั่งถัดไปได้ snapshot ใหม่ที่เห็นการรับเงินแล้ว */
+  return transaction(async (tx) => {
+    await tx.one('SELECT invoice_id FROM invoices WHERE invoice_id = :id FOR UPDATE', { id: target });
+    return tx.run(
     `UPDATE invoices
      SET customer_id         = :customer_id,
          bill_to_name        = :bill_to_name,
@@ -1480,15 +1515,33 @@ async function syncOneFromCase(target, caseRow, customer, forceInvoiceId) {
       discount: price.discount,
       addons: JSON.stringify(normalizeAddons(caseRow.addons)),
     },
-  );
+    );
+  });
 }
 
 /**
  * ปุ่ม "ดึงข้อมูลจากเคส" ของใบที่ออกแล้ว — ดึงเฉพาะผู้จ่าย (ชื่อ เลขผู้เสียภาษี ที่อยู่ออกบิล)
  * ยอด/รายการไม่แตะ: ใบที่ออกแล้วปรับยอดได้ทางใบลดหนี้/เพิ่มหนี้เท่านั้น (ตัดสินใจ 4 พ.ย. 2569)
+ * ส่งลิงก์ให้ลูกค้าไปแล้ว = ห้ามเปลี่ยนผู้จ่าย เกณฑ์เดียวกับ update() (already_shared) — ไม่งั้นปุ่มนี้
+ * เป็นทางอ้อมให้ลิงก์ที่ลูกค้าถืออยู่เปลี่ยนเป็นชื่อ/เลขผู้เสียภาษีของอีกบ้าน (ตรวจ 13 พ.ย. 2569)
  */
 export async function refreshPayerFromCase(invoiceId, caseRow, customer) {
-  return sql.run(
+  await ensureShareTables();
+  return transaction(async (tx) => {
+    const inv = await tx.one(
+      `SELECT invoice_id, bill_to_name, bill_to_tax_id, bill_to_address FROM invoices
+        WHERE invoice_id = :id AND status = 'issued' FOR UPDATE`,
+      { id: invoiceId },
+    );
+    if (!inv) return 0;
+    const next = {
+      bill_to_name: customer?.name ?? caseRow.client_name,
+      bill_to_tax_id: customer?.tax_id ?? null,
+      bill_to_address: customer?.billing_address ?? customer?.address ?? caseRow.address ?? null,
+    };
+    const changesFacing = Object.keys(next).some((k) => (next[k] ?? null) !== (inv[k] ?? null));
+    if (changesFacing && (await hasBeenShared(tx, invoiceId))) return { reason: 'already_shared' };
+    return tx.run(
     `UPDATE invoices
      SET customer_id     = :customer_id,
          bill_to_name    = :bill_to_name,
@@ -1496,14 +1549,9 @@ export async function refreshPayerFromCase(invoiceId, caseRow, customer) {
          bill_to_address = :bill_to_address,
          updated_at      = ${NOW}
      WHERE invoice_id = :id AND status = 'issued'`,
-    {
-      id: invoiceId,
-      customer_id: customer?.customer_id ?? caseRow.customer_id ?? null,
-      bill_to_name: customer?.name ?? caseRow.client_name,
-      bill_to_tax_id: customer?.tax_id ?? null,
-      bill_to_address: customer?.billing_address ?? customer?.address ?? caseRow.address ?? null,
-    },
-  );
+    { id: invoiceId, customer_id: customer?.customer_id ?? caseRow.customer_id ?? null, ...next },
+    );
+  });
 }
 
 /**
@@ -1742,6 +1790,13 @@ export async function payInvoiceForTransaction(tx, invoiceId, input, actor) {
   const received = request.amount;
   const paidAt = input.paid_at ?? TODAY();
 
+  /* รับเงินเข้าใบร่าง = ออกใบไปในตัว (ดู issuedNow ด้านล่าง) ต้องผ่านด่านเดียวกับปุ่ม "ออกใบ"
+     ไม่งั้นใบร่างของเคสที่ยกเลิกไปแล้วกลายเป็นเอกสารที่ออกจริงได้ทางนี้ (ตรวจ 13 พ.ย. 2569) */
+  if (inv.status === 'draft' && inv.case_id) {
+    const caseRow = await tx.one('SELECT status FROM cases WHERE case_id = :id', { id: inv.case_id });
+    if (caseRow?.status === 'cancelled') return { reason: 'case_cancelled' };
+  }
+
   // ใบมัดจำทั้งใบคือเงินมัดจำ — ธงนี้ใช้แยกในใบเสร็จและรายงาน
   const isDeposit = inv.billing_kind === 'deposit';
 
@@ -1809,6 +1864,10 @@ export async function payInvoiceForTransaction(tx, invoiceId, input, actor) {
                        ELSE status END,
          paid_at = CASE WHEN :settled THEN :paid_at ELSE paid_at END,
          issued_at = COALESCE(issued_at, ${NOW}),
+         -- ออกใบตอนรับเงิน = วันที่ออกใบคือวันนี้ เหมือนปุ่ม "ออกใบ" (ใบร่างที่ระบบเตรียมไว้ตอนเปิดเคสยังถือวันเปิดเคสอยู่)
+         -- วันครบกำหนดที่อยู่ก่อนวันออกใบเลื่อนตามมา ไม่ให้เอกสารครบกำหนดก่อนวันที่ออก
+         issue_date = CASE WHEN :issued_now THEN :today ELSE issue_date END,
+         due_date = CASE WHEN :issued_now AND due_date < :today THEN :today ELSE due_date END,
          payment_method = COALESCE(:payment_method, payment_method),
          paid_by = :paid_by,
          paid_by_name = :paid_by_name,
@@ -1818,6 +1877,7 @@ export async function payInvoiceForTransaction(tx, invoiceId, input, actor) {
       id: invoiceId,
       settled,
       issued_now: issuedNow,
+      today: TODAY(),
       paid_at: paidAt,
       payment_method: input.payment_method ?? null,
       paid_by: actor?.employee_id ?? null,

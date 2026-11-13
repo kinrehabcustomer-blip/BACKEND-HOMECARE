@@ -617,7 +617,8 @@ export const api = {
   caseReportImageUrl: (id, reportId, imageId) => `/api/cases/${id}/reports/${reportId}/images/${imageId}`,
   caseReportPhotoUrl: (id, reportId) => `/api/cases/${id}/reports/${reportId}/photo`,
   /* request_id ติดไปทุกครั้ง — เน็ตหลุดแล้วกดใหม่ (หรือเบราว์เซอร์ retry) ต้องได้รายงานใบเดิม
-     ไม่ใช่สองใบในกะเดียว (Codex ข้อ 6 · 8 พ.ย. 2569) */
+     ไม่ใช่สองใบในกะเดียว (Codex ข้อ 6 · 8 พ.ย. 2569) · ผู้เรียกส่ง request_id ของฟอร์มมาเองได้ (ทับตัวที่สุ่มนี้)
+     ซึ่งควรทำ — สุ่มใหม่ทุกครั้งที่เรียกแปลว่ากดบันทึกซ้ำได้รหัสใหม่ (ดู CaseReports.jsx) */
   addCaseReport: (id, body) =>
     request(`/cases/${id}/reports`, { method: 'POST', body: { request_id: crypto.randomUUID(), ...body } }),
   updateCaseReport: (id, reportId, body) =>

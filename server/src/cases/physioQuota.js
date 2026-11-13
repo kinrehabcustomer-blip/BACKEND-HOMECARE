@@ -41,7 +41,13 @@ export function expiryDate(startsOn, months) {
   d.setUTCDate(1);
   d.setUTCMonth(d.getUTCMonth() + months);
   const last = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
-  d.setUTCDate(Math.min(day, last));
+  /* เดือนปลายทางสั้นกว่าวันเริ่ม (เริ่ม 29–31 ม.ค. แพ็ก 1 เดือน) = ใช้ได้ถึงสิ้นเดือนนั้น (28 ก.พ.)
+     เดิมตัดเป็นวันสุดท้ายแล้วลบอีกวัน → 27 ก.พ. คนเริ่มปลายเดือนได้สิทธิ์สั้นกว่าคนอื่นถึง 3 วัน (ตรวจ 13 พ.ย. 2569) */
+  if (day > last) {
+    d.setUTCDate(last);
+    return d.toISOString().slice(0, 10);
+  }
+  d.setUTCDate(day);
   d.setUTCDate(d.getUTCDate() - 1);
   return d.toISOString().slice(0, 10);
 }

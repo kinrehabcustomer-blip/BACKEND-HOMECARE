@@ -74,6 +74,19 @@ if (process.env.RUN_DB_TESTS !== '1') {
       assert.match(r.body.error, /ใช้งานไม่ได้แล้ว/);
     });
 
+    test('token ที่ออกก่อนบัญชีถูกสร้าง (รหัสพนักงานถูกเอาไปใช้ซ้ำ) = 401 (ตรวจ 13 พ.ย. 2569)', async () => {
+      const reused = emp('EMP-0089', 'manager');
+      const oldToken = signToken(reused); // คุกกี้ของคนเก่าที่เคยใช้รหัสนี้
+      await new Promise((r) => setTimeout(r, 1100)); // created_at ละเอียดระดับวินาที
+      await sql.run(
+        `INSERT INTO employees (employee_id, first_name, last_name, position, email, status, password_hash, must_change_password)
+         VALUES ('EMP-0089', 'New', 'Hire', 'manager', 'emp-0089@example.invalid', 'active', 'x', false)`,
+      );
+      const res = await fetch(`${base}/api/cases`, { headers: { cookie: `${COOKIE_NAME}=${oldToken}` } });
+      assert.equal(res.status, 401);
+      assert.equal((await get('/api/cases', reused)).status, 200, 'token ใหม่ของบัญชีนี้ใช้ได้ตามปกติ');
+    });
+
     test('token บอกว่าเป็น manager แต่ DB บอกว่าเป็นพนักงานภาคสนาม = ยึดตาม DB (403)', async () => {
       assert.equal((await get('/api/cases', { ...FIELD, position: 'manager' })).status, 403);
     });
@@ -2493,6 +2506,104 @@ if (process.env.RUN_DB_TESTS !== '1') {
       );
     });
 
+    test('ใบแพ็คเกจกับใบรายครั้งของเคสเดียวกันห้ามซ้อน — กันเก็บเงินลูกค้าซ้ำ (ตรวจ 13 พ.ย. 2569)', async () => {
+      const addDone = (caseId, d) => sql.run(
+        `INSERT INTO case_visits (case_id, visit_date, status, check_in_at, check_out_at)
+         VALUES (:id, :d, 'done', (:d || ' 08:00:00+07')::timestamptz, (:d || ' 16:00:00+07')::timestamptz)`,
+        { id: caseId, d },
+      );
+
+      // ทางที่ 1: ใบแพ็คเกจออกแล้ว → ออกใบตามกะต่อไม่ได้ (เดิมได้ใบยอดเต็มซ้ำอีกใบ)
+      const a = await post('/api/cases', { case_type: 'other', client_name: 'Package then visits', fee: 2000 }, MANAGER, 201);
+      const pkg = await draftOf(a.case_id);
+      await post(`/api/invoices/${pkg.invoice_id}/billing-plan`, { mode: 'full' });
+      await post(`/api/invoices/${pkg.invoice_id}/issue`, {});
+      await addDone(a.case_id, '2026-05-01');
+      const byVisits = await post('/api/invoices', { case_id: a.case_id, basis: 'visits' }, MANAGER, 409);
+      assert.equal(byVisits.existing_invoice_id ?? byVisits.details?.existing_invoice_id ?? pkg.invoice_id, pkg.invoice_id);
+
+      // ทางที่ 2: เก็บตามกะไปแล้ว → ออกใบแพ็คเกจยอดเต็มไม่ได้
+      const b = await post('/api/cases', { case_type: 'other', client_name: 'Visits then package', fee: 2000 }, MANAGER, 201);
+      const auto = await draftOf(b.case_id);
+      assert.equal((await send('DELETE', `/api/invoices/${auto.invoice_id}`)).status, 200);
+      await addDone(b.case_id, '2026-05-01');
+      await addDone(b.case_id, '2026-05-02');
+      const v = await post('/api/invoices', { case_id: b.case_id, basis: 'visits', to: '2026-05-01' }, MANAGER, 201);
+      await post(`/api/invoices/${v.invoice_id}/billing-plan`, { mode: 'full' });
+      await post(`/api/invoices/${v.invoice_id}/issue`, {});
+      const full = await post('/api/invoices', { case_id: b.case_id }, MANAGER, 409);
+      assert.match(full.error, /ออกใบตามกะไปแล้ว/);
+      // ใบตามกะรอบถัดไปยังออกได้ตามปกติ
+      await post('/api/invoices', { case_id: b.case_id, basis: 'visits' }, MANAGER, 201);
+    });
+
+    test('ใบรายครั้งชุดสุดท้ายที่ยอดค้างน้อยกว่าราคาต่อครั้ง — ไม่มีบรรทัดติดลบ ไม่ตอบ 500 (ตรวจ 13 พ.ย. 2569)', async () => {
+      const c = await post('/api/cases', { case_type: 'other', client_name: 'Fee lowered', fee: 3000 }, MANAGER, 201);
+      const auto = await draftOf(c.case_id);
+      assert.equal((await send('DELETE', `/api/invoices/${auto.invoice_id}`)).status, 200);
+      for (const d of ['2026-06-01', '2026-06-02', '2026-06-03']) {
+        await sql.run(
+          `INSERT INTO case_visits (case_id, visit_date, status, check_in_at, check_out_at)
+           VALUES (:id, :d, 'done', (:d || ' 08:00:00+07')::timestamptz, (:d || ' 16:00:00+07')::timestamptz)`,
+          { id: c.case_id, d },
+        );
+      }
+      const first = await post('/api/invoices', { case_id: c.case_id, basis: 'visits', to: '2026-06-01' }, MANAGER, 201);
+      assert.equal(first.total, 1000);
+      await post(`/api/invoices/${first.invoice_id}/billing-plan`, { mode: 'full' });
+      await post(`/api/invoices/${first.invoice_id}/issue`, {});
+      // ลดค่าบริการหลังออกใบรอบแรก: ค้าง 1,200 − 1,000 = 200 แต่ราคาต่อครั้ง 400 × 2 กะ
+      await sql.run(
+        'UPDATE cases SET fee = 1200, service_customer_price_snapshot = NULL WHERE case_id = :id',
+        { id: c.case_id },
+      );
+      const last = await post('/api/invoices', { case_id: c.case_id, basis: 'visits' }, MANAGER, 201);
+      assert.equal(last.total, 200);
+      assert.ok(last.items.every((i) => i.amount >= 0), JSON.stringify(last.items));
+      assert.equal(Math.round(last.items.reduce((s, i) => s + i.amount, 0) * 100) / 100, 200);
+    });
+
+    test('ใบรายครั้งของเคสที่ไม่มี fee แต่มีราคาที่จดไว้ — ราคาต่อครั้งไม่เป็น 0 (ตรวจ 13 พ.ย. 2569)', async () => {
+      const c = await post('/api/cases', { case_type: 'other', client_name: 'Snapshot only', fee: 2000 }, MANAGER, 201);
+      const auto = await draftOf(c.case_id);
+      assert.equal((await send('DELETE', `/api/invoices/${auto.invoice_id}`)).status, 200);
+      await sql.run(
+        'UPDATE cases SET fee = NULL, service_customer_price_snapshot = 1800 WHERE case_id = :id',
+        { id: c.case_id },
+      );
+      for (const d of ['2026-07-01', '2026-07-02']) {
+        await sql.run(
+          `INSERT INTO case_visits (case_id, visit_date, status, check_in_at, check_out_at)
+           VALUES (:id, :d, 'done', (:d || ' 08:00:00+07')::timestamptz, (:d || ' 16:00:00+07')::timestamptz)`,
+          { id: c.case_id, d },
+        );
+      }
+      const billed = await post('/api/invoices', { case_id: c.case_id, basis: 'visits' }, MANAGER, 201);
+      assert.equal(billed.total, 1800);
+      assert.deepEqual(billed.items.map((i) => i.amount), [900, 900]);
+    });
+
+    test('รับเงินเข้าใบร่างของเคสที่ยกเลิกแล้วไม่ได้ (ตรวจ 13 พ.ย. 2569)', async () => {
+      const c = await newCase();
+      const draft = await draftOf(c.case_id);
+      await post(`/api/invoices/${draft.invoice_id}/billing-plan`, { mode: 'full' });
+      // ใบร่างที่หลุดรอดการยกเลิกตามเคส (เช่น เป็นงวดของแผน) — จำลองด้วยการยกเลิกเคสตรงที่ฐาน
+      await sql.run("UPDATE cases SET status = 'cancelled' WHERE case_id = :id", { id: c.case_id });
+      const res = await send('POST', `/api/invoices/${draft.invoice_id}/pay`, { request_id: crypto.randomUUID() });
+      assert.equal(res.status, 409, JSON.stringify(res.body));
+      assert.match(res.body.error, /ยกเลิกแล้ว/);
+      assert.equal((await invoice(draft.invoice_id)).status, 'draft');
+    });
+
+    test('ปลดผู้รับผิดชอบของเคสที่ยังไม่จับคู่แต่มีทีม = เลื่อนคนในทีมขึ้นเป็นหลัก ไม่ตอบ 500 (ตรวจ 13 พ.ย. 2569)', async () => {
+      const c = await newCase();
+      assert.equal(c.status, 'unassigned');
+      await post(`/api/cases/${c.case_id}/team`, { employee_id: FIELD.employee_id });
+      const after = await post(`/api/cases/${c.case_id}/unassign`, {});
+      assert.equal(after.assigned_to, FIELD.employee_id);
+      assert.equal(after.status, 'assigned');
+    });
+
     test('ออกใบพร้อมกันสองคำขอ = ใบร่างใบเดียว', async () => {
       const c = await newCase();
       const auto = await draftOf(c.case_id);
@@ -2650,6 +2761,23 @@ if (process.env.RUN_DB_TESTS !== '1') {
       const refused = await send('POST', `/api/invoices/${otherDraft.invoice_id}/adjustments`, { kind: 'debit', amount: 100, reason: 'ทดสอบใบร่าง' });
       assert.equal(refused.status, 409);
       assert.match(refused.body.error, /ร่าง/);
+    });
+
+    test('ใบลดหนี้+คืนเงิน กดซ้ำด้วยรหัสคำขอเดิม = เอกสารเดิม ไม่ออกใบที่สอง (ตรวจ 13 พ.ย. 2569)', async () => {
+      const id = await fullPlan('Credit retry', 10000);
+      await pay(id, {});
+      const body = {
+        kind: 'credit', amount: 2000, reason: 'ยกเลิกกะ 1 วัน', refund: { method: 'โอนคืน' }, request_id: crypto.randomUUID(),
+      };
+      const first = await send('POST', `/api/invoices/${id}/adjustments`, body);
+      assert.equal(first.status, 201, JSON.stringify(first.body));
+      const again = await send('POST', `/api/invoices/${id}/adjustments`, body);
+      assert.equal(again.status, 201, JSON.stringify(again.body));
+      assert.equal(again.body.created_note_id, first.body.created_note_id);
+      const inv = await invoice(id);
+      assert.equal(inv.adjustments.length, 1);
+      assert.equal(inv.refunds.length, 1);
+      assert.equal(inv.net_total, 8000);
     });
 
     test('ใบเพิ่มหนี้/ลดหนี้: ยอดสุทธิ · สถานะถอยกลับ · ลดหนี้จนรับเกินต้องคืนเงิน · สิทธิ์ · ยกเลิกเอกสาร', async () => {

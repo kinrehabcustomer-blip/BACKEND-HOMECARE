@@ -89,8 +89,12 @@ export async function dueRatings() {
      JOIN employees e ON e.employee_id = c.assigned_to AND ${ACTIVE_EMP('e')}
      LEFT JOIN LATERAL (${lastWorkerSql('c.case_id')}) w ON true
      WHERE c.status IN ('assigned', 'in_progress')
-        OR (c.status = 'closed' AND COALESCE(NULLIF(c.end_date, ''), left(c.updated_at, 10)) >= :since)`,
-    // วันปิดเคส = end_date (ถ้ามี) — ไม่ใช้ updated_at ตรง ๆ เพราะเคสที่ปิดนานแล้วแต่มีคนแก้ข้อมูลวันนี้จะถูกถามดาวย้อนหลัง
+        OR (c.status = 'closed'
+            AND COALESCE(NULLIF(left(c.closed_at, 10), ''), NULLIF(c.end_date, ''), left(c.updated_at, 10)) >= :since)`,
+    /* วันปิดเคส = closed_at (วันที่กดปิดจริง) ก่อน end_date (ตรวจ 13 พ.ย. 2569) — ปิดเคสไม่ได้แก้ end_date ที่นัดไว้
+       เคสที่ปิดช้ากว่ากำหนดเกิน 3 วัน (เจอบ่อย — มีป้าย "เลยกำหนดปิด") จึงไม่เคยได้ถามดาวรอบจบ
+       ส่วนเคสที่ปิดก่อนกำหนดโผล่เป็น "ถึงรอบ" ไปจนถึง end_date + 3 วัน
+       ไม่ใช้ updated_at ตรง ๆ เพราะเคสที่ปิดนานแล้วแต่มีคนแก้ข้อมูลวันนี้จะถูกถามดาวย้อนหลัง */
     { since: new Date(Date.now() + 7 * 3.6e6 - 3 * 864e5).toISOString().slice(0, 10) },
   );
   return rows

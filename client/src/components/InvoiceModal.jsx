@@ -97,6 +97,7 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
      server รู้ว่าเป็นคำขอเดิม จึงคืนรายการรับเงินใบเดิมแทนที่จะรับเงินซ้ำสองรอบ
      ออกรหัสใหม่ทุกครั้งที่เปิดฟอร์ม = การรับเงินรอบใหม่คือคำขอใหม่จริงๆ */
   const [payRequestId, setPayRequestId] = useState(null);
+  const [adjRequestId, setAdjRequestId] = useState(null); // กันออกใบลดหนี้/เพิ่มหนี้ซ้ำ (ดู openAdjustForm)
   const [paySlipId, setPaySlipId] = useState(null); // มีค่าเมื่อเปิดฟอร์มจากปุ่มยืนยันสลิปรอตรวจ
   // รายการรับชำระที่กำลังจะยกเลิก + เหตุผล (ยกเลิกทีละรายการ จึงเก็บรหัสเดียวพอ)
   const [voidFor, setVoidFor] = useState(null);
@@ -191,11 +192,19 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
   }
   const lastSend = lineInfo?.history?.[0];
 
-  const load = () =>
-    Promise.all([api.getInvoice(invoiceId), api.invoicePlan(invoiceId)]).then(([v, sib]) => {
+  /* ใบที่กล่องกำลังแสดงอยู่ตอนนี้ — ผลโหลดของใบอื่นที่กลับมาช้า (กดใบถัดไประหว่างบันทึก) ต้องไม่ทับ
+     เดิมกล่องขึ้นใบ A ขณะที่ URL/ปุ่มก่อน-ถัดไปเป็นใบ B แล้วปุ่มคัดลอกบิลส่งลิงก์ของ B (ตรวจ 13 พ.ย. 2569) */
+  const currentIdRef = useRef(invoiceId);
+  currentIdRef.current = invoiceId;
+
+  const load = () => {
+    const id = invoiceId;
+    return Promise.all([api.getInvoice(id), api.invoicePlan(id)]).then(([v, sib]) => {
+      if (currentIdRef.current !== id) return;
       setItem(v);
       setPlan(sib);
     });
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -206,6 +215,10 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
     setCancelOpen(false);
     setCancelReason('');
     setPaySlipId(null);
+    // รหัสรับชำระและยอดมัดจำที่กรอกค้างไว้เป็นของใบเดิม — ห้ามติดไปใบถัดไป
+    setPayRequestId(null);
+    setAdjRequestId(null);
+    setDepositDraft('');
     Promise.all([api.getInvoice(invoiceId), api.invoicePlan(invoiceId)])
       .then(([v, sib]) => {
         if (cancelled) return;
@@ -282,6 +295,8 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
       onChanged?.();
     } catch (e) {
       setError(e.message);
+      // ล้ม/หมดเวลา = ไม่รู้ว่า server บันทึกไปแล้วหรือยัง — โหลดใบใหม่ ยอดค้างที่เติมในฟอร์มรอบหน้าจะได้ไม่เก่า
+      load().catch(() => {});
     } finally {
       setBusy(false);
     }
@@ -292,7 +307,10 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
     setPayDate(/^\d{4}-\d{2}-\d{2}$/.test(slip?.extracted_date || '') ? slip.extracted_date : todayTH());
     setPayMethod(slip ? 'โอน' : PAYMENT_METHODS[0]);
     setPaySlipId(slip?.slip_id ?? null);
-    setPayRequestId(crypto.randomUUID());
+    /* ใช้รหัสเดิมถ้ารอบก่อนยังไม่สำเร็จ (ตรวจ 13 พ.ย. 2569) — เน็ตช้าจนหมดเวลาแต่ server บันทึกไปแล้ว
+       แล้วกดปิดฟอร์มเปิดใหม่ เดิมได้รหัสใหม่ = รับเงินซ้ำอีกรายการ · รหัสเดิมยอดเดิม = server คืนรายการเดิม
+       รหัสเดิมแต่ยอดต่าง = server ตอบให้โหลดใหม่ (ไม่บันทึกซ้ำ) · สำเร็จแล้วถึงล้างรหัส (ดูปุ่มยืนยัน) */
+    setPayRequestId((id) => id ?? crypto.randomUUID());
     setPayOpen(true);
   }
 
@@ -366,6 +384,8 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
     setAdjReason('');
     setRefundDate(todayTH());
     setRefundMethod(PAYMENT_METHODS[1]);
+    // รหัสกันออกเอกสารซ้ำ — คงเดิมจนกว่าจะออกสำเร็จ (หมดเวลาแล้วเปิดฟอร์มใหม่ = server คืนเอกสารเดิม ไม่ออกใบที่สอง)
+    setAdjRequestId((id) => id ?? crypto.randomUUID());
     setPayOpen(false);
     setAdjOpen(true);
   }
@@ -599,8 +619,8 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                 {/* ไล่ดูทีละใบได้โดยไม่ต้องปิด-เปิดใหม่ (เฉพาะใบที่อยู่ในหน้ารายการปัจจุบัน) */}
                 {siblings.length > 1 && (
                   <span className="modal-nav">
-                    <button className="btn icon-btn" disabled={!prevId} onClick={() => onNavigate?.(prevId)} title="ใบก่อนหน้า" aria-label="ใบก่อนหน้า"><LineIcon name="chevron-left" /></button>
-                    <button className="btn icon-btn" disabled={!nextId} onClick={() => onNavigate?.(nextId)} title="ใบถัดไป" aria-label="ใบถัดไป"><LineIcon name="chevron-right" /></button>
+                    <button className="btn icon-btn" disabled={!prevId || busy} onClick={() => onNavigate?.(prevId)} title="ใบก่อนหน้า" aria-label="ใบก่อนหน้า"><LineIcon name="chevron-left" /></button>
+                    <button className="btn icon-btn" disabled={!nextId || busy} onClick={() => onNavigate?.(nextId)} title="ใบถัดไป" aria-label="ใบถัดไป"><LineIcon name="chevron-right" /></button>
                   </span>
                 )}
                 <button className="modal-close" onClick={onClose} aria-label="ปิด">×</button>
@@ -830,7 +850,9 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                             amount: adjValue,
                             reason: adjReason.trim(),
                             refund: adjRefund > 0 ? { refunded_at: refundDate, method: refundMethod } : null,
+                            request_id: adjRequestId,
                           });
+                          setAdjRequestId(null); // สำเร็จแล้ว — เอกสารใบถัดไปต้องได้รหัสใหม่
                           toast(
                             `ออก${adjKind === 'credit' ? 'ใบลดหนี้' : 'ใบเพิ่มหนี้'} ${res.created_note_id} แล้ว` +
                               (adjRefund > 0 ? ` · บันทึกคืนเงิน ${amountText(adjRefund)} บาท` : ''),

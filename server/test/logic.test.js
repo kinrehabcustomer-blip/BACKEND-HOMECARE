@@ -1027,6 +1027,17 @@ describe('ตัวกันเลื่อนตำแหน่ง (employees)'
   test('ผู้จัดการตั้งตำแหน่ง manager ได้', () => {
     assert.doesNotThrow(() => guards.ensureCanGrantManager(asManager, 'manager'));
   });
+  test('ตั้งตำแหน่งที่มีสิทธิ์มากกว่าตัวเองไม่ได้ (ตรวจ 13 พ.ย. 2569)', () => {
+    const asNurseLead = { user: { employee_id: 'EMP-0009', position: 'nurse_lead' } };
+    // หัวหน้าพยาบาลไม่มีใบแจ้งหนี้ — สร้างบัญชี admin แล้ว login เข้าไปจะได้สิทธิ์ใบแจ้งหนี้
+    assert.throws(() => guards.ensureCanGrantManager(asNurseLead, 'admin'), (e) => e.status === 403);
+    // HR ไม่มีสิทธิ์ลบสลิป แต่ตำแหน่ง admin มี
+    assert.throws(() => guards.ensureCanGrantManager(asHr, 'admin'), (e) => e.status === 403);
+    // ตำแหน่งภาคสนาม (ไม่มีสิทธิ์หลังบ้าน) และตำแหน่งเดียวกับตัวเองตั้งได้ตามปกติ
+    assert.doesNotThrow(() => guards.ensureCanGrantManager(asNurseLead, 'nurse'));
+    assert.doesNotThrow(() => guards.ensureCanGrantManager(asHr, 'hr'));
+    assert.doesNotThrow(() => guards.ensureCanGrantManager(asManager, 'admin'));
+  });
   test('แก้ตำแหน่งของตัวเองไม่ได้ แม้เป็นผู้จัดการ', async () => {
     await assert.rejects(
       guards.ensurePositionChangeAllowed(asManager, { employee_id: 'EMP-0001', position: 'manager' }, 'hr'),
@@ -2516,5 +2527,21 @@ describe('ใบลดหนี้/เพิ่มหนี้ — ออกไ�
     const r = assessAdjustment('paid', ledger(100.1, 100.1), { kind: 'debit', amount: 0.2 });
     assert.equal(r.totalAfter, 100.3);
     assert.equal(r.refundAmount, 0);
+  });
+});
+
+// ---------- วันหมดอายุแพ็กกายภาพ (cases/physioQuota.js) ----------
+describe('วันหมดอายุแพ็กกายภาพ — วันเริ่ม + n เดือน − 1 วัน', () => {
+  test('ปกติ: เริ่ม 26 ต.ค. แพ็ก 3 เดือน → ใช้ได้ถึง 25 ม.ค.', async () => {
+    const { expiryDate } = await import('../src/cases/physioQuota.js');
+    assert.equal(expiryDate('2026-10-26', 3), '2027-01-25');
+    assert.equal(expiryDate('2026-01-28', 1), '2026-02-27');
+  });
+  test('เริ่มปลายเดือนที่เดือนปลายทางสั้นกว่า = ใช้ได้ถึงสิ้นเดือนนั้น ไม่หักซ้ำอีกวัน (ตรวจ 13 พ.ย. 2569)', async () => {
+    const { expiryDate } = await import('../src/cases/physioQuota.js');
+    assert.equal(expiryDate('2026-01-29', 1), '2026-02-28');
+    assert.equal(expiryDate('2026-01-31', 1), '2026-02-28');
+    assert.equal(expiryDate('2026-03-31', 1), '2026-04-30');
+    assert.equal(expiryDate('2028-01-31', 1), '2028-02-29'); // ปีอธิกสุรทิน
   });
 });

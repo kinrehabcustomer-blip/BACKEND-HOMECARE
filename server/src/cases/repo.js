@@ -9,6 +9,7 @@ import { REPORT_CONTENT_FIELDS, PATIENT_PENDING, MAX_REPORT_IMAGES, END_BEFORE_S
 import { ensurePatientCodeFree } from '../patients/repo.js';
 import { decodeImage, FRONT_POSITIONS } from '../employees/schema.js';
 import { ApiError } from '../lib/errors.js';
+import { renameCaseRefs, deleteCaseRefs } from '../lib/caseRefs.js';
 import { ensureAddonLink, promoteDueAddons, bundleCoveredSql, currentAddonRound } from './addonLink.js';
 import { physioQuota } from './physioQuota.js';
 import { ensureVisitReminderColumns, ensureVisitChangeTable, recordVisitChange } from '../notify/visitReminders.js';
@@ -93,7 +94,9 @@ async function servicePriceSnapshot(db, s) {
       { format: s.pkg_format_id, grade: s.pkg_grade_id ?? null, tier: s.pkg_staff_tier },
     );
     const list = r?.customer_price ?? null;
-    const discount = r?.discount_percent != null
+    // % ก่อนเฉพาะเมื่อ > 0 — กติกาเดียวกับ discountOf (packages/repo.js) และหน้าจอ (ตรวจ 13 พ.ย. 2569)
+    // เดิมเช็คแค่ "ไม่ว่าง": ใส่ 0% + ลด 500 บาท หน้าจอขาย 1,500 แต่ราคาที่จดในเคสเป็น 2,000
+    const discount = r?.discount_percent != null && Number(r.discount_percent) > 0
       ? Number(list || 0) * Number(r.discount_percent) / 100
       : Number(r?.discount_amount || 0);
     return { list, customer: s.fee ?? (list == null ? null : Math.max(0, list - discount)) };
@@ -108,7 +111,7 @@ const PHYSIO_ENGLISH = `(CASE WHEN c.pkg_english THEN COALESCE(p.english_fee, 0)
 const PHYSIO_LIST = `(p.original_price + ${PHYSIO_ENGLISH})`;
 const PHYSIO_NET = `(COALESCE(p.special_price, p.original_price) + ${PHYSIO_ENGLISH})`;
 /* ตารางเรท Homecare — ราคาตั้ง และราคาหลังส่วนลดของแถวนั้น */
-const RATE_NET = `GREATEST(0, r.customer_price - CASE WHEN r.discount_percent IS NOT NULL
+const RATE_NET = `GREATEST(0, r.customer_price - CASE WHEN r.discount_percent > 0
                     THEN r.customer_price * r.discount_percent / 100 ELSE COALESCE(r.discount_amount, 0) END)`;
 const money = (v) => (v == null ? 'ไม่มี' : Number(v).toLocaleString('th-TH'));
 
@@ -1422,6 +1425,10 @@ export async function update(caseId, rawInput, actor) {
        WHERE case_id = :case_id`,
       values,
     );
+    // คิวแจ้งเตือนไม่มี FK cascade — ย้ายตามรหัสใหม่เอง (ดู lib/caseRefs.js)
+    if (nextId) {
+      await renameCaseRefs(tx, () => ':to_id', (col) => `${col} = :from_id`, { from_id: caseId, to_id: nextId });
+    }
 
     // ไม่มีอะไรเปลี่ยน = ไม่บันทึก (กดบันทึกโดยไม่แก้อะไรไม่ควรมีบรรทัดขึ้นในประวัติ)
     if (changed.length > 0 || nextId) {
@@ -1551,7 +1558,24 @@ export async function start(caseId, actor) {
 /** ป้ายของใบร่างที่ระบบยกเลิกให้ตอนยกเลิกเคส — reopen คืนเฉพาะใบที่มีป้ายนี้และเวลาตรงกับการยกเลิกเคสครั้งนั้น */
 const AUTO_CANCEL_INVOICE_REASON = 'ระบบยกเลิกอัตโนมัติ — เคสถูกยกเลิก';
 
+/**
+ * แจ้งพนักงาน/ญาติว่ากะที่ยังไม่ถึงวันถูกยกเลิกตามเคส (ยกเลิก/ปิดเคส) — ตรวจ 13 พ.ย. 2569
+ * ยกเลิกทีละกะแจ้งผ่าน recordVisitChange อยู่แล้ว (ดร.ธงชัย 2 พ.ย. 2569) แต่ยกเลิกทั้งเคสอัปเดตกะแบบรวบเลยข้ามไป
+ * พนักงานที่ได้เตือน "พรุ่งนี้" ไปแล้วจึงยังเดินทางไป และญาติยังรอ · กะในอดีต (ขาดงาน) ไม่แจ้ง
+ * ผู้เรียกต้อง await ensureVisitChangeTable() ก่อนเปิด transaction
+ */
+async function announceDroppedVisits(tx, caseId, visits, reason) {
+  const today = isoDateTH(new Date());
+  for (const v of visits) {
+    if (v.visit_date < today) continue;
+    await recordVisitChange(tx, caseId, v.visit_id, { ...v, status: 'scheduled' }, { status: 'cancelled' }, ['status'], {
+      reason: reason || null,
+    });
+  }
+}
+
 export async function cancel(caseId, reason, actor) {
+  await ensureVisitChangeTable();
   await transaction(async (tx) => {
     await caseForTransition(tx, caseId, ACTIVE_CASE_STATES);
     await tx.run(
@@ -1567,16 +1591,15 @@ export async function cancel(caseId, reason, actor) {
        ทั้งที่เคสถูกยกเลิกไปแล้ว คนที่เปิดตารางงานดูจะเดินทางไปบ้านลูกค้าที่ยกเลิกไปแล้วจริงๆ
 
        ไม่แตะกะที่เช็คอินไปแล้ว: นั่นคือการทำงานที่เกิดขึ้นจริงและเป็นฐานค่าจ้าง ต้องคงไว้ตามเดิม */
-    const { n } = await tx.one(
-      `WITH cancelled AS (
-         UPDATE case_visits
-         SET status = 'cancelled', auto_cancelled_at = ${NOW}, updated_at = ${NOW}
-         WHERE case_id = :case_id AND status <> 'cancelled' AND check_in_at IS NULL
-         RETURNING 1
-       )
-       SELECT COUNT(*) AS n FROM cancelled`,
+    const cancelledVisits = await tx.all(
+      `UPDATE case_visits
+       SET status = 'cancelled', auto_cancelled_at = ${NOW}, updated_at = ${NOW}
+       WHERE case_id = :case_id AND status <> 'cancelled' AND check_in_at IS NULL
+       RETURNING visit_id, visit_date, planned_start, planned_end, assigned_to`,
       { case_id: caseId },
     );
+    const n = cancelledVisits.length;
+    await announceDroppedVisits(tx, caseId, cancelledVisits, reason || 'ยกเลิกเคส');
 
     /* ใบแจ้งหนี้ร่างของเคสนี้ (ยังไม่ส่งลูกค้า ไม่มีเงินเข้า) ยกเลิกตามไปด้วย — เคยค้างไว้แล้วกดออกใบ/รับเงินได้
        ทั้งที่เคสถูกยกเลิกแล้ว · ใบที่ออกไปแล้วหรือรับเงินมาแล้วไม่แตะ (เป็นเอกสารที่ลูกค้าถืออยู่ ต้องจัดการที่ใบเอง) */
@@ -1710,7 +1733,10 @@ export async function unassign(caseId, actor) {
 
     if (next) {
       await tx.run(
-        `UPDATE cases SET assigned_to = :employee_id, assigned_at = ${NOW}, updated_at = ${NOW}
+        /* เคสที่ยังไม่จับคู่แต่มีทีมอยู่ (เพิ่มทีมได้ตั้งแต่ยังไม่จับคู่) — มีคนหลักแล้วต้องเป็น assigned
+           ไม่งั้นชน CHECK case_status_matches_assignee แล้วตอบ 500 · in_progress คงไว้ตามเดิม (ตรวจ 13 พ.ย. 2569) */
+        `UPDATE cases SET assigned_to = :employee_id, assigned_at = ${NOW}, updated_at = ${NOW},
+                status = CASE WHEN status = 'unassigned' THEN 'assigned' ELSE status END
          WHERE case_id = :case_id`,
         { case_id: caseId, employee_id: next.employee_id },
       );
@@ -1774,6 +1800,7 @@ export async function pendingShifts(caseId) {
 }
 
 export async function close(caseId, endDate, actor) {
+  await ensureVisitChangeTable();
   await transaction(async (tx) => {
     await caseForTransition(tx, caseId, ACTIVE_CASE_STATES);
     /* เดิมตรงนี้ "ตรึงค่าจ้าง" ลงทุกกะที่เช็คอินแล้ว (staff_pay / จำนวนกะที่นัดไว้) เพราะยอดต่อกะ
@@ -1784,13 +1811,16 @@ export async function close(caseId, endDate, actor) {
     // กะที่ยังไม่ถึงวันและไม่มีใครไป = งานที่จะไม่เกิดขึ้นแล้ว ยกเลิกทิ้งไปพร้อมกับการปิดเคส
     // ไม่งั้นปฏิทินเดือนหน้ายังขึ้นกะของเคสที่ปิดไปแล้ว และพนักงานยังเห็นในตารางงานของตัวเอง
     // กะของวันที่ผ่านมาแล้วไม่แตะ — ปล่อยให้ยังเป็น "ขาดงาน" ตามความจริง
-    const dropped = await tx.run(
+    const droppedVisits = await tx.all(
       `UPDATE case_visits
        SET status = 'cancelled', auto_cancelled_at = ${NOW}, updated_at = ${NOW}
        WHERE case_id = :case_id AND status = 'scheduled'
-         AND check_in_at IS NULL AND visit_date >= :today`,
+         AND check_in_at IS NULL AND visit_date >= :today
+       RETURNING visit_id, visit_date, planned_start, planned_end, assigned_to`,
       { case_id: caseId, today: isoDateTH(new Date()) },
     );
+    const dropped = droppedVisits.length;
+    await announceDroppedVisits(tx, caseId, droppedVisits, 'ปิดเคส');
 
     await tx.run(
       `UPDATE cases
@@ -1963,6 +1993,7 @@ export function remove(caseId) {
     const { n } = await tx.one('SELECT count(*)::int AS n FROM case_payouts WHERE case_id = :id', { id: caseId });
     if (n > 0) return { removed: false, reason: 'has_payouts', payouts: n };
 
+    await deleteCaseRefs(tx, caseId); // คิวแจ้งเตือนไม่มี FK ลบตาม (ดู lib/caseRefs.js)
     await tx.run('DELETE FROM cases WHERE case_id = :id', { id: caseId });
     return { removed: true };
   });
@@ -2081,7 +2112,13 @@ export async function addVisits(caseId, dates, { assigned_to, planned_start, pla
      เดิมตรวจซ้ำนอกทรานแซกชัน — กดเบิ้ล/สองแท็บพร้อมกัน ทั้งคู่เห็นว่ายังไม่มีแล้ว insert ซ้อนได้
      ตอนนี้คำขอที่สองต้องรอคำขอแรก commit ก่อน แล้วจะเห็นนัดที่เพิ่งลงและข้ามไปเอง */
   const result = await transaction(async (tx) => {
-    const kase = await tx.one('SELECT assigned_to FROM cases WHERE case_id = :id FOR UPDATE', { id: caseId });
+    const kase = await tx.one('SELECT assigned_to, status FROM cases WHERE case_id = :id FOR UPDATE', { id: caseId });
+    /* route ตรวจสถานะจากแถวที่อ่านก่อนได้ล็อก — มีคนกดปิด/ยกเลิกเคสพร้อมกัน คำขอนี้รอล็อกแล้วลงกะ
+       เข้าเคสที่จบไปแล้วได้ (ลบทิ้งก็ไม่ได้ เพราะลบกะของเคสที่จบแล้วไม่ได้) จึงตรวจซ้ำหลังล็อก · ตรวจ 13 พ.ย. 2569 */
+    if (!kase) throw new ApiError(404, 'ไม่พบเคสนี้');
+    if (kase.status === 'closed' || kase.status === 'cancelled') {
+      throw new ApiError(409, 'เคสนี้จบไปแล้ว — ต้องเปิดเคสใหม่ก่อนจึงจะลงกะเพิ่มได้');
+    }
     const existing = await tx.all(
       `SELECT visit_date, assigned_to, planned_start FROM case_visits WHERE case_id = :id AND status <> 'cancelled'`,
       { id: caseId },
@@ -4709,12 +4746,15 @@ export async function findReport(caseId, reportId) {
    deploy ที่ยังไม่ได้รัน migrate ต้องไม่ล้มตอนบันทึกรายงาน (Codex ข้อ 6 · 8 พ.ย. 2569) */
 let reportIdemReady = null;
 const ensureReportIdempotency = () =>
+  /* แยกเป็นสองคำสั่ง (ตรวจ 13 พ.ย. 2569) — db/index.js ข้าม DDL ที่มีอยู่แล้วได้เฉพาะสตริงคำสั่งเดียว
+     เดิมรวมกันในสตริงเดียว จึง ALTER จริงทุก cold start = ขอล็อกทั้งตาราง case_reports ทุกครั้งที่ instance ใหม่
+     บันทึกรายงานใบแรก แล้วคำขออ่าน/เขียนรายงานอื่นต้องรอคิวตามหลัง */
   (reportIdemReady ??= sql
-    .run(
-      `ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS request_id UUID;
-       CREATE UNIQUE INDEX IF NOT EXISTS uq_case_reports_request
+    .run('ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS request_id UUID')
+    .then(() => sql.run(
+      `CREATE UNIQUE INDEX IF NOT EXISTS uq_case_reports_request
          ON case_reports (request_id) WHERE request_id IS NOT NULL`,
-    )
+    ))
     .catch((err) => { reportIdemReady = null; throw err; }));
 
 export async function addReport(caseId, input, actor) {

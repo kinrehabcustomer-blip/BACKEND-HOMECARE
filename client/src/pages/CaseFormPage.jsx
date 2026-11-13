@@ -73,7 +73,9 @@ const BLANK_ADDON = { name: '', kind: 'rent', quantity: '1', unit_price: '' };
 const BLANK_PROCEDURE = { name: '', unit_price: '', vn: null };
 
 /** ยอดของบรรทัด — ปัดสองตำแหน่งแบบเดียวกับ server/src/lib/addons.js ตัวเลขบนฟอร์มจะได้ตรงกับใบ */
-const addonAmount = (a) => Math.round(Number(a.quantity || 0) * Number(a.unit_price || 0) * 100) / 100;
+// จำนวนว่าง = 1 เหมือน addonsPayload ข้างล่าง (ที่ส่งไป server) — เดิมหน้าจอนับเป็น 0 แต่ใบเก็บ 1 ชิ้น (ตรวจ 13 พ.ย. 2569)
+const addonAmount = (a) =>
+  Math.round(Number(a.quantity === '' || a.quantity == null ? 1 : a.quantity) * Number(a.unit_price || 0) * 100) / 100;
 const addonsTotal = (list) => Math.round(list.reduce((s, a) => s + addonAmount(a), 0) * 100) / 100;
 
 /** แถวที่ยังไม่กรอกอะไรเลยถือว่าไม่มี (กดเพิ่มแล้วไม่ใช้) — แถวที่กรอกครึ่งๆ ส่งไปให้ server ทักเป็นรายช่อง */

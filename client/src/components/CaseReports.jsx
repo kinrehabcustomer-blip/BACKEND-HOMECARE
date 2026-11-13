@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { useToast } from '../toast.jsx';
 import { formatDate, monthText, todayTH, nowTH, reportAuthor } from '../labels.js';
@@ -359,11 +359,14 @@ export default function CaseReports({
   }
 
   /** ทุกการเขียนใช้ทางเดียวกัน: ยิง API -> โหลดหน้าแรกใหม่ -> พับฟอร์ม */
-  async function run(action, done) {
+  const requestIdRef = useRef(crypto.randomUUID());
+
+  async function run(action, done, onSaved) {
     setBusy(true);
     setFormError(null);
     try {
       await action();
+      onSaved?.(); // บันทึกสำเร็จแล้ว — แม้โหลดรายการใหม่ข้างล่างจะล้ม ก็ต้องไม่เอารหัสเดิมไปใช้กับรายงานใบถัดไป
       const res = await fetchPage(1);
       setReports(res.data);
       setMeta({ total: res.total, has_more: res.has_more, months: res.months ?? [] });
@@ -380,13 +383,20 @@ export default function CaseReports({
 
   /* ฝั่งพนักงานสร้างได้เฉพาะในโหมดรายกะ (หน้างานวันนี้) — ที่หน้าเคสถูกส่ง readOnly มาเสมอ
      ปุ่มบันทึกจึงไม่มีทางโผล่ และ server ก็ไม่มีเส้นให้สร้างที่ระดับเคสอยู่แล้ว */
-  const save = (body) =>
-    run(
+  const save = (form) => {
+    /* รหัสคำขอคงเดิมทุกครั้งที่กดบันทึกซ้ำในฟอร์มเดิม (ตรวจ 13 พ.ย. 2569) — เน็ตช้าจนหมดเวลา 30 วิ
+       แต่ server บันทึกไปแล้ว แล้วกด "บันทึก" อีกครั้ง = server คืนรายงานใบเดิม ไม่ใช่สร้างใบที่สอง
+       เดิมสุ่มใหม่ทุกครั้ง (และฝั่งพนักงานไม่ส่งเลย) ตัวกันซ้ำของ server จึงไม่เคยทำงาน
+       ได้รหัสใหม่เมื่อบันทึกสำเร็จแล้ว (ดู run) */
+    const body = { ...form, request_id: requestIdRef.current };
+    return run(
       () => (visitId
         ? api.addMyVisitReport(visitId, body)
         : backfillVisits ? api.addMyCaseReport(caseId, { ...body, visit_id: backfillVisitId ?? backfillVisits[0]?.visit_id }) : api.addCaseReport(caseId, body)),
       'บันทึกรายงานแล้ว',
+      () => { requestIdRef.current = crypto.randomUUID(); },
     );
+  };
 
   const edit = (reportId, body) =>
     run(

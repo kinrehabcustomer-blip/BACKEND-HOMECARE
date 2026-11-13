@@ -19,6 +19,7 @@ import {
 import { ApiError, asyncRoute, notFound } from '../lib/errors.js';
 import { sql } from '../db/index.js';
 import { canSeeStaffPay, BLOCKED_STATUSES, can } from '../lib/auth.js';
+import { keysFor } from '../lib/permissions.js';
 import { ensureLineColumn, ensureLinkCodeTables, hashLinkCode, LINK_CODE_TTL_HOURS } from '../lib/lineBridge.js';
 import { randomInt } from 'node:crypto';
 
@@ -135,6 +136,16 @@ export function ensureCanGrantManager(req, nextPosition) {
   // ตำแหน่งที่เห็นเรื่องเงิน (เช่น การเงิน) ก็เป็นการเลื่อนสิทธิ์เหมือนกัน — HR/Admin HC แต่งตั้งเองไม่ได้
   if (canSeeStaffPay(nextPosition) && !canSeeStaffPay(req.user.position)) {
     throw new ApiError(403, 'เฉพาะผู้จัดการเท่านั้นที่ตั้งตำแหน่งที่เห็นข้อมูลการเงินให้คนอื่นได้');
+  }
+  /* สิทธิ์ตั้งได้รายตำแหน่งแล้ว (lib/permissions.js) — ตำแหน่งใหม่ต้องไม่มีสิทธิ์ที่คนตั้งไม่มี (ตรวจ 13 พ.ย. 2569)
+     ไม่งั้นหัวหน้าพยาบาล (ไม่มีใบแจ้งหนี้) สร้างบัญชีตำแหน่ง admin แล้ว login ด้วยรหัสเริ่มต้น
+     ได้สิทธิ์ใบแจ้งหนี้/ลบสลิปที่ตัวเองไม่มี · ผู้จัดการ/Super Admin ตั้งได้ทุกตำแหน่งตามเดิม */
+  if (nextPosition && !isTopAdmin(req.user.position)) {
+    const mine = new Set(keysFor(req.user.position));
+    const extra = keysFor(nextPosition).filter((k) => !mine.has(k));
+    if (extra.length > 0) {
+      throw new ApiError(403, 'ตำแหน่งนี้มีสิทธิ์ที่บัญชีของคุณไม่มี — ต้องให้ผู้จัดการเป็นคนตั้ง', { missing: extra });
+    }
   }
 }
 

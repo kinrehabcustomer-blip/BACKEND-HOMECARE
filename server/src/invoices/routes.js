@@ -279,6 +279,14 @@ invoicesRouter.post(
         { existing_invoice_id: created.invoice_id },
       );
     }
+    if (created.reason === 'visits_billed') {
+      throw new ApiError(
+        409,
+        `เคสนี้ออกใบตามกะไปแล้ว (${created.invoice_id}) — ออกใบเต็มจำนวนจะเรียกเก็บกะที่เก็บไปแล้วซ้ำ` +
+          ' ให้ออกใบตามกะต่อสำหรับกะที่เหลือ หรือยกเลิกใบตามกะเดิมก่อน',
+        { existing_invoice_id: created.invoice_id },
+      );
+    }
     if (created.reason === 'visits_already_billed') {
       throw new ApiError(409, 'มีกะในช่วงนี้ถูกออกใบไปพร้อมกันพอดี กรุณาโหลดข้อมูลใหม่แล้วลองอีกครั้ง');
     }
@@ -410,7 +418,13 @@ invoicesRouter.post(
     const customer = await resolvePayer(caseRow);
     if (req.invoice.status === 'issued') {
       // ใบที่ออกแล้วดึงได้แค่ผู้จ่าย — ยอดที่ไม่ตรงกับเคสต้องปรับด้วยใบลดหนี้/เพิ่มหนี้ (ดู ledger.js)
-      await repo.refreshPayerFromCase(req.params.id, caseRow, customer);
+      const result = await repo.refreshPayerFromCase(req.params.id, caseRow, customer);
+      if (result?.reason === 'already_shared') {
+        throw new ApiError(
+          409,
+          'ใบนี้ส่งลิงก์ให้ลูกค้าไปแล้ว จึงเปลี่ยนชื่อ/เลขผู้เสียภาษี/ที่อยู่ผู้จ่ายไม่ได้ — ถ้าผู้จ่ายเปลี่ยนจริงให้ยกเลิกแล้วออกใบใหม่',
+        );
+      }
     } else {
       // กดรีเฟรชเอง = ตั้งใจให้ข้อมูลเคสทับสิ่งที่แก้มือไว้ในใบนี้ จึงบังคับซิงก์และล้างธง manual_edit
       await repo.syncOpenFromCase(caseRow, customer, { forceInvoiceId: req.params.id });
@@ -608,6 +622,9 @@ invoicesRouter.post(
       );
     }
     if (result.reason === 'invalid_amount') throw new ApiError(400, 'จำนวนเงินที่รับต้องมากกว่า 0');
+    if (result.reason === 'case_cancelled') {
+      throw new ApiError(409, 'เคสของใบร่างนี้ถูกยกเลิกแล้ว จึงรับชำระเข้าใบนี้ไม่ได้ — ถ้าจะเก็บเงินต่อ ให้เปิดเคสอีกครั้งก่อน');
+    }
 
     res.json(result);
   }),
@@ -699,6 +716,9 @@ invoicesRouter.post(
     }
     if (result.reason === 'invalid_reason_code') throw new ApiError(400, 'หนี้สูญใช้ได้กับใบลดหนี้เท่านั้น');
     if (result.reason === 'receipt_not_found') throw new ApiError(400, 'ใบเสร็จที่อ้างถึงไม่ใช่ของใบแจ้งหนี้นี้');
+    if (result.reason === 'idempotency_conflict') {
+      throw new ApiError(409, 'รหัสคำขอนี้ถูกใช้กับใบแจ้งหนี้อื่นแล้ว กรุณาโหลดข้อมูลใหม่แล้วลองอีกครั้ง');
+    }
     res.status(201).json({ ...(await repo.findById(req.params.id)), created_note_id: result.note_id });
   }),
 );

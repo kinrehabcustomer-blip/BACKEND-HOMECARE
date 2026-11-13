@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { Router } from 'express';
 import { z } from 'zod';
-import { sql } from '../db/index.js';
+import { sql, transaction } from '../db/index.js';
 import { ApiError, asyncRoute } from '../lib/errors.js';
 import { ensureLineColumn, ensureLinkCodeTables, hashLinkCode, isLineUserId, LINK_CODE_TTL_HOURS, verifySigned, onceByTicket } from '../lib/lineBridge.js';
 import { randomInt } from 'node:crypto';
@@ -289,7 +289,23 @@ integrationRouter.post(
     const p = verifySigned(token, 'kin-cust-link');
     if (!p?.d) throw new ApiError(401, 'ลายเซ็นไม่ถูกต้องหรือหมดอายุ');
     if (p.d.line_user_id && !isLineUserId(p.d.line_user_id)) throw new ApiError(400, 'LINE userId ไม่ถูกต้อง');
-    const r = await linkFromChat(p.d, typeof p.customer_id === 'string' ? p.customer_id : null);
+    /* กันสร้างลูกค้าซ้ำ (ตรวจ 13 พ.ย. 2569) — linkFromChat ตรวจ "LINE นี้ผูกใครอยู่ไหม" แล้วค่อยสร้างลูกค้า
+       โดยไม่มีล็อกคั่น (และ customers.line_user_id ไม่มี unique index):
+       1. ตั๋วใบเดิมยิงซ้ำ (เน็ตสะดุด/retry) = คืนคำตอบของครั้งแรก ไม่สร้างแถวใหม่ (onceByTicket)
+       2. คนละตั๋วแต่ LINE เดียวกันมาพร้อมกัน (กดเบิ้ล) = เข้าคิวทีละคำขอด้วย advisory lock ต่อ LINE
+          คำขอที่สองจะเห็นลูกค้าที่คำขอแรกเพิ่งผูกไป แล้วตอบตามนั้นแทนการสร้างอีกแถว */
+    const out = await onceByTicket(token, 'kin-cust-link', () =>
+      transaction(async (tx) => {
+        if (p.d.line_user_id) {
+          await tx.one('SELECT pg_advisory_xact_lock(hashtext(:k)) AS ok', { k: `cust-link:${p.d.line_user_id}` });
+        }
+        const linked = await linkFromChat(p.d, typeof p.customer_id === 'string' ? p.customer_id : null);
+        return { status: 200, body: linked };
+      }),
+    );
+    // คำขอเดิมยังทำงานค้างอยู่ (409 จาก onceByTicket) — ส่งต่อตามนั้น ไม่ใช่ตีความเป็น "ไม่พบลูกค้า"
+    if (out.status !== 200) return res.status(out.status).json(out.body);
+    const r = out.body;
     if (r.error) throw new ApiError(404, 'ไม่พบลูกค้ารายนี้ในระบบงาน');
     /* เบอร์ตรงลูกค้าหลายราย — ให้ทีมเลือกเอง ระบบเดาแทนไม่ได้ (Codex ข้อ 4 · 8 พ.ย. 2569)
        ฝั่งแชทต้องแสดงรายชื่อแล้วส่ง customer_id ที่เลือกกลับมาในคำขอถัดไป */

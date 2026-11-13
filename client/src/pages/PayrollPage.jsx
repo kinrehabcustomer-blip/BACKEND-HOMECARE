@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../api.js';
 import { useToast } from '../toast.jsx';
@@ -57,6 +57,7 @@ function Runs({ reloadKey }) {
      แต่คำถามที่ตามมาทันทีคือ "ก้อนนี้มาจากเคสไหนบ้าง เคสละเท่าไหร่ งวดที่เท่าไหร่"
      โหลดตอนกดเท่านั้น ไม่ดึงมาล่วงหน้าทุกคน — รอบหนึ่งมีสิบกว่าคน ส่วนใหญ่ไม่ได้ถูกกางดู */
   const [openItemId, setOpenItemId] = useState(null);
+  const openItemRef = useRef(null); // ใบที่กางล่าสุด — ใช้ทิ้งผลโหลดของใบก่อนหน้าที่กลับมาช้า (ดู toggleItem)
   const [itemCases, setItemCases] = useState(null);
 
   /* ตัวกรองรายการรอบ — กรองฝั่งหน้าเว็บ (รายการรอบมีไม่กี่สิบแถว โหลดมาครบอยู่แล้ว)
@@ -132,6 +133,7 @@ function Runs({ reloadKey }) {
     setPayForm(null);
     setOpenItemId(null);
     setItemCases(null);
+    openItemRef.current = null;
   };
 
   /* กางที่มาของสลิปใบหนึ่ง — แตะซ้ำที่ใบเดิมคือย่อกลับ (กติกาเดียวกับแถวรอบด้านบน)
@@ -141,11 +143,17 @@ function Runs({ reloadKey }) {
     if (openItemId === itemId) {
       setOpenItemId(null);
       setItemCases(null);
+      openItemRef.current = null;
       return;
     }
     setOpenItemId(itemId);
     setItemCases(null);
-    return run(async () => setItemCases(await api.payrollItemPayouts(detail.run_id, itemId)));
+    openItemRef.current = itemId;
+    return run(async () => {
+      const cases = await api.payrollItemPayouts(detail.run_id, itemId);
+      /* แตะคน A แล้วแตะคน B ต่อเร็ว ๆ — ผลของ A ที่กลับมาทีหลังต้องไม่ไปขึ้นใต้ชื่อ B (ตรวจ 13 พ.ย. 2569) */
+      if (openItemRef.current === itemId) setItemCases(cases);
+    });
   };
 
   /* แตะแถวเดิมซ้ำ = ย่อกลับ — แถวที่กางอยู่แล้วไม่มีอะไรให้กดเปิดอีก

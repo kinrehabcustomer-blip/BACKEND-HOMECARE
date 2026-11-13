@@ -175,6 +175,8 @@ export const adjustmentSchema = z.object({
     .max(50)
     .optional(),
   ref_receipt_id: z.string().trim().max(40).optional().nullable(),
+  // กันออกเอกสารซ้ำเมื่อกดซ้ำหลังหมดเวลา — หน้าเว็บส่งรหัสเดิมทุกครั้งที่กดในฟอร์มเดิม (ดู ledger.js)
+  request_id: z.string().uuid('รหัสคำขอไม่ถูกต้อง').optional(),
   refund: z
     .object({
       refunded_at: zodPastDate(z).optional(),

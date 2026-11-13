@@ -163,10 +163,11 @@ const NOW_TEXT = `to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI
 export const START_AT = `((v.visit_date || ' ' || COALESCE(v.planned_start, '08:00'))::timestamp AT TIME ZONE 'Asia/Bangkok')`;
 const DAY_AT = `(((v.visit_date)::date - 1 + time '08:00') AT TIME ZONE 'Asia/Bangkok')`;
 
-/** กะที่ยังต้องไปจริง — นัดอยู่ เคสยังเดิน คนไปผูก LINE แล้ว ยังไม่ได้เช็คอิน */
+/** กะที่ยังต้องไปจริง — นัดอยู่ เคสยังเดิน คนไปผูก LINE แล้ว ยังไม่ได้เช็คอิน
+ *  คนที่ลาออก/ถูกพักงานไม่ได้เตือน (ตรวจ 13 พ.ย. 2569) — เข้าระบบมาเช็คอินไม่ได้แล้ว และข้อความมีที่อยู่/แผนที่บ้านลูกค้า */
 const ELIGIBLE = `v.status = 'scheduled' AND v.check_in_at IS NULL
   AND c.status IN ('unassigned', 'assigned', 'in_progress')
-  AND e.line_user_id IS NOT NULL AND ${START_AT} > now()`;
+  AND e.line_user_id IS NOT NULL AND e.status NOT IN ('resigned', 'suspended') AND ${START_AT} > now()`;
 
 async function claim(kind) {
   const col = kind === 'day' ? 'remind_day_at' : 'remind_3h_at';
@@ -282,7 +283,8 @@ export async function claimDueFamilyReminders() {
             ${FAMILY_IDS} AS recipients
      FROM case_visits v
      JOIN cases c ON c.case_id = v.case_id
-     LEFT JOIN employees e ON e.employee_id = v.assigned_to
+     -- คนที่ลาออก/ถูกพักงานไม่ไปแล้ว — ไม่บอกชื่อเขาให้ญาติ (เหมือนกะที่ยังไม่มีคน) · ตรวจ 13 พ.ย. 2569
+     LEFT JOIN employees e ON e.employee_id = v.assigned_to AND e.status NOT IN ('resigned', 'suspended')
      LEFT JOIN physio_packages pp ON pp.physio_package_id = c.physio_package_id
      WHERE v.visit_id IN (${slots})`,
     params,

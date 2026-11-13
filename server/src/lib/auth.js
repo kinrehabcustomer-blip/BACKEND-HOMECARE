@@ -149,6 +149,9 @@ export function requireAuth(req, res, next) {
          เพราะ Postgres ตรวจชื่อตารางตั้งแต่ตอนแปลคำสั่ง — to_regclass กันตรงนี้ไม่ได้ */
       `SELECT e.position, e.status, e.must_change_password,
               EXTRACT(EPOCH FROM e.password_changed_at) AS password_changed_epoch,
+              -- created_at เป็นข้อความเวลาไทย — แปลงเฉพาะที่รูปแบบถูก (ข้อมูลเพี้ยนแถวเดียวต้องไม่ทำให้ทุกคำขอพัง)
+              CASE WHEN e.created_at ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}$'
+                   THEN EXTRACT(EPOCH FROM (e.created_at::timestamp AT TIME ZONE 'Asia/Bangkok')) END AS created_epoch,
               EXISTS (SELECT 1 FROM revoked_sessions r WHERE r.jti = :jti) AS revoked
        FROM employees e WHERE e.employee_id = :id`,
       { id: payload.sub, jti: payload.jti ?? '' },
@@ -175,6 +178,17 @@ export function requireAuth(req, res, next) {
       if (stale) {
         res.clearCookie(COOKIE_NAME, clearCookieOptions);
         return next(new ApiError(401, 'รหัสผ่านถูกเปลี่ยนแล้ว กรุณาเข้าสู่ระบบใหม่'));
+      }
+
+      /* token ออกก่อนบัญชีนี้ถูกสร้าง = เป็นของคนเก่าที่เคยใช้รหัสพนักงานนี้ (ลบบัญชี/เปลี่ยนรหัสแล้วรหัสว่าง
+         แล้วพนักงานใหม่ได้รหัสเดิม) — token ผูกกับรหัสพนักงานอย่างเดียว ถ้าไม่ตัดตรงนี้ คุกกี้ที่ยังไม่หมดอายุ
+         ของคนเก่าจะเข้าเป็นบัญชีของคนใหม่ได้ (ตรวจ 13 พ.ย. 2569) · created_at ละเอียดระดับวินาที
+         จึงเทียบกับวินาทีที่ปัดลงแล้ว — token ของบัญชีใหม่ที่ออกในวินาทีเดียวกับที่สร้างยังผ่าน */
+      const createdMs = emp?.created_epoch == null ? null : Math.round(Number(emp.created_epoch) * 1000);
+      const issuedMs = typeof payload.iat_ms === 'number' ? payload.iat_ms : payload.iat != null ? payload.iat * 1000 + 999 : null;
+      if (createdMs != null && issuedMs != null && issuedMs < createdMs) {
+        res.clearCookie(COOKIE_NAME, clearCookieOptions);
+        return next(new ApiError(401, 'เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่'));
       }
 
       /* ใบนี้ถูกกดออกจากระบบไปแล้ว — คุกกี้ถูกล้างที่เบราว์เซอร์ก็จริง แต่ใครที่คัดลอก token

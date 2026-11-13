@@ -126,10 +126,15 @@ export async function updatePackage(id, input) {
   if (!existing) return null;
 
   // แตะราคาเต็มหรือส่วนลดเมื่อไหร่ ต้องคิดราคาสุทธิใหม่ด้วยเสมอ ไม่งั้นสองค่าจะขัดกัน
+  /* คิดใหม่เฉพาะเมื่อค่าราคา "เปลี่ยนจริง" (ตรวจ 13 พ.ย. 2569) — ฟอร์มแก้ไขส่งช่องราคากลับมาทุกครั้ง
+     แพ็กรุ่นเก่า (ราคาเต็ม 18,000 · ขาย 15,000 · ไม่ได้กรอกช่องส่วนลด) แค่แก้ชื่อหรือปิดใช้งาน
+     ก็ถูกคิดใหม่เป็น 18,000 − 0 = 18,000 เงียบ ๆ แล้วเคสใหม่ขายแพงขึ้น 3,000 */
   const PRICE_KEYS = ['original_price', 'discount_percent', 'discount_amount', 'special_price'];
-  const patch = PRICE_KEYS.some((k) => k in input)
-    ? { ...input, special_price: resolveSpecialPrice(input, existing) }
-    : input;
+  const same = (k) => Number(input[k] ?? NaN) === Number(existing[k] ?? NaN) || ((input[k] ?? null) === null && (existing[k] ?? null) === null);
+  const priceChanged = PRICE_KEYS.some((k) => k in input && !same(k));
+  let patch = input;
+  if (priceChanged) patch = { ...input, special_price: resolveSpecialPrice(input, existing) };
+  else if ('special_price' in input) patch = { ...input, special_price: existing.special_price };
 
   const fields = COLUMNS.filter((c) => c in patch);
   if (!fields.length) return findPackage(id);
