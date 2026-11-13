@@ -123,6 +123,9 @@ const CHECKS = (process.env.EQUIV_ONLY ? (x) => x.filter((c) => new RegExp(proce
   { file: 'invoices/repo.js', name: 'invoices.list(overdue)', call: (m) => m.list({ overdue: true, page: 2, per_page: 20, sort: 'issue_date', order: 'asc' }) },
   { file: 'invoices/repo.js', name: 'invoices.summary', call: (m) => m.summary({}) },
   { file: 'invoices/repo.js', name: 'invoices.alertCounts', call: (m) => m.alertCounts() },
+  { file: 'notify/alerts.js', name: 'กระดิ่ง (ผู้จัดการ)', call: (m) => m.collectAlerts({ employee_id: 'EMP-0001', position: 'manager' }) },
+  { file: 'notify/alerts.js', name: 'กระดิ่ง (HR)', call: (m) => m.collectAlerts({ employee_id: 'EMP-0007', position: 'hr' }) },
+  { file: 'notify/alerts.js', name: 'กระดิ่ง (การเงิน)', call: (m) => m.collectAlerts({ employee_id: 'EMP-0098', position: 'finance' }) },
   { file: 'invoices/repo.js', name: 'invoices.findById', call: async (m) => Promise.all(['HC-IVP11', 'HC-IVP22', 'HC-IVP33', 'HC-IVP6'].map((id) => m.findById(id))) },
 ]);
 

@@ -37,7 +37,11 @@ const pick = (group, counts) =>
   Object.fromEntries(ALERT_KEYS[group].map((k) => [k, Number(counts?.[k] ?? 0)]));
 
 export async function collectAlerts(user) {
-  const { today } = await todayTH();
+  /* วันนี้ (ตามนาฬิกาฐานข้อมูล) ใช้แค่สองกลุ่ม — ค่าตอบแทน กับ กะวันนี้ที่ยังไม่มีคน
+     กลุ่มอื่นไม่ต้องรอ ยิงพร้อมกันได้เลย (ปรับความเร็ว 13 พ.ย. 2569 · เดิมทุกกลุ่มรอคิวรีวันที่ก่อนหนึ่งรอบ)
+     ขอวันที่เฉพาะเมื่อมีกลุ่มที่ต้องใช้ — ฟังก์ชันและผลลัพธ์ทุกตัวเหมือนเดิม */
+  let todayPromise = null;
+  const today = () => (todayPromise ??= todayTH().then((r) => r.today));
 
   /* ค่าตอบแทนพนักงานเป็น manager-only (requireManager หน้า /api/payroll)
      ตัดทั้งกลุ่มออกจาก payload ของคนที่ไม่ใช่ผู้จัดการ ไม่ใช่ส่งไปแล้วให้หน้าเว็บซ่อน —
@@ -53,9 +57,9 @@ export async function collectAlerts(user) {
   const [caseCounts, invoiceCounts, payrollCounts, exceptions, unstaffed] = await Promise.all([
     wantsOffice ? cases.alertCounts() : null,
     wantsBilling ? invoices.alertCounts() : null,
-    wantsPayroll ? payroll.alertCounts(today) : null,
+    wantsPayroll ? today().then((t) => payroll.alertCounts(t)) : null,
     wantsOffice ? cases.attendanceExceptions() : null,
-    wantsOffice ? unstaffedToday({ today }) : null,
+    wantsOffice ? today().then((t) => unstaffedToday({ today: t })) : null,
   ]);
 
   const groups = {};
