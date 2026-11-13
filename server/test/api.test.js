@@ -3019,7 +3019,7 @@ if (process.env.RUN_DB_TESTS !== '1') {
       assert.ok(nov.includes(earlyNov) && !nov.includes(lateOct), JSON.stringify(nov));
     });
 
-    test('สรุปเคส (สแกนรอบเดียว) — ยอดรวม = ผลรวมตามสถานะ = ผลรวมตามบริการ', async () => {
+    test('สรุปเคส — ยอดรวม = ผลรวมตามสถานะ = ผลรวมตามบริการ', async () => {
       const s = (await get('/api/cases/summary', MANAGER)).body;
       const sum = (rows) => rows.reduce((n, r) => n + r.count, 0);
       assert.ok(s.total > 0);
@@ -3035,7 +3035,9 @@ if (process.env.RUN_DB_TESTS !== '1') {
       await post(`/api/cases/${c.case_id}/visits/bulk`, { dates: [today], planned_start: '09:00', planned_end: '12:00' }, MANAGER, 201);
       const cal = (await get(`/api/cases/calendar?year=${today.slice(0, 4)}&month=${today.slice(5, 7)}`, MANAGER)).body;
       const mine = cal.find((v) => v.case_id === c.case_id);
-      for (const k of ['case_id', 'status', 'client_name', 'visit_id', 'visit_date', 'planned_start', 'planned_end', 'state']) {
+      // ช่องครบตามรูปแบบเดิม — ผู้ใช้ API นี้นอกหน้าปฏิทินอ่าน visit_status/kind/check_in_at อยู่
+      for (const k of ['case_id', 'title', 'case_type', 'status', 'client_name', 'customer_name', 'visit_id', 'visit_date',
+        'visit_status', 'planned_start', 'planned_end', 'check_in_at', 'check_out_at', 'assigned_position', 'state', 'kind']) {
         assert.ok(k in mine, `ขาด ${k}`);
       }
       assert.equal(mine.state, 'scheduled');

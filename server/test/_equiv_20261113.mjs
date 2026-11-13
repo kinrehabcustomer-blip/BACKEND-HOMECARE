@@ -116,6 +116,8 @@ const CHECKS = (process.env.EQUIV_ONLY ? (x) => x.filter((c) => new RegExp(proce
   { file: 'cases/repo.js', name: 'summary(all)', call: (m) => m.summary({}) },
   { file: 'cases/repo.js', name: 'summary(month)', call: (m) => m.summary({ year: today.slice(0, 4), month: today.slice(5, 7) }) },
   { file: 'cases/repo.js', name: 'attendanceList(month)', call: (m) => m.attendanceList({ month: ym }) },
+  { file: 'cases/repo.js', name: 'calendar(month)', call: (m) => m.calendar({ year: today.slice(0, 4), month: today.slice(5, 7) }) },
+  { file: 'cases/repo.js', name: 'calendar(พนักงาน)', call: (m) => m.calendar({ year: today.slice(0, 4), month: today.slice(5, 7), employee_id: 'EMP-0105' }) },
   { file: 'cases/repo.js', name: 'list(page1)', call: (m) => m.list({ page: 1, per_page: 50, sort: 'created_at', order: 'desc' }) },
   { file: 'cases/repo.js', name: 'list(q)', call: (m) => m.list({ q: 'ผู้ป่วย 1', page: 2, per_page: 20, sort: 'start_date', order: 'asc' }) },
   { file: 'invoices/repo.js', name: 'invoices.list(page)', call: (m) => m.list({ page: 1, per_page: 50, sort: 'invoice_id', order: 'desc' }) },
