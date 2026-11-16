@@ -502,7 +502,9 @@ export const api = {
   invoiceShareLinks: (id) => request(`/invoices/${id}/share-links`),
   revokeInvoiceShareLinks: (id, reason = null, token_hash = null) =>
     request(`/invoices/${id}/share-links/revoke`, { method: 'POST', body: { reason, token_hash } }),
-  cancelInvoice: (id, reason) => request(`/invoices/${id}/cancel`, { method: 'POST', body: { reason } }),
+  // reasonId = หมวดเหตุผล (categories โดเมน cancel_invoice) — เลือกแล้ว reason เป็นรายละเอียดเพิ่ม ไม่บังคับ
+  cancelInvoice: (id, reason, reasonId = null) =>
+    request(`/invoices/${id}/cancel`, { method: 'POST', body: { reason, reason_id: reasonId } }),
   /** ใบลดหนี้/เพิ่มหนี้ — ทางเดียวที่ปรับยอดใบที่ออกแล้ว (ดู server/src/invoices/ledger.js) */
   createInvoiceAdjustment: (id, body) => request(`/invoices/${id}/adjustments`, { method: 'POST', body }),
   cancelInvoiceAdjustment: (id, noteId, reason) =>
@@ -536,6 +538,16 @@ export const api = {
   permissions: () => request('/permissions'),
   savePermissions: (position, permissions) => request(`/permissions/${position}`, { method: 'PUT', body: { permissions } }),
   resetPermissions: (position) => request(`/permissions/${position}`, { method: 'DELETE' }),
+
+  // หมวดหมู่ cat / sub cat — server/src/categories (อ่านได้ทุกคน · all=1 รวมที่ปิดแล้ว ต้องมีสิทธิ์ categories)
+  categories: (params = {}) => request(`/categories?${new URLSearchParams(params)}`),
+  createCategory: (body) => request('/categories', { method: 'POST', body }),
+  updateCategory: (id, body) => request(`/categories/${id}`, { method: 'PATCH', body }),
+
+  // บันทึกการใช้งาน (Super Admin) — server/src/audit/routes.js
+  auditLogs: (params = {}) => request(`/audit-logs?${new URLSearchParams(params)}`),
+  auditMeta: () => request('/audit-logs/meta'),
+  exportAuditLogs: (params = {}) => request(`/audit-logs/export?${new URLSearchParams(params)}`),
   // เปิดรอบ + จ่ายในคำขอเดียว — ส่ง payout_ids จากพรีวิวไปให้ server ยืนยันว่าจ่ายตรงชุดที่เห็น
   payPayrollNow: (body) => request('/payroll/pay-now', { method: 'POST', body }),
   cancelPayrollRun: (id) => request(`/payroll/${id}/cancel`, { method: 'POST' }),
@@ -639,6 +651,7 @@ export const api = {
   /** ปิดเคส — force = ยืนยันแล้วว่ารู้ว่ายังมีกะค้าง (ไม่ส่ง = server จะตอบ 409 พร้อมบอกว่าค้างอะไร) */
   closeCase: (id, end_date, force = false) =>
     request(`/cases/${id}/close`, { method: 'POST', body: { end_date, force } }),
-  cancelCase: (id, reason) => request(`/cases/${id}/cancel`, { method: 'POST', body: { reason } }),
+  cancelCase: (id, reason, reasonId = null) =>
+    request(`/cases/${id}/cancel`, { method: 'POST', body: { reason, reason_id: reasonId } }),
   reopenCase: (id) => request(`/cases/${id}/reopen`, { method: 'POST' }),
 };

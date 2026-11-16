@@ -18,8 +18,9 @@ import { useScrollLock } from '../lib/scrollLock.js';
 const ConfirmContext = createContext(null);
 
 export function ConfirmProvider({ children }) {
-  const [req, setReq] = useState(null); // { title, detail, items, confirmLabel, cancelLabel, danger, input, resolve }
+  const [req, setReq] = useState(null); // { title, detail, items, confirmLabel, cancelLabel, danger, input, select, resolve }
   const [text, setText] = useState('');
+  const [choice, setChoice] = useState('');
   const cancelRef = useRef(null);
   const inputRef = useRef(null);
 
@@ -28,26 +29,31 @@ export function ConfirmProvider({ children }) {
       new Promise((resolve) => {
         const o = typeof opts === 'string' ? { title: opts } : opts;
         setText(o.input?.initial ?? '');
+        setChoice(o.select?.initial ?? '');
         setReq({ ...o, resolve });
       }),
     [],
   );
 
   /* input = มีช่องกรอกข้อความ → ตอบตกลงได้ข้อความ (string) · ยกเลิกได้ null แทน false
-     ผู้เรียกแบบเดิม (ไม่มี input) ยังได้ true/false เหมือนเดิม */
+     select = มีช่องเลือก (16 พ.ย. 2569 · เช่น หมวดเหตุผลยกเลิกนัด) → ตอบตกลงได้ { choice, text } · ยกเลิกได้ null
+     ผู้เรียกแบบเดิม (ไม่มี input/select) ยังได้ true/false เหมือนเดิม */
   const answer = useCallback((value) => {
     setReq((cur) => {
-      cur?.resolve(cur?.input ? (value ? value : null) : value);
+      if (cur?.select) cur.resolve(value ? value : null);
+      else cur?.resolve(cur?.input ? (value ? value : null) : value);
       return null;
     });
   }, []);
   const needText = Boolean(req?.input?.required) && text.trim() === '';
+  const needChoice = Boolean(req?.select?.required) && !choice;
 
   useScrollLock(Boolean(req));
 
   useEffect(() => {
     if (!req) return undefined;
-    (req.input ? inputRef : cancelRef).current?.focus();
+    // ช่องเลือกรับโฟกัสเองผ่าน autoFocus ของตัวที่ select.render วาด
+    if (!req.select) (req.input ? inputRef : cancelRef).current?.focus();
     // Esc ปิดเฉพาะกล่องนี้ ไม่ให้ popup แม่ข้างหลังปิดตามไปด้วย (ดักช่วง capture แล้วหยุด)
     const onKeyDown = (e) => {
       if (e.key !== 'Escape') return;
@@ -79,6 +85,8 @@ export function ConfirmProvider({ children }) {
                     {req.items.map((t) => <li key={t}>{t}</li>)}
                   </ul>
                 )}
+                {/* select.render(ค่า, ตั้งค่า) — ผู้เรียกวาดช่องเลือกเอง (เช่น ReasonPicker) กล่องนี้แค่ถือค่าไว้ */}
+                {req.select && <div className="confirm-input">{req.select.render(choice, setChoice)}</div>}
                 {req.input && (
                   <label className="confirm-input">
                     <span className="field-label">{req.input.label}</span>
@@ -105,8 +113,8 @@ export function ConfirmProvider({ children }) {
                   type="button"
                   className={`btn ${req.danger ? 'danger' : 'primary'}`}
                   ref={req.notice ? cancelRef : undefined}
-                  disabled={needText}
-                  onClick={() => answer(req.input ? text.trim() : true)}
+                  disabled={needText || needChoice}
+                  onClick={() => answer(req.select ? { choice, text: text.trim() } : req.input ? text.trim() : true)}
                 >
                   {req.confirmLabel ?? (req.notice ? 'รับทราบ' : 'ยืนยัน')}
                 </button>
@@ -120,7 +128,8 @@ export function ConfirmProvider({ children }) {
 }
 
 /** คืนฟังก์ชัน ask(opts) → Promise<boolean> · opts เป็นข้อความเฉยๆ ก็ได้ (ใช้เป็นหัวข้อ)
- *  opts.input = { label, placeholder, required, maxLength } → Promise<string | null> (ข้อความที่กรอก / ยกเลิก) */
+ *  opts.input = { label, placeholder, required, maxLength } → Promise<string | null> (ข้อความที่กรอก / ยกเลิก)
+ *  opts.select = { render(value, setValue), required, initial } → Promise<{ choice, text } | null> */
 export function useConfirm() {
   const ask = useContext(ConfirmContext);
   // ไม่มี Provider (เช่นในเทสต์) — ถอยไปใช้กล่องของเบราว์เซอร์ ดีกว่าโยน error ทั้งหน้า

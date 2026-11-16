@@ -30,7 +30,10 @@ const keep = superAdminEmail
   ? null
   : (args.find((a) => a.startsWith('--keep=')) ?? '--keep=EMP-0001').split('=')[1];
 // ตารางที่ต้องเหลือข้อมูลหลังล้าง — นอกจากนี้ต้องว่างหมด (ตรวจซ้ำหลังลบ ไม่เชื่อว่า CASCADE ไล่ครบเอง)
-const KEPT_TABLES = ['pkg_grades', 'pkg_service_formats', 'pkg_rates', 'physio_packages', 'id_counters', 'employees'];
+/* audit_logs (บันทึกการใช้งาน) ไม่ถูกล้างโดยตั้งใจ — ตกลงไว้ว่าเก็บอย่างน้อย 1 ปี และฐานข้อมูลกันการลบแถวที่อายุไม่ถึงปีไว้
+   (trigger audit_logs_guard) · การล้างระบบเองก็เป็นเหตุการณ์ที่ต้องตรวจย้อนได้ ไม่ใช่โอกาสลบประวัติทิ้ง */
+// categories = หมวดหมู่ตั้งต้น + ที่ผู้ใช้เพิ่ม (ค่าตั้งของระบบ ไม่ใช่ข้อมูลงาน) — ล้างระบบแล้วต้องยังอยู่
+const KEPT_TABLES = ['pkg_grades', 'pkg_service_formats', 'pkg_rates', 'physio_packages', 'id_counters', 'employees', 'audit_logs', 'categories'];
 
 // ลำดับการลบไล่จากตารางที่ถูกอ้างถึงน้อยที่สุดขึ้นไป — ลูกของแต่ละตัวหายตามเองด้วย FK CASCADE
 // (invoice_items ← invoices · case_visits, case_events ← cases · ใบรับรอง/ผลงาน/OTP ← employees)

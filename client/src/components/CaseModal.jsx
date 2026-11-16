@@ -4,6 +4,7 @@ import { api } from '../api.js';
 import { useCanSeeStaffPay } from '../auth.jsx';
 import { useToast } from '../toast.jsx';
 import { useConfirm } from './ConfirmDialog.jsx';
+import ReasonPicker, { useHasReasons } from './ReasonPicker.jsx';
 import { useSheetSwipe } from '../lib/sheetSwipe.js';
 import { useScrollLock } from '../lib/scrollLock.js';
 import CaseVisitsModal from './CaseVisitsModal.jsx';
@@ -202,6 +203,9 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
   // ฟอร์มยืนยันการยกเลิกเคส — ทำเป็นฟอร์มในหน้าแทน prompt() ที่เบราว์เซอร์บล็อกได้
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
+  // หมวดเหตุผลยกเลิก (categories · cancel_case) — มีให้เลือก = ต้องเลือกก่อนยืนยัน
+  const [cancelReasonId, setCancelReasonId] = useState('');
+  const hasCancelReasons = useHasReasons('cancel_case');
   const [invoices, setInvoices] = useState([]);  // ใบแจ้งหนี้ของเคสนี้ (ปกติมีใบเดียว)
   const [openInvoiceId, setOpenInvoiceId] = useState(null);
   const [extras, setExtras] = useState(null);    // ค่าใช้จ่ายเพิ่มเติมที่ยังไม่ได้ออกใบ { items, total }
@@ -513,9 +517,10 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
    */
   function cancelCase() {
     run(async () => {
-      const res = await api.cancelCase(item.case_id, cancelReason.trim() || null);
+      const res = await api.cancelCase(item.case_id, cancelReason.trim() || null, Number(cancelReasonId) || null);
       setCancelOpen(false);
       setCancelReason('');
+      setCancelReasonId('');
       /* แพ็กกายภาพที่เก็บเงินรวมในใบ Homecare — ใบที่ออก/รับเงิน/แบ่งมัดจำไปแล้ว ระบบแก้ให้ไม่ได้
          ยังเรียกเก็บค่าแพ็กที่เพิ่งยกเลิกอยู่ → เด้งเตือนทันทีให้ออกใบลดหนี้ (ผู้ใช้เลือก 11 พ.ย. 2569) */
       const held = res?.bundle_invoices_to_credit ?? [];
@@ -1345,16 +1350,26 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                     {' '}(ผู้จัดการพิมพ์ยอดเองได้ตอนปล่อยค่าจ้าง)
                   </p>
                 )}
+                <ReasonPicker
+                  domain="cancel_case"
+                  label="เหตุผลที่ยกเลิก"
+                  required={hasCancelReasons}
+                  value={cancelReasonId}
+                  onChange={setCancelReasonId}
+                  autoFocus
+                />
                 <label>
-                  เหตุผลที่ยกเลิก (ไม่บังคับ)
+                  รายละเอียดเพิ่มเติม (ไม่บังคับ)
                   <input
-                    autoFocus
-                    placeholder="เช่น ญาติเปลี่ยนใจ / หาพนักงานไม่ได้"
+                    placeholder="เช่น แอดมิทที่ รพ. · ญาติขอหยุดถึงสิ้นเดือน"
                     value={cancelReason}
                     onChange={(e) => setCancelReason(e.target.value)}
                     onKeyDown={(e) => {
                       // Enter = ยืนยัน · Esc ให้ตัวจัดการรวมด้านบนพับฟอร์มนี้
-                      if (e.key === 'Enter') { e.preventDefault(); cancelCase(); }
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        if (!(hasCancelReasons && !cancelReasonId)) cancelCase();
+                      }
                     }}
                   />
                 </label>
@@ -1362,7 +1377,7 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                   <button className="btn" disabled={busy} onClick={() => setCancelOpen(false)}>
                     ไม่ยกเลิกแล้ว
                   </button>
-                  <button className="btn danger" disabled={busy} onClick={cancelCase}>
+                  <button className="btn danger" disabled={busy || (hasCancelReasons && !cancelReasonId)} onClick={cancelCase}>
                     ยืนยันยกเลิก {caseCode(item.case_id)}
                   </button>
                 </div>

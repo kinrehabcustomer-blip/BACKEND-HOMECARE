@@ -1,4 +1,5 @@
 import { sql, nextInvoiceId, transaction } from '../db/index.js';
+import { ensureCategories } from '../categories/repo.js';
 import { PATIENT_PENDING } from '../cases/schema.js';
 import {
   normalizeAddons, addonAmount, addonsTotal, addonsTotalSql, addonLabel, unbilledAddons, isPhysioBundle, PHYSIO_BUNDLE,
@@ -2161,8 +2162,8 @@ export async function setDepositAmount(depositId, deposit) {
  * ลูกค้าได้บิลน้อยกว่าที่ตกลงโดยไม่มีอะไรฟ้อง) · ใบคู่รับเงินมาแล้ว = ปฏิเสธ ให้คนตัดสินใจเอง
  * เพราะเงินที่รับแล้วต้องมีใบรองรับ ยกเลิกตามให้อัตโนมัติไม่ได้
  */
-export async function cancelInvoiceForTransaction(tx, invoiceId, { reason = null, actor = null } = {}) {
-  const audit = { reason, by: actor?.employee_id ?? null, by_name: actorName(actor) };
+export async function cancelInvoiceForTransaction(tx, invoiceId, { reason = null, reasonId = null, actor = null } = {}) {
+  const audit = { reason, reason_id: reasonId, by: actor?.employee_id ?? null, by_name: actorName(actor) };
   const head = await tx.one(
     'SELECT billing_kind, parent_invoice_id FROM invoices WHERE invoice_id = :id',
     { id: invoiceId },
@@ -2235,10 +2236,11 @@ async function cancelPlanPart(tx, invoiceId, audit) {
 }
 
 /* ใครยกเลิก เมื่อไหร่ เพราะอะไร — ใบคู่ในแผนมัดจำที่ถูกยกเลิกตามไปด้วยได้เหตุผลเดียวกัน */
-const CANCEL_AUDIT = `cancel_reason = :reason, cancelled_by = :by, cancelled_by_name = :by_name, cancelled_at = ${NOW}`;
+const CANCEL_AUDIT = `cancel_reason = :reason, cancel_reason_id = :reason_id, cancelled_by = :by, cancelled_by_name = :by_name, cancelled_at = ${NOW}`;
 
-export async function cancel(invoiceId, { reason = null } = {}, actor = null) {
-  const result = await transaction((tx) => cancelInvoiceForTransaction(tx, invoiceId, { reason, actor }));
+export async function cancel(invoiceId, { reason = null, reasonId = null } = {}, actor = null) {
+  await ensureCategories(); // คอลัมน์ invoices.cancel_reason_id (categories/repo.js)
+  const result = await transaction((tx) => cancelInvoiceForTransaction(tx, invoiceId, { reason, reasonId, actor }));
   return invoiceMutationResult(result);
 }
 

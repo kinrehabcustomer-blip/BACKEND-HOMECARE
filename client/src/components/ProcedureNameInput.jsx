@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { PROCEDURE_MIN_CHARS, RATE_LABELS, defaultRate, rateNumber, searchProcedures } from '../lib/procedureCatalog.js';
+import { itemCategory, useCategories } from '../lib/categories.js';
 
 /**
  * ช่องชื่อหัตถการ — พิมพ์ค้นหาจากรายการมาตรฐาน (ขึ้นรายการเมื่อพิมพ์ครบ 3 ตัวอักษร)
@@ -10,6 +11,8 @@ import { PROCEDURE_MIN_CHARS, RATE_LABELS, defaultRate, rateNumber, searchProced
 export default function ProcedureNameInput({ value, onChange, onPick, ...rest }) {
   const inputRef = useRef(null);
   const popRef = useRef(null);
+  // หมวดของหัตถการ (categories · procedure · 16 พ.ย. 2569) — โชว์ใต้ชื่อในรายการ ช่วยแยกรายการที่ชื่อคล้ายกัน
+  const cats = useCategories();
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
   const [pos, setPos] = useState(null);
@@ -124,6 +127,10 @@ export default function ProcedureNameInput({ value, onChange, onPick, ...rest })
               >
                 <span className="proc-opt-main">
                   <span className="mono muted">{p.code}</span> {p.name}
+                  {(() => {
+                    const c = itemCategory(cats?.categories, 'procedure', p.code);
+                    return c && <small className="proc-opt-cat">{c.main?.name_th} › {c.sub.name_th}</small>;
+                  })()}
                 </span>
                 <span className="proc-rates">
                   {Object.entries(RATE_LABELS).map(([k, label]) => (

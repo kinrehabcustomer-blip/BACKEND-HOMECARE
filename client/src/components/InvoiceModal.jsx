@@ -21,6 +21,7 @@ import { caseCode } from '../lib/patientCode.js';
 import { TRANSFER_PAYMENT_INSTRUCTION } from '../lib/issuer.js';
 import { addonLabel } from '../lib/addons.js';
 import SearchSelect from './SearchSelect.jsx';
+import ReasonPicker, { useHasReasons } from './ReasonPicker.jsx';
 
 
 const FOCUSABLE = 'a[href], button:not(:disabled), input, select, textarea, [tabindex]:not([tabindex="-1"])';
@@ -72,6 +73,9 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
   // ยกเลิกทั้งใบ — ต้องพิมพ์เหตุผลก่อน (server เก็บเหตุผล + ชื่อคนยกเลิกไว้กับใบ)
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
+  // หมวดเหตุผลยกเลิกใบ (categories · cancel_invoice) — เลือกแล้วรายละเอียดไม่บังคับ
+  const [cancelReasonId, setCancelReasonId] = useState('');
+  const hasCancelReasons = useHasReasons('cancel_invoice');
   // แก้ข้อมูลเงินคืนที่กรอกผิด (วันที่ · ช่องทาง · หมายเหตุ) — ยอดแก้ไม่ได้
   const [refundEditFor, setRefundEditFor] = useState(null);
   const [refundEdit, setRefundEdit] = useState({ refunded_at: '', method: '', note: '' });
@@ -396,9 +400,10 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
    */
   function cancelInvoice() {
     return run(async () => {
-      await api.cancelInvoice(item.invoice_id, cancelReason.trim());
+      await api.cancelInvoice(item.invoice_id, cancelReason.trim(), Number(cancelReasonId) || null);
       setCancelOpen(false);
       setCancelReason('');
+      setCancelReasonId('');
       toast(`ยกเลิก ${item.invoice_id} แล้ว`);
     });
   }
@@ -733,13 +738,22 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                     ยกเลิก{isReceipt ? 'ใบเสร็จ' : 'ใบแจ้งหนี้'} {item.invoice_id} — ใบจะยังอยู่ในระบบเป็นประวัติ ไม่ถูกลบทิ้ง
                     และเลขที่เอกสารไม่หาย ระบบจะบันทึกชื่อคุณกับเหตุผลไว้กับใบ
                   </p>
+                  {hasCancelReasons && (
+                    <ReasonPicker
+                      domain="cancel_invoice"
+                      label="เหตุผลที่ยกเลิก"
+                      required
+                      value={cancelReasonId}
+                      onChange={setCancelReasonId}
+                    />
+                  )}
                   <label>
-                    เหตุผลที่ยกเลิก
+                    {hasCancelReasons ? 'รายละเอียดเพิ่มเติม (ไม่บังคับ)' : 'เหตุผลที่ยกเลิก'}
                     <input
                       type="text"
                       value={cancelReason}
                       maxLength={300}
-                      placeholder="เช่น ลูกค้ายกเลิกบริการ · ออกใบผิด"
+                      placeholder={hasCancelReasons ? 'เช่น ยอดค่าหัตถการซ้ำ · ออกใบใหม่แทนแล้ว' : 'เช่น ลูกค้ายกเลิกบริการ · ออกใบผิด'}
                       onChange={(e) => setCancelReason(e.target.value)}
                     />
                   </label>
@@ -750,7 +764,7 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                     <button
                       type="button"
                       className="btn danger"
-                      disabled={busy || cancelReason.trim().length < 3}
+                      disabled={busy || (hasCancelReasons ? !cancelReasonId : cancelReason.trim().length < 3)}
                       onClick={cancelInvoice}
                     >
                       ยืนยันยกเลิกใบ

@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import InvoiceModal from '../components/InvoiceModal.jsx';
 import SortHead from '../components/SortHead.jsx';
+import NewestSortHead from '../components/NewestSortHead.jsx';
 import OfficeLink from '../components/OfficeLink.jsx';
 import ErrorBar from '../components/ErrorBar.jsx';
 import PageRefresh from '../components/PageRefresh.jsx';
@@ -301,7 +302,7 @@ export default function InvoiceListPage() {
             <thead>
               <tr>
                 <th>#</th>
-                <th><SortHead column="invoice_id" {...SORTABLE.invoice_id} sort={sort} order={order} onSort={sortBy} /></th>
+                <th><NewestSortHead column="invoice_id" label={SORTABLE.invoice_id.label} sort={sort} order={order} onSort={sortBy} /></th>
                 <th>ผู้รับบริการ / เบอร์</th>
                 <th className="cell-text">รายการ / เคส</th>
                 <th><SortHead column="issue_date" {...SORTABLE.issue_date} sort={sort} order={order} onSort={sortBy} /></th>

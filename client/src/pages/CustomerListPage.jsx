@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api.js';
 import CustomerModal from '../components/CustomerModal.jsx';
 import SortHead from '../components/SortHead.jsx';
+import NewestSortHead from '../components/NewestSortHead.jsx';
 import ErrorBar from '../components/ErrorBar.jsx';
 import PageRefresh from '../components/PageRefresh.jsx';
 import { GENDER_LABELS } from '../labels.js';
@@ -162,8 +163,9 @@ export default function CustomerListPage() {
           <table className="table table-cards table-2line table-indexed">
             <colgroup>
               <col style={{ width: '6%' }} />
-              <col style={{ width: '12%' }} />
-              <col style={{ width: '30%' }} />
+              {/* รหัสลูกค้า 12 → 16% ให้หัว "รหัสลูกค้า ⇅ ใหม่สุด" ไม่ถูกตัด (16 พ.ย. 2569) · ยืมจากชื่อ ซึ่งตัดท้ายได้ */}
+              <col style={{ width: '16%' }} />
+              <col style={{ width: '26%' }} />
               <col style={{ width: '14%' }} />
               <col style={{ width: '20%' }} />
               <col style={{ width: '18%' }} />
@@ -171,7 +173,7 @@ export default function CustomerListPage() {
             <thead>
               <tr>
                 <th>#</th>
-                <th><SortHead column="customer_id" {...SORTABLE.customer_id} sort={sort} order={order} onSort={sortBy} /></th>
+                <th><NewestSortHead column="customer_id" label={SORTABLE.customer_id.label} sort={sort} order={order} onSort={sortBy} /></th>
                 <th><SortHead column="name" {...SORTABLE.name} sort={sort} order={order} onSort={sortBy} /></th>
                 <th>เพศ / อายุ</th>
                 <th>เบอร์โทร / Line</th>

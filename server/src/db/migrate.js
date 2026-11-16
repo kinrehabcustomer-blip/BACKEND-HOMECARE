@@ -11,6 +11,16 @@ const schema = readFileSync(join(here, 'schema.sql'), 'utf8');
 await pool.query(schema);
 console.log('สร้าง/อัปเดต schema บน Postgres เรียบร้อย');
 
+// บันทึกการใช้งาน — โครงสร้างอยู่ที่ lib/audit.js ที่เดียว (รันซ้ำได้ · อัปเดต trigger/ดัชนีตามโค้ดล่าสุด)
+const { AUDIT_DDL } = await import('../lib/audit.js');
+await pool.query(AUDIT_DDL);
+console.log('สร้าง/อัปเดตตาราง audit_logs เรียบร้อย');
+
+// หมวดหมู่ + หมวดตั้งต้น + คอลัมน์ cancel_reason_id — โครงสร้างอยู่ที่ categories/repo.js ที่เดียว (รันซ้ำได้)
+const { CATEGORY_DDL } = await import('../categories/repo.js');
+await pool.query(CATEGORY_DDL);
+console.log('สร้าง/อัปเดตตาราง categories เรียบร้อย');
+
 // พนักงานที่ยังไม่มีรหัสผ่าน — สุ่มรหัสชั่วคราวให้
 const pending = await sql.all('SELECT employee_id FROM employees WHERE password_hash IS NULL');
 

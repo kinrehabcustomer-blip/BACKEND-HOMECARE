@@ -37,6 +37,8 @@ const CalendarPage = lazy(() => import('./pages/CalendarPage.jsx'));
 const InvoiceListPage = lazy(() => import('./pages/InvoiceListPage.jsx'));
 const PayrollPage = lazy(() => import('./pages/PayrollPage.jsx'));
 const PermissionsPage = lazy(() => import('./pages/PermissionsPage.jsx'));
+const AuditLogPage = lazy(() => import('./pages/AuditLogPage.jsx'));
+const CategoriesPage = lazy(() => import('./pages/CategoriesPage.jsx'));
 const CustomerListPage = lazy(() => import('./pages/CustomerListPage.jsx'));
 const CustomerFormPage = lazy(() => import('./pages/CustomerFormPage.jsx'));
 const CustomerDetailPage = lazy(() => import('./pages/CustomerDetailPage.jsx'));
@@ -73,6 +75,8 @@ const NAV_ICONS = {
   shield: (<><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /><path d="M9 12l2 2 4-4" /></>),
   chat: (<path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 8.6 8.6 0 0 1-3.7-.8L3 21l1.9-5.1A8.4 8.4 0 1 1 21 11.5z" />),
   chevron: (<path d="M6 9l6 6 6-6" />),
+  tag: (<><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z" /><circle cx="7.5" cy="7.5" r="1.5" /></>),
+  log: (<><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /><circle cx="11" cy="15" r="3" /><path d="M13.2 17.2 15.5 19.5" /></>),
 };
 
 function NavIcon({ name }) {
@@ -109,7 +113,11 @@ const ADMIN_NAV = [
   { to: '/patients', icon: 'heart', label: 'ผู้รับบริการ', short: 'ผู้รับฯ', perm: 'patients' },
   { to: '/employees', icon: 'user', label: 'พนักงาน', perm: 'employees' },
   { to: '/reviews', icon: 'star', label: 'คะแนนประเมินจากญาติ', short: 'ประเมิน', perm: 'reviews' },
+  // หมวดหมู่ cat / sub cat (16 พ.ย. 2569) — สิทธิ์ categories ค่าตั้งต้น Super Admin + ผู้จัดการ
+  { to: '/categories', icon: 'tag', label: 'หมวดหมู่', perm: 'categories' },
   { to: '/permissions', icon: 'shield', label: 'จัดการสิทธิ์', short: 'สิทธิ์', positions: PERMISSION_ADMINS },
+  // สิทธิ์ audit_logs ตั้งได้ที่หน้าจัดการสิทธิ์ (ค่าตั้งต้น Super Admin เท่านั้น · server/src/lib/permissions.js)
+  { to: '/audit-log', icon: 'log', label: 'บันทึกการใช้งาน', short: 'บันทึก', perm: 'audit_logs' },
 ];
 
 /** หัวข้อของเมนูที่รวมกลุ่มกัน — แพ็คเกจสองแบบยุบเป็นหัวข้อเดียว (ผู้ใช้ขอ 30 ต.ค. 2569) */
@@ -492,6 +500,8 @@ export default function App() {
             <Route path="/invoices" element={<AppLayout perm="invoices"><InvoiceListPage /></AppLayout>} />
             <Route path="/payroll" element={<AppLayout perm="payroll"><PayrollPage /></AppLayout>} />
             <Route path="/permissions" element={<AppLayout positions={PERMISSION_ADMINS}><PermissionsPage /></AppLayout>} />
+            <Route path="/audit-log" element={<AppLayout perm="audit_logs"><AuditLogPage /></AppLayout>} />
+            <Route path="/categories" element={<AppLayout perm="categories"><CategoriesPage /></AppLayout>} />
             <Route path="/revenue" element={<AppLayout perm="revenue"><RevenuePage /></AppLayout>} />
 
             {/* หน้าของพนักงานภาคสนาม — เข้าได้ทั้ง field และ admin (แสดงเฉพาะงานที่ตัวเองรับ) */}

@@ -253,8 +253,10 @@ export const payShareAgreementSchema = z.object({
 });
 
 // ยกเลิกเคส — เหตุผลไม่บังคับ แต่เก็บไว้ให้ไล่ประวัติได้ว่าทำไมถึงยกเลิก
+// reason_id = หมวดเหตุผล (categories โดเมน cancel_case · 16 พ.ย. 2569) · reason = รายละเอียดที่พิมพ์เพิ่ม
 export const cancelSchema = z.object({
   reason: z.string().trim().max(500).optional().nullable(),
+  reason_id: z.number().int().positive().optional().nullable(),
 });
 
 /**
@@ -430,6 +432,8 @@ export const updateVisitSchema = z
     note: optionalText,
     /* เหตุผลที่ยกเลิก (ใช้คู่กับ status = cancelled) — ต่อท้ายหมายเหตุของกะ และส่งไปกับข้อความแจ้งยกเลิกทาง LINE */
     cancel_reason: z.string().trim().max(300, 'หมายเหตุยาวเกิน 300 ตัวอักษร').optional().nullable(),
+    // หมวดเหตุผล (categories โดเมน cancel_visit · 16 พ.ย. 2569) — ชื่อเหตุผลถูกเขียนนำหน้า cancel_reason ให้ที่ route
+    cancel_reason_id: z.number().int().positive().optional().nullable(),
   })
   .partial();
 

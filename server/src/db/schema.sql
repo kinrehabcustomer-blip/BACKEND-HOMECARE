@@ -1960,3 +1960,13 @@ ALTER TABLE cases ADD COLUMN IF NOT EXISTS bill_with_parent BOOLEAN NOT NULL DEF
 ALTER TABLE cases ADD COLUMN IF NOT EXISTS addon_next TEXT
   REFERENCES cases (case_id) ON DELETE SET NULL ON UPDATE CASCADE;
 CREATE INDEX IF NOT EXISTS idx_cases_addon_next ON cases (addon_next) WHERE addon_next IS NOT NULL;
+
+-- ============================================================================
+-- บันทึกการใช้งานระบบ (audit_logs · 16 พ.ย. 2569) — โครงสร้างอยู่ที่ AUDIT_DDL ใน server/src/lib/audit.js ที่เดียว
+-- migrate.js รันต่อจากไฟล์นี้ และแอปสร้างเองตอนคำขอแรกถ้ายังไม่มี (เคยมีสำเนาสองที่ แก้ที่หนึ่งแล้วอีกที่ไม่ตาม)
+-- ============================================================================
+
+-- ============================================================================
+-- หมวดหมู่ (categories · cat / sub cat · 16 พ.ย. 2569) + cancel_reason_id ของ cases / case_visits / invoices
+-- โครงสร้างและหมวดตั้งต้นอยู่ที่ CATEGORY_DDL ใน server/src/categories/repo.js ที่เดียว (แบบเดียวกับ audit_logs)
+-- ============================================================================

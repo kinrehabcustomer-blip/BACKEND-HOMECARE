@@ -1,4 +1,5 @@
 import { sql, transaction, nextCaseId } from '../db/index.js';
+import { ensureCategories } from '../categories/repo.js';
 import { likeEscape } from '../lib/likeEscape.js';
 import { caseCode, caseIdForPatient, isCaseOfPatient } from './caseCode.js';
 import { issueForVisits, withProcedureNumbers } from './visitNumbers.js';
@@ -1577,8 +1578,9 @@ async function announceDroppedVisits(tx, caseId, visits, reason) {
   }
 }
 
-export async function cancel(caseId, reason, actor) {
+export async function cancel(caseId, reason, actor, reasonId = null) {
   await ensureVisitChangeTable();
+  await ensureCategories(); // คอลัมน์ cancel_reason_id (categories/repo.js)
   await transaction(async (tx) => {
     await caseForTransition(tx, caseId, ACTIVE_CASE_STATES);
     await tx.run(
@@ -1586,9 +1588,10 @@ export async function cancel(caseId, reason, actor) {
        SET status = 'cancelled',
            cancelled_at = ${NOW},
            cancel_reason = :reason,
+           cancel_reason_id = :reason_id,
            updated_at = ${NOW}
        WHERE case_id = :case_id`,
-      { case_id: caseId, reason: reason ?? null },
+      { case_id: caseId, reason: reason ?? null, reason_id: reasonId },
     );
     /* กะที่ยังไม่ได้ไปทำต้องถูกยกเลิกตามไปด้วย — ไม่งั้นมันค้างอยู่บนปฏิทินและในรายการงานของพนักงาน
        ทั้งที่เคสถูกยกเลิกไปแล้ว คนที่เปิดตารางงานดูจะเดินทางไปบ้านลูกค้าที่ยกเลิกไปแล้วจริงๆ
@@ -1847,6 +1850,7 @@ export async function close(caseId, endDate, actor) {
  * กลับไปได้แค่ 'assigned'/'unassigned' เท่านั้น (ต้องกดเริ่มให้บริการใหม่) และล้างร่องรอยการปิด/ยกเลิกทิ้ง
  */
 export async function reopen(caseId, actor) {
+  await ensureCategories(); // ล้าง cancel_reason_id ด้วย (categories/repo.js)
   await transaction(async (tx) => {
     await caseForTransition(tx, caseId, ['closed', 'cancelled']);
 
@@ -1881,6 +1885,7 @@ export async function reopen(caseId, actor) {
            closed_at = NULL,
            cancelled_at = NULL,
            cancel_reason = NULL,
+           cancel_reason_id = NULL,
            updated_at = ${NOW}
        WHERE case_id = :case_id`,
       { case_id: caseId },
@@ -2341,6 +2346,7 @@ export async function updateVisit(caseId, visitId, input, actor) {
   // คอลัมน์เตือน LINE ต้องมีก่อนเข้า transaction — ALTER TABLE ระหว่างที่ล็อกกะไว้ = รอตัวเองค้าง
   await ensureVisitReminderColumns();
   await ensureVisitChangeTable();
+  await ensureCategories(); // คอลัมน์ case_visits.cancel_reason_id
   const fields = [
     'visit_date', 'assigned_to', 'planned_start', 'planned_end', 'status', 'note',
     'staff_pay', // ตั้งค่าจ้างเฉพาะกะนี้ — ส่ง null = กลับไปเกลี่ยจากยอดเคสตามปกติ
@@ -2400,6 +2406,14 @@ export async function updateVisit(caseId, visitId, input, actor) {
     if (cancelReason && !changed.includes('note')) {
       sets.push(`note = CASE WHEN COALESCE(note, '') = '' THEN :cancel_note ELSE note || ' · ' || :cancel_note END`);
       values.cancel_note = `ยกเลิก: ${cancelReason}`;
+    }
+    // หมวดเหตุผลยกเลิก (ไว้ทำรายงาน) — ตั้งเมื่อยกเลิกจริง · กลับมาเป็นนัดปกติ = ล้างทิ้ง
+    if (changed.includes('status')) {
+      const cancelling = input.status === 'cancelled' && visit.status !== 'cancelled';
+      if (cancelling || input.status !== 'cancelled') {
+        sets.push('cancel_reason_id = :cancel_reason_id');
+        values.cancel_reason_id = cancelling ? (input.cancel_reason_id ?? null) : null;
+      }
     }
     // ย้ายวัน/เวลา/คน = นัดใหม่ → เตือน LINE ใหม่ตามนัดใหม่ (notify/visitReminders.js)
     if (changed.some((c) => ['visit_date', 'planned_start', 'assigned_to'].includes(c)) || (changed.includes('status') && input.status === 'scheduled')) {

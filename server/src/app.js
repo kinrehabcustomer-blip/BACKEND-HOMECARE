@@ -20,6 +20,10 @@ import { ensureReviewColumns } from './reviews/repo.js';
 import { errorHandler } from './lib/errors.js';
 import { requireAuth, requireAdmin, requireBilling, requireCaseAccess, requirePermission, requirePasswordChanged, ensureRevokedSessions } from './lib/auth.js';
 import { permissionsRouter } from './permissions/routes.js';
+import { auditRouter } from './audit/routes.js';
+import { auditTrail, ensureAuditTable } from './lib/audit.js';
+import { categoriesRouter } from './categories/routes.js';
+import { ensureCategories } from './categories/repo.js';
 
 export function createApp() {
   /* ตาราง revoked_sessions ต้องมีก่อนคำขอแรก — requireAuth อ่านมันในคิวรีเดียวกับที่อ่านพนักงาน
@@ -29,6 +33,10 @@ export function createApp() {
   ensureRevokedSessions().catch((err) => console.error('[auth] สร้างตาราง revoked_sessions ไม่ได้ —', err.message));
   // คอลัมน์ของลิงก์ประเมิน — เหตุผลเดียวกัน (ดู reviews/repo.js)
   ensureReviewColumns().catch((err) => console.error('[reviews] เพิ่มคอลัมน์ review_token_issued_at ไม่ได้ —', err.message));
+  // ตารางบันทึกการใช้งาน (lib/audit.js) — ของจริงสร้างจาก schema.sql ตอน migrate · ตรงนี้กันกรณียังไม่ได้ migrate
+  ensureAuditTable().catch((err) => console.error('[audit] สร้างตาราง audit_logs ไม่ได้ —', err.message));
+  // หมวดหมู่ + คอลัมน์ cancel_reason_id (categories/repo.js) — เหตุผลเดียวกัน
+  ensureCategories().catch((err) => console.error('[categories] สร้างตาราง categories ไม่ได้ —', err.message));
 
   const app = express();
   // อยู่หลัง proxy ของ Vercel — req.ip = IP ผู้ใช้จริง (ตัวกันยิงถี่ /api/public/bill ไม่นับทุกคนเป็น IP เดียว)
@@ -39,6 +47,9 @@ export function createApp() {
   // ค่าปริยายของ express คือ 100KB — รูปใบรับรองที่ส่งมาแบบ base64 ใหญ่กว่านั้นแน่นอน
   app.use(express.json({ limit: '8mb' }));
   app.use(cookieParser());
+  /* บันทึกการใช้งาน (เก็บอย่างน้อย 1 ปี) — วางก่อนทุก router เส้นใหม่ที่เพิ่มทีหลังจึงถูกบันทึกเอง
+     ต้องอยู่หลัง express.json/cookieParser (อ่าน body และคุกกี้) · ดู lib/audit.js */
+  app.use('/api', auditTrail);
 
   app.get('/api/health', (req, res) => res.json({ ok: true }));
   // /api/auth ไม่ผ่านด่านบังคับเปลี่ยนรหัส — ไม่งั้นคนที่ต้องเปลี่ยนรหัสจะเรียก /auth/change-password ไม่ได้
@@ -77,6 +88,10 @@ export function createApp() {
   app.use('/api/payroll', signedIn, requirePermission('payroll', 'บัญชีของคุณไม่มีสิทธิ์เข้าหน้าค่าตอบแทนพนักงาน'), payrollRouter);
   // หน้าจัดการสิทธิ์ — Super Admin · ผู้จัดการ (ด่านอยู่ใน router เพราะเป็นรายตำแหน่ง ไม่ใช่รายสิทธิ์)
   app.use('/api/permissions', signedIn, permissionsRouter);
+  // บันทึกการใช้งาน — Super Admin เท่านั้น (ด่านอยู่ใน router · audit/routes.js)
+  app.use('/api/audit-logs', signedIn, auditRouter);
+  // หมวดหมู่ (cat / sub cat) — อ่านได้ทุกคนที่ login · เพิ่ม/แก้ต้องมีสิทธิ์ categories (ด่านอยู่ใน router)
+  app.use('/api/categories', signedIn, categoriesRouter);
 
   // ส่วนของพนักงานภาคสนาม — เห็นเฉพาะเคสของตัวเอง (กรองด้วย employee_id ในเส้น) จึงไม่ต้อง requireAdmin
   app.use('/api/my', signedIn, myRouter);

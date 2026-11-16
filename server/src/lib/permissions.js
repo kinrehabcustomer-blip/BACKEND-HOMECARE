@@ -29,11 +29,26 @@ export const PERMISSION_CATALOG = [
   { key: 'patients', group: 'menu', label: 'ผู้รับบริการ' },
   { key: 'employees', group: 'menu', label: 'พนักงาน' },
   { key: 'reviews', group: 'menu', label: 'คะแนนประเมินจากญาติ' },
+  /* หมวดหมู่ (categories/routes.js · 16 พ.ย. 2569) — เพิ่ม/แก้/ปิดเหตุผลยกเลิก · แก้ชื่อหมวดหัตถการ/เหตุการณ์
+     ไม่อยู่ใน OFFICE_KEYS โดยตั้งใจ: เปิดให้ใครแล้วต้องไม่ได้งานหลังบ้านทั้งก้อนติดมาด้วย */
+  { key: 'categories', group: 'menu', label: 'หมวดหมู่ (รหัสหมวด)', hint: 'เหตุผลยกเลิก · หมวดหัตถการ · หมวดเหตุการณ์' },
   { key: 'see_pay', group: 'sensitive', label: 'เห็นค่าจ้างพนักงาน / ต้นทุน / กำไร' },
   { key: 'invoice_adjust', group: 'sensitive', label: 'ออกใบลดหนี้ · ยกเลิกใบแจ้งหนี้ · แก้ข้อมูลเงินคืน' },
   { key: 'slip_delete', group: 'sensitive', label: 'ลบสลิปการโอน' },
+  /* บันทึกการใช้งาน (audit/routes.js · 16 พ.ย. 2569) — เห็นว่าใครทำอะไรในระบบ รวมถึงการกระทำของผู้จัดการเอง
+     ค่าตั้งต้น: Super Admin เท่านั้น (ผู้จัดการไม่ได้โดยปริยาย ต้องเปิดให้จากหน้านี้) */
+  { key: 'audit_logs', group: 'sensitive', label: 'ดูบันทึกการใช้งานระบบ', hint: 'ใครทำอะไร เมื่อไร · ส่งออก CSV ได้ · เปิด/ปิดได้เฉพาะ Super Admin', superOnly: true },
 ];
 export const PERMISSION_KEYS = PERMISSION_CATALOG.map((p) => p.key);
+
+/* สิทธิ์ที่เปิด/ปิดได้เฉพาะ Super Admin (ตรวจ 16 พ.ย. 2569) — ผู้จัดการเปิดหน้าจัดการสิทธิ์ได้และตำแหน่งตัวเองแก้ได้
+   ถ้าไม่กันไว้ ผู้จัดการเปิดสิทธิ์ดูบันทึกการใช้งาน (ที่มีการกระทำของตัวเองอยู่) ให้ตัวเองได้ */
+export const SUPER_ONLY_KEYS = PERMISSION_CATALOG.filter((p) => p.superOnly).map((p) => p.key);
+
+/* สิทธิ์ที่มีอยู่ก่อนวันที่ระบบเริ่มจำ "รู้จักสิทธิ์อะไรบ้างตอนบันทึก" (known_keys)
+   แถวที่บันทึกก่อนหน้านั้นไม่มี known_keys — ถือว่ารู้จักแค่ชุดนี้ สิทธิ์ที่เพิ่มทีหลังจึงได้ค่าตั้งต้นของตำแหน่ง
+   (ไม่งั้นผู้จัดการที่เคยถูกปรับสิทธิ์ไว้จะไม่ได้ "หมวดหมู่" ทั้งที่ค่าตั้งต้นให้) */
+const LEGACY_KEYS = PERMISSION_KEYS.filter((k) => !['audit_logs', 'categories'].includes(k));
 
 const OFFICE_KEYS = ['dashboard', 'cases', 'calendar', 'attendance', 'packages', 'customers', 'patients', 'employees', 'reviews'];
 const MONEY_KEYS = ['payroll', 'revenue', 'see_pay', 'invoice_adjust'];
@@ -45,9 +60,10 @@ export const EDITABLE_POSITIONS = BACK_POSITIONS.filter((p) => p !== LOCKED_POSI
 export const PERMISSION_ADMINS = ['super_admin', 'manager'];
 
 /** ค่าตั้งต้น = สิทธิ์เดิมก่อนมีหน้านี้ทุกประการ — เปิดใช้แล้วไม่มีใครได้หรือเสียสิทธิ์ */
+/* บันทึกการใช้งานเดิมเป็นของ Super Admin คนเดียว จึงไม่อยู่ในค่าตั้งต้นของผู้จัดการ */
 export const DEFAULT_PERMISSIONS = {
   super_admin: PERMISSION_KEYS,
-  manager: PERMISSION_KEYS,
+  manager: PERMISSION_KEYS.filter((k) => k !== 'audit_logs'),
   hr: [...OFFICE_KEYS, 'invoices'],
   admin: [...OFFICE_KEYS, 'invoices', 'slip_delete'],
   finance: ['invoices', 'payroll', 'revenue', 'see_pay', 'invoice_adjust', 'slip_delete'],
@@ -79,6 +95,8 @@ export const ensurePermissionTable = () =>
          updated_at      TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')
        )`,
     )
+    // รายการสิทธิ์ที่ระบบรู้จัก ณ ตอนบันทึก — สิทธิ์ที่เกิดทีหลังใช้ค่าตั้งต้น (ดู LEGACY_KEYS)
+    .then(() => sql.run('ALTER TABLE role_permissions ADD COLUMN IF NOT EXISTS known_keys TEXT[]'))
     .catch((err) => {
       tableReady = null;
       throw err;
@@ -92,10 +110,13 @@ export async function loadPermissions({ force = false } = {}) {
   loading ??= (async () => {
     try {
       await ensurePermissionTable();
-      const rows = await sql.all('SELECT position, permissions FROM role_permissions');
+      const rows = await sql.all('SELECT position, permissions, known_keys FROM role_permissions');
       const next = new Map();
       for (const r of rows) {
-        if (EDITABLE_POSITIONS.includes(r.position)) next.set(r.position, clean(r.permissions ?? []));
+        if (!EDITABLE_POSITIONS.includes(r.position)) continue;
+        const known = r.known_keys ?? LEGACY_KEYS;
+        const added = (DEFAULT_PERMISSIONS[r.position] ?? []).filter((k) => !known.includes(k));
+        next.set(r.position, clean([...(r.permissions ?? []), ...added]));
       }
       cache = next;
       loadedAt = Date.now();
@@ -147,13 +168,13 @@ export async function savePermissions(position, keys, actor) {
     await sql.run('DELETE FROM role_permissions WHERE position = :position', { position });
   } else {
     await sql.run(
-      `INSERT INTO role_permissions (position, permissions, updated_by, updated_by_name)
-       VALUES (:position, :permissions::text[], :by, :by_name)
+      `INSERT INTO role_permissions (position, permissions, known_keys, updated_by, updated_by_name)
+       VALUES (:position, :permissions::text[], :known::text[], :by, :by_name)
        ON CONFLICT (position) DO UPDATE
-       SET permissions = EXCLUDED.permissions, updated_by = EXCLUDED.updated_by,
+       SET permissions = EXCLUDED.permissions, known_keys = EXCLUDED.known_keys, updated_by = EXCLUDED.updated_by,
            updated_by_name = EXCLUDED.updated_by_name,
            updated_at = to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')`,
-      { position, permissions: clean(keys), by: actor?.employee_id ?? null, by_name: actor?.name ?? null },
+      { position, permissions: clean(keys), known: PERMISSION_KEYS, by: actor?.employee_id ?? null, by_name: actor?.name ?? null },
     );
   }
   await loadPermissions({ force: true });

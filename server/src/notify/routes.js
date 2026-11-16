@@ -5,6 +5,7 @@ import { ApiError, asyncRoute } from '../lib/errors.js';
 import { requireAuth, requireAdmin, requireBackOffice, requirePasswordChanged } from '../lib/auth.js';
 import { collectAlerts } from './alerts.js';
 import { failedVisitNotifications } from './visitReminders.js';
+import { purgeAuditLogs } from '../lib/audit.js';
 
 /**
  * แจ้งเตือนเชิงรุก — ของค้างที่ต้องรีบรู้ ถูกส่งไปหาคน แทนที่จะรอให้คนมาเปิดหน้าเว็บเจอ
@@ -139,7 +140,22 @@ const sendDigest = ({ once = false } = {}) => asyncRoute(async (req, res) => {
  * กดลิงก์มาที่ URL นี้ จะสั่งให้ระบบส่งอีเมลออกไปทั้งชุดในนามของเขา
  * ตัดคุกกี้ออกจากเส้น GET แล้วย้ายปุ่มของคนไปที่ POST ด้านล่าง ช่องนี้จึงปิดสนิท
  */
-notifyRouter.get('/daily-digest', cronOnly, sendDigest({ once: true }));
+/* งานตั้งเวลารายวันตัวเดียวที่มี — กวาดบันทึกการใช้งานที่เก่ากว่าระยะเก็บ (≥ 1 ปี · lib/audit.js) ไปพร้อมกัน
+   กวาดไม่สำเร็จไม่ขวางการส่งสรุป — รอบถัดไปค่อยกวาดใหม่ (ของที่เกินมาหนึ่งวันไม่ผิดข้อตกลง "อย่างน้อย 1 ปี") */
+const PURGE_BUDGET_MS = 3000;
+const purgeOldAuditLogs = (req, res, next) => {
+  /* รอไม่เกิน 3 วินาที — เกินแล้วไปส่งสรุปต่อเลย (คำสั่ง DELETE ทำงานต่อที่ฐานจนจบเอง)
+     สรุปรายวันสำคัญกว่าการกวาด ห้ามให้การกวาดกินเวลาจนฟังก์ชันหมดเวลาก่อนส่งอีเมล */
+  let timer;
+  Promise.race([
+    purgeAuditLogs().catch((err) => console.error('[audit] กวาดบันทึกเก่าไม่สำเร็จ:', err.message)),
+    new Promise((resolve) => { timer = setTimeout(resolve, PURGE_BUDGET_MS); }),
+  ]).finally(() => {
+    clearTimeout(timer);
+    next();
+  });
+};
+notifyRouter.get('/daily-digest', cronOnly, purgeOldAuditLogs, sendDigest({ once: true }));
 
 /** ทางของคน — ผู้จัดการ/HR กดจากหน้าเว็บเพื่อทดสอบว่าอีเมลออกจริงไหม หรือส่งซ้ำ */
 // บัญชีที่ยังใช้รหัสชั่วคราวต้องตั้งรหัสใหม่ก่อน — กติกาเดียวกับเส้นอื่นของหลังบ้าน (ดู app.js signedIn)

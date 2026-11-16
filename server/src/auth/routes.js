@@ -102,6 +102,8 @@ authRouter.post(
     /* ตัวนับรหัสผิดผูกกับ "บัญชี" ไม่ใช่สิ่งที่พิมพ์ (ตรวจรอบ 6 พ.ย. 2569) — เดิมพิมพ์อีเมลกับพิมพ์รหัสพนักงาน
        ของคนเดียวกันนับแยกกัน เดาได้ 20 ครั้งแทน 10 · ชื่อที่ไม่มีบัญชีนับตามที่พิมพ์เหมือนเดิม */
     const failKey = employee ? `emp:${employee.employee_id}` : email;
+    // บันทึกการใช้งาน (lib/audit.js): login ผิดก็รู้ว่ามีคนพยายามเข้าบัญชีไหน
+    if (employee) res.locals.audit = { target_type: 'employees', target_id: employee.employee_id };
 
     /* นับตามชื่อที่ใช้เข้าสู่ระบบ แม้ไม่มีบัญชีนี้อยู่จริงก็โดนล็อกเหมือนกัน
        🔴 ด่านนี้กันคำขอที่มา "ทีละใบ" · คำขอที่ยิงพร้อมกันเป็นร้อยตัวเห็นตัวนับเท่ากันหมด
@@ -136,6 +138,7 @@ authRouter.post(
       { id: employee.employee_id },
     );
 
+    res.locals.audit = { ...res.locals.audit, actor: employee };
     res.cookie(COOKIE_NAME, signToken(employee), cookieOptions);
     res.json(toSession(employee));
   }),
@@ -158,6 +161,7 @@ authRouter.get(
     await ensureLineColumn();
 
     const employee = await sql.one('SELECT * FROM employees WHERE line_user_id = :uid', { uid: lineUserId });
+    if (employee) res.locals.audit = { target_type: 'employees', target_id: employee.employee_id };
     if (!employee) return res.redirect(302, `/login?line=${encodeURIComponent(req.query.t)}${to !== '/' ? `&to=${encodeURIComponent(to)}` : ''}`);
     if (BLOCKED_STATUSES[employee.status]) return res.redirect(302, '/login?line_error=blocked');
 
@@ -174,6 +178,7 @@ authRouter.get(
        WHERE employee_id = :id`,
       { id: employee.employee_id },
     );
+    res.locals.audit = { ...res.locals.audit, actor: employee };
     res.cookie(COOKIE_NAME, signToken(employee), cookieOptions);
     res.redirect(302, to);
   }),
@@ -193,6 +198,7 @@ authRouter.get(
     const p = verifySigned(req.query.t, 'kin-admin-sso');
     const email = typeof p?.email === 'string' ? p.email.trim().toLowerCase() : '';
     if (!email) return res.redirect(302, '/login?sso_error=expired');
+    res.locals.audit = { detail: { login: email.slice(0, 254) } };
     // ตั๋วใช้ได้ครั้งเดียว — URL หลุดไปในประวัติเบราว์เซอร์/log ภายใน 2 นาที เอามาเข้าซ้ำไม่ได้
     await sql.run(`CREATE TABLE IF NOT EXISTS admin_sso_used (token_hash TEXT PRIMARY KEY, used_at TIMESTAMPTZ NOT NULL DEFAULT now())`);
     await sql.run(`DELETE FROM admin_sso_used WHERE used_at < now() - interval '1 day'`);
@@ -210,6 +216,7 @@ authRouter.get(
        WHERE employee_id = :id`,
       { id: employee.employee_id },
     );
+    res.locals.audit = { ...res.locals.audit, actor: employee };
     res.cookie(COOKIE_NAME, signToken(employee), cookieOptions);
     res.redirect(302, to);
   }),
@@ -232,6 +239,7 @@ authRouter.post(
        WHERE employee_id = :id`,
       { id: employee.employee_id },
     );
+    res.locals.audit = { actor: employee };
     res.cookie(COOKIE_NAME, signToken(employee), cookieOptions);
     res.json(toSession(employee));
   }),
@@ -313,7 +321,12 @@ authRouter.post(
 
     // ตอบสำเร็จเสมอ ไม่ว่าอีเมลจะมีอยู่จริงหรือไม่ — ไม่ให้คนนอกใช้หน้านี้ไล่เดาว่าใครมีบัญชี
     const generic = { message: `ถ้าอีเมลนี้มีอยู่ในระบบ เราได้ส่งรหัสยืนยันไปให้แล้ว (ใช้ได้ภายใน ${OTP_TTL_MINUTES} นาที)` };
-    if (!employee || BLOCKED_STATUSES[employee.status]) return res.json(generic);
+    // บันทึกการใช้งานเท่านั้น — คำตอบที่ส่งกลับยังเหมือนกันทุกตัวอักษร (ไม่บอกใบ้ว่าอีเมลไหนมีจริง)
+    if (employee) res.locals.audit = { target_type: 'employees', target_id: employee.employee_id };
+    if (!employee || BLOCKED_STATUSES[employee.status]) {
+      if (employee) res.locals.audit.detail = { otp: 'not_issued', reason: employee.status };
+      return res.json(generic);
+    }
 
     const code = String(randomInt(0, 1_000_000)).padStart(6, '0'); // randomInt = CSPRNG ไม่ใช่ Math.random
     const codeHash = await hashPassword(code);
@@ -354,7 +367,11 @@ authRouter.post(
     /* อยู่ในช่วงคูลดาวน์ = ตอบข้อความกลางเหมือนเดิมทุกตัวอักษร ไม่ใช่ 429 (ตรวจรอบ 20)
        เดิมอีเมลที่มีอยู่จริงได้ 429 ส่วนอีเมลที่ไม่มีได้ 200 เสมอ
        กดขอซ้ำสองครั้งจึงแยกออกทันทีว่าอีเมลไหนเป็นพนักงานของเรา */
-    if (!issued) return res.json(generic);
+    if (!issued) {
+      res.locals.audit.detail = { otp: 'not_issued', reason: 'cooldown_or_daily_limit' };
+      return res.json(generic);
+    }
+    res.locals.audit.detail = { otp: 'issued' };
 
     await sendOtpEmail({
       to: employee.email,
@@ -378,6 +395,7 @@ authRouter.post(
       { email },
     );
     const invalid = new ApiError(400, 'รหัสยืนยันไม่ถูกต้องหรือหมดอายุแล้ว');
+    if (employee) res.locals.audit = { target_type: 'employees', target_id: employee.employee_id };
     if (!employee || BLOCKED_STATUSES[employee.status]) throw invalid;
 
     const otp = await sql.one(

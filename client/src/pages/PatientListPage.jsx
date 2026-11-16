@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api.js';
 import PatientModal from '../components/PatientModal.jsx';
 import SortHead from '../components/SortHead.jsx';
+import NewestSortHead from '../components/NewestSortHead.jsx';
 import { GENDER_LABELS, PATIENT_STATUS_LABELS, ageFromBirthDate } from '../labels.js';
 import LineIcon from '../components/LineIcon.jsx';
 import ErrorBar from '../components/ErrorBar.jsx';
@@ -193,7 +194,7 @@ export default function PatientListPage() {
             <thead>
               <tr>
                 <th>#</th>
-                <th><SortHead column="patient_id" {...SORTABLE.patient_id} sort={sort} order={order} onSort={sortBy} /></th>
+                <th><NewestSortHead column="patient_id" label={SORTABLE.patient_id.label} sort={sort} order={order} onSort={sortBy} /></th>
                 <th><SortHead column="name" {...SORTABLE.name} sort={sort} order={order} onSort={sortBy} /></th>
                 <th>เพศ / อายุ</th>
                 <th>ผู้ว่าจ้าง</th>

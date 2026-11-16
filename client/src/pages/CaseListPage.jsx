@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api.js';
 import CaseModal from '../components/CaseModal.jsx';
 import SortHead from '../components/SortHead.jsx';
+import NewestSortHead from '../components/NewestSortHead.jsx';
 import ErrorBar from '../components/ErrorBar.jsx';
 import PageRefresh from '../components/PageRefresh.jsx';
 import { SERVICE_KIND_LABELS, MONTH_LABELS, formatBaht, formatDate, toBuddhistYear, caseStage, CASE_STATUS_FILTER_LABELS, bundledPhysioText, totalFee } from '../labels.js';
@@ -28,7 +29,9 @@ const SORTABLE = {
   start_date: { label: 'เริ่ม / ค่าจ้าง', hint: 'เรียงตามวันเริ่มให้บริการ' },
 };
 
-const DEFAULTS = { sort: 'case_id', order: 'desc', per_page: '20', page: '1' };
+/* ค่าเริ่มต้น = ใหม่สุด (วันที่เปิดเคส) — ตัวเลือกเรียงตามรหัสเคสถูกเอาออกจากเมนู (ผู้ใช้ขอ 16 พ.ย. 2569)
+   ถ้ายังเริ่มที่รหัสเคส เมนูจะต้องมีบรรทัด "ตามคอลัมน์ รหัสเคส" โผล่มาแทนทุกครั้งที่เปิดหน้า */
+const DEFAULTS = { sort: 'created_at', order: 'desc', per_page: '20', page: '1' };
 
 /* ตัวกรองที่คนใช้มองเป็น "สถานะ" แต่ไม่ใช่สถานะใน DB — คิดจากข้อมูลอื่นของเคส
    ทั้งสามตัวเป็นปลายทางของแถวในกระดิ่งแจ้งเตือน และมีตัวกรองจริงฝั่ง server รออยู่
@@ -187,14 +190,21 @@ export default function CaseListPage() {
   const sortValue = `${sort}:${order}`;
   /* ไม่มีคำว่า "เรียง" นำหน้าแล้ว (ผู้ใช้ขอ 11 พ.ย. 2569) — ไอคอนลูกศรขึ้น-ลงหน้าปุ่มบอกแทนว่าเป็นตัวเรียงลำดับ
      ชื่อสั้นโดยตั้งใจ: ปุ่มอยู่ในหัวคอลัมน์สถานะ (16% ของตาราง) คู่กับคำว่า "สถานะ" — ชื่อยาวแล้วปุ่มล้นขอบตาราง */
+  /* หัวคอลัมน์รหัสเคสคือตัวเลือกนี้ (ผู้ใช้ขอ 16 พ.ย. 2569) — เหลือแค่ ใหม่สุด / เก่าสุด (เอาเรียงตามรหัสเคสออก วันเดียวกัน)
+     ลิงก์เก่าที่ยังมี ?sort=case_id ใช้ได้ต่อ: ขึ้นเป็นบรรทัด "ตามคอลัมน์ รหัสเคส" + หัวแสดงลูกศร ▼/▲ */
   const SORT_PRESETS = [
     ['created_at:desc', 'ใหม่สุด'],
     ['created_at:asc', 'เก่าสุด'],
-    ['case_id:desc', 'รหัสเคส'],
   ];
-  // ปุ่มเดียวกันทั้งสองจอ: จอกว้างเป็นปุ่มเม็ดยาในหัวคอลัมน์สถานะ · มือถือเต็มแถวในแผ่นตัวกรอง (is-sheet)
+  const preset = SORT_PRESETS.find(([value]) => value === sortValue);
+  const presetLabel = preset?.[1] ?? `ตามคอลัมน์${SORTABLE[sort].label === '#' ? '' : ` ${SORTABLE[sort].label}`}`;
+  const sortOptions = (<>
+    {SORT_PRESETS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+    {!SORT_PRESETS.some(([value]) => value === sortValue) && <option value={sortValue}>{presetLabel}</option>}
+  </>);
+  // มือถือ (หัวตารางถูกซ่อน · โหมดการ์ด): ช่องเต็มแถวในแผ่นตัวกรอง
   const sortPicker = (
-    <label className={`sort-pick${mobile ? ' is-sheet' : ''}`} title="เรียงลำดับเคส">
+    <label className="sort-pick is-sheet" title="เรียงลำดับเคส">
       <svg className="sort-pick-icon" viewBox="0 0 24 24" aria-hidden="true">
         <path d="M7 20V4M3.5 7.5 7 4l3.5 3.5M17 4v16m-3.5-3.5L17 20l3.5-3.5" />
       </svg>
@@ -205,12 +215,14 @@ export default function CaseListPage() {
         onChange={(e) => sortBy(...e.target.value.split(':'))}
         aria-label="เรียงลำดับเคส"
       >
-        {SORT_PRESETS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-        {!SORT_PRESETS.some(([value]) => value === sortValue) && (
-          <option value={sortValue}>ตามคอลัมน์{SORTABLE[sort].label === '#' ? '' : ` ${SORTABLE[sort].label}`}</option>
-        )}
+        {sortOptions}
       </SearchSelect>
     </label>
+  );
+  /* จอกว้าง: หัวคอลัมน์ "รหัสเคส" คือปุ่มสลับ ใหม่สุด ↔ เก่าสุด (ผู้ใช้ขอ 16 พ.ย. 2569 · กดแล้วเปลี่ยนเลย ไม่ใช่ dropdown)
+     ใช้คอมโพเนนต์กลางร่วมกับหน้ารายการอื่น (NewestSortHead) · ลิงก์เก่า ?sort=case_id ยังนับว่าเรียงด้วยหัวนี้ */
+  const headSortPicker = (
+    <NewestSortHead label="รหัสเคส" column="created_at" legacy={['case_id']} sort={sort} order={order} onSort={sortBy} />
   );
 
   return (
@@ -297,30 +309,25 @@ export default function CaseListPage() {
               {/* สถานะกว้าง 16% เพราะป้ายที่ยาวที่สุด ("ยังไม่จับคู่พนักงาน") ต้องการ 139px
                   ที่ 13% บนจอ 1280/1440 ได้ไม่ถึง แล้วป้ายโดน … ตัดจนอ่านไม่ออกว่าเคสอยู่สถานะไหน
                   ที่ยืมมาคือคอลัมน์บริการ ซึ่งเป็นข้อความอิสระ ตัดท้ายแล้วยังเดาความได้ */}
-              {/* สถานะขยับเป็น 18% (11 พ.ย. 2569) — หัวคอลัมน์มีปุ่มเรียงลำดับนั่งข้างคำว่า "สถานะ" ด้วย ที่ 16% ปุ่มถูกตัดชื่อเหลือ "รหัส…"
-                  ยืมมาจากคอลัมน์บริการอีก 2% (ข้อความอิสระ ตัดท้ายแล้วยังเดาความได้) */}
+              {/* ปุ่มเรียงลำดับย้ายจากหัวคอลัมน์สถานะมาเป็นหัวคอลัมน์รหัสเคส (16 พ.ย. 2569) — สถานะกลับเป็น 16%
+                  รหัสเคส 12 → 14% ให้หัวมีที่พอสำหรับ "รหัสเคส ⇅ ใหม่สุด" */}
               <col style={{ width: '6%' }} />
-              <col style={{ width: '12%' }} />
+              <col style={{ width: '14%' }} />
               <col style={{ width: '21%' }} />
               <col style={{ width: '14%' }} />
               <col style={{ width: '13%' }} />
               <col style={{ width: '16%' }} />
-              <col style={{ width: '18%' }} />
+              <col style={{ width: '16%' }} />
             </colgroup>
             <thead>
               <tr>
                 <th><SortHead column="created_at" {...SORTABLE.created_at} sort={sort} order={order} onSort={sortBy} /></th>
-                <th><SortHead column="case_id" {...SORTABLE.case_id} sort={sort} order={order} onSort={sortBy} /></th>
+                <th>{headSortPicker}</th>
                 <th><SortHead column="title" {...SORTABLE.title} sort={sort} order={order} onSort={sortBy} /></th>
                 <th><SortHead column="start_date" {...SORTABLE.start_date} sort={sort} order={order} onSort={sortBy} /></th>
                 <th>เบอร์โทร</th>
                 <th>พนักงานที่รับ</th>
-                <th>
-                  <div className="th-tools">
-                    <span>สถานะ</span>
-                    {!mobile && sortPicker}
-                  </div>
-                </th>
+                <th>สถานะ</th>
               </tr>
             </thead>
             <tbody>

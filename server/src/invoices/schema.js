@@ -203,9 +203,18 @@ export const revokeShareSchema = z.object({
   reason: z.string().trim().max(300).optional().nullable(),
 });
 
-export const cancelInvoiceSchema = z.object({
-  reason: z.string().trim().min(3, 'กรุณาบอกเหตุผลที่ยกเลิกใบนี้').max(300),
-});
+/* reason_id = หมวดเหตุผล (categories โดเมน cancel_invoice · 16 พ.ย. 2569) — เลือกหมวดแล้วรายละเอียดไม่บังคับ
+   ไม่เลือกหมวด (เรียกแบบเดิม) ยังต้องพิมพ์เหตุผลอย่างน้อย 3 ตัวอักษรเหมือนเดิม */
+export const cancelInvoiceSchema = z
+  .object({
+    reason: z.string().trim().max(300).optional().nullable(),
+    reason_id: z.number().int().positive().optional().nullable(),
+  })
+  .superRefine((v, ctx) => {
+    if (v.reason_id == null && (v.reason ?? '').length < 3) {
+      ctx.addIssue({ code: 'custom', path: ['reason'], message: 'กรุณาเลือกเหตุผล หรือบอกเหตุผลที่ยกเลิกใบนี้' });
+    }
+  });
 
 export const cancelAdjustmentSchema = z.object({
   reason: z.string().trim().min(3, 'กรุณาบอกเหตุผลที่ยกเลิกเอกสารนี้').max(300),

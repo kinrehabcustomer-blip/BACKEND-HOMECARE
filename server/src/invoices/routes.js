@@ -28,6 +28,7 @@ import { requirePermission, can } from '../lib/auth.js';
 
 const requireAdjust = requirePermission('invoice_adjust', 'บัญชีของคุณไม่มีสิทธิ์ออกใบลดหนี้/ยกเลิกใบ');
 import { todayTh } from '../lib/dates.js';
+import { reasonText, resolveReason } from '../categories/repo.js';
 import { createShareLink, lineTarget, queueLineSend, sendHistory, activeShares, revokeShares } from './share.js';
 
 export const invoicesRouter = Router();
@@ -835,8 +836,9 @@ invoicesRouter.post(
   '/:id/cancel',
   requireAdjust,
   asyncRoute(async (req, res) => {
-    const { reason } = cancelInvoiceSchema.parse(req.body ?? {});
-    const result = await repo.cancel(req.params.id, { reason }, req.user);
+    const { reason, reason_id } = cancelInvoiceSchema.parse(req.body ?? {});
+    const picked = await resolveReason('cancel_invoice', reason_id);
+    const result = await repo.cancel(req.params.id, { reason: reasonText(picked, reason), reasonId: picked?.id ?? null }, req.user);
     throwIfInvoiceMoved(result);
     if (result.reason === 'invalid_status') throw new ApiError(409, 'ใบนี้ถูกยกเลิกไปแล้ว');
     if (result.reason === 'has_net_payments') {

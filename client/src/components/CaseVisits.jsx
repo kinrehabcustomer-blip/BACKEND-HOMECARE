@@ -9,6 +9,7 @@ import TimeSelect from './TimeSelect.jsx';
 import { caseCode } from '../lib/patientCode.js';
 import SearchSelect from './SearchSelect.jsx';
 import { useConfirm } from './ConfirmDialog.jsx';
+import ReasonPicker, { useHasReasons } from './ReasonPicker.jsx';
 
 const WEEKDAYS = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
 
@@ -86,6 +87,8 @@ function dayClass(list) {
 export default function CaseVisits({ caseId, caseItem = null, target = null, readOnly = false, mode = 'shift' }) {
   const toast = useToast();
   const ask = useConfirm();
+  // หมวดเหตุผลยกเลิกนัด (categories · cancel_visit) — มีให้เลือก = กล่องยกเลิกถามเหตุผลเป็นช่องเลือก
+  const hasCancelReasons = useHasReasons('cancel_visit');
   // ค่าจ้างรายกะเห็น/แก้ได้เฉพาะผู้จัดการ เหมือนค่าจ้างของเคส (server ตัดฟิลด์ให้อยู่แล้ว)
   const isAppt = mode === 'appointment';
   /* เปิดปฏิทินที่เดือนของ "วันแรกที่ลงนัดได้จริง" ไม่ใช่เดือนปัจจุบันเสมอไป
@@ -802,16 +805,31 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
                     title="วันนั้นไม่ได้ไปจริง — เปลี่ยนเป็นยกเลิก (ยังเก็บเป็นประวัติ)"
                     onClick={async () => {
                       /* หมายเหตุส่งไปกับข้อความแจ้งยกเลิกนัดทาง LINE (พนักงาน + ญาติ) และเก็บไว้ในกะ (11 พ.ย. 2569) */
-                      const reason = await ask({
+                      /* มีหมวดเหตุผล (categories · cancel_visit · 16 พ.ย. 2569) = เลือกเหตุผล + รายละเอียดไม่บังคับ
+                         ชื่อเหตุผลถูกเขียนนำหน้าหมายเหตุที่ server — ข้อความ LINE ได้ทั้งสองส่วน */
+                      const answer = await ask({
                         title: `ยกเลิก${unit}วันที่ ${formatDate(v.visit_date)}?`,
-                        detail: `ระบบจะแจ้งยกเลิก${unit}ทาง LINE ถึง${v.assigned_name ? ` ${v.assigned_name} ` : 'พนักงาน'}และญาติที่ผูกเคสไว้ พร้อมหมายเหตุนี้`,
-                        input: { label: 'หมายเหตุ / เหตุผลที่ยกเลิก', placeholder: 'เช่น ผู้รับบริการไม่สบาย ขอเลื่อนไปก่อน', required: true },
+                        detail: `ระบบจะแจ้งยกเลิก${unit}ทาง LINE ถึง${v.assigned_name ? ` ${v.assigned_name} ` : 'พนักงาน'}และญาติที่ผูกเคสไว้ พร้อมเหตุผลนี้`,
+                        ...(hasCancelReasons
+                          ? {
+                            select: {
+                              required: true,
+                              render: (value, set) => (
+                                <ReasonPicker domain="cancel_visit" label="เหตุผลที่ยกเลิก" required value={value} onChange={set} autoFocus />
+                              ),
+                            },
+                            input: { label: 'รายละเอียดเพิ่มเติม (ไม่บังคับ)', placeholder: 'เช่น ขอเลื่อนไปสัปดาห์หน้า' },
+                          }
+                          : { input: { label: 'หมายเหตุ / เหตุผลที่ยกเลิก', placeholder: 'เช่น ผู้รับบริการไม่สบาย ขอเลื่อนไปก่อน', required: true } }),
                         confirmLabel: `ยกเลิก${unit}และแจ้ง`,
                         cancelLabel: 'ไม่ยกเลิก',
                         danger: true,
                       });
-                      if (reason == null) return;
-                      run(() => api.updateVisit(caseId, v.visit_id, { status: 'cancelled', cancel_reason: reason }));
+                      if (answer == null) return;
+                      const body = typeof answer === 'string'
+                        ? { status: 'cancelled', cancel_reason: answer }
+                        : { status: 'cancelled', cancel_reason: answer.text || null, cancel_reason_id: Number(answer.choice) };
+                      run(() => api.updateVisit(caseId, v.visit_id, body));
                     }}
                   >
                     ยกเลิก

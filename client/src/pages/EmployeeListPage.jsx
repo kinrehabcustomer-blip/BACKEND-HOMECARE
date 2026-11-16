@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api.js';
 import EmployeeModal from '../components/EmployeeModal.jsx';
 import SortHead from '../components/SortHead.jsx';
+import NewestSortHead from '../components/NewestSortHead.jsx';
 import Avatar from '../components/Avatar.jsx';
 import ErrorBar from '../components/ErrorBar.jsx';
 import PageRefresh from '../components/PageRefresh.jsx';
@@ -174,8 +175,9 @@ export default function EmployeeListPage() {
             {/* ตรึงความกว้างคอลัมน์ไว้ ไม่ให้ตารางขยับตามความยาวชื่อของแต่ละแถว */}
             <colgroup>
               <col style={{ width: '7%' }} />
-              <col style={{ width: '15%' }} />
-              <col style={{ width: '29%' }} />
+              {/* รหัสพนักงาน 15 → 18% ให้หัว "รหัสพนักงาน ⇅ ใหม่สุด" ไม่ถูกตัด (16 พ.ย. 2569) · ยืมจากชื่อ */}
+              <col style={{ width: '18%' }} />
+              <col style={{ width: '26%' }} />
               <col style={{ width: '17%' }} />
               <col style={{ width: '17%' }} />
               <col style={{ width: '15%' }} />
@@ -183,7 +185,7 @@ export default function EmployeeListPage() {
             <thead>
               <tr>
                 <th>#</th>
-                <th><SortHead column="employee_id" {...SORTABLE.employee_id} sort={sort} order={order} onSort={sortBy} /></th>
+                <th><NewestSortHead column="employee_id" label={SORTABLE.employee_id.label} sort={sort} order={order} onSort={sortBy} /></th>
                 <th><SortHead column="first_name" {...SORTABLE.first_name} sort={sort} order={order} onSort={sortBy} /></th>
                 <th>เบอร์โทร</th>
                 <th>ตำแหน่ง</th>

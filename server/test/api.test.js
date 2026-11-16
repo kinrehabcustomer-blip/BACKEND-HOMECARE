@@ -1,4 +1,4 @@
-import { test, describe, before, after } from 'node:test';
+import { test, describe, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
@@ -4105,6 +4105,380 @@ if (process.env.RUN_DB_TESTS !== '1') {
       } finally {
         console.error = original;
       }
+    });
+  });
+
+  // ---------- บันทึกการใช้งาน (audit log · เก็บอย่างน้อย 1 ปี · 16 พ.ย. 2569) ----------
+  describe('บันทึกการใช้งาน (audit_logs)', () => {
+    const SUPER = emp('EMP-0090', 'super_admin');
+    /* ทั้งไฟล์ใช้ฐานเดียวกัน — เทสก่อนหน้าทิ้งบันทึกไว้เยอะแล้ว ดูเฉพาะแถวที่เกิดในเทสนี้ (log_id > since) */
+    let since = 0;
+    beforeEach(async () => {
+      since = Number((await sql.one('SELECT coalesce(max(log_id), 0) AS n FROM audit_logs')).n);
+    });
+    const logs = (where, params = {}) =>
+      sql.all(`SELECT * FROM audit_logs WHERE log_id > :since AND ${where} ORDER BY log_id`, { ...params, since });
+
+    async function send(method, path, body, who, headers = {}) {
+      const res = await fetch(`${base}${path}`, {
+        method,
+        headers: { 'content-type': 'application/json', ...(who ? { cookie: `${COOKIE_NAME}=${signToken(who)}` } : {}), ...headers },
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      const text = await res.text();
+      let data;
+      try { data = JSON.parse(text); } catch { data = text; }
+      return { status: res.status, body: data };
+    }
+
+    before(async () => {
+      await sql.run(
+        `INSERT INTO employees (employee_id, first_name, last_name, position, email, status, password_hash, must_change_password)
+         VALUES ('EMP-0090', 'Super', 'Admin', 'super_admin', 'emp-0090@example.invalid', 'active', 'x', false)
+         ON CONFLICT DO NOTHING`,
+      );
+    });
+
+    test('login ผิด = บันทึกว่าไม่สำเร็จ พร้อมบัญชีที่ถูกลอง · ไม่มีรหัสผ่านในบันทึก', async () => {
+      const r = await send('POST', '/api/auth/login', { email: 'EMP-0007@example.invalid', password: 'wrong-pass-xyz' });
+      assert.equal(r.status, 401);
+      const [row] = await logs(`action = 'auth.login' AND ok = false AND target_id = 'EMP-0007'`);
+      assert.ok(row, 'ต้องมีแถว login ไม่สำเร็จ');
+      assert.equal(row.level, 1);
+      assert.equal(row.actor_id, null);
+      assert.equal(row.detail.login, 'EMP-0007@example.invalid');
+      assert.equal(JSON.stringify(row).includes('wrong-pass-xyz'), false, 'ห้ามมีรหัสผ่านในบันทึก');
+    });
+
+    test('login สำเร็จ = บันทึกผู้ทำ ชื่อ ตำแหน่ง IP', async () => {
+      const r = await send('POST', '/api/auth/login', { email: 'EMP-0007@example.invalid', password: 'Fixture-password-123!' });
+      assert.equal(r.status, 200);
+      const rows = await logs(`action = 'auth.login' AND ok = true AND actor_id = 'EMP-0007'`);
+      assert.equal(rows.length, 1);
+      assert.equal(rows[0].actor_name, 'Test Employee');
+      assert.equal(rows[0].actor_position, 'hr');
+      assert.ok(rows[0].ip);
+      assert.equal(JSON.stringify(rows[0]).includes('Fixture-password-123!'), false);
+    });
+
+    test('แก้สิทธิ์ = เก็บค่าที่ตั้ง (ระดับ 1) · คืนค่าตั้งต้นก็บันทึก', async () => {
+      const r = await send('PUT', '/api/permissions/hr', { permissions: ['cases', 'customers'] }, MANAGER);
+      assert.equal(r.status, 200);
+      const [row] = await logs(`action = 'permissions.update' AND target_id = 'hr'`);
+      assert.equal(row.actor_id, 'EMP-0001');
+      assert.equal(row.target_type, 'positions');
+      assert.deepEqual(row.detail.values.permissions, ['cases', 'customers']);
+      assert.equal((await send('DELETE', '/api/permissions/hr', null, MANAGER)).status, 200);
+      assert.equal((await logs(`action = 'permissions.delete' AND target_id = 'hr'`)).length, 1);
+    });
+
+    test('ถูกปฏิเสธสิทธิ์ (403) = บันทึก access.denied · เส้นเดิมซ้ำใน 15 นาทีนับครั้งเดียว แต่ต่างเส้นนับแยก', async () => {
+      // เส้นที่เทสอื่นยังไม่เคยให้พนักงานภาคสนามเรียก (ถูกนับรวมกับของเดิมใน 15 นาที)
+      assert.equal((await send('GET', '/api/packages/meta', null, FIELD)).status, 403);
+      assert.equal((await send('GET', '/api/packages/meta', null, FIELD)).status, 403);
+      assert.equal((await send('GET', '/api/reviews/summary', null, FIELD)).status, 403);
+      const rows = await logs(`action = 'access.denied' AND actor_id = 'EMP-0003'`);
+      assert.deepEqual(rows.map((r) => r.path), ['/api/packages/meta', '/api/reviews/summary']);
+      assert.ok(rows.every((r) => r.ok === false && r.status === 403 && r.level === 1));
+    });
+
+    test('เปิดดูแฟ้มเคส = บันทึกครั้งเดียวใน 15 นาที พร้อมชื่อผู้รับบริการ · GET รายการทั่วไปไม่บันทึก', async () => {
+      // Super Admin — ผู้จัดการเปิดเคสนี้ไปแล้วในเทสก่อน ๆ (ภายใน 15 นาที จะถูกนับรวมเป็นครั้งเดิม)
+      assert.equal((await send('GET', '/api/cases/CASE-FIXTURE', null, SUPER)).status, 200);
+      assert.equal((await send('GET', '/api/cases/CASE-FIXTURE', null, SUPER)).status, 200);
+      const rows = await logs(`action = 'cases.view' AND actor_id = 'EMP-0090' AND target_id = 'CASE-FIXTURE'`);
+      assert.equal(rows.length, 1);
+      assert.equal(rows[0].level, 2);
+      assert.equal(rows[0].target_label, 'Test patient');
+      assert.equal((await send('GET', '/api/cases/meta', null, SUPER)).status, 200);
+      assert.equal((await logs(`path = '/api/cases/meta'`)).length, 0, '/cases/meta ไม่ใช่การเปิดแฟ้ม');
+    });
+
+    test('แก้ข้อมูลเคส = เก็บแค่ชื่อช่อง ไม่เก็บค่า (ข้อมูลสุขภาพ)', async () => {
+      const r = await send('PATCH', '/api/cases/CASE-FIXTURE', { medical_history: 'เบาหวาน-ลับ' }, MANAGER);
+      const [row] = await logs(`action = 'cases.update' AND target_id = 'CASE-FIXTURE'`);
+      assert.ok(row, `ต้องบันทึก (status ${r.status})`);
+      assert.deepEqual(row.detail.fields, ['medical_history']);
+      assert.equal(row.detail.values, undefined);
+      assert.equal(JSON.stringify(row).includes('เบาหวาน-ลับ'), false);
+    });
+
+    test('แก้หรือลบบันทึกย้อนหลังไม่ได้ (trigger) — ลบได้เฉพาะที่เก่ากว่า 1 ปี', async () => {
+      const row = await sql.one(`SELECT log_id FROM audit_logs WHERE action = 'auth.login' LIMIT 1`);
+      await assert.rejects(sql.run(`UPDATE audit_logs SET ok = NOT ok WHERE log_id = :id`, { id: row.log_id }), /แก้ไขไม่ได้/);
+      await assert.rejects(sql.run(`DELETE FROM audit_logs WHERE log_id = :id`, { id: row.log_id }), /แก้ไขไม่ได้/);
+      const { purgeAuditLogs } = await import('../src/lib/audit.js');
+      assert.equal(await purgeAuditLogs(), 0, 'ของใหม่ต้องไม่ถูกกวาด');
+    });
+
+    test('หน้าดูบันทึก: ค่าตั้งต้น Super Admin เท่านั้น · กรองตามคน/ระดับได้ · การเปิดดูก็ถูกบันทึก', async () => {
+      assert.equal((await send('GET', '/api/audit-logs', null, MANAGER)).status, 403, 'ผู้จัดการไม่ได้โดยปริยาย');
+      const r = await send('GET', '/api/audit-logs?actor=EMP-0007&level=1', null, SUPER);
+      assert.equal(r.status, 200);
+      assert.ok(r.body.rows.length >= 2);
+      assert.ok(r.body.rows.every((x) => x.actor_id === 'EMP-0007' && x.level === 1));
+      assert.equal(r.body.rows[0].label, 'เข้าสู่ระบบ (รหัสผ่าน)');
+      const meta = await send('GET', '/api/audit-logs/meta', null, SUPER);
+      assert.equal(meta.status, 200);
+      assert.equal(meta.body.retention_days >= 365, true);
+      assert.equal((await logs(`action = 'audit-logs.view' AND actor_id = 'EMP-0090'`)).length, 1);
+      assert.equal((await send('GET', '/api/audit-logs/export', null, SUPER)).status, 400, 'ส่งออกต้องระบุช่วงวัน');
+    });
+
+    test('คนนอก (ไม่มีเซสชัน) ยิงเส้นมั่ว/ไม่ผ่าน = ไม่เกิดแถว · login ผิดซ้ำจาก IP เดิมนับครั้งเดียวต่อผลลัพธ์', async () => {
+      const junk = Object.fromEntries(Array.from({ length: 5 }, (_, i) => [`k${i}`.repeat(50), 'x'.repeat(1000)]));
+      assert.equal((await send('POST', '/api/does-not-exist-123', junk)).status, 404);
+      assert.equal((await send('POST', '/api/patients', junk)).status, 401);
+      assert.equal((await send('GET', '/api/public/bill/abcdefghijklmnopqrstuvwxyz0123456789')).status >= 400, true);
+      assert.equal((await logs('true')).length, 0, 'ต้องไม่มีแถวจากคำขอที่ไม่รู้ตัวตนและไม่สำเร็จ');
+
+      for (let i = 0; i < 3; i++) {
+        assert.equal((await send('POST', '/api/auth/login', { email: 'EMP-0004@example.invalid', password: `nope-${i}` })).status, 401);
+      }
+      assert.equal((await logs(`action = 'auth.login' AND target_id = 'EMP-0004'`)).length, 1);
+    });
+
+    test('พิมพ์รหัสผ่านลงช่องอีเมล (ไม่ตรงบัญชีไหน) = ไม่เก็บข้อความที่พิมพ์', async () => {
+      // IP ใหม่ — login ผิดที่ไม่ตรงบัญชีจาก IP เดิมถูกนับรวมเป็นครั้งเดียวใน 15 นาที (เทสก่อน ๆ ใช้ 127.0.0.1 ไปแล้ว)
+      const ip = { 'x-forwarded-for': '203.0.113.77' };
+      assert.equal((await send('POST', '/api/auth/login', { email: 'MySecretPw99', password: 'x' }, null, ip)).status, 401);
+      const [row] = await logs(`action = 'auth.login' AND ok = false AND target_id IS NULL AND ip = '203.0.113.77'`);
+      assert.ok(row);
+      assert.equal(JSON.stringify(row).includes('MySecretPw99'), false);
+      assert.match(row.detail.login, /ไม่พบบัญชี/);
+    });
+
+    test('action ที่เก็บค่า: ข้อความอิสระ (เหตุผล) เก็บแค่ความยาว · สถานะ/วันที่/ตัวเลขเก็บค่า', async () => {
+      await send('POST', '/api/cases/CASE-FIXTURE/cancel', { reason: 'ผู้ป่วยแผลกดทับระดับ 3', status: 'cancelled', amount: 500 }, MANAGER);
+      const [row] = await logs(`action = 'cases.cancel' AND target_id = 'CASE-FIXTURE'`);
+      assert.ok(row);
+      assert.equal(JSON.stringify(row).includes('แผลกดทับ'), false);
+      assert.match(row.detail.values.reason, /^\[ข้อความ \d+ ตัวอักษร\]$/);
+      assert.equal(row.detail.values.status, 'cancelled');
+      assert.equal(row.detail.values.amount, 500);
+    });
+
+    test('สิทธิ์ดูบันทึกตั้งได้ที่หน้าจัดการสิทธิ์ — เปิดให้ HR แล้วเข้าได้ · คืนค่าตั้งต้นแล้วเข้าไม่ได้', async () => {
+      const matrix = (await send('GET', '/api/permissions', null, MANAGER)).body;
+      assert.ok(matrix.catalog.some((c) => c.key === 'audit_logs'), 'ต้องมีสวิตช์ในหน้าจัดการสิทธิ์');
+      assert.equal(matrix.positions.find((p) => p.position === 'manager').permissions.includes('audit_logs'), false);
+      assert.equal((await send('GET', '/api/audit-logs', null, HR)).status, 403);
+
+      const hrNow = matrix.positions.find((p) => p.position === 'hr').permissions;
+      // เปิด/ปิด audit_logs ได้เฉพาะ Super Admin (ตรวจรอบ 2 · 16 พ.ย. 2569)
+      assert.equal((await send('PUT', '/api/permissions/hr', { permissions: [...hrNow, 'audit_logs'] }, SUPER)).status, 200);
+      try {
+        assert.equal((await send('GET', '/api/audit-logs', null, HR)).status, 200);
+        const me = (await send('GET', '/api/auth/me', null, HR)).body;
+        assert.ok(me.permissions.includes('audit_logs'), 'หน้าเว็บต้องรู้สิทธิ์ใหม่ (เมนูขึ้น)');
+      } finally {
+        assert.equal((await send('DELETE', '/api/permissions/hr', null, SUPER)).status, 200);
+      }
+      assert.equal((await send('GET', '/api/audit-logs', null, HR)).status, 403);
+    });
+
+    test('แปลงเส้นทางเป็น action ถูกต้อง', async () => {
+      const { describeRequest } = await import('../src/lib/audit.js');
+      const d = (m, p) => describeRequest(m, p);
+      assert.equal(d('POST', '/api/patients').action, 'patients.create');
+      assert.equal(d('PATCH', '/api/patients/KN690202463').targetId, 'KN690202463');
+      assert.equal(d('POST', '/api/cases/KN690202463/visits/12/move').action, 'cases.visits.move');
+      assert.deepEqual(d('POST', '/api/cases/KN690202463/visits/12/move').sub, { visits: '12' });
+      assert.equal(d('DELETE', '/api/invoices/INV-6911-0001/slips/3').level, 3);
+      assert.equal(d('POST', '/api/integration/visits/reminders'), null, 'คิวของระบบแชทไม่บันทึก');
+      assert.equal(d('POST', '/api/integration/hire').action, 'integration.hire');
+      assert.equal(d('GET', '/api/auth/me'), null);
+      const bill = d('GET', '/api/public/bill/abcdef1234567890abcdef1234567890');
+      assert.equal(bill.action, 'public.bill.view');
+      assert.equal(bill.path.includes('abcdef1234567890abcdef1234567890'), false, 'ห้ามเก็บโทเคนลิงก์บิลเต็ม ๆ');
+      // เส้นใหม่ที่ไม่มีใครรู้จักก็ปิดโทเคนเหมือนกัน (กติกาเดียวกับ logUrl)
+      const other = d('POST', '/api/share/Zx9AbCdEfGhIjKlMnOpQrStUvWxYz/accept');
+      assert.equal(other.path, '/api/share/Zx9AbC…/accept');
+      assert.equal(other.targetId, 'Zx9AbC…');
+    });
+  });
+
+  // ---------- หมวดหมู่ (cat / sub cat · 16 พ.ย. 2569 เฟสแรก) ----------
+  describe('หมวดหมู่ (categories) + เหตุผลยกเลิก', () => {
+    async function call(method, path, body, who) {
+      const res = await fetch(`${base}${path}`, {
+        method,
+        headers: { 'content-type': 'application/json', cookie: `${COOKIE_NAME}=${signToken(who)}` },
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      const text = await res.text();
+      let data;
+      try { data = JSON.parse(text); } catch { data = text; }
+      return { status: res.status, body: data };
+    }
+    const leaf = async (code) => sql.one('SELECT category_id, name_th FROM categories WHERE code = :code', { code });
+
+    test('อ่านได้ทุกคนที่ login · หมวดตั้งต้นครบ 2 ชั้น · หัตถการ/เหตุการณ์มีรายการผูกไว้', async () => {
+      const r = await call('GET', '/api/categories?domain=cancel_case', null, FIELD);
+      assert.equal(r.status, 200);
+      const rows = r.body.categories;
+      assert.ok(rows.some((c) => c.code === 'RCS-CUS' && c.parent_id == null));
+      assert.ok(rows.some((c) => c.code === 'RCS-CUS-03' && c.parent_id != null));
+      assert.ok(rows.every((c) => c.domain === 'cancel_case'));
+      assert.equal((await call('GET', '/api/categories?all=1', null, FIELD)).status, 403, 'หมวดที่ปิดแล้วเห็นได้เฉพาะคนจัดการ');
+
+      const all = (await call('GET', '/api/categories', null, MANAGER)).body.categories;
+      const procItems = all.filter((c) => c.domain === 'procedure').flatMap((c) => c.item_keys);
+      for (let i = 1; i <= 29; i++) assert.ok(procItems.includes(`PR${String(i).padStart(4, '0')}`), `PR${i} ต้องอยู่ในหมวด`);
+      assert.equal(new Set(procItems).size, procItems.length, 'หัตถการหนึ่งรายการอยู่ได้หมวดเดียว');
+      assert.ok(all.some((c) => c.domain === 'incident' && c.item_keys.includes('fall')));
+    });
+
+    test('เพิ่มหมวด: หมวดหลักตั้งรหัส 3 ตัว · หมวดย่อยได้เลขถัดไปเอง · โดเมนรายการในระบบเพิ่มไม่ได้ · ไม่มีสิทธิ์ = 403', async () => {
+      const main = await call('POST', '/api/categories', { domain: 'cancel_case', code: 'tst', name_th: 'ทดสอบ' }, MANAGER);
+      assert.equal(main.status, 201);
+      assert.equal(main.body.code, 'RCS-TST');
+      assert.equal((await call('POST', '/api/categories', { domain: 'cancel_case', code: 'TST', name_th: 'ซ้ำ' }, MANAGER)).status, 409);
+      assert.equal((await call('POST', '/api/categories', { domain: 'cancel_case', code: 'T1', name_th: 'x' }, MANAGER)).status, 400);
+
+      const s1 = await call('POST', '/api/categories', { domain: 'cancel_case', parent_id: main.body.category_id, name_th: 'ย่อย 1' }, MANAGER);
+      const s2 = await call('POST', '/api/categories', { domain: 'cancel_case', parent_id: main.body.category_id, name_th: 'ย่อย 2' }, MANAGER);
+      assert.equal(s1.body.code, 'RCS-TST-01');
+      assert.equal(s2.body.code, 'RCS-TST-02');
+      // ลึกเกิน 2 ชั้นไม่ได้
+      assert.equal((await call('POST', '/api/categories', { domain: 'cancel_case', parent_id: s1.body.category_id, name_th: 'หลาน' }, MANAGER)).status, 400);
+      assert.equal((await call('POST', '/api/categories', { domain: 'procedure', code: 'NEW', name_th: 'x' }, MANAGER)).status, 400);
+      assert.equal((await call('POST', '/api/categories', { domain: 'cancel_case', code: 'HRX', name_th: 'x' }, HR)).status, 403);
+
+      const renamed = await call('PATCH', `/api/categories/${s2.body.category_id}`, { name_th: 'ย่อย 2 (แก้)', active: false }, MANAGER);
+      assert.equal(renamed.status, 200);
+      assert.equal(renamed.body.code, 'RCS-TST-02', 'รหัสไม่เปลี่ยนตามชื่อ');
+      assert.equal(renamed.body.active, false);
+      await assert.rejects(sql.run(`UPDATE categories SET code = 'RCS-XXX' WHERE category_id = :id`, { id: main.body.category_id }), /เปลี่ยนไม่ได้/);
+    });
+
+    test('ยกเลิกเคสพร้อมหมวดเหตุผล = เก็บรหัส + ชื่อนำหน้ารายละเอียด · หมวดผิดโดเมน/หมวดหลัก/ปิดแล้ว = 400', async () => {
+      const reason = await leaf('RCS-CUS-02');
+      const wrongDomain = await leaf('RIV-ERR-01');
+      const mainCat = await leaf('RCS-CUS');
+      const c1 = await newCase();
+      assert.equal((await call('POST', `/api/cases/${c1.case_id}/cancel`, { reason_id: wrongDomain.category_id }, MANAGER)).status, 400);
+      assert.equal((await call('POST', `/api/cases/${c1.case_id}/cancel`, { reason_id: mainCat.category_id }, MANAGER)).status, 400);
+      const off = await sql.one(`SELECT category_id FROM categories WHERE code = 'RCS-TST-02'`);
+      assert.equal((await call('POST', `/api/cases/${c1.case_id}/cancel`, { reason_id: off.category_id }, MANAGER)).status, 400);
+
+      const ok = await call('POST', `/api/cases/${c1.case_id}/cancel`, { reason_id: reason.category_id, reason: 'แอดมิทที่ รพ.ศิริราช' }, MANAGER);
+      assert.equal(ok.status, 200);
+      const row = await sql.one('SELECT cancel_reason, cancel_reason_id FROM cases WHERE case_id = :id', { id: c1.case_id });
+      assert.equal(row.cancel_reason_id, reason.category_id);
+      assert.equal(row.cancel_reason, `${reason.name_th} — แอดมิทที่ รพ.ศิริราช`);
+
+      // ไม่เลือกหมวด (แบบเดิม) ยังใช้ได้
+      const c2 = await newCase();
+      assert.equal((await call('POST', `/api/cases/${c2.case_id}/cancel`, { reason: 'เหตุผลแบบเดิม' }, MANAGER)).status, 200);
+      const row2 = await sql.one('SELECT cancel_reason, cancel_reason_id FROM cases WHERE case_id = :id', { id: c2.case_id });
+      assert.equal(row2.cancel_reason, 'เหตุผลแบบเดิม');
+      assert.equal(row2.cancel_reason_id, null);
+
+      // เปิดเคสกลับ = ล้างเหตุผลทั้งข้อความและรหัส
+      assert.equal((await call('POST', `/api/cases/${c1.case_id}/reopen`, {}, MANAGER)).status, 200);
+      const back = await sql.one('SELECT cancel_reason, cancel_reason_id FROM cases WHERE case_id = :id', { id: c1.case_id });
+      assert.equal(back.cancel_reason_id, null);
+      assert.equal(back.cancel_reason, null);
+    });
+
+    test('ยกเลิกนัดพร้อมหมวดเหตุผล = รหัสอยู่ในกะ + ชื่อเหตุผลต่อท้ายหมายเหตุ · กลับเป็นนัดปกติ = ล้างรหัส', async () => {
+      const reason = await leaf('RVS-STF-01');
+      const c = await newCase();
+      const v = await post(`/api/cases/${c.case_id}/visits`, { visit_date: '2026-12-20' }, MANAGER, 201);
+      const visitId = v.visit_id ?? v.visits?.[0]?.visit_id ?? (await sql.one('SELECT visit_id FROM case_visits WHERE case_id = :id', { id: c.case_id })).visit_id;
+      const r = await call('PATCH', `/api/cases/${c.case_id}/visits/${visitId}`, { status: 'cancelled', cancel_reason_id: reason.category_id, cancel_reason: 'แจ้งตอนเช้า' }, MANAGER);
+      assert.equal(r.status, 200, JSON.stringify(r.body));
+      const row = await sql.one('SELECT note, cancel_reason_id FROM case_visits WHERE visit_id = :id', { id: visitId });
+      assert.equal(row.cancel_reason_id, reason.category_id);
+      assert.match(row.note, new RegExp(`ยกเลิก: ${reason.name_th} — แจ้งตอนเช้า`));
+      assert.equal((await call('PATCH', `/api/cases/${c.case_id}/visits/${visitId}`, { status: 'scheduled' }, MANAGER)).status, 200);
+      assert.equal((await sql.one('SELECT cancel_reason_id FROM case_visits WHERE visit_id = :id', { id: visitId })).cancel_reason_id, null);
+    });
+
+    test('ยกเลิกใบแจ้งหนี้: เลือกหมวดแล้วรายละเอียดไม่บังคับ · ไม่เลือกหมวดยังต้องพิมพ์ ≥ 3 ตัวอักษร', async () => {
+      const { cancelInvoiceSchema } = await import('../src/invoices/schema.js');
+      assert.equal(cancelInvoiceSchema.safeParse({ reason_id: 5 }).success, true);
+      assert.equal(cancelInvoiceSchema.safeParse({ reason: 'ab' }).success, false);
+      assert.equal(cancelInvoiceSchema.safeParse({}).success, false);
+      assert.equal(cancelInvoiceSchema.safeParse({ reason: 'ออกใบผิด' }).success, true);
+    });
+  });
+
+  // ---------- ตรวจรอบ 2 (16 พ.ย. 2569): สิทธิ์ superOnly · สิทธิ์ใหม่บนแถวเก่า · บันทึกไม่เก็บเลขผู้เสียภาษี · คนนอกยิงซ้ำ ----------
+  describe('ตรวจรอบ 2 — บันทึกการใช้งาน/สิทธิ์/หมวดหมู่', () => {
+    const SA = emp('EMP-0790', 'super_admin');
+    async function call(method, path, body, who, headers = {}) {
+      const res = await fetch(`${base}${path}`, {
+        method,
+        headers: { 'content-type': 'application/json', ...(who ? { cookie: `${COOKIE_NAME}=${signToken(who)}` } : {}), ...headers },
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      const text = await res.text();
+      let data;
+      try { data = JSON.parse(text); } catch { data = text; }
+      return { status: res.status, body: data };
+    }
+    before(async () => {
+      await sql.run(
+        `INSERT INTO employees (employee_id, first_name, last_name, position, email, status, password_hash, must_change_password)
+         VALUES ('EMP-0790', 'Super', 'Two', 'super_admin', 'emp-0790@example.invalid', 'active', 'x', false)
+         ON CONFLICT DO NOTHING`,
+      );
+    });
+
+    test('ผู้จัดการเปิดสิทธิ์ดูบันทึกให้ตำแหน่งตัวเอง/คนอื่นไม่ได้ · Super Admin ทำได้ · ผู้จัดการถอนคืนก็ไม่ได้', async () => {
+      const keys = (await call('GET', '/api/permissions', null, MANAGER)).body.positions.find((p) => p.position === 'manager').permissions;
+      assert.equal((await call('PUT', '/api/permissions/manager', { permissions: [...keys, 'audit_logs'] }, MANAGER)).status, 403);
+      const hrKeys = (await call('GET', '/api/permissions', null, MANAGER)).body.positions.find((p) => p.position === 'hr').permissions;
+      assert.equal((await call('PUT', '/api/permissions/hr', { permissions: [...hrKeys, 'audit_logs'] }, MANAGER)).status, 403);
+
+      const granted = await call('PUT', '/api/permissions/hr', { permissions: [...hrKeys, 'audit_logs'] }, SA);
+      assert.equal(granted.status, 200, JSON.stringify(granted.body));
+      try {
+        // ผู้จัดการแก้สิทธิ์อื่นของ HR ได้ตามปกติ ตราบที่ไม่แตะ audit_logs
+        assert.equal((await call('PUT', '/api/permissions/hr', { permissions: [...hrKeys, 'audit_logs', 'reviews'].filter((v, i, a) => a.indexOf(v) === i) }, MANAGER)).status, 200);
+        assert.equal((await call('DELETE', '/api/permissions/hr', null, MANAGER)).status, 403, 'คืนค่าตั้งต้น = ถอน audit_logs');
+      } finally {
+        assert.equal((await call('DELETE', '/api/permissions/hr', null, SA)).status, 200);
+      }
+    });
+
+    test('แถวสิทธิ์ที่บันทึกก่อนมีสิทธิ์ "หมวดหมู่" — ผู้จัดการยังได้ตามค่าตั้งต้น', async () => {
+      const { PERMISSION_KEYS, loadPermissions, keysFor } = await import('../src/lib/permissions.js');
+      const legacy = PERMISSION_KEYS.filter((k) => !['audit_logs', 'categories'].includes(k));
+      await sql.run(`INSERT INTO role_permissions (position, permissions) VALUES ('manager', :p::text[])
+                     ON CONFLICT (position) DO UPDATE SET permissions = EXCLUDED.permissions, known_keys = NULL`, { p: legacy });
+      try {
+        await loadPermissions({ force: true });
+        assert.ok(keysFor('manager').includes('categories'));
+        assert.equal(keysFor('manager').includes('audit_logs'), false);
+        assert.equal((await call('GET', '/api/categories?all=1', null, MANAGER)).status, 200);
+      } finally {
+        await sql.run(`DELETE FROM role_permissions WHERE position = 'manager'`);
+        await loadPermissions({ force: true });
+      }
+    });
+
+    test('บันทึกการใช้งานไม่เก็บเลขผู้เสียภาษี/เบอร์/อีเมล แม้อยู่ใน action ที่เก็บค่า', async () => {
+      const since = Number((await sql.one('SELECT coalesce(max(log_id), 0) AS n FROM audit_logs')).n);
+      await call('PATCH', '/api/invoices/HC-IV0000000000', { bill_to_tax_id: '1103700123456', bill_to_phone: '0812345678', status: 'issued' }, MANAGER);
+      const row = await sql.one(`SELECT * FROM audit_logs WHERE log_id > :s AND action = 'invoices.update' ORDER BY log_id DESC LIMIT 1`, { s: since });
+      assert.ok(row);
+      const text = JSON.stringify(row);
+      assert.equal(text.includes('1103700123456'), false);
+      assert.equal(text.includes('0812345678'), false);
+      assert.equal(row.detail.values.status, 'issued', 'ช่องที่ไม่ใช่ข้อมูลบุคคลยังเก็บค่าได้');
+    });
+
+    test('คนนอกขอ OTP ซ้ำ ๆ (ตอบ 200 เสมอ) จาก IP เดียว = นับครั้งเดียวใน 15 นาที', async () => {
+      const since = Number((await sql.one('SELECT coalesce(max(log_id), 0) AS n FROM audit_logs')).n);
+      const ip = { 'x-forwarded-for': '198.51.100.23' };
+      for (let i = 0; i < 4; i++) {
+        assert.equal((await call('POST', '/api/auth/forgot-password', { email: `nobody${i}@example.invalid` }, null, ip)).status, 200);
+      }
+      const rows = await sql.all(`SELECT log_id FROM audit_logs WHERE log_id > :s AND action = 'auth.forgot-password' AND ip = '198.51.100.23'`, { s: since });
+      assert.equal(rows.length, 1);
     });
   });
 }

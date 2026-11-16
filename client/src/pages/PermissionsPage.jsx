@@ -28,6 +28,10 @@ const ICONS = {
   see_pay: <><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z" /><circle cx="12" cy="12" r="3" /></>,
   invoice_adjust: <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /><path d="M9 15h6" /></>,
   slip_delete: <><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" /><path d="M10 11v6M14 11v6" /></>,
+  // ไอคอนเดียวกับเมนู "หมวดหมู่" (NAV_ICONS.tag ใน App.jsx)
+  categories: <><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z" /><circle cx="7.5" cy="7.5" r="1.5" /></>,
+  // ไอคอนเดียวกับเมนู "บันทึกการใช้งาน" (NAV_ICONS.log ใน App.jsx)
+  audit_logs: <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /><circle cx="11" cy="15" r="3" /><path d="M13.2 17.2 15.5 19.5" /></>,
 };
 const ROLE_ICON = <><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></>;
 
@@ -83,10 +87,16 @@ export default function PermissionsPage() {
     setParams({ position }, { replace: true });
   }
 
+  // สิทธิ์ superOnly (บันทึกการใช้งาน) — คนที่ไม่ใช่ Super Admin เห็นสถานะแต่แตะไม่ได้ (server กันซ้ำอีกชั้น)
+  const lockedKey = (key) => user?.position !== 'super_admin' && data.catalog.some((c) => c.key === key && c.superOnly);
+
   function setKeys(keys, on) {
     if (!pos.editable) return;
     const next = new Set(current);
-    for (const k of keys) if (on) next.add(k); else next.delete(k);
+    for (const k of keys) {
+      if (lockedKey(k)) continue; // ปุ่ม "เปิด/ปิดทั้งหมด" ข้ามสิทธิ์ที่แตะไม่ได้
+      if (on) next.add(k); else next.delete(k);
+    }
     setDraft(next);
   }
 
@@ -186,7 +196,7 @@ export default function PermissionsPage() {
                       const on = current.has(item.key);
                       return (
                         <li key={item.key}>
-                          <label htmlFor={id} className={`perm-tile${on ? ' is-on' : ''}${pos.editable ? '' : ' is-locked'}`}>
+                          <label htmlFor={id} className={`perm-tile${on ? ' is-on' : ''}${pos.editable && !lockedKey(item.key) ? '' : ' is-locked'}`}>
                             <span className="perm-tile-ico"><Icon>{ICONS[item.key]}</Icon></span>
                             <span className="perm-text">
                               <span className="perm-label">{item.label}</span>
@@ -199,7 +209,7 @@ export default function PermissionsPage() {
                               role="switch"
                               className="perm-check"
                               checked={on}
-                              disabled={!pos.editable || busy}
+                              disabled={!pos.editable || busy || lockedKey(item.key)}
                               onChange={() => setKeys([item.key], !on)}
                             />
                           </label>

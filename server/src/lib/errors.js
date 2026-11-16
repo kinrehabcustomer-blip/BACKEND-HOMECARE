@@ -17,7 +17,9 @@ export const asyncRoute = (fn) => (req, res, next) => Promise.resolve(fn(req, re
 
 /** URL สำหรับเขียน log — ตัด query และปิดท่อนที่หน้าตาเป็นโทเคน (ลิงก์บิล · ตั๋ว LINE/SSO)
  *  log ของ Vercel อ่านได้หลายคน โทเคนที่ค้างใน log = เปิดบิลลูกค้าได้จนหมดอายุ (ตรวจ Codex 30 ต.ค. 2569 ข้อ 18) */
-const logUrl = (req) => String(req.originalUrl || '').split('?')[0].replace(/[A-Za-z0-9_.~-]{24,}/g, '***');
+/** ท่อนที่หน้าตาเป็นโทเคน — ใช้ร่วมกับบันทึกการใช้งาน (lib/audit.js) กติกาเดียวกันสองที่ */
+export const TOKEN_CHARS = '[A-Za-z0-9_.~-]{24,}';
+const logUrl = (req) => String(req.originalUrl || '').split('?')[0].replace(new RegExp(TOKEN_CHARS, 'g'), '***');
 
 // eslint-disable-next-line no-unused-vars -- express ต้องการ 4 args ถึงจะรู้ว่าเป็น error handler
 export function errorHandler(err, req, res, next) {

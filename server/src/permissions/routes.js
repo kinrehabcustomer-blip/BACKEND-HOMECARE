@@ -9,6 +9,9 @@ import {
   DEFAULT_PERMISSIONS,
   permissionMatrix,
   savePermissions,
+  SUPER_ONLY_KEYS,
+  keysFor,
+  loadPermissions,
 } from '../lib/permissions.js';
 
 /**
@@ -26,6 +29,17 @@ permissionsRouter.use((req, res, next) =>
 const saveSchema = z.object({
   permissions: z.array(z.enum(PERMISSION_KEYS, { errorMap: () => ({ message: 'มีสิทธิ์ที่ระบบไม่รู้จัก' }) })).max(PERMISSION_KEYS.length),
 });
+
+/** สิทธิ์ superOnly (บันทึกการใช้งาน) — คนที่ไม่ใช่ Super Admin เปลี่ยนสถานะเปิด/ปิดไม่ได้ ทั้งเปิดเพิ่มและถอนออก */
+async function guardSuperOnly(req, position, nextKeys) {
+  if (req.user?.position === 'super_admin') return;
+  await loadPermissions({ force: true });
+  const now = keysFor(position);
+  const touched = SUPER_ONLY_KEYS.filter((k) => now.includes(k) !== nextKeys.includes(k));
+  if (touched.length) {
+    throw new ApiError(403, 'สิทธิ์ "ดูบันทึกการใช้งานระบบ" เปิด/ปิดได้เฉพาะ Super Admin');
+  }
+}
 
 const editableOr403 = (position) => {
   if (!EDITABLE_POSITIONS.includes(position)) {
@@ -47,6 +61,7 @@ permissionsRouter.put(
   asyncRoute(async (req, res) => {
     editableOr403(req.params.position);
     const { permissions } = saveSchema.parse(req.body ?? {});
+    await guardSuperOnly(req, req.params.position, permissions);
     await savePermissions(req.params.position, permissions, req.user);
     res.json({ positions: await permissionMatrix() });
   }),
@@ -57,6 +72,7 @@ permissionsRouter.delete(
   '/:position',
   asyncRoute(async (req, res) => {
     editableOr403(req.params.position);
+    await guardSuperOnly(req, req.params.position, DEFAULT_PERMISSIONS[req.params.position] ?? []);
     await savePermissions(req.params.position, null, req.user);
     res.json({ positions: await permissionMatrix() });
   }),

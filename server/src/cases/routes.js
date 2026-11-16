@@ -44,6 +44,7 @@ import { can, canSeeStaffPay, requirePermission } from '../lib/auth.js';
 import { FRONT_POSITIONS } from '../employees/schema.js';
 import { ApiError, asyncRoute, notFound } from '../lib/errors.js';
 import { ensureFamilyTable } from '../lib/family.js';
+import { reasonText, resolveReason } from '../categories/repo.js';
 
 export const casesRouter = Router();
 
@@ -760,8 +761,10 @@ casesRouter.post(
   '/:id/cancel',
   asyncRoute(async (req, res) => {
     if (isTerminal(req.case)) throw new ApiError(409, 'เคสนี้จบไปแล้ว');
-    const { reason } = cancelSchema.parse(req.body ?? {});
-    const cancelled = await repo.cancel(req.params.id, reason, req.user);
+    const { reason, reason_id } = cancelSchema.parse(req.body ?? {});
+    // หมวดเหตุผล → ชื่อเหตุผลนำหน้าข้อความ (ที่แสดง/ส่ง LINE อยู่แล้ว) + เก็บรหัสไว้ทำรายงาน
+    const picked = await resolveReason('cancel_case', reason_id);
+    const cancelled = await repo.cancel(req.params.id, reasonText(picked, reason), req.user, picked?.id ?? null);
     await syncBundleParent(cancelled); // ยกเลิกแพ็กเสริม = บรรทัดหายจากใบร่างของ Homecare
     /* ใบ Homecare ที่ระบบแก้ให้ไม่ได้ (ออกใบ/รับเงิน/แบ่งมัดจำ/แก้มือแล้ว) ยังมีค่าแพ็กนี้อยู่
        — ส่งรายชื่อกลับไปให้หน้าเว็บเด้งเตือนทันทีว่าต้องออกใบลดหนี้ (ผู้ใช้เลือก 11 พ.ย. 2569) */
@@ -1022,6 +1025,12 @@ casesRouter.patch(
   '/:id/visits/:visitId',
   asyncRoute(async (req, res) => {
     const input = updateVisitSchema.parse(req.body);
+    // ยกเลิกนัดพร้อมหมวดเหตุผล — ชื่อเหตุผลนำหน้าหมายเหตุ (ต่อท้ายโน้ตของกะ + ข้อความแจ้ง LINE) · เก็บรหัสในกะ
+    if (input.cancel_reason_id != null) {
+      const picked = await resolveReason('cancel_visit', input.cancel_reason_id);
+      input.cancel_reason = reasonText(picked, input.cancel_reason);
+      input.cancel_reason_id = picked.id;
+    }
     /* ตรวจเฉพาะตอน "เปลี่ยนคน" — กะเก่าที่ลงให้คนที่ตอนนี้รับงานไม่ได้แล้ว (ลาออก/สายสำนักงาน)
        ยังต้องแก้หมายเหตุ/สถานะได้ หน้าเว็บส่งทั้งฟอร์มมา ถ้าเช็คทุกครั้งกะพวกนั้นจะแก้อะไรไม่ได้เลย */
     if (input.assigned_to) {
