@@ -14,6 +14,8 @@ import PageRefresh from '../components/PageRefresh.jsx';
 import { caseCode } from '../lib/patientCode.js';
 import { useToast } from '../toast.jsx';
 import TimeComboInput from '../components/TimeComboInput.jsx';
+import MoveVisitDialog from '../components/MoveVisitDialog.jsx';
+import { nowMinutes, timesForStart, toMin } from '../lib/visitMove.js';
 import SearchSelect from '../components/SearchSelect.jsx';
 import FilterBar from '../components/FilterBar.jsx';
 import MobileCalendar, { useNarrow } from '../components/MobileCalendar.jsx';
@@ -53,21 +55,7 @@ const canMove = (c, today) => c.state === 'scheduled' && ACTIVE_CASE.includes(c.
 const HOURS = Array.from({ length: 24 }, (_, h) => h);
 const DEFAULT_HOUR = 8; // วันว่างเปิดมาที่ช่วงเช้า ไม่ใช่ตีหนึ่ง
 const hh = (h) => `${String(h).padStart(2, '0')}:00`;
-const toMin = (t) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
-const fromMin = (m) => `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
-const nowMinutes = () => { const d = new Date(); return d.getHours() * 60 + d.getMinutes(); };
-
-/**
- * เวลาใหม่เมื่อวางกะลงช่องชั่วโมง h — เริ่มตรงต้นชั่วโมง ความยาวกะเท่าเดิม
- * กะข้ามเที่ยงคืน (จบ ≤ เริ่ม) นับความยาวข้ามวันให้ถูก แล้วเวลาจบก็วนข้ามเที่ยงคืนตามเดิม
- * กะที่ไม่เคยระบุเวลาจบ ยังไม่มีเวลาจบเหมือนเดิม
- */
-function timesForStart(v, startText) {
-  const start = toMin(startText);
-  if (!v.planned_start || !v.planned_end) return { planned_start: startText, planned_end: v.planned_end ?? null };
-  const length = (toMin(v.planned_end) - toMin(v.planned_start) + 1440) % 1440 || 1440;
-  return { planned_start: startText, planned_end: fromMin((start + length) % 1440) };
-}
+// toMin / nowMinutes / timesForStart ใช้ร่วมกับปุ่มเลื่อนนัดในตารางนัดของเคส (lib/visitMove.js)
 const timesForHour = (v, h) => timesForStart(v, hh(h));
 
 export default function CalendarPage() {
@@ -198,8 +186,8 @@ export default function CalendarPage() {
    * การย้ายส่ง LINE "เลื่อนนัด" ถึงพนักงานและญาติ (รอ 2 นาที — ย้ายกลับที่เดิมทันจะไม่ส่ง) จึงต้องยืนยันก่อนเสมอ
    */
   /** times = เวลาที่เลือกในกล่องยืนยัน (null = เวลาเดิม) — กล่องเป็นคนตัดสินเวลาสุดท้าย ไม่ใช่ช่องที่วาง */
-  async function confirmMove(times) {
-    const { visit, to } = pendingMove;
+  async function confirmMove(to, times) {
+    const { visit } = pendingMove;
     const before = { visit_date: visit.visit_date, planned_start: visit.planned_start, planned_end: visit.planned_end };
     const after = { visit_date: to, ...times };
     const place = (fields) => (list) => list?.map((v) => (v.visit_id === visit.visit_id ? { ...v, ...fields } : v));
@@ -510,7 +498,7 @@ export default function CalendarPage() {
       )}
 
       {pendingMove && (
-        <MoveConfirm
+        <MoveVisitDialog
           move={pendingMove}
           busy={moving}
           today={today}
@@ -633,82 +621,7 @@ function DayPanel({ day, list, today, onOpenCase, onMove, onClose }) {
   );
 }
 
-/**
- * ยืนยันก่อนย้ายกะ — การย้ายส่ง LINE ถึงพนักงานและญาติ ลากพลาดต้องไม่กลายเป็นข้อความถึงลูกค้า
- * มีช่องเลือกเวลาเริ่มใหม่ทีละชั่วโมง — มุมมองเดือนลากได้แค่ระดับวัน (ช่องวันเล็กเกินจะแบ่ง 24 ชม.) จึงเลือกเวลาที่นี่
- * ค่าเริ่มต้น = ชั่วโมงของช่องที่วาง (มุมมองสัปดาห์/ฟอร์มมือถือ) หรือ "เวลาเดิม" (มุมมองเดือน)
- */
-function MoveConfirm({ move, busy, today, onConfirm, onCancel }) {
-  const { visit, to } = move;
-  // '' = เวลาเดิม · 'HH:MM' = เวลาเริ่มใหม่ (เลือกจากรายการหรือพิมพ์เอง)
-  const [start, setStart] = useState(move.times?.planned_start ?? '');
-  const [valid, setValid] = useState(true);
-  const times = valid && start ? timesForStart(visit, start) : null;
-  const after = times ? { ...visit, ...times } : visit;
-  const past = valid && to === today && after.planned_start && toMin(after.planned_start) < nowMinutes();
-  const unchanged = valid && to === visit.visit_date && (!times || times.planned_start === visit.planned_start);
-  useEffect(() => {
-    const onKeyDown = (e) => e.key === 'Escape' && onCancel();
-    document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
-  }, [onCancel]);
-
-  return (
-    <div className="modal-backdrop" onClick={onCancel}>
-      <div className="modal modal-narrow" role="alertdialog" aria-modal="true" aria-labelledby="move-title" onClick={(e) => e.stopPropagation()}>
-        <header className="modal-head">
-          <div>
-            <p className="mono muted">{caseCode(visit.case_id)}</p>
-            <h2 id="move-title">ย้ายวันและเวลานัด</h2>
-          </div>
-        </header>
-        <div className="modal-body">
-          <p>
-            <strong>{visit.assigned_name ?? '— ยังไม่จับคู่ —'}</strong>
-            <br />
-            <span className="muted">{visit.client_name}</span>
-          </p>
-          <div className="cal-move-dates">
-            <span>
-              {formatDate(visit.visit_date)}
-              <br />
-              <span className="muted">{timeRange(visit) ?? 'ไม่ระบุเวลา'}</span>
-            </span>
-            <span aria-hidden="true">→</span>
-            <span className="sr-only">ไป</span>
-            <strong>
-              {formatDate(to)}
-              <br />
-              {timeRange(after) ?? 'ไม่ระบุเวลา'}
-            </strong>
-          </div>
-          <div className="field cal-move-hour">
-            <label htmlFor="move-confirm-hour" className="field-label">เวลาเริ่มใหม่ (เลือก หรือพิมพ์เอง)</label>
-            <TimeComboInput
-              id="move-confirm-hour"
-              value={start}
-              emptyLabel={visit.planned_start ? `เวลาเดิม (${visit.planned_start})` : 'ไม่ระบุเวลา (คงเดิม)'}
-              around={visit.planned_start ?? ''}
-              disabled={busy}
-              onChange={(v, ok) => { setStart(v); setValid(ok); }}
-            />
-          </div>
-          {past && <p className="error" role="alert">เวลา {after.planned_start} ของวันนี้ผ่านไปแล้ว — เลือกเวลาที่ยังไม่ถึง</p>}
-          {unchanged && <p className="muted" role="status">วันและเวลายังเหมือนเดิม — เลือกเวลาใหม่ก่อน</p>}
-          <p className="muted">
-            {times ? 'ความยาวกะและพนักงานคงเดิม' : 'เวลาและพนักงานคงเดิม'} ระบบจะแจ้งเลื่อนนัดทาง LINE ถึงพนักงานและญาติที่ผูกไว้
-          </p>
-        </div>
-        <footer className="modal-foot">
-          <button type="button" className="btn" onClick={onCancel} disabled={busy}>ยกเลิก</button>
-          <button type="button" className="btn primary" onClick={() => onConfirm(times)} disabled={busy || !valid || past || unchanged}>
-            {busy ? 'กำลังย้าย…' : 'ยืนยันย้าย'}
-          </button>
-        </footer>
-      </div>
-    </div>
-  );
-}
+/* กล่องยืนยันย้ายกะ ย้ายไปเป็น components/MoveVisitDialog.jsx (16 พ.ย. 2569) — ใช้ร่วมกับปุ่มเลื่อนนัดในตารางนัดของเคส */
 
 /**
  * slot ชั่วโมงในช่องวันหนึ่งช่อง (มุมมองสัปดาห์บนจอกว้าง) — 08:00–20:00 (ผู้ใช้ขอ 30 ต.ค. 2569)

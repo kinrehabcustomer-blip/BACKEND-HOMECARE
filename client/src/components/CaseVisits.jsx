@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { useToast } from '../toast.jsx';
 import {
-  POSITION_LABELS, VISIT_STATE_LABELS, MONTH_LABELS, formatBaht, formatDate, timeText, toBuddhistYear, todayTH,
+  POSITION_LABELS, VISIT_STATE_LABELS, MONTH_LABELS, formatBaht, formatDate, timeText, toBuddhistYear, todayTH, positionsForCase,
 } from '../labels.js';
 import LineIcon from './LineIcon.jsx';
 import TimeSelect from './TimeSelect.jsx';
@@ -10,8 +10,19 @@ import { caseCode } from '../lib/patientCode.js';
 import SearchSelect from './SearchSelect.jsx';
 import { useConfirm } from './ConfirmDialog.jsx';
 import ReasonPicker, { useHasReasons } from './ReasonPicker.jsx';
+import MoveVisitDialog from './MoveVisitDialog.jsx';
+import ChangeVisitPersonDialog from './ChangeVisitPersonDialog.jsx';
 
 const WEEKDAYS = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
+
+/* ป้ายวันของการ์ดนัด — 'YYYY-MM-DD' → "พ." / "พ.ย." (ปีอื่นต่อท้ายปี พ.ศ. สองหลัก เช่น "ม.ค. 70") · คิดบน UTC ให้วันไม่เลื่อน */
+const MONTHS_SHORT = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
+const dowTH = (key) => `${WEEKDAYS[new Date(`${key}T00:00:00Z`).getUTCDay()]}.`;
+const monTH = (key) => {
+  const y = Number(key.slice(0, 4));
+  const m = MONTHS_SHORT[Number(key.slice(5, 7)) - 1];
+  return y === new Date().getFullYear() ? m : `${m} ${String(y + 543).slice(2)}`;
+};
 
 /* สีประจำตัวของแต่ละคนในเคสที่มีหลายคน (ผู้ใช้ขอ 6 พ.ย. 2569) — จุดบนปฏิทิน/ชิปชื่อ/แถวนัดใช้สีเดียวกัน
    เลี่ยงทอง/เขียว/แดง ที่ปฏิทินใช้บอกสถานะนัดอยู่แล้ว · เกิน 6 คนวนสีซ้ำ (ยังมีชื่อกำกับทุกที่) */
@@ -100,6 +111,10 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
   const [month, setMonth] = useState(Number(firstBookable.slice(5, 7)));
   const [visits, setVisits] = useState([]);
   const [staff, setStaff] = useState([]);
+  // พนักงานทุกคนที่รับงานได้ — ใช้หาคนไปแทน (นอกทีมของเคส) ตอนเปลี่ยนคนไปนัด
+  const [allStaff, setAllStaff] = useState([]);
+  // เปลี่ยนคนไปนัด (กดชื่อพนักงานในแถวนัด) · { visit, error }
+  const [swapping, setSwapping] = useState(null);
 
   // ร่างที่ยังไม่บันทึก — เลือก/ยกเลิกได้อิสระ ไม่มีอะไรถูกเขียนลงฐานข้อมูลจนกว่าจะกดบันทึก
   const [picked, setPicked] = useState(() => new Set());
@@ -110,6 +125,10 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  // เลื่อนนัด (ผู้ใช้ขอ 16 พ.ย. 2569 — แบบเดียวกับลากย้ายในปฏิทินสัปดาห์) · { visit, error }
+  const [moving, setMoving] = useState(null);
+  // นัดที่ผ่านไปแล้ว (ก่อนวันนี้) พับเก็บได้ (ผู้ใช้ขอ 16 พ.ย. 2569) · null = ตามค่าเริ่มต้น (ดูด้านล่าง)
+  const [pastOpen, setPastOpen] = useState(null);
   // สิทธิ์แพ็กกายภาพ (ซื้อ/ลงแล้ว/หมดอายุ) + วันในสัปดาห์ของปุ่ม "ลงนัดทั้งแพ็ก" (ดร.ธงชัย 26 ต.ค. 2569)
   const [quota, setQuota] = useState(null);
   const [packDays, setPackDays] = useState([1, 4]);
@@ -151,6 +170,7 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
         const eligible = all.filter((e) => inCase.has(e.employee_id) && e.can_take_cases);
         eligible.sort((a, b) => (b.employee_id === caseItem?.assigned_to) - (a.employee_id === caseItem?.assigned_to));
         setStaff(eligible);
+        setAllStaff(all.filter((e) => e.can_take_cases));
         /* หลายคน = ต้องรู้เสมอว่ากำลังลงให้ใคร — ตั้งต้นที่ผู้รับผิดชอบหลัก (ตรงกับที่ server เติมให้ถ้าไม่ระบุ)
            คนเดียว = เหมือนเดิม (กะ: เลือกจากช่องค้นหา · นัดกายภาพ: ผู้รับผิดชอบหลักเสมอ) */
         if (eligible.length >= 2) setWho((w) => w || eligible[0].employee_id);
@@ -193,6 +213,9 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
   }, [shown]);
 
   const booked = visits.filter((v) => v.status !== 'cancelled').length;
+  const pastCount = shown.filter((v) => v.visit_date < today).length;
+  const pastMissed = shown.filter((v) => v.visit_date < today && v.state === 'missed').length;
+  const showPast = pastOpen ?? pastCount === shown.length;
   const doneCount = visits.filter((v) => v.state === 'done').length;
 
   const pickedList = useMemo(() => [...picked].sort(), [picked]);
@@ -208,6 +231,44 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
   );
   // วันที่เลือกไว้ซึ่งมีกะอยู่แล้ว = ลบทิ้งได้ (ปุ่มลบจึงโผล่เฉพาะตอนที่ลบได้จริง)
   const pickedWithVisits = pickedList.filter((d) => byDate.has(d));
+
+  /* เคสที่จบแล้วลงนัด/ย้ายนัดไม่ได้ (server: ensureSchedulable) — ซ่อนปุ่มไว้เลย ไม่ให้กดแล้วค่อยเจอ error */
+  const caseOpen = !caseItem || !['closed', 'cancelled'].includes(caseItem.status);
+
+  /* เปลี่ยนคนไปนัด (ผู้ใช้ขอ 16 พ.ย. 2569 — นักกายภาพติดธุระ ให้อีกคนไปแทน) — กดชื่อพนักงานในแถวนัด
+     รอบแรกเป็นกล่องในแถบเลือกวัน ผู้ใช้บอกว่ายังใช้ยาก จึงย้ายมาไว้ที่แถวนัดเอง
+     ทำได้กับนัดที่ยังไม่ถึงวันและยังไม่เช็คอิน · คนไปแทนเลือกได้ทั้งทีมของเคสและคนนอกทีม
+     (ไปแทนชั่วคราว ไม่ต้องเพิ่มเข้าทีม — เห็นเคสผ่านนัดที่ได้รับเอง)
+     server แจ้ง LINE ถึงคนเดิม (ถอดงาน) และคนใหม่ (ได้งาน) ไม่แจ้งญาติ (notify/visitReminders.js · kind reassigned) */
+  const canSwap = (v) => !readOnly && caseOpen && v.status === 'scheduled' && !v.check_in_at && v.visit_date >= today;
+  const teamIds = new Set(staff.map((s) => s.employee_id));
+  // คนนอกทีม: เฉพาะตำแหน่งที่ตรงกับบริการของเคส (กายภาพ = สายบำบัด) — กติกาเดียวกับตอนจับคู่ (positionsForCase)
+  const wanted = caseItem ? positionsForCase(caseItem) : null;
+  const outsiders = allStaff.filter((e) => !teamIds.has(e.employee_id) && (!wanted || wanted.includes(e.position)));
+  const teamChips = staff.map((s) => ({ ...s, dotClass: multi ? dotClass(s.employee_id) : null }));
+  // นัดถัดไปของคนเดิมในเคสนี้ที่ยังเปลี่ยนได้ — ตัวเลือก "เปลี่ยนทั้งชุด" ในกล่อง
+  const followUpsOf = (v) => visits.filter((o) => o.visit_id !== v.visit_id && canSwap(o)
+    && o.assigned_to === v.assigned_to && o.visit_date >= v.visit_date);
+
+  async function confirmSwap(to, targets) {
+    const name = [...staff, ...allStaff].find((s) => s.employee_id === to);
+    const label = name ? `${name.first_name} ${name.last_name}`.trim() : to;
+    setBusy(true);
+    setSwapping((s) => ({ ...s, error: null }));
+    try {
+      for (const v of targets) await api.updateVisit(caseId, v.visit_id, { assigned_to: to });
+      setVisits(await api.listVisits(caseId));
+      setSwapping(null);
+      toast(`เปลี่ยนเป็น ${label} แล้ว ${targets.length} ${unit} · ระบบจะแจ้งทาง LINE`);
+    } catch (e) {
+      // เปลี่ยนไปได้บางนัดแล้วค่อยพัง — โหลดรายการใหม่ให้เห็นสถานะจริง แล้วบอกเหตุผลในกล่อง
+      api.listVisits(caseId).then(setVisits).catch(() => {});
+      setSwapping((s) => (s ? { ...s, error: e.message } : s));
+    } finally {
+      setBusy(false);
+    }
+  }
+
 
   /**
    * ถามฝั่ง server ว่าร่างชุดนี้ชนกับงานอื่นไหม — หน่วงไว้ก่อนยิง
@@ -289,8 +350,47 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
     }
   }
 
+  const canMoveVisit = (v) => !readOnly && caseOpen && v.state === 'scheduled' && !v.check_in_at && v.visit_date >= today;
+
+  /**
+   * เลื่อนนัดไปวัน/เวลาใหม่ — เส้นเดียวกับลากย้ายในปฏิทิน (POST …/move) จึงแจ้งเลื่อนนัดทาง LINE ถึงพนักงานและญาติเหมือนกัน
+   * ไม่สำเร็จ = กล่องยังเปิดอยู่พร้อมเหตุผล (เช่น เวลาผ่านไปแล้ว) ให้แก้แล้วกดใหม่ได้ทันที
+   */
+  async function confirmMove(to, times) {
+    const v = moving.visit;
+    setBusy(true);
+    setMoving((m) => ({ ...m, error: null }));
+    try {
+      const res = await api.moveVisit(caseId, v.visit_id, to, times ?? {});
+      setVisits(await api.listVisits(caseId));
+      setMoving(null);
+      const where = `${formatDate(to)}${times ? ` ${times.planned_start}` : ''}`;
+      toast(
+        res.conflicts?.length
+          ? `เลื่อนไป ${where} แล้ว · ชนกับงานอื่นของ ${v.assigned_name ?? 'พนักงาน'} ${res.conflicts.length} รายการ ตรวจตารางอีกครั้ง`
+          : `เลื่อนไป ${where} แล้ว · ระบบจะแจ้งพนักงานและญาติทาง LINE`,
+      );
+    } catch (e) {
+      setMoving((m) => (m ? { ...m, error: e.message } : m));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /* แพ็กกายภาพ: ลงนัดได้ไม่เกินจำนวนครั้งของแพ็ก (ผู้ใช้ขอ 16 พ.ย. 2569 · server ล็อกซ้ำใน ensurePhysioRoom)
+     วันที่มีนัดอยู่แล้วยังเลือกได้เสมอ — เลือกไว้เพื่อลบ ไม่ใช่เพื่อเพิ่ม */
+  const quotaLeft = isAppt && target ? Math.max(0, target - booked) : Infinity;
+  const pickedNew = pickedList.filter((d) => !byDate.has(d)).length;
+  const overPick = pickedNew > quotaLeft;
+
   function toggleDay(dateStr) {
     if (readOnly) return;
+    if (!picked.has(dateStr) && !byDate.has(dateStr) && pickedNew >= quotaLeft) {
+      toast(quotaLeft === 0
+        ? `ลงนัดครบ ${target} ครั้งของแพ็กเกจแล้ว — ลบ/ยกเลิกนัดเดิมก่อนจึงจะลงวันใหม่ได้`
+        : `แพ็กเกจเหลือ ${quotaLeft} ครั้ง — เลือกครบแล้ว เอาวันที่เลือกไว้ออกก่อนถ้าต้องการเปลี่ยน`);
+      return;
+    }
     setPicked((prev) => {
       const next = new Set(prev);
       if (next.has(dateStr)) next.delete(dateStr);
@@ -319,7 +419,7 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
 
     /* คอร์สกายภาพมีจำนวนครั้งจำกัด — กวาด 30 วันรวดจะเกินแพ็คเกจทันที (แพ็ค 20 ครั้ง)
        จึงหยุดให้พอดีโควตาที่เหลือ ส่วนกะ Homecare ไม่มีเพดาน ลงได้เท่าที่ตกลงกัน */
-    const room = isAppt && target ? Math.max(0, target - booked - picked.size) : Infinity;
+    const room = isAppt && target ? Math.max(0, quotaLeft - pickedNew) : Infinity;
 
     const keys = [];
     let cursor = anchor;
@@ -411,9 +511,8 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
           {visits.filter((v) => v.status !== 'cancelled' && v.visit_date > quota.expires_on).length} นัด — ตรวจกับลูกค้าก่อน
         </p>
       )}
-      {target && booked > target && (
-        <p className="notice">นัดเกินจำนวนครั้งของแพ็คเกจแล้ว ({booked} จาก {target} ครั้ง)</p>
-      )}
+      {/* ไม่มีป้ายค้าง "นัดเกิน/ครบจำนวนครั้ง" แล้ว (ผู้ใช้ขอ 16 พ.ย. 2569) — เตือนเฉพาะตอนแตะวันเกินแพ็ก (toast ใน toggleDay)
+          ยอด "นัดแล้ว X / N ครั้ง" บนหัวยังบอกจำนวนอยู่ */}
       {error && <p className="error">{error}</p>}
 
       {/* เคสหลายคน: แท็บเลือกดูตารางของใคร — ตัวเลข = นัดที่ยังไม่ยกเลิกของคนนั้น */}
@@ -551,7 +650,7 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
             disabled={busy || packDays.length === 0}
             onClick={() => pickPattern(packDays, { fill: true })}
           >
-            เลือกให้ครบ {Math.max(0, target - booked - picked.size)} ครั้ง
+            เลือกให้ครบ {Math.max(0, quotaLeft - pickedNew)} ครั้ง
           </button>
         </div>
       )}
@@ -561,6 +660,7 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
           {isAppt
             ? 'แตะวันบนปฏิทินเพื่อเลือกวันนัด (แตะซ้ำเพื่อยกเลิก) แล้วเลือกเวลานัดแล้วกดบันทึก'
             : 'แตะวันบนปฏิทินเพื่อเลือก (แตะซ้ำเพื่อยกเลิก) แล้วตั้งคน/เวลาแล้วกดบันทึก'}
+          <span className="cell-sub">เปลี่ยนคนไปนัด: กดชื่อพนักงานในรายการนัดด้านล่าง</span>
           {/* บอกจุดตั้งต้นของปุ่มเลือกเร็วไว้ตรงนี้ ไม่งั้นคนกดแล้วสงสัยว่าทำไมต้นเดือนไม่ถูกเลือก */}
           <span className="cell-sub">
             ปุ่มเลือกเร็วกวาด <strong>{SPAN_DAYS} วันติดต่อกัน</strong> (ข้ามไปเดือนถัดไปให้เอง) เริ่มจาก{' '}
@@ -577,6 +677,7 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
         <div className="pick-bar">
           <p className="pick-count">
             เลือกไว้ <strong>{picked.size}</strong> วัน
+            {overPick && <span className="cell-sub">เลือกเกินแพ็กเกจ {pickedNew - quotaLeft} วัน — เอาออกก่อนบันทึก</span>}
             {duplicateDates.size > 0 && (
               <span className="cell-sub">
                 {duplicateDates.size} วันมี{unit}เหมือนกันอยู่แล้ว — จะถูกข้าม
@@ -705,7 +806,7 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
           )}
 
           <div className="pick-actions">
-            <button type="button" className="btn primary" disabled={busy} onClick={save}>
+            <button type="button" className="btn primary" disabled={busy || overPick} onClick={save}>
               บันทึก {picked.size} {unit}{multi && who ? ` ให้ ${nameOf(who)}` : ''}
             </button>
             {pickedWithVisits.length > 0 && (
@@ -741,104 +842,191 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
           {readOnly ? '' : ' — แตะวันบนปฏิทินเพื่อเลือก'}
         </p>
       ) : (
-        <ol className="visit-list">
+        <ol className="visit-list visit-rows">
+          {/* นัดที่ผ่านไปแล้วอยู่บนสุดเสมอ (server เรียงตามวัน) — พับไว้ตั้งต้น ให้นัดที่กำลังจะมาถึงขึ้นมาก่อน
+              ขาดงานที่ยังไม่ได้จัดการบอกจำนวนไว้บนแถบ จะได้ไม่ถูกพับหายไปเงียบๆ
+              ไม่มีนัดข้างหน้าเหลือเลย = กางไว้ตั้งต้น (ไม่งั้นรายการว่างเหลือแค่แถบ) */}
+          {pastCount > 0 && (
+            <li className="visit-past-toggle">
+              <button type="button" aria-expanded={showPast} onClick={() => setPastOpen(!showPast)}>
+                <LineIcon name="chevron" className={`visit-past-chev${showPast ? ' is-open' : ''}`} />
+                <span>{showPast ? `ซ่อน${unit}ที่ผ่านไปแล้ว` : `${unit}ที่ผ่านไปแล้ว`} <strong>{pastCount}</strong> รายการ</span>
+                {pastMissed > 0 && <span className="badge visit-missed">ขาดงาน {pastMissed}</span>}
+              </button>
+            </li>
+          )}
           {shown.map((v, idx) => {
+            if (!showPast && v.visit_date < today) return null;
             const t = [v.planned_start, v.planned_end].filter(Boolean).join('-');
             return (
-              <li key={v.visit_id} className={`visit-${v.state}`}>
-                <span className="visit-seq">{idx + 1}</span>
-                <span className="visit-date">
-                  {formatDate(v.visit_date)}{t && ` · ${t}`}
-                  {/* กายภาพ: หนึ่งนัดหนึ่ง VN (ระบบออกตอนลงนัด) · Homecare ไม่มี VN รายกะ ใช้ VN ของเคส */}
-                  {v.vn && <span className="mono muted"> · {v.vn}</span>}
+              <li key={v.visit_id} className={`visit-card visit-${v.state}${v.visit_date === today ? ' is-today' : ''}`}>
+                {/* การ์ดนัด (ออกแบบใหม่ 16 พ.ย. 2569): ป้ายวันซ้าย · เวลา+สถานะ / คนไป+ครั้งที่+VN กลาง · ปุ่มไอคอนขวา
+                    เดิมเป็นข้อความสามบรรทัดอัดกับปุ่มตัวหนังสือสามปุ่ม วันที่กับเวลาเบียดกันจนอ่านยาก */}
+                <span className="vc-date" aria-hidden="true">
+                  <span className="vc-dow">{v.visit_date === today ? 'วันนี้' : dowTH(v.visit_date)}</span>
+                  <span className="vc-day">{Number(v.visit_date.slice(8, 10))}</span>
+                  <span className="vc-mon">{monTH(v.visit_date)}</span>
                 </span>
-                <span className="visit-who muted">
-                  {multi && <i className={`vp-dot ${dotClass(v.assigned_to)}`} aria-hidden="true" />}
-                  {v.assigned_name ?? 'ไม่ระบุคน'}
-                  {v.check_in_at && ` · เข้า ${timeText(v.check_in_at)}`}
-                  {v.check_out_at && ` · ออก ${timeText(v.check_out_at)}`}
-                  {v.location_flagged && <> · <LineIcon name="alert" className="text-ico" />{v.location_note ?? 'นอกพื้นที่'}</>}
-                  {v.off_schedule && <> · <LineIcon name="alert" className="text-ico" />นอกวันนัด</>}
-                  {/* นัดที่ยกเลิก: หมายเหตุมีเหตุผลที่กรอกตอนกดยกเลิก ("ยกเลิก: …") — เห็นได้โดยไม่ต้องเปิดประวัติเคส */}
-                  {v.state === 'cancelled' && v.note && <span className="visit-note"> · {v.note}</span>}
+                <span className="vc-body">
+                  <span className="vc-top">
+                    <span className="sr-only">{formatDate(v.visit_date)}</span>
+                    <span className={`vc-time${t ? '' : ' is-none'}`}>{t || 'ไม่ระบุเวลา'}</span>
+                    <span className={`badge visit-${v.state}`}>{VISIT_STATE_LABELS[v.state]}</span>
+                  </span>
+                  <span className="vc-meta">
+                    {/* ชื่อคนไป = ปุ่มเปลี่ยนคน (นัดที่ยังเปลี่ยนได้) · ที่เหลือเป็นข้อความเฉยๆ */}
+                    {canSwap(v) ? (
+                      <button
+                        type="button"
+                        className="visit-person is-button"
+                        disabled={busy}
+                        title="เปลี่ยนคนไปนัดนี้ — ให้อีกคนไปแทน"
+                        onClick={() => setSwapping({ visit: v, error: null })}
+                      >
+                        {multi && <i className={`vp-dot ${dotClass(v.assigned_to)}`} aria-hidden="true" />}
+                        {v.assigned_name ?? 'ไม่ระบุคน'}
+                        <span className="visit-person-act">เปลี่ยน</span>
+                      </button>
+                    ) : (
+                      <span className="visit-person">
+                        {multi && <i className={`vp-dot ${dotClass(v.assigned_to)}`} aria-hidden="true" />}
+                        {v.assigned_name ?? 'ไม่ระบุคน'}
+                      </span>
+                    )}
+                    <span className="nw">{unit}ที่ {idx + 1}</span>
+                    {/* กายภาพ: หนึ่งนัดหนึ่ง VN (ระบบออกตอนลงนัด) · Homecare ไม่มี VN รายกะ ใช้ VN ของเคส */}
+                    {v.vn && <span className="mono nw">{v.vn}</span>}
+                    {(v.check_in_at || v.check_out_at) && (
+                      <span className="nw">
+                        {[v.check_in_at && `เข้า ${timeText(v.check_in_at)}`, v.check_out_at && `ออก ${timeText(v.check_out_at)}`].filter(Boolean).join(' · ')}
+                      </span>
+                    )}
+                    {v.location_flagged && <span className="nw vc-warn"><LineIcon name="alert" className="text-ico" />{v.location_note ?? 'นอกพื้นที่'}</span>}
+                    {v.off_schedule && <span className="nw vc-warn"><LineIcon name="alert" className="text-ico" />นอกวันนัด</span>}
+                    {/* นัดที่ยกเลิก: หมายเหตุมีเหตุผลที่กรอกตอนกดยกเลิก ("ยกเลิก: …") — เห็นได้โดยไม่ต้องเปิดประวัติเคส */}
+                    {v.state === 'cancelled' && v.note && <span className="visit-note">{v.note}</span>}
+                  </span>
                 </span>
-                <span className={`badge visit-${v.state}`}>{VISIT_STATE_LABELS[v.state]}</span>
-                {!readOnly && v.state === 'scheduled' && v.visit_date >= today && (
-                  <button
-                    type="button"
-                    className="btn tiny"
-                    disabled={busy}
-                    title="ส่งข้อความเตือนนัดนี้ทาง LINE ถึงพนักงานและญาติ"
-                    onClick={() => remind(v)}
-                  >
-                    ส่งเตือน
-                  </button>
-                )}
-                {/* ลบได้เฉพาะกะที่ยังไม่ถึงวัน · กะที่ผ่านมาแล้ว (ขาดงาน) เก็บไว้เป็นประวัติ — ยกเลิกได้แต่ลบไม่ได้ */}
-                {!readOnly && !v.check_in_at && v.visit_date >= today && (
-                  <button
-                    type="button"
-                    className="btn tiny danger-ghost"
-                    disabled={busy}
-                    onClick={async () => {
-                      /* ลบนัดที่ยังไม่ถึงวัน = แจ้งยกเลิกทาง LINE อยู่แล้ว — ขอหมายเหตุส่งไปด้วย เหมือนปุ่มยกเลิก (11 พ.ย. 2569) */
-                      const reason = await ask({
-                        title: `ลบ${unit}วันที่ ${formatDate(v.visit_date)}?`,
-                        detail: `${unit}นี้จะหายจากตาราง และระบบจะแจ้งยกเลิกทาง LINE ถึง${v.assigned_name ? ` ${v.assigned_name} ` : 'พนักงาน'}และญาติที่ผูกเคสไว้ พร้อมหมายเหตุนี้`,
-                        input: { label: 'หมายเหตุ / เหตุผลที่ยกเลิก', placeholder: 'เช่น ลูกค้าขอเลื่อนนัด', required: true },
-                        confirmLabel: `ลบ${unit}และแจ้ง`,
-                        cancelLabel: 'ไม่ลบ',
-                        danger: true,
-                      });
-                      if (reason == null) return;
-                      run(() => api.deleteVisit(caseId, v.visit_id, reason));
-                    }}
-                  >
-                    ลบ
-                  </button>
-                )}
-                {!readOnly && v.state === 'missed' && (
-                  <button
-                    type="button"
-                    className="btn tiny danger-ghost"
-                    disabled={busy}
-                    title="วันนั้นไม่ได้ไปจริง — เปลี่ยนเป็นยกเลิก (ยังเก็บเป็นประวัติ)"
-                    onClick={async () => {
-                      /* หมายเหตุส่งไปกับข้อความแจ้งยกเลิกนัดทาง LINE (พนักงาน + ญาติ) และเก็บไว้ในกะ (11 พ.ย. 2569) */
-                      /* มีหมวดเหตุผล (categories · cancel_visit · 16 พ.ย. 2569) = เลือกเหตุผล + รายละเอียดไม่บังคับ
-                         ชื่อเหตุผลถูกเขียนนำหน้าหมายเหตุที่ server — ข้อความ LINE ได้ทั้งสองส่วน */
-                      const answer = await ask({
-                        title: `ยกเลิก${unit}วันที่ ${formatDate(v.visit_date)}?`,
-                        detail: `ระบบจะแจ้งยกเลิก${unit}ทาง LINE ถึง${v.assigned_name ? ` ${v.assigned_name} ` : 'พนักงาน'}และญาติที่ผูกเคสไว้ พร้อมเหตุผลนี้`,
-                        ...(hasCancelReasons
-                          ? {
-                            select: {
-                              required: true,
-                              render: (value, set) => (
-                                <ReasonPicker domain="cancel_visit" label="เหตุผลที่ยกเลิก" required value={value} onChange={set} autoFocus />
-                              ),
-                            },
-                            input: { label: 'รายละเอียดเพิ่มเติม (ไม่บังคับ)', placeholder: 'เช่น ขอเลื่อนไปสัปดาห์หน้า' },
-                          }
-                          : { input: { label: 'หมายเหตุ / เหตุผลที่ยกเลิก', placeholder: 'เช่น ผู้รับบริการไม่สบาย ขอเลื่อนไปก่อน', required: true } }),
-                        confirmLabel: `ยกเลิก${unit}และแจ้ง`,
-                        cancelLabel: 'ไม่ยกเลิก',
-                        danger: true,
-                      });
-                      if (answer == null) return;
-                      const body = typeof answer === 'string'
-                        ? { status: 'cancelled', cancel_reason: answer }
-                        : { status: 'cancelled', cancel_reason: answer.text || null, cancel_reason_id: Number(answer.choice) };
-                      run(() => api.updateVisit(caseId, v.visit_id, body));
-                    }}
-                  >
-                    ยกเลิก
-                  </button>
-                )}
+                <span className="vc-actions">
+                  {canMoveVisit(v) && (
+                    <button
+                      type="button"
+                      className="vc-act"
+                      disabled={busy}
+                      title="เลื่อนนัดนี้ไปวัน/เวลาใหม่ — ระบบแจ้งเลื่อนนัดทาง LINE ถึงพนักงานและญาติ"
+                      onClick={() => setMoving({ visit: { ...v, case_id: caseId, client_name: caseItem?.client_name }, error: null })}
+                    >
+                      <LineIcon name="calendar" className="vc-ico" />
+                      <span>เลื่อนนัด</span>
+                    </button>
+                  )}
+                  {!readOnly && v.state === 'scheduled' && v.visit_date >= today && (
+                    <button
+                      type="button"
+                      className="vc-act"
+                      disabled={busy}
+                      title="ส่งข้อความเตือนนัดนี้ทาง LINE ถึงพนักงานและญาติ"
+                      onClick={() => remind(v)}
+                    >
+                      <LineIcon name="bell" className="vc-ico" />
+                      <span>ส่งเตือน</span>
+                    </button>
+                  )}
+                  {/* ลบได้เฉพาะกะที่ยังไม่ถึงวัน · กะที่ผ่านมาแล้ว (ขาดงาน) เก็บไว้เป็นประวัติ — ยกเลิกได้แต่ลบไม่ได้ */}
+                  {!readOnly && !v.check_in_at && v.visit_date >= today && (
+                    <button
+                      type="button"
+                      className="vc-act is-danger"
+                      disabled={busy}
+                      title={`ลบ${unit}นี้ออกจากตาราง — ระบบแจ้งยกเลิกทาง LINE`}
+                      onClick={async () => {
+                        /* ลบนัดที่ยังไม่ถึงวัน = แจ้งยกเลิกทาง LINE อยู่แล้ว — ขอหมายเหตุส่งไปด้วย เหมือนปุ่มยกเลิก (11 พ.ย. 2569) */
+                        const reason = await ask({
+                          title: `ลบ${unit}วันที่ ${formatDate(v.visit_date)}?`,
+                          detail: `${unit}นี้จะหายจากตาราง และระบบจะแจ้งยกเลิกทาง LINE ถึง${v.assigned_name ? ` ${v.assigned_name} ` : 'พนักงาน'}และญาติที่ผูกเคสไว้ พร้อมหมายเหตุนี้`,
+                          input: { label: 'หมายเหตุ / เหตุผลที่ยกเลิก', placeholder: 'เช่น ลูกค้าขอเลื่อนนัด', required: true },
+                          confirmLabel: `ลบ${unit}และแจ้ง`,
+                          cancelLabel: 'ไม่ลบ',
+                          danger: true,
+                        });
+                        if (reason == null) return;
+                        run(() => api.deleteVisit(caseId, v.visit_id, reason));
+                      }}
+                    >
+                      <LineIcon name="trash" className="vc-ico" />
+                      <span>ลบ</span>
+                    </button>
+                  )}
+                  {!readOnly && v.state === 'missed' && (
+                    <button
+                      type="button"
+                      className="vc-act is-danger"
+                      disabled={busy}
+                      title="วันนั้นไม่ได้ไปจริง — เปลี่ยนเป็นยกเลิก (ยังเก็บเป็นประวัติ)"
+                      onClick={async () => {
+                        /* หมายเหตุส่งไปกับข้อความแจ้งยกเลิกนัดทาง LINE (พนักงาน + ญาติ) และเก็บไว้ในกะ (11 พ.ย. 2569) */
+                        /* มีหมวดเหตุผล (categories · cancel_visit · 16 พ.ย. 2569) = เลือกเหตุผล + รายละเอียดไม่บังคับ
+                           ชื่อเหตุผลถูกเขียนนำหน้าหมายเหตุที่ server — ข้อความ LINE ได้ทั้งสองส่วน */
+                        const answer = await ask({
+                          title: `ยกเลิก${unit}วันที่ ${formatDate(v.visit_date)}?`,
+                          detail: `ระบบจะแจ้งยกเลิก${unit}ทาง LINE ถึง${v.assigned_name ? ` ${v.assigned_name} ` : 'พนักงาน'}และญาติที่ผูกเคสไว้ พร้อมเหตุผลนี้`,
+                          ...(hasCancelReasons
+                            ? {
+                              select: {
+                                required: true,
+                                render: (value, set) => (
+                                  <ReasonPicker domain="cancel_visit" label="เหตุผลที่ยกเลิก" required value={value} onChange={set} autoFocus />
+                                ),
+                              },
+                              input: { label: 'รายละเอียดเพิ่มเติม (ไม่บังคับ)', placeholder: 'เช่น ขอเลื่อนไปสัปดาห์หน้า' },
+                            }
+                            : { input: { label: 'หมายเหตุ / เหตุผลที่ยกเลิก', placeholder: 'เช่น ผู้รับบริการไม่สบาย ขอเลื่อนไปก่อน', required: true } }),
+                          confirmLabel: `ยกเลิก${unit}และแจ้ง`,
+                          cancelLabel: 'ไม่ยกเลิก',
+                          danger: true,
+                        });
+                        if (answer == null) return;
+                        const body = typeof answer === 'string'
+                          ? { status: 'cancelled', cancel_reason: answer }
+                          : { status: 'cancelled', cancel_reason: answer.text || null, cancel_reason_id: Number(answer.choice) };
+                        run(() => api.updateVisit(caseId, v.visit_id, body));
+                      }}
+                    >
+                      <LineIcon name="x-circle" className="vc-ico" />
+                      <span>ยกเลิก</span>
+                    </button>
+                  )}
+                </span>
               </li>
             );
           })}
         </ol>
+      )}
+
+      {swapping && (
+        <ChangeVisitPersonDialog
+          visit={swapping.visit}
+          caseId={caseId}
+          team={teamChips}
+          outsiders={outsiders}
+          followUps={followUpsOf(swapping.visit)}
+          busy={busy}
+          error={swapping.error}
+          onConfirm={confirmSwap}
+          onCancel={() => !busy && setSwapping(null)}
+        />
+      )}
+
+      {moving && (
+        <MoveVisitDialog
+          move={{ visit: moving.visit }}
+          pickDate
+          busy={busy}
+          today={today}
+          error={moving.error}
+          onConfirm={confirmMove}
+          onCancel={() => !busy && setMoving(null)}
+        />
       )}
     </>
   );

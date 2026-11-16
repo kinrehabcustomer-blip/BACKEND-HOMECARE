@@ -304,8 +304,9 @@ export async function claimDueFamilyReminders() {
 /**
  * แจ้งทันทีเมื่อเลื่อน/ยกเลิกนัด (ดร.ธงชัย 26 ต.ค. 2569 "หลังจากเลื่อนการนัดหมาย ส่งทางไลน์ให้กับลูกค้าและพนักงานทั้งคู่")
  * cases/repo.js updateVisit จดลง visit_change_outbox ในธุรกรรมเดียวกับการแก้ → cron ของ chat.kinorigin.com มารับไปส่ง
- *   moved     = เปลี่ยนวัน/เวลา (รวมเปลี่ยนคนพร้อมกัน) · cancelled = เปลี่ยนสถานะเป็นยกเลิก
- *   reassigned = เปลี่ยนแค่คนไป — แจ้งเฉพาะพนักงานคนเก่า (ถอดงาน) และคนใหม่ (ได้งาน) ไม่แจ้งญาติ
+ *   moved     = เปลี่ยนวัน/เวลา (รวมเปลี่ยนแค่เวลาเริ่มหรือเวลาจบ และรวมเปลี่ยนคนพร้อมกัน) · cancelled = เปลี่ยนสถานะเป็นยกเลิก/ลบนัด
+ *   reassigned = เปลี่ยนแค่คนไป — แจ้งพนักงานคนเก่า (ถอดงาน) คนใหม่ (ได้งาน) และญาติ/ลูกค้า (เปลี่ยนนักกายภาพ/ผู้ดูแล)
+ *   ทุกแบบแจ้งทั้งสองฝั่ง (ผู้ใช้ขอ 16 พ.ย. 2569) — เดิม reassigned ไม่แจ้งญาติ และแก้แค่เวลาจบไม่นับว่าเลื่อน
  * ผู้รับ: พนักงานคนเก่า+คนใหม่ที่ผูก LINE (@kinjobs) · ญาติที่ผูกเคส + ลูกค้าที่ทัก LINE (Kin HomeCare)
  * แก้นัดเดียวกันหลายรอบก่อน cron มารับ = ส่งเฉพาะสถานะล่าสุด (เทียบจาก "ค่าเดิม" ของรอบแรก)
  * นัดที่ผ่านไปแล้ว (ทั้งวันเดิมและวันใหม่อยู่ในอดีต) ไม่แจ้ง — เป็นการแก้บันทึกย้อนหลัง ไม่ใช่การเลื่อนนัดจริง
@@ -338,7 +339,8 @@ export const ensureVisitChangeTable = () =>
 /** เรียกใน transaction ของ updateVisit หลัง UPDATE แล้ว — before = แถวกะก่อนแก้ · after = ค่าที่ส่งมาแก้ (เฉพาะช่องที่เปลี่ยน) */
 export async function recordVisitChange(tx, caseId, visitId, before, after, changed, { reason = null } = {}) {
   const cancelled = changed.includes('status') && after.status === 'cancelled' && before.status !== 'cancelled';
-  const moved = changed.some((c) => ['visit_date', 'planned_start'].includes(c));
+  // เวลาจบเปลี่ยนอย่างเดียว (09:00–10:00 → 09:00–11:00) ก็เป็นการเลื่อนเวลานัดที่ลูกค้าต้องรู้ (16 พ.ย. 2569)
+  const moved = changed.some((c) => ['visit_date', 'planned_start', 'planned_end'].includes(c));
   const reassigned = changed.includes('assigned_to');
   if (!cancelled && !moved && !reassigned) return;
   if (!cancelled && (before.status === 'cancelled' || (after.status && after.status !== 'scheduled'))) return;
@@ -387,7 +389,8 @@ export async function claimVisitChanges() {
   const out = [];
   for (const r of byVisit.values()) {
     // เลื่อนไปแล้วเลื่อนกลับที่เดิม = ไม่มีอะไรเปลี่ยน ไม่ต้องรบกวนใคร
-    if (r.kind !== 'cancelled' && r.old_date === r.new_date && (r.old_start ?? '') === (r.new_start ?? '') && r.old_assignee === r.new_assignee) continue;
+    if (r.kind !== 'cancelled' && r.old_date === r.new_date && (r.old_start ?? '') === (r.new_start ?? '')
+        && (r.old_end ?? '') === (r.new_end ?? '') && r.old_assignee === r.new_assignee) continue;
     const info = await sql.one(
       `SELECT c.client_name, c.case_id,
               ${FAMILY_IDS} AS family,
@@ -406,8 +409,9 @@ export async function claimVisitChanges() {
       reason: r.kind === 'cancelled' ? r.reason ?? null : null,
       old: { date: r.old_date, start: r.old_start, end: r.old_end, staff: find(r.old_assignee) },
       new: { date: r.new_date, start: r.new_start, end: r.new_end, staff: find(r.new_assignee) },
-      // เปลี่ยนแค่คน = เรื่องภายใน ไม่แจ้งญาติ
-      family: r.kind === 'reassigned' ? [] : info.family ?? [],
+      // ทุกแบบแจ้งญาติ/ลูกค้าด้วย รวมเปลี่ยนแค่คน (ผู้ใช้ขอ 16 พ.ย. 2569 — เดิมถือเป็นเรื่องภายใน ไม่แจ้ง)
+      //   ข้อความฝั่งญาติของ reassigned ใช้ old.staff / new.staff (ชื่อ + ตำแหน่ง) บอกว่าใครจะไปแทน
+      family: info.family ?? [],
       change_id: r.change_id,
     };
     out.push(change);

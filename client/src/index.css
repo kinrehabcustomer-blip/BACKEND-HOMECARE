@@ -6487,3 +6487,146 @@ h1, h2, h3, h4, .page-hero-title, .cal-title, .login-heading h1 {
   .cat-items { padding-left: 0.875rem; }
   .cat-code { min-width: 0; }
 }
+
+/* (แถวนัดแบบเดิมของ CaseVisits ถูกแทนด้วยการ์ดนัด — ดู "การ์ดนัดในตารางนัด" ท้ายไฟล์) */
+
+/* ---------- กล่องเลื่อนนัด/ย้ายนัด (MoveVisitDialog · ออกแบบใหม่ 16 พ.ย. 2569) ----------
+   ชิปวัน / ชิปเวลา แบบกริด 4 ช่องเท่ากัน · ชิปที่เลือก = ทอง · ค่าเดิมมีป้าย "เดิม" มุมขวาบน
+   กล่องสรุป นัดเดิม (ขีดฆ่า) / นัดใหม่ (ตัวหนา) ท้ายฟอร์ม — พร้อมยืนยันแล้วกรอบเป็นสีทอง */
+.move-dialog .modal-body { display: flex; flex-direction: column; gap: 1.125rem; }
+.move-section { margin: 0; padding: 0; border: 0; min-width: 0; }
+.move-label { padding: 0; margin-bottom: 0.5rem; font-size: 0.8125rem; font-weight: 600; color: var(--text); }
+.move-label .muted { font-weight: 400; }
+.move-days, .move-times { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.5rem; }
+.move-chip {
+  position: relative;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.0625rem;
+  min-height: 3.25rem; padding: 0.375rem 0.25rem;
+  font: inherit; color: var(--text); background: var(--surface);
+  border: 1px solid var(--border); border-radius: 0.625rem; cursor: pointer;
+  transition: border-color 0.12s, background-color 0.12s, color 0.12s;
+}
+.move-chip:hover:not(:disabled) { border-color: var(--brand); }
+.move-chip:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.move-chip:disabled { opacity: 0.4; cursor: not-allowed; }
+.move-chip.is-on { background: var(--brand); border-color: var(--brand); color: var(--brand-ink); }
+.move-chip-top { font-size: 0.6875rem; color: var(--muted); line-height: 1.2; }
+.move-chip-main { font-size: 0.875rem; font-weight: 600; line-height: 1.25; white-space: nowrap; }
+.move-chip-sub { font-size: 0.6875rem; color: var(--muted); line-height: 1.2; }
+.move-chip.is-on .move-chip-top, .move-chip.is-on .move-chip-sub { color: inherit; opacity: 0.85; }
+.move-chip-tag {
+  position: absolute; top: -0.5rem; right: 0.375rem;
+  padding: 0 0.375rem; border-radius: 999px;
+  font-size: 0.625rem; font-weight: 600; line-height: 1rem;
+  color: var(--brand); background: var(--brand-soft); border: 1px solid var(--surface);
+}
+.move-chip-other { border-style: dashed; }
+.move-chip-other.is-on { border-style: solid; }
+.move-chip-ico { width: 1rem; height: 1rem; }
+/* ช่องวันที่ของเบราว์เซอร์: ปกติเป็นแค่ตัวเปิดปฏิทิน (showPicker) ไม่ต้องเห็น · เบราว์เซอร์ที่เปิดเองไม่ได้ค่อยโชว์ */
+.move-date-hidden { position: absolute; width: 1px; height: 1px; padding: 0; border: 0; opacity: 0; pointer-events: none; }
+.move-date-input { width: 100%; margin-top: 0.5rem; }
+.move-custom-time { margin-top: 0.5rem; }
+.move-summary {
+  display: grid; gap: 0.375rem;
+  padding: 0.75rem 0.875rem; border-radius: 0.75rem;
+  background: var(--surface-2); border: 1px solid var(--border);
+}
+.move-summary.is-ready { border-color: var(--brand); background: var(--brand-soft); }
+.move-summary-row { display: grid; grid-template-columns: 4rem minmax(0, 1fr); align-items: baseline; gap: 0.5rem; font-size: 0.875rem; }
+.move-summary-label { font-size: 0.75rem; color: var(--muted); }
+.move-summary-row.is-old > span:last-child { color: var(--muted); }
+.move-summary.is-ready .move-summary-row.is-old > span:last-child { text-decoration: line-through; }
+.move-summary-row.is-new strong { font-size: 1rem; color: var(--text); }
+.move-note { display: flex; align-items: flex-start; gap: 0.375rem; margin: 0; font-size: 0.75rem; color: var(--muted); }
+.move-note .text-ico { flex: none; margin-top: 0.125rem; }
+.move-dialog .modal-body > .error { margin: 0; }
+@media (max-width: 600px) {
+  .move-chip { min-height: 3rem; }
+  .move-chip-main { font-size: 0.8125rem; }
+}
+
+/* แถบพับ/กาง "นัดที่ผ่านไปแล้ว" บนสุดของตารางนัด (CaseVisits · 16 พ.ย. 2569) — กรอบเส้นประ แยกจากแถวนัดจริง */
+.visit-list.visit-rows li.visit-past-toggle { display: block; padding: 0; border-style: dashed; background: transparent; }
+.visit-past-toggle button {
+  display: flex; align-items: center; gap: 0.5rem; width: 100%;
+  padding: 0.5rem 0.75rem; font: inherit; font-size: 0.8125rem; text-align: left;
+  color: var(--muted); background: none; border: 0; border-radius: inherit; cursor: pointer;
+}
+.visit-past-toggle button:hover { color: var(--text); background: var(--surface-2); }
+.visit-past-toggle button:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.visit-past-toggle strong { color: var(--text); }
+.visit-past-toggle .badge { margin-left: auto; font-size: 0.6875rem; }
+.visit-past-chev { flex: none; width: 1rem; height: 1rem; transform: rotate(-90deg); transition: transform 0.15s; }
+.visit-past-chev.is-open { transform: none; }
+
+/* ชื่อคนไปในแถวนัด = ปุ่มเปลี่ยนคน (CaseVisits · 16 พ.ย. 2569) — เม็ดยาขอบเส้นประ + คำว่า "เปลี่ยน" สีทอง ให้รู้ว่ากดได้ */
+.visit-person { display: inline-flex; align-items: center; gap: 0.25rem; white-space: nowrap; color: var(--text); }
+.visit-person .vp-dot { margin-right: 0.125rem; }
+.visit-person.is-button {
+  padding: 0.125rem 0.5rem; font: inherit; font-size: 0.75rem; cursor: pointer;
+  background: var(--surface); border: 1px dashed var(--border); border-radius: 999px;
+}
+.visit-person.is-button:hover:not(:disabled) { border-color: var(--brand); border-style: solid; }
+.visit-person.is-button:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.visit-person-act { margin-left: 0.125rem; font-weight: 600; color: var(--brand); }
+.visit-person-act::before { content: '⇄ '; }
+/* กล่องเปลี่ยนคน (ChangeVisitPersonDialog) — ชิปคนแบบกริดสองช่อง · ติ๊กเปลี่ยนทั้งชุด */
+.swap-people { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem; }
+.swap-person .move-chip-main { display: inline-flex; align-items: center; gap: 0.375rem; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.swap-all { display: flex; align-items: flex-start; gap: 0.5rem; font-size: 0.8125rem; cursor: pointer; }
+.swap-all input { margin-top: 0.2rem; }
+
+/* ---------- การ์ดนัดในตารางนัด (CaseVisits · ออกแบบใหม่ 16 พ.ย. 2569) ----------
+   [ป้ายวัน] [เวลา + สถานะ / คนไป · ครั้งที่ · VN] [ปุ่มไอคอน]
+   ป้ายวันเป็นจุดยึดสายตา ไล่ลงมาเห็นวันทันที · ปุ่ม (ไอคอน+คำ) เป็นแถบล่างของการ์ด แบ่งความกว้างเท่ากัน
+   ทุกขนาดจอ — popup ตารางนัดแคบอยู่แล้ว (~490px) วางปุ่มไว้ขวาแล้วเวลา/ชื่อคนโดนบีบจนตัดหลายบรรทัด */
+.visit-list.visit-rows li.visit-card {
+  display: grid;
+  grid-template-columns: 3.25rem minmax(0, 1fr);
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  padding: 0.625rem 0.75rem;
+  border-radius: 0.75rem;
+  background: var(--surface);
+}
+.visit-card.is-today { border-color: var(--brand); box-shadow: inset 3px 0 0 var(--brand); }
+.vc-date {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  align-self: stretch; padding: 0.25rem 0; border-radius: 0.5rem;
+  background: var(--surface-2); line-height: 1.1;
+}
+.visit-card.is-today .vc-date { background: var(--brand-soft); }
+.vc-dow { font-size: 0.6875rem; color: var(--muted); }
+.visit-card.is-today .vc-dow { color: var(--brand); font-weight: 600; }
+.vc-day { font-size: 1.25rem; font-weight: 700; color: var(--text); }
+.vc-mon { font-size: 0.6875rem; color: var(--muted); white-space: nowrap; }
+.vc-body { display: flex; flex-direction: column; gap: 0.3125rem; min-width: 0; }
+.vc-top { display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem 0.5rem; }
+.vc-time { font-size: 0.9375rem; font-weight: 700; color: var(--text); white-space: nowrap; }
+.vc-time.is-none { font-weight: 500; color: var(--muted); }
+.vc-top .badge { font-size: 0.6875rem; }
+.vc-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem 0.625rem; font-size: 0.75rem; color: var(--muted); }
+.vc-meta .nw { white-space: nowrap; }
+.vc-warn { color: var(--danger, #b42318); }
+.visit-list.visit-rows li.visit-card .vc-actions {
+  display: flex; align-items: center; gap: 0.25rem;
+  grid-column: 1 / -1; padding-top: 0.375rem; border-top: 1px solid var(--border);
+}
+.visit-list.visit-rows li.visit-card .vc-actions:empty { display: none; }
+.vc-act {
+  flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 0.375rem;
+  min-height: 2.25rem; padding: 0.25rem 0.5rem;
+  font: inherit; font-size: 0.8125rem; line-height: 1.2; color: var(--text);
+  background: none; border: 1px solid transparent; border-radius: 0.5rem; cursor: pointer;
+}
+.vc-act:hover:not(:disabled) { background: var(--surface-2); border-color: var(--border); }
+.vc-act:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+.vc-act:disabled { opacity: 0.45; cursor: not-allowed; }
+.vc-act.is-danger { color: var(--danger, #b42318); }
+.vc-ico { flex: none; width: 1rem; height: 1rem; }
+.visit-list li.visit-card.visit-cancelled { text-decoration: none; }
+.visit-card.visit-cancelled .vc-time, .visit-card.visit-cancelled .vc-day { text-decoration: line-through; }
+@media (max-width: 600px) {
+  .visit-list.visit-rows li.visit-card { grid-template-columns: 3rem minmax(0, 1fr); gap: 0.5rem 0.625rem; padding: 0.625rem; }
+}

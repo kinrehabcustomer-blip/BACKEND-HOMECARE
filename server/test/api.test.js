@@ -4480,5 +4480,70 @@ if (process.env.RUN_DB_TESTS !== '1') {
       const rows = await sql.all(`SELECT log_id FROM audit_logs WHERE log_id > :s AND action = 'auth.forgot-password' AND ip = '198.51.100.23'`, { s: since });
       assert.equal(rows.length, 1);
     });
+
+    test('แพ็กกายภาพ: ลงนัดเกินจำนวนครั้งไม่ได้ (16 พ.ย. 2569) · นัดที่ยกเลิกไม่นับ', async () => {
+      const { physio_package_id: pkg } = await sql.one(
+        `INSERT INTO physio_packages (name, sessions, special_price, staff_pay)
+         VALUES ('Quota lock 3', 3, 4500, 1500) RETURNING physio_package_id`);
+      const c = await call('POST', '/api/cases', { case_type: 'other', client_name: 'Quota lock', service_kind: 'physio',
+        physio_package_id: pkg, fee: 4500 }, MANAGER);
+      assert.equal(c.status, 201);
+      const id = c.body.case_id;
+      await sql.run(`UPDATE cases SET assigned_to = 'EMP-0003', status = 'assigned' WHERE case_id = :id`, { id });
+      const day = (n) => { const d = new Date(Date.now() + 7 * 3600e3); d.setUTCDate(d.getUTCDate() + 10 + n); return d.toISOString().slice(0, 10); };
+
+      const tooMany = await call('POST', `/api/cases/${id}/visits/bulk`, { dates: [day(1), day(2), day(3), day(4)] }, MANAGER);
+      assert.equal(tooMany.status, 409);
+      assert.match(tooMany.body.error, /3 ครั้ง/);
+      assert.equal((await sql.one(`SELECT COUNT(*)::int AS n FROM case_visits WHERE case_id = :id`, { id })).n, 0, 'ปฏิเสธทั้งชุด ไม่ลงบางส่วน');
+
+      const ok = await call('POST', `/api/cases/${id}/visits/bulk`, { dates: [day(1), day(2), day(3)] }, MANAGER);
+      assert.equal(ok.status, 201);
+      assert.equal(ok.body.added, 3);
+      assert.equal((await call('POST', `/api/cases/${id}/visits`, { visit_date: day(5) }, MANAGER)).status, 409, 'ครบแล้ว ลงทีละวันก็ไม่ได้');
+      // ลงวันเดิมซ้ำ (ถูกข้าม) ไม่นับเป็นนัดเพิ่ม
+      assert.equal((await call('POST', `/api/cases/${id}/visits/bulk`, { dates: [day(1)] }, MANAGER)).status, 201);
+
+      const first = ok.body.visits[0];
+      assert.equal((await call('PATCH', `/api/cases/${id}/visits/${first.visit_id}`, { status: 'cancelled', cancel_reason: 'ทดสอบ' }, MANAGER)).status, 200);
+      assert.equal((await call('POST', `/api/cases/${id}/visits`, { visit_date: day(6) }, MANAGER)).status, 201, 'ยกเลิกแล้วลงชดเชยได้');
+      const reopen = await call('PATCH', `/api/cases/${id}/visits/${first.visit_id}`, { status: 'scheduled' }, MANAGER);
+      assert.equal(reopen.status, 409, 'เปิดนัดที่ยกเลิกกลับมาตอนแพ็กเต็ม = เกินแพ็ก');
+    });
+
+    test('เปลี่ยนคน / แก้แค่เวลาจบ = แจ้งทั้งพนักงานและญาติ (16 พ.ย. 2569)', async () => {
+      const { ensureFamilyTable } = await import('../src/lib/family.js');
+      const { claimVisitChanges } = await import('../src/notify/visitReminders.js');
+      await ensureFamilyTable();
+      const c = await call('POST', '/api/cases', { case_type: 'other', client_name: 'Notify both' }, MANAGER);
+      assert.equal(c.status, 201);
+      const id = c.body.case_id;
+      await sql.run(`UPDATE cases SET assigned_to = 'EMP-0003', status = 'assigned' WHERE case_id = :id`, { id });
+      await sql.run(`INSERT INTO case_family_links (case_id, line_user_id, invited_by, consent_by, accepted_at)
+                     VALUES (:id, 'U-family-notify-test', 'EMP-0001', 'EMP-0001', now())`, { id });
+      const day = (n) => { const d = new Date(Date.now() + 7 * 3600e3); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+      const added = await call('POST', `/api/cases/${id}/visits/bulk`, { dates: [day(3), day(4)], planned_start: '09:00', planned_end: '10:00' }, MANAGER);
+      assert.equal(added.status, 201);
+      const [v1, v2] = added.body.visits;
+
+      assert.equal((await call('PATCH', `/api/cases/${id}/visits/${v1.visit_id}`, { assigned_to: 'EMP-0004' }, MANAGER)).status, 200);
+      assert.equal((await call('PATCH', `/api/cases/${id}/visits/${v2.visit_id}`, { planned_end: '11:00' }, MANAGER)).status, 200);
+      // คิวรอ 2 นาทีหลังแก้ครั้งสุดท้าย (กันแก้ต่อเนื่องได้หลายข้อความ) — ถอยเวลาให้พร้อมส่ง
+      await sql.run(`UPDATE visit_change_outbox SET created_at = now() - interval '5 minutes' WHERE case_id = :id`, { id });
+      const changes = (await claimVisitChanges()).filter((x) => x.case_id === id);
+
+      const swap = changes.find((x) => x.visit_id === v1.visit_id);
+      assert.equal(swap?.kind, 'reassigned');
+      assert.deepEqual(swap.family, ['U-family-notify-test'], 'เปลี่ยนคนแจ้งญาติด้วย');
+      assert.equal(swap.new.staff?.employee_id, 'EMP-0004');
+      const endOnly = changes.find((x) => x.visit_id === v2.visit_id);
+      assert.equal(endOnly?.kind, 'moved', 'แก้แค่เวลาจบนับเป็นเลื่อนเวลานัด');
+      assert.equal(endOnly.new.end, '11:00');
+      assert.deepEqual(endOnly.family, ['U-family-notify-test']);
+
+      const queued = await sql.all(`SELECT visit_id, channel FROM visit_notification_outbox WHERE visit_id IN (:a, :b) AND channel = 'family'`,
+        { a: v1.visit_id, b: v2.visit_id });
+      assert.equal(queued.length, 2, 'เข้าคิวส่ง LINE ญาติทั้งสองนัด');
+    });
   });
 }

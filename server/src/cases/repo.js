@@ -2109,6 +2109,36 @@ export function visitConflicts(visitIds) {
 }
 
 /**
+ * ล็อกจำนวนนัดของแพ็กกายภาพ — ลงนัด (ที่ไม่ถูกยกเลิก) เกินจำนวนครั้งของแพ็กไม่ได้ (ผู้ใช้ขอ 16 พ.ย. 2569)
+ * เดิมเตือนอย่างเดียว (ดร. 26 ต.ค. "อย่าบล็อก") — เปลี่ยนเป็นล็อกตามคำขอใหม่
+ *   นัดที่ยกเลิกไม่นับ จึงยังลงชดเชยนัดที่ยกเลิกได้ · ซื้อเพิ่ม = เปิดแพ็กใหม่ (แต่ละแพ็กเป็นเคสแยก)
+ * เรียกในทรานแซกชันหลังล็อกแถวเคส (FOR UPDATE) แล้วเท่านั้น — สองแท็บกดพร้อมกันจะเห็นยอดของกันและกัน
+ * เคส Homecare / แพ็กที่ไม่ได้ตั้งจำนวนครั้ง = ไม่ตรวจ
+ */
+async function ensurePhysioRoom(tx, caseId, adding) {
+  if (adding <= 0) return;
+  const row = await tx.one(
+    `SELECT pp.sessions,
+            (SELECT COUNT(*) FROM case_visits v WHERE v.case_id = c.case_id AND v.status <> 'cancelled')::int AS booked
+     FROM cases c
+     JOIN physio_packages pp ON pp.physio_package_id = c.physio_package_id
+     WHERE c.case_id = :id`,
+    { id: caseId },
+  );
+  const sessions = Number(row?.sessions) || 0;
+  if (!sessions) return;
+  const booked = Number(row.booked);
+  const room = Math.max(0, sessions - booked);
+  if (adding <= room) return;
+  throw new ApiError(
+    409,
+    room === 0
+      ? `ลงนัดครบ ${sessions} ครั้งของแพ็กเกจแล้ว — ลบ/ยกเลิกนัดเดิมก่อน หรือเปิดแพ็กใหม่`
+      : `แพ็กเกจนี้มี ${sessions} ครั้ง ลงนัดแล้ว ${booked} ครั้ง — ลงเพิ่มได้อีก ${room} ครั้ง (เลือกมา ${adding} วัน)`,
+  );
+}
+
+/**
  * ลงกะหลายวันในครั้งเดียว — ตัวหลักของทั้งการกดวันเดียวบนปฏิทินและการสร้างเป็นช่วง
  *
  * ข้ามวันที่มีกะ "เหมือนกันเป๊ะ" อยู่แล้ว (คนเดียวกัน เวลาเดียวกัน) เพราะการกดสร้างช่วงซ้ำ
@@ -2137,6 +2167,7 @@ export async function addVisits(caseId, dates, { assigned_to, planned_start, pla
 
     const fresh = dates.filter((d) => !seen.has(`${d}|${who ?? ''}|${planned_start ?? ''}`));
     if (fresh.length === 0) return { rows: [], skipped: dates.length };
+    await ensurePhysioRoom(tx, caseId, fresh.length);
 
     const params = {
       case_id: caseId,
@@ -2386,6 +2417,10 @@ export async function updateVisit(caseId, visitId, input, actor) {
     }
     if (terminal && changed.includes('status') && input.status !== 'cancelled') {
       throw new ApiError(409, 'เคสนี้จบไปแล้ว — ต้องเปิดเคสใหม่ก่อนจึงจะเปิดกะกลับมาได้');
+    }
+    // เปิดนัดที่ยกเลิกไปแล้วกลับมา = นัดเพิ่มหนึ่งครั้ง — ต้องยังมีที่ว่างในแพ็กกายภาพ (ล็อกเคสไว้แล้วใน caseForTransition)
+    if (changed.includes('status') && visit.status === 'cancelled' && input.status !== 'cancelled') {
+      await ensurePhysioRoom(tx, caseId, 1);
     }
 
     // เหมือน /adjust: เงินออกไปแล้ว สถานะกะ (ไปแล้ว/ยกเลิก) คือที่มาของยอดบนสลิป ขยับทีหลังไม่ได้
