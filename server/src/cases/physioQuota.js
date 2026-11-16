@@ -1,4 +1,5 @@
 import { sql } from '../db/index.js';
+import { ensureFormatDays } from '../packages/formatDays.js';
 
 /**
  * สิทธิ์แพ็กกายภาพ — ซื้อกี่ครั้ง ลงนัดแล้วกี่ครั้ง และใช้ได้ถึงวันไหน (ดร.ธงชัย 26 ต.ค. 2569)
@@ -12,6 +13,24 @@ import { sql } from '../db/index.js';
  * เคส Homecare (ไม่มีแพ็กกายภาพ) คืน null — ไม่มีโควตาให้ตรวจ
  */
 export async function physioQuota(caseId, db = sql) {
+  await ensureFormatDays();
+  /* Homecare (16 พ.ย. 2569): เพดาน = จำนวนวันของรูปแบบบริการ · นับเป็น "วัน" (วันละหลายกะนับหนึ่ง)
+     ใช้ช่องเดียวกับกายภาพ (sessions/booked/attended/remaining) หน้าเว็บจะได้ใช้แผงสรุป/ตัวล็อกชุดเดียวกัน · unit บอกหน่วย */
+  const hc = await db.one(
+    `SELECT f.days,
+            (SELECT COUNT(DISTINCT v.visit_date) FROM case_visits v WHERE v.case_id = c.case_id AND v.status <> 'cancelled')::int AS booked,
+            (SELECT COUNT(DISTINCT v.visit_date) FROM case_visits v WHERE v.case_id = c.case_id AND v.check_in_at IS NOT NULL)::int AS attended
+     FROM cases c JOIN pkg_service_formats f ON f.format_id = c.pkg_format_id
+     WHERE c.case_id = :id AND c.physio_package_id IS NULL AND f.days IS NOT NULL`,
+    { id: caseId },
+  );
+  if (hc) {
+    return {
+      unit: 'วัน', sessions: Number(hc.days), booked: Number(hc.booked), attended: Number(hc.attended),
+      remaining: Math.max(0, Number(hc.days) - Number(hc.booked)),
+      duration_months: null, starts_on: null, expires_on: null,
+    };
+  }
   const row = await db.one(
     `SELECT c.case_id, c.start_date, pp.sessions, pp.duration_months,
             (SELECT COUNT(*) FROM case_visits v WHERE v.case_id = c.case_id AND v.status <> 'cancelled')::int AS booked,
@@ -25,6 +44,7 @@ export async function physioQuota(caseId, db = sql) {
   if (!row || !row.sessions) return null;
   const startsOn = row.start_date ? String(row.start_date).slice(0, 10) : row.first_visit ?? null;
   return {
+    unit: 'ครั้ง',
     sessions: Number(row.sessions),
     booked: Number(row.booked),
     attended: Number(row.attended),

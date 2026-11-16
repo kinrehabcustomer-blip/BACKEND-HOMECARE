@@ -19,6 +19,9 @@ console.log('สร้าง/อัปเดตตาราง audit_logs เร
 // หมวดหมู่ + หมวดตั้งต้น + คอลัมน์ cancel_reason_id — โครงสร้างอยู่ที่ categories/repo.js ที่เดียว (รันซ้ำได้)
 const { CATEGORY_DDL } = await import('../categories/repo.js');
 await pool.query(CATEGORY_DDL);
+// จำนวนวันต่อรอบของรูปแบบบริการ Homecare (ล็อกการลงกะเกินแพ็ก · 16 พ.ย. 2569) — เพิ่มคอลัมน์ + เติมค่าตั้งต้นจากชื่อครั้งเดียว
+const { ensureFormatDays } = await import('../packages/formatDays.js');
+await ensureFormatDays();
 console.log('สร้าง/อัปเดตตาราง categories เรียบร้อย');
 
 // พนักงานที่ยังไม่มีรหัสผ่าน — สุ่มรหัสชั่วคราวให้

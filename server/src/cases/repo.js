@@ -13,6 +13,7 @@ import { ApiError } from '../lib/errors.js';
 import { renameCaseRefs, deleteCaseRefs } from '../lib/caseRefs.js';
 import { ensureAddonLink, promoteDueAddons, bundleCoveredSql, currentAddonRound } from './addonLink.js';
 import { physioQuota } from './physioQuota.js';
+import { ensureFormatDays } from '../packages/formatDays.js';
 import { ensureVisitReminderColumns, ensureVisitChangeTable, recordVisitChange } from '../notify/visitReminders.js';
 export { physioQuota };
 import { normalizeAddons, addonsTotal } from '../lib/addons.js';
@@ -2109,32 +2110,42 @@ export function visitConflicts(visitIds) {
 }
 
 /**
- * ล็อกจำนวนนัดของแพ็กกายภาพ — ลงนัด (ที่ไม่ถูกยกเลิก) เกินจำนวนครั้งของแพ็กไม่ได้ (ผู้ใช้ขอ 16 พ.ย. 2569)
- * เดิมเตือนอย่างเดียว (ดร. 26 ต.ค. "อย่าบล็อก") — เปลี่ยนเป็นล็อกตามคำขอใหม่
- *   นัดที่ยกเลิกไม่นับ จึงยังลงชดเชยนัดที่ยกเลิกได้ · ซื้อเพิ่ม = เปิดแพ็กใหม่ (แต่ละแพ็กเป็นเคสแยก)
- * เรียกในทรานแซกชันหลังล็อกแถวเคส (FOR UPDATE) แล้วเท่านั้น — สองแท็บกดพร้อมกันจะเห็นยอดของกันและกัน
- * เคส Homecare / แพ็กที่ไม่ได้ตั้งจำนวนครั้ง = ไม่ตรวจ
+ * ล็อกไม่ให้ลงนัด/กะเกินแพ็กที่ซื้อ
+ *   กายภาพ (ผู้ใช้ขอ 16 พ.ย. 2569) — นัดที่ไม่ถูกยกเลิก ≤ จำนวนครั้งของแพ็ก · เดิมเตือนอย่างเดียว (ดร. 26 ต.ค. "อย่าบล็อก")
+ *   Homecare (ผู้ใช้ขอ 16 พ.ย. 2569) — "วัน" ที่มีกะ (ไม่ถูกยกเลิก) ≤ จำนวนวันของรูปแบบบริการ (รายเดือน 30 · หยุด 4 วัน = 26)
+ *     นับวันไม่ใช่นับกะ: 24 ชม. แบ่งสองกะสองคนในวันเดียวกัน = หนึ่งวัน
+ *   นัดที่ยกเลิกไม่นับ จึงยังลงชดเชยได้ · ซื้อเพิ่ม/รอบถัดไป = ต่อเคสใหม่
+ * ใช้แบบ "ก่อน–หลัง" ในทรานแซกชันเดียวกับการเขียน (ล็อกแถวเคสไว้แล้ว): หลังเขียนเกินเพดาน และมากกว่าก่อนเขียน = ปฏิเสธ (ย้อนทั้งชุด)
+ *   เคสที่เกินอยู่ก่อนมีการล็อกยังแก้/ยกเลิก/ย้ายนัดเดิมได้ — แค่เพิ่มให้เกินกว่าเดิมไม่ได้
+ * ensureFormatDays ต้องเรียกก่อนเปิดทรานแซกชัน (ALTER ระหว่างล็อกแถว = รอตัวเอง)
  */
-async function ensurePhysioRoom(tx, caseId, adding) {
-  if (adding <= 0) return;
+async function quotaUsage(tx, caseId) {
   const row = await tx.one(
-    `SELECT pp.sessions,
-            (SELECT COUNT(*) FROM case_visits v WHERE v.case_id = c.case_id AND v.status <> 'cancelled')::int AS booked
+    `SELECT (c.physio_package_id IS NOT NULL) AS physio,
+            CASE WHEN c.physio_package_id IS NOT NULL THEN pp.sessions ELSE f.days END AS cap,
+            (SELECT COUNT(*) FROM case_visits v WHERE v.case_id = c.case_id AND v.status <> 'cancelled')::int AS visits,
+            (SELECT COUNT(DISTINCT v.visit_date) FROM case_visits v WHERE v.case_id = c.case_id AND v.status <> 'cancelled')::int AS days
      FROM cases c
-     JOIN physio_packages pp ON pp.physio_package_id = c.physio_package_id
+     LEFT JOIN physio_packages pp ON pp.physio_package_id = c.physio_package_id
+     LEFT JOIN pkg_service_formats f ON f.format_id = c.pkg_format_id
      WHERE c.case_id = :id`,
     { id: caseId },
   );
-  const sessions = Number(row?.sessions) || 0;
-  if (!sessions) return;
-  const booked = Number(row.booked);
-  const room = Math.max(0, sessions - booked);
-  if (adding <= room) return;
+  const cap = Number(row?.cap) || 0;
+  const physio = Boolean(row?.physio);
+  return { cap, physio, used: physio ? Number(row.visits) : Number(row.days), unit: physio ? 'ครั้ง' : 'วัน' };
+}
+
+function assertWithinQuota(before, after) {
+  if (!after.cap || after.used <= after.cap || after.used <= before.used) return;
+  const room = Math.max(0, after.cap - before.used);
+  const adding = after.used - before.used;
+  const did = after.physio ? 'ลงนัดแล้ว' : 'ลงกะแล้ว';
   throw new ApiError(
     409,
     room === 0
-      ? `ลงนัดครบ ${sessions} ครั้งของแพ็กเกจแล้ว — ลบ/ยกเลิกนัดเดิมก่อน หรือเปิดแพ็กใหม่`
-      : `แพ็กเกจนี้มี ${sessions} ครั้ง ลงนัดแล้ว ${booked} ครั้ง — ลงเพิ่มได้อีก ${room} ครั้ง (เลือกมา ${adding} วัน)`,
+      ? `${after.physio ? 'ลงนัด' : 'ลงกะ'}ครบ ${after.cap} ${after.unit}ของแพ็กเกจแล้ว — ลบ/ยกเลิก${after.physio ? 'นัด' : 'วัน'}เดิมก่อน หรือต่อเคสรอบใหม่`
+      : `แพ็กเกจนี้มี ${after.cap} ${after.unit} ${did} ${before.used} ${after.unit} — ลงเพิ่มได้อีก ${room} ${after.unit} (เพิ่มมา ${adding} ${after.unit})`,
   );
 }
 
@@ -2146,6 +2157,7 @@ async function ensurePhysioRoom(tx, caseId, adding) {
  * ส่วนกะคนละเวลา/คนละคนในวันเดียวกันยังลงได้ตามปกติ (ตั้งใจให้ทำได้ตั้งแต่ระบบกะเฟส 2)
  */
 export async function addVisits(caseId, dates, { assigned_to, planned_start, planned_end, staff_pay, note } = {}) {
+  await ensureFormatDays(); // คอลัมน์ pkg_service_formats.days ต้องมีก่อนเปิดทรานแซกชัน (ตัวล็อกจำนวนวันอ่านมัน)
   /* ตรวจซ้ำ + ลงนัด + ออก VN ในทรานแซกชันเดียว โดยล็อกแถวเคสไว้ก่อน (ตรวจ Codex 30 ต.ค. 2569 ข้อ 5)
      เดิมตรวจซ้ำนอกทรานแซกชัน — กดเบิ้ล/สองแท็บพร้อมกัน ทั้งคู่เห็นว่ายังไม่มีแล้ว insert ซ้อนได้
      ตอนนี้คำขอที่สองต้องรอคำขอแรก commit ก่อน แล้วจะเห็นนัดที่เพิ่งลงและข้ามไปเอง */
@@ -2167,7 +2179,7 @@ export async function addVisits(caseId, dates, { assigned_to, planned_start, pla
 
     const fresh = dates.filter((d) => !seen.has(`${d}|${who ?? ''}|${planned_start ?? ''}`));
     if (fresh.length === 0) return { rows: [], skipped: dates.length };
-    await ensurePhysioRoom(tx, caseId, fresh.length);
+    const quotaBefore = await quotaUsage(tx, caseId);
 
     const params = {
       case_id: caseId,
@@ -2191,6 +2203,8 @@ export async function addVisits(caseId, dates, { assigned_to, planned_start, pla
        RETURNING visit_id`,
       params,
     );
+    // เกินแพ็ก (กายภาพนับนัด · Homecare นับวัน) = โยน error ย้อนทั้งชุด ไม่ลงบางส่วน
+    assertWithinQuota(quotaBefore, await quotaUsage(tx, caseId));
     await issueForVisits(tx, caseId, rows.map((r) => r.visit_id));
     return { rows, skipped: dates.length - fresh.length };
   });
@@ -2378,6 +2392,7 @@ export async function updateVisit(caseId, visitId, input, actor) {
   await ensureVisitReminderColumns();
   await ensureVisitChangeTable();
   await ensureCategories(); // คอลัมน์ case_visits.cancel_reason_id
+  await ensureFormatDays(); // ตัวล็อกจำนวนวันของแพ็ก (Homecare) อ่าน pkg_service_formats.days
   const fields = [
     'visit_date', 'assigned_to', 'planned_start', 'planned_end', 'status', 'note',
     'staff_pay', // ตั้งค่าจ้างเฉพาะกะนี้ — ส่ง null = กลับไปเกลี่ยจากยอดเคสตามปกติ
@@ -2418,10 +2433,10 @@ export async function updateVisit(caseId, visitId, input, actor) {
     if (terminal && changed.includes('status') && input.status !== 'cancelled') {
       throw new ApiError(409, 'เคสนี้จบไปแล้ว — ต้องเปิดเคสใหม่ก่อนจึงจะเปิดกะกลับมาได้');
     }
-    // เปิดนัดที่ยกเลิกไปแล้วกลับมา = นัดเพิ่มหนึ่งครั้ง — ต้องยังมีที่ว่างในแพ็กกายภาพ (ล็อกเคสไว้แล้วใน caseForTransition)
-    if (changed.includes('status') && visit.status === 'cancelled' && input.status !== 'cancelled') {
-      await ensurePhysioRoom(tx, caseId, 1);
-    }
+    /* เปิดนัดที่ยกเลิกกลับมา / ย้ายวัน = อาจเพิ่มนัดหรือวันในแพ็ก — วัดก่อน–หลังการแก้ (ล็อกเคสไว้แล้วใน caseForTransition)
+       Homecare: ย้ายกะออกจากวันที่ยังมีอีกกะอยู่ไปวันใหม่ = วันเพิ่มหนึ่งวัน */
+    const quotaCheck = changed.includes('visit_date') || (changed.includes('status') && visit.status === 'cancelled' && input.status !== 'cancelled');
+    const quotaBefore = quotaCheck ? await quotaUsage(tx, caseId) : null;
 
     // เหมือน /adjust: เงินออกไปแล้ว สถานะกะ (ไปแล้ว/ยกเลิก) คือที่มาของยอดบนสลิป ขยับทีหลังไม่ได้
     if (changed.includes('status') && Number(visit.released) > 0) {
@@ -2463,6 +2478,7 @@ export async function updateVisit(caseId, visitId, input, actor) {
        WHERE visit_id = :visit_id AND case_id = :case_id`,
       values,
     );
+    if (quotaBefore) assertWithinQuota(quotaBefore, await quotaUsage(tx, caseId));
 
     // บันทึกค่าเดิม → ค่าใหม่ — การย้ายวัน/เปลี่ยนคนของกะคือเรื่องที่ญาติหรือพนักงานโต้แย้งทีหลังได้
     const show = async (c, v) => {

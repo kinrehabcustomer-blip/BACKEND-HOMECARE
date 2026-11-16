@@ -12,6 +12,7 @@ import { useConfirm } from './ConfirmDialog.jsx';
 import ReasonPicker, { useHasReasons } from './ReasonPicker.jsx';
 import MoveVisitDialog from './MoveVisitDialog.jsx';
 import ChangeVisitPersonDialog from './ChangeVisitPersonDialog.jsx';
+import PackSummary from './PackSummary.jsx';
 
 const WEEKDAYS = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
 
@@ -58,8 +59,12 @@ const todayISO = () => todayTH();
  */
 const TIME_PRESETS = [
   { key: 'none', label: 'ไม่ระบุเวลา', start: '', end: '' },
-  { key: 'day', label: '08:00–17:00', start: '08:00', end: '17:00' },
-  { key: 'late', label: '09:00–18:00', start: '09:00', end: '18:00' },
+  /* กะกลางวัน / กะกลางคืน (ผู้ใช้ขอ 16 พ.ย. 2569) — เคส 24 ชม. แบ่งสองคนผลัดกัน 12 ชม.
+     กะกลางคืนข้ามเที่ยงคืน (จบ ≤ เริ่ม) ระบบนับเป็นกะต่อเนื่องถึงเช้าวันถัดไปอยู่แล้ว (ตรวจงานชน/นับชั่วโมง)
+     ลงทั้งสองกะในวันเดียวกัน = ยังนับเป็นหนึ่งวันของแพ็ก */
+  { key: 'dayshift', label: 'กะกลางวัน 08:00–20:00', start: '08:00', end: '20:00' },
+  { key: 'nightshift', label: 'กะกลางคืน 20:00–08:00', start: '20:00', end: '08:00' },
+  // 08:00–17:00 / 09:00–18:00 เอาออก (ผู้ใช้ขอ 16 พ.ย. 2569) — เวลาอื่นใช้ "กำหนดเอง"
   { key: 'full', label: '24 ชม.', start: '00:00', end: '23:59' },
 ];
 
@@ -158,7 +163,8 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
     /* ลงกะให้ได้เฉพาะคนที่รับผิดชอบเคสนี้ — ผู้รับผิดชอบหลัก + คนในทีม
        เดิมเป็นรายชื่อพนักงานทั้งบริษัท ซึ่งเลือกผิดคนได้ง่ายมาก (ชื่อคล้ายกัน/เรียงติดกัน)
        และกะที่ลงให้คนนอกเคสจะไปโผล่ในตารางงานของเขาโดยที่เขาไม่เคยรู้จักเคสนี้เลย */
-    if (isAppt) api.physioQuota(caseId).then((q) => !cancelled && setQuota(q)).catch(() => {});
+    // โควตาของแพ็ก — กายภาพ (ครั้ง) และ Homecare (วัน ตามรูปแบบบริการ · 16 พ.ย. 2569) ใช้เส้นเดียวกัน
+    api.physioQuota(caseId).then((q) => !cancelled && setQuota(q)).catch(() => {});
     Promise.all([api.listVisits(caseId), api.assignableEmployees(), api.listCaseTeam(caseId)])
       .then(([v, all, team]) => {
         if (cancelled) return;
@@ -217,6 +223,20 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
   const pastMissed = shown.filter((v) => v.visit_date < today && v.state === 'missed').length;
   const showPast = pastOpen ?? pastCount === shown.length;
   const doneCount = visits.filter((v) => v.state === 'done').length;
+  /* เพดานของแพ็ก (ล็อกลงเกิน) — กายภาพ = จำนวนครั้ง (นับนัด) · Homecare = จำนวนวันของรูปแบบบริการ (นับ "วัน" ที่มีกะ
+     วันละหลายกะนับหนึ่ง · ผู้ใช้ขอ 16 พ.ย. 2569: รายเดือน 30 วัน · หยุด 4 วัน = 26 วัน) · ไม่มีเพดาน (รายวัน) = null */
+  const cap = quota?.sessions ?? (isAppt ? target : null) ?? null;
+  const capUnit = isAppt ? 'ครั้ง' : 'วัน';
+  const activeDates = useMemo(
+    () => new Set(visits.filter((v) => v.status !== 'cancelled').map((v) => v.visit_date)),
+    [visits],
+  );
+  const capUsed = isAppt ? booked : activeDates.size;
+  const doneDays = new Set(visits.filter((v) => v.state === 'done').map((v) => v.visit_date)).size;
+  // แผงสรุป: ใช้ไปแล้ว / ทั้งหมด — มีเพดาน = เพดานของแพ็ก · ไม่มี = กะที่นัดไว้
+  const packUsed = isAppt ? doneCount : cap ? doneDays : doneCount;
+  const packTotal = cap || booked;
+  const packUnit = cap ? capUnit : unit;
 
   const pickedList = useMemo(() => [...picked].sort(), [picked]);
   const conflictDates = useMemo(
@@ -327,7 +347,7 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
         }
       }
       if (clearPicked) setPicked(new Set());
-      if (isAppt) api.physioQuota(caseId).then(setQuota).catch(() => {});
+      api.physioQuota(caseId).then(setQuota).catch(() => {});
     } catch (e) {
       setError(e.message);
     } finally {
@@ -379,16 +399,19 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
 
   /* แพ็กกายภาพ: ลงนัดได้ไม่เกินจำนวนครั้งของแพ็ก (ผู้ใช้ขอ 16 พ.ย. 2569 · server ล็อกซ้ำใน ensurePhysioRoom)
      วันที่มีนัดอยู่แล้วยังเลือกได้เสมอ — เลือกไว้เพื่อลบ ไม่ใช่เพื่อเพิ่ม */
-  const quotaLeft = isAppt && target ? Math.max(0, target - booked) : Infinity;
-  const pickedNew = pickedList.filter((d) => !byDate.has(d)).length;
+  const quotaLeft = cap ? Math.max(0, cap - capUsed) : Infinity;
+  // ปุ่ม "ทุกวัน N วัน" — Homecare ที่มีจำนวนวันของแพ็ก ใช้ตัวนั้น (รายเดือน 30 · หยุด 4 วัน = 26) · อื่นๆ 30 วันตามเดิม
+  const everyDays = !isAppt && cap ? cap : SPAN_DAYS;
+  // วันที่เลือกที่จะกลายเป็นนัด/วันใหม่ — วันที่มีนัด (ไม่ถูกยกเลิก) อยู่แล้วไม่นับ (เลือกไว้เพื่อลบ/เปลี่ยน)
+  const pickedNew = pickedList.filter((d) => !activeDates.has(d)).length;
   const overPick = pickedNew > quotaLeft;
 
   function toggleDay(dateStr) {
     if (readOnly) return;
-    if (!picked.has(dateStr) && !byDate.has(dateStr) && pickedNew >= quotaLeft) {
+    if (!picked.has(dateStr) && !activeDates.has(dateStr) && pickedNew >= quotaLeft) {
       toast(quotaLeft === 0
-        ? `ลงนัดครบ ${target} ครั้งของแพ็กเกจแล้ว — ลบ/ยกเลิกนัดเดิมก่อนจึงจะลงวันใหม่ได้`
-        : `แพ็กเกจเหลือ ${quotaLeft} ครั้ง — เลือกครบแล้ว เอาวันที่เลือกไว้ออกก่อนถ้าต้องการเปลี่ยน`);
+        ? `ลง${unit}ครบ ${cap} ${capUnit}ของแพ็กเกจแล้ว — ลบ/ยกเลิก${unit}เดิมก่อนจึงจะลงวันใหม่ได้`
+        : `แพ็กเกจเหลือ ${quotaLeft} ${capUnit} — เลือกครบแล้ว เอาวันที่เลือกไว้ออกก่อนถ้าต้องการเปลี่ยน`);
       return;
     }
     setPicked((prev) => {
@@ -417,35 +440,40 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
 
     const anchor = monthStart > startFrom ? monthStart : startFrom;
 
-    /* คอร์สกายภาพมีจำนวนครั้งจำกัด — กวาด 30 วันรวดจะเกินแพ็คเกจทันที (แพ็ค 20 ครั้ง)
-       จึงหยุดให้พอดีโควตาที่เหลือ ส่วนกะ Homecare ไม่มีเพดาน ลงได้เท่าที่ตกลงกัน */
-    const room = isAppt && target ? Math.max(0, quotaLeft - pickedNew) : Infinity;
+    /* แพ็กมีเพดาน — หยุดให้พอดีที่เหลือ (กายภาพ = ครั้ง · Homecare = วัน)
+       Homecare: วันที่มีกะอยู่แล้วไม่กินโควตา (ลงกะที่สองของวันเดิม = วันเดิม) — เคส 24 ชม. ลงกะกลางวันครบ 30 วัน
+       แล้วต้องลงกะกลางคืนให้อีกคนทับวันเดิมได้ (ผู้ใช้เจอ 16 พ.ย. 2569: เดิมนับทุกวันที่เลือก ปุ่มเลยขึ้น "ครบแล้ว")
+       วันที่เลือกไว้ก่อนแล้วก็ไม่นับซ้ำ (นับอยู่ใน pickedNew แล้ว) */
+    let budget = cap ? Math.max(0, quotaLeft - pickedNew) : Infinity;
+    const costOf = (d) => (picked.has(d) || (!isAppt && activeDates.has(d)) ? 0 : 1);
+    let capped = false;
 
     const keys = [];
     let cursor = anchor;
     /* fill = ลงนัดทั้งแพ็ก: ไล่ต่อจนครบจำนวนครั้งที่เหลือ (ไม่จำกัด 30 วัน) แต่ไม่เลยวันหมดอายุแพ็ก */
-    const span = fill ? 400 : SPAN_DAYS;
+    // "ทุกวัน" ของ Homecare = จำนวนวันของแพ็ก (หยุด 4 วัน = 26 · 16 พ.ย. 2569) · จ–ศ / ส–อา ยังกวาดหน้าต่าง 30 วันเหมือนเดิม
+    const span = fill ? 400 : !weekdays ? everyDays : SPAN_DAYS;
     const until = quota?.expires_on ?? null;
-    for (let i = 0; i < span && keys.length < room; i += 1) {
+    for (let i = 0; i < span; i += 1) {
       if (until && cursor > until) break;
-      if (!weekdays || weekdays.includes(new Date(`${cursor}T00:00:00Z`).getUTCDay())) keys.push(cursor);
+      if (!weekdays || weekdays.includes(new Date(`${cursor}T00:00:00Z`).getUTCDay())) {
+        const cost = costOf(cursor);
+        if (cost > budget) { capped = true; break; }
+        budget -= cost;
+        keys.push(cursor);
+      }
       cursor = nextDay(cursor);
     }
 
-    let added = 0;
-    setPicked((prev) => {
-      const next = new Set(prev);
-      for (const key of keys) {
-        if (!next.has(key)) added += 1;
-        next.add(key);
-      }
-      return next;
-    });
+    /* นับจาก picked ของรอบนี้ ไม่ใช่นับในตัวอัปเดต state — React อาจรันตัวอัปเดตทีหลัง (ตอน render)
+       ตัวนับจึงยังเป็น 0 ตอนเลือกข้อความ แล้วขึ้น "ถูกเลือกไว้ครบแล้ว" ทั้งที่เพิ่งเลือกไป (พบ 16 พ.ย. 2569) */
+    const added = keys.filter((key) => !picked.has(key)).length;
+    setPicked((prev) => new Set([...prev, ...keys]));
 
     if (added === 0) {
       toast(
-        room === 0
-          ? `ครบจำนวนครั้งของแพ็คเกจแล้ว (${target} ครั้ง)`
+        capped
+          ? `ครบจำนวนของแพ็คเกจแล้ว (${cap} ${capUnit})`
           : 'วันที่ตรงกับแบบนี้ถูกเลือกไว้ครบแล้ว',
       );
       return;
@@ -455,8 +483,8 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
        คนกดต้องไล่ดูปฏิทินทีละเดือนเองเพื่อตรวจว่าระบบเลือกให้ถูกหรือเปล่า */
     const last = keys[keys.length - 1];
     toast(
-      room !== Infinity && keys.length >= room
-        ? `เลือกให้ ${added} วัน (${formatDate(anchor)} – ${formatDate(last)}) — พอดีจำนวนครั้งที่เหลือของแพ็คเกจ`
+      capped || (cap && budget === 0 && keys.some((k) => costOf(k) > 0))
+        ? `เลือกให้ ${added} วัน (${formatDate(anchor)} – ${formatDate(last)}) — พอดีจำนวน${capUnit}ที่เหลือของแพ็คเกจ`
         : `เลือกให้ ${added} วัน: ${formatDate(anchor)} – ${formatDate(last)}`,
     );
   }
@@ -486,17 +514,18 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
 
   return (
     <>
+      {/* สรุปแพ็ก/ตาราง (ผู้ใช้ขอ 16 พ.ย. 2569) — เหลือแค่ "ใช้ไปแล้ว X / ทั้งหมด N" + แถบเดียว + วันหมดอายุ
+          (รอบแรกมีตัวเลขแยก ไปแล้ว/ขาดงาน/รอไป/ยังไม่ลงนัด ผู้ใช้ขอเอาออก)
+          ใช้ไปแล้ว = นัดที่ไปจริง (เช็คอินแล้ว) · ทั้งหมด = จำนวนครั้งของแพ็ก (Homecare ไม่มีเพดาน = กะที่นัดไว้) */}
+      <PackSummary
+        used={packUsed}
+        total={packTotal}
+        unitWord={packUnit}
+        expiresOn={isAppt ? quota?.expires_on ?? null : null}
+        today={today}
+      />
+
       <div className="visit-head">
-        <p className="muted">
-          {isAppt ? (
-            <>
-              นัดแล้ว <strong>{booked}</strong>{target ? ` / ${target}` : ''} ครั้ง · ไปแล้ว {doneCount} ครั้ง
-              {quota?.expires_on && <> · ใช้แพ็กได้ถึง <strong>{formatDate(quota.expires_on)}</strong></>}
-            </>
-          ) : (
-            <>นัดไว้ <strong>{booked}</strong> กะ · เสร็จ {doneCount} กะ</>
-          )}
-        </p>
         <div className="visit-nav">
           <button type="button" className="btn tiny" onClick={() => shiftMonth(-1)} aria-label="เดือนก่อนหน้า">←</button>
           <span className="visit-month">{MONTH_LABELS[mm]} {toBuddhistYear(year)}</span>
@@ -622,7 +651,7 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
           <span className="muted">เลือกเร็ว:</span>
           <button type="button" className="btn tiny" disabled={busy} onClick={() => pickPattern([1, 2, 3, 4, 5])}>จ–ศ</button>
           <button type="button" className="btn tiny" disabled={busy} onClick={() => pickPattern([0, 6])}>ส–อา</button>
-          <button type="button" className="btn tiny" disabled={busy} onClick={() => pickPattern(null)}>ทุกวัน 30 วัน</button>
+          <button type="button" className="btn tiny" disabled={busy} onClick={() => pickPattern(null)}>ทุกวัน {everyDays} วัน</button>
           {picked.size > 0 && (
             <button type="button" className="btn tiny" disabled={busy} onClick={() => setPicked(new Set())}>ล้าง</button>
           )}
@@ -663,7 +692,10 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
           <span className="cell-sub">เปลี่ยนคนไปนัด: กดชื่อพนักงานในรายการนัดด้านล่าง</span>
           {/* บอกจุดตั้งต้นของปุ่มเลือกเร็วไว้ตรงนี้ ไม่งั้นคนกดแล้วสงสัยว่าทำไมต้นเดือนไม่ถูกเลือก */}
           <span className="cell-sub">
-            ปุ่มเลือกเร็วกวาด <strong>{SPAN_DAYS} วันติดต่อกัน</strong> (ข้ามไปเดือนถัดไปให้เอง) เริ่มจาก{' '}
+            {everyDays === SPAN_DAYS
+              ? <>ปุ่มเลือกเร็วกวาด <strong>{SPAN_DAYS} วันติดต่อกัน</strong></>
+              : <>ปุ่ม &quot;ทุกวัน&quot; เลือก <strong>{everyDays} วันติดต่อกัน</strong> ตามแพ็กเกจ · จ–ศ / ส–อา กวาด {SPAN_DAYS} วัน</>}
+            {' '}(ข้ามไปเดือนถัดไปให้เอง) เริ่มจาก{' '}
             <strong>
               {startFrom === today ? `วันนี้ (${formatDate(today)})` : `วันเริ่มของเคส (${formatDate(startFrom)})`}
             </strong>{' '}
@@ -938,23 +970,24 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
                       type="button"
                       className="vc-act is-danger"
                       disabled={busy}
-                      title={`ลบ${unit}นี้ออกจากตาราง — ระบบแจ้งยกเลิกทาง LINE`}
+                      title={`ยกเลิก${unit}นี้ (นำออกจากตาราง) — ระบบแจ้งยกเลิกทาง LINE`}
                       onClick={async () => {
                         /* ลบนัดที่ยังไม่ถึงวัน = แจ้งยกเลิกทาง LINE อยู่แล้ว — ขอหมายเหตุส่งไปด้วย เหมือนปุ่มยกเลิก (11 พ.ย. 2569) */
                         const reason = await ask({
-                          title: `ลบ${unit}วันที่ ${formatDate(v.visit_date)}?`,
-                          detail: `${unit}นี้จะหายจากตาราง และระบบจะแจ้งยกเลิกทาง LINE ถึง${v.assigned_name ? ` ${v.assigned_name} ` : 'พนักงาน'}และญาติที่ผูกเคสไว้ พร้อมหมายเหตุนี้`,
+                          title: `ยกเลิก${unit}วันที่ ${formatDate(v.visit_date)}?`,
+                          detail: `${unit}นี้จะถูกนำออกจากตาราง และระบบจะแจ้งยกเลิกทาง LINE ถึง${v.assigned_name ? ` ${v.assigned_name} ` : 'พนักงาน'}และญาติที่ผูกเคสไว้ พร้อมหมายเหตุนี้`,
                           input: { label: 'หมายเหตุ / เหตุผลที่ยกเลิก', placeholder: 'เช่น ลูกค้าขอเลื่อนนัด', required: true },
-                          confirmLabel: `ลบ${unit}และแจ้ง`,
-                          cancelLabel: 'ไม่ลบ',
+                          confirmLabel: `ยกเลิก${unit}และแจ้ง`,
+                          cancelLabel: 'ไม่ยกเลิก',
                           danger: true,
                         });
                         if (reason == null) return;
                         run(() => api.deleteVisit(caseId, v.visit_id, reason));
                       }}
                     >
-                      <LineIcon name="trash" className="vc-ico" />
-                      <span>ลบ</span>
+                      <LineIcon name="x-circle" className="vc-ico" />
+                      {/* ชื่อปุ่ม "ยกเลิก" (ผู้ใช้ขอ 16 พ.ย. 2569) — การทำงานเหมือนเดิม: นำนัดที่ยังไม่ถึงวันออกจากตาราง + แจ้ง LINE */}
+                      <span>ยกเลิก</span>
                     </button>
                   )}
                   {!readOnly && v.state === 'missed' && (

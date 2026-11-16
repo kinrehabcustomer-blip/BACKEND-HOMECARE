@@ -609,6 +609,32 @@ function ManagePanel({ matrix, onChanged, setError }) {
                     {' · '}
                     {f.graded ? 'แยกราคาตามเกรด' : 'เรทเดียวทุกเกรด'}
                   </p>
+                  {/* จำนวนวันต่อรอบ — ล็อกการลงกะของเคสไม่ให้เกิน (16 พ.ย. 2569) · ว่าง = ไม่จำกัด (รายวัน) */}
+                  <label className="format-days">
+                    <span className="muted">ลงกะได้</span>
+                    <input
+                      type="number"
+                      min="1"
+                      max="366"
+                      inputMode="numeric"
+                      placeholder="ไม่จำกัด"
+                      defaultValue={f.days ?? ''}
+                      key={`${f.format_id}-${f.days ?? ''}`}
+                      disabled={busy}
+                      aria-label={`จำนวนวันที่ลงกะได้ของ ${f.name}`}
+                      onBlur={(e) => {
+                        const raw = e.target.value.trim();
+                        const days = raw === '' ? null : Math.trunc(Number(raw));
+                        if (days === (f.days ?? null) || (days != null && !(days >= 1 && days <= 366))) {
+                          e.target.value = f.days ?? '';
+                          return;
+                        }
+                        run(() => api.updateFormat(f.format_id, { days }));
+                      }}
+                      onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+                    />
+                    <span className="muted">วัน / เคส</span>
+                  </label>
                 </div>
                 <ConfirmButton
                   className="btn tiny danger-ghost"

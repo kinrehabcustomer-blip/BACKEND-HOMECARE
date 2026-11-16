@@ -24,6 +24,7 @@ import { auditRouter } from './audit/routes.js';
 import { auditTrail, ensureAuditTable } from './lib/audit.js';
 import { categoriesRouter } from './categories/routes.js';
 import { ensureCategories } from './categories/repo.js';
+import { ensureFormatDays } from './packages/formatDays.js';
 
 export function createApp() {
   /* ตาราง revoked_sessions ต้องมีก่อนคำขอแรก — requireAuth อ่านมันในคิวรีเดียวกับที่อ่านพนักงาน
@@ -37,6 +38,7 @@ export function createApp() {
   ensureAuditTable().catch((err) => console.error('[audit] สร้างตาราง audit_logs ไม่ได้ —', err.message));
   // หมวดหมู่ + คอลัมน์ cancel_reason_id (categories/repo.js) — เหตุผลเดียวกัน
   ensureCategories().catch((err) => console.error('[categories] สร้างตาราง categories ไม่ได้ —', err.message));
+  ensureFormatDays().catch((err) => console.error('[packages] เพิ่มคอลัมน์จำนวนวันของรูปแบบบริการไม่ได้ —', err.message));
 
   const app = express();
   // อยู่หลัง proxy ของ Vercel — req.ip = IP ผู้ใช้จริง (ตัวกันยิงถี่ /api/public/bill ไม่นับทุกคนเป็น IP เดียว)

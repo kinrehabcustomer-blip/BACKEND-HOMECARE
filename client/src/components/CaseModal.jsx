@@ -8,6 +8,7 @@ import ReasonPicker, { useHasReasons } from './ReasonPicker.jsx';
 import { useSheetSwipe } from '../lib/sheetSwipe.js';
 import { useScrollLock } from '../lib/scrollLock.js';
 import CaseVisitsModal from './CaseVisitsModal.jsx';
+import PackSummary from './PackSummary.jsx';
 import CaseReports from './CaseReports.jsx';
 import FamilyAccess from './FamilyAccess.jsx';
 import CaseLocationLink from './CaseLocationLink.jsx';
@@ -439,12 +440,17 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
   // วันที่ยกเลิกไม่นับเป็นนัดที่จองไว้ แต่ยังเก็บไว้เป็นประวัติใน popup
   const bookedVisits = visits.filter((v) => v.status !== 'cancelled').length;
   const doneVisits = visits.filter((v) => v.status === 'done').length;
-  /* นัดเกินจำนวนครั้งที่ลูกค้าซื้อ (ตรวจรอบ 15) — ระบบไม่เคยกันและไม่เคยเตือน
-     ของเดิมขึ้นแค่ "นัดแล้ว 15 / 10 ครั้ง" ซึ่งเป็นตัวเลขสองตัววางคู่กันเฉย ๆ
-     เจ้าหน้าที่ต้องสังเกตเองว่าตัวซ้ายมากกว่าตัวขวา = บริษัทให้บริการเกินที่เก็บเงิน
-     🔴 ดร.ธงชัย 26 ต.ค. 2569: *"เตือนอย่างเดียวพอครับ อย่าบล็อก"* — ห้ามเปลี่ยนเป็นด่านกั้นการนัด
-     (ลูกค้าซื้อเพิ่มกลางคอร์ส หรือชดเชยนัดที่ยกเลิก เป็นเรื่องที่เกิดจริง) */
-  const overQuota = isPhysio && item?.physio_sessions > 0 && bookedVisits > item.physio_sessions;
+  /* วันหมดอายุแพ็กกายภาพ — แผงสรุปในช่องตารางนัด (16 พ.ย. 2569 · ตัวเดียวกับในตารางนัด)
+     ดึงใหม่ทุกครั้งที่รายการนัดเปลี่ยน: วันหมดอายุนับจากวันเริ่ม/นัดแรก ลงนัดแรกแล้ววันจึงเกิด */
+  const [packQuota, setPackQuota] = useState(null);
+  useEffect(() => {
+    if (!caseId) { setPackQuota(null); return undefined; }
+    let cancelled = false;
+    api.physioQuota(caseId).then((q) => !cancelled && setPackQuota(q)).catch(() => !cancelled && setPackQuota(null));
+    return () => { cancelled = true; };
+  }, [caseId, visits]);
+  /* (เดิม) ป้าย "เกินแพ็กที่ซื้อ N ครั้ง" — เอาออก 16 พ.ย. 2569: ลงนัดเกินแพ็กถูกล็อกแล้ว (ensurePhysioRoom)
+     และช่องตารางนัดเปลี่ยนเป็นแผงสรุป "ใช้ไปแล้ว X / N" (PackSummary) ตามที่ผู้ใช้ขอ */
 
 
   /* กะที่ทำจบแล้วแต่ค่าจ้างยังไม่ได้อนุมัติ — ตอนปิดเคสคือจังหวะที่ผู้จัดการกำลังดูงานก้อนนี้อยู่พอดี
@@ -985,25 +991,26 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
               {/* Homecare = ตารางกะ (วัน+เวลา+คน) · กายภาพ = ตารางนัดเข้าคอร์ส (นับ X/N ครั้ง) */}
               <section>
                 <h3>{isPhysio ? 'ตารางนัด' : 'ตารางกะ'}</h3>
-                <div className="visit-summary">
-                  <p className="muted">
-                    {bookedVisits === 0 ? (
-                      isPhysio ? 'ยังไม่ได้ลงนัด' : 'ยังไม่ได้นัดกะ'
-                    ) : isPhysio ? (
-                      <>
-                        นัดแล้ว <strong>{bookedVisits}</strong>
-                        {item.physio_sessions ? ` / ${item.physio_sessions}` : ''} ครั้ง
-                        {' · '}ไปแล้ว {doneVisits} ครั้ง
-                        {overQuota && (
-                          <span className="over-quota-flag">
-                            เกินแพ็กที่ซื้อ {bookedVisits - item.physio_sessions} ครั้ง
-                          </span>
-                        )}
-                      </>
-                    ) : (
-                      <>นัดไว้ <strong>{bookedVisits}</strong> กะ{' · '}ไปแล้ว {doneVisits} กะ</>
-                    )}
-                  </p>
+                {/* แผงสรุปเดียวกับบนสุดของตารางนัด (ผู้ใช้ขอ 16 พ.ย. 2569) — ใช้ไปแล้ว X / N + แถบ + วันหมดอายุ
+                    แพ็กกายภาพโชว์เสมอ (0 / 20 ก็บอกสิทธิ์ที่มี) · Homecare ยังไม่มีกะ = ข้อความเดิม */}
+                <div className="visit-summary pack-row">
+                  {packQuota?.sessions > 0 ? (
+                    /* มีเพดาน: กายภาพ = ครั้ง · Homecare = วันของรูปแบบบริการ (attended = วันที่ไปจริง) */
+                    <PackSummary
+                      plain
+                      used={isPhysio ? doneVisits : packQuota.attended}
+                      total={packQuota.sessions}
+                      unitWord={packQuota.unit ?? (isPhysio ? 'ครั้ง' : 'วัน')}
+                      expiresOn={packQuota?.expires_on ?? null}
+                      today={todayTH()}
+                    />
+                  ) : isPhysio && item.physio_sessions > 0 ? (
+                    <PackSummary plain used={doneVisits} total={item.physio_sessions} unitWord="ครั้ง" today={todayTH()} />
+                  ) : bookedVisits === 0 ? (
+                    <p className="muted">{isPhysio ? 'ยังไม่ได้ลงนัด' : 'ยังไม่ได้นัดกะ'}</p>
+                  ) : (
+                    <PackSummary plain used={doneVisits} total={bookedVisits} unitWord={isPhysio ? 'ครั้ง' : 'กะ'} today={todayTH()} />
+                  )}
                   <button className="btn" onClick={() => setVisitsOpen(true)}>
                     {terminal
                       ? (isPhysio ? 'ดูตารางนัด' : 'ดูตารางกะ')

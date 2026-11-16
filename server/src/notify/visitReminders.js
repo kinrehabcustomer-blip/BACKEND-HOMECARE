@@ -365,6 +365,56 @@ export async function recordVisitChange(tx, caseId, visitId, before, after, chan
   await inboxVisitChange(tx, { ...row, reason: cancelled ? reason : null });
 }
 
+/**
+ * ข้อความสำเร็จรูปถึงญาติ/ลูกค้า (data.family_message ของ family_change) — ผู้ใช้ขอ 16 พ.ย. 2569:
+ * "ข้อความแจ้งเลื่อนนัดกับแจ้งเปลี่ยนตัวนักกายภาพต้องไม่ใช่ข้อความเดียวกัน"
+ * ฝั่ง chat.kinorigin.com เป็นคนวาดข้อความ LINE และเคยมีแค่แบบ "ยกเลิก" กับ "เลื่อน" — เปลี่ยนคนจึงออกมาเป็น
+ * "แจ้งเลื่อนนัด จาก 15:00 เป็น 15:00" · ส่งข้อความที่เขียนเสร็จแล้วไปด้วย ฝั่ง chat ใช้ data.family_message ได้ตรงๆ
+ * (data.family_title = หัวข้อสั้น ไว้ทำ alt text / การ์ด)
+ */
+const ROLE_TH = { therapist: 'นักกายภาพบำบัด', occupational_therapist: 'นักกิจกรรมบำบัด', speech_therapist: 'นักแก้ไขการพูด' };
+const DOW_TH = ['อา.', 'จ.', 'อ.', 'พ.', 'พฤ.', 'ศ.', 'ส.'];
+const MON_TH = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
+const dayTH = (key) => {
+  if (!key) return '';
+  const d = new Date(`${key}T00:00:00Z`);
+  return `${DOW_TH[d.getUTCDay()]} ${d.getUTCDate()} ${MON_TH[d.getUTCMonth()]}`;
+};
+const slotTH = (p) => `${dayTH(p.date)}${p.start ? ` ${p.start}${p.end ? `–${p.end}` : ''} น.` : ''}`;
+const roleTH = (s) => ROLE_TH[s?.position] ?? 'ผู้ดูแล';
+const whoTH = (s) => (s?.name ? `คุณ${s.name}` : 'เจ้าหน้าที่');
+
+export function familyChangeText(change) {
+  const { kind, old: o, new: n } = change;
+  const staffChanged = (o.staff?.employee_id ?? null) !== (n.staff?.employee_id ?? null);
+  if (kind === 'cancelled') {
+    return {
+      title: 'แจ้งยกเลิกนัด',
+      message: [`❌ แจ้งยกเลิกนัดค่ะ`, `นัด: ${slotTH(o)}`, change.reason ? `เหตุผล: ${change.reason}` : null,
+        '', 'หากต้องการนัดวันใหม่ ตอบกลับในแชทนี้ได้เลยค่ะ 🙏'].filter((x) => x !== null).join('\n'),
+    };
+  }
+  if (kind === 'reassigned') {
+    const role = roleTH(n.staff ?? o.staff);
+    return {
+      title: `แจ้งเปลี่ยน${role}`,
+      message: [`🔄 แจ้งเปลี่ยน${role}ค่ะ`, `นัด: ${slotTH(n)} (วันและเวลาเดิม)`,
+        `จาก: ${whoTH(o.staff)} → ${whoTH(n.staff)}`,
+        `${role} (${whoTH(n.staff)}) จะไปถึงบ้าน${n.start ? `ประมาณ ${n.start} น.` : 'ตามเวลานัด'}`,
+        '', 'หากมีข้อสงสัย ตอบกลับในแชทนี้ได้เลยค่ะ 🙏'].join('\n'),
+    };
+  }
+  // moved — เลื่อนวัน/เวลา (ถ้าเปลี่ยนคนพร้อมกัน บอกด้วยอีกบรรทัด)
+  const role = roleTH(n.staff ?? o.staff);
+  return {
+    title: staffChanged ? `แจ้งเลื่อนนัดและเปลี่ยน${role}` : 'แจ้งเลื่อนนัด',
+    message: [`📅 แจ้งเลื่อนนัดค่ะ`, `จากเดิม: ${slotTH(o)}`, `เป็น: ${slotTH(n)}`,
+      staffChanged ? `เปลี่ยน${role}: ${whoTH(o.staff)} → ${whoTH(n.staff)}` : null,
+      `${role} (${whoTH(n.staff)}) จะไปถึงบ้าน${n.start ? `ประมาณ ${n.start} น.` : 'ตามเวลานัด'}`,
+      '', 'หากวันเวลาใหม่ไม่สะดวก ตอบกลับในแชทนี้ได้เลยค่ะ 🙏'].filter((x) => x !== null).join('\n'),
+  };
+}
+
 /** จองรายการแจ้งเลื่อน/ยกเลิกที่ยังไม่ส่ง → รวมเป็นหนึ่งรายการต่อนัด (ค่าเดิมจากรอบแรก ค่าใหม่จากรอบล่าสุด) พร้อมผู้รับ */
 export async function claimVisitChanges() {
   await ensureVisitChangeTable();
@@ -414,6 +464,10 @@ export async function claimVisitChanges() {
       family: info.family ?? [],
       change_id: r.change_id,
     };
+    // ข้อความถึงญาติ — ชื่อช่องขึ้นต้น family_ ชัดว่าไม่ใช่ข้อความของพนักงาน (payload staff_change ก็พก data ก้อนนี้ไปด้วย)
+    const text = familyChangeText(change);
+    change.family_title = text.title;
+    change.family_message = text.message;
     out.push(change);
     const people = [change.old.staff, change.new.staff].filter(
       (p, i, a) => p?.line_user_id && a.findIndex((q) => q?.employee_id === p.employee_id) === i,

@@ -22,6 +22,8 @@ export const formatSchema = z.object({
   category: z.enum(FORMAT_CATEGORIES, { errorMap: () => ({ message: 'หมวดหมู่ไม่ถูกต้อง' }) }).default('monthly'),
   graded: z.boolean().default(true), // false = เรทเดียวใช้ร่วมทุกเกรด (รายวัน/สัปดาห์)
   sort_order: z.number().int().optional(),
+  // จำนวนวันต่อรอบ — ล็อกการลงกะไม่ให้เกิน (16 พ.ย. 2569) · null = ไม่จำกัด · ไม่ส่ง = ใช้ค่าตั้งต้นจากชื่อ/หมวด
+  days: z.number().int().min(1, 'จำนวนวันต้องมากกว่า 0').max(366, 'จำนวนวันมากเกินไป').nullable().optional(),
 });
 export const formatUpdateSchema = formatSchema.partial();
 

@@ -4536,14 +4536,66 @@ if (process.env.RUN_DB_TESTS !== '1') {
       assert.equal(swap?.kind, 'reassigned');
       assert.deepEqual(swap.family, ['U-family-notify-test'], 'เปลี่ยนคนแจ้งญาติด้วย');
       assert.equal(swap.new.staff?.employee_id, 'EMP-0004');
+      assert.match(swap.family_message, /แจ้งเปลี่ยน/, 'ข้อความเปลี่ยนคนต้องไม่ใช่ข้อความเลื่อนนัด');
+      assert.doesNotMatch(swap.family_message, /เลื่อนนัด/);
       const endOnly = changes.find((x) => x.visit_id === v2.visit_id);
       assert.equal(endOnly?.kind, 'moved', 'แก้แค่เวลาจบนับเป็นเลื่อนเวลานัด');
       assert.equal(endOnly.new.end, '11:00');
+      assert.match(endOnly.family_message, /แจ้งเลื่อนนัด/);
       assert.deepEqual(endOnly.family, ['U-family-notify-test']);
 
       const queued = await sql.all(`SELECT visit_id, channel FROM visit_notification_outbox WHERE visit_id IN (:a, :b) AND channel = 'family'`,
         { a: v1.visit_id, b: v2.visit_id });
       assert.equal(queued.length, 2, 'เข้าคิวส่ง LINE ญาติทั้งสองนัด');
+    });
+
+    test('Homecare: ลงกะได้ไม่เกินจำนวนวันของรูปแบบบริการ · นับเป็นวัน (16 พ.ย. 2569)', async () => {
+      const { ensureFormatDays, defaultFormatDays } = await import('../src/packages/formatDays.js');
+      await ensureFormatDays();
+      assert.equal(defaultFormatDays({ name: 'รายเดือน 24 ชม. หยุด 4 วัน', category: 'monthly' }), 26);
+      assert.equal(defaultFormatDays({ name: 'รายเดือน 24 ชม. ไม่มีวันหยุด', category: 'monthly' }), 30);
+      assert.equal(defaultFormatDays({ name: 'รายวัน 12 ชม.', category: 'daily' }), null);
+
+      // รูปแบบใหม่ที่สร้างผ่าน API ได้จำนวนวันจากชื่อ — แล้วตั้งเป็น 3 วันให้ทดสอบเร็ว
+      const fmt = await call('POST', '/api/packages/formats', { name: 'ทดสอบรายเดือน หยุด 4 วัน', category: 'monthly', graded: true }, MANAGER);
+      assert.equal(fmt.status, 201);
+      assert.equal(fmt.body.days, 26);
+      const patched = await call('PATCH', `/api/packages/formats/${fmt.body.format_id}`, { days: 3 }, MANAGER);
+      assert.equal(patched.status, 200);
+      assert.equal(patched.body.days, 3);
+
+      const c = await call('POST', '/api/cases', { case_type: 'other', client_name: 'HC days lock' }, MANAGER);
+      const id = c.body.case_id;
+      await sql.run(`UPDATE cases SET assigned_to = 'EMP-0003', status = 'assigned', pkg_format_id = :f WHERE case_id = :id`,
+        { id, f: fmt.body.format_id });
+      const day = (n) => { const d = new Date(Date.now() + 7 * 3600e3); d.setUTCDate(d.getUTCDate() + 20 + n); return d.toISOString().slice(0, 10); };
+
+      const over = await call('POST', `/api/cases/${id}/visits/bulk`, { dates: [day(1), day(2), day(3), day(4)] }, MANAGER);
+      assert.equal(over.status, 409);
+      assert.match(over.body.error, /3 วัน/);
+      const ok = await call('POST', `/api/cases/${id}/visits/bulk`, { dates: [day(1), day(2), day(3)], planned_start: '08:00', planned_end: '20:00' }, MANAGER);
+      assert.equal(ok.status, 201);
+      // 24 ชม. แบ่งสองกะ: กะที่สองของวันเดิม (คนละเวลา) ไม่ใช่วันใหม่ — ลงได้
+      const night = await call('POST', `/api/cases/${id}/visits/bulk`, { dates: [day(1)], planned_start: '20:00', planned_end: '08:00' }, MANAGER);
+      assert.equal(night.status, 201);
+      assert.equal(night.body.added, 1);
+      assert.equal((await call('POST', `/api/cases/${id}/visits`, { visit_date: day(5) }, MANAGER)).status, 409, 'วันใหม่เกินแพ็ก');
+
+      // ย้ายกะกลางคืนของวันที่ 1 (วันนั้นยังมีกะกลางวันอยู่) ไปวันใหม่ = วันเพิ่ม → ไม่ได้
+      const nightVisit = night.body.visits.find((v) => v.planned_start === '20:00');
+      assert.equal((await call('POST', `/api/cases/${id}/visits/${nightVisit.visit_id}/move`, { visit_date: day(6) }, MANAGER)).status, 409);
+      // ย้ายกะของวันที่มีกะเดียว ไปวันใหม่ = จำนวนวันเท่าเดิม → ได้
+      const dayThree = ok.body.visits.find((v) => v.visit_date === day(3));
+      assert.equal((await call('POST', `/api/cases/${id}/visits/${dayThree.visit_id}/move`, { visit_date: day(7) }, MANAGER)).status, 200);
+
+      const quota = await call('GET', `/api/cases/${id}/physio-quota`, null, MANAGER);
+      assert.equal(quota.body.unit, 'วัน');
+      assert.equal(quota.body.sessions, 3);
+      assert.equal(quota.body.booked, 3);
+
+      // ตั้งเป็นไม่จำกัด = ลงต่อได้
+      assert.equal((await call('PATCH', `/api/packages/formats/${fmt.body.format_id}`, { days: null }, MANAGER)).status, 200);
+      assert.equal((await call('POST', `/api/cases/${id}/visits`, { visit_date: day(5) }, MANAGER)).status, 201);
     });
   });
 }

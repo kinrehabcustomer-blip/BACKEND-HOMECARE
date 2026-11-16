@@ -1,4 +1,5 @@
 import { sql, transaction } from '../db/index.js';
+import { ensureFormatDays, defaultFormatDays } from './formatDays.js';
 
 const NOW = `to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')`;
 
@@ -32,6 +33,7 @@ function discountOf(price, percent, amount) {
 
 /** ตารางเรททั้งหมด: เกรด + รูปแบบบริการ + ราคาแต่ละช่อง (หน้าเว็บเอาไปประกอบเป็นตาราง) */
 export async function getMatrix() {
+  await ensureFormatDays(); // formats[].days = จำนวนวันต่อรอบ (ล็อกการลงกะ)
   const [grades, formats, rates] = await Promise.all([
     sql.all('SELECT * FROM pkg_grades ORDER BY sort_order, grade_id'),
     sql.all('SELECT * FROM pkg_service_formats ORDER BY sort_order, format_id'),
@@ -83,21 +85,26 @@ export const removeGrade = (id) =>
 // ---------- รูปแบบบริการ ----------
 export const findFormat = (id) => sql.one('SELECT * FROM pkg_service_formats WHERE format_id = :id', { id });
 
-export function createFormat(input) {
+export async function createFormat(input) {
+  await ensureFormatDays();
+  const category = input.category ?? 'monthly';
   return sql.one(
-    `INSERT INTO pkg_service_formats (name, category, graded, sort_order)
-     VALUES (:name, :category, :graded, :sort_order) RETURNING *`,
+    `INSERT INTO pkg_service_formats (name, category, graded, sort_order, days)
+     VALUES (:name, :category, :graded, :sort_order, :days) RETURNING *`,
     {
       name: input.name,
-      category: input.category ?? 'monthly',
+      category,
       graded: input.graded ?? true,
       sort_order: input.sort_order ?? 0,
+      // ไม่ระบุ = เดาจากชื่อ/หมวด (รายเดือน 30 · หยุด N วัน = 30 − N · สัปดาห์ 7 · รายวันไม่จำกัด)
+      days: 'days' in input ? input.days : defaultFormatDays({ name: input.name, category }),
     },
   );
 }
 
 export async function updateFormat(id, input) {
-  const fields = ['name', 'category', 'graded', 'sort_order'].filter((c) => c in input);
+  await ensureFormatDays();
+  const fields = ['name', 'category', 'graded', 'sort_order', 'days'].filter((c) => c in input);
   if (!fields.length) return findFormat(id);
   const values = { format_id: id };
   for (const c of fields) values[c] = input[c] ?? null;
