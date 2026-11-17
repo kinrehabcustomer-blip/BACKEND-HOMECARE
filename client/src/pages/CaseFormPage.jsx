@@ -12,7 +12,7 @@ import StaffPicker from '../components/StaffPicker.jsx';
 import PatientCodeInput from '../components/PatientCodeInput.jsx';
 import { isPatientCode, caseCode } from '../lib/patientCode.js';
 import { PROCEDURE, isProcedure } from '../lib/addons.js';
-import { nextRoundDates, endDateFor, carriesOver, shiftPatterns, countDaysInRange } from '../lib/caseRounds.js';
+import { nextRoundDates, endDateFor, carriesOver, shiftPatterns, countDaysInRange, packQty, packUnit, scaleByQty } from '../lib/caseRounds.js';
 import { useCanSeeStaffPay } from '../auth.jsx';
 import { useScrollLock } from '../lib/scrollLock.js';
 import { formatPhone, formatPhoneInput } from '../lib/phone.js';
@@ -31,6 +31,9 @@ const BLANK = {
   pkg_format_id: '', pkg_grade_id: '', pkg_staff_tier: '', // [Homecare]
   pkg_english: false, // [Homecare/กายภาพ] พนักงานสื่อสารภาษาอังกฤษ — บวกค่าภาษาเข้า fee
   physio_package_id: '', // [กายภาพ]
+  /* จำนวนแพ็กที่ลูกค้าซื้อ (17 พ.ย. 2569) — รายเดือน × 2 = สองเดือน · แพ็กกายภาพ × 2 = จำนวนครั้ง/อายุสองเท่า
+     ค่าบริการ/ค่าจ้างในช่องด้านล่างคูณจำนวนแล้ว · server คูณเพดานวัน/ครั้งที่ลงนัดได้ให้เอง */
+  pkg_quantity: '1',
 
   // ตัวตนผู้รับบริการ (มาจากแฟ้ม patient / หรือกรอกเพื่อสร้างแฟ้มใหม่) — client_name/gender/age/medical_history คัดลอกเป็น snapshot ในเคส
   client_name: '', patient_gender: '', patient_age: '', medical_history: '',
@@ -119,7 +122,10 @@ const TERMINAL_STATUSES = ['closed', 'cancelled'];
 
 // ช่องตัวเลขต้องส่งเป็น number ไม่ใช่ string ไม่งั้น zod ปฏิเสธ
 const NUMERIC = ['fee', 'staff_pay', 'patient_age', 'weight_kg', 'height_cm', 'pkg_format_id', 'pkg_grade_id',
-  'physio_package_id', 'geo_lat', 'geo_lng', 'geofence_radius_m'];
+  'physio_package_id', 'pkg_quantity', 'geo_lat', 'geo_lng', 'geofence_radius_m'];
+
+/** ราคา/ค่าจ้างต่อแพ็ก × จำนวนแพ็ก — ปัดสตางค์แบบเดียวกับ server */
+const timesQty = (v, qty) => Math.round(Number(v) * qty * 100) / 100;
 
 /** ช่องว่างต้องส่งเป็น null ไม่ใช่ "" */
 const toPayload = (form) =>
@@ -304,14 +310,15 @@ export default function CaseFormPage() {
       if (!surcharge) merged.pkg_english = false; // ย้ายไปหมวดที่ไม่มีค่าภาษา ธงต้องไม่ค้าง
       // เปลี่ยนรูปแบบบริการ = ความยาวของบริการเปลี่ยน → วันสิ้นสุดตามจำนวนวันของหมวดใหม่
       // (เฉพาะตอนเปลี่ยนรูปแบบ ไม่ใช่ตอนเปลี่ยนเกรด/ระดับ — ไม่งั้นวันสิ้นสุดที่แก้เองจะถูกทับทุกครั้ง)
-      if ('pkg_format_id' in next) merged.end_date = endDateFor(merged.start_date, fmt?.category) ?? merged.end_date;
+      const qty = packQty(merged.pkg_quantity);
+      if ('pkg_format_id' in next) merged.end_date = endDateFor(merged.start_date, fmt?.category, qty) ?? merged.end_date;
       const gid = fmt?.graded ? (merged.pkg_grade_id === '' ? null : Number(merged.pkg_grade_id)) : null;
       if (fmt && merged.pkg_staff_tier && (!fmt.graded || gid)) {
         const r = lookupRate(fmt.format_id, gid, merged.pkg_staff_tier);
         if (r && r.available && r.customer_price != null) {
-          merged.fee = String((r.net_price ?? r.customer_price) + (merged.pkg_english ? surcharge : 0));
+          merged.fee = String(timesQty((r.net_price ?? r.customer_price) + (merged.pkg_english ? surcharge : 0), qty));
           // ค่าจ้างพนักงานคัดลอกมาคู่กันเสมอ — เป็นตัวตั้งของยอดที่พนักงานจะเห็นตอนปิดเคส
-          if (r.staff_pay != null) merged.staff_pay = String(r.staff_pay);
+          if (r.staff_pay != null) merged.staff_pay = String(timesQty(r.staff_pay, qty));
         }
       }
       return merged;
@@ -327,7 +334,9 @@ export default function CaseFormPage() {
     setForm((prev) => {
       const merged = { ...prev, pkg_english: on };
       if (prev.fee !== '' && add) {
-        merged.fee = String(Math.max(Number(prev.fee) + (on ? add : -add), 0));
+        // ค่าภาษาคิดต่อแพ็ก (ต่อเดือน/ต่อแพ็กกายภาพ) — ซื้อสองแพ็กบวกสองเท่า
+        const extra = timesQty(add, packQty(prev.pkg_quantity));
+        merged.fee = String(Math.max(Number(prev.fee) + (on ? extra : -extra), 0));
       }
       return merged;
     });
@@ -346,29 +355,36 @@ export default function CaseFormPage() {
   const physioEnglishFee = Number(selectedPhysio?.english_fee ?? 0);
 
   // ค่าตอบแทนพนักงานที่แพ็คเกจ/เรทซึ่งเลือกอยู่ตอนนี้กำหนดไว้ — ตัวตั้งของช่อง "ค่าจ้างพนักงาน"
-  const packagePay = isPhysio
+  const qty = packQty(form.pkg_quantity);
+  const packagePayPerPack = isPhysio
     ? selectedPhysio?.staff_pay ?? null
     : currentRate?.available
       ? currentRate.staff_pay ?? null
       : null;
+  // ซื้อหลายแพ็ก = ค่าตอบแทนตามแพ็กคูณจำนวน (server คิดสูตรเดียวกันใน payFromService)
+  const packagePay = packagePayPerPack == null ? null : timesQty(packagePayPerPack, qty);
   const pickedService = isPhysio ? Boolean(selectedPhysio) : Boolean(currentRate);
 
   /* ---------- แก้เคส: เปลี่ยนแพ็คเกจจากของเดิมไหม และจะกระทบอะไรบ้าง ---------- */
   const serviceLocked = isEdit && TERMINAL_STATUSES.includes(original?.status);
   const serviceChanged =
     isEdit && original != null &&
-    SERVICE_ID_FIELDS.some((f) => String(original[f] ?? '') !== String(form[f] ?? ''));
+    (SERVICE_ID_FIELDS.some((f) => String(original[f] ?? '') !== String(form[f] ?? ''))
+      || packQty(original.pkg_quantity) !== qty); // เปลี่ยนจำนวนแพ็ก = ค่าบริการ/ค่าจ้าง/ใบแจ้งหนี้เปลี่ยนตามเหมือนเปลี่ยนแพ็ก
 
   /** ชื่อบริการจากชุดตัวเลือก — ใช้ทั้งของเดิมและของใหม่ในกล่องยืนยัน */
   function serviceText(s) {
+    const n = packQty(s.pkg_quantity);
     if (s.physio_package_id !== '' && s.physio_package_id != null) {
       const p = physio.find((x) => x.physio_package_id === Number(s.physio_package_id));
-      return p ? `${p.name} (${p.sessions} ครั้ง)` : `แพ็คเกจกายภาพ #${s.physio_package_id}`;
+      const base = p ? `${p.name} (${p.sessions} ครั้ง)` : `แพ็คเกจกายภาพ #${s.physio_package_id}`;
+      return n > 1 ? `${base} × ${n} แพ็ก` : base;
     }
     if (s.pkg_format_id !== '' && s.pkg_format_id != null) {
       const f = matrix?.formats.find((x) => x.format_id === Number(s.pkg_format_id));
       const g = matrix?.grades.find((x) => x.grade_id === Number(s.pkg_grade_id));
-      return [f?.name ?? `รูปแบบ #${s.pkg_format_id}`, s.pkg_grade_id !== '' && g?.name, s.pkg_staff_tier]
+      return [f?.name ?? `รูปแบบ #${s.pkg_format_id}`, s.pkg_grade_id !== '' && g?.name, s.pkg_staff_tier,
+        n > 1 && `× ${n} ${packUnit(f?.category)}`]
         .filter(Boolean).join(' · ');
     }
     return 'ไม่ระบุบริการ';
@@ -427,10 +443,33 @@ export default function CaseFormPage() {
       // แพ็คใหม่ไม่มีค่าภาษา = ธงต้องไม่ค้าง · มี = ติ๊กค้างไว้ได้ แล้วบวกค่าภาษาของแพ็คใหม่ให้
       const english = Number(p?.english_fee ?? 0);
       if (!english) merged.pkg_english = false;
-      if (p && p.special_price != null) merged.fee = String(p.special_price + (merged.pkg_english ? english : 0));
-      if (p && p.staff_pay != null) merged.staff_pay = String(p.staff_pay);
+      const n = packQty(merged.pkg_quantity);
+      if (p && p.special_price != null) merged.fee = String(timesQty(p.special_price + (merged.pkg_english ? english : 0), n));
+      if (p && p.staff_pay != null) merged.staff_pay = String(timesQty(p.staff_pay, n));
       return merged;
     });
+  }
+
+  /**
+   * เปลี่ยนจำนวนแพ็กที่ซื้อ (17 พ.ย. 2569) -> ค่าบริการ/ค่าจ้างในช่องปรับตามสัดส่วน · วันสิ้นสุด (Homecare) ยืดตาม
+   * ปรับตามสัดส่วนจากตัวเลขในช่องตอนนี้ ไม่ใช่ตั้งใหม่จากตารางเรท — ราคาต่อแพ็กที่ตกลงพิเศษไว้จึงไม่ถูกทับ
+   * (ตกลงเดือนละ 28,000 แล้วซื้อสองเดือน = 56,000 ไม่ใช่เด้งกลับไปราคาตาราง)
+   */
+  function changeQty(raw) {
+    setForm((prev) => {
+      const before = packQty(prev.pkg_quantity);
+      const after = packQty(raw);
+      const next = { ...prev, pkg_quantity: raw };
+      if (after === before) return next;
+      next.fee = scaleByQty(prev.fee, before, after);
+      next.staff_pay = scaleByQty(prev.staff_pay, before, after);
+      const fmt = prev.service_kind === 'homecare'
+        ? matrix?.formats.find((f) => f.format_id === Number(prev.pkg_format_id))
+        : null;
+      next.end_date = endDateFor(prev.start_date, fmt?.category, after) ?? prev.end_date;
+      return next;
+    });
+    setFieldErrors((prev) => (prev.pkg_quantity ? { ...prev, pkg_quantity: undefined } : prev));
   }
 
   /**
@@ -678,7 +717,7 @@ export default function CaseFormPage() {
       ? matrix.formats.find((f) => f.format_id === renewSource.pkg_format_id)
       : null;
     setForm((prev) => {
-      const end = endDateFor(prev.start_date, fmt?.category);
+      const end = endDateFor(prev.start_date, fmt?.category, prev.pkg_quantity);
       if (!end || end === prev.end_date) return prev;
       const next = { ...prev, end_date: end };
       initial.current = JSON.stringify(next); // ค่าตั้งต้นของฟอร์ม ไม่ใช่ "ยังไม่บันทึก"
@@ -880,12 +919,36 @@ export default function CaseFormPage() {
 
   /* ราคาในตารางวันนี้ของบริการที่เลือกอยู่ — ค่าบริการที่คัดลอกมาเป็นราคารอบก่อน ซึ่งอาจเป็นราคาเก่า
      หรือราคาที่ตกลงพิเศษไว้ จึงไม่ทับให้เอง แค่บอกว่าต่างกันแล้วให้กดเลือก (เลือกแพ็คเกจใหม่ = ใช้ราคาตารางอยู่แล้ว) */
-  const listPrice = isPhysio
+  const unitListPrice = isPhysio
     ? selectedPhysio?.special_price != null ? selectedPhysio.special_price + (form.pkg_english ? physioEnglishFee : 0) : null
     : currentRate?.available && currentRate.customer_price != null
       ? (currentRate.net_price ?? currentRate.customer_price) + (form.pkg_english ? englishFee : 0)
       : null;
+  const listPrice = unitListPrice == null ? null : timesQty(unitListPrice, qty);
   const priceDiffers = Boolean(renewFrom) && listPrice != null && form.fee !== '' && Number(form.fee) !== listPrice;
+
+  /* ช่องจำนวนที่ซื้อ — โชว์เมื่อเลือกแพ็ก/รูปแบบแล้ว (เคสเดิมที่ซื้อหลายแพ็กแต่ยังไม่โหลดตารางก็ยังเห็น) */
+  const showQty = (isHomecare && Boolean(selectedFormat)) || (isPhysio && Boolean(selectedPhysio)) || qty > 1;
+  const qtyUnit = isPhysio ? 'แพ็ก' : packUnit(selectedFormat?.category);
+  /* สรุปสิ่งที่ได้เมื่อซื้อหลายแพ็ก — จำนวนวัน/ครั้งที่ลงนัดได้ อายุแพ็ก และราคาต่อแพ็ก × จำนวน */
+  const qtyHint = (() => {
+    if (qty <= 1) return null;
+    const price = unitListPrice != null ? `ราคา ${formatBaht(unitListPrice)} × ${qty} = ${formatBaht(timesQty(unitListPrice, qty))}` : null;
+    if (isPhysio && selectedPhysio) {
+      return [
+        `รวม ${selectedPhysio.sessions * qty} ครั้ง (${selectedPhysio.sessions} × ${qty})`,
+        selectedPhysio.duration_months && `ใช้ได้ ${selectedPhysio.duration_months * qty} เดือน`,
+        price,
+      ].filter(Boolean).join(' · ');
+    }
+    if (isHomecare && selectedFormat) {
+      return [
+        selectedFormat.days ? `ลงกะได้รวม ${selectedFormat.days * qty} วัน (${selectedFormat.days} × ${qty})` : null,
+        price,
+      ].filter(Boolean).join(' · ');
+    }
+    return null;
+  })();
 
   /* ลงกะได้เฉพาะคนที่อยู่ในเคส (กติกาเดียวกับหน้าลงกะ CaseVisits) — แบบกะของคนที่ไม่ได้ตามมาจึงลงให้ไม่ได้
      กะที่ไม่ระบุคน = ของผู้รับผิดชอบหลัก ลงได้เสมอ */
@@ -1155,9 +1218,10 @@ export default function CaseFormPage() {
 
       // ไม่มีช่องชื่อเคสแล้ว — ตั้งชื่ออัตโนมัติจากบริการที่เลือก + ชื่อผู้รับบริการ (ใช้สำหรับค้นหา)
       const gradeName = needGrade ? matrix?.grades.find((g) => g.grade_id === selGradeId)?.name : null;
+      const qtyPart = qty > 1 ? `× ${qty} ${isPhysio ? 'แพ็ก' : packUnit(selectedFormat?.category)}` : null;
       const serviceParts = isPhysio
-        ? [selectedPhysio?.name]
-        : [selectedFormat?.name, gradeName];
+        ? [selectedPhysio?.name, qtyPart]
+        : [selectedFormat?.name, gradeName, qtyPart];
       // ยังไม่รู้ชื่อผู้รับบริการ = ใช้ชื่อผู้ว่าจ้างต่อท้ายแทน เคสจะได้ค้นเจอด้วยชื่อคนที่โทรมาจอง
       const who = payload.client_name || payer?.name || newPayer?.name?.trim() || null;
       payload.title = [...serviceParts, who].filter(Boolean).join(' · ') || who;
@@ -1631,6 +1695,24 @@ export default function CaseFormPage() {
             </SearchSelect>
           </label>
           )}
+          {/* จำนวนที่ซื้อ (17 พ.ย. 2569) — รายเดือน 24 ชม. แต่ซื้อ 2 เดือน · รายสัปดาห์ซื้อ 2 สัปดาห์ · แพ็กกายภาพซื้อ 2 แพ็ก
+              ค่าบริการ/ค่าจ้าง/วันสิ้นสุดปรับให้ · ลงกะ/นัดได้ตามจำนวนรวม (server คูณเพดานให้) */}
+          {showQty && (
+            <label>จำนวนที่ซื้อ ({qtyUnit})
+              <input
+                type="number" min="1" max="24" step="1" inputMode="numeric"
+                name="pkg_quantity"
+                value={form.pkg_quantity}
+                disabled={serviceLocked}
+                aria-invalid={fieldErrors.pkg_quantity ? true : undefined}
+                onChange={(e) => changeQty(e.target.value)}
+              />
+              {fieldError('pkg_quantity')}
+            </label>
+          )}
+          {showQty && qtyHint && (
+            <p className="form-hint muted">{qtyHint}</p>
+          )}
           {/* เต็มแถว — ไม่งั้นช่องถัดไป (วันเริ่ม) ขึ้นมาแทรกคอลัมน์ที่เหลือข้างกล่องติ๊กบนจอสามคอลัมน์ */}
           {isHomecare && englishFee > 0 && (
             <label className="checkbox-row full-row">
@@ -1691,7 +1773,7 @@ export default function CaseFormPage() {
                   const fmt = prev.service_kind === 'homecare'
                     ? matrix?.formats.find((f) => f.format_id === Number(prev.pkg_format_id))
                     : null;
-                  return { ...prev, start_date: start, end_date: endDateFor(start, fmt?.category) ?? prev.end_date };
+                  return { ...prev, start_date: start, end_date: endDateFor(start, fmt?.category, prev.pkg_quantity) ?? prev.end_date };
                 });
                 setFieldErrors((prev) => (prev.start_date ? { ...prev, start_date: undefined } : prev));
               }}
@@ -1959,7 +2041,6 @@ export default function CaseFormPage() {
                 />
                 {fieldError(`addons.${i}.unit_price`)}
               </label>
-              <span className="addon-amount">{formatBaht(addonAmount(a))}</span>
               <button
                 type="button"
                 className="btn danger-ghost"
@@ -2011,7 +2092,6 @@ export default function CaseFormPage() {
                 />
                 {fieldError(`procedures.${i}.unit_price`)}
               </label>
-              <span className="addon-amount mono">{p.vn ?? 'VN ออกตอนบันทึก'}</span>
               <button
                 type="button"
                 className="btn danger-ghost"
@@ -2474,10 +2554,10 @@ export default function CaseFormPage() {
               {patternShifts > 0 && (
                 <p className="form-hint muted">
                   จะลงกะให้ {patternShifts} กะ หลังเปิดเคส · กะที่ชนกับงานอื่นของพนักงานยังลงให้ แต่จะแจ้งให้ตรวจ
-                  {isPhysio && selectedPhysio?.sessions != null && patternShifts > selectedPhysio.sessions && (
+                  {isPhysio && selectedPhysio?.sessions != null && patternShifts > selectedPhysio.sessions * qty && (
                     <>
                       <br />
-                      <LineIcon name="alert" className="text-ico" />เกินจำนวนครั้งของแพ็คเกจ ({selectedPhysio.sessions} ครั้ง)
+                      <LineIcon name="alert" className="text-ico" />เกินจำนวนครั้งของแพ็คเกจ ({selectedPhysio.sessions * qty} ครั้ง)
                       {' '}— เอาติ๊กบางแบบออก หรือลดวันสิ้นสุด
                     </>
                   )}

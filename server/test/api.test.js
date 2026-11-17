@@ -4597,5 +4597,347 @@ if (process.env.RUN_DB_TESTS !== '1') {
       assert.equal((await call('PATCH', `/api/packages/formats/${fmt.body.format_id}`, { days: null }, MANAGER)).status, 200);
       assert.equal((await call('POST', `/api/cases/${id}/visits`, { visit_date: day(5) }, MANAGER)).status, 201);
     });
+
+    test('ซื้อหลายแพ็ก (pkg_quantity): ราคาเต็ม/ค่าจ้าง/จำนวนครั้ง-วัน/อายุแพ็ก คูณตาม · ใบแจ้งหนี้เขียน × N (17 พ.ย. 2569)', async () => {
+      const { physio_package_id: pkgId } = await sql.one(
+        `INSERT INTO physio_packages (name, sessions, duration_months, original_price, special_price, staff_pay)
+         VALUES ('Qty pack', 2, 3, 12000, 10000, 4000) RETURNING physio_package_id`);
+      // หน้าเว็บส่ง fee ที่คูณจำนวนแล้ว · ค่าจ้างไม่ส่ง = server ดึงจากแพ็ก × จำนวน
+      const c = await call('POST', '/api/cases', { case_type: 'other', client_name: 'Qty physio', service_kind: 'physio',
+        physio_package_id: pkgId, pkg_quantity: 2, fee: 20000 }, MANAGER);
+      assert.equal(c.status, 201, JSON.stringify(c.body));
+      assert.equal(c.body.pkg_quantity, 2);
+      assert.equal(Number(c.body.staff_pay), 8000);
+      assert.equal(Number(c.body.service_list_price_snapshot), 24000);
+      assert.equal(Number(c.body.service_customer_price_snapshot), 20000);
+      assert.equal(Number(c.body.physio_sessions), 4, 'จำนวนครั้งรวมทุกแพ็ก');
+      assert.equal(Number(c.body.physio_package_sessions), 2);
+      assert.equal(Number(c.body.physio_duration_months), 6);
+
+      const quota = (await call('GET', `/api/cases/${c.body.case_id}/physio-quota`, null, MANAGER)).body;
+      assert.equal(quota.sessions, 4);
+      assert.equal(quota.duration_months, 6);
+
+      // ลงนัดได้ 4 ครั้ง (แพ็กเดียวได้แค่ 2)
+      await sql.run(`UPDATE cases SET assigned_to = 'EMP-0003', status = 'assigned' WHERE case_id = :id`, { id: c.body.case_id });
+      const day = (n) => { const d = new Date(Date.now() + 7 * 3600e3); d.setUTCDate(d.getUTCDate() + 40 + n); return d.toISOString().slice(0, 10); };
+      assert.equal((await call('POST', `/api/cases/${c.body.case_id}/visits/bulk`, { dates: [day(1), day(2), day(3), day(4)] }, MANAGER)).status, 201);
+      assert.equal((await call('POST', `/api/cases/${c.body.case_id}/visits`, { visit_date: day(5) }, MANAGER)).status, 409);
+
+      // ใบแจ้งหนี้: ยอดก่อนลด 24,000 ส่วนลด 4,000 · รายการบอกจำนวนแพ็ก
+      const draft = (await call('GET', `/api/invoices?case_id=${c.body.case_id}`, null, MANAGER)).body.data.find((i) => i.status === 'draft');
+      assert.equal(draft.amount, 24000);
+      assert.equal(draft.discount, 4000);
+      assert.match(draft.service_description, /× 2 แพ็ก \(รวม 4 ครั้ง\)/);
+
+      // ลดเหลือแพ็กเดียว: ค่าจ้างตามแพ็กลดตาม · ประวัติบอกจำนวนแพ็ก
+      const patched = await call('PATCH', `/api/cases/${c.body.case_id}`, { pkg_quantity: 1, fee: 10000 }, MANAGER);
+      assert.equal(patched.status, 200, JSON.stringify(patched.body));
+      assert.equal(Number(patched.body.staff_pay), 4000);
+      assert.equal(Number(patched.body.service_list_price_snapshot), 12000);
+      const events = (await call('GET', `/api/cases/${c.body.case_id}/events`, null, MANAGER)).body;
+      assert.ok(events.some((e) => /จำนวนแพ็ก: 2 → 1/.test(e.detail ?? '')));
+      // ใบร่างซิงก์ตาม: ยอดก่อนลด 12,000 ส่วนลด 2,000 · รายการไม่มี × แล้ว · ไม่ขึ้นป้ายแพ็คเกจไม่ตรง
+      const synced = (await call('GET', `/api/invoices?case_id=${c.body.case_id}`, null, MANAGER)).body.data.find((i) => i.status === 'draft');
+      assert.equal(synced.amount, 12000);
+      assert.equal(synced.discount, 2000);
+      assert.doesNotMatch(synced.service_description, /×/);
+      assert.equal(synced.service_stale, false);
+
+      // ใบที่ซิงก์ไม่ได้ (แบ่งมัดจำแล้ว) + แก้แค่จำนวนแพ็ก (ราคาเท่าเดิม) = ขึ้นป้ายแพ็คเกจไม่ตรง
+      await call('POST', `/api/invoices/${synced.invoice_id}/billing-plan`, { mode: 'deposit', deposit_amount: 1000 }, MANAGER);
+      assert.equal((await call('PATCH', `/api/cases/${c.body.case_id}`, { pkg_quantity: 2 }, MANAGER)).status, 200);
+      const parts = (await call('GET', `/api/invoices?case_id=${c.body.case_id}`, null, MANAGER)).body.data.filter((i) => i.status !== 'cancelled');
+      assert.ok(parts.length >= 1 && parts.every((i) => i.service_stale), 'ใบงวดต้องขึ้นแพ็คเกจไม่ตรงเมื่อจำนวนแพ็กเปลี่ยน');
+
+      // ไม่ส่งจำนวนมา = 1 · เกินเพดาน = 400
+      const one = await call('POST', '/api/cases', { case_type: 'other', client_name: 'Qty default', service_kind: 'physio', physio_package_id: pkgId }, MANAGER);
+      assert.equal(one.body.pkg_quantity, 1);
+      assert.equal(Number(one.body.staff_pay), 4000);
+      assert.equal((await call('POST', '/api/cases', { case_type: 'other', client_name: 'Qty over', pkg_quantity: 25 }, MANAGER)).status, 400);
+
+      // Homecare: เพดานวันของรูปแบบ × จำนวน
+      const fmt = await call('POST', '/api/packages/formats', { name: 'ทดสอบรายสัปดาห์ qty', category: 'weekly', graded: false }, MANAGER);
+      await call('PATCH', `/api/packages/formats/${fmt.body.format_id}`, { days: 2 }, MANAGER);
+      const hc = await call('POST', '/api/cases', { case_type: 'other', client_name: 'Qty homecare', pkg_quantity: 2 }, MANAGER);
+      await sql.run(`UPDATE cases SET assigned_to = 'EMP-0003', status = 'assigned', pkg_format_id = :f WHERE case_id = :id`,
+        { id: hc.body.case_id, f: fmt.body.format_id });
+      const hq = (await call('GET', `/api/cases/${hc.body.case_id}/physio-quota`, null, MANAGER)).body;
+      assert.equal(hq.unit, 'วัน');
+      assert.equal(hq.sessions, 4);
+      assert.equal((await call('POST', `/api/cases/${hc.body.case_id}/visits/bulk`, { dates: [day(1), day(2), day(3), day(4)] }, MANAGER)).status, 201);
+      assert.equal((await call('POST', `/api/cases/${hc.body.case_id}/visits`, { visit_date: day(5) }, MANAGER)).status, 409);
+    });
+  });
+
+  /* ---------- การเงินของเคสที่ซื้อหลายแพ็ก (cases.pkg_quantity · 17 พ.ย. 2569) ----------
+     ไล่ทุกจุดที่เงินไหลผ่าน: เปิดเคส (ราคา/ค่าจ้างคิดจากตาราง) · ใบแจ้งหนี้ (เต็ม/มัดจำ/รายครั้ง/รวมใบ) · รับเงิน
+     ใบลดหนี้ · ปล่อยค่าจ้าง · แก้จำนวนหลังออกใบ/หลังปล่อยค่าจ้าง/หลังปิดเคส · แก้ราคาแพ็กทีหลัง · สิทธิ์ HR */
+  describe('การเงิน: ซื้อหลายแพ็ก — เปิดเคส · ใบแจ้งหนี้ · รับเงิน · ค่าจ้าง', () => {
+    async function send(method, path, body, who = MANAGER) {
+      const res = await fetch(`${base}${path}`, {
+        method,
+        headers: { 'content-type': 'application/json', cookie: `${COOKIE_NAME}=${signToken(who)}` },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+      const text = await res.text();
+      let data;
+      try { data = JSON.parse(text); } catch { data = text; }
+      return { status: res.status, body: data };
+    }
+    const ok = async (method, path, body, who = MANAGER, expected = 200) => {
+      const r = await send(method, path, body, who);
+      assert.equal(r.status, expected, `${method} ${path}: ${JSON.stringify(r.body)}`);
+      return r.body;
+    };
+    const openCase = (body, who = MANAGER) => ok('POST', '/api/cases', { case_type: 'other', ...body }, who, 201);
+    const invoicesOf = async (caseId) =>
+      (await ok('GET', `/api/invoices?case_id=${caseId}`)).data.filter((v) => v.status !== 'cancelled');
+    const draftOf = async (caseId) => (await invoicesOf(caseId)).find((v) => v.status === 'draft');
+    const invoice = (id) => ok('GET', `/api/invoices/${id}`);
+    const pay = (id, body = {}) => ok('POST', `/api/invoices/${id}/pay`, { request_id: randomUUID(), ...body });
+    const release = (caseId, amount, expected = 201) =>
+      ok('POST', `/api/cases/${caseId}/pay/release`, { request_id: randomUUID(), amount }, MANAGER, expected);
+    const physioPack = async (fields) => (await sql.one(
+      `INSERT INTO physio_packages (name, sessions, duration_months, original_price, special_price, staff_pay, english_fee)
+       VALUES (:name, :sessions, :months, :original, :special, :pay, :english) RETURNING physio_package_id`,
+      { months: null, original: null, english: null, ...fields },
+    )).physio_package_id;
+    const money = (n) => Math.round(Number(n) * 100) / 100;
+
+    let monthly; // รูปแบบรายเดือนทดสอบ + เรท CG 30,000 ลด 2,000 ค่าจ้าง 18,000
+    before(async () => {
+      const fmt = await ok('POST', '/api/packages/formats', { name: 'ทดสอบเงิน รายเดือน', category: 'monthly', graded: false }, MANAGER, 201);
+      monthly = fmt.format_id;
+      await sql.run(
+        `INSERT INTO pkg_rates (format_id, grade_id, staff_tier, customer_price, discount_amount, staff_pay)
+         VALUES (:f, NULL, 'CG', 30000, 2000, 18000)`,
+        { f: monthly },
+      );
+    });
+
+    test('Homecare รายเดือน × 2 ไม่กรอกราคา: ราคา/ส่วนลด/ค่าจ้างคิดจากเรท × 2 · เก็บเต็มจำนวน · ปล่อยค่าจ้างได้ไม่เกินยอดรวม', async () => {
+      const c = await openCase({ client_name: 'Fin HC x2', service_kind: 'homecare', pkg_format_id: monthly, pkg_staff_tier: 'CG', pkg_quantity: 2 });
+      assert.equal(c.pkg_quantity, 2);
+      assert.equal(money(c.service_list_price_snapshot), 60000);
+      assert.equal(money(c.service_customer_price_snapshot), 56000, '(30,000 − 2,000) × 2');
+      assert.equal(money(c.staff_pay), 36000, 'ค่าจ้าง 18,000 × 2');
+
+      const draft = await draftOf(c.case_id);
+      assert.equal(draft.amount, 60000);
+      assert.equal(draft.discount, 4000);
+      assert.equal(draft.total, 56000);
+      assert.match(draft.service_description, /CG · × 2 เดือน/);
+      assert.equal(draft.fee_stale, false);
+
+      await ok('POST', `/api/invoices/${draft.invoice_id}/billing-plan`, { mode: 'full' });
+      await ok('POST', `/api/invoices/${draft.invoice_id}/issue`, {});
+      await pay(draft.invoice_id, { amount: 56000 });
+      assert.equal((await invoice(draft.invoice_id)).status, 'paid');
+
+      await ok('POST', `/api/cases/${c.case_id}/assign`, { employee_id: FIELD.employee_id, force: true });
+      await release(c.case_id, 20000);
+      await release(c.case_id, 16000);
+      assert.equal((await casesRepo.payStatus(c.case_id)).released, 36000);
+      await release(c.case_id, 1, 400); // เกินยอดค่าจ้างรวมของสองเดือน
+    });
+
+    test('ราคาต่อรองเอง: fee ที่ส่งมาไม่ถูกคูณซ้ำ · ส่วนลดบนใบ = ราคาเต็ม × 2 − ราคาที่ตกลง', async () => {
+      const c = await openCase({ client_name: 'Fin HC deal', service_kind: 'homecare', pkg_format_id: monthly, pkg_staff_tier: 'CG',
+        pkg_quantity: 2, fee: 50000, staff_pay: 30000 });
+      assert.equal(money(c.fee), 50000);
+      assert.equal(money(c.service_customer_price_snapshot), 50000);
+      assert.equal(money(c.staff_pay), 30000, 'ค่าจ้างที่ผู้จัดการกรอกเองไม่ถูกคูณ');
+      const draft = await draftOf(c.case_id);
+      assert.equal(draft.amount, 60000);
+      assert.equal(draft.discount, 10000);
+      assert.equal(draft.total, 50000);
+    });
+
+    test('แพ็กกายภาพ × 2 พร้อมค่าภาษาอังกฤษ: ค่าภาษาคิดต่อแพ็ก · ราคาเต็ม/ราคาขายรวมค่าภาษา × 2', async () => {
+      const pkg = await physioPack({ name: 'Fin EN pack', sessions: 5, original: 12000, special: 10000, pay: 4000, english: 500 });
+      const c = await openCase({ client_name: 'Fin EN', service_kind: 'physio', physio_package_id: pkg, pkg_english: true, pkg_quantity: 2 });
+      assert.equal(money(c.service_list_price_snapshot), 25000, '(12,000 + 500) × 2');
+      assert.equal(money(c.service_customer_price_snapshot), 21000, '(10,000 + 500) × 2');
+      assert.equal(money(c.staff_pay), 8000);
+      const draft = await draftOf(c.case_id);
+      assert.equal(draft.total, 21000);
+      assert.equal(draft.discount, 4000);
+      assert.match(draft.service_description, /× 2 แพ็ก \(รวม 10 ครั้ง\) · ภาษาอังกฤษ/);
+    });
+
+    test('แบ่งมัดจำแล้วแก้จำนวนแพ็ก: ใบงวดไม่ถูกแก้ยอดเอง แต่ขึ้นป้ายยอดไม่ตรง + แพ็คเกจไม่ตรง', async () => {
+      const c = await openCase({ client_name: 'Fin deposit', service_kind: 'homecare', pkg_format_id: monthly, pkg_staff_tier: 'CG',
+        pkg_quantity: 3, fee: 84000 });
+      const draft = await draftOf(c.case_id);
+      await ok('POST', `/api/invoices/${draft.invoice_id}/billing-plan`, { mode: 'deposit', deposit_amount: 20000 });
+      const plan = await invoicesOf(c.case_id);
+      const deposit = plan.find((v) => v.billing_kind === 'deposit');
+      const balance = plan.find((v) => v.billing_kind === 'balance');
+      assert.equal(deposit.total + balance.total, 84000);
+      await pay(deposit.invoice_id, { amount: 20000 });
+
+      // ลูกค้าขอเพิ่มเป็น 4 เดือน
+      await ok('PATCH', `/api/cases/${c.case_id}`, { pkg_quantity: 4, fee: 112000 });
+      const after = await invoicesOf(c.case_id);
+      const dep2 = after.find((v) => v.invoice_id === deposit.invoice_id);
+      const bal2 = after.find((v) => v.invoice_id === balance.invoice_id);
+      assert.equal(dep2.total, deposit.total, 'ใบมัดจำที่รับเงินแล้วไม่ถูกแก้ยอด');
+      assert.equal(bal2.total, balance.total, 'ใบงวดไม่ซิงก์ตามเคสเอง');
+      for (const v of [dep2, bal2]) {
+        assert.equal(v.fee_stale, true, `${v.billing_kind}: ยอดทั้งแผนไม่ตรงกับเคสแล้ว`);
+        assert.equal(v.service_stale, true, `${v.billing_kind}: จำนวนแพ็กเปลี่ยนหลังออกใบ`);
+      }
+    });
+
+    test('ใบชำระแล้ว + แก้แค่จำนวนแพ็ก (ราคาเท่าเดิม = แถมเดือน): ป้ายแพ็คเกจไม่ตรงขึ้น · รับทราบแล้วหาย · ยอดเงินไม่ขยับ', async () => {
+      const c = await openCase({ client_name: 'Fin free month', service_kind: 'homecare', pkg_format_id: monthly, pkg_staff_tier: 'CG',
+        pkg_quantity: 1, fee: 28000 });
+      const draft = await draftOf(c.case_id);
+      await ok('POST', `/api/invoices/${draft.invoice_id}/billing-plan`, { mode: 'full' });
+      await pay(draft.invoice_id, { amount: 28000 });
+
+      await ok('PATCH', `/api/cases/${c.case_id}`, { pkg_quantity: 2, fee: 28000 });
+      let v = await invoice(draft.invoice_id);
+      assert.equal(v.status, 'paid');
+      assert.equal(v.total, 28000);
+      assert.equal(v.fee_stale, false, 'ยอดเงินยังตรงกับเคส');
+      assert.equal(v.service_stale, true);
+      await ok('POST', `/api/invoices/${draft.invoice_id}/acknowledge-service`, {});
+      v = await invoice(draft.invoice_id);
+      assert.equal(v.service_stale, false);
+    });
+
+    test('ลูกค้ายกเลิกหนึ่งในสองแพ็กหลังจ่ายแล้ว: ลดหนี้ครึ่งหนึ่งพร้อมคืนเงิน · ยอดสุทธิของใบลดตาม', async () => {
+      const pkg = await physioPack({ name: 'Fin refund pack', sessions: 4, special: 8000, pay: 3000 });
+      const c = await openCase({ client_name: 'Fin refund', service_kind: 'physio', physio_package_id: pkg, pkg_quantity: 2, fee: 16000 });
+      const draft = await draftOf(c.case_id);
+      await ok('POST', `/api/invoices/${draft.invoice_id}/billing-plan`, { mode: 'full' });
+      await ok('POST', `/api/invoices/${draft.invoice_id}/issue`, {});
+      await pay(draft.invoice_id, { amount: 16000 });
+      await ok('POST', `/api/invoices/${draft.invoice_id}/adjustments`, {
+        kind: 'credit', amount: 8000, reason: 'ยกเลิกแพ็กที่สอง', refund: { method: 'โอนคืน' },
+      }, MANAGER, 201);
+      const v = await invoice(draft.invoice_id);
+      assert.equal(v.net_total, 8000);
+
+      // ลดเหลือแพ็กเดียวในเคส: ค่าจ้างตามแพ็กลดเป็น 3,000 · โควตาเหลือ 4 ครั้ง
+      const patched = await ok('PATCH', `/api/cases/${c.case_id}`, { pkg_quantity: 1, fee: 8000 });
+      assert.equal(money(patched.staff_pay), 3000);
+      assert.equal((await ok('GET', `/api/cases/${c.case_id}/physio-quota`)).sessions, 4);
+    });
+
+    test('ปล่อยค่าจ้างไปแล้ว: ลดจำนวนแพ็กจนค่าจ้างต่ำกว่ายอดที่ปล่อย = ไม่ได้ · เคสปิดแล้วแก้จำนวนไม่ได้', async () => {
+      const pkg = await physioPack({ name: 'Fin paid pack', sessions: 4, special: 8000, pay: 3000 });
+      const c = await openCase({ client_name: 'Fin released', service_kind: 'physio', physio_package_id: pkg, pkg_quantity: 2, fee: 16000 });
+      assert.equal(money(c.staff_pay), 6000);
+      await ok('POST', `/api/cases/${c.case_id}/assign`, { employee_id: FIELD.employee_id, force: true });
+      await release(c.case_id, 4000);
+
+      const refused = await send('PATCH', `/api/cases/${c.case_id}`, { pkg_quantity: 1, fee: 8000 });
+      assert.equal(refused.status, 409);
+      assert.match(refused.body.error, /ต่ำกว่ายอดที่ปล่อยไปแล้ว/);
+      const still = await casesRepo.findById(c.case_id);
+      assert.equal(still.pkg_quantity, 2, 'ถูกปฏิเสธทั้งคำขอ จำนวนแพ็กไม่เปลี่ยน');
+      assert.equal(money(still.fee), 16000);
+
+      // ระบุค่าจ้างเองให้ไม่ต่ำกว่าที่ปล่อย = ลดได้
+      const reduced = await ok('PATCH', `/api/cases/${c.case_id}`, { pkg_quantity: 1, fee: 8000, staff_pay: 4000 });
+      assert.equal(reduced.pkg_quantity, 1);
+      assert.equal(money(reduced.staff_pay), 4000);
+
+      await ok('POST', `/api/cases/${c.case_id}/close`, {});
+      const locked = await send('PATCH', `/api/cases/${c.case_id}`, { pkg_quantity: 2 });
+      assert.equal(locked.status, 409);
+      assert.match(locked.body.error, /จำนวนแพ็ก/);
+      // ฟอร์มเต็มที่ส่งจำนวนเดิมกลับมา (แก้แค่หมายเหตุ) ยังผ่าน
+      await ok('PATCH', `/api/cases/${c.case_id}`, { pkg_quantity: 1, note: 'หลังปิด' });
+    });
+
+    test('ค่าจ้างพิเศษของผู้จัดการ: HR แก้หมายเหตุไม่แตะ · HR แก้จำนวนแพ็ก = คิดใหม่ตามแพ็ก × จำนวน (กติกาเดียวกับเปลี่ยนแพ็ก)', async () => {
+      const pkg = await physioPack({ name: 'Fin HR pack', sessions: 4, special: 8000, pay: 3000 });
+      const c = await openCase({ client_name: 'Fin HR', service_kind: 'physio', physio_package_id: pkg, pkg_quantity: 2, fee: 16000, staff_pay: 7000 });
+      assert.equal(money(c.staff_pay), 7000);
+      await ok('PATCH', `/api/cases/${c.case_id}`, { pkg_quantity: 2, note: 'HR แก้หมายเหตุ' }, HR);
+      assert.equal(money((await casesRepo.findById(c.case_id)).staff_pay), 7000, 'จำนวนเท่าเดิม = ค่าจ้างพิเศษคงอยู่');
+      const hrView = await ok('PATCH', `/api/cases/${c.case_id}`, { pkg_quantity: 3, fee: 24000 }, HR);
+      assert.equal(hrView.staff_pay, undefined, 'HR ไม่เห็นค่าจ้าง');
+      assert.equal(money((await casesRepo.findById(c.case_id)).staff_pay), 9000, '3,000 × 3');
+    });
+
+    test('ใบรายครั้ง (แตกตามกะ) ของแพ็ก × 2: ราคาต่อครั้ง = ยอดรวม ÷ นัดทั้งหมด · สองใบรวมกันเท่ายอดเคสพอดี', async () => {
+      const pkg = await physioPack({ name: 'Fin visits pack', sessions: 3, special: 6000, pay: 2000 });
+      const c = await openCase({ client_name: 'Fin visits', service_kind: 'physio', physio_package_id: pkg, pkg_quantity: 2, fee: 12000 });
+      const draft = await draftOf(c.case_id);
+      assert.equal((await send('DELETE', `/api/invoices/${draft.invoice_id}`)).status, 200);
+      const days = ['2026-03-02', '2026-03-03', '2026-03-04', '2026-03-05', '2026-03-06', '2026-03-07'];
+      for (const d of days) {
+        await sql.run(
+          `INSERT INTO case_visits (case_id, visit_date, status, check_in_at, check_out_at)
+           VALUES (:id, :d, 'done', (:d || ' 09:00:00+07')::timestamptz, (:d || ' 10:00:00+07')::timestamptz)`,
+          { id: c.case_id, d },
+        );
+      }
+      const first = await ok('POST', '/api/invoices', { case_id: c.case_id, basis: 'visits', to: '2026-03-03' }, MANAGER, 201);
+      assert.equal(first.items.length, 2);
+      assert.equal(first.items[0].unit_price, 2000, '12,000 ÷ 6 นัด');
+      assert.equal(first.total, 4000);
+      await ok('POST', `/api/invoices/${first.invoice_id}/billing-plan`, { mode: 'full' });
+      await ok('POST', `/api/invoices/${first.invoice_id}/issue`, {});
+      const rest = await ok('POST', '/api/invoices', { case_id: c.case_id, basis: 'visits' }, MANAGER, 201);
+      assert.equal(rest.items.length, 4);
+      assert.equal(first.total + rest.total, 12000);
+    });
+
+    test('แพ็กกายภาพ × 2 รวมในใบ Homecare: บรรทัดในใบเป็นราคารวมสองแพ็ก พร้อมบอกจำนวน · ยอดใบ = Homecare + กายภาพ', async () => {
+      await ok('POST', '/api/patients', { patient_id: 'KN690399101', name: 'การเงินรวมใบ' }, MANAGER, 201);
+      const me = { patient_id: 'KN690399101', client_name: 'การเงินรวมใบ' };
+      const pkg = await physioPack({ name: 'คอร์สเสริม', sessions: 5, special: 9000, pay: 3000 });
+      const home = await openCase({ ...me, service_kind: 'homecare', fee: 30000 });
+      const addon = await openCase({ ...me, physio_package_id: pkg, pkg_quantity: 2, fee: 18000, addon_of: home.case_id, bill_with_parent: true });
+      assert.equal(money(addon.staff_pay), 6000);
+      const draft = await draftOf(home.case_id);
+      assert.equal(draft.total, 48000);
+      const line = draft.addons.find((a) => a.ref === addon.case_id);
+      assert.equal(line.unit_price, 18000);
+      assert.match(line.name, /คอร์สเสริม · 5 ครั้ง × 2 แพ็ก \(รวม 10 ครั้ง\)/);
+      assert.equal(draft.fee_stale, false);
+
+      // ลดแพ็กเสริมเหลือหนึ่ง → ใบร่างของ Homecare ตาม
+      await ok('PATCH', `/api/cases/${addon.case_id}`, { pkg_quantity: 1, fee: 9000 });
+      const after = await draftOf(home.case_id);
+      assert.equal(after.total, 39000);
+      assert.doesNotMatch(after.addons.find((a) => a.ref === addon.case_id).name, /×/);
+    });
+
+    test('แก้ราคาแพ็กทีหลัง: เคสหลายแพ็กที่ขายราคาตามแพ็กปรับราคาเต็ม × จำนวน · ยอดที่ลูกค้าจ่ายเท่าเดิม · เคสต่อรองราคาไม่แตะ', async () => {
+      const pkg = await physioPack({ name: 'Fin reprice', sessions: 4, original: 12000, special: 10000, pay: 3000 });
+      const same = await openCase({ client_name: 'Fin reprice same', service_kind: 'physio', physio_package_id: pkg, pkg_quantity: 2, fee: 20000 });
+      const deal = await openCase({ client_name: 'Fin reprice deal', service_kind: 'physio', physio_package_id: pkg, pkg_quantity: 2, fee: 19000 });
+      assert.equal((await draftOf(same.case_id)).discount, 4000);
+
+      // เลิกโปร: ราคาเต็ม 10,000 = ราคาขาย
+      await ok('PATCH', `/api/physio/packages/${pkg}`, { original_price: 10000, special_price: 10000, discount_amount: null, discount_percent: null });
+      const s = await casesRepo.findById(same.case_id);
+      assert.equal(money(s.service_list_price_snapshot), 20000, '10,000 × 2');
+      assert.equal(money(s.service_customer_price_snapshot), 20000);
+      const sd = await draftOf(same.case_id);
+      assert.equal(sd.total, 20000);
+      assert.equal(sd.discount, 0, 'ไม่มีส่วนลดค้างจากโปรเก่า');
+      const d = await casesRepo.findById(deal.case_id);
+      assert.equal(money(d.service_list_price_snapshot), 24000, 'เคสราคาต่อรองคงราคาเต็มเดิม');
+    });
+
+    test('ต่อเคสรอบใหม่แบบหลายแพ็ก: รอบใหม่คิดเงิน/โควตาของตัวเอง ไม่ปนรอบก่อน', async () => {
+      const pkg = await physioPack({ name: 'Fin renew', sessions: 4, special: 8000, pay: 3000 });
+      const r1 = await openCase({ client_name: 'Fin renew', service_kind: 'physio', physio_package_id: pkg, pkg_quantity: 1, fee: 8000 });
+      const r2 = await openCase({ client_name: 'Fin renew', service_kind: 'physio', physio_package_id: pkg, pkg_quantity: 3, fee: 24000, renewed_from: r1.case_id });
+      assert.equal(r2.round_no, 2);
+      assert.equal(money(r2.staff_pay), 9000);
+      assert.equal((await draftOf(r2.case_id)).total, 24000);
+      assert.equal((await draftOf(r1.case_id)).total, 8000);
+      assert.equal((await ok('GET', `/api/cases/${r2.case_id}/physio-quota`)).sessions, 12);
+      assert.equal((await ok('GET', `/api/cases/${r1.case_id}/physio-quota`)).sessions, 4);
+    });
   });
 }

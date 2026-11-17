@@ -1,5 +1,6 @@
 import { sql } from '../db/index.js';
 import { ensureFormatDays } from '../packages/formatDays.js';
+import { ensureAddonLink } from './addonLink.js';
 
 /**
  * สิทธิ์แพ็กกายภาพ — ซื้อกี่ครั้ง ลงนัดแล้วกี่ครั้ง และใช้ได้ถึงวันไหน (ดร.ธงชัย 26 ต.ค. 2569)
@@ -12,12 +13,15 @@ import { ensureFormatDays } from '../packages/formatDays.js';
  * แพ็กที่ไม่ได้ตั้งอายุไว้ (duration_months ว่าง) = ไม่ตรวจวันหมดอายุ ตรวจแค่จำนวนครั้ง
  * เคส Homecare (ไม่มีแพ็กกายภาพ) คืน null — ไม่มีโควตาให้ตรวจ
  */
+/* ซื้อหลายแพ็ก (cases.pkg_quantity · 17 พ.ย. 2569) = เพดานคูณตาม — รายเดือน 30 วัน × 2 = 60 วัน
+   แพ็กกายภาพ 10 ครั้ง 3 เดือน × 2 = 20 ครั้ง ใช้ได้ 6 เดือน */
 export async function physioQuota(caseId, db = sql) {
   await ensureFormatDays();
+  if (db === sql) await ensureAddonLink(); // ผู้เรียกที่ส่ง tx มาเรียกผ่าน repo ที่เตรียมคอลัมน์ไว้แล้ว
   /* Homecare (16 พ.ย. 2569): เพดาน = จำนวนวันของรูปแบบบริการ · นับเป็น "วัน" (วันละหลายกะนับหนึ่ง)
      ใช้ช่องเดียวกับกายภาพ (sessions/booked/attended/remaining) หน้าเว็บจะได้ใช้แผงสรุป/ตัวล็อกชุดเดียวกัน · unit บอกหน่วย */
   const hc = await db.one(
-    `SELECT f.days,
+    `SELECT f.days * c.pkg_quantity AS days,
             (SELECT COUNT(DISTINCT v.visit_date) FROM case_visits v WHERE v.case_id = c.case_id AND v.status <> 'cancelled')::int AS booked,
             (SELECT COUNT(DISTINCT v.visit_date) FROM case_visits v WHERE v.case_id = c.case_id AND v.check_in_at IS NOT NULL)::int AS attended
      FROM cases c JOIN pkg_service_formats f ON f.format_id = c.pkg_format_id
@@ -32,7 +36,8 @@ export async function physioQuota(caseId, db = sql) {
     };
   }
   const row = await db.one(
-    `SELECT c.case_id, c.start_date, pp.sessions, pp.duration_months,
+    `SELECT c.case_id, c.start_date, pp.sessions * c.pkg_quantity AS sessions,
+            pp.duration_months * c.pkg_quantity AS duration_months,
             (SELECT COUNT(*) FROM case_visits v WHERE v.case_id = c.case_id AND v.status <> 'cancelled')::int AS booked,
             (SELECT COUNT(*) FROM case_visits v WHERE v.case_id = c.case_id AND v.check_in_at IS NOT NULL)::int AS attended,
             (SELECT MIN(v.visit_date) FROM case_visits v WHERE v.case_id = c.case_id AND v.status <> 'cancelled') AS first_visit

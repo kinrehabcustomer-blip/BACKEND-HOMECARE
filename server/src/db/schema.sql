@@ -590,6 +590,12 @@ ALTER TABLE cases ADD COLUMN IF NOT EXISTS service_kind TEXT CHECK (service_kind
 ALTER TABLE cases ADD COLUMN IF NOT EXISTS physio_package_id INTEGER
   REFERENCES physio_packages (physio_package_id) ON DELETE SET NULL;
 
+-- จำนวนแพ็กที่ลูกค้าซื้อในเคสนี้ (17 พ.ย. 2569) — รายเดือน 24 ชม. × 2 = สองเดือน · แพ็กกายภาพ 10 ครั้ง × 2 = 20 ครั้ง
+-- ราคา/ค่าจ้าง/จำนวนวันหรือครั้งที่ลงนัดได้ คูณด้วยตัวนี้ · เคสเก่าทั้งหมด = 1 (ซื้อแพ็กเดียว)
+-- ตัวเตรียมคอลัมน์ฝั่งโค้ดอยู่ที่ cases/addonLink.js (ensureAddonLink) — เพดานต้องตรงกับ MAX_PKG_QUANTITY
+ALTER TABLE cases ADD COLUMN IF NOT EXISTS pkg_quantity INTEGER NOT NULL DEFAULT 1
+  CHECK (pkg_quantity BETWEEN 1 AND 24);
+
 -- เคสที่เปิดไว้ก่อนมีสองสาย แต่เลือกเรท Homecare ไว้แล้ว = เป็นเคส Homecare อยู่แล้วโดยพฤตินัย
 -- ไม่เติมให้ ฟอร์มแก้ไขจะซ่อนชุด dropdown ของ Homecare แล้วเรทที่เลือกไว้จะหายไปจากสายตา
 -- แตะเฉพาะแถวที่ยังว่างและมีรูปแบบบริการอยู่จริง — เคสที่ไม่ได้ระบุบริการเลยยังคงเป็น NULL ตามเดิม
@@ -696,7 +702,7 @@ ALTER TABLE physio_packages ADD COLUMN IF NOT EXISTS english_fee DOUBLE PRECISIO
 -- รันซ้ำได้เรื่อยๆ: ตั้งค่าจ้างในตารางเรท/แพ็คเกจทีหลังแล้วรันอีกครั้ง เคสที่ยังว่างจะได้ค่าไปด้วย
 -- ไม่แตะเคสที่ปิด/ยกเลิกไปแล้ว: schema นี้รันใหม่ทุกครั้งที่ migrate บน production — ตั้งเรททีหลัง
 -- แล้วเติมค่าจ้างย้อนให้เคสที่จบไปนานแล้ว = ตัวเลข "รายได้" ของงานเก่าโผล่ขึ้นมาเองโดยไม่มีใครสั่ง
-UPDATE cases c SET staff_pay = r.staff_pay
+UPDATE cases c SET staff_pay = r.staff_pay * c.pkg_quantity
   FROM pkg_rates r
   WHERE c.staff_pay IS NULL
     AND c.status NOT IN ('closed', 'cancelled')
@@ -706,7 +712,7 @@ UPDATE cases c SET staff_pay = r.staff_pay
     AND r.staff_pay IS NOT NULL;
 
 -- สายกายภาพบำบัดคิดค่าจ้างต่อแพ็คเกจ ไม่มีเรท/ระดับพนักงาน จึงต้องเติมแยกอีกชุด
-UPDATE cases c SET staff_pay = pp.staff_pay
+UPDATE cases c SET staff_pay = pp.staff_pay * c.pkg_quantity
   FROM physio_packages pp
   WHERE c.staff_pay IS NULL
     AND c.status NOT IN ('closed', 'cancelled')

@@ -2,12 +2,17 @@ import { sql, transaction } from '../db/index.js';
 import { caseCode } from './caseCode.js';
 import { PHYSIO_BUNDLE } from '../lib/addons.js';
 
+/** ซื้อได้สูงสุดกี่แพ็กในเคสเดียว — 24 = รายเดือนสองปี (ต้องตรงกับ pkg_quantity ใน schema.js/schema.sql) */
+export const MAX_PKG_QUANTITY = 24;
+
 /* แพ็กกายภาพเสริมของเคส Homecare (cases.addon_of / addon_next — ดูท้าย schema.sql)
    เติมคอลัมน์ให้เองตอนใช้ครั้งแรก ฐานที่ยังไม่ได้ migrate จะไม่ล้มกลางการเปิดเคส
 
    แยกเป็นไฟล์ของตัวเอง (10 พ.ย. 2569) — repo ของผู้ว่าจ้าง/ผู้รับบริการ/พนักงานต้องเรียกด้วย (รายการเคสในหน้าของคนนั้นๆ
    ดึง addon_of มารวมแถวแพ็กเสริม) แต่ cases/repo.js import patients/repo.js อยู่แล้ว import กลับจะวนกัน */
-const ADDON_COLUMNS = ['addon_of', 'bill_with_parent', 'addon_next'];
+/* pkg_quantity (17 พ.ย. 2569) = จำนวนแพ็กที่ลูกค้าซื้อในเคสนี้ — รายเดือน × 2 = สองเดือน · แพ็กกายภาพ 10 ครั้ง × 2 = 20 ครั้ง
+   ฝากไว้กับตัวเตรียมคอลัมน์ชุดนี้เพราะทุกคิวรีที่อ่านเคส (SELECT_CASE · รายการเคสของหน้าอื่น) เรียก ensureAddonLink ก่อนอยู่แล้ว */
+const ADDON_COLUMNS = ['addon_of', 'bill_with_parent', 'addon_next', 'pkg_quantity'];
 let addonLinkReady = null;
 export const ensureAddonLink = () =>
   (addonLinkReady ??= (async () => {
@@ -26,14 +31,16 @@ export const ensureAddonLink = () =>
     await sql.run(`ALTER TABLE cases ADD COLUMN IF NOT EXISTS addon_next TEXT
       REFERENCES cases (case_id) ON DELETE SET NULL ON UPDATE CASCADE`);
     await sql.run('CREATE INDEX IF NOT EXISTS idx_cases_addon_next ON cases (addon_next) WHERE addon_next IS NOT NULL');
+    await sql.run(`ALTER TABLE cases ADD COLUMN IF NOT EXISTS pkg_quantity INTEGER NOT NULL DEFAULT 1
+      CHECK (pkg_quantity BETWEEN 1 AND ${MAX_PKG_QUANTITY})`);
   })().catch((err) => { addonLinkReady = null; throw err; }));
 
 /**
  * คอลัมน์ที่รายการเคสในหน้าอื่น (ผู้ว่าจ้าง · ผู้รับบริการ · พนักงาน) ต้องมี เพื่อให้หน้าเว็บรวมแพ็กเสริมเข้าแถวเคส Homecare
  * (client/src/lib/caseAddons.js) — ต้อง LEFT JOIN physio_packages pp ON pp.physio_package_id = c.physio_package_id ด้วย
  */
-export const ADDON_LIST_COLUMNS = `c.addon_of, c.bill_with_parent,
-       pp.name AS physio_package_name, pp.sessions AS physio_sessions`;
+export const ADDON_LIST_COLUMNS = `c.addon_of, c.bill_with_parent, c.pkg_quantity,
+       pp.name AS physio_package_name, pp.sessions * c.pkg_quantity AS physio_sessions`;
 
 /**
  * แพ็กกายภาพที่รวมในเคส Homecare (c = alias ของเคสกายภาพ) ถูก "ดูแลการเก็บเงิน" โดยเคส Homecare อยู่จริงไหม

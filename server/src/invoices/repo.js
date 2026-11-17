@@ -233,6 +233,7 @@ const ensurePriceSnapshotColumns = () =>
           AND column_name IN ('service_list_price_snapshot', 'service_customer_price_snapshot')`,
     );
     if (n < 2) await ensureCasePriceSnapshots();
+    await ensureAddonLink(); // cases.pkg_quantity — serviceKeySql อ่านมัน (ดูจาก catalog ก่อน ไม่ ALTER ซ้ำ)
   })().catch((err) => { priceSnapshotColumnsReady = null; throw err; }));
 
 const caseNetFeeSql = (c) => `COALESCE(${c}.service_customer_price_snapshot, ${c}.fee)`;
@@ -284,9 +285,13 @@ const planBillableSql = (c, i) =>
 const serviceCoreSql = (key) => `array_to_string((string_to_array(${key}, '|'))[1:4], '|')`;
 const serviceCore = (key) => String(key).split('|').slice(0, 4).join('|');
 
+/* จำนวนแพ็กที่ซื้อ (pkg_quantity · 17 พ.ย. 2569) ต่อท้ายช่องที่ 4 เฉพาะเมื่อ > 1 — เคสแพ็กเดียว (รวมเคสเก่าทั้งหมด) ได้ key เดิมทุกตัวอักษร
+   ใบที่ซิงก์ตามเคสไม่ได้ (งวด/รายครั้ง/รับเงินแล้ว) จึงขึ้นป้าย "แพ็คเกจไม่ตรง" เมื่อแก้จำนวนแพ็กหลังออกใบ
+   ไม่แยกเป็นช่องที่ 5 เพราะ serviceCore ตัดเหลือ 4 ช่องแรก (ท้ายเป็นรายการอุปกรณ์) · ต้องเรียก ensureAddonLink ก่อน (คอลัมน์ lazy) */
 const serviceKeySql = (c) => `concat_ws('|',
   COALESCE(${c}.physio_package_id::text, ''), COALESCE(${c}.pkg_format_id::text, ''),
-  COALESCE(${c}.pkg_grade_id::text, ''), COALESCE(${c}.pkg_staff_tier, ''),
+  COALESCE(${c}.pkg_grade_id::text, ''),
+  COALESCE(${c}.pkg_staff_tier, '') || CASE WHEN ${c}.pkg_quantity > 1 THEN 'x' || ${c}.pkg_quantity ELSE '' END,
   NULLIF(${c}.addons::text, '[]'))`;
 
 // case_payer_name = ชื่อผู้จ่าย "ที่ควรจะเป็น" ของเคสตอนนี้ ไล่ตามลำดับ:
@@ -338,12 +343,19 @@ const SELECT_INVOICE = `
  * ราคาเต็มก่อนลดของเคส — กายภาพใช้ราคาเต็มของแพ็คเกจ · Homecare ใช้ค่าบริการในตารางเรท
  * ว่าง = ไม่ได้ตั้งราคาเต็มไว้ (แพ็คที่ไม่ใช่โปรโมชัน / เคสที่ไม่ได้เลือกบริการ) = ไม่มีส่วนลดให้แสดง
  */
-const listPriceOf = (c) =>
-  c.service_list_price_snapshot ?? (
-    c.service_kind === 'physio' || c.physio_package_id != null
-      ? c.physio_original_price
-      : c.rate_customer_price
-  );
+const listPriceOf = (c) => {
+  if (c.service_list_price_snapshot != null) return c.service_list_price_snapshot;
+  const unit = c.service_kind === 'physio' || c.physio_package_id != null
+    ? c.physio_original_price
+    : c.rate_customer_price;
+  // ราคาตารางเป็น "ต่อแพ็ก" — เคสที่ซื้อหลายแพ็ก (pkg_quantity) ราคาเต็มคูณตาม (ปกติมี snapshot อยู่แล้ว ตรงนี้กันเคสที่ยังว่าง)
+  return unit == null ? unit : unit * packCount(c);
+};
+
+/** จำนวนแพ็กที่เคสซื้อ (cases.pkg_quantity · 17 พ.ย. 2569) — ว่าง = 1 */
+const packCount = (c) => (Number(c?.pkg_quantity) > 1 ? Math.trunc(Number(c.pkg_quantity)) : 1);
+/** หน่วยของ "× N" บนใบ — รายเดือน × 2 เดือน · รายสัปดาห์ × 2 สัปดาห์ · กายภาพ × 2 แพ็ก */
+const PACK_UNIT = { monthly: 'เดือน', weekly: 'สัปดาห์', daily: 'วัน' };
 
 /**
  * แยกค่าจ้างของเคสเป็น "ยอดก่อนลด + ส่วนลด" เพื่อให้ใบแจ้งหนี้แสดงส่วนลดที่ลูกค้าได้รับ
@@ -407,7 +419,7 @@ export async function bundledAddons(caseRow, db = sql) {
        เติมแบบ lazy และฟังก์ชันนี้ถูกเรียกใน tx ที่ ALTER ไม่ได้ (ฐานที่ยังไม่มีคอลัมน์ = ได้ fee ตามเดิม) */
     `SELECT c.case_id,
             COALESCE((to_jsonb(c)->>'service_customer_price_snapshot')::double precision, c.fee) AS fee,
-            pp.name AS package_name, pp.sessions
+            pp.name AS package_name, pp.sessions, c.pkg_quantity
      FROM cases c
      LEFT JOIN physio_packages pp ON pp.physio_package_id = c.physio_package_id
      WHERE c.addon_of = :id AND c.bill_with_parent AND c.status <> 'cancelled'
@@ -418,7 +430,9 @@ export async function bundledAddons(caseRow, db = sql) {
     const name = r.package_name ?? 'แพ็คเกจกายภาพบำบัด';
     // ชื่อแพ็กส่วนใหญ่บอกจำนวนครั้งอยู่แล้ว ("10 ครั้ง 3 เดือน") — เติมเฉพาะตอนยังไม่บอก (เกณฑ์เดียวกับ describeService)
     const sessions = r.sessions && !name.includes(`${r.sessions} ครั้ง`) ? ` · ${r.sessions} ครั้ง` : '';
-    return { name: `${name}${sessions}`, quantity: 1, unit_price: Number(r.fee ?? 0), kind: PHYSIO_BUNDLE, ref: r.case_id };
+    const qty = packCount(r);
+    const times = qty > 1 ? ` × ${qty} แพ็ก (รวม ${r.sessions * qty} ครั้ง)` : '';
+    return { name: `${name}${sessions}${times}`, quantity: 1, unit_price: Number(r.fee ?? 0), kind: PHYSIO_BUNDLE, ref: r.case_id };
   });
   return [...own, ...lines];
 }
@@ -1582,15 +1596,25 @@ function describeService(c) {
   /* แพ็คเกจกายภาพที่นี่ตั้งชื่อตามจำนวนครั้งอยู่แล้ว ("แพ็ค 20 ครั้ง", "10 ครั้ง 3 เดือน")
      เติม "· 20 ครั้ง" ต่อท้ายอีกจึงได้ "แพ็ค 20 ครั้ง · 20 ครั้ง" ซึ่งซ้ำคำเปล่าๆ
      และกินที่จนรายการโดน … ตัดกลางคำในตาราง — เติมเฉพาะตอนชื่อยังไม่ได้บอกจำนวนครั้งไว้ */
+  /* physio_sessions = รวมทุกแพ็กที่ซื้อ · physio_package_sessions = ต่อแพ็ก (SELECT_CASE) — ชื่อแพ็กบอกจำนวน "ต่อแพ็ก" */
+  const perPack = c.physio_package_sessions ?? c.physio_sessions;
   const sessions =
-    c.physio_sessions && !String(c.physio_package_name ?? '').includes(`${c.physio_sessions} ครั้ง`)
-      ? `${c.physio_sessions} ครั้ง`
+    perPack && !String(c.physio_package_name ?? '').includes(`${perPack} ครั้ง`)
+      ? `${perPack} ครั้ง`
       : null;
+  /* ซื้อหลายแพ็ก (17 พ.ย. 2569) — "× 2 เดือน" / "× 2 แพ็ก (รวม 20 ครั้ง)" · แพ็กเดียวไม่เติม (ข้อความใบเก่าเหมือนเดิมทุกตัวอักษร) */
+  const qty = packCount(c);
+  const physio = c.service_kind === 'physio';
+  const times = qty > 1
+    ? physio
+      ? `× ${qty} แพ็ก${perPack ? ` (รวม ${perPack * qty} ครั้ง)` : ''}`
+      : `× ${qty} ${PACK_UNIT[c.format_category] ?? 'แพ็ก'}`
+    : null;
 
   const parts =
-    c.service_kind === 'physio'
-      ? [c.physio_package_name, sessions, c.pkg_english && 'ภาษาอังกฤษ']
-      : [c.format_name, c.grade_name, c.pkg_staff_tier, c.pkg_english && 'ภาษาอังกฤษ'];
+    physio
+      ? [c.physio_package_name, sessions, times, c.pkg_english && 'ภาษาอังกฤษ']
+      : [c.format_name, c.grade_name, c.pkg_staff_tier, times, c.pkg_english && 'ภาษาอังกฤษ'];
 
   const service = parts.filter(Boolean).join(' · ');
   // เคสที่ยังไม่รู้ชื่อผู้รับบริการ ไม่พิมพ์ "ผู้รับบริการ: ยังไม่ระบุผู้รับบริการ" ลงเอกสารที่ส่งลูกค้า

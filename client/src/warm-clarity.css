@@ -1978,39 +1978,54 @@ input[aria-invalid='true'] { border-color: var(--danger); }
 .visit-who .vp-dot { margin-right: 0.375rem; }
 
 
-/* ---------- รายการคิดเงินเพิ่มในหน้าต่างเคส (อุปกรณ์เสริม / หัตถการ) — ผู้ใช้ขอ 6 พ.ย. 2569 ----------
-   บรรทัดละรายการ: ชื่อซ้าย ราคาชิดขวาตัวเลขเท่ากัน · VN บรรทัดเล็กใต้ชื่อ · มีหลายรายการมีบรรทัดรวม
-   ช่องนี้กินเต็มแถวของกริด — ครึ่งแถวแคบจนชื่อหัตถการตัดสามบรรทัด */
-.field-grid > .field:has(.charge-list) { grid-column: 1 / -1; }
-.charge-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  margin-top: 0.25rem;
-  max-width: 34rem; /* จอกว้าง: ชื่อกับราคาไม่ห่างกันจนต้องกวาดตาข้ามจอ */
-  white-space: normal;
+/* ---------- รายละเอียดเคส: บริการเต็มแถว + กล่องค่าใช้จ่าย (CaseModal · จัดใหม่ 17 พ.ย. 2569) ----------
+   เดิมค่าบริการเป็นประโยคยาว ส่วนอุปกรณ์/หัตถการแยกกล่องคนละที่ — รวมเป็นตารางเดียว ชื่อซ้าย ราคาชิดขวา บรรทัดรวมท้าย
+   ค่าจ้างพนักงาน (ต้นทุน) อยู่ใต้กล่อง คั่นด้วยเส้นประ ไม่ปนกับยอดที่เก็บลูกค้า */
+.field-grid > .field.is-wide { grid-column: 1 / -1; }
+.cost-box {
+  display: grid; gap: 0.375rem; margin-top: 0.875rem; max-width: 36rem;
 }
-.charge-row {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 0.75rem;
-  padding: 0.5rem 0.75rem;
-  border-radius: 0.5rem;
-  background: var(--surface-2);
+/* แถบพับ (summary) — ป้าย "ค่าใช้จ่าย" · ยอดรวม · ดูรายละเอียด ▾ ในแถวเดียว · กดได้ทั้งแถบ */
+.cost-summary {
+  display: flex; align-items: center; gap: 0.75rem; padding: 0.625rem 0.875rem;
+  border: 1px solid var(--border); border-radius: 0.625rem; background: var(--surface);
+  cursor: pointer; list-style: none; user-select: none;
 }
-.charge-name { display: flex; flex-direction: column; gap: 0.125rem; min-width: 0; }
-.charge-qty { color: var(--muted); }
-.charge-vn { font-size: 0.75rem; color: var(--muted); letter-spacing: 0.02em; }
-.charge-amt { flex: none; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.charge-row.is-total {
-  background: none;
-  padding-block: 0.375rem 0;
-  border-top: 1px dashed var(--border);
-  border-radius: 0;
-  font-weight: 700;
+.cost-summary::-webkit-details-marker { display: none; }
+.cost-summary:hover { border-color: var(--border-hover, var(--brand)); }
+.cost-summary:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.cost-summary .field-label { margin: 0; }
+.cost-summary-total { flex: 1; font-size: 0.9375rem; font-variant-numeric: tabular-nums; }
+.cost-summary-total strong { color: var(--brand); }
+.cost-summary-more { display: inline-flex; align-items: center; gap: 0.25rem; font-size: 0.8125rem; font-weight: 600; color: var(--brand); white-space: nowrap; }
+.cost-chev { width: 1rem; height: 1rem; transition: transform 0.15s ease; }
+.cost-box[open] .cost-chev { transform: rotate(180deg); }
+.cost-box:not([open]) .cost-when-open, .cost-box[open] .cost-when-closed { display: none; }
+@media (prefers-reduced-motion: reduce) { .cost-chev { transition: none; } }
+.cost-rows {
+  display: grid; margin: 0; padding: 0.25rem 0.875rem; list-style: none;
+  border-radius: 0.625rem; background: var(--surface-2);
 }
-.charge-row.is-total .charge-name { color: var(--muted); font-weight: 600; }
+.cost-row {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 1rem;
+  padding: 0.5rem 0; border-bottom: 1px solid var(--divider, var(--border));
+}
+.cost-row:last-child { border-bottom: 0; }
+.cost-name { display: flex; flex-direction: column; gap: 0.125rem; min-width: 0; }
+.cost-tag { margin-right: 0.375rem; font-size: 0.75rem; font-weight: 600; color: var(--muted); }
+.cost-tag::after { content: ' ·'; }
+.cost-sub { font-size: 0.75rem; color: var(--muted); letter-spacing: 0.02em; }
+.cost-amt { flex: none; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cost-amt.is-empty { font-weight: 400; color: var(--muted); }
+.cost-row.is-total { padding-top: 0.625rem; border-top: 1px solid var(--border); }
+.cost-row.is-total .cost-name { font-weight: 700; }
+.cost-row.is-total .cost-amt { font-size: 1.0625rem; color: var(--brand); }
+.cost-pay {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 1rem;
+  margin: 0; padding: 0.375rem 0.875rem 0; font-size: 0.875rem; color: var(--muted);
+}
+.cost-pay .cost-amt { color: var(--text); }
+.cost-box + .field { margin-top: 1rem; } /* หมายเหตุ/เหตุผลยกเลิกใต้กล่อง — ไม่ติดบรรทัดค่าจ้าง */
 
 
 /* ---------- ดาวน์โหลด CSV ใบแจ้งหนี้ รายวัน/สัปดาห์/เดือน (InvoiceExport) — ผู้ใช้ขอ 6 พ.ย. 2569 ----------

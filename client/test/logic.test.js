@@ -17,6 +17,8 @@ import {
 import { dayLabel, timeRange, CAL_STATES, parseTime } from '../src/lib/calendarUi.js';
 import { ISSUER, TRANSFER_ACCOUNT_TEXT, TRANSFER_PAYMENT_INSTRUCTION } from '../src/lib/issuer.js';
 import { customerAddonDescription, customerItemDescription } from '../src/lib/customerInvoice.js';
+import { endDateFor, packQty, packUnit, scaleByQty } from '../src/lib/caseRounds.js';
+import { packQtyText, physioSessionsText } from '../src/labels.js';
 
 describe('เอกสารลูกค้า HomeCare', () => {
   test('ข้อมูลผู้ออกและบัญชีรับโอนตรงกับบิลจริง', () => {
@@ -160,5 +162,48 @@ describe('parseTime — เวลาที่พิมพ์เองในก�
     assert.equal(parseTime(''), '');
     assert.equal(parseTime('   '), '');
     for (const t of ['24:00', '12:60', 'abc', '9:3x', '12345', '-1']) assert.equal(parseTime(t), null, t);
+  });
+});
+
+describe('ซื้อหลายแพ็ก (pkg_quantity · 17 พ.ย. 2569) — ตัวเลขในฟอร์มเปิดเคส', () => {
+  test('จำนวนว่าง/ผิดรูป = 1 แพ็ก', () => {
+    assert.equal(packQty(''), 1);
+    assert.equal(packQty(null), 1);
+    assert.equal(packQty('0'), 1);
+    assert.equal(packQty('-2'), 1);
+    assert.equal(packQty('abc'), 1);
+    assert.equal(packQty('3'), 3);
+    assert.equal(packQty(2.7), 2);
+  });
+
+  test('วันสิ้นสุดยืดตามจำนวน: รายเดือน × 2 = 60 วัน · รายสัปดาห์ × 2 = 14 วัน · ไม่รู้หมวด = null', () => {
+    assert.equal(endDateFor('2026-11-17', 'monthly'), '2026-12-16');
+    assert.equal(endDateFor('2026-11-17', 'monthly', 2), '2027-01-15');
+    assert.equal(endDateFor('2026-11-17', 'weekly', '2'), '2026-11-30');
+    assert.equal(endDateFor('2026-11-17', 'daily', 3), '2026-11-19');
+    assert.equal(endDateFor('2026-11-17', undefined, 2), null);
+    assert.equal(endDateFor('', 'monthly', 2), null);
+  });
+
+  test('เปลี่ยนจำนวน = ค่าบริการ/ค่าจ้างปรับตามสัดส่วน (ราคาต่อรองคงอยู่) · ช่องว่างคงว่าง', () => {
+    assert.equal(scaleByQty('28000', '1', '2'), '56000');
+    assert.equal(scaleByQty('56000', 2, 1), '28000');
+    assert.equal(scaleByQty('84000', '3', '4'), '112000');
+    assert.equal(scaleByQty('10000', '3', '2'), '6666.67', 'ปัดสตางค์');
+    assert.equal(scaleByQty('', '1', '2'), '');
+    assert.equal(scaleByQty('0', '1', '3'), '0');
+    // พิมพ์ลบช่องจำนวนชั่วคราว ('' = 1) แล้วพิมพ์ 2 — ไปกลับแล้วต้องได้ยอดเดิม
+    assert.equal(scaleByQty(scaleByQty('30000', '3', ''), '', '3'), '30000');
+  });
+
+  test('ข้อความ × N บนหน้าเคส/รายการเคส', () => {
+    assert.equal(packQtyText({ pkg_quantity: 1, format_category: 'monthly' }), null);
+    assert.equal(packQtyText({ pkg_quantity: 2, format_category: 'monthly' }), '× 2 เดือน');
+    assert.equal(packQtyText({ pkg_quantity: 3, format_category: 'weekly' }), '× 3 สัปดาห์');
+    assert.equal(packQtyText({ pkg_quantity: 2, physio_package_id: 5 }), '× 2 แพ็ก');
+    assert.equal(physioSessionsText({ physio_sessions: 10, pkg_quantity: 1, physio_package_id: 5 }), '10 ครั้ง');
+    assert.equal(physioSessionsText({ physio_sessions: 20, pkg_quantity: 2, physio_package_id: 5 }), 'รวม 20 ครั้ง');
+    assert.equal(packUnit('daily'), 'วัน');
+    assert.equal(packUnit(undefined), 'แพ็ก');
   });
 });

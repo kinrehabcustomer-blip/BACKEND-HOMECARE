@@ -1016,6 +1016,20 @@ select option:checked {
 /* กลุ่มปุ่มท้ายหัวข้อ — ไม่ใช้ .stack-actions เพราะอันนั้นบังคับปุ่มเต็มความกว้างบนมือถือ
    (ทำมาสำหรับปุ่มท้ายใบรายงานที่อยู่บรรทัดของตัวเอง) ตรงนี้ปุ่มต้องอยู่คู่กันเสมอ */
 .head-actions { display: flex; flex-wrap: wrap; gap: 0.375rem; }
+/* หัวข้อที่กดพับ/กางได้ (รายงานอาการในหน้าเคส · 17 พ.ย. 2569) — หน้าตาเหมือนหัวข้อปกติ มีลูกศรบอกว่ากดได้ */
+.section-fold {
+  display: inline-flex; align-items: center; gap: 0.375rem; padding: 0; border: 0; background: none;
+  font: inherit; color: inherit; text-align: left; cursor: pointer;
+}
+.section-fold:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; border-radius: 0.25rem; }
+.section-fold .fold-ico { flex: none; width: 1rem; height: 1rem; color: var(--muted); transition: transform 0.15s ease; }
+.section-fold[aria-expanded="true"] .fold-ico { transform: rotate(180deg); }
+.section-fold:hover .fold-ico { color: var(--brand); }
+.section-fold .fold-hint { font-size: 0.75rem; font-weight: 500; color: var(--muted); }
+@media (prefers-reduced-motion: reduce) { .section-fold .fold-ico { transition: none; } }
+/* พับอยู่ = การ์ดเหลือแค่แถวหัวข้อ — ไม่เหลือระยะใต้หัวข้อ/กล่องรายการว่างค้างไว้ (ต้องชนะ margin ของ .detail-modal ใน warm-clarity.css) */
+.modal-body > section > .section-head:has(.section-fold[aria-expanded="false"]) { margin-bottom: 0; }
+.report-list:empty { display: none; }
 
 /* ฟอร์มแก้ด่วนในโมดัล — คุมโทนให้ต่างจากส่วนอ่านอย่างเดียวรอบๆ ว่าตรงนี้กำลังแก้อยู่ */
 .quick-edit {
@@ -4079,7 +4093,7 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
 .att-filter { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
 
 /* ---------- รายงานอาการผู้รับบริการ (บันทึกทีละครั้งในเคส) ---------- */
-.report-list { display: flex; flex-direction: column; gap: 0.75rem; }
+.report-list { display: flex; flex-direction: column; gap: 0.625rem; }
 /* บอกว่าบันทึกใหม่ได้ที่ไหน — หน้าเคสเป็นที่อ่านย้อนหลัง ไม่ใช่ที่กรอก */
 .report-where { margin: -0.25rem 0 0.75rem; font-size: 0.8125rem; }
 
@@ -4262,7 +4276,7 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
 /* หัววันของกลุ่ม — เขียนวันครั้งเดียวต่อวัน แถวข้างในเหลือแค่เวลา */
 .report-day { display: flex; flex-direction: column; gap: 0.25rem; }
 .report-day-head {
-  margin: 0.375rem 0 0.125rem;
+  margin: 0.125rem 0 0.0625rem;
   font-size: 0.75rem;
   font-weight: 700;
   color: var(--muted);
@@ -5268,7 +5282,7 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
 .addons-field > .muted { margin: 0 0 0.75rem; }
 .addon-row {
   display: grid;
-  grid-template-columns: minmax(0, 1.7fr) minmax(0, 0.8fr) minmax(0, 0.7fr) minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1.7fr) minmax(0, 0.8fr) minmax(0, 0.7fr) minmax(0, 1fr) auto;
   gap: 0.625rem;
   align-items: end;
   margin-bottom: 0.75rem;
@@ -5277,10 +5291,19 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
   display: flex; flex-direction: column; gap: 0.3125rem; min-width: 0;
   font-size: 0.8125rem; font-weight: 600; color: var(--muted);
 }
-.addon-amount { padding-bottom: 0.6rem; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
-/* หัตถการ: ชื่อ · ราคา · เลข VN · ปุ่มลบ (ไม่มีช่องจำนวน) — มือถือใช้กริดสองคอลัมน์เดียวกับอุปกรณ์ */
-.procedure-row { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) auto auto; }
-.procedure-row .addon-amount { font-weight: 500; color: var(--muted); }
+/* คำแนะนำใต้ช่อง (เช่น "พิมพ์อีก 2 ตัวอักษรเพื่อค้นหาหัตถการ") — .form-hint ปกติมี margin-top ติดลบไว้ใช้ในกริดฟอร์มหลัก
+   ในช่องนี้มันเลยถูกดึงขึ้นไปชิดกล่อง (ผู้ใช้แจ้ง 17 พ.ย. 2569) · ตัวหนังสือปกติ ไม่หนาตามป้ายชื่อช่อง */
+/* ลอยใต้ช่อง (absolute) ไม่ดันความสูงของช่องชื่อ — แถวจัดชิดล่าง (align-items: end) ช่องราคา/ปุ่มลบข้างๆ จึงยังตรงแนวกล่อง
+   แถวที่มีคำแนะนำเว้นระยะล่างเพิ่มให้ข้อความ ไม่ทับแถวถัดไป */
+.addon-row label:has(> .form-hint) { position: relative; }
+.addon-row label > .form-hint {
+  position: absolute; top: calc(100% + 0.25rem); left: 0; right: 0;
+  margin: 0; font-size: 0.75rem; font-weight: 400; line-height: 1.4;
+}
+.addon-row:has(label > .form-hint) { margin-bottom: 1.75rem; }
+/* หัตถการ: ชื่อ · ราคา · ปุ่มลบ (ไม่มีช่องจำนวน)
+   ยอดต่อแถวของอุปกรณ์ และช่อง "VN ออกตอนบันทึก" ของหัตถการเอาออกแล้ว (ผู้ใช้ขอ 17 พ.ย. 2569) — ยอดรวมอยู่ท้ายส่วนอยู่แล้ว */
+.procedure-row { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) auto; }
 .addon-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; }
 .addon-foot .form-hint { margin: 0; }
 
@@ -5296,18 +5319,15 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
   }
   .addon-row > label:first-child { grid-column: 1 / -1; }
   .addon-row > label:nth-child(4) { grid-column: 1 / -1; }
-  .addon-amount { padding-bottom: 0; align-self: center; font-size: 0.9375rem; }
   .addon-row .btn { justify-self: end; }
-  /* หัตถการ: ชื่อเต็มแถว · ราคาเต็มแถว · แถวท้ายการ์ด = เลข VN ซ้าย คู่ปุ่มลบขวา
-     (เดิมราคาบีบครึ่งแถว ส่วนปุ่มลบหล่นไปแถวสามใต้ช่องราคา ดูลอย ๆ) */
+  /* หัตถการ: ชื่อเต็มแถว · แถวสอง = ราคา คู่ปุ่มลบขวา */
   .procedure-row {
     grid-template-columns: minmax(0, 1fr) auto;
-    grid-template-areas: "name name" "price price" "vn del";
-    align-items: center;
+    grid-template-areas: "name name" "price del";
+    align-items: end;
   }
   .procedure-row > label:nth-child(1) { grid-area: name; }
   .procedure-row > label:nth-child(2) { grid-area: price; }
-  .procedure-row > .addon-amount { grid-area: vn; font-size: 0.875rem; overflow: hidden; text-overflow: ellipsis; }
   .procedure-row > .btn { grid-area: del; }
   .addon-foot { flex-direction: column; align-items: stretch; }
   .addon-add { width: 100%; }
@@ -6633,35 +6653,44 @@ h1, h2, h3, h4, .page-hero-title, .cal-title, .login-heading h1 {
 
 /* ---------- แผงสรุปแพ็ก/ตารางบนสุดของตารางนัด (CaseVisits · 16 พ.ย. 2569) ----------
    หัว: ใช้ไปแล้ว X / N | ชิปวันหมดอายุ (ใกล้หมด ≤ 14 วัน = ส้ม · หมดแล้ว = แดง)
-   แถบเดียว: ส่วนที่ใช้ไปแล้ว (ทอง) บนพื้นเทา — ไม่มีตัวเลขแยกสถานะแล้ว (ผู้ใช้ขอ 16 พ.ย. 2569) */
-.pack-summary {
-  display: grid; gap: 0.625rem; margin-bottom: 0.75rem; padding: 0.875rem 1rem;
+   แถบเดียว: ส่วนที่ใช้ไปแล้ว (ทอง) บนพื้นเทา — ไม่มีตัวเลขแยกสถานะแล้ว (ผู้ใช้ขอ 16 พ.ย. 2569)
+   ต้องชนะ .modal-body section { padding: 1rem 0; border-bottom } ของป๊อปอัป (การ์ดเป็น <section>) — ไม่งั้นในป๊อปอัปตารางนัด
+   ตัวเลขกับหลอดชิดขอบซ้าย/ขวาของกรอบ (ผู้ใช้แจ้ง 17 พ.ย. 2569) · เติม .modal-body ให้น้ำหนักเท่ากฎ :last-child ของมันด้วย */
+.pack-summary, .modal-body section.pack-summary {
+  display: grid; gap: 0.5rem; margin-bottom: 0.75rem; padding: 0.875rem 1rem;
   border: 1px solid var(--border); border-radius: 0.875rem; background: var(--surface);
 }
-.vs-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.375rem 0.75rem; }
+/* แถวบน: ใช้ไปแล้ว X / N (ซ้าย) · เหลือ M (ขวา) — วางบนเส้นฐานเดียวกัน ไม่ตกบรรทัดแม้จอแคบ */
+.vs-head { display: flex; align-items: baseline; justify-content: space-between; gap: 0.75rem; }
+.vs-used { display: inline-flex; align-items: baseline; gap: 0.375rem; min-width: 0; }
+.vs-used-label { font-size: 0.8125rem; color: var(--muted); }
+.vs-used strong { font-size: 1.5rem; line-height: 1; color: var(--text); font-variant-numeric: tabular-nums; }
+.vs-used-total { font-size: 0.875rem; color: var(--muted); white-space: nowrap; }
+.vs-left { flex: none; font-size: 0.8125rem; color: var(--muted); white-space: nowrap; }
+.vs-left strong { font-weight: 700; color: var(--brand); font-variant-numeric: tabular-nums; }
+.vs-left.is-zero { font-weight: 600; color: var(--brand); }
+/* แถบบางเต็มความกว้าง — ส่วนที่ใช้แล้วปลายมนเฉพาะด้านขวา ตัวแถบตัดมุมให้ด้านซ้ายเอง */
+.vs-bar { position: relative; height: 0.375rem; overflow: hidden; border-radius: 999px; background: var(--border); }
+.vs-seg { display: block; height: 100%; min-width: 0.375rem; border-radius: 999px; }
+.vs-seg.is-done { background: var(--brand); }
+/* แถวล่าง: วันหมดอายุเป็นข้อความเล็ก — ใกล้หมด/หมดแล้วค่อยเป็นแถบสีให้สะดุดตา */
 .vs-expiry {
-  display: inline-flex; align-items: center; gap: 0.375rem; padding: 0.1875rem 0.625rem;
-  font-size: 0.75rem; color: var(--text); background: var(--surface-2); border-radius: 999px;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem 0.375rem; margin: 0;
+  font-size: 0.75rem; color: var(--muted);
 }
-.vs-expiry-ico { width: 0.875rem; height: 0.875rem; color: var(--muted); }
+.vs-expiry-ico { flex: none; width: 0.875rem; height: 0.875rem; }
 .vs-expiry-left { font-weight: 600; color: var(--brand); }
+.vs-expiry-left::before { content: '·'; margin-right: 0.375rem; font-weight: 400; color: var(--muted); }
+.vs-expiry.is-soon, .vs-expiry.is-over { justify-self: start; padding: 0.25rem 0.625rem; border-radius: 999px; color: var(--text); }
 .vs-expiry.is-soon { background: #fff1dc; }
 .vs-expiry.is-soon .vs-expiry-left { color: #b45309; }
 .vs-expiry.is-over { background: color-mix(in srgb, var(--danger) 12%, transparent); }
 .vs-expiry.is-over .vs-expiry-left { color: var(--danger); }
-.vs-bar { display: flex; gap: 2px; height: 0.625rem; overflow: hidden; border-radius: 999px; background: var(--surface-2); }
-.vs-seg { height: 100%; }
-.vs-seg { border-radius: 999px; }
-.vs-seg.is-done { background: var(--brand); }
-.vs-used { display: inline-flex; align-items: baseline; gap: 0.375rem; }
-.vs-used-label { font-size: 0.8125rem; color: var(--muted); }
-.vs-used strong { font-size: 1.5rem; line-height: 1; color: var(--text); font-variant-numeric: tabular-nums; }
-.vs-used-total { font-size: 0.9375rem; color: var(--muted); }
 :root[data-theme="dark"] .vs-expiry.is-soon { background: #3a2a12; }
 :root[data-theme="dark"] .vs-expiry.is-soon .vs-expiry-left { color: #f5b45a; }
 
 /* แผงสรุปแบบไม่มีกรอบ — อยู่ในการ์ดของหน้าเคสอยู่แล้ว (CaseModal ช่องตารางนัด) ไม่ซ้อนกรอบอีกชั้น */
-.pack-summary.is-plain { margin: 0; padding: 0; border: 0; background: none; }
+.pack-summary.is-plain, .modal-body section.pack-summary.is-plain { margin: 0; padding: 0; border: 0; background: none; }
 .visit-summary.pack-row { align-items: center; gap: 1rem; }
 .visit-summary.pack-row > .pack-summary { flex: 1; min-width: 0; }
 @media (max-width: 600px) {

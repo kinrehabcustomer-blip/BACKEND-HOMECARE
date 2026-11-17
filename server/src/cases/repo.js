@@ -31,6 +31,7 @@ const COLUMNS = [
   'pkg_staff_tier', // [homecare] ระดับพนักงาน CG/NA/PN
   'pkg_english',    // [homecare/กายภาพ] พนักงานสื่อสารภาษาอังกฤษ (fee รวมค่าภาษาแล้ว)
   'physio_package_id', // [physio] แพ็คเกจกายภาพบำบัดที่ซื้อ
+  'pkg_quantity',      // [ทั้งสองสาย] ซื้อกี่แพ็ก (รายเดือน × 2 = สองเดือน) — fee/staff_pay/โควตาวัน-ครั้ง คูณด้วยตัวนี้
 
   // รายละเอียดผู้รับบริการ
   'client_name',
@@ -74,7 +75,16 @@ export const ensureCasePriceSnapshots = () =>
    export ต่อจากที่นี่ด้วย ที่อื่นที่ import จาก cases/repo.js อยู่แล้วไม่ต้องแก้ */
 export { ensureAddonLink };
 
+/** จำนวนแพ็กที่ซื้อ — ว่าง/ผิดรูป = 1 (เคสก่อนมีช่องนี้ และ API ที่ไม่ได้ส่งมา) */
+export const packQty = (s) => {
+  const n = Math.trunc(Number(s?.pkg_quantity));
+  return Number.isFinite(n) && n >= 1 ? n : 1;
+};
+
+/* ราคาเต็ม/ราคาขายที่จดไว้ = ราคาต่อแพ็ก × จำนวนแพ็ก (17 พ.ย. 2569) · fee ที่หน้าเว็บส่งมาคูณจำนวนไว้แล้ว ไม่คูณซ้ำ */
 async function servicePriceSnapshot(db, s) {
+  const qty = packQty(s);
+  const times = (v) => (v == null ? null : Math.round(v * qty * 100) / 100);
   if (s.physio_package_id) {
     const p = await db.one(
       'SELECT original_price, special_price, english_fee FROM physio_packages WHERE physio_package_id = :id',
@@ -85,8 +95,8 @@ async function servicePriceSnapshot(db, s) {
     const english = s.pkg_english ? Number(p?.english_fee ?? 0) : 0;
     const plus = (v) => (v == null ? null : v + english);
     return {
-      list: plus(p?.original_price ?? null),
-      customer: s.fee ?? plus(p?.special_price ?? p?.original_price ?? null),
+      list: times(plus(p?.original_price ?? null)),
+      customer: s.fee ?? times(plus(p?.special_price ?? p?.original_price ?? null)),
     };
   }
   if (s.pkg_format_id && s.pkg_staff_tier) {
@@ -101,7 +111,7 @@ async function servicePriceSnapshot(db, s) {
     const discount = r?.discount_percent != null && Number(r.discount_percent) > 0
       ? Number(list || 0) * Number(r.discount_percent) / 100
       : Number(r?.discount_amount || 0);
-    return { list, customer: s.fee ?? (list == null ? null : Math.max(0, list - discount)) };
+    return { list: times(list), customer: s.fee ?? (list == null ? null : times(Math.max(0, list - discount))) };
   }
   return { list: null, customer: s.fee ?? null };
 }
@@ -110,11 +120,12 @@ const NOW = `to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')
 
 /* ราคาเต็มกับราคาขายของแพ็กกายภาพ (รวมค่าภาษาอังกฤษถ้าเคสเลือก) — สูตรเดียวกับ servicePriceSnapshot */
 const PHYSIO_ENGLISH = `(CASE WHEN c.pkg_english THEN COALESCE(p.english_fee, 0) ELSE 0 END)`;
-const PHYSIO_LIST = `(p.original_price + ${PHYSIO_ENGLISH})`;
-const PHYSIO_NET = `(COALESCE(p.special_price, p.original_price) + ${PHYSIO_ENGLISH})`;
+/* × c.pkg_quantity — เคสที่ซื้อหลายแพ็กจดราคาไว้เป็นยอดรวมทุกแพ็ก (ดู servicePriceSnapshot) */
+const PHYSIO_LIST = `((p.original_price + ${PHYSIO_ENGLISH}) * c.pkg_quantity)`;
+const PHYSIO_NET = `((COALESCE(p.special_price, p.original_price) + ${PHYSIO_ENGLISH}) * c.pkg_quantity)`;
 /* ตารางเรท Homecare — ราคาตั้ง และราคาหลังส่วนลดของแถวนั้น */
-const RATE_NET = `GREATEST(0, r.customer_price - CASE WHEN r.discount_percent > 0
-                    THEN r.customer_price * r.discount_percent / 100 ELSE COALESCE(r.discount_amount, 0) END)`;
+const RATE_NET = `(GREATEST(0, r.customer_price - CASE WHEN r.discount_percent > 0
+                    THEN r.customer_price * r.discount_percent / 100 ELSE COALESCE(r.discount_amount, 0) END) * c.pkg_quantity)`;
 const money = (v) => (v == null ? 'ไม่มี' : Number(v).toLocaleString('th-TH'));
 
 /**
@@ -131,6 +142,7 @@ const money = (v) => (v == null ? 'ไม่มี' : Number(v).toLocaleString('
  */
 export async function refreshListPriceSnapshots({ physioPackageId = null, homecareRates = false }, actor = null) {
   if (!physioPackageId && !homecareRates) return [];
+  await ensureAddonLink(); // คอลัมน์ pkg_quantity — ALTER ในทรานแซกชันที่ถือล็อกแถว cases ไม่ได้ จึงเตรียมก่อนเปิด
   return transaction(async (tx) => {
     const rows = physioPackageId
       ? await tx.all(
@@ -146,14 +158,14 @@ export async function refreshListPriceSnapshots({ physioPackageId = null, homeca
       )
       : await tx.all(
         `UPDATE cases c
-         SET service_list_price_snapshot = r.customer_price, updated_at = ${NOW}
+         SET service_list_price_snapshot = r.customer_price * c.pkg_quantity, updated_at = ${NOW}
          FROM pkg_rates r, (SELECT case_id, service_list_price_snapshot AS old_list FROM cases) o
          WHERE r.format_id = c.pkg_format_id AND r.grade_id IS NOT DISTINCT FROM c.pkg_grade_id
            AND r.staff_tier = c.pkg_staff_tier AND c.physio_package_id IS NULL AND o.case_id = c.case_id
            AND c.status NOT IN ('closed', 'cancelled')
            AND r.customer_price IS NOT NULL
            AND abs(c.service_customer_price_snapshot - ${RATE_NET}) < 0.005
-           AND c.service_list_price_snapshot IS DISTINCT FROM r.customer_price
+           AND c.service_list_price_snapshot IS DISTINCT FROM r.customer_price * c.pkg_quantity
          RETURNING c.case_id, o.old_list, c.service_list_price_snapshot AS new_list, c.service_customer_price_snapshot AS net, NULL AS name`,
       );
     for (const r of rows) {
@@ -197,9 +209,12 @@ const SELECT_CASE = `
          g.name                             AS grade_name,
          f.name                             AS format_name,
          f.graded                           AS format_graded,
+         f.category                         AS format_category,
          pp.name                            AS physio_package_name,
-         pp.sessions                        AS physio_sessions,
-         pp.duration_months                 AS physio_duration_months,
+         /* ซื้อหลายแพ็ก (pkg_quantity) = จำนวนครั้ง/อายุรวมทุกแพ็ก · physio_package_sessions = ต่อแพ็ก (ไว้เขียน "10 ครั้ง × 2") */
+         pp.sessions * c.pkg_quantity       AS physio_sessions,
+         pp.sessions                        AS physio_package_sessions,
+         pp.duration_months * c.pkg_quantity AS physio_duration_months,
          pp.original_price                  AS physio_original_price,
          pp.staff_pay                       AS physio_staff_pay,
          r.customer_price                   AS rate_customer_price,
@@ -221,7 +236,8 @@ const SELECT_CASE = `
             ต้องเรียก ensureAddonLink ก่อนใช้ SELECT นี้ (คอลัมน์สร้างแบบ lazy) */
          (SELECT json_agg(json_build_object(
                    'case_id', b.case_id, 'status', b.status, 'fee', b.fee,
-                   'name', bp.name, 'sessions', bp.sessions, 'assigned_to', b.assigned_to)
+                   'name', bp.name, 'sessions', bp.sessions * b.pkg_quantity, 'pkg_quantity', b.pkg_quantity,
+                   'assigned_to', b.assigned_to)
                  ORDER BY b.created_at, b.case_id)
           FROM cases b
           LEFT JOIN physio_packages bp ON bp.physio_package_id = b.physio_package_id
@@ -235,7 +251,7 @@ const SELECT_CASE = `
                    'case_id', a.case_id, 'status', a.status, 'fee', a.fee,
                    'start_date', a.start_date, 'end_date', a.end_date,
                    'bill_with_parent', a.bill_with_parent,
-                   'name', ap.name, 'sessions', ap.sessions,
+                   'name', ap.name, 'sessions', ap.sessions * a.pkg_quantity, 'pkg_quantity', a.pkg_quantity,
                    'assigned_to', a.assigned_to, 'assigned_name', ae.first_name || ' ' || ae.last_name)
                  ORDER BY a.created_at, a.case_id)
           FROM cases a
@@ -581,7 +597,13 @@ async function assertPhysioPackageUsable(input, db = sql) {
   }
 }
 
+/* ค่าจ้างของแพ็ก/เรทเป็น "ต่อแพ็ก" — ซื้อหลายแพ็ก (รายเดือน × 2) พนักงานทำงานหลายเท่า ค่าจ้างของเคสจึงคูณตาม (17 พ.ย. 2569) */
 async function payFromService(input, db = sql) {
+  const pay = await payPerPack(input, db);
+  return pay == null ? null : Math.round(Number(pay) * packQty(input) * 100) / 100;
+}
+
+async function payPerPack(input, db) {
   if (input.physio_package_id) {
     const p = await db.one(
       'SELECT staff_pay FROM physio_packages WHERE physio_package_id = :id',
@@ -614,6 +636,7 @@ const PAY_SERVICE_FIELDS = [
   'pkg_format_id',
   'pkg_staff_tier',
   'physio_package_id',
+  'pkg_quantity', // เปลี่ยนจำนวนแพ็ก = ค่าจ้างตามแพ็กเปลี่ยน
 ];
 
 /**
@@ -630,7 +653,9 @@ export function staffPayUpdateMode(current, input) {
   const serviceChanged = PAY_SERVICE_FIELDS.some(
     (field) =>
       Object.prototype.hasOwnProperty.call(input, field) &&
-      String(current?.[field] ?? '') !== String(input[field] ?? ''),
+      (field === 'pkg_quantity'
+        ? packQty(current) !== packQty(input) // ว่าง = 1 — ฟอร์มที่ส่ง null มาไม่นับเป็นการเปลี่ยน
+        : String(current?.[field] ?? '') !== String(input[field] ?? '')),
   );
   return serviceChanged ? 'service' : 'preserve';
 }
@@ -786,6 +811,7 @@ export async function create(rawInput, actor) {
     // รู้แค่ผู้ว่าจ้าง ยังไม่รู้ชื่อผู้รับบริการ (schema บังคับให้มีอย่างใดอย่างหนึ่งแล้ว)
     if (!values.client_name) values.client_name = PATIENT_PENDING;
     values.pkg_english = input.pkg_english ?? false; // คอลัมน์ NOT NULL — ไม่ส่งมา = ไม่ได้ขอภาษาอังกฤษ
+    values.pkg_quantity = packQty(input); // NOT NULL — ไม่ส่งมา = ซื้อแพ็กเดียว
     // node-postgres แปลง array เป็น array ของ Postgres ไม่ใช่ JSON — ต้อง stringify เองก่อนลงคอลัมน์ JSONB
     // หัตถการได้ VN ของตัวเองตั้งแต่บันทึก (เคสใหม่ = เลขใหม่ทุกบรรทัด รวมที่คัดลอกมาจากรอบก่อน)
     values.addons = JSON.stringify(await withProcedureNumbers(tx, input.addons));
@@ -993,7 +1019,7 @@ export async function physioAddons(caseId) {
   return sql.all(
     `SELECT c.case_id, c.status, c.start_date, c.end_date, c.created_at, c.bill_with_parent,
             c.addon_next, (SELECT n.round_no FROM cases n WHERE n.case_id = c.addon_next) AS addon_next_round,
-            pp.name AS physio_package_name, pp.sessions AS physio_sessions,
+            pp.name AS physio_package_name, pp.sessions * c.pkg_quantity AS physio_sessions, c.pkg_quantity,
             (SELECT COUNT(*) FROM case_visits v WHERE v.case_id = c.case_id AND v.status <> 'cancelled')::int AS booked,
             (SELECT COUNT(*) FROM case_visits v WHERE v.case_id = c.case_id AND v.check_in_at IS NOT NULL)::int AS attended
      FROM cases c
@@ -1062,8 +1088,8 @@ export async function addonParentCandidates(caseId) {
 export async function linkableAddons(caseId) {
   await ensureAddonLink();
   return sql.all(
-    `SELECT a.case_id, a.status, a.start_date, a.end_date, a.fee,
-            pp.name AS physio_package_name, pp.sessions AS physio_sessions
+    `SELECT a.case_id, a.status, a.start_date, a.end_date, a.fee, a.pkg_quantity,
+            pp.name AS physio_package_name, pp.sessions * a.pkg_quantity AS physio_sessions
      FROM cases h
      JOIN cases a ON a.patient_id = h.patient_id AND a.case_id <> h.case_id
      LEFT JOIN physio_packages pp ON pp.physio_package_id = a.physio_package_id
@@ -1156,6 +1182,7 @@ const FIELD_LABELS = {
   title: 'ชื่อเคส', case_type: 'ประเภทเคส', customer_id: 'ผู้ว่าจ้าง', patient_id: 'ผู้รับการดูแล',
   service_kind: 'สายบริการ', pkg_grade_id: 'เกรด', pkg_format_id: 'รูปแบบบริการ',
   pkg_staff_tier: 'ระดับพนักงาน', pkg_english: 'ค่าภาษาอังกฤษ', physio_package_id: 'แพ็คเกจกายภาพบำบัด',
+  pkg_quantity: 'จำนวนแพ็ก',
   client_name: 'ชื่อผู้รับบริการ', patient_gender: 'เพศ', patient_age: 'อายุ',
   weight_kg: 'น้ำหนัก', height_cm: 'ส่วนสูง', medical_history: 'โรคประจำตัว',
   current_symptoms: 'อาการปัจจุบัน', medical_devices: 'อุปกรณ์การแพทย์', care_goal: 'เป้าหมายการดูแล',
@@ -1191,6 +1218,7 @@ const SERVICE_ID_FIELDS = ['physio_package_id', 'pkg_format_id', 'pkg_grade_id',
 const LOCKED_WHEN_DONE = [
   ['fee', 'ค่าบริการ', (v) => (v == null ? null : Number(v))],
   ['staff_pay', 'ค่าจ้างพนักงาน', (v) => (v == null ? null : Number(v))],
+  ['pkg_quantity', 'จำนวนแพ็ก', (v) => packQty({ pkg_quantity: v })],
   ['start_date', 'วันเริ่ม', (v) => v || null],
   ['end_date', 'วันสิ้นสุด', (v) => v || null],
   ['customer_id', 'ผู้ว่าจ้าง', (v) => v || null],
@@ -1206,6 +1234,7 @@ function lockedFieldChanges(current, values) {
 
 const serviceChanged = (current, values) =>
   SERVICE_ID_FIELDS.some((f) => f in values && String(current?.[f] ?? '') !== String(values[f] ?? ''));
+const qtyChanged = (current, values) => 'pkg_quantity' in values && packQty(current) !== packQty(values);
 
 /** ชื่อบริการที่อ่านรู้เรื่อง ไว้เขียนลงประวัติ — ตารางแพ็คเกจถูกแก้/ลบทีหลังได้ จึงเก็บเป็นข้อความ ณ ตอนนั้น */
 async function serviceLabel(tx, s) {
@@ -1238,6 +1267,9 @@ async function valueChanges(tx, current, values) {
     const before = await serviceLabel(tx, current);
     const after = await serviceLabel(tx, { ...current, ...values });
     if (before !== after) out.push(`บริการ: ${before} → ${after}`);
+  }
+  if (qtyChanged(current, values)) {
+    out.push(`จำนวนแพ็ก: ${packQty(current)} → ${packQty(values)}`);
   }
   if ('fee' in values && String(current?.fee ?? '') !== String(values.fee ?? '')) {
     out.push(`ค่าบริการ: ${bahtText(current?.fee)} → ${bahtText(values.fee)}`);
@@ -1304,6 +1336,7 @@ export async function update(caseId, rawInput, actor) {
   for (const col of fields) values[col] = input[col] ?? null;
   // ล้างชื่อผู้รับบริการในหน้าแก้ = กลับไปเป็น "ยังไม่ระบุ" (คอลัมน์ NOT NULL)
   if ('client_name' in values && !values.client_name) values.client_name = PATIENT_PENDING;
+  if ('pkg_quantity' in values) values.pkg_quantity = packQty(values); // NOT NULL — ส่งค่าว่างมา = 1
 
   await transaction(async (tx) => {
     const payState = await staffPayUpdateForTransaction(tx, caseId, input);
@@ -1389,7 +1422,7 @@ export async function update(caseId, rawInput, actor) {
       }
     }
 
-    if (serviceChanged(current, values) || 'fee' in values) {
+    if (serviceChanged(current, values) || qtyChanged(current, values) || 'fee' in values) {
       const priceSnapshot = await servicePriceSnapshot(tx, { ...current, ...values });
       values.service_list_price_snapshot = priceSnapshot.list;
       values.service_customer_price_snapshot = priceSnapshot.customer;
@@ -2122,7 +2155,8 @@ export function visitConflicts(visitIds) {
 async function quotaUsage(tx, caseId) {
   const row = await tx.one(
     `SELECT (c.physio_package_id IS NOT NULL) AS physio,
-            CASE WHEN c.physio_package_id IS NOT NULL THEN pp.sessions ELSE f.days END AS cap,
+            /* × จำนวนแพ็กที่ซื้อ (17 พ.ย. 2569) — รายเดือน × 2 = 60 วัน · แพ็ก 10 ครั้ง × 2 = 20 ครั้ง */
+            CASE WHEN c.physio_package_id IS NOT NULL THEN pp.sessions ELSE f.days END * c.pkg_quantity AS cap,
             (SELECT COUNT(*) FROM case_visits v WHERE v.case_id = c.case_id AND v.status <> 'cancelled')::int AS visits,
             (SELECT COUNT(DISTINCT v.visit_date) FROM case_visits v WHERE v.case_id = c.case_id AND v.status <> 'cancelled')::int AS days
      FROM cases c
@@ -2158,6 +2192,7 @@ function assertWithinQuota(before, after) {
  */
 export async function addVisits(caseId, dates, { assigned_to, planned_start, planned_end, staff_pay, note } = {}) {
   await ensureFormatDays(); // คอลัมน์ pkg_service_formats.days ต้องมีก่อนเปิดทรานแซกชัน (ตัวล็อกจำนวนวันอ่านมัน)
+  await ensureAddonLink(); // cases.pkg_quantity — ตัวล็อกคูณเพดานด้วยจำนวนแพ็ก
   /* ตรวจซ้ำ + ลงนัด + ออก VN ในทรานแซกชันเดียว โดยล็อกแถวเคสไว้ก่อน (ตรวจ Codex 30 ต.ค. 2569 ข้อ 5)
      เดิมตรวจซ้ำนอกทรานแซกชัน — กดเบิ้ล/สองแท็บพร้อมกัน ทั้งคู่เห็นว่ายังไม่มีแล้ว insert ซ้อนได้
      ตอนนี้คำขอที่สองต้องรอคำขอแรก commit ก่อน แล้วจะเห็นนัดที่เพิ่งลงและข้ามไปเอง */
@@ -2393,6 +2428,7 @@ export async function updateVisit(caseId, visitId, input, actor) {
   await ensureVisitChangeTable();
   await ensureCategories(); // คอลัมน์ case_visits.cancel_reason_id
   await ensureFormatDays(); // ตัวล็อกจำนวนวันของแพ็ก (Homecare) อ่าน pkg_service_formats.days
+  await ensureAddonLink(); // cases.pkg_quantity — ตัวล็อกคูณเพดานด้วยจำนวนแพ็ก
   const fields = [
     'visit_date', 'assigned_to', 'planned_start', 'planned_end', 'status', 'note',
     'staff_pay', // ตั้งค่าจ้างเฉพาะกะนี้ — ส่ง null = กลับไปเกลี่ยจากยอดเคสตามปกติ

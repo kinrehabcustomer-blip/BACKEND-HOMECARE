@@ -612,10 +612,7 @@ function DayPanel({ day, list, today, onOpenCase, onMove, onClose }) {
             </div>
           ))}
         </div>
-
-        <footer className="modal-foot">
-          <button className="btn" onClick={onClose}>ปิด</button>
-        </footer>
+        {/* ไม่มีแถบปุ่ม "ปิด" ด้านล่าง (ผู้ใช้ขอ 17 พ.ย. 2569) — ปิดได้จาก × มุมขวาบน · กดนอกกล่อง · Esc · ปัดลงบนมือถือ */}
       </div>
     </div>
   );

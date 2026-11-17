@@ -203,6 +203,21 @@ export const totalFee = (c) => {
   return c?.fee == null && extra === 0 ? null : Number(c?.fee ?? 0) + extra;
 };
 
+/**
+ * "× 2 เดือน" / "× 2 สัปดาห์" / "× 2 แพ็ก" ของเคสที่ซื้อหลายแพ็ก (cases.pkg_quantity · 17 พ.ย. 2569) — แพ็กเดียว = null
+ * physio_sessions / physio_duration_months ที่ server ส่งมาเป็นยอดรวมทุกแพ็กแล้ว
+ */
+export function packQtyText(c) {
+  const n = Math.trunc(Number(c?.pkg_quantity));
+  if (!(n > 1)) return null;
+  if (c.physio_package_id || c.physio_package_name) return `× ${n} แพ็ก`;
+  return `× ${n} ${{ monthly: 'เดือน', weekly: 'สัปดาห์', daily: 'วัน' }[c.format_category] ?? 'แพ็ก'}`;
+}
+
+/** จำนวนครั้งของแพ็กกายภาพ — ซื้อหลายแพ็กเขียน "รวม 20 ครั้ง" ให้ไม่สับสนกับจำนวนในชื่อแพ็ก ("แพ็ก 10 ครั้ง") */
+export const physioSessionsText = (c) =>
+  c?.physio_sessions ? `${packQtyText(c) ? 'รวม ' : ''}${c.physio_sessions} ครั้ง` : null;
+
 export const serviceKindOf = (c) =>
   c?.service_kind === 'physio' || c?.physio_package_id != null || c?.case_type === 'physiotherapy'
     ? 'physio'

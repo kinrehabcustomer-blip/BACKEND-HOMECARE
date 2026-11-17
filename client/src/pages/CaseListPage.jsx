@@ -6,7 +6,7 @@ import SortHead from '../components/SortHead.jsx';
 import NewestSortHead from '../components/NewestSortHead.jsx';
 import ErrorBar from '../components/ErrorBar.jsx';
 import PageRefresh from '../components/PageRefresh.jsx';
-import { SERVICE_KIND_LABELS, MONTH_LABELS, formatBaht, formatDate, toBuddhistYear, caseStage, CASE_STATUS_FILTER_LABELS, bundledPhysioText, totalFee } from '../labels.js';
+import { SERVICE_KIND_LABELS, MONTH_LABELS, formatBaht, formatDate, toBuddhistYear, caseStage, CASE_STATUS_FILTER_LABELS, bundledPhysioText, totalFee, packQtyText, physioSessionsText } from '../labels.js';
 import { formatPhone } from '../lib/phone.js';
 import { caseCode } from '../lib/patientCode.js';
 import SearchSelect from '../components/SearchSelect.jsx';
@@ -352,9 +352,11 @@ export default function CaseListPage() {
                     {/* สองสายบริการเก็บชื่อคนละคอลัมน์ — กายภาพมาก่อนเพราะเคสที่ผูกแพ็คเกจไว้จะไม่มีเรท Homecare */}
                     {c.physio_package_name ? (
                       <>{c.physio_package_name}
-                        {c.physio_sessions && <span className="muted"> · {c.physio_sessions} ครั้ง</span>}</>
+                        {packQtyText(c) && <span className="muted"> · {packQtyText(c)}</span>}
+                        {c.physio_sessions && <span className="muted"> · {physioSessionsText(c)}</span>}</>
                     ) : c.format_name ? (
-                      <>{c.format_name}{c.grade_name && <span className="muted"> · {c.grade_name}</span>}</>
+                      <>{c.format_name}{c.grade_name && <span className="muted"> · {c.grade_name}</span>}
+                        {packQtyText(c) && <span className="muted"> · {packQtyText(c)}</span>}</>
                     ) : (
                       <span className="muted">ไม่ระบุบริการ</span>
                     )}

@@ -5,16 +5,16 @@ import CaseLocationLink from './CaseLocationLink.jsx';
 import ReportArchiveModal from './ReportArchiveModal.jsx';
 import { useSheetSwipe } from '../lib/sheetSwipe.js';
 import { useScrollLock } from '../lib/scrollLock.js';
-import { SERVICE_KIND_LABELS, serviceKindOf, GENDER_LABELS, VISIT_STATE_LABELS, formatDate, timeText, caseStage, todayTH, reportAuthor } from '../labels.js';
+import { SERVICE_KIND_LABELS, serviceKindOf, GENDER_LABELS, VISIT_STATE_LABELS, formatDate, timeText, caseStage, todayTH, reportAuthor, packQtyText, physioSessionsText } from '../labels.js';
 import { formatPhone } from '../lib/phone.js';
 import { caseCode } from '../lib/patientCode.js';
 
 /** ชื่อบริการของเคส — กายภาพใช้ชื่อแพ็คเกจ, Homecare ใช้รูปแบบ+เกรด (ใช้ร่วมกันหลายหน้าของ field) */
 export const serviceName = (c) => {
   if (c.physio_package_id && c.physio_package_name) {
-    return [c.physio_package_name, c.physio_sessions && `${c.physio_sessions} ครั้ง`].filter(Boolean).join(' · ');
+    return [c.physio_package_name, packQtyText(c), physioSessionsText(c)].filter(Boolean).join(' · ');
   }
-  return [c.format_name, c.grade_name].filter(Boolean).join(' · ') || SERVICE_KIND_LABELS[serviceKindOf(c)];
+  return [c.format_name, c.grade_name, packQtyText(c)].filter(Boolean).join(' · ') || SERVICE_KIND_LABELS[serviceKindOf(c)];
 };
 
 function Field({ label, value }) {

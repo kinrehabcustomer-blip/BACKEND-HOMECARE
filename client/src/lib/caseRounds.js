@@ -24,11 +24,36 @@ export function nextRoundDates(start, end, today) {
  */
 export const SERVICE_DAYS = { daily: 1, weekly: 7, monthly: 30 };
 
-/** วันสิ้นสุดตามจำนวนวันของหมวด — ไม่มีวันเริ่ม/ไม่รู้หมวด = null (ผู้เรียกคงค่าเดิมไว้) */
-export function endDateFor(start, category) {
+/** วันสิ้นสุดตามจำนวนวันของหมวด — ไม่มีวันเริ่ม/ไม่รู้หมวด = null (ผู้เรียกคงค่าเดิมไว้)
+    qty = จำนวนแพ็กที่ซื้อ (17 พ.ย. 2569) — รายเดือน × 2 = 60 วัน · รายสัปดาห์ × 2 = 14 วัน */
+export function endDateFor(start, category, qty = 1) {
   const days = SERVICE_DAYS[category];
   if (!start || !days) return null;
-  return isoDay(dayMs(start) + (days - 1) * DAY);
+  const n = Math.max(1, Math.trunc(Number(qty)) || 1);
+  return isoDay(dayMs(start) + (days * n - 1) * DAY);
+}
+
+/** จำนวนแพ็กจากค่าในฟอร์ม/เคส — ว่าง/ผิดรูป = 1 (เคสก่อนมีช่องนี้) */
+export const packQty = (v) => {
+  const n = Math.trunc(Number(v));
+  return Number.isFinite(n) && n >= 1 ? n : 1;
+};
+
+/** หน่วยของ "× N" — รายเดือน × 2 เดือน · รายสัปดาห์ × 2 สัปดาห์ · รายวัน × 3 วัน · กายภาพ (ไม่มีหมวด) × 2 แพ็ก */
+export const PACK_UNIT = { monthly: 'เดือน', weekly: 'สัปดาห์', daily: 'วัน' };
+export const packUnit = (category) => PACK_UNIT[category] ?? 'แพ็ก';
+
+/**
+ * ตัวเลขเงินในช่องของฟอร์ม เมื่อเปลี่ยนจำนวนแพ็กจาก before เป็น after — ปรับตามสัดส่วน ปัดสตางค์
+ * ใช้กับค่าบริการ/ค่าจ้าง: ราคาต่อแพ็กที่ตกลงพิเศษไว้จึงคงอยู่ (28,000 × 1 → 56,000 × 2) ไม่เด้งกลับราคาตาราง
+ * ช่องว่างคงว่าง (ยังไม่ได้ตั้งราคา) · คืนเป็นข้อความเพราะค่าในฟอร์มเป็นข้อความ
+ */
+export function scaleByQty(value, before, after) {
+  if (value === '' || value == null) return value;
+  const from = packQty(before);
+  const to = packQty(after);
+  if (from === to) return String(value);
+  return String(Math.round((Number(value) / from) * to * 100) / 100);
 }
 
 /**

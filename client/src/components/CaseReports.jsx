@@ -253,6 +253,8 @@ export default function CaseReports({
   backfillVisits = null,   // พนักงาน: กะของตัวเองที่ลงรายงานย้อนหลังได้ — ส่งมา = เปิดปุ่ม "ลงรายงานย้อนหลัง" แม้หน้านี้ readOnly
   patientWide = false,     // พนักงาน: ประวัติการรักษาของผู้รับบริการทั้งหมด (ทุกเคสของคนเดียวกัน ไม่ว่าใครลง)
   startAdding = false,     // เปิดมาพร้อมฟอร์มเลย (กดปุ่ม "ลงรายงานย้อนหลัง" จากหน้าแม่ ไม่ต้องกดซ้ำอีกรอบ)
+  compact = false,         // หน้าแม่มีหัวข้อพร้อมปุ่ม "ดูทั้งหมด (N)" แล้ว (หน้าเคส) — ไม่ต้องมีบรรทัด "มีรายงาน N ใบ" / ปุ่มดูตารางท้ายรายการซ้ำ
+  listHidden = false,      // หน้าแม่พับรายการเก็บไว้ (หน้าเคส · รายงานเกิน 5 ใบ) — ยังต้อง mount ไว้ ฟอร์ม "ลงย้อนหลัง" เปิดจากที่นี่
 }) {
   const toast = useToast();
   const isAdmin = scope === 'admin';
@@ -446,7 +448,8 @@ export default function CaseReports({
 
   return (
     <div className="report-list">
-      {(!readOnly || backfillVisits) && !adding && (
+      {/* compact (หน้าเคส): จำนวนใบอยู่ในปุ่ม "ดูทั้งหมด (N)" ที่หัวข้อแล้ว — เหลือเฉพาะตอนยังไม่มีรายงาน (17 พ.ย. 2569 · ผู้ใช้: กินที่เกินไป) */}
+      {(!readOnly || backfillVisits) && !adding && !(compact && meta.total > 0) && (
         <div className="visit-summary">
           <p className="muted">
             {meta.total === 0
@@ -562,8 +565,10 @@ export default function CaseReports({
         <p className="muted">{filtering ? 'ไม่มีรายงานที่ตรงกับตัวกรอง' : 'ยังไม่มีรายงานอาการ'}</p>
       )}
 
-      {days.map(([date, rows]) => (
-        <section className="report-day" key={date}>
+      {!listHidden && days.map(([date, rows]) => (
+        /* div ไม่ใช่ section — ในป๊อปอัปเคส .modal-body section ใส่ระยะบน-ล่าง 1rem + เส้นคั่นให้ทุก section
+           แต่ละวันเลยห่างกันเป็นช่องใหญ่ (ผู้ใช้แจ้ง 17 พ.ย. 2569) */
+        <div className="report-day" role="group" aria-label={formatDate(date)} key={date}>
           {/* หัววันแยกออกมา แถวข้างในจึงเหลือแค่เวลา — ไม่ต้องเขียนวันซ้ำทุกใบทั้งที่เป็นวันเดียวกัน */}
           {!visitId && (
             <h4 className="report-day-head">
@@ -597,7 +602,7 @@ export default function CaseReports({
                 </button>
             </article>
           ))}
-        </section>
+        </div>
       ))}
 
       {/* ดูรายงานเต็ม + แก้/ลบ เปิดเป็น popup (ไม่กางในรายการ) */}
@@ -683,7 +688,7 @@ export default function CaseReports({
       )}
 
       {/* โหมดย่อ: ไม่ต้องมีปุ่มโหลดเพิ่ม ให้ไปดูต่อในตารางเต็มแทน */}
-      {overflow && (
+      {overflow && !compact && !listHidden && (
         <button className="btn report-more" type="button" onClick={() => setArchiveOpen(true)}>
           ดูตารางรายงานทั้งหมด ({meta.total} ใบ)
         </button>
@@ -702,7 +707,7 @@ export default function CaseReports({
         />
       )}
 
-      {!overflow && meta.has_more && (
+      {!overflow && !listHidden && meta.has_more && (
         <button className="btn report-more" type="button" disabled={loadingMore} onClick={loadMore}>
           {loadingMore ? 'กำลังโหลด…' : `ดูเก่ากว่านี้ (เหลืออีก ${meta.total - reports.length} ใบ)`}
         </button>

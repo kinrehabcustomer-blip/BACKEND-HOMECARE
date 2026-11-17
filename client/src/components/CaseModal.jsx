@@ -16,8 +16,12 @@ import CaseReportDoc from './CaseReportDoc.jsx';
 import ReportArchiveModal from './ReportArchiveModal.jsx';
 import InvoiceModal from './InvoiceModal.jsx';
 import CaseChargeModal from './CaseChargeModal.jsx';
-import { POSITION_LABELS, GENDER_LABELS, SERVICE_KIND_LABELS, INVOICE_STATUS_LABELS, CASE_EVENT_LABELS, formatBaht, formatDate, stampText, positionsForCase, todayTH, caseStage, serviceKindOf, bundledPhysioText, totalFee } from '../labels.js';
+import { POSITION_LABELS, GENDER_LABELS, SERVICE_KIND_LABELS, INVOICE_STATUS_LABELS, CASE_EVENT_LABELS, formatBaht, formatDate, stampText, positionsForCase, todayTH, caseStage, serviceKindOf, bundledPhysioText, packQtyText, physioSessionsText } from '../labels.js';
 import LineIcon from './LineIcon.jsx';
+
+/* รายงานอาการในหน้าเคส: กางล่าสุดได้ 5 ใบ · เกินนั้นพับรายการเก็บได้ (จำการพับ/กางไว้ในเครื่อง) */
+const REPORT_FOLD_AT = 5;
+const REPORT_FOLD_KEY = 'case.reportsFolded';
 import StaffPicker from './StaffPicker.jsx';
 import { AddonLines, CaseStatus } from './CaseAddons.jsx';
 import { formatPhone, formatPhoneInput } from '../lib/phone.js';
@@ -30,9 +34,9 @@ import { isProcedure, addonLabel } from '../lib/addons.js';
  */
 const serviceName = (c) => {
   if (c.physio_package_id && c.physio_package_name) {
-    return [c.physio_package_name, c.physio_sessions && `${c.physio_sessions} ครั้ง`].filter(Boolean).join(' · ');
+    return [c.physio_package_name, packQtyText(c), physioSessionsText(c)].filter(Boolean).join(' · ');
   }
-  return [c.format_name, c.grade_name].filter(Boolean).join(' · ') || null;
+  return [c.format_name, c.grade_name, packQtyText(c)].filter(Boolean).join(' · ') || null;
 };
 
 /** รวมสองค่าที่คู่กันเป็นบรรทัดเดียว — กรอกมาแค่ค่าเดียวก็ยังแสดงค่านั้นได้ ไม่ต้องรอครบคู่ */
@@ -48,10 +52,10 @@ const weightHeight = (c) =>
 
 const FOCUSABLE = 'a[href], button:not(:disabled), input, select, textarea, [tabindex]:not([tabindex="-1"])';
 
-function Field({ label, value, mono }) {
+function Field({ label, value, mono, wide = false }) {
   const empty = value == null || value === '' || value === false;
   return (
-    <div className="field">
+    <div className={`field${wide ? ' is-wide' : ''}`}>
       <span className="field-label">{label}</span>
       <span className={`field-value ${mono ? 'mono' : ''} ${empty ? 'is-empty' : ''}`}>
         {empty ? 'ไม่ได้ระบุ' : value}
@@ -60,35 +64,100 @@ function Field({ label, value, mono }) {
   );
 }
 
+/** บริการของเคสในบรรทัดเดียว: สาย · รูปแบบ/แพ็ก · เกรด · ระดับ · จำนวนแพ็ก (· จำนวนครั้ง/อายุของแพ็กกายภาพ) */
+const serviceLine = (c) => {
+  const detail = c.physio_package_id
+    ? [c.physio_package_name, packQtyText(c), physioSessionsText(c),
+      c.physio_duration_months && `${c.physio_duration_months} เดือน`]
+    : [c.format_name, c.grade_name, c.pkg_staff_tier, packQtyText(c)];
+  return [SERVICE_KIND_LABELS[c.service_kind], ...detail].filter(Boolean).join(' · ') || null;
+};
+
+const money2 = (n) => Math.round(Number(n) * 100) / 100;
+
 /**
- * รายการคิดเงินเพิ่ม (อุปกรณ์เสริม / หัตถการ) — ทีละบรรทัด: ชื่อซ้าย ราคาชิดขวา เลข VN เป็นบรรทัดเล็กใต้ชื่อ
- * เดิมต่อกันเป็นประโยคเดียวคั่นด้วย · ราคากับ VN ปนอยู่กลางข้อความ อ่านไม่ออกว่าอะไรราคาเท่าไร (ผู้ใช้ขอ 6 พ.ย. 2569)
- * มีมากกว่าหนึ่งรายการ = มีบรรทัดรวมท้ายสุด
+ * ค่าใช้จ่ายของเคสในกล่องเดียว (จัดใหม่ 17 พ.ย. 2569 · ผู้ใช้: "จัดระเบียบ layout ตรงนี้ใหม่")
+ * เดิมกระจายอยู่สามที่: ช่อง "ค่าบริการที่ได้รับ" เป็นประโยคยาว (รวม — Homecare + กายภาพ) · อุปกรณ์เสริม · หัตถการ
+ * แต่ละอย่างมีกล่องของตัวเอง จนต้องบวกเลขเองว่าเคสนี้เก็บเท่าไร
+ * ตอนนี้บรรทัดละรายการ: ค่าบริการ → แพ็กกายภาพที่รวมใบ → อุปกรณ์เสริม → หัตถการ (VN บรรทัดเล็กใต้ชื่อ) → รวม
+ * ค่าจ้างพนักงานอยู่นอกกล่อง — เป็นต้นทุน ไม่ใช่เงินที่เก็บจากลูกค้า (เห็นเฉพาะผู้จัดการ)
+ * "รวม" = ค่าใช้จ่ายทั้งหมดของเคส (อุปกรณ์ที่เพิ่มหลังออกใบไปอยู่ใบค่าใช้จ่ายเพิ่มเติม จึงไม่ใช่ยอดของใบใบเดียวเสมอไป)
  */
-function ChargeList({ items }) {
-  const rows = items.map((x) => ({ ...x, amount: (x.quantity ?? 1) * (x.unit_price ?? 0) }));
-  const total = rows.reduce((s, x) => s + x.amount, 0);
+function CostBreakdown({ item, seePay }) {
+  const kind = SERVICE_KIND_LABELS[item.service_kind];
+  const rows = [
+    {
+      key: 'fee',
+      tag: 'ค่าบริการ',
+      name: [kind, packQtyText(item)].filter(Boolean).join(' '),
+      amount: item.fee == null ? null : Number(item.fee),
+    },
+    ...(item.bundled_physio ?? []).map((b) => ({
+      key: `physio-${b.case_id}`,
+      tag: 'แพ็กกายภาพ',
+      name: [b.name ?? 'แพ็คเกจกายภาพบำบัด', b.sessions && `${b.sessions} ครั้ง`].filter(Boolean).join(' · '),
+      amount: b.fee == null ? null : Number(b.fee),
+    })),
+    ...(item.addons ?? []).filter((x) => !isProcedure(x)).map((x, i) => ({
+      key: `eq-${i}`,
+      tag: 'อุปกรณ์เสริม',
+      name: `${x.name}${x.quantity != null && Number(x.quantity) !== 1 ? ` ×${x.quantity}` : ''}`,
+      amount: money2((x.quantity ?? 1) * (x.unit_price ?? 0)),
+    })),
+    ...(item.addons ?? []).filter(isProcedure).map((x, i) => ({
+      key: `pr-${x.vn ?? i}`,
+      tag: 'หัตถการ',
+      name: x.name,
+      sub: x.vn,
+      amount: money2((x.quantity ?? 1) * (x.unit_price ?? 0)),
+    })),
+  ];
+  const total = money2(rows.reduce((sum, r) => sum + (r.amount ?? 0), 0));
+  const hasAny = rows.some((r) => r.amount != null);
+  /* พับไว้เป็นค่าเริ่มต้น — เห็นแค่ยอดรวม กดแถบเพื่อกางรายการ (ผู้ใช้ขอ 17 พ.ย. 2569)
+     ใช้ <details> ของเบราว์เซอร์: กด/Enter/Space เปิดปิดได้ และโปรแกรมอ่านจอบอกสถานะเอง ไม่ต้องจำ state */
   return (
-    <span className="charge-list" role="list">
-      {rows.map((x, i) => (
-        <span className="charge-row" role="listitem" key={`${x.name}-${x.vn ?? i}`}>
-          <span className="charge-name">
-            <span>
-              {x.name}
-              {x.quantity != null && x.quantity !== 1 && <span className="charge-qty"> ×{x.quantity}</span>}
+    <details className="cost-box">
+      <summary className="cost-summary">
+        <span className="field-label">ค่าใช้จ่าย</span>
+        <span className="cost-summary-total">
+          {hasAny ? <>รวม <strong>{formatBaht(total)}</strong></> : <span className="muted">ไม่ได้ระบุ</span>}
+        </span>
+        <span className="cost-summary-more">
+          <span className="cost-when-closed">ดูรายละเอียด</span>
+          <span className="cost-when-open">ซ่อน</span>
+          <LineIcon name="chevron" className="cost-chev" />
+        </span>
+      </summary>
+      <ul className="cost-rows">
+        {rows.map((r) => (
+          <li className="cost-row" key={r.key}>
+            <span className="cost-name">
+              <span><span className="cost-tag">{r.tag}</span>{r.name}</span>
+              {r.sub && <span className="cost-sub mono">{r.sub}</span>}
             </span>
-            {x.vn && <span className="charge-vn mono">{x.vn}</span>}
+            <span className={`cost-amt${r.amount == null ? ' is-empty' : ''}`}>
+              {r.amount == null ? 'ไม่ได้ระบุ' : formatBaht(r.amount)}
+            </span>
+          </li>
+        ))}
+        {rows.length > 1 && (
+          <li className="cost-row is-total">
+            <span className="cost-name">รวม</span>
+            <span className="cost-amt">{formatBaht(total)}</span>
+          </li>
+        )}
+      </ul>
+      {/* ยอดที่พนักงานจะเห็นเป็นรายได้ของตัวเองเมื่อปิดเคส (เฉพาะผู้จัดการ) — อยู่ในส่วนที่พับด้วย ไม่โชว์ต้นทุนค้างบนจอ */}
+      {seePay && (
+        <p className="cost-pay">
+          <span>ค่าจ้างพนักงาน</span>
+          <span className={`cost-amt${item.staff_pay == null ? ' is-empty' : ''}`}>
+            {item.staff_pay == null ? 'ไม่ได้ระบุ' : formatBaht(item.staff_pay)}
           </span>
-          <span className="charge-amt">{formatBaht(x.amount)}</span>
-        </span>
-      ))}
-      {rows.length > 1 && (
-        <span className="charge-row is-total">
-          <span className="charge-name">รวม {rows.length} รายการ</span>
-          <span className="charge-amt">{formatBaht(total)}</span>
-        </span>
+        </p>
       )}
-    </span>
+    </details>
   );
 }
 
@@ -190,6 +259,17 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
   /* รายงานอาการผู้รับบริการ — ตัวรายการกางอยู่ในหน้าแล้ว (ดูส่วน "รายงานอาการผู้รับบริการ" ข้างล่าง)
      ตัวนี้เหลือไว้เป็นจำนวนรวม ใช้ตัดสินว่าจะโชว์ปุ่มพิมพ์ไหม — ขอมาหน้าละใบเดียว ไม่ดึงทั้งคลัง */
   const [reports, setReports] = useState({ total: 0 });
+  /* รายงานเกิน REPORT_FOLD_AT ใบ = พับรายการเก็บได้ (ผู้ใช้ขอ 17 พ.ย. 2569) — จำการเลือกไว้ในเครื่อง ค่าเริ่มต้น = พับ
+     หัวข้อ/ปุ่มยังอยู่ครบตอนพับ · เคสที่มีไม่เกิน 5 ใบกางเสมอ ไม่มีอะไรให้พับ */
+  const [reportsFolded, setReportsFolded] = useState(() => {
+    try { return localStorage.getItem(REPORT_FOLD_KEY) !== '0'; } catch { return true; }
+  });
+  const foldReports = (folded) => {
+    setReportsFolded(folded);
+    try { localStorage.setItem(REPORT_FOLD_KEY, folded ? '1' : '0'); } catch { /* โหมดส่วนตัว — จำไม่ได้ก็ไม่เป็นไร */ }
+  };
+  const reportsFoldable = reports.total > REPORT_FOLD_AT;
+  const reportsHidden = reportsFoldable && reportsFolded;
   const [team, setTeam] = useState([]); // คนที่ร่วมดูแลเคส นอกเหนือจากผู้รับผิดชอบหลัก
   /* ฟอร์มแก้รายงานกางอยู่ในหน้า — Esc/Tab ต้องไม่ปิดทั้งกล่องจนที่พิมพ์ไว้หาย */
   const [reportFormOpen, setReportFormOpen] = useState(false);
@@ -776,49 +856,9 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                   />
                 )}
 
+                {/* จัดใหม่ 17 พ.ย. 2569: บริการเต็มแถว · วันที่เรียงกันแถวเดียว · เงินทั้งหมดรวมในกล่องค่าใช้จ่าย (CostBreakdown) */}
                 <div className="field-grid">
-                  <Field label="ประเภทบริการ" value={SERVICE_KIND_LABELS[item.service_kind]} />
-                  {item.physio_package_id ? (
-                    <Field
-                      label="แพ็คเกจกายภาพบำบัด"
-                      value={[
-                        item.physio_package_name,
-                        item.physio_sessions && `${item.physio_sessions} ครั้ง`,
-                        item.physio_duration_months && `${item.physio_duration_months} เดือน`,
-                      ].filter(Boolean).join(' · ')}
-                    />
-                  ) : (
-                    <Field
-                      label="บริการ (รูปแบบ / เกรด / ระดับ)"
-                      value={[item.format_name, item.grade_name, item.pkg_staff_tier].filter(Boolean).join(' · ')}
-                    />
-                  )}
-                  {item.bundled_physio?.length > 0 ? (
-                    <Field
-                      label="ค่าบริการที่ได้รับ (รวมแพ็กกายภาพ)"
-                      value={`${formatBaht(totalFee(item))} — Homecare ${formatBaht(item.fee ?? 0)} + กายภาพ ${formatBaht(totalFee(item) - Number(item.fee ?? 0))}`}
-                    />
-                  ) : (
-                    <Field label="ค่าบริการที่ได้รับ" value={item.fee != null && formatBaht(item.fee)} />
-                  )}
-                  {item.addons?.some((x) => !isProcedure(x)) && (
-                    <Field
-                      label="อุปกรณ์เสริม (คิดเพิ่มในใบแจ้งหนี้)"
-                      value={<ChargeList items={item.addons.filter((x) => !isProcedure(x))} />}
-                    />
-                  )}
-                  {item.addons?.some(isProcedure) && (
-                    <Field
-                      label="หัตถการ (คิดเพิ่มในใบแจ้งหนี้)"
-                      value={<ChargeList items={item.addons.filter(isProcedure)} />}
-                    />
-                  )}
-                  {/* Homecare ได้ VN เคสละหนึ่งเลข (ออกตอนลงนัดครั้งแรก) · กายภาพมี VN รายนัดในตารางนัด */}
-                  {item.vn && <Field label="เลข VN" value={item.vn} mono />}
-                  {/* ยอดที่พนักงานจะเห็นเป็นรายได้ของตัวเองเมื่อปิดเคส — ต้องเห็นก่อนกดปิด (เฉพาะผู้จัดการ) */}
-                  {seePay && (
-                    <Field label="ค่าจ้างพนักงาน" value={item.staff_pay != null && formatBaht(item.staff_pay)} />
-                  )}
+                  <Field wide label="บริการ" value={serviceLine(item)} />
                   <Field label="วันเริ่ม" value={item.start_date && formatDate(item.start_date)} />
                   <Field label="วันสิ้นสุด" value={item.end_date && formatDate(item.end_date)} />
                   {item.started_at && (
@@ -830,7 +870,10 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                   {item.status === 'cancelled' && (
                     <Field label="ยกเลิกเมื่อ" value={item.cancelled_at && formatDate(item.cancelled_at)} />
                   )}
+                  {/* Homecare ได้ VN เคสละหนึ่งเลข (ออกตอนลงนัดครั้งแรก) · กายภาพมี VN รายนัดในตารางนัด */}
+                  {item.vn && <Field label="เลข VN" value={item.vn} mono />}
                 </div>
+                <CostBreakdown item={item} seePay={seePay} />
                 {item.status === 'cancelled' && <Field label="เหตุผลที่ยกเลิก" value={item.cancel_reason} />}
                 <Field label="หมายเหตุ" value={item.note} />
               </section>
@@ -1062,7 +1105,23 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                   ที่เกินไปดูได้ในคลังเต็ม (ปุ่มของ CaseReports เอง) — กติกาเดียวกับฝั่งพนักงาน */}
               <section>
                 <div className="section-head">
-                  <h3>รายงานอาการผู้รับบริการ</h3>
+                  {reportsFoldable ? (
+                    <h3>
+                      <button
+                        type="button"
+                        className="section-fold"
+                        aria-expanded={!reportsHidden}
+                        onClick={() => foldReports(!reportsHidden)}
+                        title={reportsHidden ? 'แสดงรายงานล่าสุด' : 'พับเก็บรายการรายงาน'}
+                      >
+                        รายงานอาการผู้รับบริการ
+                        <LineIcon name="chevron" className="fold-ico" />
+                        {reportsHidden && <span className="fold-hint">พับไว้ · กดเพื่อแสดง</span>}
+                      </button>
+                    </h3>
+                  ) : (
+                    <h3>รายงานอาการผู้รับบริการ</h3>
+                  )}
                   {/* สองทางที่ต่างกันจริงๆ: อ่านในระบบ (กางดูรายใบ แก้ไขได้ กรองตามเดือน/ที่ผิดปกติ)
                       กับใบกระดาษที่ส่งออกไปข้างนอก (ญาติขอดู แพทย์ขอประวัติ เก็บเข้าแฟ้มตอนปิดเคส)
                       ทางแรกต้องอยู่ตรงนี้ด้วยเสมอ ไม่ใช่โผล่เฉพาะตอนรายงานเยอะจนล้นออกนอกหน้า */}
@@ -1070,15 +1129,15 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                     {reports.total > 0 && (
                       <>
                         <button className="btn tiny" onClick={() => setReportsOpen(true)}>
-                          <LineIcon name="eye" />ดูรายงานทั้งหมด ({reports.total})
+                          <LineIcon name="eye" />ดูทั้งหมด ({reports.total})
                         </button>
-                        <button className="btn tiny" disabled={printing} onClick={printReportForm}>
-                          <LineIcon name="printer" />{printing ? 'กำลังเตรียม…' : 'พิมพ์ / บันทึก PDF'}
+                        <button className="btn tiny" disabled={printing} onClick={printReportForm} title="พิมพ์ / บันทึก PDF">
+                          <LineIcon name="printer" />{printing ? 'กำลังเตรียม…' : 'พิมพ์ / PDF'}
                         </button>
                       </>
                     )}
-                    <button className="btn tiny primary" onClick={() => setReportAddOpen(true)}>
-                      + ลงรายงานย้อนหลัง
+                    <button className="btn tiny primary" onClick={() => setReportAddOpen(true)} title="ลงรายงานย้อนหลัง">
+                      + ลงย้อนหลัง
                     </button>
                   </span>
                 </div>
@@ -1089,7 +1148,9 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                   allowAdd
                   adding={reportAddOpen}
                   onAddingChange={setReportAddOpen}
-                  inlineLimit={3}
+                  inlineLimit={REPORT_FOLD_AT}
+                  compact
+                  listHidden={reportsHidden}
                   archiveTitle={item.client_name}
                   onFormOpen={setReportFormOpen}
                   onChanged={() => load().catch(() => {})}
