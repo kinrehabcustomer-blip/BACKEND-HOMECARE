@@ -114,6 +114,9 @@ function CostBreakdown({ item, seePay }) {
   ];
   const total = money2(rows.reduce((sum, r) => sum + (r.amount ?? 0), 0));
   const hasAny = rows.some((r) => r.amount != null);
+  /* เคสกลางทาง: ลูกค้าจ่ายไปแล้วก่อนเข้าระบบ — หักให้เห็นยอดที่ยังต้องเก็บจริง (ใบแจ้งหนี้คิดแบบเดียวกัน) */
+  const prepaid = item.joined_midway ? money2(item.carried_paid ?? 0) : 0;
+  const due = money2(Math.max(0, total - prepaid));
   /* พับไว้เป็นค่าเริ่มต้น — เห็นแค่ยอดรวม กดแถบเพื่อกางรายการ (ผู้ใช้ขอ 17 พ.ย. 2569)
      ใช้ <details> ของเบราว์เซอร์: กด/Enter/Space เปิดปิดได้ และโปรแกรมอ่านจอบอกสถานะเอง ไม่ต้องจำ state */
   return (
@@ -121,7 +124,9 @@ function CostBreakdown({ item, seePay }) {
       <summary className="cost-summary">
         <span className="field-label">ค่าใช้จ่าย</span>
         <span className="cost-summary-total">
-          {hasAny ? <>รวม <strong>{formatBaht(total)}</strong></> : <span className="muted">ไม่ได้ระบุ</span>}
+          {!hasAny ? <span className="muted">ไม่ได้ระบุ</span>
+            : prepaid > 0 ? <>ต้องเก็บอีก <strong>{formatBaht(due)}</strong></>
+              : <>รวม <strong>{formatBaht(total)}</strong></>}
         </span>
         <span className="cost-summary-more">
           <span className="cost-when-closed">ดูรายละเอียด</span>
@@ -141,11 +146,23 @@ function CostBreakdown({ item, seePay }) {
             </span>
           </li>
         ))}
-        {rows.length > 1 && (
+        {(rows.length > 1 || prepaid > 0) && (
           <li className="cost-row is-total">
             <span className="cost-name">รวม</span>
             <span className="cost-amt">{formatBaht(total)}</span>
           </li>
+        )}
+        {prepaid > 0 && (
+          <>
+            <li className="cost-row is-prepaid">
+              <span className="cost-name">ชำระแล้วก่อนเข้าระบบ</span>
+              <span className="cost-amt">−{formatBaht(prepaid)}</span>
+            </li>
+            <li className="cost-row is-total">
+              <span className="cost-name">ต้องเก็บอีก</span>
+              <span className="cost-amt">{formatBaht(due)}</span>
+            </li>
+          </>
         )}
       </ul>
       {/* ยอดที่พนักงานจะเห็นเป็นรายได้ของตัวเองเมื่อปิดเคส (เฉพาะผู้จัดการ) — อยู่ในส่วนที่พับด้วย ไม่โชว์ต้นทุนค้างบนจอ */}
@@ -155,6 +172,12 @@ function CostBreakdown({ item, seePay }) {
           <span className={`cost-amt${item.staff_pay == null ? ' is-empty' : ''}`}>
             {item.staff_pay == null ? 'ไม่ได้ระบุ' : formatBaht(item.staff_pay)}
           </span>
+        </p>
+      )}
+      {seePay && Number(item.carried_staff_paid ?? 0) > 0 && (
+        <p className="cost-pay">
+          <span>จ่ายพนักงานไปแล้วก่อนเข้าระบบ</span>
+          <span className="cost-amt">{formatBaht(item.carried_staff_paid)}</span>
         </p>
       )}
     </details>
@@ -858,7 +881,17 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
 
                 {/* จัดใหม่ 17 พ.ย. 2569: บริการเต็มแถว · วันที่เรียงกันแถวเดียว · เงินทั้งหมดรวมในกล่องค่าใช้จ่าย (CostBreakdown) */}
                 <div className="field-grid">
-                  <Field wide label="บริการ" value={serviceLine(item)} />
+                  <Field
+                    wide
+                    label="บริการ"
+                    value={serviceLine(item) && (
+                      <>
+                        {serviceLine(item)}
+                        {/* ลูกค้าใช้บริการ/จ่ายเงินไปบางส่วนก่อนมีในระบบ — ยอดยกมาอยู่ในแผงสรุปแพ็กและกล่องค่าใช้จ่าย */}
+                        {item.joined_midway && <span className="badge midway-badge">เข้าระบบกลางทาง</span>}
+                      </>
+                    )}
+                  />
                   <Field label="วันเริ่ม" value={item.start_date && formatDate(item.start_date)} />
                   <Field label="วันสิ้นสุด" value={item.end_date && formatDate(item.end_date)} />
                   {item.started_at && (
@@ -1041,7 +1074,8 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                     /* มีเพดาน: กายภาพ = ครั้ง · Homecare = วันของรูปแบบบริการ (attended = วันที่ไปจริง) */
                     <PackSummary
                       plain
-                      used={isPhysio ? doneVisits : packQuota.attended}
+                      used={isPhysio ? doneVisits + (packQuota.carried ?? 0) : packQuota.attended /* server รวมยอดยกมาแล้ว */}
+                      carried={packQuota.carried ?? 0}
                       total={packQuota.sessions}
                       unitWord={packQuota.unit ?? (isPhysio ? 'ครั้ง' : 'วัน')}
                       expiresOn={packQuota?.expires_on ?? null}

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { PROCEDURE_MIN_CHARS, RATE_LABELS, defaultRate, rateNumber, searchProcedures } from '../lib/procedureCatalog.js';
-import { itemCategory, useCategories } from '../lib/categories.js';
+import { PROCEDURE_MIN_CHARS, RATE_LABELS, defaultRate, rateNumber, searchProcedures, withPrices } from '../lib/procedureCatalog.js';
+import { itemCategory, priceRow, useCategories } from '../lib/categories.js';
 
 /**
  * ช่องชื่อหัตถการ — พิมพ์ค้นหาจากรายการมาตรฐาน (ขึ้นรายการเมื่อพิมพ์ครบ 3 ตัวอักษร)
@@ -17,7 +17,11 @@ export default function ProcedureNameInput({ value, onChange, onPick, ...rest })
   const [active, setActive] = useState(0);
   const [pos, setPos] = useState(null);
 
-  const matches = useMemo(() => searchProcedures(value ?? ''), [value]);
+  // ราคาที่ตั้งในหน้าหมวดหมู่ทับราคาตั้งต้นในโค้ด (catalog_prices · 19 พ.ย. 2569)
+  const matches = useMemo(
+    () => searchProcedures(value ?? '').map((p) => withPrices(p, priceRow(cats, 'procedure', p.code))),
+    [value, cats],
+  );
   const showing = open && matches.length > 0;
   const typed = (value ?? '').trim().length;
 

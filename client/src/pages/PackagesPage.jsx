@@ -521,173 +521,214 @@ export default function PackagesPage() {
   );
 }
 
-/** แผงจัดการโครงสร้าง: เพิ่ม/แก้/ลบ เกรด และ รูปแบบบริการ (แต่ละปุ่มยิง API ทันที) */
+/**
+ * แผงจัดการโครงสร้าง: เพิ่ม/ลบ เกรด และ รูปแบบบริการ (แต่ละปุ่มยิง API ทันที)
+ * ดีไซน์ใหม่ 19 พ.ย. 2569 — การ์ดแบบเดียวกับหน้าตั้งค่า/หมวดหมู่: หัวการ์ด (ชื่อ · จำนวน · ปุ่มเพิ่ม) + แถวกล่องย่อย
+ *   เกรด: เลขวงกลม · ชื่อ + ระดับการดูแล · คำอธิบาย · ลบ
+ *   รูปแบบบริการ: แบ่งกลุ่ม รายวัน / รายสัปดาห์ / รายเดือน · ป้ายเรทเดียว/แยกตามเกรด · ช่อง "ลงกะได้ … วัน/เคส" · ลบ
+ *   ฟอร์มเพิ่มซ่อนไว้ กด "+ เพิ่ม…" ที่หัวการ์ดแล้วค่อยกางท้ายการ์ด
+ */
 function ManagePanel({ matrix, onChanged, setError }) {
   const [gradeForm, setGradeForm] = useState({ name: '', description: '' });
   const [formatForm, setFormatForm] = useState({ name: '', category: 'monthly', graded: true });
+  const [addingGrade, setAddingGrade] = useState(false);
+  const [addingFormat, setAddingFormat] = useState(false);
   const [busy, setBusy] = useState(false);
 
+  /** คืน true ถ้าสำเร็จ — ฟอร์มเพิ่มปิดเองเมื่อสำเร็จ */
   const run = async (fn) => {
     setBusy(true);
     setError(null);
     try {
       await fn();
       onChanged();
+      return true;
     } catch (err) {
       setError(err.message);
+      return false;
     } finally {
       setBusy(false);
     }
   };
 
+  const addGrade = async (e) => {
+    e.preventDefault();
+    if (!gradeForm.name.trim()) return;
+    const ok = await run(() => api.createGrade({
+      name: gradeForm.name.trim(),
+      description: gradeForm.description.trim() || null,
+      sort_order: matrix.grades.length + 1,
+    }));
+    if (ok) {
+      setGradeForm({ name: '', description: '' });
+      setAddingGrade(false);
+    }
+  };
+  const addFormat = async (e) => {
+    e.preventDefault();
+    if (!formatForm.name.trim()) return;
+    const ok = await run(() => api.createFormat({
+      name: formatForm.name.trim(),
+      category: formatForm.category,
+      graded: formatForm.graded,
+      sort_order: matrix.formats.length + 1,
+    }));
+    if (ok) {
+      setFormatForm({ name: '', category: 'monthly', graded: true });
+      setAddingFormat(false);
+    }
+  };
+
+  const groups = Object.entries(CATEGORY_LABELS)
+    .map(([cat, label]) => ({ cat, label, items: matrix.formats.filter((f) => f.category === cat) }))
+    .filter((g) => g.items.length > 0);
+
   return (
-    <div className="card manage-panel">
-      <div className="manage-cols">
-        <div>
-          <h3>เกรด</h3>
-          <ul className="manage-list">
-            {matrix.grades.map((g, i) => (
-              <li key={g.grade_id}>
-                <div>
-                  <strong>
-                    {g.name}
-                    {careLevelOf(i) && ` (${careLevelOf(i)})`}
-                  </strong>
-                  {g.description && <p className="muted">{g.description}</p>}
-                </div>
-                <ConfirmButton
-                  className="btn tiny danger-ghost"
-                  disabled={busy}
-                  title={`ลบเกรด "${g.name}"?`}
-                  detail="ราคาทุกช่องของเกรดนี้จะถูกลบไปด้วย และกู้คืนไม่ได้"
-                  confirmLabel="ลบเกรด"
-                  onConfirm={() => run(() => api.deleteGrade(g.grade_id))}
-                >
-                  ลบ
-                </ConfirmButton>
-              </li>
-            ))}
-          </ul>
-          <div className="manage-add">
-            <input
-              placeholder="ชื่อเกรด เช่น เกรด 4"
-              value={gradeForm.name}
-              onChange={(e) => setGradeForm((p) => ({ ...p, name: e.target.value }))}
-            />
-            <input
-              placeholder="คำอธิบาย (ไม่บังคับ)"
-              value={gradeForm.description}
-              onChange={(e) => setGradeForm((p) => ({ ...p, description: e.target.value }))}
-            />
-            <button
-              className="btn" disabled={busy || !gradeForm.name.trim()}
-              onClick={() =>
-                run(async () => {
-                  await api.createGrade({
-                    name: gradeForm.name.trim(),
-                    description: gradeForm.description.trim() || null,
-                    sort_order: matrix.grades.length + 1,
-                  });
-                  setGradeForm({ name: '', description: '' });
-                })
-              }
-            >
+    <div className="pkg-manage">
+      {/* ---------- เกรด ---------- */}
+      <section className="set-card" aria-label="เกรด">
+        <header className="set-card-head">
+          <div className="set-card-title">
+            <h3>เกรดการดูแล</h3>
+            <p className="muted">{matrix.grades.length} เกรด · แต่ละเกรดมีตารางราคารายเดือนของตัวเอง</p>
+          </div>
+          <div className="set-card-tools">
+            <button type="button" className="btn tiny set-add-btn" disabled={busy} onClick={() => setAddingGrade((v) => !v)}>
               + เพิ่มเกรด
             </button>
           </div>
-        </div>
-
-        <div>
-          <h3>รูปแบบบริการ</h3>
-          <ul className="manage-list">
-            {matrix.formats.map((f) => (
-              <li key={f.format_id}>
-                <div>
-                  <strong>{f.name}</strong>
-                  <p className="muted">
-                    {CATEGORY_LABELS[f.category]}
-                    {' · '}
-                    {f.graded ? 'แยกราคาตามเกรด' : 'เรทเดียวทุกเกรด'}
-                  </p>
-                  {/* จำนวนวันต่อรอบ — ล็อกการลงกะของเคสไม่ให้เกิน (16 พ.ย. 2569) · ว่าง = ไม่จำกัด (รายวัน) */}
-                  <label className="format-days">
-                    <span className="muted">ลงกะได้</span>
-                    <input
-                      type="number"
-                      min="1"
-                      max="366"
-                      inputMode="numeric"
-                      placeholder="ไม่จำกัด"
-                      defaultValue={f.days ?? ''}
-                      key={`${f.format_id}-${f.days ?? ''}`}
+        </header>
+        {matrix.grades.length > 0 ? (
+          <ul className="set-rows">
+            {matrix.grades.map((g, i) => (
+              <li key={g.grade_id} className="set-row">
+                <div className="set-row-main">
+                  <span className="set-row-ico" aria-hidden="true">{i + 1}</span>
+                  <div className="set-row-text">
+                    <strong>
+                      {g.name}
+                      {careLevelOf(i) && <span className="pkg-level">{careLevelOf(i)}</span>}
+                    </strong>
+                    {g.description && <span className="set-row-sub">{g.description}</span>}
+                  </div>
+                  <div className="set-row-tools">
+                    <ConfirmButton
+                      className="btn tiny danger-ghost"
                       disabled={busy}
-                      aria-label={`จำนวนวันที่ลงกะได้ของ ${f.name}`}
-                      onBlur={(e) => {
-                        const raw = e.target.value.trim();
-                        const days = raw === '' ? null : Math.trunc(Number(raw));
-                        if (days === (f.days ?? null) || (days != null && !(days >= 1 && days <= 366))) {
-                          e.target.value = f.days ?? '';
-                          return;
-                        }
-                        run(() => api.updateFormat(f.format_id, { days }));
-                      }}
-                      onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
-                    />
-                    <span className="muted">วัน / เคส</span>
-                  </label>
+                      title={`ลบเกรด "${g.name}"?`}
+                      detail="ราคาทุกช่องของเกรดนี้จะถูกลบไปด้วย และกู้คืนไม่ได้"
+                      confirmLabel="ลบเกรด"
+                      onConfirm={() => run(() => api.deleteGrade(g.grade_id))}
+                    >
+                      ลบ
+                    </ConfirmButton>
+                  </div>
                 </div>
-                <ConfirmButton
-                  className="btn tiny danger-ghost"
-                  disabled={busy}
-                  title={`ลบรูปแบบบริการ "${f.name}"?`}
-                  detail="ราคาทุกช่องของรูปแบบนี้จะถูกลบไปด้วย และกู้คืนไม่ได้"
-                  confirmLabel="ลบรูปแบบ"
-                  onConfirm={() => run(() => api.deleteFormat(f.format_id))}
-                >
-                  ลบ
-                </ConfirmButton>
               </li>
             ))}
           </ul>
-          <div className="manage-add">
-            <input
-              placeholder="ชื่อรูปแบบ เช่น รายเดือน 8 ชม."
-              value={formatForm.name}
-              onChange={(e) => setFormatForm((p) => ({ ...p, name: e.target.value }))}
-            />
-            <SearchSelect
-              value={formatForm.category}
-              onChange={(e) => setFormatForm((p) => ({ ...p, category: e.target.value }))}
-            >
-              {Object.entries(CATEGORY_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-            </SearchSelect>
-            <label className="checkbox-row">
-              <input
-                type="checkbox"
-                checked={formatForm.graded}
-                onChange={(e) => setFormatForm((p) => ({ ...p, graded: e.target.checked }))}
-              />
-              แยกราคาตามเกรด
-            </label>
-            <button
-              className="btn" disabled={busy || !formatForm.name.trim()}
-              onClick={() =>
-                run(async () => {
-                  await api.createFormat({
-                    name: formatForm.name.trim(),
-                    category: formatForm.category,
-                    graded: formatForm.graded,
-                    sort_order: matrix.formats.length + 1,
-                  });
-                  setFormatForm({ name: '', category: 'monthly', graded: true });
-                })
-              }
-            >
+        ) : <p className="muted set-empty">ยังไม่มีเกรด</p>}
+        {addingGrade && (
+          <form className="set-add" onSubmit={addGrade}>
+            <input autoFocus placeholder="ชื่อเกรด เช่น เกรด 4" aria-label="ชื่อเกรด" value={gradeForm.name}
+              onChange={(e) => setGradeForm((p) => ({ ...p, name: e.target.value }))} />
+            <input placeholder="คำอธิบาย (ไม่บังคับ)" aria-label="คำอธิบายเกรด" value={gradeForm.description}
+              onChange={(e) => setGradeForm((p) => ({ ...p, description: e.target.value }))} />
+            <button type="submit" className="btn primary" disabled={busy || !gradeForm.name.trim()}>เพิ่ม</button>
+            <button type="button" className="btn" disabled={busy} onClick={() => setAddingGrade(false)}>ยกเลิก</button>
+          </form>
+        )}
+      </section>
+
+      {/* ---------- รูปแบบบริการ ---------- */}
+      <section className="set-card" aria-label="รูปแบบบริการ">
+        <header className="set-card-head">
+          <div className="set-card-title">
+            <h3>รูปแบบบริการ</h3>
+            <p className="muted">{matrix.formats.length} รูปแบบ · "ลงกะได้" = จำนวนวันสูงสุดที่ลงกะได้ต่อเคส (ว่าง = ไม่จำกัด)</p>
+          </div>
+          <div className="set-card-tools">
+            <button type="button" className="btn tiny set-add-btn" disabled={busy} onClick={() => setAddingFormat((v) => !v)}>
               + เพิ่มรูปแบบ
             </button>
           </div>
-        </div>
-      </div>
+        </header>
+        {groups.length === 0 && <p className="muted set-empty">ยังไม่มีรูปแบบบริการ</p>}
+        {groups.map((g) => (
+          <div key={g.cat} className="pkg-format-group">
+            <p className="pkg-group-head">{g.label} <span className="muted">({g.items.length})</span></p>
+            <ul className="set-rows">
+              {g.items.map((f) => (
+                <li key={f.format_id} className="set-row">
+                  <div className="set-row-main">
+                    <div className="set-row-text">
+                      <strong>{f.name}</strong>
+                      <span className="set-row-sub">
+                        <span className={`pkg-chip${f.graded ? ' is-graded' : ''}`}>{f.graded ? 'แยกราคาตามเกรด' : 'เรทเดียวทุกเกรด'}</span>
+                      </span>
+                    </div>
+                    <div className="set-row-tools">
+                      {/* จำนวนวันต่อรอบ — ล็อกการลงกะของเคสไม่ให้เกิน (16 พ.ย. 2569) · ว่าง = ไม่จำกัด (รายวัน) */}
+                      <label className="format-days">
+                        <span className="muted">ลงกะได้</span>
+                        <input
+                          type="number"
+                          min="1"
+                          max="366"
+                          inputMode="numeric"
+                          placeholder="ไม่จำกัด"
+                          defaultValue={f.days ?? ''}
+                          key={`${f.format_id}-${f.days ?? ''}`}
+                          disabled={busy}
+                          aria-label={`จำนวนวันที่ลงกะได้ของ ${f.name}`}
+                          onBlur={(e) => {
+                            const raw = e.target.value.trim();
+                            const days = raw === '' ? null : Math.trunc(Number(raw));
+                            if (days === (f.days ?? null) || (days != null && !(days >= 1 && days <= 366))) {
+                              e.target.value = f.days ?? '';
+                              return;
+                            }
+                            run(() => api.updateFormat(f.format_id, { days }));
+                          }}
+                          onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+                        />
+                        <span className="muted">วัน / เคส</span>
+                      </label>
+                      <ConfirmButton
+                        className="btn tiny danger-ghost"
+                        disabled={busy}
+                        title={`ลบรูปแบบบริการ "${f.name}"?`}
+                        detail="ราคาทุกช่องของรูปแบบนี้จะถูกลบไปด้วย และกู้คืนไม่ได้"
+                        confirmLabel="ลบรูปแบบ"
+                        onConfirm={() => run(() => api.deleteFormat(f.format_id))}
+                      >
+                        ลบ
+                      </ConfirmButton>
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+        {addingFormat && (
+          <form className="set-add pkg-format-add" onSubmit={addFormat}>
+            <input autoFocus placeholder="ชื่อรูปแบบ เช่น รายเดือน 8 ชม." aria-label="ชื่อรูปแบบบริการ" value={formatForm.name}
+              onChange={(e) => setFormatForm((p) => ({ ...p, name: e.target.value }))} />
+            <SearchSelect value={formatForm.category} aria-label="ประเภท"
+              onChange={(e) => setFormatForm((p) => ({ ...p, category: e.target.value }))}>
+              {Object.entries(CATEGORY_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </SearchSelect>
+            <label className="checkbox-row">
+              <input type="checkbox" checked={formatForm.graded}
+                onChange={(e) => setFormatForm((p) => ({ ...p, graded: e.target.checked }))} />
+              แยกราคาตามเกรด
+            </label>
+            <button type="submit" className="btn primary" disabled={busy || !formatForm.name.trim()}>เพิ่ม</button>
+            <button type="button" className="btn" disabled={busy} onClick={() => setAddingFormat(false)}>ยกเลิก</button>
+          </form>
+        )}
+      </section>
     </div>
   );
 }

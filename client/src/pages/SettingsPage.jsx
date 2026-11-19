@@ -1,10 +1,14 @@
 import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import SettingsShell, { SettingsPaneHead } from '../components/SettingsShell.jsx';
 import ChangePasswordForm from '../components/ChangePasswordForm.jsx';
 import { getTheme, setTheme as persistTheme } from '../lib/theme.js';
 import LineIcon from '../components/LineIcon.jsx';
 import { useAuth } from '../auth.jsx';
 import { guideUrlFor } from '../lib/guide.js';
 import { canPromptInstall, isIos, isStandalone, onInstallChange, promptInstall } from '../lib/pwa.js';
+
+// หมวดของระบบ (เหตุผลยกเลิก · เหตุการณ์ผิดปกติ) ย้ายไปหน้า "ตั้งค่าระบบ" แล้ว (ปุ่มไขควงข้างปุ่มตั้งค่า · SystemSettingsPage)
 
 /**
  * ติดตั้งแอปลงหน้าโฮม (PWA)
@@ -50,14 +54,88 @@ function InstallApp() {
   );
 }
 
+/* เมนูซ้ายของหน้าตั้งค่า (ดีไซน์ 19 พ.ย. 2569 — เมนูซ้าย + แผงขวา) · จำหน้าที่เลือกไว้ใน ?tab= · เรื่องของบัญชีนี้เท่านั้น */
+const GROUPS = [
+  { label: 'บัญชีของฉัน', items: [
+    { key: 'display', label: 'การแสดงผล' },
+    { key: 'app', label: 'แอปบนมือถือ' },
+    { key: 'password', label: 'เปลี่ยนรหัสผ่าน' },
+    { key: 'help', label: 'ช่วยเหลือ' },
+  ] },
+];
+
 export default function SettingsPage() {
   const { user } = useAuth();
   const [theme, setThemeState] = useState(getTheme);
+  const [params, setParams] = useSearchParams();
+  const groups = GROUPS;
+  const keys = groups.flatMap((g) => g.items.map((i) => i.key));
+  const tab = keys.includes(params.get('tab')) ? params.get('tab') : keys[0];
 
   const changeTheme = (value) => {
     setThemeState(value);
     persistTheme(value); // เปลี่ยนทั้งระบบทันที + จำไว้ครั้งหน้า
   };
+
+  let pane;
+  if (tab === 'display') {
+    pane = (
+      <>
+        <SettingsPaneHead title="การแสดงผล" desc="ธีมของหน้าจอ — จำไว้ในเครื่องนี้ เปลี่ยนแล้วมีผลทั้งระบบทันที" />
+        <section className="set-card">
+          <div className="setting-row">
+            <div>
+              <strong>โหมดกลางคืน</strong>
+              <p className="muted">พื้นหลังเข้ม สบายตาเวลาใช้งานในที่แสงน้อย</p>
+            </div>
+            {/* สลับสว่าง/มืด — ปุ่มคู่ให้เห็นชัดว่าตอนนี้อยู่โหมดไหน */}
+            <div className="theme-toggle">
+              <button className={`btn ${theme === 'light' ? 'primary' : ''}`} onClick={() => changeTheme('light')}>
+                <LineIcon name="sun" />สว่าง
+              </button>
+              <button className={`btn ${theme === 'dark' ? 'primary' : ''}`} onClick={() => changeTheme('dark')}>
+                <LineIcon name="moon" />กลางคืน
+              </button>
+            </div>
+          </div>
+        </section>
+      </>
+    );
+  } else if (tab === 'app') {
+    pane = (
+      <>
+        <SettingsPaneHead title="แอปบนมือถือ" desc="ติดตั้งระบบเป็นไอคอนบนหน้าโฮม เปิดได้เร็วเหมือนแอป" />
+        <section className="set-card"><InstallApp /></section>
+      </>
+    );
+  } else if (tab === 'password') {
+    pane = (
+      <>
+        <SettingsPaneHead title="เปลี่ยนรหัสผ่าน" desc="ยืนยันด้วยรหัสผ่านปัจจุบันของคุณก่อนตั้งรหัสใหม่" />
+        <section className="set-card"><ChangePasswordForm /></section>
+      </>
+    );
+  } else {
+    pane = (
+      <>
+        <SettingsPaneHead title="ช่วยเหลือ" desc="วิธีใช้งานระบบ" />
+        <section className="set-card">
+          <div className="setting-row">
+            <div>
+              <strong>วิดีโอสอนใช้งาน</strong>
+              <p className="muted">
+                {user?.role === 'admin' ? 'ขั้นตอนงานหลังบ้านทีละขั้น' : 'วิธีใช้งานสำหรับพนักงานภาคสนาม'} — เปิดในแท็บใหม่
+              </p>
+            </div>
+            {/* ลิงก์ออกนอกระบบ ใช้ <a> — เปิดแท็บใหม่ งานที่ค้างอยู่ในระบบจึงไม่หาย */}
+            <a className="btn" href={guideUrlFor(user)} target="_blank" rel="noopener noreferrer">
+              <LineIcon name="play" />ดูวิดีโอ
+            </a>
+          </div>
+        </section>
+      </>
+    );
+  }
 
   return (
     <>
@@ -67,59 +145,9 @@ export default function SettingsPage() {
           <p className="muted">ปรับแต่งการแสดงผล ความปลอดภัยของบัญชี และดูวิธีใช้งาน</p>
         </div>
       </header>
-
-      <section className="card">
-        <h2>การแสดงผล</h2>
-        <div className="setting-row">
-          <div>
-            <strong>โหมดกลางคืน</strong>
-            <p className="muted">พื้นหลังเข้ม สบายตาเวลาใช้งานในที่แสงน้อย</p>
-          </div>
-
-          {/* สลับสว่าง/มืด — ปุ่มคู่ให้เห็นชัดว่าตอนนี้อยู่โหมดไหน */}
-          <div className="theme-toggle">
-            <button
-              className={`btn ${theme === 'light' ? 'primary' : ''}`}
-              onClick={() => changeTheme('light')}
-            >
-              <LineIcon name="sun" />สว่าง
-            </button>
-            <button
-              className={`btn ${theme === 'dark' ? 'primary' : ''}`}
-              onClick={() => changeTheme('dark')}
-            >
-              <LineIcon name="moon" />กลางคืน
-            </button>
-          </div>
-        </div>
-      </section>
-
-      <section className="card">
-        <h2>แอปบนมือถือ</h2>
-        <InstallApp />
-      </section>
-
-      <section className="card">
-        <h2>เปลี่ยนรหัสผ่าน</h2>
-        <p className="muted change-pw-note">ยืนยันด้วยรหัสผ่านปัจจุบันของคุณก่อนตั้งรหัสใหม่</p>
-        <ChangePasswordForm />
-      </section>
-
-      <section className="card">
-        <h2>ช่วยเหลือ</h2>
-        <div className="setting-row">
-          <div>
-            <strong>วิดีโอสอนใช้งาน</strong>
-            <p className="muted">
-              {user?.role === 'admin' ? 'ขั้นตอนงานหลังบ้านทีละขั้น' : 'วิธีใช้งานสำหรับพนักงานภาคสนาม'} — เปิดในแท็บใหม่
-            </p>
-          </div>
-          {/* ลิงก์ออกนอกระบบ ใช้ <a> — เปิดแท็บใหม่ งานที่ค้างอยู่ในระบบจึงไม่หาย */}
-          <a className="btn" href={guideUrlFor(user)} target="_blank" rel="noopener noreferrer">
-            <LineIcon name="play" />ดูวิดีโอ
-          </a>
-        </div>
-      </section>
+      <SettingsShell groups={groups} active={tab} onSelect={(k) => setParams({ tab: k }, { replace: true })}>
+        {pane}
+      </SettingsShell>
     </>
   );
 }

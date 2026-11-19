@@ -29,9 +29,10 @@ export const PERMISSION_CATALOG = [
   { key: 'patients', group: 'menu', label: 'ผู้รับบริการ' },
   { key: 'employees', group: 'menu', label: 'พนักงาน' },
   { key: 'reviews', group: 'menu', label: 'คะแนนประเมินจากญาติ' },
-  /* หมวดหมู่ (categories/routes.js · 16 พ.ย. 2569) — เพิ่ม/แก้/ปิดเหตุผลยกเลิก · แก้ชื่อหมวดหัตถการ/เหตุการณ์
+  /* หมวดหมู่ (categories/routes.js · 16 พ.ย. 2569) — แคตตาล็อก: แพ็ก Homecare/กายภาพ · หัตถการ · อุปกรณ์เสริม
+     เหตุผลยกเลิก/เหตุการณ์ไม่ขึ้นกับสิทธิ์นี้ — Super Admin + ผู้จัดการเท่านั้น (หน้าตั้งค่า · 19 พ.ย. 2569)
      ไม่อยู่ใน OFFICE_KEYS โดยตั้งใจ: เปิดให้ใครแล้วต้องไม่ได้งานหลังบ้านทั้งก้อนติดมาด้วย */
-  { key: 'categories', group: 'menu', label: 'หมวดหมู่ (รหัสหมวด)', hint: 'เหตุผลยกเลิก · หมวดหัตถการ · หมวดเหตุการณ์' },
+  { key: 'categories', group: 'menu', label: 'หัตถการ / อุปกรณ์เสริม', hint: 'หมวดและราคา · เมนูย่อยของแพ็คเกจ (เหตุผลยกเลิก/เหตุการณ์อยู่หน้าตั้งค่าระบบ เฉพาะ Super Admin + ผู้จัดการ)' },
   { key: 'see_pay', group: 'sensitive', label: 'เห็นค่าจ้างพนักงาน / ต้นทุน / กำไร' },
   { key: 'invoice_adjust', group: 'sensitive', label: 'ออกใบลดหนี้ · ยกเลิกใบแจ้งหนี้ · แก้ข้อมูลเงินคืน' },
   { key: 'slip_delete', group: 'sensitive', label: 'ลบสลิปการโอน' },

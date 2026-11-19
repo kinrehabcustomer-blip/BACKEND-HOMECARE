@@ -65,7 +65,7 @@ const isTerminal = (caseRow) => TERMINAL_STATUSES.includes(caseRow.status);
  * ตัดที่ชั้น route ไม่ใช่ที่ repo เพราะ repo ถูกเรียกจากฝั่ง server ด้วยกันเอง
  * (payFromService, syncOpenFromCase) ซึ่งต้องใช้ตัวเลขจริงเสมอไม่ว่าใครเป็นคนกดปุ่ม
  */
-const PAY_FIELDS = ['staff_pay', 'rate_staff_pay', 'physio_staff_pay'];
+const PAY_FIELDS = ['staff_pay', 'rate_staff_pay', 'physio_staff_pay', 'carried_staff_paid'];
 
 /**
  * แพ็กกายภาพเสริมที่เก็บเงินรวมในใบของเคส Homecare (bill_with_parent) เปลี่ยน -> ซิงก์ใบที่ยังแก้ได้ของเคส Homecare
@@ -96,7 +96,9 @@ const visibleList = (req, rows) => rows.map((row) => visible(req, row));
 
 /** มีเพียง manager ที่ส่งต้นทุนพนักงานเข้ามาได้; HR ยังเปิด/แก้เคสได้และให้ server เติมจากแพ็คเกจ */
 export function ensureCanSetStaffPay(req, body) {
-  if (Object.prototype.hasOwnProperty.call(body ?? {}, 'staff_pay') && !canSeeStaffPay(req.user?.position)) {
+  // ค่าจ้างที่จ่ายพนักงานนอกระบบ (เคสกลางทาง) เป็นตัวเลขฝั่งต้นทุนเหมือนค่าจ้าง — กติกาเดียวกัน
+  const sent = ['staff_pay', 'carried_staff_paid'].some((f) => Object.prototype.hasOwnProperty.call(body ?? {}, f));
+  if (sent && !canSeeStaffPay(req.user?.position)) {
     throw new ApiError(403, 'เฉพาะผู้จัดการเท่านั้นที่กำหนดค่าจ้างพนักงานได้');
   }
 }
@@ -1018,6 +1020,22 @@ casesRouter.delete(
     // ?employee= ลบเฉพาะนัดของคนนี้ — เคสหลายคน ลบตารางของคนหนึ่งต้องไม่กวาดนัดของอีกคนในวันเดียวกันไปด้วย
     const employee = typeof req.query.employee === 'string' && req.query.employee ? req.query.employee : null;
     res.json(await repo.removeVisitsOn(req.params.id, dates, req.user, employee));
+  }),
+);
+
+/**
+ * ยกเลิกนัดที่ยังไม่ถึงวันทั้งหมดของเคส (ผู้ใช้ขอ 19 พ.ย. 2569) — body { reason?, reason_id?, employee? }
+ * แจ้งยกเลิกทาง LINE รายนัดพร้อมเหตุผล เหมือนปุ่มยกเลิกทีละนัด · คืน { visits, deleted, kept }
+ */
+casesRouter.post(
+  '/:id/visits/cancel-upcoming',
+  asyncRoute(async (req, res) => {
+    const { reason, reason_id } = cancelSchema.parse(req.body ?? {});
+    const picked = await resolveReason('cancel_visit', reason_id);
+    const text = (reasonText(picked, reason) ?? '').trim().slice(0, 300) || null;
+    if (!text) throw new ApiError(400, 'กรุณาระบุเหตุผลที่ยกเลิก — ส่งไปกับข้อความแจ้งพนักงานและญาติ');
+    const employee = typeof req.body?.employee === 'string' && req.body.employee ? req.body.employee : null;
+    res.json(await repo.removeUpcomingVisits(req.params.id, req.user, { reason: text, employeeId: employee }));
   }),
 );
 

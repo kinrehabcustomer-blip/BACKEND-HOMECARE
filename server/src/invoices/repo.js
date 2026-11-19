@@ -5,7 +5,7 @@ import {
   normalizeAddons, addonAmount, addonsTotal, addonsTotalSql, addonLabel, unbilledAddons, isPhysioBundle, PHYSIO_BUNDLE,
 } from '../lib/addons.js';
 import { ensureAddonLink, ensureCasePriceSnapshots } from '../cases/repo.js';
-import { bundleCoveredSql } from '../cases/addonLink.js';
+import { bundleCoveredSql, prepaidCoveredSql } from '../cases/addonLink.js';
 import { ensureShareTables, hasBeenShared } from './share.js';
 import { likeEscape } from '../lib/likeEscape.js';
 import {
@@ -236,7 +236,11 @@ const ensurePriceSnapshotColumns = () =>
     await ensureAddonLink(); // cases.pkg_quantity — serviceKeySql อ่านมัน (ดูจาก catalog ก่อน ไม่ ALTER ซ้ำ)
   })().catch((err) => { priceSnapshotColumnsReady = null; throw err; }));
 
-const caseNetFeeSql = (c) => `COALESCE(${c}.service_customer_price_snapshot, ${c}.fee)`;
+/* หักยอดที่ลูกค้าจ่ายไปแล้วนอกระบบ (เคสที่เข้าระบบกลางทาง · carried_paid · 19 พ.ย. 2569) — ใบเก็บแค่ส่วนที่เหลือ
+   ไม่ได้ตั้งราคาเลย = NULL เหมือนเดิม (GREATEST ข้าม NULL จนกลายเป็น 0 จึงต้องเช็คก่อน)
+   ผู้เรียกต้องผ่าน ensurePriceSnapshotColumns (ซึ่งเรียก ensureAddonLink) ก่อน — คอลัมน์ carried_paid สร้างแบบ lazy */
+const caseNetFeeSql = (c) => `(CASE WHEN COALESCE(${c}.service_customer_price_snapshot, ${c}.fee) IS NULL THEN NULL
+  ELSE GREATEST(0, COALESCE(${c}.service_customer_price_snapshot, ${c}.fee) - COALESCE(${c}.carried_paid, 0)) END)`;
 const caseBillableSql = (c, i) =>
   `CASE WHEN ${caseNetFeeSql(c)} IS NULL AND ${i}.addons = '[]'::jsonb THEN NULL
         ELSE COALESCE(${caseNetFeeSql(c)}, 0) + ${addonsTotalSql(i)} END`;
@@ -372,6 +376,12 @@ function priceParts(caseRow) {
   const list = listPriceOf(caseRow);
   // อุปกรณ์เสริมคิดเต็มราคาเสมอ ไม่มีส่วนลด — บวกเข้ายอดก่อนลด ส่วนลดยังเป็นของค่าบริการล้วนๆ
   const extra = addonsTotal(caseRow.addons);
+  /* เคสที่เข้าระบบกลางทาง: ใบเก็บเฉพาะส่วนที่ยังไม่ได้จ่าย (ราคา − ชำระแล้วนอกระบบ) — ที่มาของยอดเขียนไว้ในรายการ (describeService)
+     ไม่แสดงบรรทัดส่วนลดในกรณีนี้ ไม่งั้นยอดก่อนลด/ส่วนลดจะดูเหมือนลูกค้าได้ลดราคา ทั้งที่ส่วนต่างคือเงินที่จ่ายไปแล้ว */
+  const prepaid = Number(caseRow.carried_paid ?? 0);
+  if (prepaid > 0) {
+    return { amount: Math.round((Math.max(0, Number(net) - prepaid) + extra) * 100) / 100, discount: 0 };
+  }
   return list != null && list > net
     ? { amount: list + extra, discount: list - net }
     : { amount: net + extra, discount: 0 };
@@ -418,7 +428,8 @@ export async function bundledAddons(caseRow, db = sql) {
     /* ราคาสุทธิ = snapshot ก่อน fee เหมือน caseNetFeeSql — อ่านผ่าน to_jsonb เพราะคอลัมน์ snapshot
        เติมแบบ lazy และฟังก์ชันนี้ถูกเรียกใน tx ที่ ALTER ไม่ได้ (ฐานที่ยังไม่มีคอลัมน์ = ได้ fee ตามเดิม) */
     `SELECT c.case_id,
-            COALESCE((to_jsonb(c)->>'service_customer_price_snapshot')::double precision, c.fee) AS fee,
+            GREATEST(0, COALESCE((to_jsonb(c)->>'service_customer_price_snapshot')::double precision, c.fee)
+                        - COALESCE((to_jsonb(c)->>'carried_paid')::double precision, 0)) AS fee,
             pp.name AS package_name, pp.sessions, c.pkg_quantity
      FROM cases c
      LEFT JOIN physio_packages pp ON pp.physio_package_id = c.physio_package_id
@@ -835,6 +846,8 @@ export const casesWithoutInvoice = () =>
        -- แพ็กกายภาพที่รวมอยู่ในเคส Homecare ออกใบที่เคส Homecare (เคสเดียวกันในสายตาคนใช้)
        -- ขึ้นเองเฉพาะตอนเคส Homecare ดูแลการเก็บเงินแพ็กนี้ไม่ได้แล้ว (ดู bundleCoveredSql)
        AND NOT ${bundleCoveredSql('c')}
+       -- เข้าระบบกลางทางที่ลูกค้าจ่ายครบนอกระบบแล้ว ไม่ต้องมีใบ (ดู prepaidCoveredSql)
+       AND NOT ${prepaidCoveredSql('c')}
        AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.case_id = c.case_id AND i.status <> 'cancelled')
      ORDER BY c.case_id DESC
      LIMIT 50`,
@@ -1231,11 +1244,15 @@ export async function visitLines(caseRow, { from, to } = {}) {
   // ราคาสุทธิเดียวกับใบแพ็คเกจ (priceParts/caseNetFeeSql) — เคสที่ราคามาจากตารางราคาอาจไม่มี fee
   // ถ้าใช้ fee ตรงๆ ทุกบรรทัดจะเป็น 0 บาท (ตรวจ 13 พ.ย. 2569)
   const fee = Number(caseRow.service_customer_price_snapshot ?? caseRow.fee ?? 0);
-  const perVisit = Number(booked.n) > 0 ? fee / Number(booked.n) : 0;
+  /* เคสกลางทาง: ราคาครอบคลุมครั้งที่ใช้ไปก่อนเข้าระบบด้วย — ตัวหาร = นัดในระบบ + ครั้งที่ยกมา (ราคาต่อครั้งไม่พอง)
+     ยอดค้างหักที่ลูกค้าจ่ายไปแล้วนอกระบบ */
+  const carriedUsed = Number(caseRow.carried_used ?? 0);
+  const prepaid = Number(caseRow.carried_paid ?? 0);
+  const perVisit = Number(booked.n) + carriedUsed > 0 ? fee / (Number(booked.n) + carriedUsed) : 0;
   let rounded = Math.round(perVisit * 100) / 100;
   // เก็บเฉพาะครั้งที่ไปจริง — ยอดรวมจึงเป็นสัดส่วนของกะที่ทำ ไม่ใช่ทั้งแพ็คเกจ
   const isFinalUnbilledBatch = Number(remaining.n) === visits.length;
-  const outstanding = Math.max(0, Math.round((fee - Number(billed.amount ?? 0)) * 100) / 100);
+  const outstanding = Math.max(0, Math.round((fee - prepaid - Number(billed.amount ?? 0)) * 100) / 100);
   const total = isFinalUnbilledBatch
     ? outstanding
     : Math.round(rounded * visits.length * 100) / 100;
@@ -1611,10 +1628,17 @@ function describeService(c) {
       : `× ${qty} ${PACK_UNIT[c.format_category] ?? 'แพ็ก'}`
     : null;
 
+  /* เคสกลางทาง: บอกที่มาของยอดในรายการเลย — "ชำระแล้วก่อนเข้าระบบ 15,000 จากราคา 30,000" (ลูกค้าเห็นว่าทำไมใบไม่เต็มราคา) */
+  const prepaid = Number(c.carried_paid ?? 0);
+  const price = c.service_customer_price_snapshot ?? c.fee;
+  const prepaidText = prepaid > 0
+    ? `ชำระแล้วก่อนเข้าระบบ ${prepaid.toLocaleString('th-TH')} บาท${price != null ? ` จากราคา ${Number(price).toLocaleString('th-TH')} บาท` : ''}`
+    : null;
+
   const parts =
     physio
-      ? [c.physio_package_name, sessions, times, c.pkg_english && 'ภาษาอังกฤษ']
-      : [c.format_name, c.grade_name, c.pkg_staff_tier, times, c.pkg_english && 'ภาษาอังกฤษ'];
+      ? [c.physio_package_name, sessions, times, c.pkg_english && 'ภาษาอังกฤษ', prepaidText]
+      : [c.format_name, c.grade_name, c.pkg_staff_tier, times, c.pkg_english && 'ภาษาอังกฤษ', prepaidText];
 
   const service = parts.filter(Boolean).join(' · ');
   // เคสที่ยังไม่รู้ชื่อผู้รับบริการ ไม่พิมพ์ "ผู้รับบริการ: ยังไม่ระบุผู้รับบริการ" ลงเอกสารที่ส่งลูกค้า

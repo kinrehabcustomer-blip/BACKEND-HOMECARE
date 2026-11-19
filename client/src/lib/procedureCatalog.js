@@ -51,3 +51,15 @@ export const rateNumber = (text) => Number(String(text).match(/[\d,]+(?:\.\d+)?/
 
 /** ราคาเริ่มต้นเมื่อเลือกทั้งแถว: รายครั้ง → รายวัน → รายเดือน อันแรกที่มี */
 export const defaultRate = (p) => ['visit', 'day', 'month'].map((k) => p.rates[k]).find(Boolean) ?? null;
+
+/* ราคาที่ตั้งในหน้าหมวดหมู่ (catalog_prices · 19 พ.ย. 2569) ทับราคาตั้งต้นข้างบนทั้งชุด — ช่องว่าง = ไม่มีราคานั้น */
+const fmtRate = (n) => (n == null ? null : Number(n).toLocaleString('en-US'));
+/** หัตถการพร้อมราคาที่ใช้จริง — row = แถวราคาของรหัสนี้ (priceRow) หรือ null */
+export const withPrices = (p, row) =>
+  row ? { ...p, rates: { visit: fmtRate(row.price_visit), day: fmtRate(row.price_day), month: fmtRate(row.price_month) } } : p;
+/** ราคาตั้งต้นเป็นตัวเลข { price_visit, price_day, price_month } (ช่วงราคา '12,000/8,000' ได้ตัวแรก) */
+export const defaultPrices = (p) => ({
+  price_visit: p.rates.visit ? rateNumber(p.rates.visit) : null,
+  price_day: p.rates.day ? rateNumber(p.rates.day) : null,
+  price_month: p.rates.month ? rateNumber(p.rates.month) : null,
+});

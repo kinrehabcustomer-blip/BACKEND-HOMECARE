@@ -459,6 +459,10 @@ export const api = {
     if (points) params.set('points', points);
     return request(`/invoices/revenue?${params}`);
   },
+  /** รายได้ตาม BU (เกณฑ์เงินสด · invoices/revenueBu.js) — { from, to, group: day|week|month } */
+  revenueByBu: (params) => request(`/invoices/revenue-bu?${new URLSearchParams(params)}`),
+  /** เงินเข้า/คืนรายงวดที่แบ่ง BU แล้ว — { from, to, bu? } (เจาะดู + ส่งออก) */
+  revenueByBuRows: (params) => request(`/invoices/revenue-bu/rows?${new URLSearchParams(params)}`),
   getInvoice: (id) => request(`/invoices/${id}`),
   // ส่งใบเข้า LINE ลูกค้า (24 ต.ค. 2569) · ลิงก์สาธารณะของลูกค้า
   invoiceLine: (id) => request(`/invoices/${id}/line`),
@@ -543,6 +547,10 @@ export const api = {
   categories: (params = {}) => request(`/categories?${new URLSearchParams(params)}`),
   createCategory: (body) => request('/categories', { method: 'POST', body }),
   updateCategory: (id, body) => request(`/categories/${id}`, { method: 'PATCH', body }),
+  // จัดรายการเข้าหมวดย่อย (แทนทั้งชุด · แคตตาล็อก) — คืน { categories } ทั้งโดเมน
+  // ราคาของรายการในแคตตาล็อก (หัตถการ ครั้ง/วัน/เดือน · อุปกรณ์ เช่า/ขาย) — แทนทั้งชุดของรายการนั้น
+  setCatalogPrice: (body) => request('/categories/prices', { method: 'PUT', body }),
+  setCategoryItems: (id, itemKeys) => request(`/categories/${id}/items`, { method: 'PUT', body: { item_keys: itemKeys } }),
 
   // บันทึกการใช้งาน (Super Admin) — server/src/audit/routes.js
   auditLogs: (params = {}) => request(`/audit-logs?${new URLSearchParams(params)}`),
@@ -579,6 +587,8 @@ export const api = {
       `/cases/${id}/visits?${new URLSearchParams({ dates: dates.join(','), ...(employee ? { employee } : {}) })}`,
       { method: 'DELETE' },
     ),
+  /** ยกเลิกนัดที่ยังไม่ถึงวันทั้งหมดของเคส — body { reason, reason_id?, employee? } · คืน { visits, deleted, kept } */
+  cancelUpcomingVisits: (id, body) => request(`/cases/${id}/visits/cancel-upcoming`, { method: 'POST', body }),
   updateVisit: (id, visitId, body) => request(`/cases/${id}/visits/${visitId}`, { method: 'PATCH', body }),
   /**
    * ย้ายกะจากปฏิทิน — times = { planned_start, planned_end } เมื่อลงช่องเวลาใหม่ (ไม่ส่ง = เวลาคงเดิม)

@@ -7,6 +7,7 @@ import { formatBaht } from '../labels.js';
 import { caseCode } from '../lib/patientCode.js';
 import SearchSelect from './SearchSelect.jsx';
 import ProcedureNameInput from './ProcedureNameInput.jsx';
+import { categoryItemNames, equipmentPrice, useCategories } from '../lib/categories.js';
 
 /**
  * popup เพิ่มหัตถการ / อุปกรณ์เสริม จากหน้ารายละเอียดเคส (ผู้ใช้ขอ 9 พ.ย. 2569) — ไม่ต้องออกไปหน้าแก้ไขเต็ม
@@ -46,6 +47,13 @@ export default function CaseChargeModal({ item, mode, onClose, onSaved }) {
   }, [onClose, saving]);
 
   const set = (key, value) => setForm((prev) => ({ ...prev, [key]: value }));
+  /* อุปกรณ์จากหน้าหมวดหมู่: แนะนำชื่อ + เติมราคาตามรูปแบบ (เช่า/ซื้อขาด) เมื่อชื่อตรงกับที่ตั้งราคาไว้ */
+  const cats = useCategories();
+  const equipmentNames = categoryItemNames(cats?.categories, 'equipment');
+  const fillPrice = (name, kind) => {
+    const price = equipmentPrice(cats, name, kind);
+    if (price != null) set('unit_price', String(price));
+  };
   const qty = isProc ? 1 : Number(form.quantity || 0);
   const amount = Math.round(qty * Number(form.unit_price || 0) * 100) / 100;
   const ready = form.name.trim() !== '' && form.unit_price !== '' && (isProc || Number(form.quantity) > 0);
@@ -111,11 +119,17 @@ export default function CaseChargeModal({ item, mode, onClose, onSaved }) {
               <>
                 <label>ชื่ออุปกรณ์
                   <input value={form.name} placeholder="เช่น เตียงลม, รถเข็น" autoFocus
-                    onChange={(e) => set('name', e.target.value)} />
+                    list={equipmentNames.length > 0 ? 'charge-equipment-names' : undefined}
+                    onChange={(e) => { set('name', e.target.value); fillPrice(e.target.value, form.kind); }} />
+                  {equipmentNames.length > 0 && (
+                    <datalist id="charge-equipment-names">
+                      {equipmentNames.map((x) => <option key={x.name} value={x.name} label={x.group} />)}
+                    </datalist>
+                  )}
                 </label>
                 <div className="charge-grid">
                   <label>รูปแบบ
-                    <SearchSelect value={form.kind} onChange={(e) => set('kind', e.target.value)}>
+                    <SearchSelect value={form.kind} onChange={(e) => { set('kind', e.target.value); fillPrice(form.name, e.target.value); }}>
                       <option value="rent">เช่า</option>
                       <option value="sale">ซื้อขาด</option>
                     </SearchSelect>

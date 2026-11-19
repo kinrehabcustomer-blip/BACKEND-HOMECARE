@@ -1,4 +1,6 @@
 import { Router } from 'express';
+import { z } from 'zod';
+import { prepaidCovered } from '../cases/addonLink.js';
 import * as repo from './repo.js';
 import * as cases from '../cases/repo.js';
 import * as customers from '../customers/repo.js';
@@ -22,6 +24,7 @@ import {
   updateRefundSchema,
 } from './schema.js';
 import { createAdjustment, cancelAdjustment, updateRefund } from './ledger.js';
+import { allocatedEntries, checkRange, revenueByBu } from './revenueBu.js';
 import { decodeImage } from '../employees/schema.js';
 import { ApiError, asyncRoute, notFound } from '../lib/errors.js';
 import { requirePermission, can } from '../lib/auth.js';
@@ -77,6 +80,8 @@ export async function resolvePayer(caseRow) {
 export async function createDraftForCase(caseRow, actor) {
   // แพ็กกายภาพเสริมที่เก็บรวมในใบของเคส Homecare — ไม่มีใบของตัวเอง (ดู bundledAddons)
   if (caseRow.bill_with_parent) return null;
+  // เข้าระบบกลางทางที่ลูกค้าจ่ายครบนอกระบบแล้ว (ไม่มีอุปกรณ์/หัตถการเพิ่ม) — ไม่มีอะไรให้เก็บ ไม่ต้องมีใบร่าง
+  if (prepaidCovered(caseRow)) return null;
   /* กันใบร่างซ้ำไว้ตรงนี้ด้วย ไม่ใช่แค่ที่ปุ่มออกใบ — เส้นนี้ทำงานเองตอนเปิดเคส
      ถ้าคำขอเปิดเคสถูกยิงซ้ำ (เน็ตหลุดกลางทางแล้วกดใหม่) จะได้ไม่เหลือใบร่างค้างสองใบเงียบๆ */
   const existing = await repo.findDraftForCase(caseRow.case_id);
@@ -131,6 +136,30 @@ invoicesRouter.get(
   '/revenue',
   requirePermission('revenue', 'บัญชีของคุณไม่มีสิทธิ์ดูรายได้บริษัท'),
   asyncRoute(async (req, res) => res.json(await repo.revenue(revenueQuerySchema.parse(req.query)))),
+);
+
+/* รายได้ตาม BU (เมนูแยก · 19 พ.ย. 2569 · invoices/revenueBu.js) — สิทธิ์เดียวกับรายได้บริษัท
+   /revenue-bu = สรุป + กราฟ · /revenue-bu/rows = เงินเข้า/คืนรายงวดที่แบ่ง BU แล้ว (เจาะดู + ส่งออก) */
+const buQuery = z.object({
+  from: z.string(),
+  to: z.string(),
+  group: z.enum(['day', 'week', 'month']).default('month'),
+  bu: z.enum(['homecare', 'physio', 'procedure', 'rent', 'sale', 'other']).optional(),
+});
+invoicesRouter.get(
+  '/revenue-bu',
+  requirePermission('revenue', 'บัญชีของคุณไม่มีสิทธิ์ดูรายได้บริษัท'),
+  asyncRoute(async (req, res) => res.json(await revenueByBu(buQuery.parse(req.query)))),
+);
+invoicesRouter.get(
+  '/revenue-bu/rows',
+  requirePermission('revenue', 'บัญชีของคุณไม่มีสิทธิ์ดูรายได้บริษัท'),
+  asyncRoute(async (req, res) => {
+    const q = buQuery.parse(req.query);
+    checkRange(q.from, q.to);
+    const rows = await allocatedEntries(q.from, q.to);
+    res.json({ rows: q.bu ? rows.filter((r) => r.bu === q.bu) : rows });
+  }),
 );
 
 invoicesRouter.get(

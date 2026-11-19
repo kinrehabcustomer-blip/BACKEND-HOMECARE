@@ -531,13 +531,14 @@ function Exceptions({ rows, error, onReload, filters }) {
   function exportCsv() {
     downloadCsv(
       `attendance-issues-${thisMonth()}.csv`,
-      ['วันที่', 'พนักงาน', 'ผู้รับบริการ', 'รหัสเคส', 'ปัญหา', 'เวลานัด', 'เข้า', 'ออก', 'ตำแหน่ง', 'สาย (นาที)'],
+      // ลำดับคอลัมน์ตามที่ผู้ใช้ขอ (19 พ.ย. 2569): วันที่ · รหัสเคส · ผู้รับบริการ · พนักงาน · เวลานัด · เข้า · ออก · ปัญหา · ตำแหน่ง · สาย
+      ['วันที่', 'รหัสเคส', 'ผู้รับบริการ', 'พนักงาน', 'เวลานัด', 'เข้า', 'ออก', 'ปัญหา', 'ตำแหน่ง', 'สาย (นาที)'],
       rows.map((v) => [
-        v.visit_date, v.employee_name ?? '', v.client_name ?? '', caseCode(v.case_id),
-        reason(v),
+        v.visit_date, caseCode(v.case_id), v.client_name ?? '', v.employee_name ?? '',
         v.planned_start ? `${v.planned_start}–${v.planned_end ?? ''}` : '',
         v.check_in_at ? timeText(v.check_in_at) : '',
         v.check_out_at ? timeText(v.check_out_at) : '',
+        reason(v),
         v.location_note ?? (v.location_flagged ? 'นอกพื้นที่' : ''),
         v.check_in_late_minutes ?? '',
       ]),

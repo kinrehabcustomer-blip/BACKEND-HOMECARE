@@ -223,11 +223,12 @@ export async function onVisitAttendance(visitId, kind) {
     `SELECT v.visit_id, v.case_id, v.visit_date, v.planned_start, v.planned_end,
             to_char(v.check_in_at AT TIME ZONE 'Asia/Bangkok', 'HH24:MI') AS check_in_time,
             to_char(v.check_out_at AT TIME ZONE 'Asia/Bangkok', 'HH24:MI') AS check_out_time,
-            c.client_name, pp.sessions AS package_sessions,
+            c.client_name, pp.sessions * COALESCE((to_jsonb(c) ->> 'pkg_quantity')::int, 1) AS package_sessions,
             (SELECT COUNT(*) FROM case_visits o
               WHERE o.case_id = v.case_id AND o.status <> 'cancelled'
                 AND (o.visit_date, COALESCE(o.planned_start, ''), o.visit_id)
-                    <= (v.visit_date, COALESCE(v.planned_start, ''), v.visit_id))::int AS session_no,
+                    <= (v.visit_date, COALESCE(v.planned_start, ''), v.visit_id))::int
+                + CASE WHEN c.physio_package_id IS NOT NULL THEN COALESCE((to_jsonb(c) ->> 'carried_used')::int, 0) ELSE 0 END AS session_no,
             COALESCE(NULLIF(e.nickname, ''), e.first_name) AS employee_name, e.position AS employee_position,
             ${FAMILY_IDS} AS family
      FROM case_visits v
@@ -257,11 +258,12 @@ export async function queueManualReminder(caseId, visitId, actor) {
   await prepare();
   const r = await sql.one(
     `SELECT v.visit_id, v.case_id, v.visit_date, v.planned_start, v.planned_end, v.status, v.check_in_at,
-            c.client_name, c.address, c.geo_lat, c.geo_lng, c.status AS case_status, pp.sessions AS package_sessions,
+            c.client_name, c.address, c.geo_lat, c.geo_lng, c.status AS case_status, pp.sessions * COALESCE((to_jsonb(c) ->> 'pkg_quantity')::int, 1) AS package_sessions,
             (SELECT COUNT(*) FROM case_visits o
               WHERE o.case_id = v.case_id AND o.status <> 'cancelled'
                 AND (o.visit_date, COALESCE(o.planned_start, ''), o.visit_id)
-                    <= (v.visit_date, COALESCE(v.planned_start, ''), v.visit_id))::int AS session_no,
+                    <= (v.visit_date, COALESCE(v.planned_start, ''), v.visit_id))::int
+                + CASE WHEN c.physio_package_id IS NOT NULL THEN COALESCE((to_jsonb(c) ->> 'carried_used')::int, 0) ELSE 0 END AS session_no,
             e.employee_id, e.line_user_id, e.position AS employee_position,
             COALESCE(NULLIF(e.nickname, ''), e.first_name) AS employee_name,
             ${FAMILY_IDS} AS family
@@ -356,11 +358,12 @@ export async function claimDueFamily3hReminders() {
 async function queueFamily3h(ids) {
   const rows = await sql.all(
     `SELECT v.visit_id, v.case_id, v.visit_date, v.planned_start, v.planned_end,
-            c.client_name, pp.sessions AS package_sessions,
+            c.client_name, pp.sessions * COALESCE((to_jsonb(c) ->> 'pkg_quantity')::int, 1) AS package_sessions,
             (SELECT COUNT(*) FROM case_visits o
               WHERE o.case_id = v.case_id AND o.status <> 'cancelled'
                 AND (o.visit_date, COALESCE(o.planned_start, ''), o.visit_id)
-                    <= (v.visit_date, COALESCE(v.planned_start, ''), v.visit_id))::int AS session_no,
+                    <= (v.visit_date, COALESCE(v.planned_start, ''), v.visit_id))::int
+                + CASE WHEN c.physio_package_id IS NOT NULL THEN COALESCE((to_jsonb(c) ->> 'carried_used')::int, 0) ELSE 0 END AS session_no,
             COALESCE(NULLIF(e.nickname, ''), e.first_name) AS employee_name, e.position AS employee_position,
             ${FAMILY_IDS} AS family
      FROM case_visits v

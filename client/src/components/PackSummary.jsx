@@ -12,7 +12,7 @@ import LineIcon from './LineIcon.jsx';
  *   1) ใช้ไปแล้ว X / N ……… เหลือ M   2) แถบบางเต็มความกว้าง   3) ใช้ได้ถึง … · อีก N วัน
  * จอแคบชิปวันหมดอายุเคยถูกบีบจนตกบรรทัดไม่เป็นระเบียบ และแถบหนา 10px ที่เติมแค่ 15% ดูเป็นก้อนกลมๆ ไม่ใช่หลอด
  */
-export default function PackSummary({ used, total, unitWord, expiresOn = null, today, plain = false }) {
+export default function PackSummary({ used, total, unitWord, expiresOn = null, today, plain = false, carried = 0 }) {
   const daysLeft = expiresOn
     ? Math.round((Date.parse(`${expiresOn}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 864e5)
     : null;
@@ -26,6 +26,8 @@ export default function PackSummary({ used, total, unitWord, expiresOn = null, t
           <span className="vs-used-label">ใช้ไปแล้ว</span>
           <strong>{used}</strong>
           <span className="vs-used-total">/ {total} {unitWord}</span>
+          {/* เคสที่เข้าระบบกลางทาง — ส่วนที่ใช้ไปก่อนมีในระบบรวมอยู่ใน "ใช้ไปแล้ว" แล้ว บอกไว้ให้รู้ที่มา */}
+          {carried > 0 && <span className="vs-carried">ก่อนเข้าระบบ {carried}</span>}
         </span>
         {hasCap && (
           <span className={`vs-left${left === 0 ? ' is-zero' : ''}`}>

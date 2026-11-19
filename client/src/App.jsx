@@ -27,7 +27,9 @@ const PublicBillPage = lazy(() => import('./pages/PublicBillPage.jsx'));
 const ReviewsPage = lazy(() => import('./pages/ReviewsPage.jsx'));
 const ReviewDetailPage = lazy(() => import('./pages/ReviewDetailPage.jsx'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage.jsx'));
+const SystemSettingsPage = lazy(() => import('./pages/SystemSettingsPage.jsx'));
 const RevenuePage = lazy(() => import('./pages/RevenuePage.jsx'));
+const RevenueBuPage = lazy(() => import('./pages/RevenueBuPage.jsx'));
 const EmployeeListPage = lazy(() => import('./pages/EmployeeListPage.jsx'));
 const EmployeeFormPage = lazy(() => import('./pages/EmployeeFormPage.jsx'));
 const EmployeeDetailPage = lazy(() => import('./pages/EmployeeDetailPage.jsx'));
@@ -36,8 +38,6 @@ const CaseFormPage = lazy(() => import('./pages/CaseFormPage.jsx'));
 const CalendarPage = lazy(() => import('./pages/CalendarPage.jsx'));
 const InvoiceListPage = lazy(() => import('./pages/InvoiceListPage.jsx'));
 const PayrollPage = lazy(() => import('./pages/PayrollPage.jsx'));
-const PermissionsPage = lazy(() => import('./pages/PermissionsPage.jsx'));
-const AuditLogPage = lazy(() => import('./pages/AuditLogPage.jsx'));
 const CategoriesPage = lazy(() => import('./pages/CategoriesPage.jsx'));
 const CustomerListPage = lazy(() => import('./pages/CustomerListPage.jsx'));
 const CustomerFormPage = lazy(() => import('./pages/CustomerFormPage.jsx'));
@@ -58,6 +58,7 @@ const MyAttendancePage = lazy(() => import('./pages/MyAttendancePage.jsx'));
 
 /* ไอคอนเมนูแบบเส้น (Lucide-style) — stroke=currentColor จึง tint ตามสีเมนู (จาง → ทองตอน active) เอง */
 const NAV_ICONS = {
+  bars: (<><path d="M3 21h18" /><rect x="5" y="11" width="3" height="7" rx="1" /><rect x="10.5" y="6" width="3" height="12" rx="1" /><rect x="16" y="9" width="3" height="9" rx="1" /></>),
   dashboard: (<><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /></>),
   cases: (<><rect x="8" y="2" width="8" height="4" rx="1" /><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" /><path d="M9 12h6M9 16h6" /></>),
   calendar: (<><rect x="3" y="4" width="18" height="18" rx="2" /><path d="M3 10h18M8 2v4M16 2v4" /></>),
@@ -75,6 +76,9 @@ const NAV_ICONS = {
   shield: (<><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /><path d="M9 12l2 2 4-4" /></>),
   chat: (<path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 8.6 8.6 0 0 1-3.7-.8L3 21l1.9-5.1A8.4 8.4 0 1 1 21 11.5z" />),
   chevron: (<path d="M6 9l6 6 6-6" />),
+  // หัตถการ (เข็มฉีดยา) · อุปกรณ์เสริม (เตียง) — เมนูย่อยของแพ็คเกจ (19 พ.ย. 2569)
+  syringe: (<><path d="m18 2 4 4" /><path d="m17 7 3-3" /><path d="M19 9 8.7 19.3c-1 1-2.5 1-3.4 0l-.6-.6c-1-1-1-2.5 0-3.4L15 5" /><path d="m9 11 4 4" /><path d="m5 19-3 3" /><path d="m14 4 6 6" /></>),
+  bed: (<><path d="M2 4v16" /><path d="M2 8h18a2 2 0 0 1 2 2v10" /><path d="M2 17h20" /><path d="M6 8v9" /></>),
   tag: (<><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z" /><circle cx="7.5" cy="7.5" r="1.5" /></>),
   log: (<><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /><circle cx="11" cy="15" r="3" /><path d="M13.2 17.2 15.5 19.5" /></>),
 };
@@ -99,25 +103,29 @@ const PERMISSION_ADMINS = ['super_admin', 'manager'];
 /* short = ชื่อสั้นบนแถบเมนูล่างของมือถือ (ดู TabBar) — ไม่ใส่ = ใช้ label */
 const ADMIN_NAV = [
   { to: '/dashboard', icon: 'dashboard', label: 'ภาพรวม', perm: 'dashboard' },
+  /* รายได้แยก BU (19 พ.ย. 2569) — เมนูแยก ส่งออก CSV ได้ · สิทธิ์เดียวกับรายได้บริษัท
+     อยู่ถัดจากภาพรวม (ผู้ใช้ขอ 19 พ.ย. 2569) · noTab = ไม่แย่งที่แถบเมนูล่างของมือถือ (ยังอยู่ในแผ่น "เมนู") */
+  { to: '/revenue-bu', icon: 'bars', label: 'รายได้ตาม BU', short: 'รายได้ BU', perm: 'revenue', noTab: true },
   { to: '/cases', icon: 'cases', label: 'เคส', perm: 'cases' },
   { to: '/calendar', icon: 'calendar', label: 'ตารางงาน', short: 'ตาราง', perm: 'calendar' },
-  { to: '/attendance', icon: 'clock', label: 'การมาทำงาน', short: 'เข้างาน', perm: 'attendance' },
   { to: '/invoices', icon: 'invoice', label: 'ใบแจ้งหนี้', perm: 'invoices' },
+  { to: '/attendance', icon: 'clock', label: 'การมาทำงาน', short: 'เข้างาน', perm: 'attendance' },
   { to: '/payroll', icon: 'wallet', label: 'ค่าตอบแทนพนักงาน', short: 'ค่าตอบแทน', perm: 'payroll' },
   { to: '/revenue', icon: 'dashboard', label: 'รายได้บริษัท', short: 'รายได้', perm: 'revenue', unlessPerm: 'dashboard' },
   /* group = รวมอยู่ใต้หัวข้อเดียวที่กางได้ในแถบเมนู (ดู NAV_GROUPS) · sub = ชื่อสั้นในเมนูย่อย
      label เต็มยังใช้เป็นชื่อหน้าบนแถบบน */
   { to: '/packages', icon: 'home', label: 'แพ็คเกจ Homecare', sub: 'Homecare', group: 'packages', perm: 'packages' },
   { to: '/physio-packages', icon: 'activity', label: 'แพ็คเกจกายภาพบำบัด', sub: 'กายภาพบำบัด', group: 'packages', perm: 'packages' },
+  /* หัตถการ / อุปกรณ์เสริม (หมวด + ราคา) — เดิมอยู่เมนู "หมวดหมู่" ย้ายมาเป็นเมนูย่อยของแพ็คเกจ (ผู้ใช้ขอ 19 พ.ย. 2569)
+     สิทธิ์ categories เหมือนเดิม (คนละสิทธิ์กับ packages — ตำแหน่งที่มีแค่อย่างใดอย่างหนึ่งเห็นเฉพาะเมนูของตัวเอง) */
+  { to: '/procedures', icon: 'syringe', label: 'หัตถการ', group: 'packages', perm: 'categories' },
+  { to: '/equipment', icon: 'bed', label: 'อุปกรณ์เสริม', group: 'packages', perm: 'categories' },
   { to: '/customers', icon: 'users', label: 'ลูกค้า', perm: 'customers' },
   { to: '/patients', icon: 'heart', label: 'ผู้รับบริการ', short: 'ผู้รับฯ', perm: 'patients' },
   { to: '/employees', icon: 'user', label: 'พนักงาน', perm: 'employees' },
   { to: '/reviews', icon: 'star', label: 'คะแนนประเมินจากญาติ', short: 'ประเมิน', perm: 'reviews' },
-  // หมวดหมู่ cat / sub cat (16 พ.ย. 2569) — สิทธิ์ categories ค่าตั้งต้น Super Admin + ผู้จัดการ
-  { to: '/categories', icon: 'tag', label: 'หมวดหมู่', perm: 'categories' },
-  { to: '/permissions', icon: 'shield', label: 'จัดการสิทธิ์', short: 'สิทธิ์', positions: PERMISSION_ADMINS },
-  // สิทธิ์ audit_logs ตั้งได้ที่หน้าจัดการสิทธิ์ (ค่าตั้งต้น Super Admin เท่านั้น · server/src/lib/permissions.js)
-  { to: '/audit-log', icon: 'log', label: 'บันทึกการใช้งาน', short: 'บันทึก', perm: 'audit_logs' },
+  /* จัดการสิทธิ์ + บันทึกการใช้งาน ย้ายไปหน้าตั้งค่าระบบแล้ว (ปุ่มไขควงข้างปุ่มตั้งค่า · 19 พ.ย. 2569)
+     สิทธิ์ audit_logs ยังตั้งได้ที่หน้าจัดการสิทธิ์ (ค่าตั้งต้น Super Admin เท่านั้น · server/src/lib/permissions.js) */
 ];
 
 /** หัวข้อของเมนูที่รวมกลุ่มกัน — แพ็คเกจสองแบบยุบเป็นหัวข้อเดียว (ผู้ใช้ขอ 30 ต.ค. 2569) */
@@ -204,7 +212,7 @@ function TabBar({ menuOpen, onMenu }) {
     );
   }
 
-  const tabs = navFor(user).filter((i) => !i.group).slice(0, ADMIN_TABS);
+  const tabs = navFor(user).filter((i) => !i.group && !i.noTab).slice(0, ADMIN_TABS);
   /* อยู่หน้าที่ไม่มีบนแถบ (ลูกค้า/พนักงาน/…) — ไฮไลต์ "เมนู" แทน ไม่งั้นแถบไม่มีช่องไหนติดเลย
      คนใช้จะไม่รู้ว่าตอนนี้อยู่ตรงไหน และไม่รู้ว่าหน้านี้มาจากปุ่มไหน */
   const elsewhere = !tabs.some((i) => location.pathname.startsWith(i.to));
@@ -357,6 +365,13 @@ function Sidebar({ menuOpen, setMenuOpen }) {
                 ไม่ใช่เมนูของระบบ · ออกจากระบบเดิมเป็นปุ่มข้อความเต็มความกว้างอยู่บรรทัดล่าง
                 ซึ่งเด่นกว่าเมนูงานทุกอันในหน้า ทั้งที่เป็นสิ่งที่กดกันวันละครั้ง */}
             <div className="who-actions">
+              {/* ตั้งค่าระบบ (เหตุผลยกเลิก · หมวดเหตุการณ์ · จัดการสิทธิ์ · บันทึกการใช้งาน) — ไอคอนไขควง (19 พ.ย. 2569)
+                  เห็นเมื่อเข้าได้อย่างน้อยหนึ่งแท็บ: Super Admin + ผู้จัดการ หรือมีสิทธิ์ audit_logs */}
+              {(PERMISSION_ADMINS.includes(user.position) || permissionsOf(user).includes('audit_logs')) && (
+                <NavLink className="btn icon-btn" to="/system-settings" title="ตั้งค่าระบบ" aria-label="ตั้งค่าระบบ">
+                  <LineIcon name="tools" />
+                </NavLink>
+              )}
               <NavLink className="btn icon-btn" to="/settings" title="ตั้งค่า" aria-label="ตั้งค่า">
                 <LineIcon name="settings" />
               </NavLink>
@@ -464,6 +479,13 @@ function NoAccessPage() {
   );
 }
 
+/** /categories เดิม → /procedures หรือ /equipment ตาม ?domain= */
+function OldCategoriesRedirect() {
+  const { search } = useLocation();
+  const domain = new URLSearchParams(search).get('domain');
+  return <Navigate to={domain === 'equipment' ? '/equipment' : '/procedures'} replace />;
+}
+
 export default function App() {
   return (
     <BrowserRouter>
@@ -481,6 +503,7 @@ export default function App() {
             {/* ใบแจ้งหนี้/ใบเสร็จที่ส่งเข้า LINE ลูกค้า — ไม่มี login แบบเดียวกับแบบประเมิน (server/src/invoices/share.js) */}
             <Route path="/bill/:token" element={<PublicBillPage />} />
             <Route path="/settings" element={<AppLayout><SettingsPage /></AppLayout>} />
+            <Route path="/system-settings" element={<AppLayout><SystemSettingsPage /></AppLayout>} />
             {/* ลิงก์เดิมที่อาจถูก bookmark ไว้ ให้เด้งไปหน้าตั้งค่าแทน */}
             <Route path="/change-password" element={<Navigate to="/settings" replace />} />
             <Route path="/" element={<RequireAuth><HomeRedirect /></RequireAuth>} />
@@ -499,10 +522,15 @@ export default function App() {
             <Route path="/attendance" element={<AppLayout perm="attendance"><AttendancePage /></AppLayout>} />
             <Route path="/invoices" element={<AppLayout perm="invoices"><InvoiceListPage /></AppLayout>} />
             <Route path="/payroll" element={<AppLayout perm="payroll"><PayrollPage /></AppLayout>} />
-            <Route path="/permissions" element={<AppLayout positions={PERMISSION_ADMINS}><PermissionsPage /></AppLayout>} />
-            <Route path="/audit-log" element={<AppLayout perm="audit_logs"><AuditLogPage /></AppLayout>} />
-            <Route path="/categories" element={<AppLayout perm="categories"><CategoriesPage /></AppLayout>} />
+            {/* ลิงก์เดิมที่อาจถูก bookmark ไว้ — พาไปแท็บเดียวกันในหน้าตั้งค่าระบบ */}
+            <Route path="/permissions" element={<Navigate to="/system-settings?tab=permissions" replace />} />
+            <Route path="/audit-log" element={<Navigate to="/system-settings?tab=audit" replace />} />
+            <Route path="/procedures" element={<AppLayout perm="categories"><CategoriesPage domain="procedure" /></AppLayout>} />
+            <Route path="/equipment" element={<AppLayout perm="categories"><CategoriesPage domain="equipment" /></AppLayout>} />
+            {/* ลิงก์เดิมของเมนู "หมวดหมู่" — ?domain=equipment ไปหน้าอุปกรณ์ ที่เหลือไปหน้าหัตถการ */}
+            <Route path="/categories" element={<OldCategoriesRedirect />} />
             <Route path="/revenue" element={<AppLayout perm="revenue"><RevenuePage /></AppLayout>} />
+            <Route path="/revenue-bu" element={<AppLayout perm="revenue"><RevenueBuPage /></AppLayout>} />
 
             {/* หน้าของพนักงานภาคสนาม — เข้าได้ทั้ง field และ admin (แสดงเฉพาะงานที่ตัวเองรับ) */}
             <Route path="/my-today" element={<AppLayout><MyTodayPage /></AppLayout>} />

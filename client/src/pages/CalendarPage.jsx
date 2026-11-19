@@ -19,6 +19,7 @@ import { nowMinutes, timesForStart, toMin } from '../lib/visitMove.js';
 import SearchSelect from '../components/SearchSelect.jsx';
 import FilterBar from '../components/FilterBar.jsx';
 import MobileCalendar, { useNarrow } from '../components/MobileCalendar.jsx';
+import CalendarPrintDoc from '../components/CalendarPrintDoc.jsx';
 
 const WEEKDAYS = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
 
@@ -72,6 +73,19 @@ export default function CalendarPage() {
   const [pendingMove, setPendingMove] = useState(null); // { visit, to } รอกดยืนยัน
   const [moving, setMoving] = useState(false);
   const narrow = useNarrow();
+  /* กดพิมพ์ = ใส่เอกสารฉบับพิมพ์ (CalendarPrintDoc) ลงหน้าก่อน แล้วค่อยเรียก window.print() หลังวาดเสร็จ
+     พิมพ์เสร็จ/ปิดหน้าต่างพิมพ์ = เอาออก — ไม่ค้างใน DOM (ไม่ชนกับสำเนาใบแจ้งหนี้ถ้าเปิดเคสต่อ) */
+  const [printing, setPrinting] = useState(false);
+  useEffect(() => {
+    if (!printing) return undefined;
+    const done = () => setPrinting(false);
+    window.addEventListener('afterprint', done);
+    const frame = requestAnimationFrame(() => requestAnimationFrame(() => window.print()));
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener('afterprint', done);
+    };
+  }, [printing]);
 
   const get = (key) => params.get(key) ?? '';
   const view = get('view') === 'week' ? 'week' : 'month';
@@ -349,7 +363,7 @@ export default function CalendarPage() {
         filtered={filtered}
         onClear={() => patch({ employee_id: '', client: '', kind: '', state: '' })}
         extra={(
-          <button className="btn cal-print-btn" onClick={() => window.print()} title="พิมพ์">
+          <button className="btn cal-print-btn" onClick={() => setPrinting(true)} disabled={!visits} title="พิมพ์ / บันทึกเป็น PDF">
             <LineIcon name="printer" /><span className="cal-print-label">พิมพ์</span>
           </button>
         )}
@@ -485,6 +499,29 @@ export default function CalendarPage() {
         </div>
       </div>
       )}
+
+      {printing && visits && (() => {
+        const person = staff.find((s) => s.employee_id === employeeId);
+        const personName = person ? `${person.first_name} ${person.last_name}`.trim() : employeeId;
+        const clientName = clients.find(([id]) => id === clientCase)?.[1];
+        return (
+          <CalendarPrintDoc
+            kicker={view === 'week' ? 'ตารางงานรายสัปดาห์' : 'ตารางงานประจำเดือน'}
+            title={employeeId ? `${rangeTitle} · ${personName}` : rangeTitle}
+            rangeText={`${formatDate(days[0])} – ${formatDate(days[days.length - 1])}`}
+            days={days}
+            byDay={byDay}
+            filters={[
+              ['พนักงาน', employeeId ? personName : ''],
+              ['ผู้รับบริการ', clientCase ? `${clientName ?? ''} · ${caseCode(clientCase)}` : ''],
+              ['ประเภทบริการ', kind ? SERVICE_KIND_LABELS[kind] : ''],
+              ['สถานะกะ', state ? VISIT_STATE_LABELS[state] : ''],
+            ]}
+            hideStaff={Boolean(employeeId)}
+            hideClient={Boolean(clientCase)}
+          />
+        );
+      })()}
 
       {openDay && (
         <DayPanel

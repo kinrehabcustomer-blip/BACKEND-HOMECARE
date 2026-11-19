@@ -24,6 +24,11 @@ const read = () => {
     viz: {
       homecare: v('--viz-homecare'),
       physio: v('--viz-physio'),
+      // รายได้ตาม BU (RevenueBuPage) — ตรวจชุดสีแล้วทั้งสองธีม
+      procedure: v('--viz-procedure'),
+      rent: v('--viz-rent'),
+      sale: v('--viz-sale'),
+      other: v('--viz-other'),
       working: v('--viz-visit-working'),
       done: v('--viz-visit-done'),
       missed: v('--viz-visit-missed'),

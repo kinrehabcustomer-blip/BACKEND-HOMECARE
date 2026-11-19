@@ -61,6 +61,7 @@ export default function CasePayPanel({ caseId, busy, run, toast }) {
     company_share: companyShare,
     released,
     remaining,
+    paid_outside: paidOutside = 0, // เคสกลางทาง: ค่าจ้างที่จ่ายพนักงานไปแล้วก่อนเข้าระบบ (หักออกจาก remaining แล้ว)
     /* เคสที่ถูกยกเลิกกลางคัน: ระบบเสนอยอดตามกะที่ไปจริง (ดร. 25 ต.ค. 2569 "กะที่ยังอยู่ไม่ต้องจ่าย")
        เป็น "ข้อเสนอ" เท่านั้น — เพดานที่พิมพ์เองได้ยังเป็น remaining (ยอดเหมา) เหมือนเดิม */
     suggested_remaining: suggestedLeft,
@@ -200,7 +201,9 @@ export default function CasePayPanel({ caseId, busy, run, toast }) {
             <p className="muted">
               <strong>ค่าจ้างพนักงาน {formatBaht(total)}</strong>
               <span className="cell-sub">
-                ปล่อยแล้ว {formatBaht(released)} · เหลือ {formatBaht(remaining)}
+                ปล่อยแล้ว {formatBaht(released)}
+                {paidOutside > 0 && ` · จ่ายนอกระบบก่อนเข้าระบบ ${formatBaht(paidOutside)}`}
+                {' · '}เหลือ {formatBaht(remaining)}
                 {used > 0 && ` · แบ่งจ่ายแล้ว ${used} งวด`}
               </span>
               {/* ยอดที่เสนอไม่เท่ายอดเหมา = ต้องบอกเหตุผลตรงนี้ ไม่งั้นผู้จัดการอ่านว่าตัวเลขเพี้ยน

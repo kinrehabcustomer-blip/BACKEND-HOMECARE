@@ -197,7 +197,8 @@ async function claim(kind) {
 
 /**
  * จองรายการที่ถึงเวลาเตือน แล้วคืนรายละเอียดสำหรับเขียนข้อความ
- * ครั้งที่ = ลำดับของกะนี้ในบรรดากะที่ไม่ยกเลิกของเคส (นับตามวัน-เวลา) · total = จำนวนครั้งในแพ็กกายภาพ (เคส Homecare = null)
+ * ครั้งที่ = ลำดับของกะนี้ในบรรดากะที่ไม่ยกเลิกของเคส (นับตามวัน-เวลา) + ครั้งที่ใช้ไปก่อนเข้าระบบ (กายภาพกลางทาง)
+ * total = จำนวนครั้งในแพ็กกายภาพ × จำนวนแพ็ก (เคส Homecare = null) · อ่านผ่าน to_jsonb เพราะคอลัมน์สร้างแบบ lazy
  */
 export async function claimDueVisitReminders() {
   await ensureVisitReminderColumns();
@@ -211,11 +212,12 @@ export async function claimDueVisitReminders() {
     const rows = await sql.all(
       `SELECT v.visit_id, v.case_id, v.visit_date, v.planned_start, v.planned_end,
               c.client_name, c.address, c.geo_lat, c.geo_lng, c.service_kind,
-              pp.sessions AS package_sessions,
+              pp.sessions * COALESCE((to_jsonb(c) ->> 'pkg_quantity')::int, 1) AS package_sessions,
               (SELECT COUNT(*) FROM case_visits o
                 WHERE o.case_id = v.case_id AND o.status <> 'cancelled'
                   AND (o.visit_date, COALESCE(o.planned_start, ''), o.visit_id)
-                      <= (v.visit_date, COALESCE(v.planned_start, ''), v.visit_id))::int AS session_no,
+                      <= (v.visit_date, COALESCE(v.planned_start, ''), v.visit_id))::int
+                + CASE WHEN c.physio_package_id IS NOT NULL THEN COALESCE((to_jsonb(c) ->> 'carried_used')::int, 0) ELSE 0 END AS session_no,
               e.line_user_id, e.employee_id, COALESCE(NULLIF(e.nickname, ''), e.first_name) AS employee_name
        FROM case_visits v
        JOIN cases c ON c.case_id = v.case_id
@@ -274,11 +276,12 @@ export async function claimDueFamilyReminders() {
   const params = Object.fromEntries(ids.map((id, i) => [`v${i}`, id]));
   const rows = await sql.all(
     `SELECT 'family' AS kind, v.visit_id, v.case_id, v.visit_date, v.planned_start, v.planned_end,
-            c.client_name, pp.sessions AS package_sessions,
+            c.client_name, pp.sessions * COALESCE((to_jsonb(c) ->> 'pkg_quantity')::int, 1) AS package_sessions,
             (SELECT COUNT(*) FROM case_visits o
               WHERE o.case_id = v.case_id AND o.status <> 'cancelled'
                 AND (o.visit_date, COALESCE(o.planned_start, ''), o.visit_id)
-                    <= (v.visit_date, COALESCE(v.planned_start, ''), v.visit_id))::int AS session_no,
+                    <= (v.visit_date, COALESCE(v.planned_start, ''), v.visit_id))::int
+                + CASE WHEN c.physio_package_id IS NOT NULL THEN COALESCE((to_jsonb(c) ->> 'carried_used')::int, 0) ELSE 0 END AS session_no,
             COALESCE(NULLIF(e.nickname, ''), e.first_name) AS employee_name, e.position AS employee_position,
             ${FAMILY_IDS} AS recipients
      FROM case_visits v

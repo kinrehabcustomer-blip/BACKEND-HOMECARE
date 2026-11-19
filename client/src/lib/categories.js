@@ -57,3 +57,23 @@ export function itemCategory(rows, domain, key) {
   const main = rows.find((c) => c.category_id === sub.parent_id);
   return { main, sub };
 }
+
+/** ชื่อทุกรายการของหมวดย่อยในโดเมน (อุปกรณ์เสริม) [{ name, group }] — ใช้เป็นคำแนะนำในช่องพิมพ์ชื่อ */
+export function categoryItemNames(rows, domain) {
+  return treeOf(rows, domain).flatMap((main) =>
+    main.children.flatMap((sub) => (sub.item_keys ?? []).map((name) => ({ name, group: `${main.name_th} › ${sub.name_th}` }))),
+  );
+}
+
+/** ราคาที่ตั้งไว้ในหน้าหมวดหมู่ (catalog_prices) ของรายการหนึ่ง — ไม่มี = null (ใช้ราคาตั้งต้นในโค้ดถ้ามี) */
+export function priceRow(data, domain, key) {
+  const k = String(key ?? '').trim();
+  return (data?.prices ?? []).find((p) => p.domain === domain && p.item_key === k) ?? null;
+}
+
+/** ราคาต่อหน่วยของอุปกรณ์เสริมตามรูปแบบ (เช่า/ซื้อขาด) — ชื่อต้องตรงกับที่ตั้งไว้ · ไม่มี = null */
+export function equipmentPrice(data, name, kind) {
+  const row = priceRow(data, 'equipment', name);
+  if (!row) return null;
+  return (kind === 'sale' ? row.price_sale : row.price_rent) ?? null;
+}

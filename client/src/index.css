@@ -602,7 +602,6 @@ select option:checked {
 .per-page select,
 .att-filter select,
 .visit-list select,
-.manage-add select,
 .shift-form select {
   padding: 0.3125rem 1.625rem 0.3125rem 0.5rem;
   background-position: right 0.5rem center;
@@ -1210,6 +1209,11 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
 :root {
   --viz-homecare: #916919;
   --viz-physio: #2a78d6;
+  /* BU ที่เหลือของหน้ารายได้ตาม BU — ลำดับ homecare → physio → procedure → rent → sale ผ่านตัวตรวจ (19 พ.ย. 2569) */
+  --viz-procedure: #1baf7a;
+  --viz-rent: #6250d6;
+  --viz-sale: #e87ba4;
+  --viz-other: #8a8478;
   --viz-visit-working: #1baf7a;
   --viz-visit-done: #2a78d6;
   --viz-visit-missed: #d03b3b;
@@ -1219,6 +1223,10 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
 :root[data-theme='dark'] {
   --viz-homecare: #b88827;
   --viz-physio: #3987e5;
+  --viz-procedure: #199e70;
+  --viz-rent: #9085e9;
+  --viz-sale: #d55181;
+  --viz-other: #8f877a;
   --viz-visit-working: #199e70;
   --viz-visit-done: #3987e5;
   --viz-visit-missed: #d03b3b;
@@ -2996,6 +3004,7 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
   .invoice-doc, .invoice-doc *,
   .payroll-doc, .payroll-doc *,
   .report-doc, .report-doc *,
+  .cal-doc, .cal-doc *,
   .cal-print, .cal-print *,
   .cal-title, .cal-title *,
   .cal-legend, .cal-legend * { visibility: visible; }
@@ -3058,6 +3067,8 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
      หน้าอื่นที่ไม่มีสำเนานี้ (ใบสรุปค่าตอบแทน/รายงานอาการ/ตารางงาน) ไม่โดนกฎนี้ ใช้วิธีเดิมตามด้านบน */
   body:has(> .print-sheet) > :not(.print-sheet) { display: none !important; }
   .print-sheet { display: block; }
+  /* พื้นครีมของแอปไม่ต้องติดกระดาษ (บางเครื่องเปิด "พิมพ์พื้นหลัง" ไว้) */
+  html:has(> body > .print-sheet), body:has(> .print-sheet) { background: #fff !important; }
   .print-sheet .invoice-doc { position: static; }
   /* popup เปิดอยู่ = body ถูกล็อก overflow: hidden (useScrollLock) — ปลดตอนพิมพ์ ไม่ให้เอกสารถูกตัดเหลือแผ่นเดียว */
   html:has(> body > .print-sheet),
@@ -3106,6 +3117,14 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
   margin-bottom: 0.5rem;
 }
 .visit-nav { display: flex; align-items: center; gap: 0.375rem; }
+/* ยกเลิกนัดที่ลงไว้ทั้งหมด — ชิดขวาของแถวเดือน (มือถือตกลงไปแถวถัดไป ยังชิดขวา) */
+.visit-cancel-all { margin-left: auto; display: inline-flex; align-items: center; gap: 0.3rem; }
+/* ปุ่มเดียวกันที่มุมซ้ายของ footer popup ตารางนัด — ขนาดเล็ก (ผู้ใช้ขอ 19 พ.ย. 2569) อยู่กึ่งกลางแนวตั้งกับ "เสร็จสิ้น" */
+.modal-foot .visit-foot-cancel { align-self: center; gap: 0.25rem; font-size: 0.75rem; }
+.modal-foot .visit-foot-cancel .text-ico { width: 0.875rem; height: 0.875rem; }
+@media (max-width: 600px) {
+  .modal-foot .visit-foot-cancel { justify-self: start; }
+}
 .visit-month { font-size: 0.8125rem; font-weight: 600; min-width: 8rem; text-align: center; }
 
 .mini-cal {
@@ -3648,17 +3667,22 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
 .physio-preview .net-price { font-size: 1.25rem; color: var(--brand); }
 
 /* แผงจัดการเกรด/รูปแบบ */
-.manage-panel { margin-bottom: 1rem; }
-.manage-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
-.manage-list { list-style: none; margin: 0 0 0.75rem; padding: 0; }
-.manage-list li { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; padding: 0.4rem 0; border-bottom: 1px dashed var(--divider); }
-.manage-list li p { margin: 2px 0 0; font-size: 0.75rem; }
-.manage-add { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; }
-/* เฉพาะ input — select ใช้ padding จากกฎรวมด้านบน (ต้องเว้นที่ขวาไว้ให้ลูกศร) */
-.manage-add input { padding: 0.35rem 0.5rem; }
+/* แผงจัดการเกรด/รูปแบบ (PackagesPage · ดีไซน์ใหม่ 19 พ.ย. 2569) — ใช้การ์ด .set-* ของหน้าตั้งค่า
+   จอกว้าง: เกรดซ้าย (แคบกว่า) · รูปแบบบริการขวา · จอแคบเรียงลง */
+.pkg-manage { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 1.25rem; align-items: start; margin-bottom: 1.25rem; }
+.pkg-level { margin-left: 0.5rem; padding: 0.0625rem 0.5rem; border-radius: 999px; background: var(--brand-soft); color: var(--brand); font-size: 0.75rem; font-weight: 600; vertical-align: middle; }
+.pkg-format-group + .pkg-format-group { margin-top: 1rem; }
+.pkg-group-head { margin: 0 0 0.5rem; font-size: 0.8125rem; font-weight: 700; color: var(--brand); }
+.pkg-chip { display: inline-block; margin-top: 0.125rem; padding: 0.0625rem 0.5rem; border-radius: 999px; background: var(--surface-2); color: var(--muted); font-size: 0.75rem; }
+.pkg-chip.is-graded { background: var(--brand-soft); color: var(--brand); }
+.pkg-manage .format-days { margin-top: 0; white-space: nowrap; }
+.pkg-manage .set-add > input { min-width: 10rem; }
+.pkg-format-add > select { width: auto; }
+@media (max-width: 1100px) {
+  .pkg-manage { grid-template-columns: minmax(0, 1fr); }
+}
 
 @media (max-width: 768px) {
-  .manage-cols { grid-template-columns: 1fr; }
 }
 
 /* ---------- ระบบเช็คอินพนักงานภาคสนาม ---------- */
@@ -5295,6 +5319,25 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
    ในช่องนี้มันเลยถูกดึงขึ้นไปชิดกล่อง (ผู้ใช้แจ้ง 17 พ.ย. 2569) · ตัวหนังสือปกติ ไม่หนาตามป้ายชื่อช่อง */
 /* ลอยใต้ช่อง (absolute) ไม่ดันความสูงของช่องชื่อ — แถวจัดชิดล่าง (align-items: end) ช่องราคา/ปุ่มลบข้างๆ จึงยังตรงแนวกล่อง
    แถวที่มีคำแนะนำเว้นระยะล่างเพิ่มให้ข้อความ ไม่ทับแถวถัดไป */
+/* ---------- เคสที่เริ่มก่อนเข้าระบบ (ฟอร์มเปิดเคส · 19 พ.ย. 2569) ---------- */
+.midway-box {
+  display: grid; gap: 0.75rem; padding: 0.875rem 1rem;
+  border: 1px dashed var(--border-hover, var(--border)); border-radius: 0.75rem; background: var(--surface-2);
+}
+.midway-box > .form-hint { margin: 0; }
+.midway-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); gap: 0.75rem 1rem; align-items: start; }
+.midway-grid > label { display: flex; flex-direction: column; gap: 0.3125rem; }
+.midway-pay { display: grid; gap: 0.375rem; margin: 0; padding: 0; border: 0; min-width: 0; }
+.midway-pay legend { margin-bottom: 0.25rem; padding: 0; font-size: 0.875rem; font-weight: 600; }
+.midway-radios { display: flex; flex-wrap: wrap; gap: 0.375rem 1rem; }
+/* ต้องชนะสไตล์ label ของฟอร์มหลัก (คอลัมน์ · ช่องกว้างเต็ม) — ปุ่มเลือกเรียงแถวเดียว ข้อความอยู่ข้างปุ่ม */
+.midway-box .midway-radios > .radio-row {
+  display: inline-flex; flex-direction: row; align-items: center; gap: 0.375rem;
+  font-size: 0.875rem; font-weight: 400; color: var(--text); cursor: pointer;
+}
+.midway-box .midway-radios > .radio-row > input { width: auto; margin: 0; flex: none; }
+.midway-pay > label:not(.radio-row) { display: flex; flex-direction: column; gap: 0.3125rem; margin-top: 0.25rem; }
+.midway-summary { margin: 0; font-size: 0.875rem; font-weight: 600; color: var(--brand); }
 .addon-row label:has(> .form-hint) { position: relative; }
 .addon-row label > .form-hint {
   position: absolute; top: calc(100% + 0.25rem); left: 0; right: 0;
@@ -6470,43 +6513,24 @@ h1, h2, h3, h4, .page-hero-title, .cal-title, .login-heading h1 {
   letter-spacing: normal; text-transform: none;
 }
 
-/* ---------- หมวดหมู่ (pages/CategoriesPage.jsx · 16 พ.ย. 2569) ---------- */
+/* ---------- หมวดหมู่ (components/CategoryManager.jsx · 16 พ.ย. 2569 · โครงหน้าอยู่ที่ .set-* ท้ายไฟล์) ---------- */
 .proc-opt-cat { display: block; font-size: 0.75rem; color: var(--muted); }
-.cat-page { padding-bottom: 1rem; }
-.cat-domains { display: flex; flex-wrap: wrap; gap: 0.5rem; padding: 1rem 1rem 0.5rem; }
-.cat-domain {
-  display: inline-flex; flex-direction: column; align-items: flex-start; gap: 0.125rem;
-  padding: 0.5rem 0.875rem; border: 1px solid var(--border); border-radius: 10px;
-  background: var(--surface); color: var(--text); font: inherit; cursor: pointer; text-align: left;
+/* ชิปรายการของแคตตาล็อกในหมวดย่อย + ช่องเพิ่ม (components/CategoryManager.jsx) */
+.cat-chips { display: flex; flex-wrap: wrap; gap: 0.375rem; margin: 0; padding: 0; list-style: none; }
+.cat-chip {
+  display: inline-flex; align-items: center; gap: 0.25rem; max-width: 100%;
+  padding: 0.125rem 0.25rem 0.125rem 0.625rem; border: 1px solid var(--border); border-radius: 999px;
+  background: var(--bg); font-size: 0.8125rem;
 }
-.cat-domain small { color: var(--muted); font-size: 0.75rem; }
-.cat-domain:hover { border-color: var(--border-hover); }
-.cat-domain.is-on { border-color: var(--brand); background: var(--brand-soft); color: var(--brand); font-weight: 600; }
-.cat-hint { margin: 0 1rem 0.75rem; font-size: 0.85rem; }
-.cat-tree { display: flex; flex-direction: column; gap: 0.75rem; padding: 0 1rem; }
-.cat-row { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
-.cat-children .cat-row { border: none; border-top: 1px solid var(--border); border-radius: 0; }
-.cat-row.is-off > .cat-row-head { opacity: 0.6; }
-.cat-row-head { display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem 0.75rem; padding: 0.625rem 0.875rem; }
-.cat-tree > .cat-row > .cat-row-head { background: var(--bg); border-radius: 10px 10px 0 0; font-weight: 600; }
-.cat-code { min-width: 6.5rem; color: var(--brand); font-size: 0.85rem; }
-.cat-name { display: inline-flex; align-items: center; gap: 0.25rem; flex: 1; min-width: 12rem; }
-.cat-name.is-editing input { flex: 1; min-width: 10rem; }
-.cat-row-tools { display: inline-flex; align-items: center; gap: 0.25rem; margin-left: auto; }
-.cat-children { padding-left: 1.25rem; }
-.cat-items { margin: 0 0 0.5rem; padding: 0 0.875rem 0 calc(7.25rem + 0.875rem); list-style: none; font-size: 0.8rem; color: var(--muted); }
-.cat-items li::before { content: '· '; }
-.cat-add { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; padding: 0.625rem 0.875rem; border-top: 1px dashed var(--border); }
-.cat-add input { flex: 1; min-width: 12rem; }
-.cat-add-code { display: inline-flex; align-items: center; gap: 0.25rem; }
-.cat-add-code input { width: 4.5rem; min-width: 0; flex: none; font-family: ui-monospace, monospace; text-transform: uppercase; }
-.cat-add-main { margin: 1rem 1rem 0; }
-.cat-add-main .cat-add { border: 1px dashed var(--border); border-radius: 10px; }
-@media (max-width: 600px) {
-  .cat-children { padding-left: 0.5rem; }
-  .cat-items { padding-left: 0.875rem; }
-  .cat-code { min-width: 0; }
+.cat-chip > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cat-chip.is-missing { color: var(--muted); border-style: dashed; }
+.cat-chip-x {
+  flex: none; width: 1.375rem; height: 1.375rem; border: 0; border-radius: 999px; padding: 0;
+  background: transparent; color: var(--muted); font-size: 1rem; line-height: 1; cursor: pointer;
 }
+.cat-chip-x:hover:not(:disabled) { background: var(--surface-2); color: var(--danger, #c0392b); }
+.cat-item-add { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; max-width: 32rem; }
+.cat-item-add > input, .cat-item-add > select, .cat-item-add > .search-select { flex: 1; min-width: 12rem; }
 
 /* (แถวนัดแบบเดิมของ CaseVisits ถูกแทนด้วยการ์ดนัด — ดู "การ์ดนัดในตารางนัด" ท้ายไฟล์) */
 
@@ -6666,6 +6690,10 @@ h1, h2, h3, h4, .page-hero-title, .cal-title, .login-heading h1 {
 .vs-used-label { font-size: 0.8125rem; color: var(--muted); }
 .vs-used strong { font-size: 1.5rem; line-height: 1; color: var(--text); font-variant-numeric: tabular-nums; }
 .vs-used-total { font-size: 0.875rem; color: var(--muted); white-space: nowrap; }
+.vs-carried {
+  align-self: center; padding: 0.0625rem 0.5rem; border-radius: 999px; white-space: nowrap;
+  font-size: 0.6875rem; font-weight: 600; color: var(--muted); background: var(--surface-2);
+}
 .vs-left { flex: none; font-size: 0.8125rem; color: var(--muted); white-space: nowrap; }
 .vs-left strong { font-weight: 700; color: var(--brand); font-variant-numeric: tabular-nums; }
 .vs-left.is-zero { font-weight: 600; color: var(--brand); }
@@ -6701,3 +6729,381 @@ h1, h2, h3, h4, .page-hero-title, .cal-title, .login-heading h1 {
 /* จำนวนวันต่อรอบของรูปแบบบริการ (PackagesPage · 16 พ.ย. 2569) — ช่องตัวเลขเล็กในรายการรูปแบบ */
 .format-days { display: inline-flex; align-items: center; gap: 0.375rem; margin-top: 0.25rem; font-size: 0.8125rem; }
 .format-days input { width: 5rem; padding: 0.25rem 0.5rem; text-align: center; }
+
+/* ---------- หน้าตั้งค่าแบบเมนูซ้าย + แผงขวา (SettingsShell · CategoryManager · ผู้ใช้ขอ 19 พ.ย. 2569) ----------
+   ใช้กับหน้าตั้งค่า และเมนู "หมวดหมู่" · การ์ดมนใหญ่ แถวรายการเป็นกล่องย่อย สวิตช์เขียว "เปิดใช้งาน" + ปุ่มแก้ไข */
+.set-shell { display: grid; grid-template-columns: 15.5rem minmax(0, 1fr); gap: 1.5rem; align-items: start; }
+.set-nav {
+  position: sticky; top: 1rem; display: flex; flex-direction: column; gap: 0.875rem;
+  padding: 0.875rem 0.75rem; border: 1px solid var(--border); border-radius: 1rem; background: var(--surface);
+}
+.set-nav-group { display: flex; flex-direction: column; gap: 0.125rem; }
+.set-nav-head { margin: 0 0.75rem 0.25rem; font-size: 0.75rem; font-weight: 700; color: var(--brand); letter-spacing: 0.02em; }
+.set-nav-item {
+  display: block; width: 100%; padding: 0.625rem 0.75rem; border: 0; border-left: 3px solid transparent; border-radius: 0.5rem;
+  background: transparent; color: var(--text); font: inherit; font-size: 0.9375rem; text-align: left; cursor: pointer;
+}
+.set-nav-item:hover { background: var(--surface-2); color: var(--heading); }
+.set-nav-item.is-on { background: var(--brand-soft); border-left-color: var(--brand); color: var(--heading); font-weight: 600; }
+.set-nav-item:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }
+
+.set-main { min-width: 0; display: flex; flex-direction: column; gap: 1.25rem; }
+/* หน้าหัตถการ / อุปกรณ์เสริม — แผงเดียวไม่มีเมนูซ้าย ใช้ระยะเดียวกับแผงขวา */
+.catalog-page { display: flex; flex-direction: column; gap: 1.25rem; }
+.set-pane-head { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 0.75rem 1rem; }
+.set-pane-head h2 { margin: 0; font-size: 1.375rem; color: var(--heading); }
+.set-pane-head p { margin: 0.25rem 0 0; font-size: 0.875rem; }
+
+.set-card {
+  padding: 1.25rem 1.5rem; border: 1px solid var(--border); border-radius: 1rem; background: var(--surface);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 3%);
+}
+.set-card.is-warn { border: 1px dashed #d9a843; }
+.set-card.is-off > .set-card-head .set-card-title { opacity: 0.6; }
+.set-card-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.75rem 1rem; margin-bottom: 1rem; }
+.set-card-head:last-child { margin-bottom: 0; }
+.set-card-title { min-width: 0; }
+.set-card-title h3 { margin: 0; font-size: 1.0625rem; color: var(--heading); }
+.set-card-title p { margin: 0.25rem 0 0; font-size: 0.8125rem; }
+.set-code { margin-left: 0.375rem; font-size: 0.75rem; font-weight: 500; color: var(--brand); }
+.set-card-tools, .set-row-tools { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 0.75rem; }
+/* คอลัมน์ขวาตรงกันทุกแถว: หัวการ์ดเว้นขวาเท่าขอบ+ระยะในของกล่องแถว · ป้ายสวิตช์กว้างคงที่ (เปิดใช้งาน/ปิดอยู่ ยาวไม่เท่ากัน) */
+.set-card-tools { padding-right: calc(1rem + 1px); }
+.set-switch > span { min-width: 4.75em; }
+.set-edit-btn { min-width: 3.75rem; }
+.set-edit-btn.is-hidden { visibility: hidden; }
+.set-add-btn { margin-right: 0.25rem; }
+
+.set-rows { display: flex; flex-direction: column; gap: 0.5rem; margin: 0; padding: 0; list-style: none; }
+.set-row { padding: 0.75rem 1rem; border: 1px solid var(--border); border-radius: 0.75rem; background: var(--surface); }
+.set-row:hover { border-color: var(--border-hover); }
+.set-row.is-off .set-row-ico, .set-row.is-off .set-row-text { opacity: 0.55; }
+.set-row-main { display: flex; align-items: center; gap: 0.875rem; }
+.set-row-ico {
+  flex: none; display: grid; place-items: center; width: 2.5rem; height: 2.5rem; border-radius: 999px;
+  background: var(--brand-soft); color: var(--brand); font-size: 0.8125rem; font-weight: 700;
+}
+.set-row-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.125rem; }
+.set-row-text strong { color: var(--heading); font-size: 0.9375rem; }
+.set-row-sub { font-size: 0.75rem; color: var(--muted); overflow-wrap: anywhere; }
+.set-row-tools { flex: none; justify-content: flex-end; }
+.set-row-tools > select { width: auto; min-width: 14rem; }
+.set-items { display: flex; flex-direction: column; gap: 0.5rem; margin: 0.625rem 0 0 calc(2.5rem + 0.875rem); }
+/* รายการพร้อมช่องราคา (หัตถการ/อุปกรณ์) — ชื่อซ้าย ช่องราคาเรียงขวา ปุ่ม × ท้ายแถว */
+.set-item-rows { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; border: 1px solid var(--border); border-radius: 0.625rem; }
+.set-item-row { display: flex; align-items: center; gap: 0.75rem; padding: 0.5rem 0.5rem 0.5rem 0.75rem; }
+.set-item-row + .set-item-row { border-top: 1px solid var(--divider, var(--border)); }
+.set-item-row.is-missing .set-item-name { color: var(--muted); }
+.set-item-name { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.125rem; font-size: 0.875rem; color: var(--text); }
+.set-item-name small { font-size: 0.75rem; }
+.set-item-prices { flex: none; display: flex; gap: 0.5rem; }
+.set-price { display: flex; flex-direction: column; gap: 0.125rem; margin: 0; }
+.set-price small { font-size: 0.6875rem; color: var(--muted); }
+.set-price-box { display: inline-flex; align-items: center; gap: 0.25rem; }
+.set-price-box input { width: 6.5rem; padding: 0.3125rem 0.5rem; text-align: right; }
+
+/* สวิตช์เปิดใช้งาน — ใช้ .perm-check ของหน้าจัดการสิทธิ์ แต่สีเขียว (เปิด = ใช้งานอยู่) */
+.set-switch {
+  --perm-accent: #2e7d4f;
+  display: inline-flex; align-items: center; gap: 0.5rem; margin: 0;
+  font-size: 0.8125rem; font-weight: 600; color: var(--muted); white-space: nowrap; cursor: pointer;
+}
+.set-switch.is-on { color: #2e7d4f; }
+.set-switch.is-locked { cursor: not-allowed; }
+.set-switch > .perm-check { flex: none; width: 2.5rem; }
+:root[data-theme='dark'] .set-switch { --perm-accent: #3f9e66; }
+:root[data-theme='dark'] .set-switch.is-on { color: #6fcf97; }
+
+.set-name-edit { display: flex; flex-wrap: wrap; align-items: center; gap: 0.375rem; }
+.set-name-edit input { flex: 1; min-width: 10rem; }
+.set-add { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-top: 0.875rem; padding-top: 0.875rem; border-top: 1px dashed var(--border); }
+.set-card-head + .set-add { margin-top: 0; padding-top: 0; border-top: 0; }
+.set-add > input { flex: 1; width: auto; min-width: 12rem; }
+.set-add-code { display: inline-flex; align-items: center; gap: 0.25rem; }
+.set-add-code input { width: 4.5rem; font-family: var(--font-mono); text-transform: uppercase; }
+.set-empty { margin: 0; font-size: 0.875rem; }
+.set-blank { text-align: center; }
+.set-blank p { margin: 0; }
+.set-foot { margin: 0; font-size: 0.75rem; }
+/* หน้าเดิมที่ฝังในแผงขวาของหน้าตั้งค่าระบบ (จัดการสิทธิ์ · บันทึกการใช้งาน) */
+.set-embed { min-width: 0; }
+
+/* ---------- จัดการสิทธิ์ (PermissionsPage · ดีไซน์ใหม่ 19 พ.ย. 2569) ---------- */
+.pm { --perm-accent: #b8892b; display: flex; flex-direction: column; gap: 1rem; }
+:root[data-theme='dark'] .pm { --perm-accent: #d7a63f; }
+.pm-positions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.pm-chip {
+  display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0.875rem;
+  border: 1px solid var(--border); border-radius: 999px; background: var(--surface);
+  color: var(--text); font: inherit; font-size: 0.875rem; cursor: pointer;
+}
+.pm-chip:hover { border-color: var(--border-hover); color: var(--heading); }
+.pm-chip.is-on { border-color: var(--brand); background: var(--brand-soft); color: var(--heading); font-weight: 600; }
+.pm-chip-ico { width: 1rem; height: 1rem; color: var(--muted); }
+.pm-chip.is-on .pm-chip-ico { color: var(--brand); }
+.pm-chip-count { font-size: 0.75rem; color: var(--muted); font-weight: 500; font-variant-numeric: tabular-nums; }
+.pm-chip:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+
+.pm-summary { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+.pm-avatar { flex: none; display: grid; place-items: center; width: 3rem; height: 3rem; border-radius: 0.875rem; background: var(--brand); color: #fff; }
+.pm-avatar .perm-avatar-ico { width: 1.5rem; height: 1.5rem; }
+.pm-summary-text { flex: 1; min-width: 14rem; }
+.pm-summary-text h3 { display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem; margin: 0; font-size: 1.25rem; color: var(--heading); }
+.pm-summary-text p { margin: 0.25rem 0 0; font-size: 0.8125rem; }
+.pm-badge { padding: 0.0625rem 0.5rem; border-radius: 999px; background: var(--surface-2); color: var(--muted); font-size: 0.75rem; font-weight: 600; }
+.pm-badge.is-custom { background: var(--brand-soft); color: var(--brand); }
+.pm-badge.is-locked { background: var(--surface-2); color: var(--text); }
+.pm-count { flex: 0 0 11rem; display: flex; flex-direction: column; align-items: flex-end; gap: 0.375rem; font-size: 0.8125rem; color: var(--muted); }
+.pm-count strong { font-size: 1.75rem; color: var(--heading); font-variant-numeric: tabular-nums; }
+.pm-bar { display: block; width: 100%; height: 0.375rem; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
+.pm-bar > span { display: block; height: 100%; border-radius: 999px; background: var(--brand); }
+
+.pm-group-count { margin-left: 0.375rem; padding: 0.0625rem 0.5rem; border-radius: 999px; background: var(--surface-2); color: var(--muted); font-size: 0.75rem; font-weight: 600; vertical-align: middle; }
+.pm-bulk { gap: 0.5rem; }
+.pm-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr)); gap: 0.5rem; margin: 0; padding: 0; list-style: none; }
+.pm-row {
+  display: flex; align-items: center; gap: 0.75rem; height: 100%; margin: 0; padding: 0.625rem 0.875rem;
+  border: 1px solid var(--border); border-radius: 0.75rem; background: var(--surface); cursor: pointer;
+}
+.pm-row:hover { border-color: var(--border-hover); }
+.pm-row.is-locked { cursor: default; }
+.pm-row.is-locked:hover { border-color: var(--border); }
+.pm-ico { flex: none; display: grid; place-items: center; width: 2.25rem; height: 2.25rem; border-radius: 0.625rem; background: var(--surface-2); color: var(--muted); }
+.pm-ico svg { width: 1.125rem; height: 1.125rem; }
+.pm-row.is-on .pm-ico { background: var(--brand-soft); color: var(--brand); }
+.pm-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.0625rem; }
+.pm-label { font-size: 0.9375rem; font-weight: 500; color: var(--heading); }
+.pm-row:not(.is-on) .pm-label { color: var(--text); }
+.pm-hint { font-size: 0.75rem; color: var(--muted); }
+.pm-row .perm-check { flex: none; }
+
+/* แถบบันทึก — อยู่ท้ายรายการ · มีการเปลี่ยนที่ยังไม่บันทึกแล้วติดขอบล่างจอ (ไม่ต้องเลื่อนลงไปหาปุ่ม) */
+.pm-foot {
+  position: static; z-index: 5; display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem 0.75rem;
+  padding: 0.75rem 1rem; border: 1px solid var(--border); border-radius: 0.875rem; background: var(--surface);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 8%);
+}
+.pm-foot.is-dirty { position: sticky; bottom: 0.75rem; border-color: var(--brand); background: var(--brand-soft); }
+.pm-foot-note { font-size: 0.8125rem; color: var(--muted); }
+.pm-foot.is-dirty .pm-foot-note { color: var(--brand); font-weight: 600; }
+.pm-foot-right { display: flex; gap: 0.5rem; margin-left: auto; }
+@media (max-width: 900px) {
+  .pm-count { flex: 1 1 100%; align-items: flex-start; }
+  .pm-grid { grid-template-columns: minmax(0, 1fr); }
+  .pm-foot.is-dirty { bottom: calc(5.5rem + env(safe-area-inset-bottom, 0px)); }
+}
+/* ตัวกรองด้านบนของแผง — ค้นหา + เลือกหมวดหลัก */
+.set-filter {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 0.625rem 0.75rem;
+  padding: 0.75rem 1rem; border: 1px solid var(--border); border-radius: 1rem; background: var(--surface);
+}
+.set-filter-search { position: relative; flex: 1 1 20rem; display: flex; margin: 0; }
+.set-filter-search svg { position: absolute; left: 0.75rem; top: 50%; width: 1rem; height: 1rem; transform: translateY(-50%); color: var(--muted); pointer-events: none; }
+.set-filter-search input { flex: 1; width: 100%; padding-left: 2.25rem; }
+.set-filter > select { flex: 0 1 16rem; width: auto; }
+.set-filter-result { display: inline-flex; align-items: center; gap: 0.25rem; font-size: 0.8125rem; color: var(--muted); white-space: nowrap; }
+
+@media (max-width: 900px) {
+  .set-shell { grid-template-columns: minmax(0, 1fr); gap: 1rem; }
+  .set-nav {
+    position: static; flex-direction: row; gap: 0.25rem; padding: 0.375rem; border-radius: 0.75rem;
+    overflow-x: auto; scrollbar-width: none;
+  }
+  .set-nav::-webkit-scrollbar { display: none; }
+  .set-nav-group { display: contents; }
+  .set-nav-head { display: none; }
+  .set-nav-item { flex: none; width: auto; padding: 0.5rem 0.875rem; border-left: 0; white-space: nowrap; font-size: 0.875rem; }
+  .set-card { padding: 1rem; }
+  .set-row { padding: 0.75rem; }
+  .set-row-main { flex-wrap: wrap; }
+  .set-row-tools { width: 100%; flex-wrap: nowrap; justify-content: flex-start; gap: 0.375rem; padding-left: 0; }
+  .set-card-tools { width: 100%; justify-content: flex-start; padding-right: 0; }
+  .set-row-tools { gap: 0.5rem; }
+  /* จอแคบ: สวิตช์ชิดซ้าย ปุ่มแก้ไขชิดขวาของกล่อง — ทุกแถวตรงกัน */
+  .set-row-tools > .set-edit-btn, .set-card-tools > .set-edit-btn { margin-left: auto; }
+  .pkg-manage .set-row-tools > :last-child { margin-left: auto; }
+  .set-row-tools > select { flex: 1; min-width: 0; }
+  .set-items { margin-left: 0; }
+  .set-filter { padding: 0.625rem; }
+  .set-filter > select { flex: 1 1 100%; }
+  .set-item-row { flex-wrap: wrap; }
+  .set-item-name { flex-basis: calc(100% - 2.5rem); }
+  /* ช่องราคาแบ่งความกว้างเท่ากันในบรรทัดเดียว (หัตถการ 3 ช่อง · อุปกรณ์ 2 ช่อง) */
+  .set-item-prices { order: 3; width: 100%; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); }
+  .set-price-box input { flex: 1; width: 100%; min-width: 0; }
+}
+
+/* ---------- รายได้ตาม BU (RevenueBuPage · 19 พ.ย. 2569) ---------- */
+.bu-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 0.625rem 1.25rem; margin-bottom: 0.5rem; }
+/* ช่วงเวลา: ‹ [ปุ่มช่วง] › เป็นก้อนเดียว */
+.bu-range-ctl { display: inline-flex; align-items: stretch; border: 1px solid var(--border); border-radius: 0.625rem; background: var(--surface); overflow: hidden; }
+.bu-step { width: 2.5rem; border: 0; background: transparent; color: var(--text); font-size: 1.25rem; line-height: 1; cursor: pointer; }
+.bu-step:hover:not(:disabled) { background: var(--surface-2); color: var(--heading); }
+.bu-step:disabled { color: var(--border-hover); cursor: not-allowed; }
+.bu-range-btn {
+  display: inline-flex; align-items: center; gap: 0.5rem; min-height: 2.5rem; padding: 0.25rem 0.875rem;
+  border: 0; border-left: 1px solid var(--border); border-right: 1px solid var(--border);
+  background: transparent; color: var(--heading); font: inherit; cursor: pointer; text-align: left;
+}
+.bu-range-btn:hover, .bu-range-btn[aria-expanded='true'] { background: var(--brand-soft); }
+.bu-range-btn .btn-ico { color: var(--brand); }
+.bu-range-text { display: inline-flex; align-items: baseline; gap: 0.5rem; flex-wrap: wrap; }
+.bu-range-text strong { font-weight: 700; }
+.bu-caret { color: var(--muted); font-size: 0.75rem; }
+/* แสดงเป็น: ป้าย + ปุ่มสามตัว */
+.bu-show { display: inline-flex; align-items: center; gap: 0.5rem; font-size: 0.875rem; }
+/* ปุ่มส่งออกชิดขวาสุดของแถวตัวกรอง (แทนแถวหัวหน้าเดิม) */
+.bu-export-slot { margin-left: auto; }
+.bu-show .seg button:disabled { opacity: 0.4; cursor: not-allowed; }
+.bu-show .seg button:disabled:hover { background: transparent; color: var(--muted); }
+/* แผงเลือกช่วง */
+.bu-range-pop {
+  position: fixed; z-index: 60; padding: 0.375rem; border: 1px solid var(--border); border-radius: 0.875rem;
+  background: var(--surface); box-shadow: 0 12px 32px rgb(0 0 0 / 16%);
+}
+.bu-range-list { margin: 0; padding: 0; list-style: none; }
+.bu-range-opt {
+  display: grid; grid-template-columns: 1.25rem 1fr; align-items: center; gap: 0.5rem; width: 100%;
+  padding: 0.5rem 0.625rem; border: 0; border-radius: 0.5rem; background: transparent; color: var(--heading); font: inherit; text-align: left; cursor: pointer;
+}
+.bu-range-opt:hover { background: var(--surface-2); }
+.bu-range-opt.is-on { background: var(--brand-soft); font-weight: 600; }
+.bu-check { color: var(--brand); font-weight: 700; text-align: center; }
+.bu-range-custom { margin-top: 0.375rem; padding: 0.625rem; border-top: 1px solid var(--border); }
+.bu-range-custom .field-label { margin: 0 0 0.375rem; }
+.bu-range-inputs { display: flex; flex-direction: column; gap: 0.375rem; }
+.bu-range-inputs label { display: grid; grid-template-columns: 2.75rem minmax(0, 1fr); align-items: center; gap: 0.5rem; margin: 0; font-size: 0.875rem; font-weight: 400; }
+.bu-range-inputs input { width: 100%; min-width: 0; padding: 0.375rem 0.5rem; }
+.bu-range-apply { width: 100%; margin-top: 0.625rem; justify-content: center; }
+.bu-range { margin: 0 0 0.875rem; font-size: 0.8125rem; }
+.bu-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(10.5rem, 1fr)); gap: 0.75rem; margin-bottom: 1rem; }
+.bu-tile { text-align: left; font: inherit; cursor: pointer; }
+.bu-tile.is-total { cursor: default; background: var(--brand-soft); border-color: transparent; }
+.bu-tile.is-total:hover { background: var(--brand-soft); }
+.bu-tile.is-on { border-color: var(--brand); box-shadow: inset 0 0 0 1px var(--brand); }
+.bu-tile .kpi-label { display: inline-flex; align-items: center; gap: 0.375rem; }
+.bu-tile .kpi-value { font-size: 1.375rem; }
+.bu-delta { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.bu-delta.is-up { color: #2e7d4f; }
+.bu-delta.is-down { color: var(--danger); }
+:root[data-theme='dark'] .bu-delta.is-up { color: #6fcf97; }
+.bu-table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+.bu-table th, .bu-table td { padding: 0.625rem 0.75rem; border-bottom: 1px solid var(--divider, var(--border)); text-align: left; vertical-align: middle; }
+.bu-table th { font-size: 0.75rem; font-weight: 600; color: var(--muted); background: var(--surface-2); white-space: nowrap; }
+.bu-table .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.bu-table tfoot td { font-weight: 700; color: var(--heading); border-bottom: 0; border-top: 2px solid var(--border); }
+.bu-table tr.is-click { cursor: pointer; }
+.bu-table tr.is-click:hover td, .bu-table tr.is-on td { background: var(--brand-soft); }
+.bu-table tr.is-click:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }
+.bu-name { display: inline-flex; align-items: center; gap: 0.5rem; font-weight: 600; color: var(--heading); }
+.bu-share { display: inline-flex; align-items: center; justify-content: flex-end; gap: 0.5rem; }
+.bu-share-bar { display: inline-block; width: 4.5rem; height: 0.375rem; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
+.bu-share-bar > span { display: block; height: 100%; border-radius: 999px; }
+.bu-more { margin-top: 0.75rem; }
+.bu-export {
+  position: fixed; z-index: 60; display: flex; flex-direction: column; gap: 0.25rem; padding: 0.5rem;
+  border: 1px solid var(--border); border-radius: 0.75rem; background: var(--surface); box-shadow: 0 10px 30px rgb(0 0 0 / 14%);
+}
+.bu-export-range { margin: 0.25rem 0.5rem 0.25rem; font-size: 0.75rem; }
+.bu-export-item {
+  display: flex; flex-direction: column; gap: 0.125rem; padding: 0.625rem 0.75rem; border: 0; border-radius: 0.5rem;
+  background: transparent; color: var(--heading); font: inherit; text-align: left; cursor: pointer;
+}
+.bu-export-item span { font-size: 0.75rem; }
+.bu-export-item:hover:not(:disabled) { background: var(--brand-soft); }
+.bu-export-item:disabled { opacity: 0.6; cursor: wait; }
+@media (max-width: 900px) {
+  .bu-range-ctl { width: 100%; }
+  .bu-range-btn { flex: 1; }
+  .bu-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .bu-tile.is-total { grid-column: 1 / -1; }
+  .bu-share-bar { display: none; }
+}
+
+/* ---------- ตารางงานฉบับพิมพ์ / PDF (components/CalendarPrintDoc.jsx · 19 พ.ย. 2569) ----------
+   อยู่ใน .print-sheet (บนจอไม่แสดง · ตอนพิมพ์ซ่อนทั้งแอปเหลือตัวนี้) — ขนาดเป็น pt/px ของกระดาษ ไม่ใช่ rem ของจอ
+   สีเข้มพอสำหรับเครื่องพิมพ์ขาวดำ · สถานะบอกด้วยตัวอักษร + รูปทรงเครื่องหมาย ไม่พึ่งสีอย่างเดียว */
+@page caldoc {
+  size: A4;
+  margin: 12mm 12mm 14mm;
+  @bottom-right { content: "หน้า " counter(page) " / " counter(pages); font-size: 8pt; color: #7a6f60; }
+}
+.cal-doc {
+  page: caldoc;
+  font-size: 9.5pt; line-height: 1.4; color: #1d1a16;
+  -webkit-print-color-adjust: exact; print-color-adjust: exact;
+}
+.cal-doc-head {
+  display: grid; grid-template-columns: auto 1fr auto; gap: 0 14px; align-items: center;
+  padding-bottom: 10px; border-bottom: 2px solid #8a6a1f;
+}
+.cal-doc-logo { height: 46px; width: auto; }
+.cal-doc-kicker { margin: 0; font-size: 8.5pt; color: #7a6f60; letter-spacing: 0.02em; }
+.cal-doc-title h1 { margin: 1px 0 0; font-size: 17pt; font-weight: 700; line-height: 1.2; color: #1d1a16; }
+.cal-doc-range { margin: 2px 0 0; font-size: 9pt; color: #5b5246; }
+.cal-doc-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; font-size: 8pt; color: #7a6f60; text-align: right; }
+
+.cal-doc-filters { display: flex; flex-wrap: wrap; gap: 3px 18px; margin: 9px 0 0; font-size: 8.5pt; }
+.cal-doc-filters > div { display: flex; gap: 6px; }
+.cal-doc-filters dt { color: #7a6f60; }
+.cal-doc-filters dd { margin: 0; color: #5b5246; }
+.cal-doc-filters .is-set dd { font-weight: 700; color: #1d1a16; }
+
+.cal-doc-summary { display: flex; gap: 6px; margin: 10px 0 12px; }
+.cal-doc-total {
+  flex: 1.5; display: flex; align-items: baseline; gap: 6px;
+  padding: 7px 10px; border-radius: 6px; background: #f4ecda; font-size: 8.5pt; color: #5b5246;
+}
+.cal-doc-total strong { font-size: 16pt; line-height: 1; color: #1d1a16; }
+.cal-doc-stat {
+  flex: 1; display: flex; align-items: center; gap: 5px; min-width: 0;
+  padding: 7px 8px; border: 1px solid #ddd5c4; border-radius: 6px; font-size: 8.5pt; white-space: nowrap;
+}
+.cal-doc-stat strong { margin-left: auto; font-size: 11pt; }
+.cal-doc-stat.is-zero { color: #a49b8c; }
+.cal-doc-stat.is-zero .cal-doc-mark { opacity: 0.45; }
+
+.cal-doc-table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 9pt; }
+.cal-doc-table .cd-time { width: 13%; }
+.cal-doc-table col.cd-staff { width: 21%; }
+.cal-doc-table col.cd-client { width: 24%; }
+.cal-doc-table col.cd-case { width: 15%; }
+.cal-doc-table col.cd-kind { width: 12%; }
+.cal-doc-table col.cd-state { width: 15%; }
+.cal-doc-table thead th {
+  padding: 5px 6px; text-align: left; font-size: 8pt; font-weight: 600; color: #7a6f60;
+  border-bottom: 1.5px solid #1d1a16;
+}
+/* หนึ่งวันไม่ถูกหั่นคาบหน้ากระดาษ (วันที่ยาวเกินหน้าเบราว์เซอร์ตัดเองตามปกติ) · หัวตารางซ้ำทุกหน้าเอง (thead) */
+.cal-doc-day { break-inside: avoid; }
+.cal-doc-dayrow th {
+  padding: 10px 6px 4px; text-align: left; font-size: 10pt; font-weight: 700; color: #1d1a16;
+  border-bottom: 1px solid #c9bfa9;
+}
+.cal-doc-daycount { float: right; font-size: 8.5pt; font-weight: 500; color: #7a6f60; }
+.cal-doc-table td { padding: 4px 6px; border-bottom: 1px solid #ece5d6; vertical-align: top; overflow-wrap: anywhere; }
+.cal-doc-row:nth-child(odd) td { background: #faf7f0; }
+.cal-doc-table td.cd-time { font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.cal-doc-table td.cd-code { font-family: var(--font-mono, monospace); font-size: 8pt; color: #5b5246; }
+.cal-doc-table td.cd-state { white-space: nowrap; }
+.cal-doc-row.is-missed td.cd-state { color: #a12a1f; font-weight: 600; }
+.cal-doc-row.is-stale td.cd-state { color: #5f3d96; font-weight: 600; }
+.cd-muted { color: #a49b8c; }
+.cal-doc-empty { margin: 24px 0; text-align: center; color: #7a6f60; }
+
+/* เครื่องหมายสถานะ — รูปทรงต่างกันทุกแบบ (กลวง/ครึ่ง/ทึบ/ข้าวหลามตัด/กากบาท) แยกออกได้แม้พิมพ์ขาวดำ */
+.cal-doc-mark {
+  display: inline-block; flex: none; box-sizing: border-box;
+  width: 8px; height: 8px; margin-right: 5px; vertical-align: 0.05em;
+  border: 1.5px solid currentColor; border-radius: 50%;
+}
+.cal-doc-mark.m-scheduled { color: #c27f0b; }
+.cal-doc-mark.m-working { color: #1e7a4c; background: linear-gradient(90deg, #1e7a4c 50%, transparent 50%); }
+.cal-doc-mark.m-done { color: #5e584e; background: #5e584e; }
+.cal-doc-mark.m-stale { color: #7b52b9; border-radius: 1px; transform: rotate(45deg) scale(0.85); }
+.cal-doc-mark.m-missed { position: relative; color: #c0392b; border: 0; border-radius: 0; }
+.cal-doc-mark.m-missed::before, .cal-doc-mark.m-missed::after {
+  content: ''; position: absolute; left: -1px; right: -1px; top: 50%; height: 1.75px; margin-top: -0.875px;
+  background: currentColor; transform: rotate(45deg);
+}
+.cal-doc-mark.m-missed::after { transform: rotate(-45deg); }

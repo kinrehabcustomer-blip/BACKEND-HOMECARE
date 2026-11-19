@@ -1,7 +1,8 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useSheetSwipe } from '../lib/sheetSwipe.js';
 import { useScrollLock } from '../lib/scrollLock.js';
 import CaseVisits from './CaseVisits.jsx';
+import LineIcon from './LineIcon.jsx';
 import { caseCode } from '../lib/patientCode.js';
 
 /**
@@ -12,6 +13,8 @@ export default function CaseVisitsModal({ caseItem, readOnly = false, mode = 'sh
   const title = mode === 'appointment' ? 'ตารางนัด' : 'ตารางกะ';
   const sheetRef = useSheetSwipe(onClose); // จอแคบ: ปัดลงเพื่อปิด
   useScrollLock();
+  // ปุ่ม "ยกเลิกนัดทั้งหมด" ที่มุมซ้ายของ footer — CaseVisits ส่งสถานะมา (null = ไม่มีนัดให้ยกเลิก)
+  const [footAction, setFootAction] = useState(null);
   useEffect(() => {
     const onKeyDown = (e) => e.key === 'Escape' && onClose();
     document.addEventListener('keydown', onKeyDown);
@@ -37,10 +40,24 @@ export default function CaseVisitsModal({ caseItem, readOnly = false, mode = 'sh
             target={caseItem.physio_sessions ?? null}
             readOnly={readOnly}
             mode={mode}
+            onFootAction={setFootAction}
           />
         </div>
 
         <footer className="modal-foot">
+          {/* ปุ่มทำลายชิดซ้าย ห่างจาก "เสร็จสิ้น" (.foot-danger — มือถือลงไปเป็นแถวของตัวเอง) */}
+          {footAction && (
+            <button
+              type="button"
+              className="btn tiny danger-ghost foot-danger visit-foot-cancel"
+              disabled={footAction.busy}
+              title={footAction.title}
+              onClick={footAction.onClick}
+            >
+              <LineIcon name="x-circle" className="text-ico" />
+              {footAction.label}
+            </button>
+          )}
           <button className="btn primary" onClick={onClose}>เสร็จสิ้น</button>
         </footer>
       </div>

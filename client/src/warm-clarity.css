@@ -2025,6 +2025,9 @@ input[aria-invalid='true'] { border-color: var(--danger); }
   margin: 0; padding: 0.375rem 0.875rem 0; font-size: 0.875rem; color: var(--muted);
 }
 .cost-pay .cost-amt { color: var(--text); }
+.cost-row.is-prepaid .cost-name, .cost-row.is-prepaid .cost-amt { color: var(--muted); font-weight: 600; }
+.cost-row.is-total + .cost-row.is-prepaid { border-top: 0; }
+.midway-badge { margin-left: 0.5rem; vertical-align: middle; background: var(--brand-soft); color: var(--brand); }
 .cost-box + .field { margin-top: 1rem; } /* หมายเหตุ/เหตุผลยกเลิกใต้กล่อง — ไม่ติดบรรทัดค่าจ้าง */
 
 

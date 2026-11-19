@@ -18,6 +18,7 @@ import { useScrollLock } from '../lib/scrollLock.js';
 import { formatPhone, formatPhoneInput } from '../lib/phone.js';
 import SearchSelect from '../components/SearchSelect.jsx';
 import ProcedureNameInput from '../components/ProcedureNameInput.jsx';
+import { categoryItemNames, equipmentPrice, useCategories } from '../lib/categories.js';
 import { useConfirm, LEAVE_UNSAVED } from '../components/ConfirmDialog.jsx';
 
 const TIERS = ['CG', 'NA', 'PN', 'RN'];
@@ -34,6 +35,10 @@ const BLANK = {
   /* จำนวนแพ็กที่ลูกค้าซื้อ (17 พ.ย. 2569) — รายเดือน × 2 = สองเดือน · แพ็กกายภาพ × 2 = จำนวนครั้ง/อายุสองเท่า
      ค่าบริการ/ค่าจ้างในช่องด้านล่างคูณจำนวนแล้ว · server คูณเพดานวัน/ครั้งที่ลงนัดได้ให้เอง */
   pkg_quantity: '1',
+
+  /* เคสที่เริ่มก่อนเข้าระบบ (ย้ายเข้ากลางทาง · 19 พ.ย. 2569) — ยอดยกมาจากก่อนมีในระบบ
+     prepay_mode เป็นของฟอร์มเท่านั้น (ชำระครบ/บางส่วน/ยังไม่ชำระ) ตัดออกก่อนส่ง — server เก็บแค่ carried_paid */
+  joined_midway: false, carried_used: '', carried_paid: '', carried_staff_paid: '', prepay_mode: 'none',
 
   // ตัวตนผู้รับบริการ (มาจากแฟ้ม patient / หรือกรอกเพื่อสร้างแฟ้มใหม่) — client_name/gender/age/medical_history คัดลอกเป็น snapshot ในเคส
   client_name: '', patient_gender: '', patient_age: '', medical_history: '',
@@ -122,7 +127,26 @@ const TERMINAL_STATUSES = ['closed', 'cancelled'];
 
 // ช่องตัวเลขต้องส่งเป็น number ไม่ใช่ string ไม่งั้น zod ปฏิเสธ
 const NUMERIC = ['fee', 'staff_pay', 'patient_age', 'weight_kg', 'height_cm', 'pkg_format_id', 'pkg_grade_id',
-  'physio_package_id', 'pkg_quantity', 'geo_lat', 'geo_lng', 'geofence_radius_m'];
+  'physio_package_id', 'pkg_quantity', 'geo_lat', 'geo_lng', 'geofence_radius_m',
+  'carried_used', 'carried_paid', 'carried_staff_paid'];
+
+/** ยอดยกมาว่างทั้งชุด — ต่อเคส (รอบใหม่ไม่ใช่เคสกลางทาง) และตอนเอาติ๊ก "เริ่มก่อนเข้าระบบ" ออก */
+const CARRY_BLANK = { joined_midway: false, carried_used: '', carried_paid: '', carried_staff_paid: '', prepay_mode: 'none' };
+
+/** ยอดยกมาของเคสที่โหลดมาแก้ → ค่าในฟอร์ม (0 ของเคสปกติเป็นช่องว่าง · เดาวิธีชำระจากยอดเทียบราคา) */
+function carryFromCase(c) {
+  if (!c.joined_midway) return CARRY_BLANK;
+  const paid = Number(c.carried_paid ?? 0);
+  const price = c.service_customer_price_snapshot ?? c.fee;
+  const text = (v) => (Number(v ?? 0) > 0 ? String(v) : '');
+  return {
+    joined_midway: true,
+    carried_used: text(c.carried_used),
+    carried_paid: text(c.carried_paid),
+    carried_staff_paid: text(c.carried_staff_paid),
+    prepay_mode: paid <= 0 ? 'none' : price != null && paid >= Number(price) ? 'full' : 'partial',
+  };
+}
 
 /** ราคา/ค่าจ้างต่อแพ็ก × จำนวนแพ็ก — ปัดสตางค์แบบเดียวกับ server */
 const timesQty = (v, qty) => Math.round(Number(v) * qty * 100) / 100;
@@ -350,7 +374,22 @@ export default function CaseFormPage() {
 
   // ปกติเสนอเฉพาะแพ็คเกจที่ยังเปิดขาย — แต่เคสเก่าที่ผูกแพ็คเกจซึ่งปิดขายไปแล้วต้องยังเห็นของตัวเอง
   // ไม่งั้น dropdown จะเด้งเป็นค่าว่างแล้วแพ็คเกจของเคสนั้นหายไปเงียบๆ ตอนกดบันทึก
-  const physioOptions = physio.filter((p) => p.active || p.physio_package_id === selPhysioId);
+  /* เคสที่เริ่มก่อนเข้าระบบเลือกแพ็กที่ปิดขายไปแล้วได้ — ลูกค้าซื้อไว้ตอนที่แพ็กยังขายอยู่ (server ก็ยอมเฉพาะกรณีนี้) */
+  const physioOptions = physio.filter((p) => p.active || p.physio_package_id === selPhysioId || form.joined_midway);
+  /* หมวดของอุปกรณ์เสริม (หน้า "หมวดหมู่" · 19 พ.ย. 2569) — คำแนะนำตอนพิมพ์ชื่อ + เติมราคา
+     รูปแบบบริการ Homecare จัดกลุ่มตามประเภท รายวัน/สัปดาห์/เดือน ของตัวเอง (หมวดแพ็กเกจแยกเอาออกแล้ว — ซ้ำกับหน้าแพ็คเกจ) */
+  const cats = useCategories();
+  const formatGroups = ['daily', 'weekly', 'monthly'].map((cat) => ({
+    label: CATEGORY_LABELS[cat],
+    items: matrix?.formats.filter((f) => f.category === cat) ?? [],
+  })).filter((g) => g.items.length > 0);
+  const equipmentNames = categoryItemNames(cats?.categories, 'equipment');
+  // ป้ายใต้ชื่อในรายการแนะนำ: หมวด · ค่าเช่า/ราคาขาย ที่ตั้งไว้
+  const equipmentHint = (e) => {
+    const rent = equipmentPrice(cats, e.name, 'rent');
+    const sale = equipmentPrice(cats, e.name, 'sale');
+    return [e.group, rent != null && `เช่า ${formatBaht(rent)}`, sale != null && `ขาย ${formatBaht(sale)}`].filter(Boolean).join(' · ');
+  };
   // ค่าภาษาอังกฤษของแพ็คกายภาพที่เลือก (ตั้งรายแพ็คที่หน้าแพ็คเกจ) — 0 = แพ็คนี้ไม่มีตัวเลือกภาษาอังกฤษ
   const physioEnglishFee = Number(selectedPhysio?.english_fee ?? 0);
 
@@ -447,6 +486,15 @@ export default function CaseFormPage() {
       if (p && p.special_price != null) merged.fee = String(timesQty(p.special_price + (merged.pkg_english ? english : 0), n));
       if (p && p.staff_pay != null) merged.staff_pay = String(timesQty(p.staff_pay, n));
       return merged;
+    });
+  }
+
+  /** ติ๊ก/เอาติ๊ก "เคสนี้เริ่มก่อนเข้าระบบ" — เอาออก = ล้างยอดยกมา และแพ็กที่ปิดขายแล้วเลือกต่อไม่ได้ */
+  function toggleMidway(on) {
+    setForm((prev) => {
+      if (on) return { ...prev, joined_midway: true };
+      const pkg = physio.find((x) => x.physio_package_id === Number(prev.physio_package_id));
+      return { ...prev, ...CARRY_BLANK, ...(pkg && !pkg.active ? { physio_package_id: '' } : null) };
     });
   }
 
@@ -573,8 +621,11 @@ export default function CaseFormPage() {
   const [renewLeftover, setRenewLeftover] = useState([]);
   // คนของรอบก่อนที่ตามมาไม่ได้ (ลาออก/พักงาน/ย้ายไปสายสำนักงาน) — บอกให้รู้ ไม่ใช่หายไปเงียบๆ
   const [renewDropped, setRenewDropped] = useState([]);
-  // แบบกะที่ผู้ใช้เอาติ๊กออก (key ของ shiftPatterns) — ที่เหลือลงให้หลังเปิดเคส
-  const [patternsOff, setPatternsOff] = useState([]);
+  /* แบบกะที่ผู้ใช้ติ๊กเลือก (key ของ shiftPatterns) — ลงให้หลังเปิดเคสเฉพาะที่ติ๊ก
+     เดิมติ๊กไว้ให้ทุกแบบ (เอาติ๊กออกเอง) ผู้ใช้เจอ 19 พ.ย. 2569: ต่อเคสแล้วระบบลงนัดให้เองโดยไม่ได้ตั้งใจ
+     (KN690202546-R2 แพ็กกายภาพ 30 ครั้ง อายุ 6 เดือน — แบบแรก "ทุกวันพุธ" กินโควตาไป 25 นัดจนถึง พ.ค. 2570
+      แบบที่เหลือลงไม่ได้เพราะเกินแพ็ก) → เปลี่ยนเป็นไม่ติ๊กไว้ก่อน ต้องเลือกเองว่าจะลงแบบไหน */
+  const [patternsPicked, setPatternsPicked] = useState([]);
   const [issuingExtras, setIssuingExtras] = useState(false);
   useEffect(() => {
     if (!renewFrom) return;
@@ -600,6 +651,7 @@ export default function CaseFormPage() {
           else if (c.case_type === 'physiotherapy') filled.service_kind = 'physio';
         }
         Object.assign(filled, nextRoundDates(c.start_date, c.end_date, todayTH()));
+        Object.assign(filled, CARRY_BLANK); // รอบใหม่เริ่มในระบบเต็มรอบ — ยอดยกมาของรอบก่อนไม่ตามมา
         setForm(filled);
         initial.current = JSON.stringify(filled);
         setRenewSource(c);
@@ -803,6 +855,7 @@ export default function CaseFormPage() {
         for (const key of Object.keys(BLANK)) filled[key] = c[key] ?? '';
         if (filled.client_name === PATIENT_PENDING) filled.client_name = '';
         Object.assign(filled, splitAddons(c.addons));
+        Object.assign(filled, carryFromCase(c));
 
         // เคสที่เปิดก่อนมีสองสายไม่มี service_kind — เดาจากสิ่งที่ผูกไว้จริง
         // ไม่เดา ชุด dropdown จะถูกซ่อนแล้วบริการที่เลือกไว้จะหายไปจากสายตา (และโดนล้างทิ้งตอนกดบันทึก)
@@ -927,6 +980,24 @@ export default function CaseFormPage() {
   const listPrice = unitListPrice == null ? null : timesQty(unitListPrice, qty);
   const priceDiffers = Boolean(renewFrom) && listPrice != null && form.fee !== '' && Number(form.fee) !== listPrice;
 
+  /* ---------- เคสที่เริ่มก่อนเข้าระบบ: เพดาน · เหลือ · ยอดที่ต้องเก็บ (สรุปสดใต้กล่อง) ---------- */
+  const carryUnit = isPhysio ? 'ครั้ง' : 'วัน';
+  const carryCap = isPhysio
+    ? (selectedPhysio?.sessions ? selectedPhysio.sessions * qty : null)
+    : (selectedFormat?.days ? selectedFormat.days * qty : null);
+  const carriedUsed = Number(form.carried_used || 0);
+  const carryOver = carryCap != null && carriedUsed > carryCap;
+  const feeNow = form.fee === '' ? listPrice : Number(form.fee);
+  const prepaidNow = form.prepay_mode === 'full' ? feeNow ?? 0 : form.prepay_mode === 'partial' ? Number(form.carried_paid || 0) : 0;
+  const dueNow = feeNow == null ? null : Math.max(0, Math.round((feeNow - prepaidNow) * 100) / 100);
+  const carrySummary = form.joined_midway ? [
+    pickedService && `แพ็กเกจเดิม: ${serviceText(form)}${isPhysio && selectedPhysio && !selectedPhysio.active ? ' (ปิดขายแล้ว)' : ''}`,
+    carryCap != null && `ใช้ไปแล้ว ${carriedUsed} · เหลือ ${Math.max(0, carryCap - carriedUsed)} ${carryUnit}`,
+    dueNow != null && (dueNow === 0 && prepaidNow > 0
+      ? 'ลูกค้าชำระครบแล้ว — ไม่ออกใบแจ้งหนี้ (ยกเว้นมีอุปกรณ์/หัตถการเพิ่ม)'
+      : `ต้องเก็บอีก ${formatBaht(dueNow)}`),
+  ].filter(Boolean).join(' · ') : null;
+
   /* ช่องจำนวนที่ซื้อ — โชว์เมื่อเลือกแพ็ก/รูปแบบแล้ว (เคสเดิมที่ซื้อหลายแพ็กแต่ยังไม่โหลดตารางก็ยังเห็น) */
   const showQty = (isHomecare && Boolean(selectedFormat)) || (isPhysio && Boolean(selectedPhysio)) || qty > 1;
   const qtyUnit = isPhysio ? 'แพ็ก' : packUnit(selectedFormat?.category);
@@ -959,7 +1030,7 @@ export default function CaseFormPage() {
   const scheduleFrom = form.start_date && form.start_date < todayTH() ? todayTH() : form.start_date;
   const startsInPast = Boolean(form.start_date) && scheduleFrom !== form.start_date;
   const canSchedule = Boolean(scheduleFrom && form.end_date && form.end_date >= scheduleFrom);
-  const patternsOn = canSchedule ? patterns.filter((p) => patternUsable(p) && !patternsOff.includes(p.key)) : [];
+  const patternsOn = canSchedule ? patterns.filter((p) => patternUsable(p) && patternsPicked.includes(p.key)) : [];
   const patternCount = (p) => countDaysInRange(scheduleFrom, form.end_date, p.weekdays);
   const patternShifts = patternsOn.reduce((n, p) => n + patternCount(p), 0);
   const patternDays = (p) =>
@@ -1203,6 +1274,15 @@ export default function CaseFormPage() {
       return;
     }
 
+    /* ต่อเคสกายภาพ: แบบกะที่ติ๊กรวมกันเกินจำนวนครั้งของแพ็ก — หยุดก่อนเปิดเคส
+       (ถ้าปล่อยไป แบบแรกจะลงจนเต็มแพ็ก แบบที่เหลือลงไม่ได้ ได้ตารางที่ไม่ตรงกับที่ตั้งใจ) */
+    const physioCap = isPhysio && selectedPhysio?.sessions != null ? selectedPhysio.sessions * qty : null;
+    if (renewFrom && physioCap != null && patternShifts > physioCap) {
+      setError(`แบบกะที่ติ๊กไว้รวม ${patternShifts} ครั้ง เกินจำนวนครั้งของแพ็คเกจ (${physioCap} ครั้ง) — เอาติ๊กบางแบบออก หรือลดวันสิ้นสุด`);
+      formEl.current?.querySelector('.renew-shifts')?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      return;
+    }
+
     setSaving(true);
     setError(null);
     let equipmentCount = 0; // จำนวนแถวอุปกรณ์ที่ส่งไป — ใช้แยกข้อความเตือนของแถวหัตถการตอน server ทัก
@@ -1238,6 +1318,17 @@ export default function CaseFormPage() {
          ถ้าปล่อยผ่าน แค่ HR เข้ามาแก้หมายเหตุ ค่าจ้างที่ผู้จัดการตั้งทับไว้เองก็จะถูกดีดกลับเป็นเรทของแพ็คเกจ
          (หรือหายเป็น null เลยถ้าเคสนั้นไม่ได้เลือกแพ็คเกจไว้) — กติกาเดียวกับหน้าแพ็คเกจ/กายภาพ */
       if (!seePay) delete payload.staff_pay;
+
+      /* ยอดยกมา: ไม่ติ๊กกลางทาง = 0 ทั้งชุด · "ชำระครบ" = ยอดเท่าค่าบริการ · "ยังไม่ชำระ" = 0 (server ล้างซ้ำให้อีกชั้น) */
+      if (!payload.joined_midway) {
+        Object.assign(payload, { joined_midway: false, carried_used: 0, carried_paid: 0, carried_staff_paid: 0 });
+      } else if (form.prepay_mode === 'full') {
+        payload.carried_paid = payload.fee ?? listPrice ?? 0;
+      } else if (form.prepay_mode === 'none') {
+        payload.carried_paid = 0;
+      }
+      delete payload.prepay_mode;
+      if (!seePay) delete payload.carried_staff_paid; // ตัวเลขฝั่งต้นทุน — server ไม่รับจากคนที่ไม่เห็นค่าจ้าง
 
       // หัตถการต่อท้ายอุปกรณ์เสริมในรายการเดียวกัน — ข้อความเตือนของ addons.N เกินจำนวนอุปกรณ์ = แถวหัตถการ
       const equipment = addonsPayload(form.addons);
@@ -1634,15 +1725,11 @@ export default function CaseFormPage() {
           <label>รูปแบบบริการ
             <SearchSelect value={form.pkg_format_id} disabled={serviceLocked} onChange={(e) => applySelection({ pkg_format_id: e.target.value })}>
               <option value="">— ไม่ระบุ —</option>
-              {['daily', 'weekly', 'monthly'].map((cat) => {
-                const opts = matrix?.formats.filter((f) => f.category === cat) ?? [];
-                if (opts.length === 0) return null;
-                return (
-                  <optgroup key={cat} label={CATEGORY_LABELS[cat]}>
-                    {opts.map((f) => <option key={f.format_id} value={f.format_id}>{f.name}</option>)}
-                  </optgroup>
-                );
-              })}
+              {formatGroups.map((g) => (
+                <optgroup key={g.label} label={g.label}>
+                  {g.items.map((f) => <option key={f.format_id} value={f.format_id}>{f.name}</option>)}
+                </optgroup>
+              ))}
             </SearchSelect>
           </label>
           )}
@@ -1837,6 +1924,68 @@ export default function CaseFormPage() {
               </button>
             </p>
           )}
+
+          {/* เคสที่เริ่มก่อนเข้าระบบ (19 พ.ย. 2569) — ลูกค้าใช้บริการ/จ่ายเงินไปบางส่วนก่อนมีในระบบ
+              จดเป็นยอดยกมา ไม่สร้างนัด/รับเงิน/ปล่อยค่าจ้างย้อนหลัง (ดู server/src/cases/addonLink.js) */}
+          {!addonOf && !renewFrom && (
+            <label className="checkbox-row full-row">
+              <input
+                type="checkbox"
+                name="joined_midway"
+                checked={Boolean(form.joined_midway)}
+                disabled={serviceLocked}
+                onChange={(e) => toggleMidway(e.target.checked)}
+              />
+              เคสนี้เริ่มก่อนเข้าระบบ (ย้ายเข้ากลางทาง — ใช้บริการหรือชำระเงินไปบางส่วนแล้ว)
+            </label>
+          )}
+          {form.joined_midway && (
+            <div className="midway-box full-row">
+              <p className="form-hint muted">
+                เลือก<strong>แพ็กเกจเดิม</strong>ที่ลูกค้าซื้อไว้ด้านบน (เลือกแพ็กที่ปิดขายแล้วได้) ·
+                {' '}<strong>วันเริ่ม</strong> = วันที่เริ่มใช้บริการจริง (ย้อนหลังได้) ·
+                {' '}<strong>ค่าบริการ</strong> = ราคาที่ลูกค้าซื้อจริง
+              </p>
+              <div className="midway-grid">
+                <label>ใช้ไปแล้วก่อนเข้าระบบ ({carryUnit})
+                  <input type="number" min="0" step="1" inputMode="numeric" disabled={serviceLocked} {...field('carried_used')} />
+                  {carryOver
+                    ? <span className="field-error">เกินแพ็กเกจ — แพ็กนี้มี {carryCap} {carryUnit}</span>
+                    : fieldError('carried_used')}
+                </label>
+                <fieldset className="midway-pay" disabled={serviceLocked}>
+                  <legend>การชำระเงินของลูกค้าก่อนเข้าระบบ</legend>
+                  <div className="midway-radios">
+                    {[['full', 'ชำระครบแล้ว'], ['partial', 'ชำระบางส่วน'], ['none', 'ยังไม่ชำระ']].map(([v, label]) => (
+                      <label key={v} className="radio-row">
+                        <input
+                          type="radio"
+                          name="prepay_mode"
+                          value={v}
+                          checked={form.prepay_mode === v}
+                          onChange={() => setForm((prev) => ({ ...prev, prepay_mode: v }))}
+                        />
+                        {label}
+                      </label>
+                    ))}
+                  </div>
+                  {form.prepay_mode === 'partial' && (
+                    <label>ชำระแล้ว (บาท)
+                      <input type="number" min="0" step="0.01" {...field('carried_paid')} />
+                      {fieldError('carried_paid')}
+                    </label>
+                  )}
+                </fieldset>
+                {seePay && (
+                  <label>ค่าจ้างที่จ่ายพนักงานไปแล้ว (บาท)
+                    <input type="number" min="0" step="0.01" disabled={serviceLocked} {...field('carried_staff_paid')} />
+                    {fieldError('carried_staff_paid')}
+                  </label>
+                )}
+              </div>
+              {carrySummary && <p className="midway-summary">{carrySummary}</p>}
+            </div>
+          )}
         </div>
 
         {/* ต่อเคส Homecare: คอร์สกายภาพของรอบก่อนย้ายตามมา เมื่อรอบใหม่เริ่ม (วิธี A แบบจองย้าย · 10 พ.ย. 2569) */}
@@ -1999,15 +2148,27 @@ export default function CaseFormPage() {
         <section className="addons-field" aria-labelledby="addons-title">
           <h3 id="addons-title">อุปกรณ์เสริม <span className="muted">(คิดเงินเพิ่ม)</span></h3>
           {form.addons.length === 0 && <p className="muted">ยังไม่มีอุปกรณ์เสริม</p>}
+          {/* ชื่ออุปกรณ์จากหมวดอุปกรณ์เสริม (หน้า "หมวดหมู่") — เป็นคำแนะนำ พิมพ์ชื่ออื่นเองได้เหมือนเดิม */}
+          {equipmentNames.length > 0 && (
+            <datalist id="equipment-names">
+              {equipmentNames.map((e) => <option key={e.name} value={e.name} label={equipmentHint(e)} />)}
+            </datalist>
+          )}
           {form.addons.map((a, i) => (
             <div className="addon-row" key={i}>
               <label>ชื่ออุปกรณ์
                 <input
                   name={`addons.${i}.name`}
                   value={a.name}
+                  list={equipmentNames.length > 0 ? 'equipment-names' : undefined}
                   placeholder="เช่น เตียงลม, รถเข็น"
                   aria-invalid={fieldErrors[`addons.${i}.name`] ? true : undefined}
-                  onChange={(e) => setAddon(i, 'name', e.target.value)}
+                  onChange={(e) => {
+                    setAddon(i, 'name', e.target.value);
+                    // ชื่อตรงกับอุปกรณ์ที่ตั้งราคาไว้ (หน้าหมวดหมู่) = เติมราคาตามรูปแบบ เช่า/ซื้อขาด ให้เอง · แก้เองต่อได้
+                    const price = equipmentPrice(cats, e.target.value, a.kind);
+                    if (price != null) setAddon(i, 'unit_price', String(price));
+                  }}
                 />
                 {fieldError(`addons.${i}.name`)}
               </label>
@@ -2015,7 +2176,11 @@ export default function CaseFormPage() {
                 <SearchSelect
                   name={`addons.${i}.kind`}
                   value={a.kind}
-                  onChange={(e) => setAddon(i, 'kind', e.target.value)}
+                  onChange={(e) => {
+                    setAddon(i, 'kind', e.target.value);
+                    const price = equipmentPrice(cats, a.name, e.target.value);
+                    if (price != null) setAddon(i, 'unit_price', String(price));
+                  }}
                 >
                   <option value="rent">เช่า</option>
                   <option value="sale">ซื้อขาด</option>
@@ -2511,6 +2676,7 @@ export default function CaseFormPage() {
           {renewFrom && patterns.length > 0 && (
             <fieldset className="full-row renew-shifts">
               <legend>ลงกะตามแบบรอบก่อน</legend>
+              <p className="form-hint muted">ไม่บังคับ — ติ๊กเฉพาะแบบที่ต้องการให้ระบบลงให้หลังเปิดเคส · ไม่ติ๊กเลย = ไม่ลงนัดให้ (ลงเองที่หน้าเคสได้)</p>
               {!canSchedule && (
                 <p className="form-hint muted">
                   <LineIcon name="alert" className="text-ico" />
@@ -2527,7 +2693,7 @@ export default function CaseFormPage() {
               )}
               {patterns.map((p) => {
                 const usable = patternUsable(p);
-                const on = canSchedule && usable && !patternsOff.includes(p.key);
+                const on = canSchedule && usable && patternsPicked.includes(p.key);
                 return (
                   <label key={p.key} className={`checkbox-row${usable ? '' : ' muted'}`}>
                     <input
@@ -2535,8 +2701,8 @@ export default function CaseFormPage() {
                       checked={on}
                       disabled={!canSchedule || !usable}
                       onChange={(e) =>
-                        setPatternsOff((prev) =>
-                          e.target.checked ? prev.filter((k) => k !== p.key) : [...prev, p.key])}
+                        setPatternsPicked((prev) =>
+                          e.target.checked ? [...prev, p.key] : prev.filter((k) => k !== p.key))}
                     />
                     <span>
                       <strong>{patternDays(p)}</strong> · {patternTime(p)} · {p.assigned_name ?? 'ผู้รับผิดชอบหลัก'}

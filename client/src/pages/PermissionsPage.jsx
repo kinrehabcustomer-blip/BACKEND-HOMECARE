@@ -28,7 +28,7 @@ const ICONS = {
   see_pay: <><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z" /><circle cx="12" cy="12" r="3" /></>,
   invoice_adjust: <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /><path d="M9 15h6" /></>,
   slip_delete: <><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" /><path d="M10 11v6M14 11v6" /></>,
-  // ไอคอนเดียวกับเมนู "หมวดหมู่" (NAV_ICONS.tag ใน App.jsx)
+  // ไอคอนป้าย — หัตถการ / อุปกรณ์เสริม (หมวดและราคา)
   categories: <><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z" /><circle cx="7.5" cy="7.5" r="1.5" /></>,
   // ไอคอนเดียวกับเมนู "บันทึกการใช้งาน" (NAV_ICONS.log ใน App.jsx)
   audit_logs: <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /><circle cx="11" cy="15" r="3" /><path d="M13.2 17.2 15.5 19.5" /></>,
@@ -49,8 +49,9 @@ const posLabel = (p) => POSITION_LABELS[p] ?? p;
 /**
  * จัดการสิทธิ์ — หน้าละตำแหน่ง (Super Admin · ผู้จัดการ · server/src/permissions/routes.js)
  *
- * การ์ดด้านซ้ายเลือกตำแหน่ง (จำไว้ใน ?position= ให้รีเฟรช/ส่งลิงก์แล้วกลับมาที่เดิม) · มือถือเรียงเป็นแถวเลื่อนข้าง
- * ด้านขวาเป็นสิทธิ์ของตำแหน่งนั้นเป็นการ์ดย่อยมีสวิตช์ แบ่งสองกลุ่ม (เมนู · งานอ่อนไหว) แล้วกดบันทึกครั้งเดียวท้ายหน้า
+ * ชิปเลือกตำแหน่งด้านบน (จำไว้ใน ?position= ให้รีเฟรช/ส่งลิงก์แล้วกลับมาที่เดิม) · การ์ดสรุปของตำแหน่งนั้น
+ * แล้วการ์ดสิทธิ์สองกลุ่ม (เมนู · งานอ่อนไหว) แถวละสิทธิ์มีสวิตช์ · กดบันทึกครั้งเดียวที่แถบล่าง (ติดขอบล่างจอ)
+ * อยู่ในหน้าตั้งค่าระบบ แท็บ "จัดการสิทธิ์" (SystemSettingsPage · ดีไซน์ใหม่ 19 พ.ย. 2569)
  * Super Admin มีครบเสมอ (สวิตช์ล็อก) — กันไม่ให้ระบบเหลือคนที่เข้าหน้านี้ไม่ได้
  * ตั้งแล้วมีผลกับทุกคนในตำแหน่งนั้นภายใน ~15 วินาที (ผู้ใช้ต้องรีเฟรชหน้าให้เมนูเปลี่ยนตาม)
  */
@@ -115,116 +116,99 @@ export default function PermissionsPage() {
     }
   }
 
+  const pct = Math.round((current.size / total) * 100);
   return (
     <>
       <h1 className="sr-only">จัดการสิทธิ์</h1>
-      <div className="list-card perm-card">
-        <div className="perm-layout">
-          {/* การ์ดเลือกตำแหน่งด้านข้าง — สลับแล้วการเปลี่ยนที่ยังไม่บันทึกของตำแหน่งเดิมถูกทิ้ง */}
-          <nav className="perm-cards" aria-label="ตำแหน่ง">
-            <p className="perm-cards-title">ตำแหน่ง</p>
-            {positions.map((p) => {
-              const on = p.position === selectedKey;
-              const pct = Math.round((p.permissions.length / total) * 100);
-              return (
-                <button
-                  key={p.position}
-                  type="button"
-                  aria-current={on ? 'true' : undefined}
-                  className={`perm-card-btn${on ? ' is-on' : ''}`}
-                  onClick={() => pick(p.position)}
-                >
-                  <span className="perm-avatar"><Icon className="perm-avatar-ico">{ROLE_ICON}</Icon></span>
-                  <span className="perm-card-text">
-                    <span className="perm-card-name">
-                      {posLabel(p.position)}
-                      {p.customized && <span className="perm-tab-dot" title="ปรับจากค่าตั้งต้นแล้ว" aria-label="ปรับแล้ว" />}
-                    </span>
-                    <span className="perm-card-meta">
-                      {p.editable ? `${p.permissions.length} จาก ${total} สิทธิ์` : 'ครบทุกสิทธิ์ · ล็อก'}
-                    </span>
-                    <span className="perm-card-bar" aria-hidden="true"><span style={{ width: `${pct}%` }} /></span>
-                  </span>
-                </button>
-              );
-            })}
-          </nav>
+      {/* ดีไซน์ใหม่ 19 พ.ย. 2569 (อยู่ในหน้าตั้งค่าระบบ) — ชิปเลือกตำแหน่ง (ตัดบรรทัด ไม่ต้องเลื่อนข้าง) · การ์ดสรุป ·
+          การ์ดสิทธิ์รายกลุ่มกว้างเต็มแผง แถวละสิทธิ์มีสวิตช์ · แถบบันทึกติดล่างเมื่อมีการเปลี่ยน */}
+      <div className="pm">
+        <nav className="pm-positions" aria-label="ตำแหน่ง">
+          {positions.map((p) => {
+            const on = p.position === selectedKey;
+            return (
+              <button key={p.position} type="button" aria-current={on ? 'true' : undefined}
+                className={`pm-chip${on ? ' is-on' : ''}`} onClick={() => pick(p.position)}>
+                <Icon className="pm-chip-ico">{ROLE_ICON}</Icon>
+                <span className="pm-chip-name">{posLabel(p.position)}</span>
+                <span className="pm-chip-count">{p.editable ? `${p.permissions.length}/${total}` : 'ล็อก'}</span>
+                {p.customized && <span className="perm-tab-dot" title="ปรับจากค่าตั้งต้นแล้ว" aria-label="ปรับแล้ว" />}
+              </button>
+            );
+          })}
+        </nav>
 
-          <div className="perm-body" aria-label={`สิทธิ์ของ ${posLabel(pos.position)}`}>
-            <header className="perm-hero">
-              <span className="perm-avatar is-lg"><Icon className="perm-avatar-ico">{ROLE_ICON}</Icon></span>
-              <div className="perm-hero-text">
-                <h2>{posLabel(pos.position)}</h2>
-                <p className="muted">
-                  {pos.editable
-                    ? (pos.customized ? 'ปรับจากค่าตั้งต้นแล้ว' : 'ใช้ค่าตั้งต้น')
-                    : 'มีสิทธิ์ครบทุกอย่างเสมอ แก้ไม่ได้ — กันไม่ให้ระบบเหลือคนที่เข้าหน้าจัดการสิทธิ์ไม่ได้'}
-                  {pos.updated_at && ` · แก้ล่าสุด ${stampText(pos.updated_at)}${pos.updated_by_name ? ` โดย ${pos.updated_by_name}` : ''}`}
-                </p>
-              </div>
-              <div className="perm-count" aria-label={`เปิด ${current.size} จาก ${total} สิทธิ์`}>
-                <strong>{current.size}</strong><span>/{total}</span>
-                <small>สิทธิ์ที่เปิด</small>
-              </div>
-            </header>
-
-            {error && <p className="error">{error}</p>}
-
-            {GROUPS.map((g) => {
-              const items = data.catalog.filter((c) => c.group === g.key);
-              const keys = items.map((i) => i.key);
-              const onInGroup = keys.filter((k) => current.has(k)).length;
-              return (
-                <section key={g.key} className="perm-section">
-                  <div className="perm-section-head">
-                    <div>
-                      <h3>{g.label} <span className="perm-section-count">{onInGroup}/{keys.length}</span></h3>
-                      <p className="muted perm-section-hint">{g.hint}</p>
-                    </div>
-                    {pos.editable && (
-                      <div className="perm-bulk">
-                        <button type="button" className="btn link-btn" disabled={busy || onInGroup === keys.length}
-                          onClick={() => setKeys(keys, true)}>เปิดทั้งหมด</button>
-                        <button type="button" className="btn link-btn" disabled={busy || onInGroup === 0}
-                          onClick={() => setKeys(keys, false)}>ปิดทั้งหมด</button>
-                      </div>
-                    )}
-                  </div>
-                  <ul className="perm-grid">
-                    {items.map((item) => {
-                      const id = `perm-${pos.position}-${item.key}`;
-                      const on = current.has(item.key);
-                      return (
-                        <li key={item.key}>
-                          <label htmlFor={id} className={`perm-tile${on ? ' is-on' : ''}${pos.editable && !lockedKey(item.key) ? '' : ' is-locked'}`}>
-                            <span className="perm-tile-ico"><Icon>{ICONS[item.key]}</Icon></span>
-                            <span className="perm-text">
-                              <span className="perm-label">{item.label}</span>
-                              {item.hint && <span className="cell-sub">{item.hint}</span>}
-                            </span>
-                            {/* สวิตช์ = checkbox จริง (คีย์บอร์ด/โปรแกรมอ่านหน้าจอใช้ได้) วาดเป็นสวิตช์ด้วย CSS */}
-                            <input
-                              id={id}
-                              type="checkbox"
-                              role="switch"
-                              className="perm-check"
-                              checked={on}
-                              disabled={!pos.editable || busy || lockedKey(item.key)}
-                              onChange={() => setKeys([item.key], !on)}
-                            />
-                          </label>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </section>
-              );
-            })}
+        <section className="set-card pm-summary" aria-label={`สิทธิ์ของ ${posLabel(pos.position)}`}>
+          <span className="pm-avatar"><Icon className="perm-avatar-ico">{ROLE_ICON}</Icon></span>
+          <div className="pm-summary-text">
+            <h3>
+              {posLabel(pos.position)}
+              <span className={`pm-badge${pos.editable ? (pos.customized ? ' is-custom' : '') : ' is-locked'}`}>
+                {pos.editable ? (pos.customized ? 'ปรับจากค่าตั้งต้น' : 'ค่าตั้งต้น') : 'ล็อก · ครบทุกสิทธิ์'}
+              </span>
+            </h3>
+            <p className="muted">
+              {pos.editable
+                ? 'เปิด/ปิดสิทธิ์ด้านล่าง แล้วกดบันทึก — มีผลกับทุกคนในตำแหน่งนี้เมื่อรีเฟรชหน้า'
+                : 'Super Admin มีสิทธิ์ครบเสมอ แก้ไม่ได้ — กันไม่ให้ระบบเหลือคนที่เข้าหน้าจัดการสิทธิ์ไม่ได้'}
+              {pos.updated_at && ` · แก้ล่าสุด ${stampText(pos.updated_at)}${pos.updated_by_name ? ` โดย ${pos.updated_by_name}` : ''}`}
+            </p>
           </div>
-        </div>
+          <div className="pm-count" aria-label={`เปิด ${current.size} จาก ${total} สิทธิ์`}>
+            <span><strong>{current.size}</strong> / {total} สิทธิ์</span>
+            <span className="pm-bar" aria-hidden="true"><span style={{ width: `${pct}%` }} /></span>
+          </div>
+        </section>
+
+        {error && <p className="error">{error}</p>}
+
+        {GROUPS.map((g) => {
+          const items = data.catalog.filter((c) => c.group === g.key);
+          const keys = items.map((i) => i.key);
+          const onInGroup = keys.filter((k) => current.has(k)).length;
+          return (
+            <section key={g.key} className="set-card" aria-label={g.label}>
+              <header className="set-card-head">
+                <div className="set-card-title">
+                  <h3>{g.label} <span className="pm-group-count">{onInGroup}/{keys.length}</span></h3>
+                  <p className="muted">{g.hint}</p>
+                </div>
+                {pos.editable && (
+                  <div className="set-card-tools pm-bulk">
+                    <button type="button" className="btn tiny" disabled={busy || onInGroup === keys.length}
+                      onClick={() => setKeys(keys, true)}>เปิดทั้งหมด</button>
+                    <button type="button" className="btn tiny" disabled={busy || onInGroup === 0}
+                      onClick={() => setKeys(keys, false)}>ปิดทั้งหมด</button>
+                  </div>
+                )}
+              </header>
+              <ul className="pm-grid">
+                {items.map((item) => {
+                  const id = `perm-${pos.position}-${item.key}`;
+                  const on = current.has(item.key);
+                  const locked = !pos.editable || lockedKey(item.key);
+                  return (
+                    <li key={item.key}>
+                      <label htmlFor={id} className={`pm-row${on ? ' is-on' : ''}${locked ? ' is-locked' : ''}`}>
+                        <span className="pm-ico"><Icon>{ICONS[item.key]}</Icon></span>
+                        <span className="pm-text">
+                          <span className="pm-label">{item.label}</span>
+                          {item.hint && <span className="pm-hint">{item.hint}</span>}
+                        </span>
+                        {/* สวิตช์ = checkbox จริง (คีย์บอร์ด/โปรแกรมอ่านหน้าจอใช้ได้) วาดเป็นสวิตช์ด้วย CSS */}
+                        <input id={id} type="checkbox" role="switch" className="perm-check" checked={on}
+                          disabled={locked || busy} onChange={() => setKeys([item.key], !on)} />
+                      </label>
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          );
+        })}
 
         {pos.editable && (
-          <div className={`perm-foot${dirty ? ' is-dirty' : ''}`}>
+          <div className={`pm-foot${dirty ? ' is-dirty' : ''}`}>
             {pos.customized && (
               <ConfirmButton
                 className="btn"
@@ -238,8 +222,8 @@ export default function PermissionsPage() {
                 คืนค่าตั้งต้น
               </ConfirmButton>
             )}
-            {dirty && <span className="perm-foot-note">มีการเปลี่ยนที่ยังไม่บันทึก</span>}
-            <div className="perm-foot-right">
+            <span className="pm-foot-note">{dirty ? 'มีการเปลี่ยนที่ยังไม่บันทึก' : 'ยังไม่มีการเปลี่ยน'}</span>
+            <div className="pm-foot-right">
               {dirty && (
                 <button type="button" className="btn" disabled={busy} onClick={() => setDraft(null)}>
                   ยกเลิกการเปลี่ยน

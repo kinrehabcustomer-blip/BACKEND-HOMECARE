@@ -11,7 +11,7 @@ import { ensurePatientCodeFree } from '../patients/repo.js';
 import { decodeImage, FRONT_POSITIONS } from '../employees/schema.js';
 import { ApiError } from '../lib/errors.js';
 import { renameCaseRefs, deleteCaseRefs } from '../lib/caseRefs.js';
-import { ensureAddonLink, promoteDueAddons, bundleCoveredSql, currentAddonRound } from './addonLink.js';
+import { ensureAddonLink, promoteDueAddons, bundleCoveredSql, currentAddonRound, prepaidCoveredSql } from './addonLink.js';
 import { physioQuota } from './physioQuota.js';
 import { ensureFormatDays } from '../packages/formatDays.js';
 import { ensureVisitReminderColumns, ensureVisitChangeTable, recordVisitChange } from '../notify/visitReminders.js';
@@ -32,6 +32,12 @@ const COLUMNS = [
   'pkg_english',    // [homecare/กายภาพ] พนักงานสื่อสารภาษาอังกฤษ (fee รวมค่าภาษาแล้ว)
   'physio_package_id', // [physio] แพ็คเกจกายภาพบำบัดที่ซื้อ
   'pkg_quantity',      // [ทั้งสองสาย] ซื้อกี่แพ็ก (รายเดือน × 2 = สองเดือน) — fee/staff_pay/โควตาวัน-ครั้ง คูณด้วยตัวนี้
+
+  // เคสที่เข้าระบบกลางทาง — ยอดยกมาจากก่อนมีในระบบ (ดู addonLink.js · normalizeCarry/assertCarry ด้านล่าง)
+  'joined_midway',
+  'carried_used',
+  'carried_paid',
+  'carried_staff_paid',
 
   // รายละเอียดผู้รับบริการ
   'client_name',
@@ -369,7 +375,8 @@ const foldAddonsSql = (where) => {
 const CLOSED_NO_INVOICE_SQL = `
   c.status = 'closed'
   AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.case_id = c.case_id AND i.status <> 'cancelled')
-  AND NOT ${bundleCoveredSql('c')}`;
+  AND NOT ${bundleCoveredSql('c')}
+  AND NOT ${prepaidCoveredSql('c')}`; /* เข้าระบบกลางทางที่ลูกค้าจ่ายครบนอกระบบแล้ว ไม่ต้องมีใบ */
 
 export async function list({ q, status, case_type, service_kind, assigned_to, no_staff_pay, overdue_close, closed_no_invoice, ending_soon, year, month, page, per_page, sort, order }) {
   await ensureAddonLink();
@@ -585,14 +592,15 @@ function clearUnusedKind(input) {
  * เช็คเฉพาะตอนที่ input ส่ง physio_package_id มาเอง — เคสเก่าที่แพ็กถูกปิดขายทีหลัง
  * ต้องแก้ข้อมูลอื่นได้ตามปกติ ไม่ใช่ล็อกทั้งเคส
  */
-async function assertPhysioPackageUsable(input, db = sql) {
+async function assertPhysioPackageUsable(input, db = sql, { allowInactive = false } = {}) {
   if (!('physio_package_id' in input) || !input.physio_package_id) return;
   const p = await db.one(
     'SELECT name, active FROM physio_packages WHERE physio_package_id = :id',
     { id: input.physio_package_id },
   );
   if (!p) throw new ApiError(400, `ไม่พบแพ็คเกจกายภาพรหัส ${input.physio_package_id}`);
-  if (!p.active) {
+  /* เคสที่เข้าระบบกลางทาง: ลูกค้าซื้อแพ็กไว้ก่อนที่แพ็กจะปิดขาย — ต้องเลือกแพ็กเดิมตามจริงได้ (19 พ.ย. 2569) */
+  if (!p.active && !allowInactive) {
     throw new ApiError(409, `แพ็ก "${p.name}" ปิดขายแล้ว เลือกใช้กับเคสใหม่ไม่ได้ — เลือกแพ็กที่ยังเปิดขายอยู่`);
   }
 }
@@ -628,6 +636,64 @@ async function payPerPack(input, db) {
   }
 
   return null;
+}
+
+/* ---------- เคสที่เข้าระบบกลางทาง (ยอดยกมา · 19 พ.ย. 2569) ---------- */
+const CARRY_FIELDS = ['carried_used', 'carried_paid', 'carried_staff_paid'];
+const carryNumber = (f, v) => {
+  const n = Number(v ?? 0);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return f === 'carried_used' ? Math.trunc(n) : Math.round(n * 100) / 100;
+};
+
+/** ยอดยกมาที่จะเขียนลงเคส — ไม่ติ๊ก "เริ่มก่อนเข้าระบบ" = ล้างเป็น 0 ทั้งหมด (ฟอร์มค้างตัวเลขไว้ก็ไม่หลุดเข้าไป) */
+function normalizeCarry(target, source, joined) {
+  target.joined_midway = Boolean(joined);
+  for (const f of CARRY_FIELDS) target[f] = joined ? carryNumber(f, source[f]) : 0;
+}
+
+/** เพดานของแพ็กที่เคสเลือก (ครั้ง/วัน × จำนวนแพ็ก) — null = ไม่มีเพดาน (รายวัน · ยังไม่เลือกแพ็ก) */
+async function packCap(db, s) {
+  const qty = packQty(s);
+  if (s.physio_package_id) {
+    const p = await db.one('SELECT sessions FROM physio_packages WHERE physio_package_id = :id', { id: s.physio_package_id });
+    return p?.sessions ? { cap: Number(p.sessions) * qty, unit: 'ครั้ง' } : null;
+  }
+  if (s.pkg_format_id) {
+    const f = await db.one('SELECT days FROM pkg_service_formats WHERE format_id = :id', { id: s.pkg_format_id });
+    return f?.days ? { cap: Number(f.days) * qty, unit: 'วัน' } : null;
+  }
+  return null;
+}
+
+/**
+ * ยอดยกมาต้องไม่เกินของที่ซื้อ — ใช้ไปแล้วไม่เกินแพ็ก · ลูกค้าจ่ายแล้วไม่เกินราคา · ค่าจ้างที่จ่ายแล้วไม่เกินค่าจ้างของเคส
+ * s = แถวเคสหลังรวมค่าใหม่แล้ว (ต้องมีราคาที่จดไว้/fee/staff_pay ชุดสุดท้าย) · ต้องเรียก ensureFormatDays ก่อนเปิดทรานแซกชัน
+ */
+async function assertCarry(db, s) {
+  if (!s.joined_midway) return;
+  const bad = (field, message) => { throw new ApiError(400, message, [{ field, message }]); };
+  const cap = await packCap(db, s);
+  if (cap && Number(s.carried_used) > cap.cap) {
+    bad('carried_used', `ใช้ไปแล้วเกินแพ็กเกจ — แพ็กนี้มี ${cap.cap} ${cap.unit}`);
+  }
+  const price = s.service_customer_price_snapshot ?? s.fee;
+  if (price != null && Number(s.carried_paid) > Number(price) + 0.005) {
+    bad('carried_paid', `ยอดที่ลูกค้าชำระแล้วเกินค่าบริการของเคส (${Number(price).toLocaleString('th-TH')} บาท)`);
+  }
+  if (s.staff_pay != null && Number(s.carried_staff_paid) > Number(s.staff_pay) + 0.005) {
+    bad('carried_staff_paid', `ค่าจ้างที่จ่ายไปแล้วเกินค่าจ้างของเคส (${Number(s.staff_pay).toLocaleString('th-TH')} บาท)`);
+  }
+}
+
+/** ข้อความประวัติตอนเปิดเคสกลางทาง — ไม่ใส่ตัวเลขค่าจ้าง (ประวัติเคสเปิดให้ HR อ่าน) */
+async function carryLogText(db, s) {
+  const cap = await packCap(db, s);
+  return [
+    `เข้าระบบกลางทาง — ใช้ไปแล้ว ${s.carried_used}${cap ? ` / ${cap.cap} ${cap.unit}` : ''}`,
+    `ลูกค้าชำระแล้วก่อนเข้าระบบ ${Number(s.carried_paid).toLocaleString('th-TH')} บาท`,
+    Number(s.carried_staff_paid) > 0 && 'จดค่าจ้างที่จ่ายพนักงานนอกระบบไว้แล้ว',
+  ].filter(Boolean).join(' · ');
 }
 
 const PAY_SERVICE_FIELDS = [
@@ -686,7 +752,7 @@ export async function staffPayUpdateForTransaction(tx, caseId, input) {
   const current = await tx.one('SELECT * FROM cases WHERE case_id = :id FOR UPDATE', { id: caseId });
   if (!current) throw new ApiError(404, `ไม่พบเคสรหัส ${caseCode(caseId)}`);
 
-  await assertPhysioPackageUsable(input, tx);
+  await assertPhysioPackageUsable(input, tx, { allowInactive: Boolean(input.joined_midway ?? current.joined_midway) });
 
   const mode = staffPayUpdateMode(current, input);
   if (mode === 'preserve') return { current, mode, staff_pay: current.staff_pay };
@@ -695,10 +761,15 @@ export async function staffPayUpdateForTransaction(tx, caseId, input) {
     mode === 'service'
       ? await payFromService({ ...current, ...input }, tx)
       : input.staff_pay;
-  const { released } = await tx.one(
+  const { released: releasedInSystem } = await tx.one(
     'SELECT COALESCE(SUM(amount), 0) AS released FROM case_payouts WHERE case_id = :id',
     { id: caseId },
   );
+  /* ค่าจ้างที่จ่ายพนักงานไปแล้วนอกระบบ (เคสกลางทาง) นับเป็นยอดที่จ่ายไปแล้วด้วย — ลดค่าจ้างต่ำกว่านั้นไม่ได้ */
+  const outside = 'carried_staff_paid' in input && (input.joined_midway ?? current.joined_midway)
+    ? carryNumber('carried_staff_paid', input.carried_staff_paid)
+    : Number(current.carried_staff_paid ?? 0);
+  const released = Number(releasedInSystem) + outside;
   const assessment = assessStaffPayUpdate(targetStaffPay, released);
   if (assessment.reason === 'below_released') {
     throw new ApiError(
@@ -776,6 +847,7 @@ const isPhysioCase = (s) => isPhysioService(s) || (!s.service_kind && s.case_typ
 export async function create(rawInput, actor) {
   await ensureCasePriceSnapshots();
   await ensureAddonLink();
+  await ensureFormatDays(); // ตรวจยอดยกมากับจำนวนวันของรูปแบบ Homecare (ALTER นอกทรานแซกชัน)
   const input = clearUnusedKind(rawInput);
   return transaction(async (tx) => {
     if (input.addon_of && input.renewed_from) {
@@ -812,17 +884,19 @@ export async function create(rawInput, actor) {
     if (!values.client_name) values.client_name = PATIENT_PENDING;
     values.pkg_english = input.pkg_english ?? false; // คอลัมน์ NOT NULL — ไม่ส่งมา = ไม่ได้ขอภาษาอังกฤษ
     values.pkg_quantity = packQty(input); // NOT NULL — ไม่ส่งมา = ซื้อแพ็กเดียว
+    normalizeCarry(values, input, input.joined_midway); // NOT NULL ทั้งชุด · ไม่ติ๊กกลางทาง = 0
     // node-postgres แปลง array เป็น array ของ Postgres ไม่ใช่ JSON — ต้อง stringify เองก่อนลงคอลัมน์ JSONB
     // หัตถการได้ VN ของตัวเองตั้งแต่บันทึก (เคสใหม่ = เลขใหม่ทุกบรรทัด รวมที่คัดลอกมาจากรอบก่อน)
     values.addons = JSON.stringify(await withProcedureNumbers(tx, input.addons));
 
-    await assertPhysioPackageUsable(input, tx);
+    await assertPhysioPackageUsable(input, tx, { allowInactive: values.joined_midway });
 
     // ไม่ได้ส่งค่าจ้างมา = ใช้ของแพ็คเกจ · ส่งตัวเลขมาเอง (รวม 0) = เคารพตามนั้น
     if (values.staff_pay == null) values.staff_pay = await payFromService(input, tx);
     const priceSnapshot = await servicePriceSnapshot(tx, values);
     values.service_list_price_snapshot = priceSnapshot.list;
     values.service_customer_price_snapshot = priceSnapshot.customer;
+    await assertCarry(tx, values);
 
     // ไม่มีช่องกรอกชื่อเคสแล้ว — ปกติหน้าเว็บส่งชื่อที่ประกอบจากแพ็คเกจ+ผู้รับบริการมาให้
     // ถ้าเรียก API ตรงๆ โดยไม่ส่ง title มา ใช้ชื่อผู้รับบริการแทน เพื่อไม่ให้ชน NOT NULL
@@ -851,6 +925,7 @@ export async function create(rawInput, actor) {
     );
 
     await logEvent(tx, caseId, 'created', `เปิดเคสให้ ${values.client_name}`, actor);
+    if (values.joined_midway) await logEvent(tx, caseId, 'edited', await carryLogText(tx, values), actor);
     if (values.assigned_to) {
       await logEvent(tx, caseId, 'assigned', `มอบหมายให้ ${await staffLabel(tx, values.assigned_to)}`, actor);
     }
@@ -1183,6 +1258,8 @@ const FIELD_LABELS = {
   service_kind: 'สายบริการ', pkg_grade_id: 'เกรด', pkg_format_id: 'รูปแบบบริการ',
   pkg_staff_tier: 'ระดับพนักงาน', pkg_english: 'ค่าภาษาอังกฤษ', physio_package_id: 'แพ็คเกจกายภาพบำบัด',
   pkg_quantity: 'จำนวนแพ็ก',
+  joined_midway: 'เข้าระบบกลางทาง', carried_used: 'ใช้ไปแล้วก่อนเข้าระบบ',
+  carried_paid: 'ชำระแล้วก่อนเข้าระบบ', carried_staff_paid: 'ค่าจ้างที่จ่ายนอกระบบ',
   client_name: 'ชื่อผู้รับบริการ', patient_gender: 'เพศ', patient_age: 'อายุ',
   weight_kg: 'น้ำหนัก', height_cm: 'ส่วนสูง', medical_history: 'โรคประจำตัว',
   current_symptoms: 'อาการปัจจุบัน', medical_devices: 'อุปกรณ์การแพทย์', care_goal: 'เป้าหมายการดูแล',
@@ -1219,6 +1296,9 @@ const LOCKED_WHEN_DONE = [
   ['fee', 'ค่าบริการ', (v) => (v == null ? null : Number(v))],
   ['staff_pay', 'ค่าจ้างพนักงาน', (v) => (v == null ? null : Number(v))],
   ['pkg_quantity', 'จำนวนแพ็ก', (v) => packQty({ pkg_quantity: v })],
+  ['carried_used', 'ยอดใช้ไปก่อนเข้าระบบ', (v) => Number(v ?? 0)],
+  ['carried_paid', 'ยอดชำระก่อนเข้าระบบ', (v) => Number(v ?? 0)],
+  ['carried_staff_paid', 'ค่าจ้างที่จ่ายนอกระบบ', (v) => Number(v ?? 0)],
   ['start_date', 'วันเริ่ม', (v) => v || null],
   ['end_date', 'วันสิ้นสุด', (v) => v || null],
   ['customer_id', 'ผู้ว่าจ้าง', (v) => v || null],
@@ -1270,6 +1350,15 @@ async function valueChanges(tx, current, values) {
   }
   if (qtyChanged(current, values)) {
     out.push(`จำนวนแพ็ก: ${packQty(current)} → ${packQty(values)}`);
+  }
+  if ('joined_midway' in values && Boolean(current?.joined_midway) !== Boolean(values.joined_midway)) {
+    out.push(values.joined_midway ? 'ตั้งเป็นเคสที่เข้าระบบกลางทาง' : 'ยกเลิกการเป็นเคสกลางทาง (ล้างยอดยกมา)');
+  }
+  if ('carried_used' in values && Number(current?.carried_used ?? 0) !== Number(values.carried_used)) {
+    out.push(`ใช้ไปแล้วก่อนเข้าระบบ: ${Number(current?.carried_used ?? 0)} → ${values.carried_used}`);
+  }
+  if ('carried_paid' in values && Number(current?.carried_paid ?? 0) !== Number(values.carried_paid)) {
+    out.push(`ชำระแล้วก่อนเข้าระบบ: ${bahtText(current?.carried_paid ?? 0)} → ${bahtText(values.carried_paid)}`);
   }
   if ('fee' in values && String(current?.fee ?? '') !== String(values.fee ?? '')) {
     out.push(`ค่าบริการ: ${bahtText(current?.fee)} → ${bahtText(values.fee)}`);
@@ -1326,6 +1415,7 @@ async function patientForNamedCase(tx, current, values, patientCode) {
 export async function update(caseId, rawInput, actor) {
   await ensureCasePriceSnapshots();
   await ensureAddonLink();
+  await ensureFormatDays(); // ตรวจยอดยกมากับจำนวนวันของรูปแบบ Homecare (ALTER นอกทรานแซกชัน)
   // สลับสายบริการตอนแก้เคส ต้องล้างของสายเดิมด้วย ไม่งั้นค้างเป็นเคสที่มีทั้งเรท Homecare และแพ็คเกจกายภาพบำบัด
   const input = clearUnusedKind(rawInput);
   const fields = COLUMNS.filter((col) => col in input);
@@ -1341,6 +1431,14 @@ export async function update(caseId, rawInput, actor) {
   await transaction(async (tx) => {
     const payState = await staffPayUpdateForTransaction(tx, caseId, input);
     const { current, mode: payMode } = payState;
+
+    /* ยอดยกมา: ส่งช่องไหนมาก็เขียนชุดเต็มตามสถานะ "กลางทาง" สุดท้าย (เอาติ๊กออก = ล้างเป็น 0) — ต้องรู้ของเดิมจึงทำหลังล็อก */
+    if (['joined_midway', ...CARRY_FIELDS].some((f) => f in values)) {
+      const joined = 'joined_midway' in values ? Boolean(values.joined_midway) : Boolean(current.joined_midway);
+      const merged = { ...current, ...input };
+      normalizeCarry(values, merged, joined);
+      for (const f of ['joined_midway', ...CARRY_FIELDS]) if (!fields.includes(f)) fields.push(f);
+    }
 
     // หัตถการเดิมคงเลข VN เดิม หัตถการที่เพิ่งเพิ่มได้เลขใหม่ (ต้องรู้ของเดิมก่อน จึงทำหลังล็อกเคส)
     if ('addons' in values) values.addons = JSON.stringify(await withProcedureNumbers(tx, values.addons, current.addons));
@@ -1428,6 +1526,8 @@ export async function update(caseId, rawInput, actor) {
       values.service_customer_price_snapshot = priceSnapshot.customer;
       fields.push('service_list_price_snapshot', 'service_customer_price_snapshot');
     }
+    // เปลี่ยนแพ็ก/ราคา/ค่าจ้าง/ยอดยกมา แล้วยอดยกมาต้องยังไม่เกินของที่ซื้อ (เคสที่ไม่ได้เป็นกลางทาง assertCarry ข้ามเอง)
+    await assertCarry(tx, { ...current, ...values });
 
     // เคสที่เปิดโดยรู้แค่ผู้ว่าจ้าง เพิ่งได้ชื่อผู้รับบริการ → สร้างแฟ้มผู้รับบริการแล้วผูกกับเคส (ทรานแซกชันเดียวกัน)
     const newPatient = await patientForNamedCase(tx, current, values, input.patient_code);
@@ -2154,7 +2254,7 @@ export function visitConflicts(visitIds) {
  */
 async function quotaUsage(tx, caseId) {
   const row = await tx.one(
-    `SELECT (c.physio_package_id IS NOT NULL) AS physio,
+    `SELECT (c.physio_package_id IS NOT NULL) AS physio, c.carried_used,
             /* × จำนวนแพ็กที่ซื้อ (17 พ.ย. 2569) — รายเดือน × 2 = 60 วัน · แพ็ก 10 ครั้ง × 2 = 20 ครั้ง */
             CASE WHEN c.physio_package_id IS NOT NULL THEN pp.sessions ELSE f.days END * c.pkg_quantity AS cap,
             (SELECT COUNT(*) FROM case_visits v WHERE v.case_id = c.case_id AND v.status <> 'cancelled')::int AS visits,
@@ -2167,7 +2267,9 @@ async function quotaUsage(tx, caseId) {
   );
   const cap = Number(row?.cap) || 0;
   const physio = Boolean(row?.physio);
-  return { cap, physio, used: physio ? Number(row.visits) : Number(row.days), unit: physio ? 'ครั้ง' : 'วัน' };
+  /* เคสกลางทาง: ครั้ง/วันที่ใช้ไปก่อนเข้าระบบนับเป็นของที่ใช้แล้ว (10 ครั้ง ใช้ไป 5 = ลงนัดได้อีก 5) */
+  const carried = Number(row?.carried_used ?? 0);
+  return { cap, physio, used: (physio ? Number(row.visits) : Number(row.days)) + carried, unit: physio ? 'ครั้ง' : 'วัน' };
 }
 
 function assertWithinQuota(before, after) {
@@ -2320,6 +2422,41 @@ export async function removeVisitsOn(caseId, dates, actor = null, employeeId = n
   );
 
   return { visits: await listVisits(caseId), deleted, kept: Number(left.kept), past: Number(left.past) };
+}
+
+/**
+ * ยกเลิกนัดที่ลงไว้ทั้งหมดของเคส (ผู้ใช้ขอ 19 พ.ย. 2569 — ปุ่ม "ยกเลิกนัดทั้งหมด" ในตารางนัด)
+ * กติกาเดียวกับปุ่ม "ยกเลิก" ทีละนัด: นำนัดที่ยังไม่ถึงวัน (รวมวันนี้) และยังไม่เช็คอินออกจากตาราง
+ *   + แจ้งยกเลิกทาง LINE ถึงพนักงานและญาติรายนัด พร้อมเหตุผล (recordVisitChange · กระดิ่งในแอปพนักงาน)
+ * ไม่แตะ: นัดที่เช็คอินแล้ว (บันทึกการทำงานจริง/ฐานค่าจ้าง) และนัดที่ผ่านมาแล้ว (ประวัติขาดงาน)
+ * ลบแล้วโควตาแพ็กคืนมา ลงนัดใหม่ได้ · employeeId = เฉพาะนัดของคนนี้ (เคสหลายคน กำลังดูตารางของคนเดียว)
+ */
+export async function removeUpcomingVisits(caseId, actor = null, { reason = null, employeeId = null } = {}) {
+  const params = { id: caseId, today: isoDateTH(new Date()), emp: employeeId };
+  const whose = 'AND (CAST(:emp AS text) IS NULL OR assigned_to = :emp)';
+  await ensureVisitChangeTable();
+  const deleted = await transaction(async (tx) => {
+    await lockCaseForVisitDelete(tx, caseId);
+    const gone = await tx.all(
+      `DELETE FROM case_visits
+       WHERE case_id = :id AND check_in_at IS NULL AND visit_date >= :today ${whose}
+       RETURNING visit_id, visit_date, planned_start, planned_end, assigned_to, status`,
+      params,
+    );
+    gone.sort((a, b) => a.visit_date.localeCompare(b.visit_date));
+    for (const v of gone) await recordVisitChange(tx, caseId, v.visit_id, v, { status: 'cancelled' }, ['status'], { reason });
+    if (gone.length > 0) {
+      await logEvent(tx, caseId, 'visit_removed', `ยกเลิกนัดทั้งหมด · ${removedDetail(gone)}${reason ? ` · เหตุผล: ${reason}` : ''}`, actor);
+    }
+    return gone.length;
+  });
+  // ที่เหลือในตาราง (ไม่ได้ยกเลิกให้) — บอกผู้ใช้ว่าทำไมยังมีนัดค้าง
+  const left = await sql.one(
+    `SELECT COUNT(*) FILTER (WHERE check_in_at IS NOT NULL AND visit_date >= :today) AS kept
+     FROM case_visits WHERE case_id = :id ${whose}`,
+    params,
+  );
+  return { visits: await listVisits(caseId), deleted, kept: Number(left.kept), past: 0 };
 }
 
 /**
@@ -3819,7 +3956,7 @@ export async function payStatus(caseId) {
   const [row, split, payouts] = await Promise.all([
     sql.one(
       /* เลขงวดที่ใช้อยู่ทั้งหมด — ดู installmentSlots (เลขงวดเดิมไม่เลื่อน แต่งวดที่ถอนคืนแล้วได้ช่องคืน) */
-      `SELECT c.staff_pay, c.fee, c.status,
+      `SELECT c.staff_pay, c.fee, c.status, c.carried_staff_paid,
               ${WORKED_SHIFTS}  AS worked_shifts,
               ${PLANNED_SHIFTS} AS planned_shifts,
               COALESCE((SELECT SUM(p.amount) FROM case_payouts p WHERE p.case_id = c.case_id), 0) AS released,
@@ -3835,6 +3972,9 @@ export async function payStatus(caseId) {
   const total = row.staff_pay == null ? null : Number(row.staff_pay);
   const fee = row.fee == null ? null : Number(row.fee);
   const released = round(Number(row.released));
+  /* ค่าจ้างที่จ่ายพนักงานไปแล้วนอกระบบ (เคสกลางทาง) — ไม่ใช่รายการปล่อยในระบบ (รอบจ่ายเงินเดือนจะได้ไม่ดึงไปจ่ายซ้ำ)
+     แต่ต้องหักออกจากยอดที่ยังปล่อยได้ */
+  const paidOutside = round(Number(row.carried_staff_paid ?? 0));
   const slots = installmentSlots(row.installment_nos);
 
   /* ข้อตกลงส่วนแบ่ง: มีแถวไหม และรวมแล้วเท่ากับค่าจ้างของเคสหรือเปล่า
@@ -3863,8 +4003,9 @@ export async function payStatus(caseId) {
     agreement_matches: agreedTotal == null || total == null ? true : agreedTotal === round(total),
 
     released,
-    // เพดานที่พิมพ์เองได้สูงสุด — ยังเป็นยอดเหมาลบที่ปล่อยไปแล้วเหมือนเดิม ไม่ถูกตัดด้วยสัดส่วน
-    remaining: total == null ? null : round(total - released),
+    paid_outside: paidOutside,
+    // เพดานที่พิมพ์เองได้สูงสุด — ยอดเหมาลบที่ปล่อยไปแล้ว (และที่จ่ายนอกระบบ) ไม่ถูกตัดด้วยสัดส่วน
+    remaining: total == null ? null : round(total - released - paidOutside),
 
     /* ยอดที่ระบบเสนอให้ปล่อย (ค่าปริยายของช่อง "ยอดงวดนี้") กับที่มาของมัน —
        หน้าจอต้องอธิบายได้ว่าทำไมยอดไม่เท่ายอดเหมา ไม่งั้นผู้จัดการจะคิดว่าตัวเลขเพี้ยน */
@@ -3872,7 +4013,7 @@ export async function payStatus(caseId) {
     worked_shifts,
     planned_shifts,
     suggested_pay: suggested,
-    suggested_remaining: suggested == null ? null : round(suggested - released),
+    suggested_remaining: suggested == null ? null : Math.max(0, round(suggested - released - paidOutside)),
     prorated: suggested != null && total != null && suggested < total,
 
     shares: split,
@@ -4184,7 +4325,7 @@ export async function releasePay(caseId, { request_id, amount: requestedAmount, 
     /* จองแถวเคสก่อนอ่านทั้งยอดและเลขงวด — case_payouts เป็น "แถวที่ยังไม่มี" จึงล็อกตรงๆ ไม่ได้
        คำขอของเคสเดียวกันทุกคำขอต้องผ่าน lock นี้ แล้ว statement ถัดไปจึงเห็น payout ที่คำขอก่อนหน้า commit */
     const lockedCase = await tx.one(
-      'SELECT case_id, staff_pay FROM cases WHERE case_id = :id FOR UPDATE',
+      'SELECT case_id, staff_pay, carried_staff_paid FROM cases WHERE case_id = :id FOR UPDATE',
       { id: caseId },
     );
     if (!lockedCase) return { released: [], reason: 'not_found' };
@@ -4199,12 +4340,14 @@ export async function releasePay(caseId, { request_id, amount: requestedAmount, 
         : { released: [], reason: 'idempotency_conflict' };
     }
 
-    const { installment_nos: installmentNos, released: releasedAmount } = await tx.one(
+    const { installment_nos: installmentNos, released: releasedInSystem } = await tx.one(
       `SELECT ${INSTALLMENT_NOS_SQL(':id')} AS installment_nos,
               COALESCE((SELECT SUM(amount) FROM case_payouts WHERE case_id = :id), 0) AS released`,
       { id: caseId },
     );
     const slots = installmentSlots(installmentNos);
+    /* ค่าจ้างที่จ่ายนอกระบบ (เคสกลางทาง) นับรวมเป็นยอดที่จ่ายไปแล้วตอนคิดเพดาน — ปล่อยได้แค่ส่วนที่เหลือจริง */
+    const releasedAmount = Number(releasedInSystem) + Number(lockedCase.carried_staff_paid ?? 0);
 
     /* นับกะใหม่ในทรานแซกชันเดียวกัน ไม่ใช้เลขที่หน้าเว็บถือมา — ยกเลิกเคสหรือเพิ่ม/ลบกะ
        ระหว่างที่ผู้จัดการเปิดหน้าค้างไว้ แล้วตัวหารเปลี่ยนไปโดยไม่มีใครเห็น */

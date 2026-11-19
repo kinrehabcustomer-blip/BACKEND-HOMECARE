@@ -100,7 +100,9 @@ function dayClass(list) {
  * mode='shift' (Homecare)     เลือกคน + เวลาให้กับกะที่กำลังจะลง
  * mode='appointment' (กายภาพ) นับเป็น "ครั้ง" ในคอร์ส ไม่ต้องระบุคน/เวลา
  */
-export default function CaseVisits({ caseId, caseItem = null, target = null, readOnly = false, mode = 'shift' }) {
+/* onFootAction = popup แม่วาดปุ่ม "ยกเลิกนัดทั้งหมด" เองที่มุมซ้ายของ footer (ผู้ใช้ขอ 19 พ.ย. 2569 — ย้ายจากแถวเลือกเดือน)
+   ได้ค่า { label, title, busy, onClick } หรือ null (ไม่มีนัดให้ยกเลิก) · ไม่ส่งมา = วาดปุ่มไว้บนแถวเดือนตามเดิม */
+export default function CaseVisits({ caseId, caseItem = null, target = null, readOnly = false, mode = 'shift', onFootAction = null }) {
   const toast = useToast();
   const ask = useConfirm();
   // หมวดเหตุผลยกเลิกนัด (categories · cancel_visit) — มีให้เลือก = กล่องยกเลิกถามเหตุผลเป็นช่องเลือก
@@ -231,10 +233,13 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
     () => new Set(visits.filter((v) => v.status !== 'cancelled').map((v) => v.visit_date)),
     [visits],
   );
-  const capUsed = isAppt ? booked : activeDates.size;
+  /* เคสที่เข้าระบบกลางทาง: ครั้ง/วันที่ใช้ไปก่อนเข้าระบบ (server นับให้ใน physio-quota) — นับเป็นของที่ใช้แล้ว
+     ทั้งในตัวล็อก (ลงเพิ่มได้อีกเท่าไร) แผงสรุป และเลข "ครั้งที่" ของนัดในระบบ (นัดแรกในระบบ = ครั้งที่ 6 ถ้าใช้ไปแล้ว 5) */
+  const carried = Number(quota?.carried ?? 0);
+  const capUsed = (isAppt ? booked : activeDates.size) + carried;
   const doneDays = new Set(visits.filter((v) => v.state === 'done').map((v) => v.visit_date)).size;
   // แผงสรุป: ใช้ไปแล้ว / ทั้งหมด — มีเพดาน = เพดานของแพ็ก · ไม่มี = กะที่นัดไว้
-  const packUsed = isAppt ? doneCount : cap ? doneDays : doneCount;
+  const packUsed = (isAppt ? doneCount : cap ? doneDays : doneCount) + carried;
   const packTotal = cap || booked;
   const packUnit = cap ? capUnit : unit;
 
@@ -327,7 +332,7 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
    * ผลลัพธ์บอกผ่าน toast ไม่ใช่ข้อความในหน้า เพราะบนมือถือปุ่มบันทึกอยู่ท้ายสุด
    * ข้อความที่อยู่เหนือปฏิทินจึงอยู่นอกจอตอนกด — เท่ากับไม่ได้บอกอะไรเลย
    */
-  async function run(action, { clearPicked = false } = {}) {
+  async function run(action, { clearPicked = false, verb = 'ลบ' } = {}) {
     setBusy(true);
     setError(null);
     try {
@@ -338,7 +343,7 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
         setVisits(res.visits);
         if (res.deleted != null) {
           toast(
-            `ลบ ${res.deleted} ${unit}` +
+            `${verb} ${res.deleted} ${unit}` +
               (res.kept ? ` · เก็บ ${res.kept} ${unit}ที่เช็คอินไปแล้วไว้` : '') +
               (res.past ? ` · ${res.past} ${unit}ที่ผ่านมาแล้วลบไม่ได้ (ถ้าไม่ได้ไปให้กด "ยกเลิก" ที่${unit}นั้น)` : ''),
           );
@@ -396,6 +401,57 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
       setBusy(false);
     }
   }
+
+  /* ยกเลิกนัดที่ลงไว้ทั้งหมด (ผู้ใช้ขอ 19 พ.ย. 2569) — นัดที่ยังไม่ถึงวัน (รวมวันนี้) และยังไม่เช็คอิน
+     กติกาเดียวกับปุ่ม "ยกเลิก" ทีละนัด: นำออกจากตาราง (โควตาแพ็กคืน) + แจ้ง LINE พนักงานและญาติรายนัดพร้อมเหตุผล
+     นัดที่ผ่านมาแล้ว (ขาดงาน) และที่เช็คอินแล้วไม่แตะ · ดูตารางของคนเดียวอยู่ = เฉพาะนัดของคนนั้น */
+  const upcoming = shown.filter((v) => !v.check_in_at && v.visit_date >= today && v.status !== 'cancelled');
+  async function cancelAllUpcoming() {
+    const whose = multi && view ? ` ของ ${nameOf(view)}` : '';
+    const first = upcoming[0]?.visit_date;
+    const last = upcoming[upcoming.length - 1]?.visit_date;
+    const answer = await ask({
+      title: `ยกเลิก${unit}ที่ลงไว้ทั้งหมด${whose} ${upcoming.length} ${unit}?`,
+      detail:
+        `${unit}ตั้งแต่ ${formatDate(first)}${first !== last ? ` ถึง ${formatDate(last)}` : ''} จะถูกนำออกจากตาราง ` +
+        `และระบบจะแจ้งยกเลิกทาง LINE ถึงพนักงานและญาติที่ผูกเคสไว้ทีละ${unit} พร้อมเหตุผลนี้` +
+        (pastCount > 0 ? ` · ${unit}ที่ผ่านไปแล้วเก็บไว้เป็นประวัติตามเดิม` : ''),
+      ...(hasCancelReasons
+        ? {
+          select: {
+            required: true,
+            render: (value, set) => (
+              <ReasonPicker domain="cancel_visit" label="เหตุผลที่ยกเลิก" required value={value} onChange={set} autoFocus />
+            ),
+          },
+          input: { label: 'รายละเอียดเพิ่มเติม (ไม่บังคับ)', placeholder: 'เช่น ผู้รับบริการเข้าโรงพยาบาล' },
+        }
+        : { input: { label: 'หมายเหตุ / เหตุผลที่ยกเลิก', placeholder: 'เช่น ผู้รับบริการเข้าโรงพยาบาล', required: true } }),
+      confirmLabel: `ยกเลิกทั้งหมดและแจ้ง`,
+      cancelLabel: 'ไม่ยกเลิก',
+      danger: true,
+    });
+    if (answer == null) return;
+    const body = typeof answer === 'string'
+      ? { reason: answer }
+      : { reason: answer.text || null, reason_id: Number(answer.choice) };
+    if (multi && view) body.employee = view;
+    run(() => api.cancelUpcomingVisits(caseId, body), { clearPicked: true, verb: 'ยกเลิก' });
+  }
+  const canCancelAll = !readOnly && caseOpen && upcoming.length > 0;
+  const cancelAllLabel = `ยกเลิก${unit}ทั้งหมด (${upcoming.length})`;
+  const cancelAllTitle = `ยกเลิก${unit}ที่ยังไม่ถึงวันทั้งหมด — แจ้งพนักงานและญาติทาง LINE`;
+  // ฟังก์ชันล่าสุดเสมอ (ปิดค่าของรอบ render ล่าสุด) — popup แม่ถือแค่ตัวเรียกผ่าน ref ไม่ต้องรับฟังก์ชันใหม่ทุก render
+  const cancelAllRef = useRef(cancelAllUpcoming);
+  cancelAllRef.current = cancelAllUpcoming;
+  useEffect(() => {
+    if (!onFootAction) return undefined;
+    onFootAction(canCancelAll
+      ? { label: cancelAllLabel, title: cancelAllTitle, busy, onClick: () => cancelAllRef.current() }
+      : null);
+    return undefined;
+  }, [onFootAction, canCancelAll, cancelAllLabel, cancelAllTitle, busy]);
+  useEffect(() => () => onFootAction?.(null), [onFootAction]);
 
   /* แพ็กกายภาพ: ลงนัดได้ไม่เกินจำนวนครั้งของแพ็ก (ผู้ใช้ขอ 16 พ.ย. 2569 · server ล็อกซ้ำใน ensurePhysioRoom)
      วันที่มีนัดอยู่แล้วยังเลือกได้เสมอ — เลือกไว้เพื่อลบ ไม่ใช่เพื่อเพิ่ม */
@@ -523,6 +579,7 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
         unitWord={packUnit}
         expiresOn={isAppt ? quota?.expires_on ?? null : null}
         today={today}
+        carried={carried}
       />
 
       <div className="visit-head">
@@ -531,6 +588,18 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
           <span className="visit-month">{MONTH_LABELS[mm]} {toBuddhistYear(year)}</span>
           <button type="button" className="btn tiny" onClick={() => shiftMonth(1)} aria-label="เดือนถัดไป">→</button>
         </div>
+        {canCancelAll && !onFootAction && (
+          <button
+            type="button"
+            className="btn tiny danger-ghost visit-cancel-all"
+            disabled={busy}
+            title={cancelAllTitle}
+            onClick={cancelAllUpcoming}
+          >
+            <LineIcon name="x-circle" className="text-ico" />
+            {cancelAllLabel}
+          </button>
+        )}
       </div>
 
       {/* เตือนอย่างเดียว ไม่บล็อก (ดร. 26 ต.ค. 2569) — นัดที่เลยวันหมดอายุแพ็ก */}
@@ -925,7 +994,7 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
                         {v.assigned_name ?? 'ไม่ระบุคน'}
                       </span>
                     )}
-                    <span className="nw">{unit}ที่ {idx + 1}</span>
+                    <span className="nw">{unit}ที่ {idx + 1 + (isAppt ? carried : 0)}</span>
                     {/* กายภาพ: หนึ่งนัดหนึ่ง VN (ระบบออกตอนลงนัด) · Homecare ไม่มี VN รายกะ ใช้ VN ของเคส */}
                     {v.vn && <span className="mono nw">{v.vn}</span>}
                     {(v.check_in_at || v.check_out_at) && (

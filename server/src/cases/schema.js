@@ -74,6 +74,13 @@ const caseFields = z.object({
     .optional()
     .nullable(),
 
+  /* เคสที่เข้าระบบกลางทาง (19 พ.ย. 2569) — ยอดยกมาจากก่อนมีในระบบ · ไม่ติ๊ก joined_midway = repo ล้างเป็น 0 ทั้งหมด
+     เพดาน (ไม่เกินแพ็ก/ราคา/ค่าจ้าง) ตรวจที่ repo เพราะต้องรู้แพ็กที่เลือก */
+  joined_midway: z.boolean().optional(),
+  carried_used: z.number().int('จำนวนที่ใช้ไปแล้วต้องเป็นจำนวนเต็ม').min(0, 'ต้องไม่ติดลบ').max(9999).optional().nullable(),
+  carried_paid: z.number().min(0, 'ยอดที่ชำระแล้วต้องไม่ติดลบ').optional().nullable(),
+  carried_staff_paid: z.number().min(0, 'ค่าจ้างที่จ่ายแล้วต้องไม่ติดลบ').optional().nullable(),
+
   // ---------- รายละเอียดผู้รับบริการ ----------
   // ว่างได้เมื่อระบุผู้ว่าจ้าง (เช็คใน createCaseSchema ด้านล่าง) — repo เติม PATIENT_PENDING ให้
   client_name: z.string().trim().max(200).optional().nullable(),

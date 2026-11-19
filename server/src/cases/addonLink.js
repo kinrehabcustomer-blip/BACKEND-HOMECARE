@@ -12,7 +12,13 @@ export const MAX_PKG_QUANTITY = 24;
    ดึง addon_of มารวมแถวแพ็กเสริม) แต่ cases/repo.js import patients/repo.js อยู่แล้ว import กลับจะวนกัน */
 /* pkg_quantity (17 พ.ย. 2569) = จำนวนแพ็กที่ลูกค้าซื้อในเคสนี้ — รายเดือน × 2 = สองเดือน · แพ็กกายภาพ 10 ครั้ง × 2 = 20 ครั้ง
    ฝากไว้กับตัวเตรียมคอลัมน์ชุดนี้เพราะทุกคิวรีที่อ่านเคส (SELECT_CASE · รายการเคสของหน้าอื่น) เรียก ensureAddonLink ก่อนอยู่แล้ว */
-const ADDON_COLUMNS = ['addon_of', 'bill_with_parent', 'addon_next', 'pkg_quantity'];
+/* เคสที่เข้าระบบกลางทาง (19 พ.ย. 2569) — ใช้บริการ/จ่ายเงิน/จ่ายค่าจ้างไปบางส่วนก่อนมีในระบบ จดเป็น "ยอดยกมา" ที่เคส
+   joined_midway = ติ๊ก "เคสนี้เริ่มก่อนเข้าระบบ" · carried_used = ครั้ง (กายภาพ) / วัน (Homecare) ที่ใช้ไปแล้ว
+   carried_paid = ลูกค้าจ่ายแล้วนอกระบบ (บาท) · carried_staff_paid = ค่าจ้างที่จ่ายพนักงานไปแล้วนอกระบบ (บาท)
+   ไม่สร้างนัด/รายการรับเงิน/รายการปล่อยค่าจ้างย้อนหลัง — นัดย้อนหลังจะกลายเป็นขาดงาน · รับเงินย้อนหลังทำรายได้วันนี้พอง
+   · ปล่อยค่าจ้างย้อนหลังจะถูกรอบจ่ายเงินเดือนดึงไปจ่ายซ้ำ */
+const CARRY_COLUMNS = ['joined_midway', 'carried_used', 'carried_paid', 'carried_staff_paid'];
+const ADDON_COLUMNS = ['addon_of', 'bill_with_parent', 'addon_next', 'pkg_quantity', ...CARRY_COLUMNS];
 let addonLinkReady = null;
 export const ensureAddonLink = () =>
   (addonLinkReady ??= (async () => {
@@ -33,7 +39,28 @@ export const ensureAddonLink = () =>
     await sql.run('CREATE INDEX IF NOT EXISTS idx_cases_addon_next ON cases (addon_next) WHERE addon_next IS NOT NULL');
     await sql.run(`ALTER TABLE cases ADD COLUMN IF NOT EXISTS pkg_quantity INTEGER NOT NULL DEFAULT 1
       CHECK (pkg_quantity BETWEEN 1 AND ${MAX_PKG_QUANTITY})`);
+    await sql.run('ALTER TABLE cases ADD COLUMN IF NOT EXISTS joined_midway BOOLEAN NOT NULL DEFAULT FALSE');
+    await sql.run('ALTER TABLE cases ADD COLUMN IF NOT EXISTS carried_used INTEGER NOT NULL DEFAULT 0 CHECK (carried_used >= 0)');
+    await sql.run('ALTER TABLE cases ADD COLUMN IF NOT EXISTS carried_paid DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK (carried_paid >= 0)');
+    await sql.run('ALTER TABLE cases ADD COLUMN IF NOT EXISTS carried_staff_paid DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK (carried_staff_paid >= 0)');
   })().catch((err) => { addonLinkReady = null; throw err; }));
+
+/**
+ * เคสกลางทางที่ลูกค้าจ่ายครบนอกระบบแล้ว และไม่มีอุปกรณ์/หัตถการให้เก็บเพิ่ม = ไม่ต้องมีใบแจ้งหนี้
+ * ไม่ออกใบร่างให้ตอนเปิดเคส · ไม่ขึ้นใน "เคสที่ยังไม่มีใบ" และกระดิ่ง "ปิดแล้วไม่มีใบ" (c = alias ของ cases)
+ * ราคาที่เทียบ = ราคาที่จดไว้ก่อน fee (ลำดับเดียวกับใบแจ้งหนี้ · caseNetFeeSql)
+ */
+export const prepaidCoveredSql = (c) => `(${c}.joined_midway AND ${c}.carried_paid > 0
+  AND ${c}.carried_paid >= COALESCE(${c}.service_customer_price_snapshot, ${c}.fee, 0)
+  AND COALESCE(${c}.addons, '[]'::jsonb) = '[]'::jsonb)`;
+
+/** เวอร์ชัน JS ของ prepaidCoveredSql — ใช้กับแถวเคสที่อ่านมาแล้ว (createDraftForCase) */
+export const prepaidCovered = (c) => {
+  if (!c?.joined_midway) return false;
+  const paid = Number(c.carried_paid ?? 0);
+  const price = Number(c.service_customer_price_snapshot ?? c.fee ?? 0);
+  return paid > 0 && paid >= price && (c.addons ?? []).length === 0;
+};
 
 /**
  * คอลัมน์ที่รายการเคสในหน้าอื่น (ผู้ว่าจ้าง · ผู้รับบริการ · พนักงาน) ต้องมี เพื่อให้หน้าเว็บรวมแพ็กเสริมเข้าแถวเคส Homecare

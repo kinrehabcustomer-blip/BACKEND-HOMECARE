@@ -596,6 +596,14 @@ ALTER TABLE cases ADD COLUMN IF NOT EXISTS physio_package_id INTEGER
 ALTER TABLE cases ADD COLUMN IF NOT EXISTS pkg_quantity INTEGER NOT NULL DEFAULT 1
   CHECK (pkg_quantity BETWEEN 1 AND 24);
 
+-- เคสที่เข้าระบบกลางทาง (19 พ.ย. 2569) — ยอดยกมาจากก่อนมีในระบบ (ตัวเตรียมฝั่งโค้ด: cases/addonLink.js)
+-- carried_used = ครั้ง (กายภาพ) / วัน (Homecare) ที่ใช้ไปแล้ว · carried_paid = ลูกค้าจ่ายแล้วนอกระบบ
+-- carried_staff_paid = ค่าจ้างที่จ่ายพนักงานไปแล้วนอกระบบ — ไม่สร้างนัด/รับเงิน/ปล่อยค่าจ้างย้อนหลังแทน
+ALTER TABLE cases ADD COLUMN IF NOT EXISTS joined_midway BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE cases ADD COLUMN IF NOT EXISTS carried_used INTEGER NOT NULL DEFAULT 0 CHECK (carried_used >= 0);
+ALTER TABLE cases ADD COLUMN IF NOT EXISTS carried_paid DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK (carried_paid >= 0);
+ALTER TABLE cases ADD COLUMN IF NOT EXISTS carried_staff_paid DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK (carried_staff_paid >= 0);
+
 -- เคสที่เปิดไว้ก่อนมีสองสาย แต่เลือกเรท Homecare ไว้แล้ว = เป็นเคส Homecare อยู่แล้วโดยพฤตินัย
 -- ไม่เติมให้ ฟอร์มแก้ไขจะซ่อนชุด dropdown ของ Homecare แล้วเรทที่เลือกไว้จะหายไปจากสายตา
 -- แตะเฉพาะแถวที่ยังว่างและมีรูปแบบบริการอยู่จริง — เคสที่ไม่ได้ระบุบริการเลยยังคงเป็น NULL ตามเดิม

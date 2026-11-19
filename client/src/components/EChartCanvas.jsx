@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import * as echarts from 'echarts/core';
-import { LineChart, PieChart } from 'echarts/charts';
-import { GridComponent, TooltipComponent, TitleComponent } from 'echarts/components';
+import { BarChart, LineChart, PieChart } from 'echarts/charts';
+import { GridComponent, LegendComponent, TooltipComponent, TitleComponent } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
 
 /*
@@ -16,7 +16,8 @@ import { CanvasRenderer } from 'echarts/renderers';
 /* ตัดออก 11 พ.ย. 2569 (ไม่มีกราฟไหนใช้แล้ว): Bar — กราฟแท่งในการ์ดเป็น SVG ของเราเอง (Spark ใน DashboardCharts)
    · Legend — คำอธิบายสีเป็น <ul className="donut-legend"> · MarkArea — ไม่มี option ไหนอ้างถึง
    จะใช้อีกเมื่อไหร่ต้องเติมกลับที่บรรทัดนี้ ไม่งั้นกราฟจะว่างเฉยๆ (ดูคำเตือนด้านบน) */
-echarts.use([LineChart, PieChart, GridComponent, TooltipComponent, TitleComponent, CanvasRenderer]);
+/* เติมกลับ 19 พ.ย. 2569: Bar + Legend — กราฟแท่งซ้อนของหน้ารายได้ตาม BU (RevenueBuPage) */
+echarts.use([BarChart, LineChart, PieChart, GridComponent, LegendComponent, TooltipComponent, TitleComponent, CanvasRenderer]);
 
 /**
  * ครอบ ECharts หนึ่ง instance ให้ใช้แบบ React ได้
