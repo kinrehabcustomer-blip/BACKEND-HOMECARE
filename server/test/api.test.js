@@ -3028,12 +3028,14 @@ if (process.env.RUN_DB_TESTS !== '1') {
       assert.equal((await send('PATCH', path, { note: 'แก้หลังยกเลิก' })).status, 409);
     });
 
-    test('รายได้ตาม BU: แบ่งเงินแต่ละงวดตามสัดส่วนในใบ · เงินคืนติดลบตามสัดส่วน · รวมทุก BU = กราฟรายได้ · สิทธิ์ revenue', async () => {
+    test('รายได้ตาม BU (ชุดใหม่): แบ่ง BU · เป้า · รับรู้ตามบริการ · กำไร · ลูกหนี้แยกอายุ · ลูกค้า · ราคาจริง · สิทธิ์', async () => {
       const { today } = await sql.one(`SELECT to_char(now() AT TIME ZONE 'Asia/Bangkok','YYYY-MM-DD') AS today`);
-      const bu = async () => (await get(`/api/invoices/revenue-bu?from=${today}&to=${today}&group=day`, MANAGER)).body;
-      const before = await bu();
+      const r2 = (n) => Math.round(n * 100) / 100;
+      const q = `from=${today}&to=${today}`;
+      const overview = async () => (await get(`/api/invoices/revenue-bu/overview?${q}`, MANAGER)).body;
+      const before = await overview();
 
-      // ใบ 14,500 = ค่าบริการ 10,000 + เตียงเช่า 2×1,500 + ขาย 1,000 + หัตถการ 500
+      // ---- แบ่ง BU: ใบ 14,500 = ค่าบริการ 10,000 + เตียงเช่า 2×1,500 + ขาย 1,000 + หัตถการ 500 · รับครึ่งใบ
       const c = await post('/api/cases', {
         case_type: 'other', client_name: 'BU split', fee: 10000,
         addons: [
@@ -3046,55 +3048,129 @@ if (process.env.RUN_DB_TESTS !== '1') {
       await post(`/api/invoices/${draft.invoice_id}/billing-plan`, { mode: 'full' });
       assert.equal((await invoice(draft.invoice_id)).total, 14500);
       await pay(draft.invoice_id, { amount: 7250 });
-
-      let r = await bu();
-      const delta = (k) => Math.round((r.totals[k] - before.totals[k]) * 100) / 100;
+      let ov = await overview();
+      const delta = (k) => r2(ov.current[k] - before.current[k]);
       assert.equal(delta('homecare'), 5000);
       assert.equal(delta('rent'), 1500);
       assert.equal(delta('sale'), 500);
       assert.equal(delta('procedure'), 250);
-      assert.equal(Math.round((r.total - before.total) * 100) / 100, 7250);
-      assert.equal(r.series.length, 1);
-      assert.equal(r.series[0].total, r.total);
+      // รวมทุก BU = กราฟรายได้หน้าภาพรวมของวันเดียวกัน · แนวโน้ม 12 เดือนจบที่เดือนนี้
+      const sumCur = r2(Object.values(ov.current).reduce((a, b) => a + b, 0));
+      assert.equal((await get('/api/invoices/revenue?bucket=day&points=2', MANAGER)).body.data.at(-1).revenue, sumCur);
+      assert.equal(ov.trend.length, 12);
+      assert.equal(ov.trend.at(-1).month, today.slice(0, 7));
+      assert.ok(ov.last_year.from.startsWith(String(Number(today.slice(0, 4)) - 1)));
 
-      // รวมทุก BU = กราฟรายได้หน้าภาพรวมของวันเดียวกัน
-      const graph = (await get('/api/invoices/revenue?bucket=day&points=2', MANAGER)).body;
-      assert.equal(graph.data.at(-1).revenue, r.total);
-
-      // เคสกายภาพ — ค่าบริการไปอยู่ BU กายภาพ
-      const physioId = await fullPlan('BU physio', 3000);
-      await sql.run(`UPDATE cases SET service_kind = 'physio' WHERE case_id = (SELECT case_id FROM invoices WHERE invoice_id = :id)`, { id: physioId });
-      await pay(physioId, {});
-      const r2 = await bu();
-      assert.equal(Math.round((r2.totals.physio - r.totals.physio) * 100) / 100, 3000);
-
-      // ลดหนี้พร้อมคืนเงิน 1,450 (10% ของใบ) — ลงที่ BU ของค่าบริการเพราะเป็นส่วนลด แต่เงินคืนแบ่งตามสัดส่วนใบหลังลดหนี้
-      const rest = await pay(draft.invoice_id, {});
-      assert.ok(rest);
-      const cn = await send('POST', `/api/invoices/${draft.invoice_id}/adjustments`, {
-        kind: 'credit', reason_code: 'not_rendered', amount: 1450, reason: 'ไม่ได้เข้ากะ', refund: { method: 'โอน' },
+      // ---- เป้า: ตั้งได้เฉพาะ Super Admin/ผู้จัดการ · เฉลี่ยตามจำนวนวันของช่วง · ช่องว่าง = ลบ
+      const ym = today.slice(0, 7);
+      const dim = new Date(Date.UTC(Number(ym.slice(0, 4)), Number(ym.slice(5, 7)), 0)).getUTCDate();
+      const year = Number(today.slice(0, 4));
+      assert.equal((await send('PUT', '/api/invoices/revenue-bu/targets', { year, rows: [{ month: ym, bu: 'homecare', amount: 31000 }] }, HR)).status, 403);
+      assert.equal((await send('PUT', '/api/invoices/revenue-bu/targets', { year, rows: [{ month: `${year + 1}-01`, bu: 'homecare', amount: 1 }] })).status, 400);
+      const saved = await send('PUT', '/api/invoices/revenue-bu/targets', {
+        year, rows: [{ month: ym, bu: 'homecare', amount: 31000 }, { month: ym, bu: 'rent', amount: 9300 }],
       });
-      assert.equal(cn.status, 201, JSON.stringify(cn.body));
-      const r3 = await bu();
-      const sum3 = Object.values(r3.totals).reduce((a, b) => a + b, 0);
-      assert.equal(Math.round(sum3 * 100) / 100, r3.total, 'ผลรวม BU เท่ายอดรวมทุกสตางค์');
-      assert.equal((await get('/api/invoices/revenue?bucket=day&points=2', MANAGER)).body.data.at(-1).revenue, r3.total);
+      assert.equal(saved.status, 200, JSON.stringify(saved.body));
+      assert.equal(saved.body.rows.length, 2);
+      ov = await overview();
+      assert.equal(ov.targets.homecare, r2(31000 / dim));
+      assert.equal(ov.targets.physio, null, 'BU ที่ไม่ได้ตั้งเป้า = null');
+      assert.equal(ov.trend.at(-1).target_total, 40300);
+      await send('PUT', '/api/invoices/revenue-bu/targets', { year, rows: [{ month: ym, bu: 'rent', amount: null }] });
+      assert.equal((await get(`/api/invoices/revenue-bu/targets?year=${year}`, MANAGER)).body.rows.length, 1);
 
-      // รายการเจาะดู/ส่งออก — แถวละหนึ่ง BU ของหนึ่งงวด · ทุก BU ของงวดเดียวกันรวมเท่ายอดงวด
-      const rows = (await get(`/api/invoices/revenue-bu/rows?from=${today}&to=${today}`, MANAGER)).body.rows
-        .filter((x) => x.invoice_id === draft.invoice_id);
-      const byEntry = new Map();
-      for (const x of rows) byEntry.set(`${x.type}:${x.ref_id}`, (byEntry.get(`${x.type}:${x.ref_id}`) ?? 0) + x.amount);
-      for (const x of rows) assert.equal(Math.round(byEntry.get(`${x.type}:${x.ref_id}`) * 100) / 100, x.entry_amount);
-      assert.ok(rows.some((x) => x.type === 'refund' && x.amount < 0 && x.bu === 'rent'), 'เงินคืนแบ่งเข้า BU อุปกรณ์ด้วย');
-      const rentOnly = (await get(`/api/invoices/revenue-bu/rows?from=${today}&to=${today}&bu=rent`, MANAGER)).body.rows;
-      assert.ok(rentOnly.length > 0 && rentOnly.every((x) => x.bu === 'rent'));
+      // ---- รับรู้ตามบริการ: แพ็กกายภาพ 10 ครั้ง ราคา 10,000 (ราคาตั้ง 12,000) จ่ายครบ · ไปแล้ว 3 ครั้ง (วันนี้ 2 · เมื่อวาน 1)
+      const pp = await sql.one(
+        `INSERT INTO physio_packages (name, sessions, original_price, special_price, code)
+         VALUES ('แพ็ก BU 10 ครั้ง', 10, 12000, 10000, 'PT-BU10') RETURNING physio_package_id AS id`,
+      );
+      const pc = await post('/api/cases', { case_type: 'physiotherapy', client_name: 'BU physio pkg', fee: 10000 }, MANAGER, 201);
+      await sql.run(
+        `UPDATE cases SET service_kind = 'physio', physio_package_id = :pp, service_customer_price_snapshot = 10000,
+                service_list_price_snapshot = 12000, assigned_to = :emp, status = 'assigned' WHERE case_id = :id`,
+        { pp: pp.id, emp: FIELD.employee_id, id: pc.case_id },
+      );
+      const pInv = await draftOf(pc.case_id);
+      await post(`/api/invoices/${pInv.invoice_id}/billing-plan`, { mode: 'full' });
+      await pay(pInv.invoice_id, {});
+      const { yesterday } = await sql.one(`SELECT to_char((now() AT TIME ZONE 'Asia/Bangkok') - interval '1 day','YYYY-MM-DD') AS yesterday`);
+      for (const d of [yesterday, today, today]) {
+        await sql.run(
+          `INSERT INTO case_visits (case_id, visit_date, status, check_in_at, check_out_at)
+           VALUES (:id, :d, 'done', (:d || ' 08:00:00+07')::timestamptz, (:d || ' 09:00:00+07')::timestamptz)`,
+          { id: pc.case_id, d },
+        );
+      }
+      const rec = (await get(`/api/invoices/revenue-bu/recognition?${q}`, MANAGER)).body;
+      const row = rec.cases.find((x) => x.case_id === pc.case_id);
+      assert.ok(row, 'เคสแพ็กขึ้นตารางรับรู้รายได้');
+      assert.equal(row.unit_price, 1000);
+      assert.equal(row.units_in_period, 2);
+      assert.equal(row.recognized_in_period, 2000);
+      assert.equal(row.recognized_to_date, 3000);
+      assert.equal(row.paid_to_date, 10000);
+      assert.equal(row.balance, 7000, 'รับเงินล่วงหน้า 7 ครั้งที่ยังไม่ได้ให้บริการ');
+      const physioRec = rec.by_bu.find((b) => b.bu === 'physio');
+      assert.ok(physioRec.deferred >= 7000 && physioRec.from_delivery >= 2000);
+      // อุปกรณ์/หัตถการรับรู้วันที่ออกใบ (เต็มยอด ไม่ใช่ตามเงินที่รับ)
+      assert.ok(rec.by_bu.find((b) => b.bu === 'rent').from_invoice >= 3000);
 
-      // ช่วงเดือนเต็ม = ช่วงก่อนหน้าเป็นเดือนก่อน · ช่วงผิด = 400 · ไม่มีสิทธิ์ revenue = 403
-      const month = (await get(`/api/invoices/revenue-bu?from=${today.slice(0, 7)}-01&to=${today}&group=month`, MANAGER)).body;
-      assert.ok(month.previous.to < `${today.slice(0, 7)}-01`);
-      assert.equal((await send('GET', `/api/invoices/revenue-bu?from=${today}&to=2000-01-01`)).status, 400);
-      assert.equal((await send('GET', `/api/invoices/revenue-bu?from=${today}&to=${today}`, undefined, HR)).status, 403);
+      // ---- กำไร: ต้นทุน = ค่าจ้างที่ปล่อยในช่วง · นับให้เคส (แพ็ก · พนักงานหลัก) · ต้องมี see_pay
+      await sql.run(
+        `INSERT INTO case_payouts (case_id, employee_id, employee_name, amount) VALUES (:id, :emp, 'T T', 1500)`,
+        { id: pc.case_id, emp: FIELD.employee_id },
+      );
+      const m = (await get(`/api/invoices/revenue-bu/margin?${q}`, MANAGER)).body;
+      const pkgRow = m.package.find((x) => x.key === `pp:${pp.id}`);
+      assert.deepEqual([pkgRow.cash, pkgRow.recognized, pkgRow.cost, pkgRow.code], [10000, 2000, 1500, 'PT-BU10']);
+      const staffRow = m.staff.find((x) => x.key === FIELD.employee_id);
+      assert.ok(staffRow.cost >= 1500 && staffRow.recognized >= 2000);
+      assert.equal(m.totals.cost, r2(m.bu.reduce((s, x) => s + x.cost, 0)));
+      assert.equal((await send('GET', `/api/invoices/revenue-bu/margin?${q}`, undefined, HR)).status, 403);
+
+      // ---- ลูกหนี้: ใบแรกค้าง 7,250 เกินกำหนด 45 วัน → ช่อง 31–60 · แบ่ง BU ตามสัดส่วนใบ
+      await sql.run(
+        `UPDATE invoices SET due_date = to_char((now() AT TIME ZONE 'Asia/Bangkok') - interval '45 day','YYYY-MM-DD') WHERE invoice_id = :id`,
+        { id: draft.invoice_id },
+      );
+      const ar = (await get('/api/invoices/revenue-bu/receivables', MANAGER)).body;
+      const arInv = ar.invoices.find((x) => x.invoice_id === draft.invoice_id);
+      assert.equal(arInv.bucket, 'd31_60');
+      assert.equal(arInv.days_overdue, 45);
+      assert.equal(arInv.balance, 7250);
+      assert.deepEqual(arInv.parts, { homecare: 5000, rent: 1500, sale: 500, procedure: 250 });
+      assert.ok(ar.by_bu.find((b) => b.bu === 'rent').d31_60 >= 1500);
+
+      // ---- ลูกค้า: ต่อเคส · ยกเลิกพร้อมเหตุผล · การกระจุกตัว
+      const closed = await post('/api/cases', { case_type: 'other', client_name: 'BU renew A', fee: 1000 }, MANAGER, 201);
+      await sql.run(`UPDATE cases SET status = 'closed', closed_at = to_char(now() AT TIME ZONE 'Asia/Bangkok','YYYY-MM-DD HH24:MI:SS') WHERE case_id = :id`, { id: closed.case_id });
+      const next = await post('/api/cases', { case_type: 'other', client_name: 'BU renew B', fee: 1000 }, MANAGER, 201);
+      await sql.run('UPDATE cases SET renewed_from = :a, round_no = 2 WHERE case_id = :b', { a: closed.case_id, b: next.case_id });
+      const gone = await post('/api/cases', { case_type: 'other', client_name: 'BU cancel', fee: 1000 }, MANAGER, 201);
+      await sql.run(
+        `UPDATE cases SET status = 'cancelled', cancel_reason = 'ทดสอบเหตุผล BU',
+                cancelled_at = to_char(now() AT TIME ZONE 'Asia/Bangkok','YYYY-MM-DD HH24:MI:SS') WHERE case_id = :id`,
+        { id: gone.case_id },
+      );
+      const cu = (await get(`/api/invoices/revenue-bu/customers?${q}`, MANAGER)).body;
+      const hc = cu.lifecycle.find((x) => x.bu === 'homecare');
+      assert.ok(hc.closed >= 1 && hc.renewed >= 1 && hc.cancelled >= 1 && hc.started_renew >= 1);
+      assert.equal(cu.reasons.find((x) => x.reason === 'ทดสอบเหตุผล BU').count, 1);
+      assert.ok(cu.top.length > 0 && cu.top.length <= 10);
+      assert.ok(cu.concentration.top10 <= cu.concentration.total + 0.01);
+
+      // ---- ราคาจริงเทียบราคาตั้ง ต่อแพ็ก · ส่วนลด/เงินคืนต่อ BU
+      const pr = (await get(`/api/invoices/revenue-bu/pricing?${q}`, MANAGER)).body;
+      const pRow = pr.packages.find((x) => x.key === `pp:${pp.id}`);
+      assert.deepEqual([pRow.cases, pRow.list_total, pRow.actual_total], [1, 12000, 10000]);
+      assert.ok(pr.by_bu.find((b) => b.bu === 'rent').billed >= 3000);
+
+      // ---- ช่วงผิด = 400 · ไม่มีสิทธิ์ revenue = 403
+      assert.equal((await send('GET', `/api/invoices/revenue-bu/overview?from=${today}&to=2000-01-01`)).status, 400);
+      for (const p of ['overview', 'recognition', 'customers', 'pricing']) {
+        assert.equal((await send('GET', `/api/invoices/revenue-bu/${p}?${q}`, undefined, HR)).status, 403, p);
+      }
+      assert.equal((await send('GET', '/api/invoices/revenue-bu/receivables', undefined, HR)).status, 403);
     });
 
     test('บันทึกการเงิน: ยอดวันนี้ (เงินเข้า · ลูกหนี้ · เกินกำหนด) · สมุดรายการเงินเก็บรายการที่ยกเลิก · ยอดของวันที่ผ่านไปแล้วแก้ไม่ได้ · สิทธิ์', async () => {

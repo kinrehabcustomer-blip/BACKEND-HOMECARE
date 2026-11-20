@@ -3715,10 +3715,14 @@ export function payQueue() {
                  แต่นับใน lv ก้อนเดียวกับวันกะแรก/ล่าสุด (optimize 11 พ.ย. 2569) — ฉบับซับคิวรีนับทีละเคส
                  สองรอบต่อแถว ทั้งคิวคือทุกเคสในประวัติ (3,000 เคส ≈ 80 ms ของ 145 ms) */
               COALESCE(lv.worked_shifts, 0)  AS worked_shifts,
-              COALESCE(lv.planned_shifts, 0) AS planned_shifts
+              COALESCE(lv.planned_shifts, 0) AS planned_shifts,
+              /* คอลัมน์ "หมายเหตุ" ของคิวปล่อยค่าจ้าง (ผู้ใช้ขอ 20 พ.ย. 2569) — เหตุผลยกเลิกเคส + หมายเหตุของงวดล่าสุดที่ปล่อย */
+              c.cancel_reason,
+              p.last_note AS last_payout_note
        FROM cases c
        LEFT JOIN (
-         SELECT case_id, SUM(amount) AS released, COUNT(DISTINCT installment_no) AS installments
+         SELECT case_id, SUM(amount) AS released, COUNT(DISTINCT installment_no) AS installments,
+                (array_agg(NULLIF(btrim(note), '') ORDER BY payout_id DESC) FILTER (WHERE NULLIF(btrim(note), '') IS NOT NULL))[1] AS last_note
          FROM case_payouts GROUP BY case_id
        ) p ON p.case_id = c.case_id
 

@@ -2545,3 +2545,67 @@ describe('วันหมดอายุแพ็กกายภาพ — ว�
     assert.equal(expiryDate('2028-01-31', 1), '2028-02-29'); // ปีอธิกสุรทิน
   });
 });
+
+describe('revenue BU report (invoices/buReport.js)', async () => {
+  const bu = await import('../src/invoices/buReport.js');
+
+  test('allocateLines sums to the exact satang, including refunds', () => {
+    assert.deepEqual(bu.allocateLines(100, [1, 1, 1]), [33.34, 33.33, 33.33]);
+    assert.deepEqual(bu.allocateLines(-10, [3, 1]), [-7.5, -2.5]);
+    assert.deepEqual(bu.allocateLines(5, [0, 0]), [2.5, 2.5]);
+  });
+
+  test('invoiceSlices: addons at full price, service gets the remainder, bundle goes to its own case', () => {
+    const s = bu.invoiceSlices({
+      net_total: 14000, service_kind: null, case_id: 'C1',
+      addons: [
+        { name: 'bed', quantity: 2, unit_price: 1500 },
+        { name: 'kit', kind: 'sale', quantity: 1, unit_price: 1000 },
+        { name: 'PT', kind: 'physio', ref: 'C2', quantity: 1, unit_price: 3000 },
+      ],
+    });
+    const by = Object.fromEntries(s.map((x) => [x.kind, x]));
+    assert.equal(by.rent.weight, 3000);
+    assert.equal(by.sale.weight, 1000);
+    assert.equal(by.bundle.case_id, 'C2');
+    assert.equal(by.bundle.bu, 'physio');
+    assert.equal(by.service.weight, 7000);
+    assert.equal(by.service.bu, 'homecare');
+    assert.equal(bu.invoiceSlices({ net_total: 500, addons: [], case_id: null })[0].bu, 'other');
+  });
+
+  test('lastYear keeps month ends and clamps leap days', () => {
+    assert.equal(bu.lastYear('2028-02-29'), '2027-02-28');
+    assert.equal(bu.lastYear('2027-02-28'), '2026-02-28');
+    assert.equal(bu.lastYear('2029-02-28'), '2028-02-29'); // month end stays month end
+    assert.equal(bu.lastYear('2026-11-20'), '2025-11-20');
+  });
+
+  test('targets are prorated by the days the range covers', () => {
+    const rows = [{ month: '2026-11', bu: 'homecare', amount: 30000 }, { month: '2026-12', bu: 'homecare', amount: 31000 }];
+    assert.equal(bu.proratedTargets(rows, '2026-11-01', '2026-11-30').homecare, 30000);
+    assert.equal(bu.proratedTargets(rows, '2026-11-21', '2026-12-10').homecare, 10000 + 10000);
+    assert.equal(bu.proratedTargets(rows, '2026-11-01', '2026-11-30').physio, null);
+    assert.equal(bu.overlapDays('2026-02', '2026-01-15', '2026-03-01'), 28);
+  });
+
+  test('describeCase: unit price excludes what was paid and used before the system', () => {
+    const c = bu.describeCase({
+      case_id: 'C9', service_kind: 'physio', physio_package_id: 4, pp_name: 'PT 10', pp_sessions: 10, pkg_quantity: 2,
+      pp_original: 6000, price_snap: 10000, joined_midway: true, carried_paid: 2000, carried_used: 4, adjustments: -1000,
+    });
+    assert.equal(c.units, 20);
+    assert.equal(c.units_in, 16);
+    assert.equal(c.value_in, 7000);
+    assert.equal(c.unit_price, 437.5);
+    assert.equal(c.list, 12000);
+    assert.equal(c.metered, true);
+    // no unit count (format without days) = recognized on the invoice date
+    assert.equal(bu.describeCase({ case_id: 'C1', pkg_format_id: 1, format_days: null, fee: 5000 }).metered, false);
+  });
+
+  test('aging buckets', () => {
+    assert.deepEqual([0, 1, 30, 31, 60, 61, 90, 91, -5].map(bu.agingBucket),
+      ['current', 'd1_30', 'd1_30', 'd31_60', 'd31_60', 'd61_90', 'd61_90', 'd90', 'current']);
+  });
+});

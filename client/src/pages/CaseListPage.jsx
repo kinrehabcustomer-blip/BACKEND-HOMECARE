@@ -304,20 +304,19 @@ export default function CaseListPage() {
 
         {/* จอแคบ: ให้ตารางเลื่อนแนวนอนในกล่องของตัวเอง ไม่ดันทั้งหน้าให้เลื่อนตาม */}
         <div className="table-wrap">
-          <table className="table table-cards table-2line table-indexed">
+          <table className="table table-cards table-2line table-indexed case-table">
             <colgroup>
-              {/* สถานะกว้าง 16% เพราะป้ายที่ยาวที่สุด ("ยังไม่จับคู่พนักงาน") ต้องการ 139px
-                  ที่ 13% บนจอ 1280/1440 ได้ไม่ถึง แล้วป้ายโดน … ตัดจนอ่านไม่ออกว่าเคสอยู่สถานะไหน
-                  ที่ยืมมาคือคอลัมน์บริการ ซึ่งเป็นข้อความอิสระ ตัดท้ายแล้วยังเดาความได้ */}
-              {/* ปุ่มเรียงลำดับย้ายจากหัวคอลัมน์สถานะมาเป็นหัวคอลัมน์รหัสเคส (16 พ.ย. 2569) — สถานะกลับเป็น 16%
-                  รหัสเคส 12 → 14% ให้หัวมีที่พอสำหรับ "รหัสเคส ⇅ ใหม่สุด" */}
-              <col style={{ width: '6%' }} />
-              <col style={{ width: '14%' }} />
-              <col style={{ width: '21%' }} />
-              <col style={{ width: '14%' }} />
-              <col style={{ width: '13%' }} />
-              <col style={{ width: '16%' }} />
-              <col style={{ width: '16%' }} />
+              {/* จัดวางใหม่ (ผู้ใช้ขอ 20 พ.ย. 2569 "ช่องไฟเหลือเยอะ · ให้ข้อความขาดน้อยที่สุด")
+                  เดิมทุกคอลัมน์เป็น % — จอกว้าง #/รหัสเคส/เบอร์โทร กินที่เปล่า ๆ เกือบ 500px ขณะที่บริการ/พนักงานโดน … ตัด
+                  ตอนนี้: คอลัมน์ที่เนื้อหายาวคงที่ (ลำดับ · รหัสเคส · วันเริ่ม · ป้ายสถานะ) กว้างคงที่พอดีเนื้อหา
+                  พนักงาน 22% (สองชื่อเต็มบรรทัด ตกบรรทัดได้) · บริการได้ที่เหลือทั้งหมด · เบอร์โทรรวมเข้าบรรทัดผู้รับบริการ (เคสส่วนใหญ่ไม่มีเบอร์ คอลัมน์เป็น — ทั้งแถบ)
+                  สถานะ 10.5rem = ป้ายยาวสุด "ยังไม่จับคู่พนักงาน" (139px) + ช่องว่างสองข้าง */}
+              <col style={{ width: '3.25rem' }} />
+              <col style={{ width: '9.5rem' }} />
+              <col />
+              <col style={{ width: '8rem' }} />
+              <col style={{ width: '22%' }} />
+              <col style={{ width: '10.5rem' }} />
             </colgroup>
             <thead>
               <tr>
@@ -325,7 +324,6 @@ export default function CaseListPage() {
                 <th>{headSortPicker}</th>
                 <th><SortHead column="title" {...SORTABLE.title} sort={sort} order={order} onSort={sortBy} /></th>
                 <th><SortHead column="start_date" {...SORTABLE.start_date} sort={sort} order={order} onSort={sortBy} /></th>
-                <th>เบอร์โทร</th>
                 <th>พนักงานที่รับ</th>
                 <th>สถานะ</th>
               </tr>
@@ -348,7 +346,7 @@ export default function CaseListPage() {
                   {/* ลำดับนับต่อเนื่องข้ามหน้า — เป็นลำดับของ "รายการที่เห็นตอนนี้" ไม่ใช่เลขประจำตัว */}
                   <td className="row-index" data-label="ลำดับ">{(effPage - 1) * Number(perPage) + i + 1}</td>
                   <td className="mono link" data-label="รหัสเคส">{caseCode(c.case_id)}</td>
-                  <td className="cell-stack" data-label="บริการ">
+                  <td className="cell-stack cell-wrap" data-label="บริการ">
                     {/* สองสายบริการเก็บชื่อคนละคอลัมน์ — กายภาพมาก่อนเพราะเคสที่ผูกแพ็คเกจไว้จะไม่มีเรท Homecare */}
                     {/* รหัสแพ็คเกจ (20 พ.ย. 2569) — ค้นหาเคสด้วยรหัสได้ที่ช่องค้นหาด้านบน */}
                     {(c.physio_package_id ? c.physio_package_code : c.pkg_rate_code) && (
@@ -367,7 +365,13 @@ export default function CaseListPage() {
                     {/* server รุ่นเก่า (ไม่มี physio_addons) — ยังบอกแพ็กที่เก็บเงินรวมแบบเดิม */}
                     {!c.physio_addons && bundledPhysioText(c) && <span className="muted"> + {bundledPhysioText(c)}</span>}
                     {/* บรรทัดรองคือผู้รับบริการ (ผู้รับการดูแล) ไม่ใช่ผู้ว่าจ้าง — พนักงานจับคู่/ตามงานด้วยชื่อคนที่ไปดูแล */}
-                    <span className="cell-sub">{c.client_name}</span>
+                    {/* เบอร์โทรต่อท้ายชื่อผู้รับบริการ (เดิมเป็นคอลัมน์ของตัวเอง) — stopPropagation กันกดเบอร์แล้วเปิด popup ตามไปด้วย */}
+                    <span className="cell-sub">
+                      {c.client_name}
+                      {c.client_phone && (
+                        <>{' · '}<a className="link mono" href={`tel:${c.client_phone}`} onClick={(e) => e.stopPropagation()}>{formatPhone(c.client_phone)}</a></>
+                      )}
+                    </span>
                     {/* แพ็กกายภาพเสริมของเคส Homecare นี้ — อยู่ในแถวเดียวกับเคสแม่ ไม่ขึ้นเป็นแถวแยก (ผู้ใช้ขอ 10 พ.ย. 2569)
                         ช่องนี้บอกแค่ "แพ็กอะไร ราคาเท่าไร" · คนรับอยู่คอลัมน์พนักงาน · สถานะอยู่คอลัมน์สถานะ (แต่ละอย่างอยู่ในคอลัมน์ของมัน)
                         (server ซ่อนแถวแพ็กเฉพาะเมื่อแถวแม่อยู่ในรายการเดียวกัน — ดู list() ใน cases/repo.js) */}
@@ -377,17 +381,7 @@ export default function CaseListPage() {
                     {c.start_date ? formatDate(c.start_date) : <span className="muted">ยังไม่ระบุ</span>}
                     {totalFee(c) != null && <span className="cell-sub">{formatBaht(totalFee(c))}</span>}
                   </td>
-                  <td className={c.client_phone ? '' : 'is-blank'} data-label="เบอร์โทร">
-                    {c.client_phone ? (
-                      // stopPropagation กันไม่ให้การกดเบอร์เปิด popup ตามไปด้วย
-                      <a className="link mono" href={`tel:${c.client_phone}`} onClick={(e) => e.stopPropagation()}>
-                        {formatPhone(c.client_phone)}
-                      </a>
-                    ) : (
-                      <span className="muted">—</span>
-                    )}
-                  </td>
-                  <td className={c.assigned_name || c.physio_addons?.some((a) => a.assigned_name) ? '' : 'is-blank'} data-label="พนักงานที่รับ">
+                  <td className={`cell-wrap${c.assigned_name || c.physio_addons?.some((a) => a.assigned_name) ? '' : ' is-blank'}`} data-label="พนักงานที่รับ">
                     {/* เคสหนึ่งมีพนักงานได้หลายคน — โชว์ทุกคน ไม่ใช่แค่คนที่ระบบอ้างเป็นตัวหลัก
                         รหัสพนักงานโชว์เฉพาะตอนมีคนเดียว ไม่งั้นแถวจะยาวจนอ่านชื่อไม่ทัน */}
                     {c.assigned_name ? (
@@ -426,13 +420,13 @@ export default function CaseListPage() {
               {/* โหลดครั้งแรกยังไม่มีข้อมูลเลย — ต้องบอกว่ากำลังโหลด ไม่ใช่ปล่อยตารางว่างเงียบๆ
                   (ถ้ามีข้อมูลเก่าอยู่แล้ว คงไว้ให้อ่านต่อระหว่างโหลดรอบใหม่ ไม่ให้จอกระพริบ) */}
               {loading && rows.length === 0 && (
-                <tr><td colSpan={7} className="empty">กำลังโหลด…</td></tr>
+                <tr><td colSpan={6} className="empty">กำลังโหลด…</td></tr>
               )}
 
               {/* error มีแถบของตัวเองอยู่แล้ว — ไม่ต้องบอกซ้ำว่า "ไม่มีข้อมูล" ทั้งที่จริงๆ คือโหลดไม่สำเร็จ */}
               {!loading && !error && rows.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="empty">
+                  <td colSpan={6} className="empty">
                     {filtered ? (
                       <>
                         ไม่พบเคสที่ตรงกับเงื่อนไข{' '}

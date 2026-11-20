@@ -207,3 +207,67 @@ describe('ซื้อหลายแพ็ก (pkg_quantity · 17 พ.ย. 2569
     assert.equal(packUnit(undefined), 'แพ็ก');
   });
 });
+
+/* ---------- รายได้ตาม BU ชุดใหม่ (lib/revenueReport.js · 20 พ.ย. 2569) ---------- */
+import * as rr from '../src/lib/revenueReport.js';
+
+describe('รายได้ตาม BU: ช่วงเวลา · ตัวเลข · CSV', () => {
+  test('ลูกศรเลื่อนช่วงเดือนทีละเดือน และไม่เกินวันนี้', () => {
+    assert.deepEqual(rr.stepRange('2026-11-01', '2026-11-20', -1, '2026-11-20'), ['2026-10-01', '2026-10-31']);
+    assert.deepEqual(rr.stepRange('2026-10-01', '2026-10-31', 1, '2026-11-20'), ['2026-11-01', '2026-11-20']);
+    assert.deepEqual(rr.stepRange('2026-11-10', '2026-11-16', -1, '2026-11-20'), ['2026-11-03', '2026-11-09']);
+  });
+
+  test('ชื่อช่วง: ตัวเลือกด่วน · เดือนเต็ม · ไม่มีชื่อ', () => {
+    assert.equal(rr.rangeName('2026-11-01', '2026-11-20', '2026-11-20'), 'เดือนนี้');
+    assert.match(rr.rangeName('2026-09-01', '2026-09-30', '2026-11-20'), /2569/);
+    assert.equal(rr.rangeName('2026-09-03', '2026-09-10', '2026-11-20'), null);
+  });
+
+  test('เปลี่ยนแปลง/สัดส่วน: ฐานศูนย์ = null (หน้าเว็บเขียน —)', () => {
+    assert.equal(rr.change(120, 100), 20);
+    assert.equal(rr.change(5, 0), null);
+    assert.equal(rr.pct(1, 4), 25);
+    assert.equal(rr.pct(1, 0), null);
+    assert.equal(rr.pctText(null), '—');
+  });
+
+  test('กำไรขั้นต้นตามเกณฑ์ที่เลือก', () => {
+    const row = { cash: 10000, recognized: 4000, cost: 3000 };
+    assert.deepEqual(rr.marginOf(row, 'cash'), { revenue: 10000, cost: 3000, profit: 7000, margin: 70 });
+    assert.deepEqual(rr.marginOf(row, 'recognized'), { revenue: 4000, cost: 3000, profit: 1000, margin: 25 });
+    assert.equal(rr.marginOf({ cash: 0, recognized: 0, cost: 500 }, 'cash').margin, null);
+  });
+
+  test('CSV ภาพรวม: แถว BU + รวม + แนวโน้ม · BU "ไม่ระบุบริการ" โผล่เมื่อมีเงินเท่านั้น', () => {
+    const zero = { homecare: 0, physio: 0, procedure: 0, rent: 0, sale: 0, other: 0 };
+    const d = {
+      from: '2026-11-01', to: '2026-11-20', previous: { from: '2026-10-01', to: '2026-10-31' }, last_year: { from: '2025-11-01', to: '2025-11-20' },
+      current: { ...zero, homecare: 100000, rent: 5000 }, previous_totals: { ...zero, homecare: 80000 }, last_year_totals: { ...zero, homecare: 50000 },
+      targets: { homecare: 90000, physio: null, procedure: null, rent: null, sale: null },
+      trend: [{ month: '2026-11', values: { ...zero, homecare: 100000 }, total: 105000, last_year_total: 50000, target_total: 135000 }],
+    };
+    const { header, lines } = rr.overviewCsv(d);
+    assert.equal(header.length, 8);
+    const names = lines.map((l) => l[0]);
+    assert.ok(!names.includes('ไม่ระบุบริการ'));
+    const hc = lines.find((l) => l[0] === 'Homecare');
+    assert.deepEqual(hc, ['Homecare', 100000, 80000, 25, 50000, 100, 90000, 111.11]);
+    const total = lines.find((l) => l[0] === 'รวม');
+    assert.equal(total[1], 105000);
+    assert.equal(total[6], 90000, 'เป้ารวมนับเฉพาะ BU ที่ตั้ง');
+    assert.ok(lines.some((l) => l[0] === '2026-11' && l.at(-1) === 135000));
+  });
+
+  test('CSV ลูกหนี้: แถวรวมเท่าผลรวมทุก BU', () => {
+    const aging = [{ key: 'current', label: 'ยังไม่ถึงกำหนด' }, { key: 'd90', label: 'เกิน 90 วัน' }];
+    const d = {
+      today: '2026-11-20', aging,
+      by_bu: [{ bu: 'homecare', current: 100, d90: 50, total: 150 }, { bu: 'rent', current: 0, d90: 20, total: 20 }],
+      invoices: [{ invoice_id: 'I1', customer: 'A', case_id: null, issue_date: '2026-01-01', due_date: null, days_overdue: 300, bucket: 'd90', balance: 70, parts: { homecare: 50, rent: 20 } }],
+    };
+    const { lines } = rr.receivablesCsv(d);
+    assert.deepEqual(lines.find((l) => l[0] === 'รวม'), ['รวม', 100, 70, 170]);
+    assert.ok(lines.some((l) => l[0] === 'I1' && l[7] === 'เกิน 90 วัน'));
+  });
+});

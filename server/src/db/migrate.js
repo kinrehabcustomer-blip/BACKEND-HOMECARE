@@ -29,6 +29,11 @@ const { FINANCE_DDL } = await import('../finance/log.js');
 await pool.query(FINANCE_DDL);
 console.log('สร้าง/อัปเดตตาราง finance_snapshots เรียบร้อย');
 
+// เป้ารายได้รายเดือนต่อ BU (หน้ารายได้ตาม BU · ตั้งได้เฉพาะ Super Admin/ผู้จัดการ) — โครงสร้างอยู่ที่ invoices/buReport.js ที่เดียว
+const { REVENUE_TARGET_DDL } = await import('../invoices/buReport.js');
+await pool.query(REVENUE_TARGET_DDL);
+console.log('สร้าง/อัปเดตตาราง revenue_targets เรียบร้อย');
+
 // พนักงานที่ยังไม่มีรหัสผ่าน — สุ่มรหัสชั่วคราวให้
 const pending = await sql.all('SELECT employee_id FROM employees WHERE password_hash IS NULL');
 

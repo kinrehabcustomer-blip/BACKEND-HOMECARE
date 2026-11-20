@@ -24,7 +24,8 @@ import {
   updateRefundSchema,
 } from './schema.js';
 import { createAdjustment, cancelAdjustment, updateRefund } from './ledger.js';
-import { allocatedEntries, checkRange, revenueByBu } from './revenueBu.js';
+import * as buReport from './buReport.js';
+import { PERMISSION_ADMINS } from '../lib/permissions.js';
 import { decodeImage } from '../employees/schema.js';
 import { ApiError, asyncRoute, notFound } from '../lib/errors.js';
 import { requirePermission, can } from '../lib/auth.js';
@@ -138,27 +139,43 @@ invoicesRouter.get(
   asyncRoute(async (req, res) => res.json(await repo.revenue(revenueQuerySchema.parse(req.query)))),
 );
 
-/* รายได้ตาม BU (เมนูแยก · 19 พ.ย. 2569 · invoices/revenueBu.js) — สิทธิ์เดียวกับรายได้บริษัท
-   /revenue-bu = สรุป + กราฟ · /revenue-bu/rows = เงินเข้า/คืนรายงวดที่แบ่ง BU แล้ว (เจาะดู + ส่งออก) */
-const buQuery = z.object({
-  from: z.string(),
-  to: z.string(),
-  group: z.enum(['day', 'week', 'month']).default('month'),
-  bu: z.enum(['homecare', 'physio', 'procedure', 'rent', 'sale', 'other']).optional(),
-});
-invoicesRouter.get(
-  '/revenue-bu',
-  requirePermission('revenue', 'บัญชีของคุณไม่มีสิทธิ์ดูรายได้บริษัท'),
-  asyncRoute(async (req, res) => res.json(await revenueByBu(buQuery.parse(req.query)))),
+/* รายได้ตาม BU ชุดใหม่ (20 พ.ย. 2569 · invoices/buReport.js) — แทนหน้าเดิม + การเจาะดูระดับบรรทัดทั้งหมด
+   ทุกเส้นใช้สิทธิ์ revenue · กำไร (มีต้นทุนค่าจ้าง) ต้องมี see_pay เพิ่ม · ตั้งเป้าได้เฉพาะ Super Admin/ผู้จัดการ */
+const canSeeRevenue = requirePermission('revenue', 'บัญชีของคุณไม่มีสิทธิ์ดูรายได้บริษัท');
+const buRange = z.object({ from: z.string(), to: z.string() });
+const buRoute = (path, fn, ...guards) => invoicesRouter.get(
+  `/revenue-bu/${path}`,
+  canSeeRevenue,
+  ...guards,
+  asyncRoute(async (req, res) => res.json(await fn(buRange.parse(req.query)))),
 );
+buRoute('overview', buReport.overview);
+buRoute('margin', buReport.margin, requirePermission('see_pay', 'บัญชีของคุณไม่มีสิทธิ์ดูค่าจ้างพนักงาน (ต้นทุน)'));
+buRoute('recognition', buReport.recognition);
+buRoute('customers', buReport.customers);
+buRoute('pricing', buReport.pricing);
+invoicesRouter.get('/revenue-bu/receivables', canSeeRevenue, asyncRoute(async (req, res) => res.json(await buReport.receivables())));
+
+const targetYear = z.coerce.number().int().min(2000).max(2200);
 invoicesRouter.get(
-  '/revenue-bu/rows',
-  requirePermission('revenue', 'บัญชีของคุณไม่มีสิทธิ์ดูรายได้บริษัท'),
+  '/revenue-bu/targets',
+  canSeeRevenue,
+  asyncRoute(async (req, res) => res.json(await buReport.listTargets(targetYear.parse(req.query.year)))),
+);
+const targetsBody = z.object({
+  year: targetYear,
+  rows: z.array(z.object({
+    month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),
+    bu: z.enum(buReport.TARGET_BUS),
+    amount: z.number().min(0).max(1e10).nullable(),
+  })).max(12 * 6),
+});
+invoicesRouter.put(
+  '/revenue-bu/targets',
   asyncRoute(async (req, res) => {
-    const q = buQuery.parse(req.query);
-    checkRange(q.from, q.to);
-    const rows = await allocatedEntries(q.from, q.to);
-    res.json({ rows: q.bu ? rows.filter((r) => r.bu === q.bu) : rows });
+    if (!PERMISSION_ADMINS.includes(req.user?.position)) throw new ApiError(403, 'ตั้งเป้ารายได้ได้เฉพาะ Super Admin และผู้จัดการ');
+    const body = targetsBody.parse(req.body);
+    res.json(await buReport.saveTargets(body.year, body.rows, req.user));
   }),
 );
 

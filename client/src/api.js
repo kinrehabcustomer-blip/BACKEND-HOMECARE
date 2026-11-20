@@ -459,10 +459,11 @@ export const api = {
     if (points) params.set('points', points);
     return request(`/invoices/revenue?${params}`);
   },
-  /** รายได้ตาม BU (เกณฑ์เงินสด · invoices/revenueBu.js) — { from, to, group: day|week|month } */
-  revenueByBu: (params) => request(`/invoices/revenue-bu?${new URLSearchParams(params)}`),
-  /** เงินเข้า/คืนรายงวดที่แบ่ง BU แล้ว — { from, to, bu? } (เจาะดู + ส่งออก) */
-  revenueByBuRows: (params) => request(`/invoices/revenue-bu/rows?${new URLSearchParams(params)}`),
+  /** รายได้ตาม BU ชุดใหม่ (invoices/buReport.js · 20 พ.ย. 2569) — part: overview · margin · recognition · receivables · customers · pricing */
+  revenueBu: (part, params) => request(`/invoices/revenue-bu/${part}${params ? `?${new URLSearchParams(params)}` : ''}`),
+  /** เป้ารายได้รายเดือนต่อ BU ของทั้งปี (ค.ศ.) · บันทึกได้เฉพาะ Super Admin/ผู้จัดการ — rows: [{ month: 'YYYY-MM', bu, amount|null }] */
+  revenueTargets: (year) => request(`/invoices/revenue-bu/targets?year=${year}`),
+  saveRevenueTargets: (year, rows) => request('/invoices/revenue-bu/targets', { method: 'PUT', body: { year, rows } }),
   getInvoice: (id) => request(`/invoices/${id}`),
   // ส่งใบเข้า LINE ลูกค้า (24 ต.ค. 2569) · ลิงก์สาธารณะของลูกค้า
   invoiceLine: (id) => request(`/invoices/${id}/line`),

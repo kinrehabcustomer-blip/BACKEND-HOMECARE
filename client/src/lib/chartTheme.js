@@ -13,6 +13,7 @@ const read = () => {
   return {
     text: v('--text'),
     muted: v('--muted'),
+    heading: v('--heading'),
     faint: v('--text-faint'),
     border: v('--border'),
     divider: v('--divider'),
@@ -34,6 +35,12 @@ const read = () => {
       missed: v('--viz-visit-missed'),
       stale: v('--viz-visit-stale'),
       scheduled: v('--viz-visit-scheduled'),
+      // ชุดสีกลุ่มทั่วไป 8 ช่อง (index.css --viz-cat-1..8) — ใช้ตามลำดับ ห้ามวนซ้ำ (เกิน 8 = "อื่น ๆ")
+      cat: [1, 2, 3, 4, 5, 6, 7, 8].map((i) => v(`--viz-cat-${i}`)),
+      // รายได้ตาม BU (วงแหวน): ต้นทุน = เทา · อายุหนี้ = ไล่เฉดอุ่น 5 ขั้น · อันดับ = ไล่เฉดน้ำเงิน 4 ขั้น (index.css)
+      cost: v('--viz-cost'),
+      age: [1, 2, 3, 4, 5].map((i) => v(`--viz-age-${i}`)),
+      seq: [1, 2, 3, 4].map((i) => v(`--viz-seq-${i}`)),
     },
     // ฟอนต์ต้องส่งเข้า option ด้วยเหมือนกัน — canvas ไม่สืบทอดจาก CSS
     font: getComputedStyle(document.body).fontFamily,

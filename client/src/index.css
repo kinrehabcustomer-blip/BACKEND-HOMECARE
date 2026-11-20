@@ -1219,6 +1219,15 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
   --viz-visit-missed: #d03b3b;
   --viz-visit-stale: #6250d6;
   --viz-visit-scheduled: #ec835a;
+  /* ชุดสีกลุ่มทั่วไป 8 ช่อง (รายได้ตาม BU เมื่อแยกตามมิติอื่นที่ไม่ใช่ BU · 20 พ.ย. 2569) — ชุดอ้างอิงของ dataviz
+     ผ่านตัวตรวจทั้งสองธีม (ลำดับนี้คือลำดับที่ผ่านคู่ที่ติดกัน ห้ามสลับ) · กลุ่มที่ 9 ขึ้นไปรวมเป็น "อื่น ๆ" สี --viz-other */
+  --viz-cat-1: #2a78d6; --viz-cat-2: #eb6834; --viz-cat-3: #1baf7a; --viz-cat-4: #eda100;
+  --viz-cat-5: #e87ba4; --viz-cat-6: #008300; --viz-cat-7: #6250d6; --viz-cat-8: #e34948;
+  /* dashboard รายได้ตาม BU (20 พ.ย. 2569): ต้นทุน = เทากลาง · อายุหนี้ = ไล่เฉดอุ่นสีเดียว อ่อน→เข้ม (เก่ายิ่งเข้ม)
+     · อันดับ/ประเภทเคส = ไล่เฉดน้ำเงินสีเดียว อ่อน→เข้ม — ความเข้มเรียงขั้นเดียว ไม่ใช่สีรุ้ง */
+  --viz-cost: #b9b3a9;
+  --viz-age-1: #f1d7a1; --viz-age-2: #e6ae62; --viz-age-3: #d9833f; --viz-age-4: #bf5a2b; --viz-age-5: #8f2f17;
+  --viz-seq-1: #cddff6; --viz-seq-2: #8db6ea; --viz-seq-3: #4c88d8; --viz-seq-4: #255ba8;
 }
 :root[data-theme='dark'] {
   --viz-homecare: #b88827;
@@ -1232,6 +1241,12 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
   --viz-visit-missed: #d03b3b;
   --viz-visit-stale: #9085e9;
   --viz-visit-scheduled: #d9703f;
+  --viz-cat-1: #3987e5; --viz-cat-2: #d95926; --viz-cat-3: #199e70; --viz-cat-4: #c98500;
+  --viz-cat-5: #d55181; --viz-cat-6: #0ca30c; --viz-cat-7: #9085e9; --viz-cat-8: #e66767;
+  /* โหมดมืด: ไล่จากกลืนพื้น (น้อย/ใหม่) ไปสว่าง (มาก/เก่า) — ความต่างจากพื้นคือขนาด */
+  --viz-cost: #6f6a62;
+  --viz-age-1: #5e4522; --viz-age-2: #8a5d27; --viz-age-3: #b8742f; --viz-age-4: #dc8a48; --viz-age-5: #f4ad80;
+  --viz-seq-1: #223f63; --viz-seq-2: #2f5d97; --viz-seq-3: #4f87d0; --viz-seq-4: #93bdf0;
 }
 .dot { width: 0.5rem; height: 0.5rem; border-radius: 50%; flex-shrink: 0; }
 .dot.case-unassigned  { background: var(--case-unassigned); }
@@ -3452,6 +3467,11 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
 .table tbody tr.is-picked,
 .table tbody tr.is-picked:hover { background: var(--brand-soft); border-color: var(--brand); }
 .pay-cell { text-align: right; }
+/* คอลัมน์หมายเหตุของคิวปล่อยค่าจ้าง (PayQueue) — หลายบรรทัด ตัวเล็ก ชิดซ้าย */
+.pay-note { white-space: normal !important; overflow-wrap: anywhere; }
+.table td.pay-note:nth-child(n), .table th.pay-note-h:nth-child(n) { text-align: left; }
+.pay-note-line { display: block; font-size: 0.8125rem; line-height: 1.45; color: var(--muted); }
+.pay-note-line + .pay-note-line { margin-top: 0.125rem; }
 .pay-cell > strong { white-space: nowrap; }
 
 /* บรรทัดบอกว่ารายชื่อพนักงานถูกกรองตามระดับของเคสอยู่ — ใต้ช่องเลือกในโมดัลเคส */
@@ -6066,9 +6086,7 @@ h1, h2, h3, h4, .page-hero-title, .cal-title, .login-heading h1 {
   :is(.content, .content > .pull-zone > .pull-content) > .toolbar:has(+ .table-wrap) { margin-bottom: 0; }
   :is(.content, .content > .pull-zone > .pull-content) > .toolbar + .table-wrap > :is(.table, .cal-grid) { border-top: 0; }
   :is(.content, .content > .pull-zone > .pull-content):has(.hero-card) > .card:not(.narrow),
-  :is(.content, .content > .pull-zone > .pull-content):has(> .columns) > .card:not(.narrow),
-  /* หน้ารายได้ตาม BU — กราฟกับตารางสรุปเป็นการ์ดมีขอบมุมมนเหมือนการ์ดตัวเลขด้านบน (ผู้ใช้ขอ 20 พ.ย. 2569) */
-  :is(.content, .content > .pull-zone > .pull-content):has(> .bu-tiles) > .card:not(.narrow) {
+  :is(.content, .content > .pull-zone > .pull-content):has(> .columns) > .card:not(.narrow) {
     margin-inline: 0; border-inline: 1px solid var(--border); border-radius: var(--radius-card);
   }
 }
@@ -7081,8 +7099,6 @@ h1, h2, h3, h4, .page-hero-title, .cal-title, .login-heading h1 {
 .bu-range-text { display: inline-flex; align-items: baseline; gap: 0.5rem; flex-wrap: wrap; }
 .bu-range-text strong { font-weight: 700; }
 .bu-caret { color: var(--muted); font-size: 0.75rem; }
-/* แสดงเป็น: ป้าย + ปุ่มสามตัว */
-.bu-show { display: inline-flex; align-items: center; gap: 0.5rem; font-size: 0.875rem; }
 /* ปุ่มส่งออกชิดขวาสุดของแถวตัวกรอง (แทนแถวหัวหน้าเดิม) */
 .bu-export-slot { margin-left: auto; }
 /* ไอคอนไฟล์ CSV สีเขียว (ปุ่มดาวน์โหลด CSV) — โตกว่า .btn-ico ปกติให้อ่านคำว่า CSV ออก
@@ -7092,8 +7108,6 @@ h1, h2, h3, h4, .page-hero-title, .cal-title, .login-heading h1 {
 :root[data-theme='dark'] .csv-ico { color: #2ea043; }
 /* ปุ่ม CSV ทุกหน้าใช้ไอคอนนี้ (20 พ.ย. 2569) — กฎขนาด svg ของปุ่มเดิมบางหน้า (การมาทำงานบนมือถือ) ต้องไม่ย่อมันลง */
 .btn > svg.csv-ico.csv-ico.csv-ico { width: 1.5rem; height: 1.5rem; margin-block: -0.25rem; }
-.bu-show .seg button:disabled { opacity: 0.4; cursor: not-allowed; }
-.bu-show .seg button:disabled:hover { background: transparent; color: var(--muted); }
 /* แผงเลือกช่วง */
 .bu-range-pop {
   position: fixed; z-index: 60; padding: 0.375rem; border: 1px solid var(--border); border-radius: 0.875rem;
@@ -7115,10 +7129,8 @@ h1, h2, h3, h4, .page-hero-title, .cal-title, .login-heading h1 {
 .bu-range-apply { width: 100%; margin-top: 0.625rem; justify-content: center; }
 .bu-range { margin: 0 0 0.875rem; font-size: 0.8125rem; }
 .bu-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(10.5rem, 1fr)); gap: 0.75rem; margin-bottom: 1rem; }
-.bu-tile { text-align: left; font: inherit; cursor: pointer; }
-.bu-tile.is-total { cursor: default; background: var(--brand-soft); border-color: transparent; }
-.bu-tile.is-total:hover { background: var(--brand-soft); }
-.bu-tile.is-on { border-color: var(--brand); box-shadow: inset 0 0 0 1px var(--brand); }
+.bu-tile { text-align: left; }
+.bu-tile.is-total { background: var(--brand-soft); border-color: transparent; }
 .bu-tile .kpi-label { display: inline-flex; align-items: center; gap: 0.375rem; }
 .bu-tile .kpi-value { font-size: 1.375rem; }
 .bu-delta { font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -7358,3 +7370,245 @@ h1, h2, h3, h4, .page-hero-title, .cal-title, .login-heading h1 {
   .fin-events td.is-blank { display: none; }
   :root[data-theme='dark'] .fin-events td.fe-amount.is-in { color: #6fcf97; }
 }
+
+/* ---------- รายได้ตาม BU ชุดใหม่ (RevenueBuPage + RevenueBuTabs · 20 พ.ย. 2569) ----------
+   ช่วงเวลา/ปุ่มส่งออก/การ์ดตัวเลข/ตาราง ใช้ .bu-* ชุดเดิมข้างบน · ส่วนนี้คือของที่เพิ่มมากับแท็บ */
+.bu-range-ctl.is-off { opacity: 0.55; }
+.rbu-tabs { margin: 0.25rem 0 1rem; }
+/* แท็บซ้าย · ปุ่ม CSV ชิดขวาในแถวเดียวกัน */
+.rbu-tabbar { display: flex; align-items: center; gap: 0.75rem; margin: 0.25rem 0 1rem; }
+.rbu-tabbar > .rbu-tabs { flex: 0 1 auto; min-width: 0; margin: 0; }
+.rbu-tabbar > .bu-export-slot { flex: none; margin-left: auto; }
+.rbu-tabs .seg { flex-wrap: nowrap; }
+.rbu-tabs .seg button { white-space: nowrap; }
+.rbu-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 0.625rem 1.25rem; margin-bottom: 0.875rem; }
+.rbu-ctl { display: inline-flex; align-items: center; gap: 0.5rem; font-size: 0.875rem; }
+.rbu-note { margin: -0.25rem 0 0.75rem; font-size: 0.8125rem; }
+.rbu-foot { margin: 0.75rem 0 0; font-size: 0.75rem; line-height: 1.6; }
+.bu-table .rbu-name-cell { min-width: 9rem; }
+.rbu-sub { display: block; margin-top: 0.125rem; font-size: 0.75rem; font-weight: 400; white-space: normal; }
+.bu-table .num .rbu-sub { text-align: right; }
+.bu-table td.cell-stack { white-space: normal; }
+.is-neg { color: var(--danger); }
+/* แถบสัดส่วน/อัตรากำไร/ความคืบหน้าเป้า — ตัวเลขข้างแถบคือค่าจริงเสมอ แถบแค่ช่วยกวาดตา */
+.rbu-bar { display: inline-block; flex: none; width: 4.5rem; height: 0.375rem; border-radius: 999px; background: var(--surface-2); overflow: hidden; vertical-align: middle; }
+.rbu-bar > span { display: block; height: 100%; border-radius: 999px; background: var(--brand); }
+.rbu-bar.is-good > span { background: #2e7d4f; }
+:root[data-theme='dark'] .rbu-bar.is-good > span { background: #6fcf97; }
+.rbu-target { display: grid; gap: 0.3125rem; margin-top: 0.625rem; font-size: 0.75rem; color: var(--muted); }
+/* แถบเต็มความกว้างการ์ด ข้อความอยู่ใต้แถบ — การ์ดแคบบนมือถือ แถบกับข้อความแย่งที่กันจนแถบหายเป็นศูนย์ */
+.rbu-target .rbu-bar { display: block; width: 100%; }
+.rbu-parts { display: inline-flex; flex-wrap: wrap; gap: 0.25rem 0.75rem; }
+.rbu-part { display: inline-flex; align-items: center; gap: 0.375rem; white-space: nowrap; font-size: 0.8125rem; }
+.rbu-rank {
+  display: inline-grid; place-items: center; flex: none; width: 1.5rem; height: 1.5rem; border-radius: 999px;
+  background: var(--surface-2); color: var(--muted); font-size: 0.75rem; font-weight: 700;
+}
+.bu-table tbody tr:hover td { background: transparent; }
+.bu-table td a.link { font-weight: 600; }
+@media (max-width: 900px) {
+  /* แท็บเลื่อนซ้ายขวาได้ในตัว (หน้าไม่เลื่อน) — หกแท็บไม่พอดีจอโทรศัพท์ */
+  .rbu-tabs { overflow-x: auto; margin-inline: calc(-1 * var(--gx, 1rem)); padding-inline: var(--gx, 1rem); scrollbar-width: none; }
+  .rbu-tabs::-webkit-scrollbar { display: none; }
+  .rbu-tabs .seg { width: max-content; }
+  /* มือถือ: ปุ่ม CSV ขึ้นบรรทัดบนชิดขวา แท็บเลื่อนซ้ายขวาเต็มความกว้างบรรทัดล่าง */
+  .rbu-tabbar { flex-wrap: wrap; gap: 0.5rem; }
+  .rbu-tabbar > .rbu-tabs { flex: 1 1 100%; order: 2; margin-inline: calc(-1 * var(--gx, 1rem)); }
+  .rbu-controls { flex-direction: column; align-items: stretch; }
+  .rbu-ctl { justify-content: space-between; }
+}
+@media (max-width: 640px) {
+  /* ตารางของหน้านี้กลายเป็นการ์ดทีละแถวบนมือถือ: ช่องแรก = หัวการ์ด · ช่องอื่น = ป้ายซ้าย ค่าขวา (data-label) */
+  .bu-table.is-cards, .bu-table.is-cards tbody, .bu-table.is-cards tfoot { display: block; }
+  .bu-table.is-cards thead { display: none; }
+  .bu-table.is-cards tr {
+    display: block; margin-bottom: 0.625rem; padding: 0.625rem 0.875rem;
+    border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface);
+  }
+  .bu-table.is-cards tfoot tr { background: var(--brand-soft); border-color: transparent; }
+  .bu-table.is-cards td {
+    display: block; padding: 0.25rem 0; border: 0; text-align: right; white-space: normal; overflow-wrap: anywhere;
+  }
+  .bu-table.is-cards td:empty, .bu-table.is-cards td.is-blank { display: none; }
+  .bu-table.is-cards td[data-label]::before {
+    content: attr(data-label); float: left; margin-right: 1rem; font-size: 0.75rem; font-weight: 400; line-height: 1.6; color: var(--muted);
+  }
+  .bu-table.is-cards td.rbu-name-cell { padding: 0 0 0.375rem; margin-bottom: 0.25rem; border-bottom: 1px solid var(--divider, var(--border)); text-align: left; font-weight: 700; }
+  .bu-table.is-cards td.cell-stack { text-align: left; }
+  .bu-table.is-cards td.cell-stack[data-label]::before { float: none; display: block; margin: 0 0 0.125rem; }
+  .bu-table.is-cards td.bu-empty { text-align: center; }
+  .bu-table.is-cards .num .rbu-sub { display: block; }
+  .bu-table.is-cards tfoot td { border-top: 0; }
+  .bu-table.is-cards .bu-share { justify-content: flex-end; }
+  .table-wrap:has(> .bu-table.is-cards) { overflow: visible; border: 0; background: none; }
+}
+
+/* เป้ารายได้ (ตั้งค่าระบบ › การเงิน · RevenueTargetsPane) */
+.rt-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.625rem 1rem; margin-bottom: 0.875rem; }
+.rt-year { display: inline-flex; align-items: center; gap: 0.5rem; margin: 0; font-size: 0.875rem; font-weight: 400; }
+.rt-year select { min-width: 8rem; }
+.rt-fill { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0.375rem; }
+.rt-fill select { min-width: 9rem; }
+.rt-fill input { width: 8rem; }
+.rt-table th, .rt-table td { padding: 0.375rem 0.375rem; }
+.rt-table th:first-child, .rt-table td:first-child { padding-left: 0.75rem; }
+.rt-table th:last-child, .rt-table td:last-child { padding-right: 0.75rem; }
+.rt-input { width: 100%; min-width: 0; padding: 0.375rem 0.5rem; text-align: right; font-variant-numeric: tabular-nums; }
+.rt-input.is-bad { border-color: var(--danger); box-shadow: 0 0 0 1px var(--danger); }
+.rt-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 0.625rem 1rem; margin-top: 0.875rem; }
+.rt-meta { font-size: 0.8125rem; }
+@media (max-width: 640px) {
+  .rt-head, .rt-fill { flex-direction: column; align-items: stretch; }
+  .rt-year { justify-content: space-between; }
+  .rt-fill input, .rt-fill select { width: 100%; }
+  .rt-fill .btn { justify-content: center; }
+  .bu-table.is-cards.rt-table td[data-label] { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+  .bu-table.is-cards.rt-table td[data-label]::before { float: none; margin: 0; }
+  .rt-input { max-width: 11rem; min-width: 0; }
+  .rt-actions .btn { flex: 1; justify-content: center; }
+}
+
+/* ---------- รายได้ตาม BU แบบ dashboard (RevenueBuTabs · 20 พ.ย. 2569 "เปลี่ยนจากตาราง ให้เป็น design dashboard") ---------- */
+.rbu-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; align-items: start; }
+.rbu-grid > .card { margin: 0; min-width: 0; }
+.rbu-panel.is-wide { grid-column: 1 / -1; }
+.rbu-panel-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem 1rem; margin-bottom: 0.875rem; }
+.rbu-panel-head h2 { margin: 0; font-size: 1rem; }
+.rbu-empty { margin: 0.5rem 0; font-size: 0.875rem; }
+.rbu-more { margin-top: 0.625rem; }
+.rbu-legend { display: flex; flex-wrap: wrap; gap: 0.25rem 0.875rem; margin: 0; padding: 0; list-style: none; font-size: 0.75rem; color: var(--muted); }
+.rbu-legend li { display: inline-flex; align-items: center; gap: 0.375rem; }
+.rbu-legend strong { color: var(--heading); font-weight: 600; }
+
+/* แถบนอน: ราง + ท่อนต่อกัน (ช่องว่าง 2px) + เส้นขีดตั้งของเป้า/ราคาตั้ง */
+.rbu-track { position: relative; display: block; height: 0.75rem; border-radius: 4px; background: var(--surface-2); }
+.rbu-track.is-tall { height: 1.25rem; margin-bottom: 0.875rem; }
+.rbu-fill { display: flex; gap: 2px; height: 100%; min-width: 0; border-radius: 4px; overflow: hidden; }
+.rbu-fill > span { flex-basis: 0; min-width: 2px; height: 100%; }
+.rbu-fill > span.is-hatch { background-image: repeating-linear-gradient(135deg, rgb(255 255 255 / 45%) 0 3px, transparent 3px 6px) !important; }
+.rbu-tick { position: absolute; top: -0.25rem; bottom: -0.25rem; width: 2px; margin-left: -1px; border-radius: 1px; background: var(--heading); }
+
+/* รายการแถบ: ชื่อ | แถบ | ตัวเลข */
+.rbu-rows { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+.rbu-row {
+  display: grid; grid-template-columns: minmax(6rem, 12rem) minmax(0, 1fr) minmax(6rem, auto); align-items: center; gap: 0.375rem 1rem;
+  padding: 0.5rem 0; border-bottom: 1px solid var(--divider, var(--border));
+}
+.rbu-row:last-child { border-bottom: 0; }
+.rbu-row-label { display: flex; align-items: center; gap: 0.5rem; min-width: 0; }
+.rbu-row-name { min-width: 0; font-weight: 600; color: var(--heading); overflow-wrap: anywhere; font-size: 0.875rem; }
+.rbu-row-bar { display: flex; flex-direction: column; gap: 0.375rem; min-width: 0; }
+.rbu-row-value { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; font-size: 0.875rem; }
+.rbu-row-value .rbu-sub { white-space: nowrap; }
+.rbu-units { display: flex; align-items: center; gap: 0.5rem; font-size: 0.75rem; }
+.rbu-units .rbu-bar { width: 4rem; height: 0.25rem; }
+.is-good { color: #2e7d4f; }
+:root[data-theme='dark'] .is-good { color: #6fcf97; }
+
+/* สัดส่วน (แถบเดียวยาว + ค่าใต้แถบ) */
+.rbu-mix { display: grid; grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr)); gap: 0.625rem 1rem; margin: 0; padding: 0; list-style: none; }
+.rbu-mix li { display: flex; flex-direction: column; gap: 0.0625rem; min-width: 0; }
+.rbu-mix-name { display: inline-flex; align-items: center; gap: 0.375rem; font-size: 0.8125rem; color: var(--muted); }
+.rbu-mix strong { font-size: 1.125rem; color: var(--heading); font-variant-numeric: tabular-nums; }
+.rbu-mix .muted { font-size: 0.75rem; font-variant-numeric: tabular-nums; }
+
+/* แถบสองทาง (ยังไม่ได้รับเงิน ← | → รับล่วงหน้า) */
+.rbu-drow { display: grid; grid-template-columns: minmax(7rem, 10rem) minmax(0, 1fr); align-items: center; gap: 0.25rem 1rem; padding: 0.5rem 0; border-bottom: 1px solid var(--divider, var(--border)); }
+.rbu-drow:last-child { border-bottom: 0; }
+.rbu-drow .rbu-row-label { font-weight: 600; color: var(--heading); font-size: 0.875rem; }
+.rbu-dbar { display: grid; grid-template-columns: 1fr 1fr; height: 0.75rem; }
+.rbu-dside { display: flex; height: 100%; background: var(--surface-2); }
+.rbu-dside.is-left { justify-content: flex-end; border-radius: 4px 0 0 4px; border-right: 2px solid var(--heading); }
+.rbu-dside.is-right { border-radius: 0 4px 4px 0; }
+.rbu-dside > span { height: 100%; min-width: 2px; }
+.rbu-dside.is-left > span { border-radius: 4px 0 0 4px; }
+.rbu-dside.is-right > span { border-radius: 0 4px 4px 0; }
+.rbu-dvals { grid-column: 2; display: grid; grid-template-columns: 1fr 1fr; font-size: 0.75rem; font-variant-numeric: tabular-nums; }
+.rbu-dvals > span:first-child { text-align: right; padding-right: 0.5rem; }
+.rbu-dvals > span:last-child { padding-left: 0.5rem; }
+
+/* การ์ดย่อยตัวเลข (อัตรากำไร · ส่วนลด/คืนเงิน · ต่อเคส/ยกเลิก) */
+.rbu-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr)); gap: 0.75rem; }
+.rbu-cards.is-two { grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr)); }
+.rbu-stat, .rbu-life { display: flex; flex-direction: column; gap: 0.375rem; padding: 0.875rem 1rem; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); min-width: 0; }
+.rbu-stat-label { display: inline-flex; align-items: center; gap: 0.375rem; font-weight: 600; color: var(--heading); font-size: 0.875rem; }
+.rbu-stat-value { font-size: 1.5rem; line-height: 1.2; color: var(--heading); font-variant-numeric: tabular-nums; }
+.rbu-stat-value.is-neg { color: var(--danger); }
+.rbu-stat-sub { font-size: 0.75rem; }
+.rbu-stat .rbu-bar, .rbu-life .rbu-bar { display: block; width: 100%; }
+.rbu-pair, .rbu-life-rates { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+.rbu-pair > div, .rbu-life-rates > div { display: flex; flex-direction: column; gap: 0.25rem; min-width: 0; font-size: 0.8125rem; }
+.rbu-life-start { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.25rem; padding-top: 0.625rem; border-top: 1px solid var(--divider, var(--border)); font-size: 0.8125rem; }
+.rbu-life-start strong { color: var(--heading); }
+
+/* ใบค้างนานสุด — ป้ายอายุ (สีตามช่วงอายุ + ตัวเลขวัน) | ลูกค้า/เลขใบ/แถบ BU | ยอด */
+.rbu-inv { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 24rem), 1fr)); column-gap: 2rem; margin: 0; padding: 0; list-style: none; }
+.rbu-inv li { display: grid; grid-template-columns: 3.25rem minmax(0, 1fr) auto; align-items: center; gap: 0.75rem; padding: 0.625rem 0; border-bottom: 1px solid var(--divider, var(--border)); }
+.rbu-inv li:last-child { border-bottom: 0; }
+.rbu-inv-age {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; height: 3rem; border-radius: 0.625rem;
+  color: #2b1a0e; font-size: 0.6875rem; line-height: 1.1; text-align: center;
+}
+.rbu-inv-age strong { font-size: 1rem; }
+.rbu-inv-age[style*='age-4'], .rbu-inv-age[style*='age-5'] { color: #fff; }
+:root[data-theme='dark'] .rbu-inv-age { color: #fff; }
+:root[data-theme='dark'] .rbu-inv-age[style*='age-4'], :root[data-theme='dark'] .rbu-inv-age[style*='age-5'] { color: #2b1a0e; }
+.rbu-inv-main { display: flex; flex-direction: column; gap: 0.25rem; min-width: 0; }
+.rbu-inv-name { font-weight: 600; color: var(--heading); font-size: 0.875rem; overflow-wrap: anywhere; }
+.rbu-inv-main .rbu-track { height: 0.375rem; margin-top: 0.125rem; }
+.rbu-inv-amt { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+@media (max-width: 1100px) {
+  .rbu-grid { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 640px) {
+  .rbu-grid { gap: 0.75rem; }
+  .rbu-grid > .card { padding: 1rem; }
+  /* แถวแถบบนมือถือ: ชื่อ + ตัวเลขบรรทัดบน · แถบเต็มความกว้างบรรทัดล่าง */
+  .rbu-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .rbu-row-bar { grid-column: 1 / -1; grid-row: 2; }
+  .rbu-drow { grid-template-columns: minmax(0, 1fr); }
+  .rbu-dvals { grid-column: 1; }
+  .rbu-mix { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .rbu-life-rates, .rbu-pair { gap: 0.75rem; }
+  .rbu-panel-head { flex-direction: column; align-items: flex-start; }
+}
+
+/* วงแหวน/โดนัทของ dashboard รายได้ตาม BU (ผู้ใช้ขอ 20 พ.ย. 2569 "แบบวงกลม หรืออย่างอื่นบ้าง") */
+.rbu-rings { display: grid; grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr)); gap: 1rem 0.75rem; justify-items: center; }
+.rbu-ring { display: flex; flex-direction: column; align-items: center; gap: 0.25rem; min-width: 0; text-align: center; }
+.rbu-ring-chart { position: relative; display: grid; place-items: center; flex: none; }
+.rbu-ring-chart svg { position: absolute; inset: 0; }
+.rbu-ring-chart circle { transition: stroke-dasharray 0.4s ease; }
+.rbu-ring-value { position: relative; font-size: 1.125rem; color: var(--heading); font-variant-numeric: tabular-nums; }
+.rbu-ring.is-good .rbu-ring-value { color: #2e7d4f; }
+:root[data-theme='dark'] .rbu-ring.is-good .rbu-ring-value { color: #6fcf97; }
+.rbu-ring.is-neg .rbu-ring-value { color: var(--danger); }
+.rbu-ring-label { display: inline-flex; align-items: center; gap: 0.375rem; margin-top: 0.25rem; font-size: 0.8125rem; font-weight: 600; color: var(--heading); }
+.rbu-ring-sub { font-size: 0.75rem; font-variant-numeric: tabular-nums; }
+.rbu-life-rates .rbu-ring, .rbu-pair .rbu-ring { width: 100%; }
+.rbu-donut-chart { position: relative; }
+.rbu-donut-center {
+  position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  pointer-events: none; text-align: center; line-height: 1.2;
+}
+.rbu-donut-center strong { font-size: 1.25rem; color: var(--heading); font-variant-numeric: tabular-nums; }
+.rbu-donut-center span { font-size: 0.6875rem; color: var(--muted); max-width: 6.5rem; }
+.rbu-donut .donut-legend li { grid-template-columns: auto minmax(0, 1fr) auto auto; }
+@media (max-width: 640px) {
+  .rbu-rings { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .rbu-donut { justify-content: center; }
+}
+
+/* ตารางเคส (CaseListPage · 20 พ.ย. 2569 "ช่องไฟเหลือเยอะ · ให้ข้อความขาดน้อยที่สุด")
+   บริการ/ผู้รับบริการ และพนักงานที่รับ ตกบรรทัดได้แทนการตัดด้วย … (แถวสูงขึ้นได้ · ความสูงเดิมเป็นขั้นต่ำ)
+   ช่องว่างในช่องแคบลงเล็กน้อย — เดิม 1.25rem สองข้างทุกช่อง เสียที่รวมเกือบ 300px ต่อแถว */
+@media (min-width: 601px) { /* ≤600 เป็นโหมดการ์ด — มีระยะของตัวเองอยู่แล้ว */
+  .table.case-table th, .table.case-table td { padding-inline: 0.875rem; }
+  .list-card .table.case-table th, .list-card .table.case-table td { padding-inline: 0.875rem; }
+  .list-card .table.case-table.table-indexed th:first-child,
+  .list-card .table.case-table.table-indexed td:first-child { padding-inline: 0.25rem; }
+  .table.case-table td.cell-wrap { white-space: normal; overflow-wrap: anywhere; padding-block: 0.625rem; line-height: 1.45; }
+  .table.case-table td.cell-wrap .cell-sub { white-space: normal; }
+}
+.table.case-table td .cell-sub a.link { font-size: inherit; }

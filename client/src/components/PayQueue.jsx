@@ -30,6 +30,15 @@ const LATE_DAYS = 30;
    ถ้าใช้คนละวันกับที่เรียง เคสจะย้ายช่วงวันโดยที่ลำดับไม่ขยับ แล้วเชื่อทั้งสองอย่างไม่ได้ */
 const dayOf = (c) => (c.waiting_since ?? c.created_at ?? '').slice(0, 10);
 
+/** บรรทัดในคอลัมน์หมายเหตุ — คิดตามกะ (เคสยกเลิก) · เหตุผลยกเลิก · หมายเหตุงวดล่าสุด */
+function payNotes(c) {
+  return [
+    c.prorated && `เคสยกเลิก — คิดตามกะที่ไปจริง ${c.worked_shifts} จาก ${c.planned_shifts} กะ`,
+    c.status === 'cancelled' && c.cancel_reason && `เหตุผลยกเลิก: ${c.cancel_reason}`,
+    c.last_payout_note && `งวดล่าสุด: ${c.last_payout_note}`,
+  ].filter(Boolean);
+}
+
 export default function PayQueue({ reloadKey, openCase, onOpenCase }) {
   const toast = useToast();
   const [rows, setRows] = useState(null);
@@ -221,15 +230,16 @@ export default function PayQueue({ reloadKey, openCase, onOpenCase }) {
                   โดยไม่ต้องนับเอง — เคสที่ค้างจ่ายมีหลักสิบ ไล่ทีละแถวจนตาลาย */}
               <table className="table table-cards table-indexed">
                 <colgroup>
-                  <col style={{ width: '6%' }} />
-                  <col style={{ width: '38%' }} />
-                  <col style={{ width: '18%' }} />
-                  <col style={{ width: '18%' }} />
-                  <col style={{ width: '20%' }} />
+                  <col style={{ width: '5%' }} />
+                  <col style={{ width: '31%' }} />
+                  <col style={{ width: '13%' }} />
+                  <col style={{ width: '13%' }} />
+                  <col style={{ width: '14%' }} />
+                  <col style={{ width: '24%' }} />
                 </colgroup>
                 <thead>
                   <tr>
-                    <th>#</th><th>พนักงาน / เคส</th><th>ค่าจ้างพนักงาน</th><th>ปล่อยแล้ว</th><th>คงเหลือ</th>
+                    <th>#</th><th>พนักงาน / เคส</th><th>ค่าจ้างพนักงาน</th><th>ปล่อยแล้ว</th><th>คงเหลือ</th><th className="pay-note-h">หมายเหตุ</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -283,13 +293,6 @@ export default function PayQueue({ reloadKey, openCase, onOpenCase }) {
                           {leftToPay(c) > 0 ? (
                             <>
                               <strong>{formatBaht(leftToPay(c))}</strong>
-                              {/* ยอดไม่เท่า "ยอดเหมา − ปล่อยแล้ว" ต้องอธิบายตรงนี้
-                                  ไม่งั้นผู้จัดการเอาสองคอลัมน์ซ้ายมาลบกันแล้วคิดว่าระบบคำนวณผิด */}
-                              {c.prorated && (
-                                <span className="cell-sub">
-                                  เคสยกเลิก — คิดตามกะที่ไปจริง {c.worked_shifts} จาก {c.planned_shifts} กะ
-                                </span>
-                              )}
                               {c.released > 0 && (
                                 <span className="pay-state">
                                   <span className="badge payout-partial">ตามจ่ายอยู่</span>
@@ -303,6 +306,12 @@ export default function PayQueue({ reloadKey, openCase, onOpenCase }) {
                               </span>
                             </span>
                           )}
+                        </td>
+                        {/* หมายเหตุ (ผู้ใช้ขอ 20 พ.ย. 2569) — เดิมคำอธิบายยอดคิดตามกะอยู่ใต้ยอดคงเหลือ
+                            ยอดไม่เท่า "ยอดเหมา − ปล่อยแล้ว" ต้องอธิบาย ไม่งั้นผู้จัดการเอาสองคอลัมน์มาลบกันแล้วคิดว่าระบบคำนวณผิด
+                            + เหตุผลที่ยกเลิกเคส · หมายเหตุของงวดล่าสุดที่ปล่อย · ไม่มีอะไร = ขีด (มือถือไม่ขึ้นบรรทัด) */}
+                        <td className={`pay-note cell-stack${payNotes(c).length ? '' : ' is-blank'}`} data-label="หมายเหตุ">
+                          {payNotes(c).length ? payNotes(c).map((t) => <span key={t} className="pay-note-line">{t}</span>) : <span className="pay-note-line">—</span>}
                         </td>
                       </tr>
 
