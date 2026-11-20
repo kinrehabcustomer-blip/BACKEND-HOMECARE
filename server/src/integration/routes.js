@@ -24,8 +24,18 @@ import {
   claimVisitNotificationOutbox,
   ackVisitNotificationOutbox,
 } from '../notify/visitReminders.js';
+import { ensureStaffInbox, materializeReminders } from '../notify/staffInbox.js';
+import { flushPending, pushReady } from '../notify/webPush.js';
 import { claimCaseEventOutbox, ackCaseEventOutbox, claimDueFamily3hReminders } from '../notify/caseEvents.js';
 import { ensureCustomerLineColumns as ensureCustomerLineColumnsSafe, findByPhones, linkFromChat } from '../lib/customerLine.js';
+
+/** เตือนก่อนนัด → push · ยังไม่ตั้งกุญแจ VAPID = ข้าม (ไม่สร้างแถวล่วงหน้าให้คนที่ยังไม่เปิดแอป) */
+async function pushReminders() {
+  if (!pushReady()) return;
+  await ensureStaffInbox();
+  await materializeReminders(null);
+  await flushPending();
+}
 
 /**
  * ทางเข้าจากระบบสมัครงาน chat.kinorigin.com (ดร.ธงชัย 22 ต.ค. 2569 "ได้งาน → สร้างพนักงานใน staff ในคลิกเดียว")
@@ -692,6 +702,9 @@ integrationRouter.post(
     await claimDueVisitReminders();
     await claimDueFamilyReminders();
     await claimVisitChanges();
+    /* แจ้งเตือนบนมือถือ (notify/webPush.js) — อาศัยรอบ 15 นาทีนี้สร้างเตือนก่อนนัดของทุกคนแล้วส่ง push
+       พังก็ไม่ขวางคิว LINE ด้านล่าง */
+    await pushReminders().catch((err) => console.error('[web-push] reminders:', err?.message ?? err));
     res.json({ acked: 0, pending: await claimVisitNotificationOutbox() });
   }),
 );

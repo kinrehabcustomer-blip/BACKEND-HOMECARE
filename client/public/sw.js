@@ -9,7 +9,7 @@
  *
  * แก้ไฟล์นี้เมื่อไร ให้เลื่อน VERSION — เบราว์เซอร์จะลงตัวใหม่และล้างแคชรุ่นเก่าทิ้งเอง
  */
-const VERSION = 'v2';
+const VERSION = 'v3'; // v3 = แจ้งเตือนบนมือถือ (push · 20 พ.ย. 2569)
 const SHELL = `kin-shell-${VERSION}`;
 const ASSETS = `kin-assets-${VERSION}`;
 const PRECACHE = ['/offline.html', '/icons/icon-192.png'];
@@ -56,4 +56,42 @@ self.addEventListener('fetch', (event) => {
       return res;
     })());
   }
+});
+
+/*
+ * แจ้งเตือนบนมือถือ (Web Push · 20 พ.ย. 2569 · server notify/webPush.js)
+ * ข้อความมาเป็น JSON { title, body, url, tag } — ชื่อผู้รับบริการ + วัน/เวลานัดเท่านั้น ไม่มีข้อมูลสุขภาพ/เงิน
+ * tag ต่างกันทุกแจ้งเตือน (kin-<id>) — ไม่ทับกันเอง · ทดสอบใช้ kin-test
+ */
+self.addEventListener('push', (event) => {
+  let data = {};
+  try {
+    data = event.data ? event.data.json() : {};
+  } catch {
+    data = { body: event.data ? event.data.text() : '' };
+  }
+  event.waitUntil(self.registration.showNotification(data.title || 'KIN Homecare', {
+    body: data.body || '',
+    icon: '/icons/icon-192.png',
+    badge: '/icons/icon-192.png',
+    tag: data.tag || undefined,
+    lang: 'th',
+    data: { url: data.url || '/my-today' },
+  }));
+});
+
+/** กดแจ้งเตือน → ใช้หน้าต่างแอปที่เปิดอยู่แล้ว (พาไปหน้าที่เกี่ยว) ไม่มีค่อยเปิดใหม่ */
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const target = new URL(event.notification.data?.url || '/', self.location.origin).href;
+  event.waitUntil((async () => {
+    const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    const win = wins.find((w) => new URL(w.url).origin === self.location.origin);
+    if (win) {
+      await win.focus();
+      if ('navigate' in win) await win.navigate(target).catch(() => {});
+      return;
+    }
+    await self.clients.openWindow(target);
+  })());
 });

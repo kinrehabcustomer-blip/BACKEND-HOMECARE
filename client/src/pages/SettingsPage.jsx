@@ -7,6 +7,9 @@ import LineIcon from '../components/LineIcon.jsx';
 import { useAuth } from '../auth.jsx';
 import { guideUrlFor } from '../lib/guide.js';
 import { canPromptInstall, isIos, isStandalone, onInstallChange, promptInstall } from '../lib/pwa.js';
+import { currentSubscription, disablePush, enablePush, pushSupport, testPush } from '../lib/push.js';
+import { api } from '../api.js';
+import { useToast } from '../toast.jsx';
 
 // หมวดของระบบ (เหตุผลยกเลิก · เหตุการณ์ผิดปกติ) ย้ายไปหน้า "ตั้งค่าระบบ" แล้ว (ปุ่มไขควงข้างปุ่มตั้งค่า · SystemSettingsPage)
 
@@ -48,6 +51,85 @@ function InstallApp() {
       <div>
         <strong>ติดตั้งแอปลงหน้าโฮม</strong>
         <p className="muted">เปิดจากไอคอนได้เลย เต็มจอเหมือนแอป ไม่ต้องพิมพ์ที่อยู่เว็บ</p>
+      </div>
+      {body}
+    </div>
+  );
+}
+
+/**
+ * แจ้งเตือนบนมือถือ (ผู้ใช้ขอ 20 พ.ย. 2569) — พนักงานภาคสนามเท่านั้น · lib/push.js · server notify/webPush.js
+ * เด้งที่เครื่องแม้ปิดแอปอยู่: กะใหม่ · เลื่อน/ยกเลิก/ย้ายกะ · เตือนวันก่อนนัด · เตือน 3 ชม.
+ * สถานะจริงต้องดูสองฝั่ง: เบราว์เซอร์มีการสมัครอยู่ไหม + server ผูกเครื่องนี้กับเราไหม (คนอื่นอาจเคยล็อกอินเครื่องนี้)
+ */
+function PushSetting() {
+  const toast = useToast();
+  const support = pushSupport();
+  const [state, setState] = useState({ loading: true, enabled: false, on: false });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let off = false;
+    (async () => {
+      const sub = await currentSubscription().catch(() => null);
+      const s = await api.pushStatus(sub?.endpoint).catch(() => ({ enabled: false, subscribed: false }));
+      if (!off) setState({ loading: false, enabled: s.enabled, on: Boolean(sub && s.subscribed) });
+    })();
+    return () => { off = true; };
+  }, []);
+
+  const run = async (fn, done) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await fn();
+      if (done) toast(done);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const turnOn = () => run(async () => { await enablePush(); setState((s) => ({ ...s, on: true })); }, 'เปิดแจ้งเตือนเครื่องนี้แล้ว');
+  const turnOff = () => run(async () => { await disablePush(); setState((s) => ({ ...s, on: false })); }, 'ปิดแจ้งเตือนเครื่องนี้แล้ว');
+  const test = () => run(() => testPush(), 'ส่งข้อความทดสอบแล้ว — ควรเด้งขึ้นภายในไม่กี่วินาที');
+
+  let body;
+  if (support === 'ios-install') {
+    body = <p className="muted">iPhone ต้องติดตั้งแอปลงหน้าโฮมก่อน (ด้านบน) แล้วเปิดจากไอคอน จึงจะเปิดแจ้งเตือนได้ — ต้องเป็น iOS 16.4 ขึ้นไป</p>;
+  } else if (support === 'unsupported') {
+    body = <p className="muted">เบราว์เซอร์นี้ไม่รองรับแจ้งเตือน — ใช้ Chrome บน Android หรือแอปที่ติดตั้งบน iPhone</p>;
+  } else if (support === 'dev') {
+    body = <p className="muted">ใช้ได้เฉพาะเว็บจริง (ไม่ใช่โหมดพัฒนา)</p>;
+  } else if (support === 'denied') {
+    body = <p className="muted">เครื่องนี้ปิดการแจ้งเตือนของแอปไว้ — เปิดที่การตั้งค่าของเครื่อง (แจ้งเตือน → KIN Homecare) แล้วกลับมาหน้านี้</p>;
+  } else if (state.loading) {
+    body = <p className="muted">กำลังตรวจสอบ…</p>;
+  } else if (!state.enabled) {
+    body = <p className="muted">ระบบยังไม่ได้เปิดใช้แจ้งเตือนบนมือถือ — แจ้งผู้ดูแลระบบ</p>;
+  } else if (state.on) {
+    body = (
+      <div className="push-actions">
+        <span className="badge active">เปิดอยู่</span>
+        <button type="button" className="btn" disabled={busy} onClick={test}>ทดสอบ</button>
+        <button type="button" className="btn" disabled={busy} onClick={turnOff}>ปิด</button>
+      </div>
+    );
+  } else {
+    body = (
+      <button type="button" className="btn primary" disabled={busy} onClick={turnOn}>
+        <LineIcon name="bell" />{busy ? 'กำลังเปิด…' : 'เปิดแจ้งเตือน'}
+      </button>
+    );
+  }
+
+  return (
+    <div className="setting-row install-row">
+      <div>
+        <strong>แจ้งเตือนบนมือถือ</strong>
+        <p className="muted">เด้งขึ้นที่เครื่องแม้ปิดแอปอยู่ — กะใหม่ · เลื่อน/ยกเลิกกะ · เตือนวันก่อนนัด · เตือน 3 ชม. ก่อนเริ่มกะ</p>
+        {error && <p className="error push-error">{error}</p>}
       </div>
       {body}
     </div>
@@ -106,6 +188,8 @@ export default function SettingsPage() {
       <>
         <SettingsPaneHead title="แอปบนมือถือ" desc="ติดตั้งระบบเป็นไอคอนบนหน้าโฮม เปิดได้เร็วเหมือนแอป" />
         <section className="set-card"><InstallApp /></section>
+        {/* แจ้งเตือนกะงาน — เฉพาะพนักงานภาคสนาม (หลังบ้านใช้กระดิ่งของค้าง + อีเมลสรุป) */}
+        {user?.role !== 'admin' && <section className="set-card"><PushSetting /></section>}
       </>
     );
   } else if (tab === 'password') {

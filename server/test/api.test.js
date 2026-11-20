@@ -3482,6 +3482,110 @@ if (process.env.RUN_DB_TESTS !== '1') {
       await call('POST', '/api/my/notifications/read', { ids: 'x' }, LEAD_A, 400);
     });
 
+    test('แจ้งเตือนบนมือถือ (Web Push): สมัครต่อเครื่อง · ส่งก่อนตอบคำขอ · ไม่ส่งซ้ำ · เครื่องที่เลิกรับถูกลบ · ย้ายเครื่องตามคนล็อกอิน', async () => {
+      const webpush = (await import('web-push')).default;
+      const push = await import('../src/notify/webPush.js');
+      const saved = { ...process.env };
+      const realSend = webpush.sendNotification;
+      const sent = [];
+      let gone = new Set();
+      // ไม่ยิงออกเน็ตจริง — ดักที่ตัวส่งของ web-push แล้วเก็บข้อความไว้ตรวจ
+      webpush.sendNotification = async (sub, body) => {
+        if (gone.has(sub.endpoint)) { const e = new Error('gone'); e.statusCode = 410; throw e; }
+        sent.push({ endpoint: sub.endpoint, msg: JSON.parse(body) });
+        return { statusCode: 201 };
+      };
+      const ep = (n) => `https://push.example.test/${LEAD_A.employee_id}/${n}`;
+      const q = (n) => `/api/my/push?endpoint=${encodeURIComponent(ep(n))}`;
+      const key = { p256dh: 'BOr-test-p256dh-key-0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJK', auth: 'auth-secret-0123' };
+      try {
+        // ยังไม่ตั้งกุญแจ → ปิดเงียบ (หน้าตั้งค่าบอกว่ายังไม่เปิดใช้) · สมัครไม่ได้
+        delete process.env.VAPID_PUBLIC_KEY;
+        assert.equal((await get('/api/my/push', LEAD_A)).body.enabled, false);
+        await call('POST', '/api/my/push', { endpoint: ep(1), keys: key }, LEAD_A, 503);
+
+        const vapid = webpush.generateVAPIDKeys();
+        Object.assign(process.env, { VAPID_PUBLIC_KEY: vapid.publicKey, VAPID_PRIVATE_KEY: vapid.privateKey, VAPID_SUBJECT: 'mailto:test@example.test' });
+        const st = (await get('/api/my/push', LEAD_A)).body;
+        assert.equal(st.enabled, true);
+        assert.equal(st.public_key, vapid.publicKey);
+        await call('POST', '/api/my/push', { endpoint: 'http://insecure.test/x', keys: key }, LEAD_A, 400);
+        await call('POST', '/api/my/push', { endpoint: ep(1), keys: key }, LEAD_A);
+        await call('POST', '/api/my/push', { endpoint: ep(2), keys: key }, LEAD_A);
+        assert.equal((await get(q(1), LEAD_A)).body.subscribed, true);
+        assert.equal((await get(q(1), LEAD_B)).body.subscribed, false);
+
+        // ลงกะใหม่ให้ LEAD_A → push ถึงทั้งสองเครื่องก่อนคำขอตอบกลับ (ไม่ต้องรอ cron)
+        await push.flushPending(); // ของค้างจากเทสก่อน ๆ
+        sent.length = 0;
+        const c = await newCase();
+        const sched = await call('POST', `/api/cases/${c.case_id}/visits/bulk`, { dates: [inDays(2)], assigned_to: LEAD_A.employee_id }, MANAGER, 201);
+        assert.deepEqual(sent.map((x) => x.endpoint).sort(), [ep(1), ep(2)]);
+        assert.equal(sent[0].msg.title, 'กะใหม่');
+        assert.match(sent[0].msg.body, /Workflow patient/);
+        assert.equal(sent[0].msg.url, '/my-calendar');
+        assert.doesNotMatch(JSON.stringify(sent[0].msg), /฿|บาท|2000|1200/, 'ไม่มีเงินบนจอล็อก');
+
+        // ไม่ส่งซ้ำ: flush อีกรอบไม่มีอะไรออก
+        sent.length = 0;
+        assert.equal((await push.flushPending()).claimed, 0);
+        assert.equal(sent.length, 0);
+
+        // เลื่อนกะ — เครื่องที่ 2 เลิกรับไปแล้ว (410) → ถูกลบ · เครื่องที่ 1 ยังได้
+        gone = new Set([ep(2)]);
+        const vPath = `/api/cases/${c.case_id}/visits/${sched.visits[0].visit_id}`;
+        await call('PATCH', vPath, { visit_date: inDays(3) });
+        assert.deepEqual(sent.map((x) => [x.endpoint, x.msg.title]), [[ep(1), 'กะถูกเลื่อน']]);
+        assert.equal((await get(q(2), LEAD_A)).body.subscribed, false);
+
+        // คำขอที่ล้มไม่ส่ง
+        sent.length = 0;
+        await call('PATCH', vPath, { visit_date: 'x' }, MANAGER, 400);
+        assert.equal(sent.length, 0);
+
+        // เครื่องเดียวกันมีคนอื่นล็อกอิน → ย้ายเป็นของคนล่าสุด กะของ A ไม่เด้งบนเครื่องที่ B ถืออยู่
+        await call('POST', '/api/my/push', { endpoint: ep(1), keys: key }, LEAD_B);
+        assert.equal((await get(q(1), LEAD_A)).body.subscribed, false);
+        assert.equal((await get(q(1), LEAD_B)).body.subscribed, true);
+        sent.length = 0;
+        await call('PATCH', vPath, { visit_date: inDays(4) });
+        assert.equal(sent.length, 0);
+
+        // ปุ่มทดสอบ · เลิกรับ
+        assert.equal((await call('POST', '/api/my/push/test', { endpoint: ep(1) }, LEAD_B)).sent, 1);
+        assert.equal(sent[0].msg.tag, 'kin-test');
+        await call('POST', '/api/my/push/test', { endpoint: ep(1) }, LEAD_A, 409); // ไม่ใช่เครื่องของ A แล้ว
+        await call('DELETE', '/api/my/push', { endpoint: ep(1) }, LEAD_B);
+        assert.equal((await get(q(1), LEAD_B)).body.subscribed, false);
+
+        // เตือนก่อนนัดจากรอบ cron 15 นาที (สร้างของทุกคน) แล้วส่ง push
+        await call('POST', '/api/my/push', { endpoint: ep(3), keys: key }, LEAD_A);
+        const inbox = await import('../src/notify/staffInbox.js');
+        // ปรับนาฬิกาไม่ได้ จึงตรวจด้วยกะของวันนี้ที่เริ่มอีก 1 ชม. (เข้ารอบเตือน 3 ชม. ทันที)
+        const { soon } = await sql.one(`SELECT to_char((now() AT TIME ZONE 'Asia/Bangkok') + interval '1 hour', 'HH24:MI') AS soon`);
+        if (soon > '01:00') {
+          const s2 = await call('POST', `/api/cases/${c.case_id}/visits/bulk`, { dates: [today], assigned_to: LEAD_A.employee_id, planned_start: soon }, MANAGER, 201);
+          sent.length = 0;
+          await inbox.materializeReminders(null);
+          await push.flushPending();
+          const r = sent.filter((x) => x.msg.title === 'ใกล้ถึงเวลากะ');
+          assert.equal(r.length, 1, JSON.stringify(sent));
+          assert.equal(r[0].msg.url, '/my-today');
+          assert.ok(s2.visits.length >= 1);
+        }
+
+        // ข้อความ: ถ้อยคำตรงกับกระดิ่ง
+        assert.deepEqual(push.describe({ id: 9, kind: 'remind_3h', payload: { client: 'คุณเอ', date: today, start: '13:00' } }),
+          { title: 'ใกล้ถึงเวลากะ', body: 'คุณเอ · เริ่ม 13:00 น.', url: '/my-today', tag: 'kin-9' });
+        assert.equal(push.describe({ id: 1, kind: 'visit_cancelled', payload: { client: 'คุณบี', date: today } }).url, '/my-calendar');
+      } finally {
+        webpush.sendNotification = realSend;
+        for (const k of ['VAPID_PUBLIC_KEY', 'VAPID_PRIVATE_KEY', 'VAPID_SUBJECT']) {
+          if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k];
+        }
+      }
+    });
+
     test('เปลี่ยนคนดูแลเคส: กะข้างหน้าย้ายตาม · กะที่ลงตอนยังไม่มีคนได้เจ้าของ · ถอดคนแล้วไม่ค้างชื่อ', async () => {
       const c = await newCase();
       const sched = await post(`/api/cases/${c.case_id}/visits/bulk`, { dates: [inDays(-1), today, inDays(2)] }, MANAGER, 201);

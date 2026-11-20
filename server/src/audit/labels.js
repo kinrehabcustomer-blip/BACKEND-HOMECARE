@@ -140,6 +140,10 @@ export const ACTION_LABELS = {
   'my.cases.reports': 'ส่งรายงานการดูแล',
   'my.cases.reports.update': 'แก้รายงานการดูแล (พนักงาน)',
   'my.cases.family-messages': 'พนักงานส่งข้อความถึงญาติ',
+  // แจ้งเตือนบนมือถือ (notify/webPush.js · 20 พ.ย. 2569)
+  'my.push': 'เปิดแจ้งเตือนบนมือถือ',
+  'my.push.delete': 'ปิดแจ้งเตือนบนมือถือ',
+  'my.push.test': 'ทดสอบแจ้งเตือนบนมือถือ',
   'integration.report': 'ส่งรายงานผ่าน LINE',
   'integration.cases.assign': 'มอบหมายงาน (จากระบบแชท)',
   'integration.family.accept': 'ญาติตอบรับคำเชิญ',

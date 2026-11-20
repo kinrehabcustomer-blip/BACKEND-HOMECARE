@@ -23,6 +23,7 @@ import { permissionsRouter } from './permissions/routes.js';
 import { auditRouter } from './audit/routes.js';
 import { financeRouter } from './finance/routes.js';
 import { auditTrail, ensureAuditTable } from './lib/audit.js';
+import { pushAfterRequest } from './notify/webPush.js';
 import { categoriesRouter } from './categories/routes.js';
 import { ensureCategories } from './categories/repo.js';
 import { ensureFormatDays } from './packages/formatDays.js';
@@ -53,6 +54,8 @@ export function createApp() {
   /* บันทึกการใช้งาน (เก็บอย่างน้อย 1 ปี) — วางก่อนทุก router เส้นใหม่ที่เพิ่มทีหลังจึงถูกบันทึกเอง
      ต้องอยู่หลัง express.json/cookieParser (อ่าน body และคุกกี้) · ดู lib/audit.js */
   app.use('/api', auditTrail);
+  /* แจ้งเตือนบนมือถือ — คำขอที่สร้างแจ้งเตือนกะ (ลงกะ/เลื่อน/ยกเลิก/ย้ายคน) ส่ง push ก่อนตอบกลับ · ดู notify/webPush.js */
+  app.use('/api', pushAfterRequest);
 
   app.get('/api/health', (req, res) => res.json({ ok: true }));
   // /api/auth ไม่ผ่านด่านบังคับเปลี่ยนรหัส — ไม่งั้นคนที่ต้องเปลี่ยนรหัสจะเรียก /auth/change-password ไม่ได้

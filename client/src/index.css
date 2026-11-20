@@ -7635,3 +7635,15 @@ h1, h2, h3, h4, .page-hero-title, .cal-title, .login-heading h1 {
 @media (max-width: 600px) {
   .table.case-table .staff-name + .staff-name::before { content: ' · '; }
 }
+
+/* แจ้งเตือนบนมือถือ (SettingsPage · PushSetting · 20 พ.ย. 2569) */
+.push-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem; }
+.push-error { margin: 0.375rem 0 0; font-size: 0.8125rem; }
+/* กระดิ่งพนักงาน: ชวนเปิดแจ้งเตือนบนมือถือท้ายกล่อง (StaffBell) */
+.staff-push-hint {
+  display: flex; align-items: center; gap: 0.5rem; width: 100%; margin: 0.25rem 0 0.5rem;
+  padding: 0.625rem 0.75rem; border: 1px dashed var(--brand); border-radius: 0.625rem;
+  background: none; color: var(--brand); font: inherit; font-size: 0.8125rem; font-weight: 600; text-align: left; cursor: pointer;
+}
+.staff-push-hint:hover { background: var(--brand-soft); }
+.staff-push-hint svg { flex: none; width: 1rem; height: 1rem; }

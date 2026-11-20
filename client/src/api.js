@@ -312,6 +312,11 @@ export const api = {
   /** กระดิ่งแจ้งเตือนของพนักงาน — { items, unread } · ids ไม่ส่ง = อ่านทั้งหมด */
   myNotifications: () => request('/my/notifications'),
   readMyNotifications: (ids) => request('/my/notifications/read', { method: 'POST', body: ids ? { ids } : {} }),
+  /** แจ้งเตือนบนมือถือ (lib/push.js) — { enabled, public_key, subscribed } · สมัคร/เลิก/ทดสอบต่อเครื่อง (endpoint) */
+  pushStatus: (endpoint) => request(`/my/push${endpoint ? `?${new URLSearchParams({ endpoint })}` : ''}`),
+  pushSubscribe: (sub) => request('/my/push', { method: 'POST', body: sub }),
+  pushUnsubscribe: (endpoint) => request('/my/push', { method: 'DELETE', body: endpoint ? { endpoint } : {} }),
+  pushTest: (endpoint) => request('/my/push/test', { method: 'POST', body: { endpoint } }),
   myAttendance: (month) => request(`/my/attendance${month ? `?month=${month}` : ''}`),
   /** สลิปค่าตอบแทนของตัวเอง — เฉพาะรอบที่จ่ายจริงแล้ว */
   myPayslips: () => request('/my/payslips'),

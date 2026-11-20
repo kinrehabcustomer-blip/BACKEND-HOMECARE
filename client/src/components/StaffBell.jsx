@@ -5,6 +5,7 @@ import { api } from '../api.js';
 import LineIcon from './LineIcon.jsx';
 import { todayTH } from '../labels.js';
 import { useVisiblePoll } from '../lib/poll.js';
+import { currentSubscription, pushSupport } from '../lib/push.js';
 
 /* ดึงใหม่ทุก 2 นาที (เฉพาะตอนแอปเปิดอยู่บนจอ — ดู lib/poll.js) + ทุกครั้งที่เปลี่ยนหน้า */
 const REFRESH_MS = 2 * 60_000;
@@ -67,6 +68,20 @@ export default function StaffBell() {
   const [pos, setPos] = useState(null);
   const btnRef = useRef(null);
   const panelRef = useRef(null);
+  /* ชวนเปิดแจ้งเตือนบนมือถือท้ายกล่อง — เฉพาะเครื่องที่เปิดได้ (หรือ iPhone ที่ต้องติดตั้งก่อน) และยังไม่ได้เปิด */
+  const [pushHint, setPushHint] = useState(false);
+  useEffect(() => {
+    if (!open) return undefined;
+    let off = false;
+    const support = pushSupport();
+    if (support !== 'ok' && support !== 'ios-install') return undefined;
+    (async () => {
+      const sub = await currentSubscription().catch(() => null);
+      const s = await api.pushStatus(sub?.endpoint).catch(() => null);
+      if (!off) setPushHint(Boolean(s?.enabled && !(sub && s.subscribed)));
+    })();
+    return () => { off = true; };
+  }, [open]);
 
   const load = useCallback(() => api.myNotifications().then(setData).catch(() => {}), []);
   useVisiblePoll(load, REFRESH_MS, location.pathname);
@@ -153,6 +168,13 @@ export default function StaffBell() {
           style={{ width: pos.width, left: pos.left, top: pos.top, maxHeight: pos.maxHeight }}
         >
           <h2 className="bell-panel-title">การแจ้งเตือน</h2>
+          {/* อยู่บนสุด — ท้ายรายการ 40 อันไม่มีใครเลื่อนไปเห็น */}
+          {pushHint && (
+            <button type="button" className="staff-push-hint" onClick={() => { setOpen(false); navigate('/settings?tab=app'); }}>
+              <LineIcon name="bell" />
+              <span>เปิดแจ้งเตือนบนมือถือ — เด้งขึ้นแม้ปิดแอปอยู่</span>
+            </button>
+          )}
           {items.length === 0 ? (
             <p className="bell-empty">
               <LineIcon name="check" className="text-ico" />

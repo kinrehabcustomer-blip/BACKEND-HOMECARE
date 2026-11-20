@@ -1,4 +1,5 @@
 import { sql } from '../db/index.js';
+import { markPushPending } from './webPush.js';
 
 /**
  * กระดิ่งแจ้งเตือนในแอปของพนักงานภาคสนาม (ผู้ใช้ขอ 9 พ.ย. 2569) — คู่ขนานกับ LINE @kinjobs ไม่ได้แทน
@@ -11,7 +12,8 @@ import { sql } from '../db/index.js';
  * เก็บเป็นข้อมูล (payload) ไม่ใช่ข้อความสำเร็จรูป — หน้าเว็บเป็นคนเขียนข้อความเอง จะแก้ถ้อยคำได้โดยไม่ต้องย้อนแก้แถวเก่า
  * ไม่มีเงิน/ข้อมูลสุขภาพในนี้ — ชื่อผู้รับบริการ วันและเวลานัดเท่านั้น (เท่าที่พนักงานเห็นในตารางของตัวเองอยู่แล้ว)
  *
- * การเตือนก่อนนัดไม่ต้องมี cron: สร้างตอนพนักงานเปิดแอป/ดึงรายการ (materializeReminders)
+ * การเตือนก่อนนัด: สร้างตอนพนักงานเปิดแอป/ดึงรายการ (materializeReminders)
+ * + cron 15 นาทีของระบบแชทสร้างของทุกคนด้วย เพื่อส่งแจ้งเตือนบนมือถือ (notify/webPush.js · 20 พ.ย. 2569)
  * แจ้งเตือนในแอปมีความหมายเฉพาะตอนเปิดแอปอยู่แล้ว — dedupe_key กันสร้างซ้ำ
  */
 let ready = null;
@@ -30,6 +32,10 @@ export const ensureStaffInbox = () =>
     )`);
     await sql.run(`CREATE INDEX IF NOT EXISTS idx_staff_notifications_inbox
       ON staff_notifications (employee_id, created_at DESC)`);
+    // แจ้งเตือนบนมือถือ (notify/webPush.js · 20 พ.ย. 2569) — ใช้ตารางนี้เป็นคิวส่ง push · NULL = ยังไม่ส่ง
+    await sql.run('ALTER TABLE staff_notifications ADD COLUMN IF NOT EXISTS pushed_at TIMESTAMPTZ');
+    await sql.run(`CREATE INDEX IF NOT EXISTS idx_staff_notifications_unpushed
+      ON staff_notifications (created_at) WHERE pushed_at IS NULL`);
   })().catch((err) => { ready = null; throw err; }));
 
 /** db = sql หรือ tx — ต้องเรียก ensureStaffInbox() ก่อนเปิด transaction (DDL ใน tx ที่ล็อกแถวอยู่เสี่ยงค้าง) */
@@ -41,6 +47,7 @@ async function push(db, { employeeId, kind, caseId = null, visitId = null, paylo
      ON CONFLICT (dedupe_key) DO NOTHING`,
     { employeeId, kind, caseId, visitId, payload: JSON.stringify(payload), key },
   );
+  markPushPending(); // ส่ง push ก่อนตอบคำขอนี้ (หลัง transaction commit) — notify/webPush.js
 }
 
 const clientOf = async (db, caseId) =>
@@ -97,7 +104,7 @@ export async function inboxVisitChange(tx, row) {
 /* เงื่อนไขเดียวกับการเตือนทาง LINE (visitReminders.js) — กะที่ยังต้องไปจริง ยังไม่เช็คอิน เคสยังเดิน */
 const START_AT = `((v.visit_date || ' ' || COALESCE(v.planned_start, '08:00'))::timestamp AT TIME ZONE 'Asia/Bangkok')`;
 const DAY_AT = `(((v.visit_date)::date - 1 + time '08:00') AT TIME ZONE 'Asia/Bangkok')`;
-const DUE_BASE = `v.assigned_to = :me AND v.status = 'scheduled' AND v.check_in_at IS NULL
+const DUE_BASE = `(CAST(:me AS text) IS NULL OR v.assigned_to = :me) AND v.assigned_to IS NOT NULL AND v.status = 'scheduled' AND v.check_in_at IS NULL
   AND c.status IN ('unassigned', 'assigned', 'in_progress') AND ${START_AT} > now()
   AND v.visit_date BETWEEN to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD')
                        AND to_char((now() AT TIME ZONE 'Asia/Bangkok') + interval '2 days', 'YYYY-MM-DD')`;
@@ -107,7 +114,9 @@ const DUE_BASE = `v.assigned_to = :me AND v.status = 'scheduled' AND v.check_in_
  * กุญแจผูกตัวพนักงานด้วย (ตรวจ 11 พ.ย. 2569) — เดิมกุญแจมีแค่กะ+วัน คนเดิมได้เตือนไปแล้ว ย้ายกะให้คนใหม่
  * คนใหม่จะไม่ได้เตือนเลย (ชนกุญแจเดิม) · NOT EXISTS กันคนเดิมได้ซ้ำจากแถวที่สร้างด้วยกุญแจรูปแบบเก่า
  */
-async function materializeReminders(me) {
+/* me = null → ทุกคน (cron 15 นาที · ส่ง push) · me = คนที่เปิดแอปอยู่ → เห็นในกระดิ่งแล้ว จดว่าส่งแล้ว ไม่เด้งซ้ำทีหลัง */
+export async function materializeReminders(me = null) {
+  const pushed = me ? 'now()' : 'NULL';
   const payload = `jsonb_build_object('client', c.client_name, 'date', v.visit_date, 'start', v.planned_start, 'end', v.planned_end)`;
   const legacy = (kind, key) => `NOT EXISTS (SELECT 1 FROM staff_notifications o
     WHERE o.employee_id = v.assigned_to AND o.kind = '${kind}' AND o.dedupe_key = ${key})`;
@@ -115,9 +124,9 @@ async function materializeReminders(me) {
   const threeKey = `'remind-3h:' || v.visit_id || ':' || v.visit_date || ':' || v.planned_start`;
   // วันก่อนนัด — ยังห่างนัดเกิน 3 ชม. (ใกล้กว่านั้นรอบ 3 ชม. แจ้งแทน ไม่ซ้อนสองอัน)
   await sql.run(
-    `INSERT INTO staff_notifications (employee_id, kind, case_id, visit_id, payload, dedupe_key)
+    `INSERT INTO staff_notifications (employee_id, kind, case_id, visit_id, payload, dedupe_key, pushed_at)
      SELECT v.assigned_to, 'remind_day', v.case_id, v.visit_id, ${payload},
-            ${dayKey} || ':' || v.assigned_to
+            ${dayKey} || ':' || v.assigned_to, ${pushed}
      FROM case_visits v JOIN cases c ON c.case_id = v.case_id
      WHERE ${DUE_BASE} AND now() >= ${DAY_AT} AND now() < ${START_AT} - interval '3 hours'
        AND ${legacy('remind_day', dayKey)}
@@ -125,9 +134,9 @@ async function materializeReminders(me) {
     { me },
   );
   await sql.run(
-    `INSERT INTO staff_notifications (employee_id, kind, case_id, visit_id, payload, dedupe_key)
+    `INSERT INTO staff_notifications (employee_id, kind, case_id, visit_id, payload, dedupe_key, pushed_at)
      SELECT v.assigned_to, 'remind_3h', v.case_id, v.visit_id, ${payload},
-            ${threeKey} || ':' || v.assigned_to
+            ${threeKey} || ':' || v.assigned_to, ${pushed}
      FROM case_visits v JOIN cases c ON c.case_id = v.case_id
      WHERE ${DUE_BASE} AND v.planned_start IS NOT NULL AND now() >= ${START_AT} - interval '3 hours'
        AND ${legacy('remind_3h', threeKey)}

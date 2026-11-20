@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { z } from 'zod';
 import * as cases from '../cases/repo.js';
 import {
   calendarQuerySchema,
@@ -18,6 +19,7 @@ import { THERAPY_POSITIONS } from '../employees/schema.js';
 import { sql } from '../db/index.js';
 import { notifySafely, onVisitAttendance } from '../notify/caseEvents.js';
 import * as inbox from '../notify/staffInbox.js';
+import * as webPush from '../notify/webPush.js';
 
 /**
  * ส่วนของ "พนักงานภาคสนาม" (field) — เห็น/แตะได้เฉพาะกะของตัวเอง
@@ -660,6 +662,60 @@ myRouter.get(
   '/notifications',
   asyncRoute(async (req, res) => {
     res.json(await inbox.listInbox(req.user.employee_id));
+  }),
+);
+
+/**
+ * แจ้งเตือนบนมือถือ (notify/webPush.js · 20 พ.ย. 2569) — สมัคร/เลิกรับต่อเครื่อง · ผูกกับคนที่ล็อกอินอยู่เสมอ
+ *   GET    /push          → { enabled, public_key, subscribed } (subscribed ตาม endpoint ที่ส่งมาใน ?endpoint=)
+ *   POST   /push          { endpoint, keys: { p256dh, auth } } → สมัครเครื่องนี้
+ *   DELETE /push          { endpoint? } → เลิกรับเครื่องนี้ (ไม่ส่ง endpoint = ทุกเครื่องของฉัน)
+ *   POST   /push/test     { endpoint } → ส่งข้อความทดสอบไปเครื่องนี้
+ */
+const pushSubSchema = z.object({
+  endpoint: z.string().url().max(1000).refine((u) => u.startsWith('https://'), 'endpoint ต้องเป็น https'),
+  keys: z.object({ p256dh: z.string().min(10).max(200), auth: z.string().min(8).max(100) }),
+});
+const endpointSchema = z.object({ endpoint: z.string().url().max(1000).optional() });
+
+myRouter.get(
+  '/push',
+  asyncRoute(async (req, res) => {
+    const key = webPush.publicKey();
+    const endpoint = typeof req.query.endpoint === 'string' ? req.query.endpoint : null;
+    res.json({
+      enabled: Boolean(key),
+      public_key: key,
+      subscribed: key && endpoint ? await webPush.isSubscribed(req.user.employee_id, endpoint) : false,
+    });
+  }),
+);
+
+myRouter.post(
+  '/push',
+  asyncRoute(async (req, res) => {
+    if (!webPush.pushReady()) throw new ApiError(503, 'ระบบยังไม่ได้เปิดใช้แจ้งเตือนบนมือถือ — แจ้งผู้ดูแลระบบ');
+    await webPush.subscribe(req.user.employee_id, pushSubSchema.parse(req.body ?? {}), req.get('user-agent'));
+    res.json({ subscribed: true });
+  }),
+);
+
+myRouter.delete(
+  '/push',
+  asyncRoute(async (req, res) => {
+    const { endpoint } = endpointSchema.parse(req.body ?? {});
+    res.json({ removed: await webPush.unsubscribe(req.user.employee_id, endpoint ?? null) });
+  }),
+);
+
+myRouter.post(
+  '/push/test',
+  asyncRoute(async (req, res) => {
+    const { endpoint } = endpointSchema.parse(req.body ?? {});
+    if (!endpoint) throw new ApiError(400, 'ไม่พบเครื่องที่จะทดสอบ');
+    const sent = await webPush.sendTest(req.user.employee_id, endpoint);
+    if (!sent) throw new ApiError(409, 'ส่งไม่สำเร็จ — ลองปิดแล้วเปิดแจ้งเตือนใหม่');
+    res.json({ sent });
   }),
 );
 

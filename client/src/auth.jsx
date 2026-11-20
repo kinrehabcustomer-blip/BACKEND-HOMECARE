@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { api, setUnauthorizedHandler } from './api.js';
+import { disablePush } from './lib/push.js';
 
 const AuthContext = createContext(null);
 
@@ -67,6 +68,8 @@ export function AuthProvider({ children }) {
     intentionalLogout.current = true;
     setKickedOut(null);
     setSessionExpired(false);
+    // เลิกรับแจ้งเตือนบนมือถือของเครื่องนี้ก่อน (ยังมี session) — คนถัดไปที่ล็อกอินเครื่องนี้ต้องไม่เห็นกะของเรา
+    await disablePush().catch(() => {});
     await api.logout().catch(() => {}); // คุกกี้อาจหมดอายุไปแล้ว — ยังไงก็ต้องออกจากระบบฝั่งหน้าเว็บ
     setUser(null);
   };
