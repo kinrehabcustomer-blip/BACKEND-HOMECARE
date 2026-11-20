@@ -87,7 +87,13 @@ export default function PermissionsPage() {
     if (position === selectedKey) return;
     setDraft(null);
     setError(null);
-    setParams({ position }, { replace: true });
+    /* เก็บพารามิเตอร์อื่นไว้ (โดยเฉพาะ ?tab=permissions ของหน้าตั้งค่าระบบ) — เดิมเขียนทับทั้งก้อน
+       กดชิปตำแหน่งแล้ว tab หาย หน้าเด้งไปแท็บแรก "เหตุผลยกเลิกเคส" (ผู้ใช้แจ้ง 20 พ.ย. 2569 "กดจัดการสิทธิ์ไม่ได้") */
+    setParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('position', position);
+      return next;
+    }, { replace: true });
   }
 
   // สิทธิ์ superOnly (บันทึกการใช้งาน) — คนที่ไม่ใช่ Super Admin เห็นสถานะแต่แตะไม่ได้ (server กันซ้ำอีกชั้น)

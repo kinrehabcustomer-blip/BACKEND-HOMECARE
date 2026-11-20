@@ -80,6 +80,8 @@ export const ACTION_LABELS = {
   'invoices.share-links.revoke': 'ปิดลิงก์ใบแจ้งหนี้',
   'invoices.line': 'ส่งใบแจ้งหนี้เข้า LINE ลูกค้า',
   'invoices.export': 'ส่งออกรายการใบแจ้งหนี้',
+  // PUT /invoices/revenue-bu/targets (ตั้งค่าระบบ › เป้ารายได้) — เดิมขึ้นเป็นรหัสดิบ "invoices.revenue-bu.…"
+  'invoices.revenue-bu.targets.update': 'ตั้งเป้ารายได้',
   'integration.invoices.pending-slip': 'รับสลิปจาก LINE ลูกค้า',
   'public.bill.view': 'ลูกค้าเปิดดูใบแจ้งหนี้ (ลิงก์)',
   'public.bill.slip': 'ลูกค้าแนบสลิป (ลิงก์)',

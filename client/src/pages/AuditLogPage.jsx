@@ -23,6 +23,9 @@ const bkkDate = (d) => d.toLocaleDateString('sv-SE', { timeZone: 'Asia/Bangkok' 
 const daysAgo = (n) => bkkDate(new Date(Date.now() - n * 86_400_000));
 
 const FILTER_KEYS = ['q', 'from', 'to', 'level', 'actor', 'action', 'ok'];
+// หน้าละ 10 รายการแบบหน้าบันทึกการเงิน (ผู้ใช้ขอ 20 พ.ย. 2569) — แทนปุ่ม "โหลดเพิ่ม" ต่อท้ายยาว ๆ
+// server ยังส่งทีละ 50 (เคอร์เซอร์ before) — กดถัดไปเกินที่โหลดไว้ค่อยดึงชุดต่อไป
+const PAGE = 10;
 const posLabel = (p) => (p ? POSITION_LABELS[p] ?? p : '');
 
 /** ผู้ทำรายการ — ไม่มีรหัสพนักงาน = มาจากนอกระบบ (ลิงก์บิล/แบบประเมิน หรือระบบแชท LINE) */
@@ -103,6 +106,7 @@ export default function AuditLogPage() {
   const [error, setError] = useState(null);
   const [open, setOpen] = useState(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const [page, setPage] = useState(1);
   const lastQuery = useRef({});
   /* รุ่นของชุดผลลัพธ์ — เปลี่ยนตัวกรองแล้ว "โหลดเพิ่ม" ที่ยังค้างของชุดเก่าต้องไม่ต่อท้ายชุดใหม่ */
   const generation = useRef(0);
@@ -143,6 +147,7 @@ export default function AuditLogPage() {
           lastQuery.current = q;
           setRows(data.rows);
           setNextBefore(data.next_before);
+          setPage(1);
           setOpen(null);
           setError(null);
         })
@@ -156,21 +161,34 @@ export default function AuditLogPage() {
   }, [queryKey, reloadKey]);
 
   const loadMore = useCallback(async () => {
-    if (!nextBefore) return;
+    if (!nextBefore) return false;
     const gen = generation.current;
     setLoadingMore(true);
     try {
       const data = await api.auditLogs({ ...lastQuery.current, before: nextBefore });
-      if (gen !== generation.current) return; // ตัวกรองเปลี่ยนระหว่างรอ — ทิ้ง
+      if (gen !== generation.current) return false; // ตัวกรองเปลี่ยนระหว่างรอ — ทิ้ง
       setRows((rs) => [...rs, ...data.rows]);
       setNextBefore(data.next_before);
       setError(null);
+      return data.rows.length > 0;
     } catch (e) {
       if (gen === generation.current) setError(e.message);
+      return false;
     } finally {
       setLoadingMore(false);
     }
   }, [nextBefore]);
+
+  /* ไปหน้าถัดไป — ถ้าแถวที่โหลดไว้ไม่พอสำหรับหน้านั้น ดึงชุดต่อไปจาก server ก่อน */
+  const pages = Math.max(1, Math.ceil(rows.length / PAGE));
+  const hasNext = page < pages || Boolean(nextBefore);
+  const goNext = async () => {
+    if (page * PAGE >= rows.length && !(await loadMore())) return;
+    setOpen(null);
+    setPage((n) => n + 1);
+  };
+  const goPrev = () => { setOpen(null); setPage((n) => Math.max(1, n - 1)); };
+  const shown = rows.slice((page - 1) * PAGE, page * PAGE);
 
   async function exportCsv() {
     setExporting(true);
@@ -272,7 +290,7 @@ export default function AuditLogPage() {
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => (
+              {shown.map((r) => (
                 <Fragment key={r.log_id}>
                   <tr
                     className={`row-clickable${open === r.log_id ? ' audit-open' : ''}`}
@@ -318,15 +336,24 @@ export default function AuditLogPage() {
         {!loading && rows.length === 0 && !error && (
           <p className="muted audit-empty">ไม่พบรายการในช่วง {from} ถึง {to}</p>
         )}
-        <div className="load-more">
-          {nextBefore ? (
-            <button type="button" className="btn" onClick={loadMore} disabled={loadingMore || loading}>
-              {loadingMore ? 'กำลังโหลด…' : 'โหลดเพิ่ม'}
-            </button>
-          ) : rows.length > 0 ? (
-            <span>แสดงครบ {rows.length.toLocaleString('th-TH')} รายการ</span>
-          ) : null}
-        </div>
+        {/* ตัวเลื่อนหน้าแบบหน้าบันทึกการเงิน (fin-pager) — ยังโหลดไม่ครบ = บอก "มากกว่า N" เพราะ server ไม่นับทั้งหมด */}
+        {rows.length > 0 && (
+          <div className="fin-pager audit-pager">
+            <span className="muted">
+              {(page - 1) * PAGE + 1}–{Math.min(page * PAGE, rows.length)} จาก{' '}
+              {nextBefore ? `มากกว่า ${rows.length.toLocaleString('th-TH')}` : rows.length.toLocaleString('th-TH')} รายการ
+            </span>
+            {(pages > 1 || nextBefore) && (
+              <div className="fin-pager-nav">
+                <button type="button" className="btn tiny" disabled={page <= 1 || loading} onClick={goPrev}>‹ ก่อนหน้า</button>
+                <span className="muted">หน้า {page}{nextBefore ? '' : ` / ${pages}`}</span>
+                <button type="button" className="btn tiny" disabled={!hasNext || loadingMore || loading} onClick={goNext}>
+                  {loadingMore ? 'กำลังโหลด…' : 'ถัดไป ›'}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </>
   );

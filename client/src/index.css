@@ -6933,6 +6933,11 @@ h1, h2, h3, h4, .page-hero-title, .cal-title, .login-heading h1 {
 .set-foot { margin: 0; font-size: 0.75rem; }
 /* หน้าเดิมที่ฝังในแผงขวาของหน้าตั้งค่าระบบ (จัดการสิทธิ์ · บันทึกการใช้งาน) */
 .set-embed { min-width: 0; }
+/* ล้อเมาส์บนตาราง (บันทึกการใช้งาน · บันทึกการเงิน) ไม่เลื่อน (ผู้ใช้แจ้ง 20 พ.ย. 2569)
+   กฎ "ตารางล็อกพอดีจอ" (warm-clarity.css) ใส่ overscroll-behavior: contain ให้ .list-card > .table-wrap
+   แต่ในแผงตั้งค่า การ์ดไม่ได้อยู่ในโครง flex ของหน้า → กล่องตารางไม่ถูกจำกัดความสูง ไม่มีอะไรให้เลื่อนในตัว
+   Chrome ยังถือว่ากล่อง contain เป็นตัวรับล้อ → กลืนการหมุนทิ้ง ทั้งหน้าไม่เลื่อน — ที่นี่ให้ส่งต่อให้หน้าเลื่อนตามปกติ */
+.set-embed .list-card > .table-wrap { overscroll-behavior: auto; }
 
 /* ---------- จัดการสิทธิ์ (PermissionsPage · ดีไซน์ใหม่ 19 พ.ย. 2569) ---------- */
 .pm { --perm-accent: #b8892b; display: flex; flex-direction: column; gap: 1rem; }
@@ -7308,6 +7313,8 @@ h1, h2, h3, h4, .page-hero-title, .cal-title, .login-heading h1 {
 .fin-pager { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem 1rem; padding: 0.75rem 1rem; font-size: 0.8125rem; }
 .fin-pager-nav { display: flex; align-items: center; gap: 0.625rem; }
 .fin-pager-nav .muted { font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* หน้าบันทึกการใช้งานใช้ตัวเลื่อนหน้าเดียวกัน (20 พ.ย. 2569) — อยู่ท้ายการ์ดรายการ มีเส้นคั่นจากตาราง */
+.list-card > .audit-pager { flex: none; border-top: 1px solid var(--divider, var(--border)); }
 
 /* ป้ายชนิดรายการ — สีตามกลุ่ม (เงินเข้า/ออก · ลูกหนี้ · ค่าจ้าง) · รายการยกเลิกเป็นเส้นขอบประ */
 .fin-kind {
