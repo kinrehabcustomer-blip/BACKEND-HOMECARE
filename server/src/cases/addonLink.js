@@ -1,6 +1,7 @@
 import { sql, transaction } from '../db/index.js';
 import { caseCode } from './caseCode.js';
 import { PHYSIO_BUNDLE } from '../lib/addons.js';
+import { ensurePackageCodes } from '../packages/codes.js';
 
 /** ซื้อได้สูงสุดกี่แพ็กในเคสเดียว — 24 = รายเดือนสองปี (ต้องตรงกับ pkg_quantity ใน schema.js/schema.sql) */
 export const MAX_PKG_QUANTITY = 24;
@@ -22,6 +23,9 @@ const ADDON_COLUMNS = ['addon_of', 'bill_with_parent', 'addon_next', 'pkg_quanti
 let addonLinkReady = null;
 export const ensureAddonLink = () =>
   (addonLinkReady ??= (async () => {
+    /* SELECT ของเคสอ้าง pp.code / r.code (รหัสแพ็คเกจ 20 พ.ย. 2569) — ทุกที่ที่อ่านเคสเรียกตัวนี้ก่อนอยู่แล้ว
+       จึงพ่วงไว้ที่นี่ที่เดียว แทนการไล่ใส่ทุกจุด · ดู packages/codes.js */
+    await ensurePackageCodes();
     /* findById/รายการเคสเรียกตัวนี้ทุกครั้ง (หลัง cold start ทุกรอบ) — ALTER TABLE ขอล็อกทั้งตารางแม้คอลัมน์มีแล้ว
        ถ้ามีทรานแซกชันอื่นถือล็อกแถว cases อยู่จะต้องรอ จึงดูจาก catalog ก่อน (ไม่ล็อกอะไร) มีครบแล้ว = จบ */
     const { n } = await sql.one(

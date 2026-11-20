@@ -551,7 +551,7 @@ function Exceptions({ rows, error, onReload, filters }) {
         {filters}
         {rows?.length > 0 && (
           <button className="btn" onClick={exportCsv}>
-            <LineIcon name="download" />ดาวน์โหลด CSV
+            <LineIcon name="csv" className="btn-ico csv-ico" />ดาวน์โหลด CSV
           </button>
         )}
       </div>
@@ -598,7 +598,7 @@ function Exceptions({ rows, error, onReload, filters }) {
                   </td>
                   <td data-label="พนักงาน / เคส"><WhoCell v={v} /></td>
                   <td data-label="ปัญหา"><span className={`badge ${reasonTone(v)}`}>{reason(v)}</span></td>
-                  <td data-label="หลักฐาน"><Evidence v={v} /></td>
+                  <td className={v.check_in_lat != null || v.has_photo || v.check_in_distance_m != null ? '' : 'is-blank'} data-label="หลักฐาน"><Evidence v={v} /></td>
                   <td className="row-actions">
                     {/* ลงเวลาจริงย้อนหลัง — ทางออกของกะที่ "ไปทำงานจริงแต่ลืมเช็คอิน"
                         ทั้งกะที่ขาดงาน (ไม่มีเวลาเลย) และกะที่ค้างเช็คเอาท์ (มีแต่เวลาเข้า)
@@ -787,7 +787,7 @@ function Log({ month, employeeId, state, q, page, patch, employeePicker, reloadK
         )}
         {filteredRows.length > 0 && (
           <button className="btn att-csv" onClick={exportCsv} title="ดาวน์โหลด CSV">
-            <LineIcon name="download" /><span className="att-csv-label">ดาวน์โหลด CSV</span>
+            <LineIcon name="csv" className="btn-ico csv-ico" /><span className="att-csv-label">ดาวน์โหลด CSV</span>
           </button>
         )}
       </MonthPicker>
@@ -823,7 +823,7 @@ function Log({ month, employeeId, state, q, page, patch, employeePicker, reloadK
                     </td>
                     <td data-label="รวม">{durationText(v.worked_minutes)}</td>
                     <td data-label="สถานะ"><span className={`badge visit-${v.state}`}>{VISIT_STATE_LABELS[v.state]}</span></td>
-                    <td data-label="หลักฐาน"><Evidence v={v} /></td>
+                    <td className={v.check_in_lat != null || v.has_photo || v.check_in_distance_m != null ? '' : 'is-blank'} data-label="หลักฐาน"><Evidence v={v} /></td>
                   </tr>
                 ))}
               </tbody>

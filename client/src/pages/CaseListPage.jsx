@@ -348,8 +348,12 @@ export default function CaseListPage() {
                   {/* ลำดับนับต่อเนื่องข้ามหน้า — เป็นลำดับของ "รายการที่เห็นตอนนี้" ไม่ใช่เลขประจำตัว */}
                   <td className="row-index" data-label="ลำดับ">{(effPage - 1) * Number(perPage) + i + 1}</td>
                   <td className="mono link" data-label="รหัสเคส">{caseCode(c.case_id)}</td>
-                  <td data-label="บริการ">
+                  <td className="cell-stack" data-label="บริการ">
                     {/* สองสายบริการเก็บชื่อคนละคอลัมน์ — กายภาพมาก่อนเพราะเคสที่ผูกแพ็คเกจไว้จะไม่มีเรท Homecare */}
+                    {/* รหัสแพ็คเกจ (20 พ.ย. 2569) — ค้นหาเคสด้วยรหัสได้ที่ช่องค้นหาด้านบน */}
+                    {(c.physio_package_id ? c.physio_package_code : c.pkg_rate_code) && (
+                      <span className="pkg-code">{c.physio_package_id ? c.physio_package_code : c.pkg_rate_code}</span>
+                    )}
                     {c.physio_package_name ? (
                       <>{c.physio_package_name}
                         {packQtyText(c) && <span className="muted"> · {packQtyText(c)}</span>}
@@ -373,7 +377,7 @@ export default function CaseListPage() {
                     {c.start_date ? formatDate(c.start_date) : <span className="muted">ยังไม่ระบุ</span>}
                     {totalFee(c) != null && <span className="cell-sub">{formatBaht(totalFee(c))}</span>}
                   </td>
-                  <td data-label="เบอร์โทร">
+                  <td className={c.client_phone ? '' : 'is-blank'} data-label="เบอร์โทร">
                     {c.client_phone ? (
                       // stopPropagation กันไม่ให้การกดเบอร์เปิด popup ตามไปด้วย
                       <a className="link mono" href={`tel:${c.client_phone}`} onClick={(e) => e.stopPropagation()}>
@@ -383,7 +387,7 @@ export default function CaseListPage() {
                       <span className="muted">—</span>
                     )}
                   </td>
-                  <td data-label="พนักงานที่รับ">
+                  <td className={c.assigned_name || c.physio_addons?.some((a) => a.assigned_name) ? '' : 'is-blank'} data-label="พนักงานที่รับ">
                     {/* เคสหนึ่งมีพนักงานได้หลายคน — โชว์ทุกคน ไม่ใช่แค่คนที่ระบบอ้างเป็นตัวหลัก
                         รหัสพนักงานโชว์เฉพาะตอนมีคนเดียว ไม่งั้นแถวจะยาวจนอ่านชื่อไม่ทัน */}
                     {c.assigned_name ? (

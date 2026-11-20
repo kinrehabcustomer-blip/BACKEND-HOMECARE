@@ -5,6 +5,16 @@ import { z } from 'zod';
    ตัวเลขสองหน้าจอจึงต่างกันทีละสตางค์โดยหาที่มาไม่เจอ · เกณฑ์เดียวกับ invoices/schema.js */
 const money = (msg) => z.number().nonnegative(msg).multipleOf(0.01, 'จำนวนเงินต้องมีทศนิยมไม่เกิน 2 ตำแหน่ง');
 
+/* รหัสแพ็คเกจ (ดู packages/codes.js) — ตัวพิมพ์ใหญ่ให้เอง · ช่องว่างกลางคำเป็น - · ว่าง = ให้ระบบตั้งรหัสตั้งต้นให้
+   ใช้ทั้งเรท Homecare และแพ็คกายภาพ (physio/schema.js import ไปใช้) กติกาจึงมีที่เดียว */
+export const packageCode = z
+  .string()
+  .max(40)
+  .transform((s) => s.trim().toUpperCase().replace(/\s+/g, '-'))
+  .refine((s) => s === '' || /^[A-Z0-9-]{1,20}$/.test(s), {
+    message: 'รหัสแพ็คเกจใช้ได้เฉพาะ A-Z, 0-9 และ - ยาวไม่เกิน 20 ตัว',
+  });
+
 export const STAFF_TIERS = ['CG', 'NA', 'PN', 'RN'];
 export const FORMAT_CATEGORIES = ['daily', 'weekly', 'monthly'];
 
@@ -46,6 +56,8 @@ export const ratesSchema = z.object({
           .optional(),
         discount_amount: money('ส่วนลดต้องไม่ติดลบ').nullable().optional(),
         available: z.boolean().optional(),
+        // ไม่ส่งคีย์ = ไม่แตะรหัสเดิม · ส่ง '' = ให้ระบบตั้งรหัสตั้งต้นใหม่
+        code: packageCode.optional(),
       }),
     )
     .min(1, 'ต้องมีอย่างน้อยหนึ่งช่อง'),

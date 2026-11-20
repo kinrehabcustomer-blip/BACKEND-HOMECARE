@@ -1488,7 +1488,7 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
               </div>
             </div>
 
-            <footer className="modal-foot no-print">
+            <footer className="modal-foot inv-foot no-print">
               {/* ปุ่มทำลายดันไปชิดซ้ายสุด แยกออกจากกลุ่มปุ่มที่กดกันจริง — ไม่ให้มือไปโดนตอนเล็งปุ่มข้างๆ
                   (อีกปุ่มหนึ่งอยู่ในกล่องเตือน "ไม่ตรงกับเคส" ซึ่งเป็นคนละบริบท จงใจให้อยู่ตรงนั้น)
 

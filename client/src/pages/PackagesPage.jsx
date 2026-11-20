@@ -33,8 +33,12 @@ const NUM_FIELDS = ['customer_price', 'staff_pay', 'discount_percent', 'discount
  * เทียบผ่าน num() ไม่ใช่ === ตรงๆ เพราะค่าที่โหลดมาจากฐานข้อมูลเป็นตัวเลข (15000)
  * แต่พอผู้ใช้พิมพ์ทับจะกลายเป็นข้อความ ("15000") — พิมพ์เลขเดิมกลับเข้าไปจึงต้องนับว่า "ไม่เปลี่ยน"
  */
+/** รหัสแพ็คเกจตามกติกาเดียวกับ server (packages/schema.js) — ตัวพิมพ์ใหญ่ · ช่องว่างกลางคำเป็น - */
+const normCode = (v) => String(v ?? '').trim().toUpperCase().replace(/\s+/g, '-');
+
 const sameCell = (a, b) =>
-  Boolean(a) && Boolean(b) && a.available === b.available && NUM_FIELDS.every((k) => num(a[k]) === num(b[k]));
+  Boolean(a) && Boolean(b) && a.available === b.available && NUM_FIELDS.every((k) => num(a[k]) === num(b[k])) &&
+  normCode(a.code) === normCode(b.code);
 
 /**
  * ส่วนลดเป็นบาท — สูตรเดียวกับฝั่ง server (packages/repo.js)
@@ -57,7 +61,7 @@ function RateCell({ tier, editing, rate, draft, changed, onPatch, seePay }) {
      ป้าย CG/NA/PN/RN (พร้อมสีประจำระดับ) จึงมาจากแอตทริบิวต์นี้แทนหัวคอลัมน์ */
   if (editing) {
     const dv = draft ?? {
-      customer_price: '', staff_pay: '', discount_percent: '', discount_amount: '', available: true,
+      customer_price: '', staff_pay: '', discount_percent: '', discount_amount: '', available: true, code: '',
     };
     // ทำเครื่องหมายช่องที่แก้ไปแล้ว — ตารางมีเป็นร้อยช่อง ไล่หาเองว่าแตะอะไรไปบ้างไม่ไหว
     // และเป็นตัวเดียวกับที่ตัดสินว่าช่องไหนจะถูกส่งขึ้น server ตอนกดบันทึก
@@ -82,6 +86,15 @@ function RateCell({ tier, editing, rate, draft, changed, onPatch, seePay }) {
     return (
       <td className={`rate-input${mark}`} data-tier={tier}>
         <div className="rate-edit">
+          {/* รหัสแพ็คเกจ (20 พ.ย. 2569) — ว่างไว้ = ระบบตั้งรหัสตั้งต้นให้ (HC-รูปแบบ-เกรด-ระดับ) */}
+          <div className="rate-edit-row">
+            <input
+              className="rate-code-input" type="text" maxLength={20} placeholder="รหัส (ว่าง = ตั้งให้)"
+              title="รหัสแพ็คเกจ — A-Z 0-9 และ - ห้ามซ้ำกับแพ็คอื่น" spellCheck={false} autoCapitalize="characters"
+              value={dv.code ?? ''}
+              onChange={(e) => onPatch({ code: e.target.value.toUpperCase() })}
+            />
+          </div>
           <div className="rate-edit-row">
             <input
               type="number" min="0" step="100" placeholder="ราคา" value={dv.customer_price}
@@ -135,6 +148,8 @@ function RateCell({ tier, editing, rate, draft, changed, onPatch, seePay }) {
   const discounted = rate.discount_value > 0;
   return (
     <td className="rate-price" data-tier={tier}>
+      {/* ห่อด้วยบรรทัดของตัวเอง — ป้ายเป็น inline-block จึงจัดแนวตามเซลล์เหมือนราคา (กลาง/ซ้ายตามธีม) */}
+      {rate.code && <span className="rate-code-row"><span className="pkg-code rate-code" title="รหัสแพ็คเกจ">{rate.code}</span></span>}
       {discounted && <span className="rate-was">{formatBaht(rate.customer_price)}</span>}
       {formatBaht(discounted ? rate.net_price : rate.customer_price)}
       {discounted && (
@@ -345,6 +360,7 @@ export default function PackagesPage() {
             discount_percent: r?.discount_percent ?? '',
             discount_amount: r?.discount_amount ?? '',
             available: r ? r.available : true,
+            code: r?.code ?? '',
           };
         }
       }
@@ -383,6 +399,8 @@ export default function PackagesPage() {
         discount_percent: num(dv.discount_percent),
         discount_amount: num(dv.discount_amount),
         available: dv.available,
+        // ส่งรหัสเฉพาะเมื่อแก้จริง — ไม่ส่ง = server คงรหัสเดิม · ส่ง '' = ให้ตั้งรหัสตั้งต้นใหม่
+        ...(normCode(dv.code) !== normCode(baseline.current[key]?.code) ? { code: normCode(dv.code) } : null),
       };
     });
 

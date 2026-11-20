@@ -1530,6 +1530,15 @@ input[aria-invalid='true'] { border-color: var(--danger); }
     filter: drop-shadow(0 1px 0.5px rgb(90 64 10 / 35%));
   }
   @media (prefers-reduced-motion: reduce) { .toolbar.fbar .toolbar-action { transition: none; } }
+  /* ปุ่มดาวน์โหลด CSV ในตำแหน่งปุ่มหลัก (หน้าบันทึกการใช้งาน) — ไม่ใช่ปุ่ม "+ เพิ่ม" จึงไม่ใช้ทรงกลมทอง
+     เป็นปุ่มกลมพื้นขาวขอบบางแบบปุ่มตัวกรอง ไอคอนไฟล์ CSV สีเขียวเต็มสี (ผู้ใช้ขอ 20 พ.ย. 2569 — บนพื้นทองไอคอนจมหาย) */
+  .toolbar.fbar .toolbar-action.csv-action {
+    border: 1px solid var(--border); background: var(--surface); box-shadow: none; filter: none;
+    /* ข้อความปุ่ม (ซ่อนด้วย font-size 0) ยังกินช่องว่างระหว่างไอคอนกับข้อความ (gap ของ .btn ที่มีไอคอน) — ตัดทิ้ง ไอคอนจึงอยู่กลางปุ่มพอดี */
+    gap: 0; grid-auto-flow: column;
+  }
+  .toolbar.fbar .toolbar-action.csv-action:active { box-shadow: none; filter: none; background: var(--surface-2); }
+  .toolbar.fbar .toolbar-action.csv-action .csv-ico { width: 1.5rem; height: 1.5rem; margin: 0; }
   /* ปุ่ม "รอออกใบ" ของหน้าใบแจ้งหนี้ — ทรงเดียวกับปุ่มตัวกรอง */
   .toolbar.fbar .todo-btn { flex: none; min-height: 2.75rem; margin: 0; border-radius: 999px; }
   /* ข้อความสรุปผล (หน้าคะแนนประเมิน) ตกไปบรรทัดของตัวเอง */

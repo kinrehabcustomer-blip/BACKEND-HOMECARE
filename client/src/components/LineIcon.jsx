@@ -155,6 +155,17 @@ const PATHS = {
       <path d="M10 11v6M14 11v6" />
     </>
   ),
+  /* ไฟล์ CSV — กระดาษพับมุม + ป้ายทึบคำว่า CSV ยื่นออกซ้าย (ผู้ใช้ส่งแบบมา 20 พ.ย. 2569)
+     กรอบกับป้ายเป็น currentColor (ปุ่มส่งออกตั้งสีเขียวเอง ดู .csv-ico) ตัวอักษรขาวบนป้ายทึบ
+     ไม่ใช้ตัวอักษรเส้นบางลอยในกระดาษ เพราะที่ขนาดไอคอนตัวหนังสือเล็กจนอ่านไม่ออก */
+  csv: (
+    <>
+      <path d="M6 10V4a2 2 0 0 1 2-2h7l5 5v13a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2v-1" strokeWidth="2.2" />
+      <path d="M14.5 2v4.5H20" strokeWidth="2.2" />
+      <rect x="1.5" y="10" width="17" height="9" rx="1.2" fill="currentColor" stroke="none" />
+      <text x="10" y="17.1" textAnchor="middle" fontSize="7.2" fontWeight="700" fill="#fff" stroke="none">CSV</text>
+    </>
+  ),
   'x-circle': (
     <>
       <circle cx="12" cy="12" r="9" />

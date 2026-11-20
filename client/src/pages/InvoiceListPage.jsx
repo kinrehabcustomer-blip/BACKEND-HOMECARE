@@ -374,7 +374,7 @@ export default function InvoiceListPage() {
                   {/* รายละเอียดบริการเป็นข้อความอิสระ ยาวเกินคอลัมน์เสมอและถูก … ตัดท้าย
                       บนมือถือมันตัดบรรทัดจึงอ่านได้ครบ แต่บน PC ที่บังคับบรรทัดเดียวจะอ่านต่อไม่ได้เลย
                       title ให้ชี้เมาส์ค้างแล้วเห็นข้อความเต็ม — เป็นทางอ่านที่มีเฉพาะบน PC อยู่แล้ว */}
-                  <td className="cell-text" data-label="รายการ" title={v.service_description || undefined}>
+                  <td className="cell-text cell-stack" data-label="รายการ" title={v.service_description || undefined}>
                     {serviceHead(v.service_description)}
                     {v.case_id && (
                       <span className="cell-sub">

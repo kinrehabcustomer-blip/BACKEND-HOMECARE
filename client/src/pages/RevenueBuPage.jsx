@@ -562,8 +562,9 @@ function ExportMenu({ data, from, to, bus, disabled }) {
 
   return (
     <>
+      {/* ไอคอนไฟล์ CSV สีเขียว + "ดาวน์โหลด CSV" (ผู้ใช้ส่งแบบมา 20 พ.ย. 2569) */}
       <button ref={btnRef} type="button" className="btn" disabled={disabled} aria-expanded={open} onClick={() => setOpen((v) => !v)}>
-        <LineIcon name="download" />ส่งออก
+        <LineIcon name="csv" className="btn-ico csv-ico" />ดาวน์โหลด CSV
       </button>
       {open && pos && createPortal(
         <div ref={panelRef} className="bu-export" style={pos} role="menu">

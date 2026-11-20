@@ -17,6 +17,7 @@ import { useCanSeeStaffPay } from '../auth.jsx';
 import { useScrollLock } from '../lib/scrollLock.js';
 import { formatPhone, formatPhoneInput } from '../lib/phone.js';
 import SearchSelect from '../components/SearchSelect.jsx';
+import PackageCodeInput from '../components/PackageCodeInput.jsx';
 import ProcedureNameInput from '../components/ProcedureNameInput.jsx';
 import { categoryItemNames, equipmentPrice, useCategories } from '../lib/categories.js';
 import { useConfirm, LEAVE_UNSAVED } from '../components/ConfirmDialog.jsx';
@@ -376,6 +377,31 @@ export default function CaseFormPage() {
   // ไม่งั้น dropdown จะเด้งเป็นค่าว่างแล้วแพ็คเกจของเคสนั้นหายไปเงียบๆ ตอนกดบันทึก
   /* เคสที่เริ่มก่อนเข้าระบบเลือกแพ็กที่ปิดขายไปแล้วได้ — ลูกค้าซื้อไว้ตอนที่แพ็กยังขายอยู่ (server ก็ยอมเฉพาะกรณีนี้) */
   const physioOptions = physio.filter((p) => p.active || p.physio_package_id === selPhysioId || form.joined_midway);
+
+  /* รายการรหัสแพ็คเกจที่พิมพ์เลือกได้ — เฉพาะของที่เลือกจากช่องเลือกได้อยู่แล้ว
+     (เรทที่เปิดให้บริการและตั้งราคาไว้ · แพ็คกายภาพที่เปิดขาย) พิมพ์รหัสจึงไม่ได้ของที่ปกติเลือกไม่ได้ */
+  const codeEntries = [
+    ...(matrix?.rates ?? [])
+      .filter((r) => r.code && r.available && r.customer_price != null)
+      .flatMap((r) => {
+        const f = matrix.formats.find((x) => x.format_id === r.format_id);
+        const g = r.grade_id != null ? matrix.grades.find((x) => x.grade_id === r.grade_id) : null;
+        if (!f || (f.graded && !g)) return [];
+        return [{
+          kind: 'homecare', code: r.code, format_id: r.format_id, grade_id: r.grade_id ?? null, staff_tier: r.staff_tier,
+          label: [f.name, g?.name, r.staff_tier, formatBaht(r.net_price ?? r.customer_price)].filter(Boolean).join(' · '),
+        }];
+      }),
+    ...physioOptions
+      .filter((p) => p.code)
+      .map((p) => ({
+        kind: 'physio', code: p.code, physio_package_id: p.physio_package_id,
+        label: `กายภาพ · ${p.name} · ${p.sessions} ครั้ง · ${formatBaht(p.special_price)}`,
+      })),
+  ];
+  const currentCode = form.service_kind === 'physio'
+    ? physio.find((p) => p.physio_package_id === selPhysioId)?.code
+    : form.service_kind === 'homecare' ? currentRate?.code : null;
   /* หมวดของอุปกรณ์เสริม (หน้า "หมวดหมู่" · 19 พ.ย. 2569) — คำแนะนำตอนพิมพ์ชื่อ + เติมราคา
      รูปแบบบริการ Homecare จัดกลุ่มตามประเภท รายวัน/สัปดาห์/เดือน ของตัวเอง (หมวดแพ็กเกจแยกเอาออกแล้ว — ซ้ำกับหน้าแพ็คเกจ) */
   const cats = useCategories();
@@ -472,6 +498,21 @@ export default function CaseFormPage() {
       ...(kind !== 'homecare' ? { pkg_format_id: '', pkg_grade_id: '', pkg_staff_tier: '' } : null),
       ...(kind !== 'physio' ? { physio_package_id: '' } : null),
     }));
+  }
+
+  /** พิมพ์รหัสแพ็คเกจ (ช่อง PackageCodeInput) -> สลับสายแล้วเลือกแพ็คให้ เหมือนกดเลือกจากช่องเลือกเอง */
+  function pickByCode(entry) {
+    if (entry.kind === 'physio') {
+      changeKind('physio');
+      applyPhysio(String(entry.physio_package_id));
+    } else {
+      changeKind('homecare');
+      applySelection({
+        pkg_format_id: String(entry.format_id),
+        pkg_grade_id: entry.grade_id == null ? '' : String(entry.grade_id),
+        pkg_staff_tier: entry.staff_tier,
+      });
+    }
   }
 
   /** เลือกแพ็คเกจกายภาพบำบัด -> คัดลอกราคาพิเศษมาเป็นค่าจ้าง (คัดลอก ไม่ใช่อ้างอิง เหมือนฝั่ง Homecare) */
@@ -1720,6 +1761,14 @@ export default function CaseFormPage() {
               {Object.entries(SERVICE_KIND_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
             </SearchSelect>
           </label>
+          {/* พิมพ์รหัสแพ็คเกจแทนการไล่เลือกทีละช่อง — เลือกจากช่องด้านล่างก็เห็นรหัสตามไปด้วย */}
+          <PackageCodeInput
+            entries={codeEntries}
+            currentCode={currentCode}
+            disabled={serviceLocked}
+            allowKinds={addonOf ? ['physio'] : null}
+            onPick={pickByCode}
+          />
 
           {isHomecare && (
           <label>รูปแบบบริการ
@@ -1740,7 +1789,7 @@ export default function CaseFormPage() {
                 <option value="">— เลือกแพ็คเกจ —</option>
                 {physioOptions.map((p) => (
                   <option key={p.physio_package_id} value={p.physio_package_id}>
-                    {p.name} · {p.sessions} ครั้ง
+                    {p.code ? `${p.code} · ` : ''}{p.name} · {p.sessions} ครั้ง
                     {p.duration_months ? ` · ${p.duration_months} เดือน` : ''}
                     {` · ${formatBaht(p.special_price)}`}
                     {p.active ? '' : ' (ปิดขายแล้ว)'}

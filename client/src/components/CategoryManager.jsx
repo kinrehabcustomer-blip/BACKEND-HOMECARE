@@ -7,6 +7,7 @@ import { SettingsPaneHead } from './SettingsShell.jsx';
 import { invalidateCategories, treeOf } from '../lib/categories.js';
 import { PROCEDURE_CATALOG, defaultPrices } from '../lib/procedureCatalog.js';
 import { INCIDENT_TYPES, PHYSIO_INCIDENT_TYPES } from '../lib/dailyCare.js';
+import LineIcon from './LineIcon.jsx';
 
 /**
  * จัดการหมวดหมู่ของโดเมนเดียว (cat / sub cat) — แผงขวาของหน้าตั้งค่า/หน้าหมวดหมู่ (ดีไซน์ใหม่ 19 พ.ย. 2569)
@@ -26,8 +27,8 @@ export const PANE_INFO = {
   cancel_visit: { title: 'เหตุผลยกเลิกนัด / กะ', desc: 'เหตุผลที่ให้เลือกตอนยกเลิกนัดกายภาพหรือกะ Homecare', unit: 'เหตุผล', pick: 'ตอนยกเลิกนัด' },
   cancel_invoice: { title: 'เหตุผลยกเลิกใบแจ้งหนี้', desc: 'เหตุผลที่ให้เลือกตอนยกเลิกใบแจ้งหนี้', unit: 'เหตุผล', pick: 'ตอนยกเลิกใบแจ้งหนี้' },
   incident: { title: 'หมวดเหตุการณ์ผิดปกติ', desc: 'จัดกลุ่มเหตุการณ์ในรายงานการดูแล — ตัวเหตุการณ์กำหนดในระบบ แก้ชื่อหมวด ลำดับ และเปิด-ปิดได้', unit: 'หมวด', pick: 'ในรายงาน' },
-  procedure: { title: 'หมวดหัตถการ', desc: 'จัดกลุ่มหัตถการ PRxxxx และตั้งราคาต่อครั้ง/วัน/เดือน — ช่องค้นหาหัตถการในฟอร์มเคสใช้หมวดและราคาตามนี้ (ช่องว่าง = ไม่มีราคาแบบนั้น)', unit: 'หมวดย่อย', pick: 'ในฟอร์มเคส', example: 'ทางเดินหายใจ' },
-  equipment: { title: 'หมวดอุปกรณ์เสริม', desc: 'รายชื่ออุปกรณ์แยกตามหมวด พร้อมค่าเช่า/ราคาขายต่อหน่วย — ฟอร์มเคสแนะนำชื่อและเติมราคาตามรูปแบบ (เช่า/ซื้อขาด) ให้เอง', unit: 'หมวดย่อย', pick: 'ในฟอร์มเคส', example: 'อุปกรณ์ทางเดินหายใจ' },
+  procedure: { title: 'หมวดหัตถการ', unit: 'หมวดย่อย', pick: 'ในฟอร์มเคส', example: 'ทางเดินหายใจ' },
+  equipment: { title: 'หมวดอุปกรณ์เสริม', unit: 'หมวดย่อย', pick: 'ในฟอร์มเคส', example: 'อุปกรณ์ทางเดินหายใจ' },
 };
 
 // ช่องราคาของรายการ (catalog_prices · server PRICE_FIELDS) — หัตถการ: ครั้ง/วัน/เดือน · อุปกรณ์: เช่า/ขาย ต่อหน่วย
@@ -222,15 +223,29 @@ function ItemEditor({ c, domain, kind, itemLabel, catalog, labels, ownerOf, pric
 }
 
 /** แถวหมวดย่อย — เลข · ชื่อ/รหัส · สวิตช์ · แก้ไข (+ รายการของแคตตาล็อก) */
-function SubRow({ c, parentOn, busy, labels, kind, meta, editor, onPatch }) {
+function SubRow({ c, parentOn, busy, labels, kind, meta, editor, onPatch, forceOpen = false }) {
+  // forceOpen = มีคำค้นอยู่ (เลือกแค่หมวดหลักไม่นับ — กางทุกหมวดย่อยพร้อมราคาจะยาวเหมือนเดิม)
   const [editing, setEditing] = useState(false);
+  /* แคตตาล็อก (หัตถการ/อุปกรณ์): รายการ + ช่องราคาพับเก็บไว้ตั้งต้น กดจำนวนรายการเพื่อกาง (ผู้ใช้ขอ 20 พ.ย. 2569
+     "การ์ดเล็กลง รายการมากขึ้นหน้าจะยาวเกิน") · ค้นหาอยู่ = กางให้เอง จะได้เห็นรายการที่ตรง */
+  const [open, setOpen] = useState(false);
+  const shownOpen = open || forceOpen;
   const items = c.item_keys ?? [];
   const num = c.code.split('-').pop();
   let sub = <span className="mono">{c.code}</span>;
-  if (kind) sub = <><span className="mono">{c.code}</span> · {items.length} {meta.itemLabel}</>;
-  else if (items.length > 0) sub = <><span className="mono">{c.code}</span> · {items.map((k) => labels[k] ?? k).join(' · ')}</>;
+  if (kind) {
+    sub = (
+      <>
+        <span className="mono">{c.code}</span> ·{' '}
+        <button type="button" className="set-fold-link" aria-expanded={shownOpen} onClick={() => setOpen(!shownOpen)}>
+          {items.length} {meta.itemLabel}
+          <LineIcon name="chevron" className={`set-fold-ico${shownOpen ? ' is-open' : ''}`} />
+        </button>
+      </>
+    );
+  } else if (items.length > 0) sub = <><span className="mono">{c.code}</span> · {items.map((k) => labels[k] ?? k).join(' · ')}</>;
   return (
-    <li className={`set-row${c.active ? '' : ' is-off'}`}>
+    <li className={`set-row${c.active ? '' : ' is-off'}${kind ? ' is-catalog' : ''}`}>
       <div className="set-row-main">
         <span className="set-row-ico mono" aria-hidden="true">{num}</span>
         <div className="set-row-text">
@@ -245,26 +260,36 @@ function SubRow({ c, parentOn, busy, labels, kind, meta, editor, onPatch }) {
           <EditButton editing={editing} busy={busy} onClick={() => setEditing(true)} />
         </div>
       </div>
-      {editor}
+      {(!kind || shownOpen) && editor}
     </li>
   );
 }
 
 /** การ์ดหมวดหลัก — หัวการ์ด (ชื่อ · รหัส · นับที่เปิดใช้ · ปุ่ม) + แถวหมวดย่อย */
-function MainCard({ main, busy, labels, kind, meta, info, editorFor, onPatch, onAddSub, shownSubs = null }) {
+function MainCard({ main, busy, labels, kind, meta, info, editorFor, onPatch, onAddSub, shownSubs = null, forceOpen = false, openItems = false }) {
   const [editing, setEditing] = useState(false);
   const [adding, setAdding] = useState(false);
+  /* แคตตาล็อก: การ์ดหมวดหลักพับเก็บตั้งต้น เหลือหัวการ์ดบรรทัดเดียว — กดชื่อหมวดเพื่อกาง (20 พ.ย. 2569)
+     กำลังเพิ่มหมวดย่อย/ค้นหาอยู่ = กางให้เอง · หน้าเหตุผลยกเลิก/เหตุการณ์ไม่พับ (รายการสั้นอยู่แล้ว) */
+  const [open, setOpen] = useState(false);
+  const foldable = Boolean(kind);
+  const shownOpen = !foldable || open || forceOpen || adding;
   const subs = main.children;
   const listed = shownSubs ?? subs; // ตัวกรองด้านบน — ตัวนับ "เปิดใช้งาน X จาก Y" ยังนับจากทั้งหมวด
   const on = subs.filter((s) => s.active).length;
   return (
-    <section className={`set-card${main.active ? '' : ' is-off'}`} aria-label={main.name_th}>
+    <section className={`set-card${main.active ? '' : ' is-off'}${shownOpen ? '' : ' is-folded'}`} aria-label={main.name_th}>
       <header className="set-card-head">
         <div className="set-card-title">
           {editing ? (
             <NameInput value={main.name_th} busy={busy} onSave={(name_th) => onPatch(main, { name_th })} onCancel={() => setEditing(false)} />
           ) : (
-            <h3>{main.name_th} <span className="mono set-code">{main.code}</span></h3>
+            foldable ? (
+              <button type="button" className="set-fold-btn" aria-expanded={shownOpen} onClick={() => setOpen(!shownOpen)}>
+                <LineIcon name="chevron" className={`set-fold-ico${shownOpen ? ' is-open' : ''}`} />
+                <h3>{main.name_th} <span className="mono set-code">{main.code}</span></h3>
+              </button>
+            ) : <h3>{main.name_th} <span className="mono set-code">{main.code}</span></h3>
           )}
           <p className="muted">
             {main.active
@@ -283,14 +308,14 @@ function MainCard({ main, busy, labels, kind, meta, info, editorFor, onPatch, on
           <EditButton editing={editing} busy={busy} onClick={() => setEditing(true)} />
         </div>
       </header>
-      {listed.length > 0 ? (
+      {shownOpen && (listed.length > 0 ? (
         <ul className="set-rows">
           {listed.map((s) => (
             <SubRow key={s.category_id} c={s} parentOn={main.active} busy={busy} labels={labels} kind={kind} meta={meta}
-              editor={editorFor(s)} onPatch={onPatch} />
+              editor={editorFor(s)} onPatch={onPatch} forceOpen={openItems} />
           ))}
         </ul>
-      ) : <p className="muted set-empty">ยังไม่มี{kind ? 'หมวดย่อย' : info.unit}ในหมวดนี้</p>}
+      ) : <p className="muted set-empty">ยังไม่มี{kind ? 'หมวดย่อย' : info.unit}ในหมวดนี้</p>)}
       {adding && (
         <AddForm placeholder={`ชื่อ${kind ? 'หมวดย่อย' : info.unit}ใหม่ใน "${main.name_th}"`} busy={busy}
           onAdd={(body) => onAddSub(main, body)} onCancel={() => setAdding(false)} />
@@ -472,7 +497,7 @@ export default function CategoryManager({ domain }) {
       )}
 
       {view.map((v) => (
-        <MainCard key={v.main.category_id} main={v.main} shownSubs={filtering ? v.subs : null} busy={busy} labels={labels} kind={kind} meta={meta}
+        <MainCard key={v.main.category_id} main={v.main} shownSubs={filtering ? v.subs : null} forceOpen={filtering} openItems={q !== ''} busy={busy} labels={labels} kind={kind} meta={meta}
           info={info} editorFor={(sub) => editorFor(sub, visibleFor(v, sub))} onPatch={patch}
           onAddSub={(m, body) => add({ ...body, parent_id: m.category_id })} />
       ))}

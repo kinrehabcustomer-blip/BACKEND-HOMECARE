@@ -21,6 +21,7 @@ import { errorHandler } from './lib/errors.js';
 import { requireAuth, requireAdmin, requireBilling, requireCaseAccess, requirePermission, requirePasswordChanged, ensureRevokedSessions } from './lib/auth.js';
 import { permissionsRouter } from './permissions/routes.js';
 import { auditRouter } from './audit/routes.js';
+import { financeRouter } from './finance/routes.js';
 import { auditTrail, ensureAuditTable } from './lib/audit.js';
 import { categoriesRouter } from './categories/routes.js';
 import { ensureCategories } from './categories/repo.js';
@@ -92,6 +93,8 @@ export function createApp() {
   app.use('/api/permissions', signedIn, permissionsRouter);
   // บันทึกการใช้งาน — Super Admin เท่านั้น (ด่านอยู่ใน router · audit/routes.js)
   app.use('/api/audit-logs', signedIn, auditRouter);
+  // บันทึกการเงิน — ยอดประจำวัน + สมุดรายการเงิน (สิทธิ์ finance_logs ตรวจใน router)
+  app.use('/api/finance-log', signedIn, financeRouter);
   // หมวดหมู่ (cat / sub cat) — อ่านได้ทุกคนที่ login · เพิ่ม/แก้ต้องมีสิทธิ์ categories (ด่านอยู่ใน router)
   app.use('/api/categories', signedIn, categoriesRouter);
 

@@ -2423,7 +2423,7 @@ const BUCKETS = {
  * หมายเหตุ: "วันนี้" อิงเวลาไทยเหมือน TODAY() ที่ใช้ตอนบันทึกชำระ — เส้นแบ่งวันของกราฟ
  * จึงตรงกับเส้นแบ่งวันของข้อมูลที่บันทึกไว้ และตรงกับวันที่คนดูกราฟเข้าใจ
  */
-const COUNTS_AS_REVENUE = `(i.status <> 'cancelled' OR ABS(${netPaidSql('i')}) < 0.005)`;
+export const COUNTS_AS_REVENUE = `(i.status <> 'cancelled' OR ABS(${netPaidSql('i')}) < 0.005)`;
 
 export async function revenue({ bucket, points }) {
   const { unit, step } = BUCKETS[bucket];

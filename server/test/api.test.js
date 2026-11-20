@@ -279,6 +279,74 @@ if (process.env.RUN_DB_TESTS !== '1') {
     assert.equal((await patch(`/api/physio/packages/${id}`, { original_price: 15000, special_price: 15000 })).refreshed.cases, 0);
   });
 
+  test('รหัสแพ็คเกจ: ตั้งให้อัตโนมัติ · แก้ได้ (ตัวพิมพ์ใหญ่ให้เอง) · ห้ามซ้ำข้ามกายภาพ/Homecare · ว่าง = ตั้งใหม่ · เคสเห็นรหัส · ค้นเคสด้วยรหัสได้', async () => {
+    const send = async (method, path, body, expected = 200) => {
+      const res = await fetch(`${base}${path}`, {
+        method,
+        headers: { 'content-type': 'application/json', cookie: `${COOKIE_NAME}=${signToken(MANAGER)}` },
+        body: JSON.stringify(body),
+      });
+      const data = res.status === 204 ? null : await res.json();
+      assert.equal(res.status, expected, `${method} ${path}: ${JSON.stringify(data)}`);
+      return data;
+    };
+    const { formatAbbr, rateDefaultCode } = await import('../src/packages/codes.js');
+    assert.equal(formatAbbr({ format_id: 1, name: 'รายวัน 12 ชม.', category: 'daily' }), 'D12');
+    assert.equal(formatAbbr({ format_id: 3, name: 'รายสัปดาห์ 24 ชม.', category: 'weekly' }), 'W24');
+    assert.equal(formatAbbr({ format_id: 5, name: 'รายเดือน 12 ชม. หยุด 4 วัน', category: 'monthly' }), 'M12H');
+    assert.equal(formatAbbr({ format_id: 8, name: 'รายเดือน 24 ชม. ไม่มีวันหยุด', category: 'monthly' }), 'M24N');
+    assert.equal(formatAbbr({ format_id: 9, name: 'แบบพิเศษ', category: 'monthly' }), 'F9');
+    assert.equal(
+      rateDefaultCode({ grade_id: 1, staff_tier: 'RN' }, { format_id: 8, name: 'รายเดือน 24 ชม. ไม่มีวันหยุด', category: 'monthly' }, { grade_id: 1, name: 'เกรด 1' }),
+      'HC-M24N-G1-RN',
+    );
+
+    // ตั้งให้อัตโนมัติ — ทั้งแถวที่มีอยู่ก่อน (fixture) และแถวใหม่
+    const matrix = (await get('/api/packages/matrix', MANAGER)).body;
+    const rate = matrix.rates.find((r) => r.staff_tier === 'CG' && r.customer_price === 2000);
+    assert.equal(rate.code, `HC-F${rate.format_id}-CG`);
+    const fresh = await send('POST', '/api/physio/packages', { name: 'Code auto', sessions: 5, special_price: 5000 }, 201);
+    assert.equal(fresh.code, `PT-${String(fresh.physio_package_id).padStart(3, '0')}`);
+
+    // แก้ได้ · ตัวพิมพ์ใหญ่/ขีดให้เอง · รหัสผิดรูปแบบ = 400
+    const saved = await send('PATCH', '/api/packages/rates', { rates: [{ format_id: rate.format_id, grade_id: null, staff_tier: 'CG',
+      customer_price: 2000, available: true, code: ' hc daily cg ' }] });
+    assert.equal(saved.rates.find((r) => r.rate_id === rate.rate_id).code, 'HC-DAILY-CG');
+    await send('PATCH', `/api/physio/packages/${fresh.physio_package_id}`, { code: 'ab$c' }, 400);
+    assert.equal((await send('PATCH', `/api/physio/packages/${fresh.physio_package_id}`, { code: 'pt five' })).code, 'PT-FIVE');
+
+    // ห้ามซ้ำข้ามตาราง ไม่สนตัวพิมพ์ · ชนกันเองในชุดเดียว
+    await send('PATCH', `/api/physio/packages/${fresh.physio_package_id}`, { code: 'hc-daily-cg' }, 409);
+    await send('POST', '/api/physio/packages', { name: 'Code clash', sessions: 1, special_price: 100, code: 'PT-FIVE' }, 409);
+    await send('PATCH', '/api/packages/rates', { rates: [
+      { format_id: rate.format_id, grade_id: null, staff_tier: 'CG', customer_price: 2000, code: 'PT-FIVE' }] }, 409);
+    await send('PATCH', '/api/packages/rates', { rates: [
+      { format_id: rate.format_id, grade_id: null, staff_tier: 'CG', customer_price: 2000, code: 'SAME' },
+      { format_id: rate.format_id, grade_id: null, staff_tier: 'NA', customer_price: 2500, code: 'SAME' }] }, 409);
+    // บันทึกรหัสเดิมของตัวเองซ้ำ = ไม่นับว่าชน · ไม่ส่งคีย์ code = คงรหัสเดิม
+    assert.equal((await send('PATCH', `/api/physio/packages/${fresh.physio_package_id}`, { code: 'PT-FIVE', note: 'x' })).code, 'PT-FIVE');
+    assert.equal((await send('PATCH', `/api/physio/packages/${fresh.physio_package_id}`, { note: 'y' })).code, 'PT-FIVE');
+
+    // ว่าง = กลับเป็นรหัสตั้งต้น
+    assert.equal((await send('PATCH', `/api/physio/packages/${fresh.physio_package_id}`, { code: '' })).code,
+      `PT-${String(fresh.physio_package_id).padStart(3, '0')}`);
+
+    // เคสเห็นรหัส (ผูกด้วย id เดิม แก้รหัสแล้วเคสไม่หลุด) · ค้นรายการเคสด้วยรหัสได้
+    const hc = await post('/api/cases', { case_type: 'other', client_name: 'Coded homecare', service_kind: 'homecare',
+      pkg_format_id: rate.format_id, pkg_staff_tier: 'CG' }, MANAGER, 201);
+    assert.equal((await casesRepo.findById(hc.case_id)).pkg_rate_code, 'HC-DAILY-CG');
+    const pt = await post('/api/cases', { case_type: 'other', client_name: 'Coded physio', service_kind: 'physio',
+      physio_package_id: fresh.physio_package_id }, MANAGER, 201);
+    await send('PATCH', `/api/physio/packages/${fresh.physio_package_id}`, { code: 'PT-RENAMED' });
+    const ptRow = await casesRepo.findById(pt.case_id);
+    assert.equal(ptRow.physio_package_id, fresh.physio_package_id);
+    assert.equal(ptRow.physio_package_code, 'PT-RENAMED');
+    const found = (await get('/api/cases?q=pt-renamed', MANAGER)).body.data.map((c) => c.case_id);
+    assert.ok(found.includes(pt.case_id), JSON.stringify(found));
+    assert.ok(!found.includes(hc.case_id));
+    assert.ok((await get('/api/cases?q=HC-DAILY', MANAGER)).body.data.some((c) => c.case_id === hc.case_id));
+  });
+
   test('popup เพิ่มหัตถการ/อุปกรณ์เสริม: PATCH เฉพาะ addons ทีละรายการ · หัตถการได้ VN และคงเลขเดิมเมื่อเพิ่มรายการถัดไป', async () => {
     const patch = async (path, body, expected = 200) => {
       const res = await fetch(`${base}${path}`, {
@@ -350,7 +418,7 @@ if (process.env.RUN_DB_TESTS !== '1') {
       }
       const me = (await get('/api/auth/me', FINANCE)).body;
       // หมวดเดิม (คิดจากสิทธิ์รายเมนู) + สิทธิ์รายเมนู/งานของการเงินตามค่าตั้งต้น
-      assert.deepEqual(me.permissions, ['billing', 'money', 'invoices', 'payroll', 'revenue', 'see_pay', 'invoice_adjust', 'slip_delete']);
+      assert.deepEqual(me.permissions, ['billing', 'money', 'invoices', 'payroll', 'revenue', 'see_pay', 'invoice_adjust', 'slip_delete', 'finance_logs']);
       const alerts = (await get('/api/notify/alerts', FINANCE)).body;
       assert.deepEqual(Object.keys(alerts.groups).sort(), ['invoices', 'payroll']);
     });
@@ -3027,6 +3095,60 @@ if (process.env.RUN_DB_TESTS !== '1') {
       assert.ok(month.previous.to < `${today.slice(0, 7)}-01`);
       assert.equal((await send('GET', `/api/invoices/revenue-bu?from=${today}&to=2000-01-01`)).status, 400);
       assert.equal((await send('GET', `/api/invoices/revenue-bu?from=${today}&to=${today}`, undefined, HR)).status, 403);
+    });
+
+    test('บันทึกการเงิน: ยอดวันนี้ (เงินเข้า · ลูกหนี้ · เกินกำหนด) · สมุดรายการเงินเก็บรายการที่ยกเลิก · ยอดของวันที่ผ่านไปแล้วแก้ไม่ได้ · สิทธิ์', async () => {
+      const { today } = await sql.one(`SELECT to_char(now() AT TIME ZONE 'Asia/Bangkok','YYYY-MM-DD') AS today`);
+      const figs = async () => (await get('/api/finance-log/today', MANAGER)).body;
+      const diff = (a, b, k) => Math.round((a[k] - b[k]) * 100) / 100;
+      const before = await figs();
+
+      // ใบ 9,000 ออกแล้ว เกินกำหนดชำระ
+      const id = await fullPlan('Finance log', 9000);
+      if ((await invoice(id)).status === 'draft') await post(`/api/invoices/${id}/issue`, {});
+      await sql.run(`UPDATE invoices SET issue_date = '2000-01-01', due_date = '2000-01-02' WHERE invoice_id = :id`, { id });
+      let now = await figs();
+      assert.equal(diff(now, before, 'ar_outstanding'), 9000);
+      assert.equal(diff(now, before, 'ar_overdue'), 9000);
+      assert.equal(now.ar_count - before.ar_count, 1);
+
+      // รับ 4,000 → เงินเข้าวันนี้ +4,000 · ลูกหนี้เหลือ 5,000
+      await pay(id, { amount: 4000 });
+      now = await figs();
+      assert.equal(diff(now, before, 'cash_in'), 4000);
+      assert.equal(diff(now, before, 'ar_outstanding'), 5000);
+      assert.equal(now.snap_date, today);
+
+      // ยกเลิกรายการรับเงิน → ตัวเลขวันนี้กลับ · สมุดยังเห็นทั้งรายการรับเงินเดิมและรายการยกเลิก
+      const payment = (await invoice(id)).payments[0];
+      await post(`/api/invoices/${id}/payments/${payment.payment_id}/void`, { reason: 'กรอกยอดผิด' });
+      now = await figs();
+      assert.equal(diff(now, before, 'cash_in'), 0);
+      assert.equal(diff(now, before, 'ar_outstanding'), 9000);
+      const ev = (await get(`/api/finance-log/events?from=${today}&to=${today}&q=${id}`, MANAGER)).body;
+      const kinds = ev.rows.map((r) => r.kind).sort();
+      assert.deepEqual(kinds, ['invoice_issued', 'payment', 'payment_void']);
+      assert.equal(ev.rows.find((r) => r.kind === 'payment').amount, 4000);
+      assert.equal(ev.rows.find((r) => r.kind === 'payment_void').amount, -4000);
+      assert.equal(ev.rows.find((r) => r.kind === 'payment_void').note, 'กรอกยอดผิด');
+      assert.equal(ev.summary.net_cash, 0);
+      const cashOnly = (await get(`/api/finance-log/events?from=${today}&to=${today}&q=${id}&grp=cash`, MANAGER)).body;
+      assert.ok(cashOnly.rows.every((r) => r.grp === 'cash'));
+
+      // ยอดประจำวัน: แถวของวันนี้ = ตัวเลขล่าสุด
+      const snaps = (await get(`/api/finance-log/snapshots?from=${today}&to=${today}`, MANAGER)).body.rows;
+      assert.equal(snaps.length, 1);
+      assert.equal(snaps[0].ar_outstanding, now.ar_outstanding);
+
+      // วันที่ผ่านไปแล้ว: เพิ่มได้ (ย้ายข้อมูล) แต่แก้/ลบไม่ได้ในระดับฐานข้อมูล
+      await sql.run(`INSERT INTO finance_snapshots (snap_date, cash_in) VALUES ('2001-01-01', 100) ON CONFLICT DO NOTHING`);
+      await assert.rejects(sql.run(`UPDATE finance_snapshots SET cash_in = 0 WHERE snap_date = '2001-01-01'`), /แก้ไขหรือลบไม่ได้/);
+      await assert.rejects(sql.run(`DELETE FROM finance_snapshots WHERE snap_date = '2001-01-01'`), /แก้ไขหรือลบไม่ได้/);
+
+      // ช่วงวันที่ผิด / ยาวเกิน 1 ปี = 400 · ไม่มีสิทธิ์ finance_logs = 403
+      assert.equal((await send('GET', `/api/finance-log/events?from=${today}&to=2000-01-01`)).status, 400);
+      assert.equal((await send('GET', `/api/finance-log/events?from=2020-01-01&to=${today}`)).status, 400);
+      assert.equal((await send('GET', '/api/finance-log/today', undefined, HR)).status, 403);
     });
 
     test('ลดหนี้จนเหลือ 0 ก่อนรับเงิน = ให้ยกเลิกใบแทน · ตัดหนี้สูญได้ไม่เกินยอดค้าง และขึ้นยอดหนี้สูญ', async () => {

@@ -24,6 +24,11 @@ const { ensureFormatDays } = await import('../packages/formatDays.js');
 await ensureFormatDays();
 console.log('สร้าง/อัปเดตตาราง categories เรียบร้อย');
 
+// บันทึกการเงิน — ยอดประจำวัน (แถวของวันที่ผ่านไปแล้วแก้/ลบไม่ได้ · trigger) · โครงสร้างอยู่ที่ finance/log.js ที่เดียว
+const { FINANCE_DDL } = await import('../finance/log.js');
+await pool.query(FINANCE_DDL);
+console.log('สร้าง/อัปเดตตาราง finance_snapshots เรียบร้อย');
+
 // พนักงานที่ยังไม่มีรหัสผ่าน — สุ่มรหัสชั่วคราวให้
 const pending = await sql.all('SELECT employee_id FROM employees WHERE password_hash IS NULL');
 

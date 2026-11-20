@@ -1,5 +1,6 @@
 import { sql, transaction } from '../db/index.js';
 import { ensureFormatDays, defaultFormatDays } from './formatDays.js';
+import { ensurePackageCodes, fillMissingCodes, assertCodesFree } from './codes.js';
 
 const NOW = `to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')`;
 
@@ -34,6 +35,7 @@ function discountOf(price, percent, amount) {
 /** ตารางเรททั้งหมด: เกรด + รูปแบบบริการ + ราคาแต่ละช่อง (หน้าเว็บเอาไปประกอบเป็นตาราง) */
 export async function getMatrix() {
   await ensureFormatDays(); // formats[].days = จำนวนวันต่อรอบ (ล็อกการลงกะ)
+  await ensurePackageCodes(); // rates[].code = รหัสแพ็คเกจ (ดู codes.js)
   const [grades, formats, rates] = await Promise.all([
     sql.all('SELECT * FROM pkg_grades ORDER BY sort_order, grade_id'),
     sql.all('SELECT * FROM pkg_service_formats ORDER BY sort_order, format_id'),
@@ -136,10 +138,14 @@ async function upsertOne(tx, r) {
      อย่างหลังคือผู้จัดการตั้งใจล้างค่าจ้างช่องนั้น ต้องล้างจริง จึงแยกด้วยการมี/ไม่มีท่อน SET ไม่ใช่ COALESCE */
   const writePay = 'staff_pay' in r;
   const paySet = writePay ? 'staff_pay = :staff_pay, ' : '';
+  /* รหัสแพ็คเกจ: ไม่มีคีย์ = คงรหัสเดิม · '' = ล้างแล้วให้ fillMissingCodes ตั้งรหัสตั้งต้นใหม่หลังบันทึก */
+  const writeCode = 'code' in r;
+  values.code = writeCode && r.code ? r.code : null;
+  const codeSet = writeCode ? 'code = :code, ' : '';
 
   const updated = await tx.run(
     `UPDATE pkg_rates
-     SET customer_price = :customer_price, ${paySet}
+     SET customer_price = :customer_price, ${paySet}${codeSet}
          discount_percent = :discount_percent, discount_amount = :discount_amount,
          available = :available, updated_at = ${NOW}
      WHERE format_id = :format_id
@@ -151,17 +157,31 @@ async function upsertOne(tx, r) {
   if (updated === 0) {
     await tx.one(
       `INSERT INTO pkg_rates
-         (format_id, grade_id, staff_tier, customer_price, staff_pay, discount_percent, discount_amount, available)
+         (format_id, grade_id, staff_tier, customer_price, staff_pay, discount_percent, discount_amount, available, code)
        VALUES (:format_id, :grade_id, :staff_tier, :customer_price, :staff_pay,
-               :discount_percent, :discount_amount, :available)
+               :discount_percent, :discount_amount, :available, :code)
        RETURNING rate_id`,
       values,
     );
   }
 }
 
-export function upsertRates(rates) {
-  return transaction(async (tx) => {
+export async function upsertRates(rates) {
+  await ensurePackageCodes();
+  // รหัสซ้ำบอกให้ชัดก่อนเขียน — ช่องเดียวกัน (format + grade + tier) ไม่นับว่าชนตัวเอง
+  await assertCodesFree(
+    rates
+      .filter((r) => r.code)
+      .map((r) => ({
+        code: r.code,
+        self: (row) =>
+          row.kind === 'rate' && row.format_id === r.format_id &&
+          (row.grade_id ?? null) === (r.grade_id ?? null) && row.staff_tier === r.staff_tier,
+      })),
+  );
+  await transaction(async (tx) => {
     for (const r of rates) await upsertOne(tx, r);
-  }).then(getMatrix);
+  });
+  await fillMissingCodes(); // ช่องใหม่ / ช่องที่ล้างรหัสทิ้ง ได้รหัสตั้งต้น
+  return getMatrix();
 }

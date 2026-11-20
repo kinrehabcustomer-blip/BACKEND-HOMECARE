@@ -13,3 +13,6 @@ server/data/
 # มี staff_pay = ต้นทุนค่าจ้างพนักงาน ซึ่งในระบบเปิดให้เห็นเฉพาะผู้จัดการ — ไม่ควรอยู่ใน git
 homecare-packages-data.sql
 *-packages-data.sql
+
+# สำรองฐานข้อมูล (npm run backup:db) — มีข้อมูลผู้ป่วย/ลูกค้าและรหัสผ่านที่ hash แล้ว ห้ามขึ้น git
+backups/

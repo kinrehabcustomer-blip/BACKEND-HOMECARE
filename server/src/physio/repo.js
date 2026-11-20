@@ -1,10 +1,15 @@
 import { sql, transaction } from '../db/index.js';
+import { ensurePackageCodes, fillMissingCodes, assertCodesFree } from '../packages/codes.js';
 
 const NOW = `to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')`;
 const COLUMNS = [
   'name', 'sessions', 'duration_months', 'original_price', 'special_price',
-  'discount_percent', 'discount_amount', 'staff_pay', 'english_fee', 'active', 'note', 'sort_order',
+  'discount_percent', 'discount_amount', 'staff_pay', 'english_fee', 'active', 'note', 'sort_order', 'code',
 ];
+
+/** รหัสห้ามชนแพ็คอื่น (ทั้งกายภาพและ Homecare) — id = แพ็คที่กำลังแก้ (ไม่นับว่าชนตัวเอง) · ดู packages/codes.js */
+export const assertPhysioCodeFree = (code, id = null) =>
+  assertCodesFree([{ code, self: (row) => row.kind === 'physio' && id != null && Number(row.physio_package_id) === Number(id) }]);
 
 /**
  * ชื่อแพ็กห้ามซ้ำ (ตรวจรอบ 15) — เดิมเช็คไม่ได้เลย สองหน้าจอกดบันทึกชื่อเดียวกันพร้อมกัน
@@ -80,6 +85,7 @@ const withComputed = (p) => {
 
 /** ทุกแพ็คเกจเรียงตามลำดับที่ตั้งไว้ — เท่ากันให้เรียงตามจำนวนครั้งน้อยไปมาก (1 ครั้ง -> 30 ครั้ง) */
 export async function listPackages() {
+  await ensurePackageCodes();
   const rows = await sql.all(
     'SELECT * FROM physio_packages ORDER BY sort_order, sessions, physio_package_id',
   );
@@ -87,11 +93,12 @@ export async function listPackages() {
 }
 
 export const findPackage = (id) =>
-  sql
-    .one('SELECT * FROM physio_packages WHERE physio_package_id = :id', { id })
+  ensurePackageCodes()
+    .then(() => sql.one('SELECT * FROM physio_packages WHERE physio_package_id = :id', { id }))
     .then((p) => (p ? withComputed(p) : null));
 
 export async function createPackage(input) {
+  await ensurePackageCodes();
   // ไม่ระบุลำดับมา = ต่อท้ายรายการ
   const { next } = await sql.one(
     'SELECT COALESCE(MAX(sort_order), 0) + 1 AS next FROM physio_packages',
@@ -99,9 +106,9 @@ export async function createPackage(input) {
   const row = await sql.one(
     `INSERT INTO physio_packages
        (name, sessions, duration_months, original_price, special_price,
-        discount_percent, discount_amount, staff_pay, english_fee, active, note, sort_order)
+        discount_percent, discount_amount, staff_pay, english_fee, active, note, sort_order, code)
      VALUES (:name, :sessions, :duration_months, :original_price, :special_price,
-             :discount_percent, :discount_amount, :staff_pay, :english_fee, :active, :note, :sort_order)
+             :discount_percent, :discount_amount, :staff_pay, :english_fee, :active, :note, :sort_order, :code)
      RETURNING *`,
     {
       name: input.name,
@@ -116,12 +123,16 @@ export async function createPackage(input) {
       active: input.active ?? true,
       note: input.note ?? null,
       sort_order: input.sort_order ?? next,
+      code: input.code || null, // ว่าง = ตั้ง PT-<id> ให้ข้างล่าง (ยังไม่รู้ id จนกว่าจะ INSERT)
     },
   );
-  return withComputed(row);
+  if (row.code) return withComputed(row);
+  await fillMissingCodes();
+  return findPackage(row.physio_package_id);
 }
 
 export async function updatePackage(id, input) {
+  await ensurePackageCodes();
   const existing = await sql.one('SELECT * FROM physio_packages WHERE physio_package_id = :id', { id });
   if (!existing) return null;
 
@@ -141,12 +152,17 @@ export async function updatePackage(id, input) {
 
   const values = { physio_package_id: id };
   for (const c of fields) values[c] = patch[c] ?? null;
+  if ('code' in values && !values.code) values.code = null; // ล้างรหัส = ให้ตั้ง PT-<id> ใหม่ข้างล่าง
 
   const row = await sql.one(
     `UPDATE physio_packages SET ${fields.map((c) => `${c} = :${c}`).join(', ')}, updated_at = ${NOW}
      WHERE physio_package_id = :physio_package_id RETURNING *`,
     values,
   );
+  if (row && !row.code) {
+    await fillMissingCodes();
+    return findPackage(id);
+  }
   return row ? withComputed(row) : null;
 }
 

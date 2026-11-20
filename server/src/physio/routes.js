@@ -4,6 +4,7 @@ import { physioPackageSchema, physioPackageUpdateSchema, reorderSchema } from '.
 import { ApiError, asyncRoute, notFound } from '../lib/errors.js';
 import { canSeeStaffPay, stripPayFields } from '../lib/auth.js';
 import { refreshCasePrices } from '../cases/priceRefresh.js';
+import { isDuplicateCodeError, duplicateCodeError } from '../packages/codes.js';
 
 export const physioRouter = Router();
 
@@ -34,10 +35,12 @@ physioRouter.post(
   asyncRoute(async (req, res) => {
     const input = guardPay(req, physioPackageSchema.parse(req.body));
     await repo.ensureUniquePackageName();
+    await repo.assertPhysioCodeFree(input.code);
     try {
       res.status(201).json(visible(req, await repo.createPackage(input)));
     } catch (err) {
       if (repo.isDuplicateNameError(err)) throw new ApiError(409, DUP_NAME(input.name));
+      if (isDuplicateCodeError(err)) throw duplicateCodeError(input.code);
       throw err;
     }
   }),
@@ -88,6 +91,7 @@ physioRouter.patch(
       }
     }
     await repo.ensureUniquePackageName();
+    if (input.code) await repo.assertPhysioCodeFree(input.code, req.params.id);
     try {
       const updated = await repo.updatePackage(req.params.id, input);
       /* แก้ราคา → เคสที่เปิดอยู่และขายราคาเดียวกับแพ็กตามราคาเต็มใหม่ (ส่วนลดบนใบแจ้งหนี้ร่างตรงกับระบบ) */
@@ -97,6 +101,7 @@ physioRouter.patch(
       res.json({ ...visible(req, updated), ...(refreshed ? { refreshed } : {}) });
     } catch (err) {
       if (repo.isDuplicateNameError(err)) throw new ApiError(409, DUP_NAME(input.name));
+      if (isDuplicateCodeError(err)) throw duplicateCodeError(input.code);
       throw err;
     }
   }),

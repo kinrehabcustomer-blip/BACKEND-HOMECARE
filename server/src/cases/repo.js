@@ -217,6 +217,9 @@ const SELECT_CASE = `
          f.graded                           AS format_graded,
          f.category                         AS format_category,
          pp.name                            AS physio_package_name,
+         /* รหัสแพ็คเกจ (packages/codes.js) — ป้ายให้คนอ่าน ไม่ใช่ตัวเชื่อม · Homecare มาจากช่องเรทที่ตรงกับเคส */
+         pp.code                            AS physio_package_code,
+         r.code                             AS pkg_rate_code,
          /* ซื้อหลายแพ็ก (pkg_quantity) = จำนวนครั้ง/อายุรวมทุกแพ็ก · physio_package_sessions = ต่อแพ็ก (ไว้เขียน "10 ครั้ง × 2") */
          pp.sessions * c.pkg_quantity       AS physio_sessions,
          pp.sessions                        AS physio_package_sessions,
@@ -257,7 +260,7 @@ const SELECT_CASE = `
                    'case_id', a.case_id, 'status', a.status, 'fee', a.fee,
                    'start_date', a.start_date, 'end_date', a.end_date,
                    'bill_with_parent', a.bill_with_parent,
-                   'name', ap.name, 'sessions', ap.sessions * a.pkg_quantity, 'pkg_quantity', a.pkg_quantity,
+                   'name', ap.name, 'code', ap.code, 'sessions', ap.sessions * a.pkg_quantity, 'pkg_quantity', a.pkg_quantity,
                    'assigned_to', a.assigned_to, 'assigned_name', ae.first_name || ' ' || ae.last_name)
                  ORDER BY a.created_at, a.case_id)
           FROM cases a
@@ -389,6 +392,12 @@ export async function list({ q, status, case_type, service_kind, assigned_to, no
   if (q) {
     where.push(`(
       c.case_id ILIKE :q OR c.title ILIKE :q OR c.client_name ILIKE :q OR c.client_phone ILIKE :q
+      /* ค้นด้วยรหัสแพ็คเกจได้ (20 พ.ย. 2569) — EXISTS ไม่ใช่ JOIN เพราะ clause นี้ใช้กับ FROM cases c ตัวเดียว (ตัวนับ/ตัดหน้า) */
+      OR EXISTS (SELECT 1 FROM physio_packages sp
+                  WHERE sp.physio_package_id = c.physio_package_id AND sp.code ILIKE :q)
+      OR EXISTS (SELECT 1 FROM pkg_rates sr
+                  WHERE sr.format_id = c.pkg_format_id AND sr.grade_id IS NOT DISTINCT FROM c.pkg_grade_id
+                    AND sr.staff_tier = c.pkg_staff_tier AND sr.code ILIKE :q)
     )`);
     params.q = `%${likeEscape(q)}%`;
   }

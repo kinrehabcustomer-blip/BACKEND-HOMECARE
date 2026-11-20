@@ -554,6 +554,10 @@ export const api = {
 
   // บันทึกการใช้งาน (Super Admin) — server/src/audit/routes.js
   auditLogs: (params = {}) => request(`/audit-logs?${new URLSearchParams(params)}`),
+  // บันทึกการเงิน (server/src/finance) — today = ตัวเลขสด + จดเป็นยอดของวันนี้ · snapshots/events รับ { from, to }
+  financeToday: () => request('/finance-log/today'),
+  financeSnapshots: (params) => request(`/finance-log/snapshots?${new URLSearchParams(params)}`),
+  financeEvents: (params) => request(`/finance-log/events?${new URLSearchParams(params)}`),
   auditMeta: () => request('/audit-logs/meta'),
   exportAuditLogs: (params = {}) => request(`/audit-logs/export?${new URLSearchParams(params)}`),
   // เปิดรอบ + จ่ายในคำขอเดียว — ส่ง payout_ids จากพรีวิวไปให้ server ยืนยันว่าจ่ายตรงชุดที่เห็น

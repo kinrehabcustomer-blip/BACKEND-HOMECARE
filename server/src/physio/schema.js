@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { packageCode } from '../packages/schema.js';
 
 // แพ็คเกจกายภาพบำบัด = ซื้อเหมาจำนวนครั้ง (ต่างจาก Homecare ที่เป็นตารางเรทตามเกรด)
 // "ตกเฉลี่ย" ไม่รับจากฝั่งหน้าเว็บ — คำนวณจาก special_price / sessions ตอนอ่านเสมอ
@@ -11,6 +12,8 @@ const money = (z, msg) => z.number().nonnegative(msg).multipleOf(0.01, 'จำ�
 export const physioPackageSchema = z
   .object({
     name: z.string().trim().min(1, 'กรุณากรอกชื่อแพ็คเกจ').max(100),
+    // รหัสแพ็คเกจ (ดู packages/codes.js) — ว่าง/ไม่ส่ง = ระบบตั้ง PT-<id> ให้
+    code: packageCode.optional(),
     sessions: z.number().int('จำนวนครั้งต้องเป็นจำนวนเต็ม').positive('จำนวนครั้งต้องมากกว่า 0'),
     duration_months: z
       .number()
@@ -47,6 +50,7 @@ export const physioPackageSchema = z
 export const physioPackageUpdateSchema = z
   .object({
     name: z.string().trim().min(1, 'กรุณากรอกชื่อแพ็คเกจ').max(100),
+    code: packageCode,
     sessions: z.number().int().positive('จำนวนครั้งต้องมากกว่า 0'),
     duration_months: z.number().int().positive().nullable(),
     original_price: money(z, 'ราคารวมเดิมต้องไม่ติดลบ').nullable(),

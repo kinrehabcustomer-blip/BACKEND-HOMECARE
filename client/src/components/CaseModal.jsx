@@ -886,6 +886,12 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                     label="บริการ"
                     value={serviceLine(item) && (
                       <>
+                        {/* รหัสแพ็คเกจ (20 พ.ย. 2569) — Homecare มาจากช่องเรทที่ตรงกับเคส · กายภาพจากแพ็คที่ผูกไว้ */}
+                        {(item.physio_package_id ? item.physio_package_code : item.pkg_rate_code) && (
+                          <span className="pkg-code" title="รหัสแพ็คเกจ">
+                            {item.physio_package_id ? item.physio_package_code : item.pkg_rate_code}
+                          </span>
+                        )}
                         {serviceLine(item)}
                         {/* ลูกค้าใช้บริการ/จ่ายเงินไปบางส่วนก่อนมีในระบบ — ยอดยกมาอยู่ในแผงสรุปแพ็กและกล่องค่าใช้จ่าย */}
                         {item.joined_midway && <span className="badge midway-badge">เข้าระบบกลางทาง</span>}

@@ -39,6 +39,9 @@ export const PERMISSION_CATALOG = [
   /* บันทึกการใช้งาน (audit/routes.js · 16 พ.ย. 2569) — เห็นว่าใครทำอะไรในระบบ รวมถึงการกระทำของผู้จัดการเอง
      ค่าตั้งต้น: Super Admin เท่านั้น (ผู้จัดการไม่ได้โดยปริยาย ต้องเปิดให้จากหน้านี้) */
   { key: 'audit_logs', group: 'sensitive', label: 'ดูบันทึกการใช้งานระบบ', hint: 'ใครทำอะไร เมื่อไร · ส่งออก CSV ได้ · เปิด/ปิดได้เฉพาะ Super Admin', superOnly: true },
+  /* บันทึกการเงิน (finance/routes.js · 20 พ.ย. 2569) — ยอดประจำวัน (เงินเข้า · ลูกหนี้ค้าง · ค่าจ้างค้างจ่าย) + สมุดรายการเงิน
+     ค่าตั้งต้น: Super Admin · ผู้จัดการ · ฝ่ายการเงิน */
+  { key: 'finance_logs', group: 'sensitive', label: 'ดูบันทึกการเงิน', hint: 'ยอดประจำวัน · เงินเข้า/ออก · ลูกหนี้ค้างชำระ · ค่าจ้างค้างจ่าย · อยู่ในหน้าตั้งค่าระบบ' },
 ];
 export const PERMISSION_KEYS = PERMISSION_CATALOG.map((p) => p.key);
 
@@ -49,7 +52,7 @@ export const SUPER_ONLY_KEYS = PERMISSION_CATALOG.filter((p) => p.superOnly).map
 /* สิทธิ์ที่มีอยู่ก่อนวันที่ระบบเริ่มจำ "รู้จักสิทธิ์อะไรบ้างตอนบันทึก" (known_keys)
    แถวที่บันทึกก่อนหน้านั้นไม่มี known_keys — ถือว่ารู้จักแค่ชุดนี้ สิทธิ์ที่เพิ่มทีหลังจึงได้ค่าตั้งต้นของตำแหน่ง
    (ไม่งั้นผู้จัดการที่เคยถูกปรับสิทธิ์ไว้จะไม่ได้ "หมวดหมู่" ทั้งที่ค่าตั้งต้นให้) */
-const LEGACY_KEYS = PERMISSION_KEYS.filter((k) => !['audit_logs', 'categories'].includes(k));
+const LEGACY_KEYS = PERMISSION_KEYS.filter((k) => !['audit_logs', 'categories', 'finance_logs'].includes(k));
 
 const OFFICE_KEYS = ['dashboard', 'cases', 'calendar', 'attendance', 'packages', 'customers', 'patients', 'employees', 'reviews'];
 const MONEY_KEYS = ['payroll', 'revenue', 'see_pay', 'invoice_adjust'];
@@ -67,7 +70,7 @@ export const DEFAULT_PERMISSIONS = {
   manager: PERMISSION_KEYS.filter((k) => k !== 'audit_logs'),
   hr: [...OFFICE_KEYS, 'invoices'],
   admin: [...OFFICE_KEYS, 'invoices', 'slip_delete'],
-  finance: ['invoices', 'payroll', 'revenue', 'see_pay', 'invoice_adjust', 'slip_delete'],
+  finance: ['invoices', 'payroll', 'revenue', 'see_pay', 'invoice_adjust', 'slip_delete', 'finance_logs'],
   /* หัวหน้าพยาบาล — งานพยาบาลภายใน (ดร.ธงชัย 8 พ.ย. 2569
      "เรื่องการจัดยา เรื่องการทำแผล ... เป็นเรื่องของการพยาบาลภายใน ไม่ต้องยุ่งกับลูกค้าภายนอก")
      เห็นเคสและรายงานการดูแลรายกะ (อาการ · การดูแลที่ให้ · รูปแผล · หัตถการ) · แฟ้มผู้รับบริการ

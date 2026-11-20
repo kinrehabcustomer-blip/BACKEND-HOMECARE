@@ -5,6 +5,7 @@ import { POSITION_LABELS } from '../labels.js';
 import FilterBar from '../components/FilterBar.jsx';
 import SearchSelect from '../components/SearchSelect.jsx';
 import ErrorBar from '../components/ErrorBar.jsx';
+import LineIcon from '../components/LineIcon.jsx';
 import { downloadCsv } from '../lib/attendanceUi.js';
 
 /**
@@ -241,8 +242,9 @@ export default function AuditLogPage() {
           filtered={filtered}
           onClear={() => patch(Object.fromEntries(FILTER_KEYS.map((k) => [k, ''])))}
           action={(
-            <button type="button" className="btn toolbar-action" onClick={exportCsv} disabled={exporting || loading}>
-              {exporting ? 'กำลังส่งออก…' : 'ส่งออก CSV'}
+            <button type="button" className="btn toolbar-action csv-action" title="ดาวน์โหลด CSV" onClick={exportCsv} disabled={exporting || loading}>
+              <LineIcon name="csv" className="btn-ico csv-ico" />
+              {exporting ? 'กำลังส่งออก…' : 'ดาวน์โหลด CSV'}
             </button>
           )}
         />

@@ -21,6 +21,7 @@ const inUse = (what, n) =>
   );
 import { canSeeStaffPay, stripPayFields } from '../lib/auth.js';
 import { refreshCasePrices } from '../cases/priceRefresh.js';
+import { isDuplicateCodeError, duplicateCodeError } from './codes.js';
 
 export const packagesRouter = Router();
 
@@ -105,7 +106,14 @@ packagesRouter.patch(
        ไม่ใช่แค่กันเจตนาไม่ดี แต่กันอุบัติเหตุตรงๆ: หน้าเว็บของคนกลุ่มนี้ไม่มีช่องค่าจ้าง
        ถ้าปล่อยผ่าน ค่าที่ส่งมาจะเป็นว่างเปล่าแล้วไปล้างค่าจ้างเดิมที่ผู้จัดการตั้งไว้ทิ้งทั้งแถว */
     const safe = seePay ? rates : rates.map(({ staff_pay, ...r }) => r);
-    const updated = await repo.upsertRates(safe);
+    let updated;
+    try {
+      updated = await repo.upsertRates(safe);
+    } catch (err) {
+      // สองคนตั้งรหัสเดียวกันพร้อมกัน — ผ่านการเช็คล่วงหน้ามาได้ทั้งคู่ แต่ดัชนี unique กันไว้
+      if (isDuplicateCodeError(err)) throw duplicateCodeError(safe.find((r) => r.code)?.code ?? '');
+      throw err;
+    }
     // แก้ราคา → เคส Homecare ที่เปิดอยู่และขายราคาเดียวกับเรทตามราคาตั้งใหม่ (ดู cases/priceRefresh.js)
     const refreshed = await refreshCasePrices({ homecareRates: true }, req.user);
     res.json({ ...(seePay ? updated : { ...updated, rates: updated.rates.map(stripPayFields) }), refreshed });

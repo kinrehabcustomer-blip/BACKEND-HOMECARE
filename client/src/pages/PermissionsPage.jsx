@@ -32,6 +32,8 @@ const ICONS = {
   categories: <><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z" /><circle cx="7.5" cy="7.5" r="1.5" /></>,
   // ไอคอนเดียวกับเมนู "บันทึกการใช้งาน" (NAV_ICONS.log ใน App.jsx)
   audit_logs: <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /><circle cx="11" cy="15" r="3" /><path d="M13.2 17.2 15.5 19.5" /></>,
+  // บันทึกการเงิน (20 พ.ย. 2569) — เหรียญ ฿
+  finance_logs: <><circle cx="12" cy="12" r="9" /><path d="M10 7.5v9M10 7.5h3a2 2 0 0 1 0 4h-3h3.5a2.25 2.25 0 0 1 0 4.5H10M12 6v1.5M12 16.5V18" /></>,
 };
 const ROLE_ICON = <><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></>;
 

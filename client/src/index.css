@@ -2058,6 +2058,15 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
   /* dropdown เลือกใบเสร็จกินเต็มแถว · ปุ่มพิมพ์ที่ตามมาเต็มแถวเสมอ
      (:nth-child(n) ไว้เพิ่มน้ำหนักให้ชนะกฎคี่/คู่ของ foot-danger ด้านบน) */
   .modal-foot select.foot-switch { grid-column: 1 / -1; width: 100%; }
+  /* ท้าย popup ใบแจ้งหนี้ (ตรวจหน้าจอมือถือ 20 พ.ย. 2569) — ปุ่มเยอะสุดในระบบ (สูงสุด ~8 ปุ่ม)
+     ปุ่มหลัก (บันทึกการชำระเงิน / ออกใบแจ้งหนี้) ขึ้นแถวแรกเต็มความกว้าง — เดิมจมอยู่กลางกริด
+     ข้อความสถานะ LINE / กล่องคัดลอกบิล ลงแถวของตัวเองเต็มความกว้าง — เดิมไปนั่งเป็นช่องหนึ่งของกริดจนปุ่มเยื้อง */
+  .inv-foot > .btn.primary { order: -2; grid-column: 1 / -1; }
+  /* ปุ่มยกเลิกใบ/ลบใบ ไม่ต้องลงแถวของตัวเองชิดซ้าย — ต่อท้ายปุ่มรอง เติมช่องว่างฝั่งขวาให้สองคอลัมน์เท่ากัน
+     (ผู้ใช้ขอ 20 พ.ย. 2569) · ยังอยู่ท้ายสุดของกลุ่มปุ่ม ห่างจากปุ่มหลักที่แถวบน */
+  .modal-foot.inv-foot > .foot-danger { order: 1; grid-column: auto; margin-top: 0; }
+  .inv-foot > .foot-note { order: 2; grid-column: 1 / -1; font-size: 0.75rem; text-align: center; }
+  .inv-foot > .notice { order: 3; grid-column: 1 / -1; }
   .modal-foot .foot-switch ~ .btn:last-child:nth-child(n) { grid-column: 1 / -1; }
 
   /* ฟอร์มจับคู่พนักงาน/ใบรับรอง: ปุ่มตกลงมาใต้ช่องกรอก */
@@ -2150,6 +2159,15 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
     text-align: left;
     color: var(--muted);
   }
+  /* ช่องข้อความยาว (บริการของเคส · รายการในใบแจ้งหนี้) — ป้ายอยู่บรรทัดบน ค่าชิดซ้ายเต็มความกว้าง
+     ชิดขวาแบบช่องอื่นแล้วข้อความยาวตกบรรทัดเป็นก้อนขวาเยื้องไปมา อ่านยาก (ตรวจหน้าจอมือถือ 20 พ.ย. 2569) */
+  .table.table-cards tbody td.cell-stack:nth-child(n),
+  .table.table-cards.table-indexed tbody td.cell-stack:nth-child(n) { text-align: left; }
+  .table-cards tbody td.cell-stack[data-label]::before { float: none; display: block; margin: 0 0 0.125rem; }
+  /* ช่องที่ไม่มีค่า ("—") ไม่ต้องกินบรรทัดในการ์ด — ป้ายสถานะ/ข้อมูลอื่นบอกอยู่แล้ว */
+  .table.table-cards tbody td.is-blank { display: none; }
+  /* ลิงก์ในการ์ด (รหัสเคส · เบอร์โทร) — ขยายพื้นที่กดเป็น ~32px โดยไม่ดันบรรทัด */
+  .table-cards tbody td a.link { display: inline-block; padding-block: 0.5rem; margin-block: -0.5rem; }
   /* ช่องสถานะว่าง/กำลังโหลด กินเต็มการ์ด ไม่ต้องมีป้ายกำกับ
      (เป็น td ช่องแรกของแถวด้วย จึงต้องเขียนให้ชนะกฎ .table-indexed td:first-child ข้างบน) */
   .table.table-cards tbody td.empty,
@@ -2413,6 +2431,41 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
 .rate-edit-row input { width: 100%; min-width: 0; padding: 0.2rem 0.35rem; text-align: right; }
 .rate-edit .btn.tiny { flex-shrink: 0; }
 .rate-net { font-size: 0.625rem; font-weight: 600; color: var(--brand); text-align: right; }
+
+/* รหัสแพ็คเกจ (20 พ.ย. 2569) — ป้ายตัวเล็กแบบเดียวกันทุกที่: ตารางเรท · แพ็คกายภาพ · หน้าเคส · รายการเคส
+   ตัวอักษรความกว้างเท่ากัน (mono) ให้อ่านรหัสทีละตัวไม่สับสน 0/O 1/I · สีจางไม่แย่งความเด่นจากราคา */
+.pkg-code {
+  display: inline-block;
+  margin-right: 0.375rem;
+  padding: 0.0625rem 0.375rem;
+  border: 1px solid var(--border);
+  border-radius: 0.375rem;
+  background: var(--bg);
+  color: var(--muted);
+  font-family: ui-monospace, 'Cascadia Mono', monospace;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1.4;
+  white-space: nowrap;
+  vertical-align: 0.0625rem;
+}
+/* ในช่องเรทและชื่อแพ็คกายภาพ — วางเป็นบรรทัดบนของตัวเอง (คอลัมน์ระดับพนักงานแคบ ~100px วางคู่ราคาไม่พอ) */
+.rate-code-row { display: block; margin-bottom: 0.1875rem; line-height: 1; }
+.rate-code { margin: 0; padding: 0 0.3125rem; font-size: 0.625rem; }
+.physio-code { white-space: nowrap; }
+/* คอลัมน์รหัสของตารางกายภาพ: ตัวอักษรเฉยๆ ไม่มีกรอบ/พื้น (ผู้ใช้ขอ 20 พ.ย. 2569) — ป้ายมีกรอบยังใช้ที่อื่นตามเดิม */
+.physio-code .pkg-code { margin: 0; padding: 0; border: 0; background: none; font-size: 0.8125rem; color: var(--text); }
+.pkg-code-input,
+.rate-edit-row input.rate-code-input {
+  font-family: ui-monospace, 'Cascadia Mono', monospace;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+.rate-edit-row input.rate-code-input { text-align: left; font-size: 0.75rem; }
+/* placeholder ไม่ต้องเป็นตัวพิมพ์ใหญ่/mono — เป็นคำอธิบายภาษาไทย */
+.pkg-code-input::placeholder,
+.rate-code-input::placeholder { font-family: inherit; text-transform: none; letter-spacing: normal; }
 /* ค่าจ้างพนักงานใต้ราคาขาย — เบากว่าราคาเพราะเป็นข้อมูลประกอบ ไม่ใช่ตัวเลขที่ลูกค้าเห็น */
 .rate-staff { display: block; font-size: 0.6875rem; font-weight: 400; color: var(--muted); }
 .rate-staff.is-missing { color: var(--danger); }
@@ -3399,6 +3452,7 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
 .table tbody tr.is-picked,
 .table tbody tr.is-picked:hover { background: var(--brand-soft); border-color: var(--brand); }
 .pay-cell { text-align: right; }
+.pay-cell > strong { white-space: nowrap; }
 
 /* บรรทัดบอกว่ารายชื่อพนักงานถูกกรองตามระดับของเคสอยู่ — ใต้ช่องเลือกในโมดัลเคส */
 .assign-hint { margin: 0.375rem 0 0; font-size: 0.75rem; }
@@ -3632,6 +3686,10 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
     text-align: left;
   }
   .table-cards tbody td.physio-name::before { content: none; }
+  /* รหัสอยู่เหนือชื่อแพ็คเกจในการ์ด (ไม่มีป้ายกำกับ) · ไม่มีรหัส = ไม่ต้องมีบรรทัด */
+  .table.table-cards tbody td.physio-code { order: -21; flex: 1 1 100%; padding: 0 0 0.25rem; text-align: left; }
+  .table-cards tbody td.physio-code::before { content: none; }
+  .table.table-cards tbody td.physio-code.is-blank { display: none; }
   /* เส้นคั่นใต้ชื่อ — ก่อนบล็อกตัวเลข (order ปริยาย 0) */
   .table-cards tbody tr:has(> td.physio-name)::after {
     content: '';
@@ -3648,7 +3706,7 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
   /* ปุ่มจัดการ: ↑ ↓ เท่าที่จำเป็น ส่วน "แก้ไข/ลบ" หารความกว้างที่เหลือ
      ให้ทุกปุ่ม flex: 1 เท่ากันจะได้ปุ่มลูกศรกว้างเท่าปุ่มลบ ทั้งที่ไอคอนเดียว */
   .table-cards tbody td.physio-actions .btn { margin-left: 0; }
-  .table-cards tbody td.physio-actions .btn:nth-child(-n + 2) { flex: 0 0 auto; }
+  .table-cards tbody td.physio-actions > * { flex: 1 1 0; justify-content: center; min-height: 2.5rem; }
 }
 
 /* กล่องสรุปตัวเลขที่คำนวณให้ในฟอร์ม */
@@ -3765,7 +3823,7 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
 }
 
 .shift-actions { flex-shrink: 0; display: flex; gap: 0.5rem; }
-.shift-done { color: #1c7a4d; font-weight: 600; font-size: 0.875rem; }
+.shift-done { display: inline-flex; align-items: center; align-self: center; gap: 0.25rem; white-space: nowrap; color: #1c7a4d; font-weight: 600; font-size: 0.875rem; }
 
 /* กล่องยืนยันเช็คเอาท์ — เข้ามาแทนที่ปุ่มในช่องเดิม ไม่ใช่แทรกเพิ่มเป็นแถวใหม่
    การ์ดจะได้ไม่กระตุกยืดออกตอนกด และสายตายังอยู่ตรงจุดที่นิ้วเพิ่งแตะ */
@@ -6008,7 +6066,9 @@ h1, h2, h3, h4, .page-hero-title, .cal-title, .login-heading h1 {
   :is(.content, .content > .pull-zone > .pull-content) > .toolbar:has(+ .table-wrap) { margin-bottom: 0; }
   :is(.content, .content > .pull-zone > .pull-content) > .toolbar + .table-wrap > :is(.table, .cal-grid) { border-top: 0; }
   :is(.content, .content > .pull-zone > .pull-content):has(.hero-card) > .card:not(.narrow),
-  :is(.content, .content > .pull-zone > .pull-content):has(> .columns) > .card:not(.narrow) {
+  :is(.content, .content > .pull-zone > .pull-content):has(> .columns) > .card:not(.narrow),
+  /* หน้ารายได้ตาม BU — กราฟกับตารางสรุปเป็นการ์ดมีขอบมุมมนเหมือนการ์ดตัวเลขด้านบน (ผู้ใช้ขอ 20 พ.ย. 2569) */
+  :is(.content, .content > .pull-zone > .pull-content):has(> .bu-tiles) > .card:not(.narrow) {
     margin-inline: 0; border-inline: 1px solid var(--border); border-radius: var(--radius-card);
   }
 }
@@ -6738,6 +6798,8 @@ h1, h2, h3, h4, .page-hero-title, .cal-title, .login-heading h1 {
   padding: 0.875rem 0.75rem; border: 1px solid var(--border); border-radius: 1rem; background: var(--surface);
 }
 .set-nav-group { display: flex; flex-direction: column; gap: 0.125rem; }
+/* ช่องเลือกหัวข้อ — ใช้แทนเมนูซ้ายบนจอแคบเท่านั้น (SettingsShell) */
+.set-picker { display: none; }
 .set-nav-head { margin: 0 0.75rem 0.25rem; font-size: 0.75rem; font-weight: 700; color: var(--brand); letter-spacing: 0.02em; }
 .set-nav-item {
   display: block; width: 100%; padding: 0.625rem 0.75rem; border: 0; border-left: 3px solid transparent; border-radius: 0.5rem;
@@ -6753,6 +6815,12 @@ h1, h2, h3, h4, .page-hero-title, .cal-title, .login-heading h1 {
 .set-pane-head { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 0.75rem 1rem; }
 .set-pane-head h2 { margin: 0; font-size: 1.375rem; color: var(--heading); }
 .set-pane-head p { margin: 0.25rem 0 0; font-size: 0.875rem; }
+/* มือถือ: หัวแผงไม่ชิดขอบจอ — เยื้องเข้าให้ตรงกับเนื้อในการ์ดด้านล่าง · ชื่อกับปุ่มกึ่งกลางแนวเดียวกัน (20 พ.ย. 2569) */
+@media (max-width: 600px) {
+  .set-pane-head { align-items: center; padding-inline: 0.875rem; }
+  /* ปุ่มของหัวแผง (+ เพิ่มหมวดหลัก) ตกบรรทัดแล้วชิดขวา (ผู้ใช้ขอ 20 พ.ย. 2569) */
+  .set-pane-head > .btn { margin-left: auto; }
+}
 
 .set-card {
   padding: 1.25rem 1.5rem; border: 1px solid var(--border); border-radius: 1rem; background: var(--surface);
@@ -6764,6 +6832,20 @@ h1, h2, h3, h4, .page-hero-title, .cal-title, .login-heading h1 {
 .set-card-head:last-child { margin-bottom: 0; }
 .set-card-title { min-width: 0; }
 .set-card-title h3 { margin: 0; font-size: 1.0625rem; color: var(--heading); }
+/* พับ/กาง (หน้าหัตถการ · อุปกรณ์เสริม — 20 พ.ย. 2569): ชื่อหมวดหลักเป็นปุ่มกาง · จำนวนรายการของหมวดย่อยเป็นปุ่มกางราคา */
+.set-fold-btn {
+  display: inline-flex; align-items: center; gap: 0.5rem; max-width: 100%; margin: 0; padding: 0.125rem 0;
+  border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+.set-fold-btn:hover h3 { color: var(--brand); }
+.set-fold-ico { flex: none; width: 1rem; height: 1rem; color: var(--muted); transform: rotate(-90deg); transition: transform 0.15s; }
+.set-fold-ico.is-open { transform: none; }
+.set-fold-link {
+  display: inline-flex; align-items: center; gap: 0.25rem; margin: 0; padding: 0.25rem 0;
+  border: 0; background: none; font: inherit; font-weight: 600; color: var(--brand); cursor: pointer;
+}
+.set-fold-link .set-fold-ico { width: 0.875rem; height: 0.875rem; color: currentColor; }
+.set-card.is-folded .set-card-head { margin-bottom: 0; }
 .set-card-title p { margin: 0.25rem 0 0; font-size: 0.8125rem; }
 .set-code { margin-left: 0.375rem; font-size: 0.75rem; font-weight: 500; color: var(--brand); }
 .set-card-tools, .set-row-tools { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 0.75rem; }
@@ -6904,15 +6986,35 @@ h1, h2, h3, h4, .page-hero-title, .cal-title, .login-heading h1 {
 .set-filter-result { display: inline-flex; align-items: center; gap: 0.25rem; font-size: 0.8125rem; color: var(--muted); white-space: nowrap; }
 
 @media (max-width: 900px) {
-  .set-shell { grid-template-columns: minmax(0, 1fr); gap: 1rem; }
-  .set-nav {
-    position: static; flex-direction: row; gap: 0.25rem; padding: 0.375rem; border-radius: 0.75rem;
-    overflow-x: auto; scrollbar-width: none;
+  /* จอแคบ (20 พ.ย. 2569): เมนูซ้ายซ่อน → ช่องเลือกหัวข้อ (.set-picker) + ตัวกรองของแผง (.set-filter) รวมเป็นการ์ดเดียวบนสุด
+     .set-main เป็น display: contents ลูกของแผงจึงเรียงต่อกับช่องเลือกได้ — ลำดับ: หัวแผง · ช่องเลือก · ตัวกรอง · เนื้อหา */
+  .set-shell { display: flex; flex-direction: column; align-items: stretch; gap: 1rem; }
+  .set-shell > .set-main > * { min-width: 0; }
+  .set-nav { display: none; }
+  .set-main { display: contents; }
+  .set-picker {
+    order: -3; display: flex; flex-direction: column; gap: 0.375rem;
+    padding: 0.75rem; border: 1px solid var(--border); border-radius: 1rem; background: var(--surface);
   }
-  .set-nav::-webkit-scrollbar { display: none; }
-  .set-nav-group { display: contents; }
-  .set-nav-head { display: none; }
-  .set-nav-item { flex: none; width: auto; padding: 0.5rem 0.875rem; border-left: 0; white-space: nowrap; font-size: 0.875rem; }
+  .set-picker .search-select, .set-picker select { width: 100%; }
+  .set-picker-label { font-size: 0.75rem; font-weight: 700; color: var(--brand); letter-spacing: 0.02em; }
+  .set-picker select { width: 100%; font-weight: 600; color: var(--heading); }
+  .set-main > .set-filter { order: -2; }
+  /* หัวข้อ (ชื่อ · คำอธิบาย · ปุ่มเพิ่ม) ขึ้นก่อนการ์ดช่องเลือก/ตัวกรอง (ผู้ใช้ขอ 20 พ.ย. 2569) */
+  .set-main > .set-pane-head { order: -4; }
+  /* มีตัวกรอง = ต่อกันเป็นการ์ดเดียว — ช่องทั้งสามกว้างเท่ากัน ขอบซ้ายขวาตรงกัน ระยะห่างระหว่างช่องเท่ากันทุกช่อง (0.5rem)
+     (รอบแรกระยะไม่เท่ากัน: ช่องเลือกหัวข้อ→ค้นหา ห่างกว่า ค้นหา→หมวดหลัก และขอบในไม่ตรงกัน · ผู้ใช้ทัก 20 พ.ย. 2569) */
+  .set-shell:has(> .set-main > .set-filter) > .set-picker {
+    padding-bottom: 0; border-bottom: 0; border-bottom-left-radius: 0; border-bottom-right-radius: 0;
+  }
+  .set-shell:has(> .set-main > .set-filter) > .set-main > .set-filter {
+    margin-top: -1rem; padding: 0.5rem 0.75rem 0.75rem; gap: 0.5rem; border-top: 0;
+    border-top-left-radius: 0; border-top-right-radius: 0;
+  }
+  .set-shell:has(> .set-main > .set-filter) > .set-main > .set-filter > * { flex: 1 1 100%; }
+  .set-shell:has(> .set-main > .set-filter) > .set-main > .set-filter > .set-filter-result { justify-content: space-between; }
+  /* หัวแผง (ชื่อหัวข้อ · คำอธิบาย · ปุ่มเพิ่ม) ตรงแนวเดียวกับช่องในการ์ดด้านบน */
+  .set-shell .set-main > .set-pane-head { padding-inline: calc(0.75rem + 1px); }
   .set-card { padding: 1rem; }
   .set-row { padding: 0.75rem; }
   .set-row-main { flex-wrap: wrap; }
@@ -6921,6 +7023,35 @@ h1, h2, h3, h4, .page-hero-title, .cal-title, .login-heading h1 {
   .set-row-tools { gap: 0.5rem; }
   /* จอแคบ: สวิตช์ชิดซ้าย ปุ่มแก้ไขชิดขวาของกล่อง — ทุกแถวตรงกัน */
   .set-row-tools > .set-edit-btn, .set-card-tools > .set-edit-btn { margin-left: auto; }
+  .set-card-tools > .set-switch { order: -1; }
+  /* แคตตาล็อกบนมือถือ — การ์ดกระชับ: แถวหมวดย่อยบรรทัดเดียว (เลข · ชื่อ · สวิตช์ · แก้ไข)
+     ข้อความ "เปิดใช้งาน" ข้างสวิตช์ของแถวย่อยซ่อนไว้ — สีสวิตช์และแถวจางตอนปิดบอกสถานะอยู่แล้ว */
+  .set-card:has(.set-fold-btn) { padding: 0.875rem; }
+  .set-card:has(.set-fold-btn) .set-card-head { gap: 0.5rem 0.75rem; margin-bottom: 0.75rem; }
+  .set-card:has(.set-fold-btn).is-folded .set-card-head { margin-bottom: 0; }
+  /* พับอยู่ = การ์ดเหลือแถวเดียว: ชื่อหมวด (กดกาง) · สวิตช์ — คำอธิบาย/ปุ่มเพิ่ม/แก้ไข โผล่เมื่อกางการ์ด */
+  .set-card.is-folded:has(.set-fold-btn) .set-card-head { flex-wrap: nowrap; }
+  .set-card.is-folded:has(.set-fold-btn) .set-card-title { flex: 1; }
+  .set-card.is-folded:has(.set-fold-btn) .set-card-title p { display: none; }
+  .set-card.is-folded:has(.set-fold-btn) .set-card-tools { width: auto; flex: none; }
+  .set-card.is-folded:has(.set-fold-btn) .set-card-tools > :not(.set-switch) { display: none; }
+  .set-card.is-folded:has(.set-fold-btn) .set-switch > span { display: none; }
+  .set-card.is-folded:has(.set-fold-btn) { padding-block: 0.625rem; }
+  .set-card:has(.set-fold-btn) .set-card-title p { font-size: 0.75rem; }
+  .set-row.is-catalog { padding: 0.5rem 0.625rem; }
+  .set-row.is-catalog .set-row-main { flex-wrap: nowrap; gap: 0.625rem; }
+  .set-row.is-catalog .set-row-ico { width: 2rem; height: 2rem; font-size: 0.75rem; }
+  .set-row.is-catalog .set-row-tools { width: auto; gap: 0.375rem; }
+  .set-row.is-catalog .set-row-tools > .set-edit-btn { margin-left: 0; }
+  .set-row.is-catalog .set-switch > span { display: none; }
+  .set-row.is-catalog .set-items { margin-top: 0.5rem; }
+  .set-row.is-catalog .set-item-row { padding: 0.375rem 0.5rem 0.4375rem 0.625rem; gap: 0.5rem; }
+  .set-row.is-catalog .set-price-box input { padding-block: 0.1875rem; min-height: 2rem; }
+  .set-card-tools > .set-add-btn { margin-left: auto; }
+  .set-card-tools > .set-add-btn ~ .set-edit-btn { margin-left: 0; }
+  /* ปุ่ม × เอารายการออกจากหมวด — 22px เล็กเกินนิ้ว */
+  /* พื้นที่กด 32px แต่กินที่เท่าเดิม (margin ติดลบ) — ไม่ดันชื่อหัตถการให้ตกบรรทัด */
+  .cat-chip-x { width: 2rem; height: 2rem; margin: -0.3125rem; font-size: 1.125rem; }
   .pkg-manage .set-row-tools > :last-child { margin-left: auto; }
   .set-row-tools > select { flex: 1; min-width: 0; }
   .set-items { margin-left: 0; }
@@ -6954,6 +7085,13 @@ h1, h2, h3, h4, .page-hero-title, .cal-title, .login-heading h1 {
 .bu-show { display: inline-flex; align-items: center; gap: 0.5rem; font-size: 0.875rem; }
 /* ปุ่มส่งออกชิดขวาสุดของแถวตัวกรอง (แทนแถวหัวหน้าเดิม) */
 .bu-export-slot { margin-left: auto; }
+/* ไอคอนไฟล์ CSV สีเขียว (ปุ่มดาวน์โหลด CSV) — โตกว่า .btn-ico ปกติให้อ่านคำว่า CSV ออก
+   margin ติดลบบน-ล่างกันปุ่มสูงกว่าปุ่มข้อความข้าง ๆ · โหมดมืดใช้เขียวสว่างขึ้นให้ตัดกับพื้นเข้ม
+   แต่ยังเข้มพอให้ตัวอักษรขาวบนป้ายอ่านออก */
+.csv-ico { width: 1.5rem; height: 1.5rem; margin-block: -0.25rem; color: #1a7f37; }
+:root[data-theme='dark'] .csv-ico { color: #2ea043; }
+/* ปุ่ม CSV ทุกหน้าใช้ไอคอนนี้ (20 พ.ย. 2569) — กฎขนาด svg ของปุ่มเดิมบางหน้า (การมาทำงานบนมือถือ) ต้องไม่ย่อมันลง */
+.btn > svg.csv-ico.csv-ico.csv-ico { width: 1.5rem; height: 1.5rem; margin-block: -0.25rem; }
 .bu-show .seg button:disabled { opacity: 0.4; cursor: not-allowed; }
 .bu-show .seg button:disabled:hover { background: transparent; color: var(--muted); }
 /* แผงเลือกช่วง */
@@ -7107,3 +7245,116 @@ h1, h2, h3, h4, .page-hero-title, .cal-title, .login-heading h1 {
   background: currentColor; transform: rotate(45deg);
 }
 .cal-doc-mark.m-missed::after { transform: rotate(-45deg); }
+
+/* ---------- บันทึกการเงิน (pages/FinanceLogPage.jsx · หน้าตั้งค่าระบบ · 20 พ.ย. 2569) ---------- */
+.fin { display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
+
+/* แถวบนของการ์ด: มุมมอง (ซ้าย) · ช่วงเวลา (ขวา) — พื้นอ่อนแยกจากแถวตัวกรองด้านล่าง */
+.fin-bar {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.625rem;
+  padding: 0.875rem 1rem; background: var(--surface-2); border-bottom: 1px solid var(--divider, var(--border));
+}
+.fin-range { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+.fin-date input { width: 9.5rem; }
+
+.fin-card { padding: 0; overflow: hidden; }
+.fin-card-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.625rem; padding: 0.875rem 1rem; border-bottom: 1px solid var(--divider, var(--border)); }
+.fin-card-head > .btn { margin-left: auto; }
+.fin-search { flex: 1 1 14rem; min-width: 0; max-width: 22rem; }
+.fin-hint { margin: 0; flex: 1 1 18rem; font-size: 0.8125rem; }
+.fin-pad { padding: 1rem; margin: 0; }
+
+.fin-sum { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0; margin: 0; border-bottom: 1px solid var(--divider, var(--border)); }
+.fin-sum > div { padding: 0.625rem 1rem; border-right: 1px solid var(--divider, var(--border)); }
+.fin-sum > div:last-child { border-right: 0; }
+.fin-sum dt { font-size: 0.6875rem; font-weight: 600; color: var(--muted); }
+.fin-sum dt { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fin-sum dd { margin: 0.125rem 0 0; font-size: 0.9375rem; font-weight: 700; color: var(--heading); font-variant-numeric: tabular-nums; }
+
+.fin-scroll { border: 0; border-radius: 0; }
+.fin-table { width: 100%; border-collapse: collapse; font-size: 0.8125rem; }
+.fin-table th, .fin-table td { padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--divider, var(--border)); text-align: left; vertical-align: top; }
+.fin-table th { font-size: 0.6875rem; font-weight: 600; color: var(--muted); background: var(--surface-2); white-space: nowrap; }
+.fin-table .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.fin-table .strong { font-weight: 700; color: var(--heading); }
+.fin-table .cell-sub { display: block; }
+/* เลขเอกสาร/วันที่/เวลา ห้ามหักกลางคำ ("HC-" ตกบรรทัด) — ตารางเลื่อนแนวนอนได้แทน */
+.fin-table .nw, .fin-table .mono { white-space: nowrap; }
+.fin-table .mono { font-size: 0.75rem; }
+.fin-table td.fin-party { min-width: 9rem; }
+.fin-table .is-in { color: #2e7d4f; }
+.fin-table .is-out, .fin-sum .is-out { color: var(--danger); }
+.fin-sum .is-in { color: #2e7d4f; }
+:root[data-theme='dark'] .fin-table .is-in, :root[data-theme='dark'] .fin-sum .is-in { color: #6fcf97; }
+.fin-note { min-width: 10rem; color: var(--muted); }
+.fin-pager { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem 1rem; padding: 0.75rem 1rem; font-size: 0.8125rem; }
+.fin-pager-nav { display: flex; align-items: center; gap: 0.625rem; }
+.fin-pager-nav .muted { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* ป้ายชนิดรายการ — สีตามกลุ่ม (เงินเข้า/ออก · ลูกหนี้ · ค่าจ้าง) · รายการยกเลิกเป็นเส้นขอบประ */
+.fin-kind {
+  display: inline-block; padding: 0.0625rem 0.5rem; border-radius: 999px; font-size: 0.75rem; font-weight: 600; white-space: nowrap;
+  border: 1px solid transparent;
+}
+.fin-kind.is-cash { background: #e6f4ec; color: #1f6b43; }
+.fin-kind.is-ar { background: var(--brand-soft); color: var(--brand); }
+.fin-kind.is-payroll { background: #ece8fb; color: #5a45b8; }
+.fin-kind[class*='_void'], .fin-kind[class*='_cancelled'] { background: transparent; border-style: dashed; border-color: currentColor; }
+.fin-kind.k-refund { background: #fbe9e9; color: #a12a1f; }
+:root[data-theme='dark'] .fin-kind.is-cash { background: rgba(111, 207, 151, 0.14); color: #6fcf97; }
+:root[data-theme='dark'] .fin-kind.is-payroll { background: rgba(144, 133, 233, 0.16); color: #b3a9f2; }
+:root[data-theme='dark'] .fin-kind.k-refund { background: rgba(229, 115, 115, 0.14); color: #f09a9a; }
+
+@media (max-width: 1100px) {
+  .fin-sum { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .fin-sum > div:nth-child(3n) { border-right: 0; }
+  .fin-sum > div:nth-child(-n + 3) { border-bottom: 1px solid var(--divider, var(--border)); }
+}
+@media (max-width: 640px) {
+  .fin-sum { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .fin-sum > div { border-right: 1px solid var(--divider, var(--border)); border-bottom: 1px solid var(--divider, var(--border)); }
+  .fin-sum > div:nth-child(2n) { border-right: 0; }
+  .fin-sum > div:nth-last-child(-n + 2) { border-bottom: 0; }
+  .fin-bar { align-items: stretch; }
+  .fin-range { width: 100%; }
+  .fin-date { flex: 1 1 0; }
+  .fin-date input { width: 100%; }
+  .fin-card-head > .btn { margin-left: 0; }
+  .fin-search { max-width: none; }
+}
+
+/* มือถือ: รายการเงินแถวละการ์ด (แบบหน้าบันทึกการใช้งาน · ผู้ใช้ขอ 20 พ.ย. 2569) — จอคอมเป็นตารางตามเดิม
+   บน: ป้ายรายการ · จำนวนเงิน (ตัวใหญ่ ขวา) · วันที่เวลา · เลขเอกสาร · ลูกค้า/ช่องทาง/ผู้ทำ (ป้ายซ้าย ค่าขวา) · หมายเหตุ */
+@media (max-width: 640px) {
+  .fin-scroll:has(> .fin-events) { overflow: visible; }
+  .fin-events, .fin-events tbody { display: block; width: 100%; }
+  .fin-events thead { display: none; }
+  .fin-events tbody { padding: 0.75rem 0.75rem 0; }
+  .fin-events tr {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.25rem 0.75rem; align-items: center;
+    margin-bottom: 0.625rem; padding: 0.75rem 0.875rem;
+    border: 1px solid var(--border); border-radius: 0.875rem; background: var(--surface);
+  }
+  .fin-events td { display: block; padding: 0; border: 0; background: none !important; min-width: 0; }
+  .fin-events td.fe-kind { grid-column: 1; grid-row: 1; }
+  .fin-events td.fe-amount { grid-column: 2; grid-row: 1; font-size: 1rem; font-weight: 700; color: var(--heading); }
+  .fin-events td.fe-amount.is-in { color: #2e7d4f; }
+  .fin-events td.fe-amount.is-out { color: var(--danger); }
+  .fin-events td.fe-date { grid-column: 1 / -1; font-size: 0.75rem; color: var(--muted); }
+  .fin-events td.fe-date .cell-sub { display: inline; }
+  .fin-events td.fe-date .cell-sub::before { content: ' · '; }
+  .fin-events td.fe-doc {
+    grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 0 0.625rem;
+    padding-bottom: 0.375rem; border-bottom: 1px solid var(--divider, var(--border));
+  }
+  .fin-events td.fe-doc .cell-sub { display: inline; color: var(--muted); }
+  .fin-events td.fe-meta {
+    grid-column: 1 / -1; display: flex; justify-content: space-between; gap: 1rem;
+    font-size: 0.8125rem; white-space: normal;
+  }
+  .fin-events td.fe-meta::before { content: attr(data-label); flex: none; color: var(--muted); font-size: 0.75rem; }
+  .fin-events td.fin-party { text-align: right; }
+  .fin-events td.fe-note { grid-column: 1 / -1; font-size: 0.8125rem; color: var(--muted); }
+  .fin-events td.is-blank { display: none; }
+  :root[data-theme='dark'] .fin-events td.fe-amount.is-in { color: #6fcf97; }
+}

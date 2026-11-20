@@ -159,8 +159,9 @@ export default function InvoiceExport({ filters, filterNote }) {
         title="ดาวน์โหลด CSV"
         onClick={() => setOpen((v) => !v)}
       >
-        <LineIcon name="download" />
-        <span className="inv-csv-label">CSV</span>
+        {/* ไอคอนไฟล์ CSV สีเขียว + "ดาวน์โหลด CSV" — แบบเดียวกันทุกปุ่ม CSV (ผู้ใช้ขอ 20 พ.ย. 2569) · มือถือเหลือแค่ไอคอน */}
+        <LineIcon name="csv" className="btn-ico csv-ico" />
+        <span className="inv-csv-label">ดาวน์โหลด CSV</span>
       </button>
       {open && pos && createPortal(
         <div

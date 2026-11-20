@@ -6,6 +6,7 @@ import { requireAuth, requireAdmin, requireBackOffice, requirePasswordChanged } 
 import { collectAlerts } from './alerts.js';
 import { failedVisitNotifications } from './visitReminders.js';
 import { purgeAuditLogs } from '../lib/audit.js';
+import { captureSnapshot } from '../finance/log.js';
 
 /**
  * แจ้งเตือนเชิงรุก — ของค้างที่ต้องรีบรู้ ถูกส่งไปหาคน แทนที่จะรอให้คนมาเปิดหน้าเว็บเจอ
@@ -155,7 +156,19 @@ const purgeOldAuditLogs = (req, res, next) => {
     next();
   });
 };
-notifyRouter.get('/daily-digest', cronOnly, purgeOldAuditLogs, sendDigest({ once: true }));
+/* จดยอดการเงินประจำวัน (finance/log.js) ทุกเช้า — วันที่ไม่มีใครเปิดหน้าบันทึกการเงินก็ยังมีแถวของวันนั้น
+   จดไม่สำเร็จ/ช้าเกินไม่ขวางการส่งสรุป (เงื่อนไขเดียวกับการกวาดบันทึกการใช้งาน) */
+const snapshotFinance = (req, res, next) => {
+  let timer;
+  Promise.race([
+    captureSnapshot().catch((err) => console.error('[finance] จดยอดประจำวันไม่สำเร็จ:', err.message)),
+    new Promise((resolve) => { timer = setTimeout(resolve, PURGE_BUDGET_MS); }),
+  ]).finally(() => {
+    clearTimeout(timer);
+    next();
+  });
+};
+notifyRouter.get('/daily-digest', cronOnly, purgeOldAuditLogs, snapshotFinance, sendDigest({ once: true }));
 
 /** ทางของคน — ผู้จัดการ/HR กดจากหน้าเว็บเพื่อทดสอบว่าอีเมลออกจริงไหม หรือส่งซ้ำ */
 // บัญชีที่ยังใช้รหัสชั่วคราวต้องตั้งรหัสใหม่ก่อน — กติกาเดียวกับเส้นอื่นของหลังบ้าน (ดู app.js signedIn)

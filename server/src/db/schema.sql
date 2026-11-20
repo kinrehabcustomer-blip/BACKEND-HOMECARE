@@ -705,6 +705,14 @@ ALTER TABLE physio_packages ADD COLUMN IF NOT EXISTS staff_pay DOUBLE PRECISION 
 -- ว่าง = แพ็คเกจนี้ไม่มีตัวเลือกภาษาอังกฤษ · เคสเก็บธงไว้ที่ cases.pkg_english คอลัมน์เดียวกับ Homecare
 ALTER TABLE physio_packages ADD COLUMN IF NOT EXISTS english_fee DOUBLE PRECISION CHECK (english_fee >= 0);
 
+-- รหัสแพ็คเกจที่คนอ่านออกและแก้ได้จากหน้าเว็บ (20 พ.ย. 2569) — PT-006 · HC-M24N-G1-RN
+-- เป็นป้ายชื่อ ไม่ใช่ตัวเชื่อม: เคสยังผูกด้วย id เดิม · ห้ามซ้ำ (ไม่สนตัวพิมพ์) ข้ามสองตารางเช็คที่ชั้นแอป
+-- แอปสร้างเองแบบ lazy และเติมรหัสตั้งต้นให้แถวที่ยังว่าง (server/src/packages/codes.js) — ตรงนี้ให้ migrate ได้โครงเดียวกัน
+ALTER TABLE pkg_rates ADD COLUMN IF NOT EXISTS code TEXT;
+ALTER TABLE physio_packages ADD COLUMN IF NOT EXISTS code TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_pkg_rates_code ON pkg_rates (upper(code)) WHERE code IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_physio_packages_code ON physio_packages (upper(code)) WHERE code IS NOT NULL;
+
 -- เคสเดิมที่เปิดก่อนมีคอลัมน์นี้ — เติมจากเรท/แพ็คเกจที่เคสอ้างอิงอยู่ (เท่าที่ยังหาเจอ)
 -- แตะเฉพาะแถวที่ยังว่าง เคสที่กรอกค่าจ้างเองไว้แล้วไม่ถูกทับ
 -- รันซ้ำได้เรื่อยๆ: ตั้งค่าจ้างในตารางเรท/แพ็คเกจทีหลังแล้วรันอีกครั้ง เคสที่ยังว่างจะได้ค่าไปด้วย

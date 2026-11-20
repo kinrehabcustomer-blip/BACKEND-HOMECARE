@@ -6,11 +6,13 @@ import CategoryManager from '../components/CategoryManager.jsx';
 
 const PermissionsPage = lazy(() => import('./PermissionsPage.jsx'));
 const AuditLogPage = lazy(() => import('./AuditLogPage.jsx'));
+const FinanceLogPage = lazy(() => import('./FinanceLogPage.jsx'));
 
 /**
  * ตั้งค่าระบบ — เปิดจากปุ่มไอคอนไขควงข้างปุ่มตั้งค่าในแถบเมนู (ผู้ใช้ขอ 19 พ.ย. 2569 — แยกจากหน้าตั้งค่าบัญชี)
  *   หมวดของระบบ: เหตุผลยกเลิก (เคส · นัด/กะ · ใบแจ้งหนี้) · หมวดเหตุการณ์ผิดปกติ — Super Admin + ผู้จัดการ
  *   ผู้ใช้และความปลอดภัย: จัดการสิทธิ์ (Super Admin + ผู้จัดการ) · บันทึกการใช้งาน (สิทธิ์ audit_logs)
+ *   การเงิน: บันทึกการเงิน (สิทธิ์ finance_logs · 20 พ.ย. 2569) — ยอดประจำวัน + รายการเงินทุกความเคลื่อนไหว
  * แต่ละแท็บโผล่เฉพาะคนที่เข้าได้ — server ตรวจสิทธิ์ซ้ำทุกเส้น (categories · permissions · audit-logs)
  * จำแท็บที่เลือกไว้ใน ?tab= · ลิงก์เดิม /permissions และ /audit-log พามาแท็บเดียวกันที่นี่
  */
@@ -19,13 +21,16 @@ export const SYSTEM_ADMINS = ['super_admin', 'manager'];
 const PANES = {
   permissions: { title: 'จัดการสิทธิ์', desc: 'เปิด/ปิดเมนูและสิทธิ์รายตำแหน่ง — มีผลกับทุกคนในตำแหน่งนั้น' },
   audit: { title: 'บันทึกการใช้งาน', desc: 'ใครทำอะไรในระบบ เมื่อไร จากที่ไหน — เก็บย้อนหลัง 1 ปี' },
+  finance: { title: 'บันทึกการเงิน' },
 };
+const PANE_PAGES = { permissions: PermissionsPage, audit: AuditLogPage, finance: FinanceLogPage };
 
 export default function SystemSettingsPage() {
   const { user } = useAuth();
   const [params, setParams] = useSearchParams();
   const isAdmin = SYSTEM_ADMINS.includes(user?.position);
   const canAudit = permissionsOf(user).includes('audit_logs');
+  const canFinance = permissionsOf(user).includes('finance_logs');
 
   const groups = [
     isAdmin && { label: 'เหตุผลยกเลิก', items: [
@@ -38,6 +43,7 @@ export default function SystemSettingsPage() {
       isAdmin && { key: 'permissions', label: 'จัดการสิทธิ์' },
       canAudit && { key: 'audit', label: 'บันทึกการใช้งาน' },
     ].filter(Boolean) },
+    canFinance && { label: 'การเงิน', items: [{ key: 'finance', label: 'บันทึกการเงิน' }] },
   ].filter(Boolean);
   const keys = groups.flatMap((g) => g.items.map((i) => i.key));
   if (keys.length === 0) return <Navigate to="/settings" replace />;
@@ -45,7 +51,7 @@ export default function SystemSettingsPage() {
 
   let pane;
   if (PANES[tab]) {
-    const Page = tab === 'permissions' ? PermissionsPage : AuditLogPage;
+    const Page = PANE_PAGES[tab];
     pane = (
       <>
         <SettingsPaneHead title={PANES[tab].title} desc={PANES[tab].desc} />
@@ -66,7 +72,6 @@ export default function SystemSettingsPage() {
       <header className="page-head">
         <div>
           <h1>ตั้งค่าระบบ</h1>
-          <p className="muted">หมวดที่ใช้ทั้งระบบ สิทธิ์การใช้งาน และบันทึกการใช้งาน</p>
         </div>
       </header>
       <SettingsShell groups={groups} active={tab} label="ตั้งค่าระบบ"

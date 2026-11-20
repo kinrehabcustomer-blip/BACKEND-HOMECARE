@@ -367,7 +367,7 @@ function Sidebar({ menuOpen, setMenuOpen }) {
             <div className="who-actions">
               {/* ตั้งค่าระบบ (เหตุผลยกเลิก · หมวดเหตุการณ์ · จัดการสิทธิ์ · บันทึกการใช้งาน) — ไอคอนไขควง (19 พ.ย. 2569)
                   เห็นเมื่อเข้าได้อย่างน้อยหนึ่งแท็บ: Super Admin + ผู้จัดการ หรือมีสิทธิ์ audit_logs */}
-              {(PERMISSION_ADMINS.includes(user.position) || permissionsOf(user).includes('audit_logs')) && (
+              {(PERMISSION_ADMINS.includes(user.position) || permissionsOf(user).some((k) => ['audit_logs', 'finance_logs'].includes(k))) && (
                 <NavLink className="btn icon-btn" to="/system-settings" title="ตั้งค่าระบบ" aria-label="ตั้งค่าระบบ">
                   <LineIcon name="tools" />
                 </NavLink>

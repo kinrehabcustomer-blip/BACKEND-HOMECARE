@@ -1,13 +1,27 @@
+import SearchSelect from './SearchSelect.jsx';
+
 /**
  * โครงหน้าตั้งค่าแบบเมนูซ้าย + แผงขวา (ผู้ใช้ขอ 19 พ.ย. 2569 — แบบเดียวกับหน้า "บัญชีธนาคาร / เครื่อง EDC")
  * ใช้สองที่: หน้าตั้งค่า (SettingsPage) และเมนู "หมวดหมู่" (CategoriesPage)
  *
  * groups = [{ label, items: [{ key, label }] }] · active = key ที่เลือกอยู่ · onSelect(key)
- * จอแคบ (≤ 900px) เมนูกลายเป็นแถบเลื่อนแนวนอนด้านบน (ซ่อนหัวกลุ่ม) — แผงขวาเต็มความกว้าง
+ * จอแคบ (≤ 900px): เมนูซ้ายซ่อน ใช้ช่องเลือกหัวข้อ (.set-picker · จัดกลุ่มตามหัวกลุ่ม) แทน — ผู้ใช้ขอ 20 พ.ย. 2569
+ *   เดิมเป็นแถบเลื่อนแนวนอนที่หัวข้อท้ายๆ ถูกตัดขอบ ("หมวดเหตุกา…") ไม่รู้ว่ามีอะไรอีก และไม่เห็นหัวกลุ่ม
+ *   ช่องเลือกรวมเป็นการ์ดเดียวกับแถบค้นหา/ตัวกรองของแผง (ถ้ามี) — จัดด้วย CSS ไม่ได้ย้ายตัวกรองออกจากแผง
  */
 export default function SettingsShell({ groups, active, onSelect, label = 'หมวดการตั้งค่า', children }) {
   return (
     <div className="set-shell">
+      <div className="set-picker">
+        <span className="set-picker-label">{label}</span>
+        <SearchSelect value={active} searchable={false} aria-label={label} onChange={(e) => onSelect(e.target.value)}>
+          {groups.filter((g) => g.items.length > 0).map((g) => (
+            <optgroup key={g.label} label={g.label}>
+              {g.items.map((it) => <option key={it.key} value={it.key}>{it.label}</option>)}
+            </optgroup>
+          ))}
+        </SearchSelect>
+      </div>
       <nav className="set-nav" aria-label={label}>
         {groups.filter((g) => g.items.length > 0).map((g) => (
           <div className="set-nav-group" key={g.label}>

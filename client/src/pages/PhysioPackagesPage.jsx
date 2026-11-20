@@ -11,6 +11,7 @@ import { useToast } from '../toast.jsx';
 import { priceRefreshText } from '../lib/customerInvoice.js';
 
 const BLANK = {
+  code: '',
   name: '',
   sessions: '',
   duration_months: '',
@@ -120,6 +121,8 @@ export default function PhysioPackagesPage() {
           <table className="table physio-table table-cards">
             <thead>
               <tr>
+                {/* รหัสแยกเป็นคอลัมน์ของตัวเอง (ผู้ใช้ขอ 20 พ.ย. 2569) — เดิมเป็นป้ายเล็กเหนือชื่อแพ็คเกจ */}
+                <th>รหัส</th>
                 <th>แพ็กเกจ</th>
                 <th>ราคาเต็ม (บาท)</th>
                 <th>ราคาสุทธิ (บาท)</th>
@@ -133,6 +136,9 @@ export default function PhysioPackagesPage() {
             <tbody>
               {items.map((p) => (
                 <tr key={p.physio_package_id} className={p.active ? '' : 'is-inactive'}>
+                  <td className={`physio-code${p.code ? '' : ' is-blank'}`} data-label="รหัส">
+                    {p.code ? <span className="pkg-code" title="รหัสแพ็คเกจ">{p.code}</span> : <span className="muted">—</span>}
+                  </td>
                   <td className="physio-name">
                     {p.name}
                     {!p.active && <span className="badge muted-badge">ปิดขาย</span>}
@@ -197,7 +203,7 @@ export default function PhysioPackagesPage() {
               ))}
               {items.length === 0 && (
                 <tr>
-                  <td colSpan={seePay ? 7 : 6} className="empty">ยังไม่มีแพ็คเกจ — กด "+ เพิ่มแพ็คเกจ" เพื่อเริ่ม</td>
+                  <td colSpan={seePay ? 8 : 7} className="empty">ยังไม่มีแพ็คเกจ — กด "+ เพิ่มแพ็คเกจ" เพื่อเริ่ม</td>
                 </tr>
               )}
             </tbody>
@@ -238,6 +244,7 @@ function PackageForm({ initial, onClose, onSaved }) {
     english_fee: initial.english_fee ?? '',
     sessions: initial.sessions ?? '',
     note: initial.note ?? '',
+    code: initial.code ?? '',
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
@@ -258,6 +265,8 @@ function PackageForm({ initial, onClose, onSaved }) {
     setError(null);
     try {
       const body = {
+        // ว่าง = ให้ระบบตั้ง PT-<id> ให้ (ตอนเพิ่มใหม่ยังไม่รู้ id)
+        code: form.code.trim().toUpperCase().replace(/\s+/g, '-'),
         name: form.name.trim(),
         sessions: toNum(form.sessions),
         duration_months: toNum(form.duration_months),
@@ -300,6 +309,16 @@ function PackageForm({ initial, onClose, onSaved }) {
           {error && <p className="error">{error}</p>}
 
           <div className="grid cols-2">
+            {/* รหัสแพ็คเกจ (20 พ.ย. 2569) — ป้ายให้คนอ้างอิง เคสยังผูกกับแพ็คเดิมแม้เปลี่ยนรหัส */}
+            <label className="span-2">รหัสแพ็คเกจ
+              <input
+                className="pkg-code-input" maxLength={20} spellCheck={false} autoCapitalize="characters"
+                value={form.code}
+                placeholder={isNew ? 'ว่างไว้ = ระบบตั้งให้ (PT-…)' : 'ว่างไว้ = ระบบตั้งให้ใหม่'}
+                onChange={(e) => set('code', e.target.value.toUpperCase())}
+              />
+              <span className="form-hint muted">ใช้ได้ A-Z, 0-9 และ - · ห้ามซ้ำกับแพ็คอื่น (รวมแพ็ค Homecare)</span>
+            </label>
             <label className="span-2">ชื่อแพ็กเกจ *
               <input
                 value={form.name}
