@@ -277,8 +277,20 @@ function MainCard({ main, busy, labels, kind, meta, info, editorFor, onPatch, on
   const subs = main.children;
   const listed = shownSubs ?? subs; // ตัวกรองด้านบน — ตัวนับ "เปิดใช้งาน X จาก Y" ยังนับจากทั้งหมวด
   const on = subs.filter((s) => s.active).length;
+  /* กดตรงไหนของการ์ดก็กางได้ (ผู้ใช้ขอ 20 พ.ย. 2569 "คลิกที่ตัวการ์ดเพื่อเปิด") — กางแล้วกดหัวการ์ดเพื่อพับ
+     (กดในแถวหมวดย่อยไม่พับ) · ยกเว้นปุ่ม/สวิตช์/ช่องพิมพ์ ซึ่งทำงานของตัวเอง
+     ปุ่มลูกศร+ชื่อ (set-fold-btn) ยังเป็นปุ่มจริงไว้ให้คีย์บอร์ด/โปรแกรมอ่านหน้าจอ — ตัวการ์ดเป็นพื้นที่กดเสริมของเมาส์ */
+  const clickable = foldable && !editing && !forceOpen && !adding;
+  const toggleFromCard = (e) => {
+    if (!clickable) return;
+    if (e.target.closest('button, a, input, select, textarea, label, form')) return;
+    if (shownOpen && !e.target.closest('.set-card-head')) return;
+    if (window.getSelection?.().toString()) return; // ลากคลุมข้อความ (เช่นคัดลอกรหัส) ไม่นับเป็นการกด
+    setOpen(!shownOpen);
+  };
   return (
-    <section className={`set-card${main.active ? '' : ' is-off'}${shownOpen ? '' : ' is-folded'}`} aria-label={main.name_th}>
+    <section className={`set-card${main.active ? '' : ' is-off'}${shownOpen ? '' : ' is-folded'}${clickable ? ' is-clickable' : ''}`}
+      aria-label={main.name_th} onClick={toggleFromCard}>
       <header className="set-card-head">
         <div className="set-card-title">
           {editing ? (
