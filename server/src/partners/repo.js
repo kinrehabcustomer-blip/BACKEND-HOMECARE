@@ -387,6 +387,38 @@ async function partnerVisitOr404(partnerId, visitId) {
   return visit;
 }
 
+/**
+ * รายละเอียดเคสคร่าวๆ ของกะที่ส่งมา (ผู้ใช้ขอ 21 พ.ย. 2569 — กดการ์ดงานเพื่อดู)
+ * ให้เท่าที่ใช้เตรียมตัวไปหน้างาน: เพศ/อายุ/น้ำหนัก/ส่วนสูง · อุปกรณ์ที่ติดตัวผู้รับบริการ · ช่วงเคส · ครั้งที่เท่าไรของเคส
+ * ไม่ให้: อาการ/โรคประจำตัว (ผู้ใช้สั่งตัดอาการออก) · เบอร์โทร · ราคา · กะของ KIN หรือของบริษัทอื่น
+ */
+export async function partnerVisitDetail(partnerId, visitId) {
+  await partnerVisitOr404(partnerId, visitId);
+  const v = await sql.one(
+    `${PARTNER_VISIT.replace('c.service_kind,', `c.service_kind, c.patient_gender, c.patient_age, c.weight_kg, c.height_cm,
+         c.medical_devices, c.start_date, c.end_date,`)}
+     WHERE v.visit_id = :id`,
+    { id: visitId },
+  );
+  const order = await sql.one(
+    `SELECT COUNT(*) FILTER (WHERE (o.visit_date, COALESCE(o.planned_start, '')) <= (:date, COALESCE(:start::text, '')))::int AS no,
+            COUNT(*)::int AS total
+     FROM case_visits o WHERE o.case_id = :cid AND o.status <> 'cancelled'`,
+    { cid: v.case_id, date: v.visit_date, start: v.planned_start },
+  );
+  // กะอื่นของเคสนี้ที่ส่งให้บริษัทเดียวกัน — ดูว่าครั้งก่อน/ครั้งหน้าใครไป
+  const others = await sql.all(
+    `SELECT v.visit_id, v.visit_date, v.planned_start, v.planned_end, v.status, v.check_in_at, v.check_out_at,
+            e.first_name || ' ' || e.last_name AS assigned_name
+     FROM case_visits v LEFT JOIN employees e ON e.employee_id = v.assigned_to
+     WHERE v.case_id = :cid AND v.partner_id = :pid AND v.visit_id <> :id
+     ORDER BY v.visit_date DESC, v.planned_start DESC NULLS LAST LIMIT 10`,
+    { cid: v.case_id, pid: partnerId, id: visitId },
+  );
+  const { case_id: _cid, ...rest } = withDeadline(v);
+  return { ...rest, visit_no: order?.no ?? null, visit_total: order?.total ?? null, others };
+}
+
 /** คนในทีมที่เลือกให้กะนี้ได้ + กะอื่นของแต่ละคนในวันเดียวกัน (หน้าเว็บโชว์ "ชนเวลา") */
 export async function candidates(partnerId, visitId) {
   const visit = await partnerVisitOr404(partnerId, visitId);

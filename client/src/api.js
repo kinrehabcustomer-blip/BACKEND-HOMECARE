@@ -332,6 +332,7 @@ export const api = {
   partnerMe: () => request('/partner/me'),
   partnerVisits: (tab) => request(`/partner/visits?tab=${tab}`),
   partnerCandidates: (visitId) => request(`/partner/visits/${visitId}/candidates`),
+  partnerVisit: (visitId) => request(`/partner/visits/${visitId}`),
   partnerAccept: (visitId, employeeId) => request(`/partner/visits/${visitId}/accept`, { method: 'POST', body: { employee_id: employeeId } }),
   partnerReject: (visitId, reason) => request(`/partner/visits/${visitId}/reject`, { method: 'POST', body: { reason: reason || null } }),
   partnerTeam: () => request('/partner/team'),

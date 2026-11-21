@@ -3491,6 +3491,7 @@ if (process.env.RUN_DB_TESTS !== '1') {
       // ---- บริษัท B มองไม่เห็น/แตะไม่ได้ ----
       assert.ok(!(await call('GET', '/api/partner/visits?tab=pending', undefined, leadB)).some((v) => v.visit_id === v1));
       await call('GET', `/api/partner/visits/${v1}/candidates`, undefined, leadB, 404);
+      await call('GET', `/api/partner/visits/${v1}`, undefined, leadB, 404);
       await call('POST', `/api/partner/visits/${v1}/accept`, { employee_id: b1Row.employee_id }, leadB, 404);
       await call('POST', `/api/partner/visits/${v1}/reject`, {}, leadB, 404);
       // หัวหน้าพาร์ทเนอร์เข้าหลังบ้าน KIN ไม่ได้ · พนักงานพาร์ทเนอร์เข้าหน้าหัวหน้าไม่ได้
@@ -3504,6 +3505,13 @@ if (process.env.RUN_DB_TESTS !== '1') {
       const job = pending.find((v) => v.visit_id === v1);
       assert.equal(job.client_name, 'Workflow patient');
       for (const k of ['fee', 'staff_pay', 'partner_rate', 'medical_history', 'current_symptoms']) assert.ok(!(k in job), `ไม่ควรมี ${k}`);
+      // รายละเอียดเคสคร่าวๆ: มีลำดับครั้ง · ไม่มีอาการ/โรค/เบอร์/ราคา
+      const detail = await call('GET', `/api/partner/visits/${v1}`, undefined, leadA);
+      assert.equal(detail.client_name, 'Workflow patient');
+      assert.ok(detail.visit_no >= 1 && detail.visit_total >= detail.visit_no);
+      assert.ok(Array.isArray(detail.others));
+      for (const k of ['fee', 'staff_pay', 'partner_rate', 'medical_history', 'current_symptoms', 'client_phone', 'note', 'case_id']) assert.ok(!(k in detail), `ไม่ควรมี ${k}`);
+      assert.equal((await get(`/api/partner/visits/${v1}`, staffA1)).status, 403);
       const cands = await call('GET', `/api/partner/visits/${v1}/candidates`, undefined, leadA);
       assert.deepEqual(cands.map((x) => x.employee_id), [a1Row.employee_id]);
 

@@ -164,6 +164,10 @@ partnerRouter.get('/visits', asyncRoute(async (req, res) => {
   res.json(await repo.partnerVisits(mine(req), tab));
 }));
 
+partnerRouter.get('/visits/:id', asyncRoute(async (req, res) => {
+  res.json(await repo.partnerVisitDetail(mine(req), intId.parse(req.params.id)));
+}));
+
 partnerRouter.get('/visits/:id/candidates', asyncRoute(async (req, res) => {
   res.json(await repo.candidates(mine(req), intId.parse(req.params.id)));
 }));

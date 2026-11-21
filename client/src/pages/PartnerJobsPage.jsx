@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from '../api.js';
 import { useToast } from '../toast.jsx';
-import { POSITION_LABELS, formatDate, todayTH } from '../labels.js';
+import { GENDER_LABELS, POSITION_LABELS, formatDate, todayTH } from '../labels.js';
 import { timeRange } from '../lib/calendarUi.js';
 import { useScrollLock } from '../lib/scrollLock.js';
 import ErrorBar from '../components/ErrorBar.jsx';
@@ -45,6 +45,7 @@ export default function PartnerJobsPage() {
   const [loading, setLoading] = useState(true);
   const [assigning, setAssigning] = useState(null);
   const [rejecting, setRejecting] = useState(null);
+  const [viewing, setViewing] = useState(null);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -121,11 +122,16 @@ export default function PartnerJobsPage() {
               const urgent = tab === 'pending' && v.starts_in_hours <= 24;
               const past = tab === 'past' ? pastLabel(v) : null;
               return (
-                <article key={v.visit_id} className="pt-card">
+                /* กดที่ตัวการ์ด = ดูรายละเอียดเคสคร่าวๆ (ผู้ใช้ขอ 21 พ.ย. 2569) · ปุ่ม/ลิงก์ในการ์ดไม่เปิดกล่อง */
+                <article key={v.visit_id} className="pt-card is-clickable" role="button" tabIndex={0}
+                  aria-label={`ดูรายละเอียดเคส ${v.client_name} ${formatDate(v.visit_date)}`}
+                  onClick={(e) => { if (!e.target.closest('button, a')) setViewing(v); }}
+                  onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); setViewing(v); } }}>
                   <div className="pt-card-top">
                     <span className={`pt-tag ${v.substitute ? 'is-sub' : 'is-once'}`}>{v.substitute ? 'ไปแทนทีม KIN' : 'งานรายครั้ง'}</span>
                     {urgent && <span className="pt-due">ต้องเลือกคนภายใน {Math.max(0, v.starts_in_hours)} ชม.</span>}
                     {past && <span className={past.cls}>{past.text}</span>}
+                    <span className="pt-more">ดูรายละเอียด ›</span>
                   </div>
                   <div className="pt-when">
                     <strong>{formatDate(v.visit_date)}{timeRange(v) ? ` · ${timeRange(v)} น.` : ''}</strong>
@@ -161,6 +167,11 @@ export default function PartnerJobsPage() {
         <p className="muted pt-foot">ไม่เห็นราคาที่ลูกค้าจ่าย · เห็นเฉพาะกะที่ส่งให้บริษัทคุณ</p>
       </div>
 
+      {viewing && (
+        <DetailDialog visit={viewing} tab={tab} onCancel={() => setViewing(null)}
+          onAssign={(v) => { setViewing(null); setAssigning(v); }}
+          onReject={(v) => { setViewing(null); setRejecting(v); }} />
+      )}
       {assigning && <AssignDialog visit={assigning} onCancel={() => setAssigning(null)} onDone={done} />}
       {rejecting && <RejectDialog visit={rejecting} onCancel={() => setRejecting(null)} onDone={done} />}
     </PageRefresh>
@@ -174,6 +185,96 @@ function useEsc(onCancel) {
     document.addEventListener('keydown', onKey, true);
     return () => document.removeEventListener('keydown', onKey, true);
   }, [onCancel]);
+}
+
+/** รายละเอียดเคสคร่าวๆ — server ให้เท่าที่ใช้เตรียมตัว (ไม่มีอาการ/โรค/เบอร์โทร/ราคา · partners/repo.js partnerVisitDetail) */
+function DetailDialog({ visit, tab, onCancel, onAssign, onReject }) {
+  const [d, setD] = useState(null);
+  const [error, setError] = useState(null);
+  useEsc(onCancel);
+  useEffect(() => {
+    api.partnerVisit(visit.visit_id).then(setD).catch((e) => setError(e.message));
+  }, [visit.visit_id]);
+  const v = d ?? visit;
+  const map = mapUrl(v);
+  const body = [
+    v.patient_gender && GENDER_LABELS[v.patient_gender],
+    v.patient_age != null && `${v.patient_age} ปี`,
+    v.weight_kg && `${v.weight_kg} กก.`,
+    v.height_cm && `${v.height_cm} ซม.`,
+  ].filter(Boolean).join(' · ');
+  const canAct = tab !== 'past' && !v.check_in_at && v.visit_date >= todayTH();
+  return createPortal(
+    <div className="modal-backdrop modal-stacked" onClick={onCancel}>
+      <div className="modal modal-narrow pt-sheet" role="dialog" aria-modal="true" aria-labelledby="pt-detail-title" onClick={(e) => e.stopPropagation()}>
+        <header className="modal-head">
+          <div>
+            <h2 id="pt-detail-title">{v.client_name}</h2>
+            <p className="muted">{v.substitute ? 'ไปแทนทีม KIN' : 'งานรายครั้ง'}{v.service_name ? ` · ${v.service_name}` : ''}</p>
+          </div>
+          <button type="button" className="modal-close" onClick={onCancel} aria-label="ปิด">×</button>
+        </header>
+        <div className="modal-body">
+          {error && <p className="error" role="alert">{error}</p>}
+          <dl className="pt-detail">
+            <dt>นัดครั้งนี้</dt>
+            <dd>
+              {formatDate(v.visit_date)}{timeRange(v) ? ` · ${timeRange(v)} น.` : ''}
+              {d?.visit_no && d?.visit_total ? <span className="muted"> · ครั้งที่ {d.visit_no} จาก {d.visit_total} ของเคส</span> : null}
+            </dd>
+            {d && (d.start_date || d.end_date) && (
+              <>
+                <dt>ช่วงเคส</dt>
+                <dd>{d.start_date ? formatDate(d.start_date) : '—'} – {d.end_date ? formatDate(d.end_date) : 'ยังไม่กำหนด'}</dd>
+              </>
+            )}
+            {body && (<><dt>ผู้รับบริการ</dt><dd>{body}</dd></>)}
+            {d?.medical_devices && (<><dt>อุปกรณ์ที่ติดตัว</dt><dd className="pt-pre">{d.medical_devices}</dd></>)}
+            <dt>สถานที่</dt>
+            <dd>
+              {v.address || <span className="muted">ไม่ได้ระบุที่อยู่</span>}
+              {map && <><br /><a href={map} target="_blank" rel="noopener noreferrer" className="pt-map"><LineIcon name="pin" className="text-ico" />เปิดแผนที่</a></>}
+            </dd>
+            <dt>คนที่ไป</dt>
+            <dd>
+              {v.assigned_name || <span className="muted">ยังไม่ได้เลือกคน</span>}
+              {v.check_in_at && <span className="muted"> · เข้า {hhmm(v.check_in_at)}{v.check_out_at ? ` · ออก ${hhmm(v.check_out_at)}` : ''}</span>}
+            </dd>
+          </dl>
+          {!d && !error && <p className="muted">กำลังโหลดรายละเอียด…</p>}
+          {d?.others?.length > 0 && (
+            <section className="pt-detail-others">
+              <h3>กะอื่นของเคสนี้ที่ส่งให้บริษัทคุณ</h3>
+              <ul>
+                {d.others.map((o) => {
+                  const tag = o.status === 'cancelled' ? 'ยกเลิก' : o.check_out_at ? 'ไปแล้ว' : o.visit_date < todayTH() && !o.check_in_at ? 'ขาดงาน' : 'รอวันนัด';
+                  return (
+                    <li key={o.visit_id}>
+                      <span>{formatDate(o.visit_date)}{timeRange(o) ? ` · ${timeRange(o)}` : ''}</span>
+                      <span className="muted">{o.assigned_name || 'ยังไม่ได้เลือกคน'} · {tag}</span>
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          )}
+        </div>
+        <footer className="modal-foot">
+          {canAct ? (
+            <>
+              <button type="button" className="btn" onClick={() => onReject(visit)}>ปฏิเสธ</button>
+              <button type="button" className="btn primary" onClick={() => onAssign(visit)}>
+                {tab === 'pending' ? 'รับงาน + เลือกคน' : 'เปลี่ยนคน'}
+              </button>
+            </>
+          ) : (
+            <button type="button" className="btn" onClick={onCancel}>ปิด</button>
+          )}
+        </footer>
+      </div>
+    </div>,
+    document.body,
+  );
 }
 
 /** เลือกคนในทีม — คนที่มีกะอื่นชนเวลานี้เลือกไม่ได้ */

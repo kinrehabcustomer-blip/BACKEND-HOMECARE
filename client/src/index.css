@@ -7658,6 +7658,21 @@ h1, h2, h3, h4, .page-hero-title, .cal-title, .login-heading h1 {
 .pt-list { display: flex; flex-direction: column; gap: 0.75rem; }
 .pt-card { display: flex; flex-direction: column; gap: 0.625rem; padding: 0.875rem; border: 1px solid var(--border); border-radius: 1rem; background: var(--surface); }
 .pt-card-top { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap; }
+/* การ์ดงานกดดูรายละเอียดเคสได้ (21 พ.ย. 2569) */
+.pt-card.is-clickable { cursor: pointer; transition: border-color 0.15s, box-shadow 0.15s; }
+.pt-card.is-clickable:hover { border-color: var(--border-hover); }
+.pt-card.is-clickable:focus-visible { outline: 2px solid var(--accent, #8a6416); outline-offset: 2px; }
+.pt-more { margin-left: auto; font-size: 0.75rem; font-weight: 600; color: var(--muted); white-space: nowrap; }
+.pt-detail { display: grid; grid-template-columns: 7rem 1fr; gap: 0.5rem 0.875rem; margin: 0; font-size: 0.875rem; }
+.pt-detail dt { color: var(--muted); }
+.pt-detail dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.pt-detail .pt-map { display: inline-flex; margin-top: 0.25rem; }
+.pt-pre { white-space: pre-line; }
+.pt-detail-others { margin-top: 1rem; padding-top: 0.875rem; border-top: 1px solid var(--divider, var(--border)); }
+.pt-detail-others h3 { margin: 0 0 0.5rem; font-size: 0.8125rem; color: var(--heading); }
+.pt-detail-others ul { display: flex; flex-direction: column; gap: 0.375rem; margin: 0; padding: 0; list-style: none; font-size: 0.8125rem; }
+.pt-detail-others li { display: flex; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; }
+@media (max-width: 420px) { .pt-detail { grid-template-columns: 1fr; gap: 0.125rem; } .pt-detail dd { margin-bottom: 0.5rem; } }
 .pt-tag { display: inline-flex; align-items: center; padding: 0.125rem 0.625rem; border-radius: 999px; font-size: 0.75rem; font-weight: 600; white-space: nowrap; }
 .pt-tag.is-sub { background: #fdecd2; color: #8a4b00; }
 .pt-tag.is-once { background: #e3edf9; color: #1d4f91; }
