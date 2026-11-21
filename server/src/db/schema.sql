@@ -102,6 +102,17 @@ ALTER TABLE employees ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT 
 -- ยังใช้รหัสเริ่มต้นอยู่ไหม (ตรวจครั้งเดียวตอนเข้าสู่ระบบ · lib/auth.js markDefaultPassword · 21 พ.ย. 2569)
 -- NULL = ยังไม่ตรวจ · TRUE = บังคับตั้งรหัสใหม่ · FALSE = ตั้งเองแล้ว ไม่ตรวจอีก
 ALTER TABLE employees ADD COLUMN IF NOT EXISTS uses_default_password BOOLEAN;
+-- ฐานที่เคยรันรุ่นแรก (NOT NULL DEFAULT FALSE) — ทุกแถวเป็น FALSE = ไม่มีใครถูกบังคับ · แปลงครั้งเดียวให้ตรวจใหม่ (lib/auth.js normalizeDefaultPasswordColumn)
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+             WHERE table_schema = current_schema() AND table_name = 'employees'
+               AND column_name = 'uses_default_password' AND is_nullable = 'NO') THEN
+    ALTER TABLE employees ALTER COLUMN uses_default_password DROP DEFAULT;
+    ALTER TABLE employees ALTER COLUMN uses_default_password DROP NOT NULL;
+    UPDATE employees SET uses_default_password = NULL WHERE uses_default_password = FALSE;
+  END IF;
+END $$;
 ALTER TABLE employees ADD COLUMN IF NOT EXISTS temp_password_encrypted TEXT;
 -- เวลาที่รหัสผ่านถูกเปลี่ยนล่าสุด — token ที่ออกก่อนหน้านี้ถือว่าใช้ไม่ได้แล้ว (ดู requireAuth)
 -- ไม่มีค่า = ยังไม่เคยเปลี่ยนตั้งแต่มีคอลัมน์นี้ ซึ่งแปลว่าไม่มีอะไรต้องเพิกถอน

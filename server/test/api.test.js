@@ -152,6 +152,25 @@ if (process.env.RUN_DB_TESTS !== '1') {
       // ยังไม่เคยตรวจ = NULL · ตรวจแล้วจดผล
       assert.equal((await sql.one(`SELECT uses_default_password AS v FROM employees WHERE employee_id = 'EMP-0392'`)).v, true);
       assert.equal((await sql.one(`SELECT uses_default_password AS v FROM employees WHERE employee_id = 'EMP-0391'`)).v, false);
+
+      // ฐานที่เคยรันรุ่นแรก (NOT NULL DEFAULT FALSE · ทุกแถว FALSE) — แปลงครั้งเดียวแล้วคนที่ยังใช้รหัสเริ่มต้นถูกบังคับจริง (ตรวจ 21 พ.ย. 2569)
+      const { normalizeDefaultPasswordColumn } = await import('../src/lib/auth.js');
+      await sql.run(`INSERT INTO employees (employee_id, first_name, last_name, position, email, status, password_hash, must_change_password)
+                     VALUES ('EMP-0394', 'Legacy', 'Flag', 'caregiver', 'emp-0394@example.invalid', 'active', :h, false)`,
+        { h: await hashPassword(DEFAULT_PASSWORD) });
+      await sql.run('UPDATE employees SET uses_default_password = FALSE WHERE uses_default_password IS NULL');
+      await sql.run('ALTER TABLE employees ALTER COLUMN uses_default_password SET DEFAULT FALSE');
+      await sql.run('ALTER TABLE employees ALTER COLUMN uses_default_password SET NOT NULL');
+      assert.equal((await send('POST', '/api/auth/login', { email: 'EMP-0394', password: DEFAULT_PASSWORD }, null, 200)).data.must_change_password, false,
+        'รูปแบบเก่า: ไม่ถูกบังคับ (บั๊กที่เจอ)');
+      assert.equal(await normalizeDefaultPasswordColumn(), true);
+      assert.equal(await normalizeDefaultPasswordColumn(), false, 'แปลงครั้งเดียว');
+      assert.equal((await send('POST', '/api/auth/login', { email: 'EMP-0394', password: DEFAULT_PASSWORD }, null, 200)).data.must_change_password, true);
+      // คนที่ใช้รหัสของตัวเองอยู่ (hash ไม่ใช่รหัสเริ่มต้น) — ตรวจใหม่หลังแปลงก็ยังไม่ถูกบังคับ
+      await sql.run(`INSERT INTO employees (employee_id, first_name, last_name, position, email, status, password_hash, must_change_password, uses_default_password)
+                     VALUES ('EMP-0395', 'Own', 'Pass', 'caregiver', 'emp-0395@example.invalid', 'active', :h, false, NULL)`,
+        { h: await hashPassword('own-pass-0395') });
+      assert.equal((await send('POST', '/api/auth/login', { email: 'EMP-0395', password: 'own-pass-0395' }, null, 200)).data.must_change_password, false);
     });
   });
 

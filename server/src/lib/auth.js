@@ -93,7 +93,27 @@ let defaultPwReady = null;
 export const ensureDefaultPasswordColumn = () =>
   (defaultPwReady ??= sql
     .run('ALTER TABLE employees ADD COLUMN IF NOT EXISTS uses_default_password BOOLEAN')
+    .then(() => normalizeDefaultPasswordColumn())
     .catch((err) => { defaultPwReady = null; throw err; }));
+
+/**
+ * แก้คอลัมน์รูปแบบเก่า (ตรวจ 21 พ.ย. 2569) — รุ่นแรกของฟีเจอร์ (ตอนยังตรวจทุกครั้ง) สร้างเป็น NOT NULL DEFAULT FALSE
+ * ฐานที่เคยรันรุ่นนั้นจึงมีทุกแถวเป็น FALSE = "ตรวจแล้ว ไม่ใช่รหัสเริ่มต้น" → พอเปลี่ยนเป็นตรวจครั้งเดียว ไม่มีใครถูกบังคับเลย
+ * แปลงครั้งเดียว: ปลด NOT NULL/DEFAULT แล้วล้าง FALSE เป็น NULL ให้ตรวจใหม่ตอนเข้าสู่ระบบครั้งถัดไป
+ * ปลอดภัยกับคนที่เปลี่ยนรหัสไปแล้วจริง — ตรวจใหม่ก็ได้ FALSE กลับมา (เทียบ hash แล้วไม่ใช่รหัสเริ่มต้น)
+ * แปลงแล้วคอลัมน์เป็น nullable — รอบต่อไปไม่เข้าเงื่อนไขอีก
+ */
+export async function normalizeDefaultPasswordColumn() {
+  const col = await sql.one(
+    `SELECT is_nullable FROM information_schema.columns
+     WHERE table_schema = current_schema() AND table_name = 'employees' AND column_name = 'uses_default_password'`,
+  );
+  if (col?.is_nullable !== 'NO') return false;
+  await sql.run('ALTER TABLE employees ALTER COLUMN uses_default_password DROP DEFAULT');
+  await sql.run('ALTER TABLE employees ALTER COLUMN uses_default_password DROP NOT NULL');
+  await sql.run('UPDATE employees SET uses_default_password = NULL WHERE uses_default_password = FALSE');
+  return true;
+}
 
 /**
  * ตรวจว่าบัญชีนี้ยังใช้รหัสเริ่มต้นไหม — เฉพาะบัญชีที่ยังไม่เคยตรวจ (NULL) · ตรวจแล้วคืนผลเดิมทันที ไม่แตะรหัส
