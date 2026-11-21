@@ -203,7 +203,8 @@ function DetailDialog({ visit, tab, onCancel, onAssign, onReject }) {
     v.weight_kg && `${v.weight_kg} กก.`,
     v.height_cm && `${v.height_cm} ซม.`,
   ].filter(Boolean).join(' · ');
-  const canAct = tab !== 'past' && !v.check_in_at && v.visit_date >= todayTH();
+  // ต้องโหลดรายละเอียดสำเร็จก่อน — KIN ดึงกะคืนไประหว่างนั้น (404) ไม่ควรเหลือปุ่มที่กดแล้วพัง
+  const canAct = Boolean(d) && tab !== 'past' && v.status !== 'cancelled' && !v.check_in_at && v.visit_date >= todayTH();
   return createPortal(
     <div className="modal-backdrop modal-stacked" onClick={onCancel}>
       <div className="modal modal-narrow pt-sheet" role="dialog" aria-modal="true" aria-labelledby="pt-detail-title" onClick={(e) => e.stopPropagation()}>
@@ -247,7 +248,11 @@ function DetailDialog({ visit, tab, onCancel, onAssign, onReject }) {
               <h3>กะอื่นของเคสนี้ที่ส่งให้บริษัทคุณ</h3>
               <ul>
                 {d.others.map((o) => {
-                  const tag = o.status === 'cancelled' ? 'ยกเลิก' : o.check_out_at ? 'ไปแล้ว' : o.visit_date < todayTH() && !o.check_in_at ? 'ขาดงาน' : 'รอวันนัด';
+                  const past = o.visit_date < todayTH();
+                  const tag = o.status === 'cancelled' ? 'ยกเลิก'
+                    : o.check_out_at ? 'ไปแล้ว'
+                      : o.check_in_at ? (past ? 'ยังไม่เช็คเอาท์' : 'กำลังทำงาน')
+                        : past ? 'ขาดงาน' : 'รอวันนัด';
                   return (
                     <li key={o.visit_id}>
                       <span>{formatDate(o.visit_date)}{timeRange(o) ? ` · ${timeRange(o)}` : ''}</span>

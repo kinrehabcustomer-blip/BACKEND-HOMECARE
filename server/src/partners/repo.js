@@ -401,10 +401,12 @@ export async function partnerVisitDetail(partnerId, visitId) {
     { id: visitId },
   );
   const order = await sql.one(
-    `SELECT COUNT(*) FILTER (WHERE (o.visit_date, COALESCE(o.planned_start, '')) <= (:date, COALESCE(:start::text, '')))::int AS no,
+    // visit_id ตัดสินเมื่อวัน+เวลาเท่ากัน (กะไม่ระบุเวลาหลายกะในวันเดียว) ไม่งั้นได้ "ครั้งที่" ซ้ำกัน
+    `SELECT COUNT(*) FILTER (WHERE (o.visit_date, COALESCE(o.planned_start, ''), o.visit_id)
+                                   <= (CAST(:date AS text), COALESCE(CAST(:start AS text), ''), CAST(:id AS int)))::int AS no,
             COUNT(*)::int AS total
      FROM case_visits o WHERE o.case_id = :cid AND o.status <> 'cancelled'`,
-    { cid: v.case_id, date: v.visit_date, start: v.planned_start },
+    { cid: v.case_id, date: v.visit_date, start: v.planned_start, id: visitId },
   );
   // กะอื่นของเคสนี้ที่ส่งให้บริษัทเดียวกัน — ดูว่าครั้งก่อน/ครั้งหน้าใครไป
   const others = await sql.all(
@@ -416,7 +418,9 @@ export async function partnerVisitDetail(partnerId, visitId) {
     { cid: v.case_id, pid: partnerId, id: visitId },
   );
   const { case_id: _cid, ...rest } = withDeadline(v);
-  return { ...rest, visit_no: order?.no ?? null, visit_total: order?.total ?? null, others };
+  // กะที่ยกเลิกไม่อยู่ในลำดับ — ไม่โชว์ "ครั้งที่ x" ที่จริงเป็นของกะอื่น
+  const cancelled = v.status === 'cancelled';
+  return { ...rest, visit_no: cancelled ? null : order?.no ?? null, visit_total: cancelled ? null : order?.total ?? null, others };
 }
 
 /** คนในทีมที่เลือกให้กะนี้ได้ + กะอื่นของแต่ละคนในวันเดียวกัน (หน้าเว็บโชว์ "ชนเวลา") */
