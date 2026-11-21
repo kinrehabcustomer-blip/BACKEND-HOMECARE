@@ -354,11 +354,17 @@ export const bulkVisitSchema = z
     // ลงตามจำนวนครั้ง (ใช้กับ from + weekdays แทน to) — ปุ่ม "ลงนัดทั้งแพ็ก"
     count: z.number().int().positive().max(MAX_BULK_VISITS).optional(),
     assigned_to: z.string().trim().min(1).optional().nullable(),
+    // ลงนัดแล้วส่งให้พาร์ทเนอร์เลย (partners/ · 21 พ.ย. 2569) — ไม่มีคน รอหัวหน้าบริษัทเลือก · ใช้คู่กับ assigned_to ไม่ได้
+    partner_id: z.coerce.number().int().positive().optional().nullable(),
     planned_start: time.optional().nullable(),
     planned_end: time.optional().nullable(),
     note: optionalText,
   })
   .superRefine((v, ctx) => {
+    if (v.partner_id && v.assigned_to) {
+      ctx.addIssue({ code: 'custom', path: ['partner_id'], message: 'เลือกได้อย่างเดียว — ลงให้พนักงาน หรือส่งให้พาร์ทเนอร์' });
+      return;
+    }
     const listed = v.dates?.length ?? 0;
     /* ลงตามจำนวนครั้ง (from + count ไม่มี to) — เพดานถูกบังคับที่ตัว count แล้ว (max MAX_BULK_VISITS)
        🔴 ต้องมี !v.to ด้วย: ของเดิมส่ง from+to+count มาพร้อมกันแล้วหลุดด่านทั้งก้อน

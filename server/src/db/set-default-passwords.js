@@ -1,6 +1,6 @@
 import '../lib/env.js';
 import { pool, sql } from './index.js';
-import { hashPassword, DEFAULT_PASSWORD } from '../lib/auth.js';
+import { hashPassword, DEFAULT_PASSWORD, ensureDefaultPasswordColumn } from '../lib/auth.js';
 
 /**
  * ตั้งรหัสผ่านของพนักงาน "ที่มีอยู่แล้วทุกคน" เป็นรหัสเริ่มต้น (DEFAULT_PASSWORD) และยกเลิกการบังคับเปลี่ยนรหัส
@@ -17,9 +17,11 @@ if (!process.argv.includes('--yes')) {
   process.exit(0);
 }
 
+await ensureDefaultPasswordColumn(); // คอลัมน์ตรวจรหัสเริ่มต้นสร้างแบบ lazy — ต้องมีก่อน UPDATE
 const updated = await sql.run(
   `UPDATE employees
       SET password_hash = :hash, must_change_password = FALSE, temp_password_encrypted = NULL,
+          uses_default_password = NULL, -- กลับเป็นรหัสเริ่มต้น = ต้องถูกบังคับเปลี่ยนอีกรอบ (lib/auth.js markDefaultPassword)
           password_changed_at = now()`,
   { hash: await hashPassword(DEFAULT_PASSWORD) },
 );

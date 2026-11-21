@@ -103,7 +103,8 @@ export function describe(n) {
   const p = n.payload ?? {};
   const who = p.client ?? 'ผู้รับบริการ';
   const today = todayTh();
-  const url = p.date === today && !['visit_cancelled', 'visit_removed'].includes(n.kind) ? '/my-today' : '/my-calendar';
+  const url = n.kind === 'partner_job' ? '/partner'
+    : p.date === today && !['visit_cancelled', 'visit_removed'].includes(n.kind) ? '/my-today' : '/my-calendar';
   const msg = (() => {
     switch (n.kind) {
       case 'visits_added':
@@ -121,6 +122,10 @@ export function describe(n) {
         return { title: 'พรุ่งนี้มีกะ', body: `${who} · ${whenText(p.date, p.start)}` };
       case 'remind_3h':
         return { title: 'ใกล้ถึงเวลากะ', body: `${who} · เริ่ม ${p.start} น.` };
+      case 'partner_job': // หัวหน้าพาร์ทเนอร์ — งานใหม่จาก KIN รอเลือกคน
+        return p.total > 1
+          ? { title: `งานใหม่จาก KIN ${p.total} งาน`, body: `${who} · ${dayText(p.date)} ถึง ${dayText(p.last_date)} — เลือกคนที่จะไป` }
+          : { title: 'งานใหม่จาก KIN', body: `${who} · ${whenText(p.date, p.start)} — เลือกคนที่จะไป` };
       default:
         return { title: 'แจ้งเตือน', body: who };
     }

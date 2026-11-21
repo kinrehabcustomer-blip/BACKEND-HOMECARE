@@ -3,6 +3,7 @@ import * as invoices from '../invoices/repo.js';
 import * as payroll from '../payroll/repo.js';
 import { can } from '../lib/auth.js';
 import { todayTH, unstaffedToday } from './repo.js';
+import { attentionCount as partnerAttentionCount } from '../partners/repo.js';
 
 /**
  * ของค้างทั้งระบบสำหรับกระดิ่งแจ้งเตือนบนแถบเมนู
@@ -26,7 +27,8 @@ export const ALERT_KEYS = {
      (attendanceExceptions มีเงื่อนไข check_in_at IS NULL AND visit_date < today อยู่ในตัว
       และ missedShifts คือเงื่อนไขเดียวกันแต่ย้อนหลังสั้นกว่า จึงเป็นสับเซตเสมอ)
      เคยนับสองแถว แล้วยอดบนกระดิ่งบวกกะเดียวกันสองครั้ง — วัดกับฐานจริงซ้ำ 14 จาก 14 */
-  attendance: ['exceptions', 'unstaffed_today'],
+  // partner_attention = กะที่ส่งให้พาร์ทเนอร์แล้วยังไม่มีคน (ใกล้นัด 24 ชม.) หรือพาร์ทเนอร์ปฏิเสธ (partners/repo.js)
+  attendance: ['exceptions', 'unstaffed_today', 'partner_attention'],
   payroll: ['unreleased', 'unbatched', 'draft_runs'],
   cases: ['unassigned', 'overdue_close', 'ending_soon', 'no_staff_pay', 'closed_no_invoice'],
   invoices: ['overdue', 'draft_stale', 'data_stale'],
@@ -54,12 +56,13 @@ export async function collectAlerts(user) {
   const wantsBilling = can(position, 'billing');
   const wantsPayroll = can(position, 'money');
 
-  const [caseCounts, invoiceCounts, payrollCounts, exceptions, unstaffed] = await Promise.all([
+  const [caseCounts, invoiceCounts, payrollCounts, exceptions, unstaffed, partnerAttention] = await Promise.all([
     wantsOffice ? cases.alertCounts() : null,
     wantsBilling ? invoices.alertCounts() : null,
     wantsPayroll ? today().then((t) => payroll.alertCounts(t)) : null,
     wantsOffice ? cases.attendanceExceptions() : null,
     wantsOffice ? today().then((t) => unstaffedToday({ today: t })) : null,
+    wantsOffice ? partnerAttentionCount().catch(() => 0) : null,
   ]);
 
   const groups = {};
@@ -68,6 +71,7 @@ export async function collectAlerts(user) {
     groups.attendance = pick('attendance', {
       exceptions: exceptions.length,
       unstaffed_today: unstaffed.length,
+      partner_attention: partnerAttention,
     });
   }
   if (wantsBilling) groups.invoices = pick('invoices', invoiceCounts);

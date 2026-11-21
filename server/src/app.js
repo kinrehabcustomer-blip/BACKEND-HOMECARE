@@ -18,12 +18,14 @@ import { publicReviewsRouter, reviewsRouter } from './reviews/routes.js';
 import { publicBillRouter } from './invoices/publicRoutes.js';
 import { ensureReviewColumns } from './reviews/repo.js';
 import { errorHandler } from './lib/errors.js';
-import { requireAuth, requireAdmin, requireBilling, requireCaseAccess, requirePermission, requirePasswordChanged, ensureRevokedSessions } from './lib/auth.js';
+import { requireAuth, requireAdmin, requireBilling, requireCaseAccess, requirePermission, requirePasswordChanged, ensureRevokedSessions, ensureDefaultPasswordColumn, requirePartnerLead } from './lib/auth.js';
+import { adminPartnersRouter, partnerLogoRoute, partnerRouter } from './partners/routes.js';
 import { permissionsRouter } from './permissions/routes.js';
 import { auditRouter } from './audit/routes.js';
 import { financeRouter } from './finance/routes.js';
 import { auditTrail, ensureAuditTable } from './lib/audit.js';
 import { pushAfterRequest } from './notify/webPush.js';
+import { ensurePartnerSchema } from './partners/schema.js';
 import { categoriesRouter } from './categories/routes.js';
 import { ensureCategories } from './categories/repo.js';
 import { ensureFormatDays } from './packages/formatDays.js';
@@ -34,6 +36,9 @@ export function createApp() {
      ไม่ await ที่นี่ (createApp ไม่ใช่ async) — คำขอแรก ๆ ที่มาก่อนตารางเสร็จจะได้ 500 หนึ่งครั้ง
      แล้วหายเอง · บนของจริง schema.sql สร้างให้ตั้งแต่ migrate อยู่แล้ว */
   ensureRevokedSessions().catch((err) => console.error('[auth] สร้างตาราง revoked_sessions ไม่ได้ —', err.message));
+  ensureDefaultPasswordColumn().catch((err) => console.error('[auth] เพิ่มคอลัมน์ uses_default_password ไม่ได้ —', err.message));
+  // พาร์ทเนอร์ (partners/schema.js) — requireAuth อ่าน employees.partner_id ทุกคำขอ
+  ensurePartnerSchema().catch((err) => console.error('[partners] สร้างตารางพาร์ทเนอร์ไม่ได้ —', err.message));
   // คอลัมน์ของลิงก์ประเมิน — เหตุผลเดียวกัน (ดู reviews/repo.js)
   ensureReviewColumns().catch((err) => console.error('[reviews] เพิ่มคอลัมน์ review_token_issued_at ไม่ได้ —', err.message));
   // ตารางบันทึกการใช้งาน (lib/audit.js) — ของจริงสร้างจาก schema.sql ตอน migrate · ตรงนี้กันกรณียังไม่ได้ migrate
@@ -103,6 +108,11 @@ export function createApp() {
 
   // ส่วนของพนักงานภาคสนาม — เห็นเฉพาะเคสของตัวเอง (กรองด้วย employee_id ในเส้น) จึงไม่ต้อง requireAdmin
   app.use('/api/my', signedIn, myRouter);
+  /* พาร์ทเนอร์ (partners/ · 21 พ.ย. 2569) — หลังบ้าน KIN จัดการบริษัท/ส่งกะ · หัวหน้าพาร์ทเนอร์เห็นเฉพาะของบริษัทตัวเอง */
+  app.get('/api/partner-logos/:id', signedIn, partnerLogoRoute);
+  // ด่านรายเส้นอยู่ใน partners/routes.js (งาน = office · ตัวเลขเงิน = see_pay · บันทึกจ่าย = payroll)
+  app.use('/api/partners', signedIn, adminPartnersRouter);
+  app.use('/api/partner', signedIn, requirePartnerLead, partnerRouter);
 
   // แจ้งเตือนอัตโนมัติ — ตรวจสิทธิ์เองในเส้น เพราะ Vercel Cron ยิงเข้ามาโดยไม่มีคุกกี้ session
   app.use('/api/notify', notifyRouter);

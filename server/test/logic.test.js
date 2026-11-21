@@ -1997,7 +1997,8 @@ describe('กระดิ่งแจ้งเตือน — สัญญา�
      เทสนี้กันการเผลอเพิ่มแถวนั้นกลับมา — ยอดบนกระดิ่งคือผลบวกตรงๆ ของทุกคีย์ */
   test('กลุ่มการมาทำงานไม่มีคีย์ที่นับกะชุดเดียวกันซ้ำ', async () => {
     const { ALERT_KEYS } = await import('../src/notify/alerts.js');
-    assert.deepEqual(ALERT_KEYS.attendance, ['exceptions', 'unstaffed_today']);
+    // partner_attention ไม่นับซ้ำกับ unstaffed_today — กะของพาร์ทเนอร์/ที่พาร์ทเนอร์ปฏิเสธถูกตัดออกจาก unstaffedToday
+    assert.deepEqual(ALERT_KEYS.attendance, ['exceptions', 'unstaffed_today', 'partner_attention']);
   });
 });
 
@@ -2116,14 +2117,15 @@ describe('แบบประเมิน — ตัวหารของคะ�
 
 describe('แบบประเมิน — ตำแหน่งที่เปิดใช้', () => {
   test('เปิดให้พนักงานกลุ่ม front ทั้งหมด (สายดูแล + สายบำบัด) โดยอ้างรายการกลาง', async () => {
-    const { FRONT_POSITIONS, BACK_POSITIONS, POSITIONS } = await import('../src/employees/schema.js');
+    const { FRONT_POSITIONS, BACK_POSITIONS, PARTNER_POSITIONS, POSITIONS } = await import('../src/employees/schema.js');
     assert.deepEqual(REVIEW_POSITIONS, FRONT_POSITIONS);
     assert.deepEqual([...FRONT_POSITIONS].sort(), [
       'assistant_nurse', 'caregiver', 'nurse', 'occupational_therapist', 'practical_nurse', 'speech_therapist', 'therapist', 'unassigned',
     ]);
     for (const p of THERAPY_POSITIONS) assert.ok(FRONT_POSITIONS.includes(p), `${p} ต้องอยู่กลุ่ม front`);
-    // สองกลุ่มรวมกันได้ทุกตำแหน่งพอดี ไม่ซ้อนกัน
-    assert.deepEqual([...FRONT_POSITIONS, ...BACK_POSITIONS].sort(), [...POSITIONS].sort());
+    // สามกลุ่ม (front · back · พาร์ทเนอร์) รวมกันได้ทุกตำแหน่งพอดี ไม่ซ้อนกัน
+    assert.deepEqual([...FRONT_POSITIONS, ...BACK_POSITIONS, ...PARTNER_POSITIONS].sort(), [...POSITIONS].sort());
+    assert.equal(roleForPosition('partner_lead'), 'partner');
   });
 
   test('กลุ่มพนักงานฝั่งหน้าเว็บตรงกับ server', async () => {

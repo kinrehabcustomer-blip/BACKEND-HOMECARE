@@ -101,6 +101,21 @@ export async function inboxVisitChange(tx, row) {
   await push(tx, { ...base, employeeId: row.new_assignee, kind: 'visits_added', payload: { ...fresh, total: 1, last_date: row.new_date } });
 }
 
+/**
+ * งานใหม่ที่ KIN ส่งให้พาร์ทเนอร์ (partners/repo.js · 21 พ.ย. 2569) — หัวหน้าพาร์ทเนอร์ทุกคนของบริษัทนั้นได้หนึ่งแจ้งเตือน
+ * db = transaction ของการส่ง (ensureStaffInbox ก่อนเปิด tx) · ส่ง push ก่อนตอบคำขอ (markPushPending ใน push)
+ */
+export async function inboxPartnerJob(db, leadIds, { caseId, visitId, client, date, start, total = 1, lastDate = null }) {
+  for (const id of leadIds) {
+    await push(db, {
+      employeeId: id, kind: 'partner_job', caseId, visitId,
+      key: `partner-job:${visitId}:${id}:${Date.now()}`,
+      // total > 1 = ลงนัดหลายวันแล้วส่งพร้อมกัน — แจ้งครั้งเดียว ไม่ใช่วันละแจ้ง
+      payload: { client, date, start: start ?? null, total, last_date: lastDate ?? date },
+    });
+  }
+}
+
 /* เงื่อนไขเดียวกับการเตือนทาง LINE (visitReminders.js) — กะที่ยังต้องไปจริง ยังไม่เช็คอิน เคสยังเดิน */
 const START_AT = `((v.visit_date || ' ' || COALESCE(v.planned_start, '08:00'))::timestamp AT TIME ZONE 'Asia/Bangkok')`;
 const DAY_AT = `(((v.visit_date)::date - 1 + time '08:00') AT TIME ZONE 'Asia/Bangkok')`;

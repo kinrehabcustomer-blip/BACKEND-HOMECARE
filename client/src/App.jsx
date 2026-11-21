@@ -55,6 +55,9 @@ const MyCalendarPage = lazy(() => import('./pages/MyCalendarPage.jsx'));
 const MyChatPage = lazy(() => import('./pages/MyChatPage.jsx'));
 const MyReportsPage = lazy(() => import('./pages/MyReportsPage.jsx'));
 const MyAttendancePage = lazy(() => import('./pages/MyAttendancePage.jsx'));
+const PartnerJobsPage = lazy(() => import('./pages/PartnerJobsPage.jsx'));
+const PartnerTeamPage = lazy(() => import('./pages/PartnerTeamPage.jsx'));
+const PartnerSummaryPage = lazy(() => import('./pages/PartnerSummaryPage.jsx'));
 
 /* ไอคอนเมนูแบบเส้น (Lucide-style) — stroke=currentColor จึง tint ตามสีเมนู (จาง → ทองตอน active) เอง */
 const NAV_ICONS = {
@@ -144,6 +147,7 @@ const navFor = (user) => {
 
 /** หน้าแรกหลัง login — หน้าแรกที่เข้าได้จริง ไม่ใช่ /dashboard ตายตัว (การเงินเข้าภาพรวมไม่ได้) */
 const homePath = (user) => {
+  if (user.role === 'partner') return '/partner'; // หัวหน้าพาร์ทเนอร์ (21 พ.ย. 2569)
   if (user.role !== 'admin') return '/my-today';
   return navFor(user)[0]?.to ?? '/no-access';
 };
@@ -161,7 +165,21 @@ const FIELD_NAV = [
 /* แถบล่างของพนักงาน (ผู้ใช้ขอ 9 พ.ย. 2569): ไม่มี ☰ บนแถบบนแล้ว — ช่องขวาสุดเป็นปุ่ม "ตั้งค่า"
    ที่กางแผงเมนูขึ้นจากล่าง ในแผงมีแชทญาติ + ตั้งค่า/ออกจากระบบ · เมนูที่อยู่บนแถบแล้วไม่ซ้ำในแผง */
 const FIELD_IN_SHEET = new Set(['/my-chat']);
-const FIELD_TABS = FIELD_NAV.filter((i) => !FIELD_IN_SHEET.has(i.to));
+
+/* หัวหน้าพาร์ทเนอร์ (ผู้รับเหมาช่วงรายครั้ง · 21 พ.ย. 2569) — หน้าจอของตัวเอง 3 หน้า */
+const PARTNER_NAV = [
+  { to: '/partner', icon: 'calendar', label: 'งานที่ส่งมา', short: 'งาน', end: true },
+  { to: '/partner/team', icon: 'users', label: 'ทีมของฉัน', short: 'ทีม' },
+  { to: '/partner/summary', icon: 'bars', label: 'สรุปรายเดือน', short: 'สรุป' },
+];
+/* พนักงานของพาร์ทเนอร์: ไม่มีแชทญาติ (ทีม KIN เท่านั้น) และไม่มีค่าตอบแทน (บริษัทจ่ายเอง) — server กันอีกชั้น */
+const PARTNER_STAFF_HIDDEN = new Set(['/my-chat', '/my-attendance']);
+/** เมนูของผู้ที่ไม่ใช่หลังบ้าน */
+const fieldNavFor = (user) => {
+  if (user.role === 'partner') return PARTNER_NAV;
+  return user.partner_id ? FIELD_NAV.filter((i) => !PARTNER_STAFF_HIDDEN.has(i.to)) : FIELD_NAV;
+};
+const fieldTabsFor = (user) => fieldNavFor(user).filter((i) => !FIELD_IN_SHEET.has(i.to));
 
 /** จำนวนเมนูหลักบนแถบล่างของหลังบ้าน — ช่องที่ 5 คือปุ่ม "เมนู" (390px แบ่ง 5 ช่อง ช่องละ ~70px ชื่อสั้นยังไม่ตกบรรทัด) */
 const ADMIN_TABS = 4;
@@ -195,7 +213,7 @@ function TabBar({ menuOpen, onMenu }) {
   );
   // ตอนแผงเมนูกางอยู่ ไฮไลต์ที่ปุ่มเมนูช่องเดียว — สองช่องติดพร้อมกันอ่านไม่ออกว่าอันไหนคือสิ่งที่เปิดอยู่
   const tabLink = (i) => (
-    <NavLink key={i.to} to={i.to} className={({ isActive }) => (isActive && !menuOpen ? 'active' : '')}>
+    <NavLink key={i.to} to={i.to} end={i.end} className={({ isActive }) => (isActive && !menuOpen ? 'active' : '')}>
       {icon(i.icon)}
       <span className="tab-label">{i.short ?? i.label}</span>
     </NavLink>
@@ -203,10 +221,11 @@ function TabBar({ menuOpen, onMenu }) {
 
   if (user.role !== 'admin') {
     // อยู่หน้าที่ไม่มีบนแถบ (แชท/ตั้งค่า) — ไฮไลต์ปุ่ม "ตั้งค่า" แทน จะได้รู้ว่าหน้านี้มาจากปุ่มไหน
-    const elsewhere = !FIELD_TABS.some((i) => location.pathname.startsWith(i.to));
+    const tabs = fieldTabsFor(user);
+    const elsewhere = !tabs.some((i) => location.pathname.startsWith(i.to));
     return (
       <nav className="tabbar" aria-label="เมนูพนักงาน">
-        {FIELD_TABS.map(tabLink)}
+        {tabs.map(tabLink)}
         {menuButton('ตั้งค่า', 'settings', elsewhere)}
       </nav>
     );
@@ -230,7 +249,7 @@ function Sidebar({ menuOpen, setMenuOpen }) {
   const navigate = useNavigate();
   const location = useLocation();
   const isAdmin = user.role === 'admin';
-  const items = isAdmin ? navFor(user) : FIELD_NAV;
+  const items = isAdmin ? navFor(user) : fieldNavFor(user);
 
   /* หัวข้อกลุ่มที่กางอยู่ (เช่น "แพ็คเกจ") — กางเองเมื่ออยู่ในหน้าของกลุ่มนั้น
      ไม่งั้นเข้าหน้าแพ็คเกจจากลิงก์อื่นแล้วเมนูที่ไฮไลต์ซ่อนอยู่ใต้หัวข้อที่หุบ */
@@ -319,7 +338,7 @@ function Sidebar({ menuOpen, setMenuOpen }) {
                 {i.to === '/packages' && <span className="nav-section-label">ข้อมูลและบริการ</span>}
                 {!i.group ? (
                   /* on-tabbar = พนักงานภาคสนาม เมนูนี้อยู่บนแถบล่างแล้ว — แผงเมนูบนมือถือซ่อนไว้ (จอกว้างยังเห็นครบ) */
-                  <NavLink to={i.to} className={!isAdmin && !FIELD_IN_SHEET.has(i.to) ? 'on-tabbar' : undefined}><NavIcon name={i.icon} />{i.label}</NavLink>
+                  <NavLink to={i.to} end={i.end} className={!isAdmin && !FIELD_IN_SHEET.has(i.to) ? 'on-tabbar' : undefined}><NavIcon name={i.icon} />{i.label}</NavLink>
                 ) : (
                   <>
                     <button
@@ -367,7 +386,9 @@ function Sidebar({ menuOpen, setMenuOpen }) {
             <div className="who-actions">
               {/* ตั้งค่าระบบ (เหตุผลยกเลิก · หมวดเหตุการณ์ · จัดการสิทธิ์ · บันทึกการใช้งาน) — ไอคอนไขควง (19 พ.ย. 2569)
                   เห็นเมื่อเข้าได้อย่างน้อยหนึ่งแท็บ: Super Admin + ผู้จัดการ หรือมีสิทธิ์ audit_logs */}
-              {(PERMISSION_ADMINS.includes(user.position) || permissionsOf(user).some((k) => ['audit_logs', 'finance_logs'].includes(k))) && (
+              {/* + สิทธิ์งานหลังบ้าน (office) — แท็บพาร์ทเนอร์ (21 พ.ย. 2569) */}
+              {(PERMISSION_ADMINS.includes(user.position) || permissionsOf(user).some((k) => ['audit_logs', 'finance_logs', 'office'].includes(k))
+                || (permissionsOf(user).includes('payroll') && permissionsOf(user).includes('see_pay'))) && (
                 <NavLink className="btn icon-btn" to="/system-settings" title="ตั้งค่าระบบ" aria-label="ตั้งค่าระบบ">
                   <LineIcon name="tools" />
                 </NavLink>
@@ -407,11 +428,13 @@ function ForcePasswordChange() {
     <div className="login-page">
       <section className="login-card">
         <h1>ตั้งรหัสผ่านของคุณก่อนเริ่มใช้งาน</h1>
+        {/* บังคับเปลี่ยนรหัสเริ่มต้น (ผู้ใช้ขอ 21 พ.ย. 2569) — server ตรวจตอนเข้าสู่ระบบว่ารหัสยังเป็น 12345678 ไหม
+            เปลี่ยนแล้วไม่เห็นหน้านี้อีก · ไม่ถามรหัสปัจจุบัน (server ใช้รหัสเริ่มต้นตรวจแทน) */}
         <p className="muted">
-          บัญชี <strong>{user.employee_id}</strong> ยังใช้รหัสผ่านชั่วคราวที่ผู้ดูแลตั้งให้อยู่ —
-          คนที่ออกรหัสให้ก็รู้รหัสนี้ด้วย จึงต้องเปลี่ยนเป็นรหัสของตัวเองก่อน
+          บัญชี <strong>{user.employee_id}</strong> ยังใช้รหัสผ่านเริ่มต้นอยู่ ซึ่งทุกคนในบริษัทรู้ —
+          ตั้งรหัสใหม่ของคุณเองก่อน เพื่อไม่ให้คนอื่นเข้าบัญชีนี้ได้ (ครั้งต่อไปเข้าทาง LINE ได้ตามเดิม)
         </p>
-        <ChangePasswordForm />
+        <ChangePasswordForm forced />
         <button className="btn link-btn" type="button" onClick={logout}>ออกจากระบบ</button>
       </section>
     </div>
@@ -539,6 +562,11 @@ export default function App() {
             <Route path="/my-reports" element={<AppLayout><MyReportsPage /></AppLayout>} />
             <Route path="/my-calendar" element={<AppLayout><MyCalendarPage /></AppLayout>} />
             <Route path="/my-attendance" element={<AppLayout><MyAttendancePage /></AppLayout>} />
+
+            {/* หัวหน้าพาร์ทเนอร์ (21 พ.ย. 2569) — server กรองด้วยบริษัทใน session (/api/partner) */}
+            <Route path="/partner" element={<AppLayout positions={['partner_lead']}><PartnerJobsPage /></AppLayout>} />
+            <Route path="/partner/team" element={<AppLayout positions={['partner_lead']}><PartnerTeamPage /></AppLayout>} />
+            <Route path="/partner/summary" element={<AppLayout positions={['partner_lead']}><PartnerSummaryPage /></AppLayout>} />
 
             {/* ลูกค้า (ผู้ว่าจ้าง/ผู้จ่ายเงิน) — กลับมาเปิดแสดงในเมนูอีกครั้ง (ดร.ธงชัย 28 ต.ค. 2569) */}
             <Route path="/customers" element={<AppLayout perm="customers"><CustomerListPage /></AppLayout>} />

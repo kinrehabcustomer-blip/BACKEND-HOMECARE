@@ -312,6 +312,33 @@ export const api = {
   /** กระดิ่งแจ้งเตือนของพนักงาน — { items, unread } · ids ไม่ส่ง = อ่านทั้งหมด */
   myNotifications: () => request('/my/notifications'),
   readMyNotifications: (ids) => request('/my/notifications/read', { method: 'POST', body: ids ? { ids } : {} }),
+  /* ---------- พาร์ทเนอร์ (ผู้รับเหมาช่วงรายครั้ง · 21 พ.ย. 2569 · server/src/partners/) ---------- */
+  // หลังบ้าน KIN
+  partners: () => request('/partners'),
+  partnerLogoUrl: (id, v) => `/api/partner-logos/${id}?v=${v ?? 0}`,
+  setPartnerLogo: (id, image) => request(`/partners/${id}/logo`, { method: 'PUT', body: { image } }),
+  createPartner: (body) => request('/partners', { method: 'POST', body }),
+  updatePartner: (id, body) => request(`/partners/${id}`, { method: 'PATCH', body }),
+  partnerPeople: (id) => request(`/partners/${id}/people`),
+  createPartnerLead: (id, body) => request(`/partners/${id}/leads`, { method: 'POST', body }),
+  updatePartnerPerson: (id, employeeId, body) => request(`/partners/${id}/people/${employeeId}`, { method: 'PATCH', body }),
+  partnerAttention: () => request('/partners/attention'),
+  partnersSummary: (month) => request(`/partners/summary?month=${month}`),
+  partnerSummaryAdmin: (id, month) => request(`/partners/${id}/summary?month=${month}`),
+  payPartner: (id, body) => request(`/partners/${id}/payments`, { method: 'POST', body }),
+  sendVisitToPartner: (visitId, partnerId) => request(`/partners/visits/${visitId}/send`, { method: 'POST', body: { partner_id: partnerId } }),
+  pullVisitFromPartner: (visitId, assignedTo) => request(`/partners/visits/${visitId}/pull`, { method: 'POST', body: { assigned_to: assignedTo ?? null } }),
+  // หัวหน้าพาร์ทเนอร์
+  partnerMe: () => request('/partner/me'),
+  partnerVisits: (tab) => request(`/partner/visits?tab=${tab}`),
+  partnerCandidates: (visitId) => request(`/partner/visits/${visitId}/candidates`),
+  partnerAccept: (visitId, employeeId) => request(`/partner/visits/${visitId}/accept`, { method: 'POST', body: { employee_id: employeeId } }),
+  partnerReject: (visitId, reason) => request(`/partner/visits/${visitId}/reject`, { method: 'POST', body: { reason: reason || null } }),
+  partnerTeam: () => request('/partner/team'),
+  partnerAddPerson: (body) => request('/partner/team', { method: 'POST', body }),
+  partnerUpdatePerson: (employeeId, body) => request(`/partner/team/${employeeId}`, { method: 'PATCH', body }),
+  partnerSummary: (month) => request(`/partner/summary?month=${month}`),
+
   /** แจ้งเตือนบนมือถือ (lib/push.js) — { enabled, public_key, subscribed } · สมัคร/เลิก/ทดสอบต่อเครื่อง (endpoint) */
   pushStatus: (endpoint) => request(`/my/push${endpoint ? `?${new URLSearchParams({ endpoint })}` : ''}`),
   pushSubscribe: (sub) => request('/my/push', { method: 'POST', body: sub }),

@@ -148,7 +148,7 @@ export default function EmployeeListPage() {
           filters={(<>
           <SearchSelect value={position} onChange={(e) => setFilter('position', e.target.value)}>
             <option value="">ทุกตำแหน่ง</option>
-            {Object.entries(POSITION_LABELS).map(([value, label]) => (
+            {Object.entries(POSITION_LABELS).filter(([value]) => value !== 'partner_lead').map(([value, label]) => (
               <option key={value} value={value}>{label}</option>
             ))}
           </SearchSelect>

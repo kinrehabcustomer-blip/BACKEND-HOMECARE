@@ -95,6 +95,64 @@ if (process.env.RUN_DB_TESTS !== '1') {
       assert.equal((await get('/api/cases', MANAGER)).status, 200);
       assert.equal((await get('/api/cases', HR)).status, 200);
     });
+
+    test('บังคับเปลี่ยนรหัสเริ่มต้น (21 พ.ย. 2569): เข้าด้วย 12345678 = ใช้อะไรไม่ได้จนตั้งรหัสใหม่ · เปลี่ยนแล้วไม่ถูกบังคับอีก', async () => {
+      const { DEFAULT_PASSWORD, markDefaultPassword } = await import('../src/lib/auth.js');
+      await sql.run(
+        `INSERT INTO employees (employee_id, first_name, last_name, position, email, status, password_hash, must_change_password)
+         VALUES ('EMP-0391', 'Default', 'Pw', 'caregiver', 'emp-0391@example.invalid', 'active', :h, false),
+                ('EMP-0392', 'Line', 'Only', 'caregiver', 'emp-0392@example.invalid', 'active', :h, false)`,
+        { h: await hashPassword(DEFAULT_PASSWORD) },
+      );
+      const send = async (method, path, body, cookie, expected) => {
+        const res = await fetch(`${base}${path}`, {
+          method, headers: { 'content-type': 'application/json', ...(cookie ? { cookie } : {}) },
+          body: body === undefined ? undefined : JSON.stringify(body),
+        });
+        const data = await res.json().catch(() => null);
+        if (expected) assert.equal(res.status, expected, `${method} ${path}: ${JSON.stringify(data)}`);
+        const set = res.headers.get('set-cookie');
+        return { status: res.status, data, cookie: set ? set.split(';')[0] : cookie };
+      };
+
+      // เข้าด้วยรหัสเริ่มต้น → session บอกให้เปลี่ยน · /api ทุกเส้นปิด · /auth/me ยังเรียกได้
+      const login = await send('POST', '/api/auth/login', { email: 'EMP-0391', password: DEFAULT_PASSWORD }, null, 200);
+      assert.equal(login.data.must_change_password, true);
+      const c1 = login.cookie;
+      assert.equal((await send('GET', '/api/my/today', undefined, c1)).status, 403);
+      assert.equal((await send('GET', '/api/auth/me', undefined, c1, 200)).data.must_change_password, true);
+
+      // ตั้งรหัสใหม่เป็นรหัสเริ่มต้นไม่ได้ · ไม่ส่งรหัสปัจจุบันได้ (server ใช้รหัสเริ่มต้นตรวจแทน)
+      await send('POST', '/api/auth/change-password', { new_password: DEFAULT_PASSWORD }, c1, 400);
+      const changed = await send('POST', '/api/auth/change-password', { new_password: 'my-own-pass-391' }, c1, 200);
+      const c2 = changed.cookie;
+      assert.notEqual(c2, c1, 'ออกคุกกี้ใบใหม่ให้หลังเปลี่ยนรหัส');
+      assert.equal((await send('GET', '/api/auth/me', undefined, c2, 200)).data.must_change_password, false);
+      assert.equal((await send('GET', '/api/my/today', undefined, c2)).status, 200);
+
+      // ไม่ส่งรหัสปัจจุบัน ใช้ได้เฉพาะตอนรหัสยังเป็นค่าเริ่มต้น — เปลี่ยนไปแล้วต้องพิมพ์รหัสเดิม
+      await send('POST', '/api/auth/change-password', { new_password: 'another-pass-391' }, c2, 400);
+
+      // เข้าครั้งถัดไปด้วยรหัสใหม่ → ไม่ถูกบังคับ
+      const again = await send('POST', '/api/auth/login', { email: 'EMP-0391', password: 'my-own-pass-391' }, null, 200);
+      assert.equal(again.data.must_change_password, false);
+      assert.equal((await send('GET', '/api/my/today', undefined, again.cookie)).status, 200);
+
+      // เข้าทาง LINE/SSO (ไม่มีรหัสที่พิมพ์) — เทียบ hash: ยังเป็นรหัสเริ่มต้น = บังคับ · ไม่ใช่ = ไม่บังคับ
+      const lineOnly = await sql.one('SELECT * FROM employees WHERE employee_id = :id', { id: 'EMP-0392' });
+      assert.equal(await markDefaultPassword(lineOnly), true);
+      assert.equal((await get('/api/my/today', emp('EMP-0392', 'caregiver'))).status, 403, 'เซสชันของคนที่ยังใช้รหัสเริ่มต้นถูกปิด');
+      const done = await sql.one('SELECT * FROM employees WHERE employee_id = :id', { id: 'EMP-0391' });
+      assert.equal(await markDefaultPassword(done), false);
+
+      // ตรวจครั้งเดียวพอ (ผู้ใช้ขอ 21 พ.ย. 2569) — ตั้งรหัสเองแล้ว (FALSE) ไม่ตรวจอีก แม้รหัสจะกลับไปเป็นค่าเริ่มต้นทางอื่น
+      await sql.run('UPDATE employees SET password_hash = :h WHERE employee_id = :id', { h: await hashPassword(DEFAULT_PASSWORD), id: 'EMP-0391' });
+      const once = await send('POST', '/api/auth/login', { email: 'EMP-0391', password: DEFAULT_PASSWORD }, null, 200);
+      assert.equal(once.data.must_change_password, false);
+      // ยังไม่เคยตรวจ = NULL · ตรวจแล้วจดผล
+      assert.equal((await sql.one(`SELECT uses_default_password AS v FROM employees WHERE employee_id = 'EMP-0392'`)).v, true);
+      assert.equal((await sql.one(`SELECT uses_default_password AS v FROM employees WHERE employee_id = 'EMP-0391'`)).v, false);
+    });
   });
 
   // ---------- สิทธิ์ field vs admin ----------
@@ -3341,6 +3399,242 @@ if (process.env.RUN_DB_TESTS !== '1') {
       }
       assert.equal(mine.state, 'scheduled');
       assert.ok(cal.every((v) => v.state !== 'cancelled'));
+    });
+  });
+
+  describe('พาร์ทเนอร์ (ผู้รับเหมาช่วงรายครั้ง · 21 พ.ย. 2569)', () => {
+    async function call(method, path, body, who = MANAGER, expected = 200) {
+      const res = await fetch(`${base}${path}`, {
+        method,
+        headers: { 'content-type': 'application/json', cookie: `${COOKIE_NAME}=${signToken(who)}` },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+      const text = await res.text();
+      let data;
+      try { data = JSON.parse(text); } catch { data = text; }
+      assert.equal(res.status, expected, `${method} ${path}: ${text}`);
+      return data;
+    }
+    const day = async (n) => (await sql.one(
+      `SELECT to_char((now() AT TIME ZONE 'Asia/Bangkok')::date + :n::int, 'YYYY-MM-DD') AS d`, { n },
+    )).d;
+    const visitRow = (id) => sql.one('SELECT * FROM case_visits WHERE visit_id = :id', { id });
+
+    test('ส่งกะ → หัวหน้าเลือกคน/ปฏิเสธ · KIN ดึงคืน · กันข้อมูลข้ามบริษัท · ค่าจ้าง/ต้นทุน', async () => {
+      // ---- บริษัท + บัญชีหัวหน้า (หลังบ้าน KIN) ----
+      const A = await call('POST', '/api/partners', { name: 'เอ แคร์', rate_per_visit: 600 }, MANAGER, 201);
+      const B = await call('POST', '/api/partners', { name: 'บี เฮลธ์', rate_per_visit: 500 }, MANAGER, 201);
+      await call('POST', '/api/partners', { name: 'x', rate_per_visit: 1 }, FIELD, 403);
+      const leadARow = await call('POST', `/api/partners/${A.partner_id}/leads`, { first_name: 'หัวหน้า', last_name: 'เอ' }, MANAGER, 201);
+      const leadBRow = await call('POST', `/api/partners/${B.partner_id}/leads`, { first_name: 'หัวหน้า', last_name: 'บี' }, MANAGER, 201);
+      const leadA = emp(leadARow.employee_id, 'partner_lead');
+      const leadB = emp(leadBRow.employee_id, 'partner_lead');
+      const me = (await get('/api/auth/me', leadA)).body;
+      assert.equal(me.role, 'partner');
+      assert.equal(me.partner_id, A.partner_id);
+
+      // ---- ทีม (หัวหน้าเพิ่มเอง) ----
+      await call('POST', '/api/partner/team', { first_name: 'x', last_name: 'y', position: 'manager' }, leadA, 400);
+      const a1Row = await call('POST', '/api/partner/team', { first_name: 'กภ', last_name: 'เอหนึ่ง', position: 'therapist' }, leadA, 201);
+      const b1Row = await call('POST', '/api/partner/team', { first_name: 'กภ', last_name: 'บีหนึ่ง', position: 'therapist' }, leadB, 201);
+      const staffA1 = emp(a1Row.employee_id, 'therapist');
+      const team = await call('GET', '/api/partner/team', undefined, leadA);
+      assert.deepEqual(team.people.map((p) => p.employee_id).sort(), [leadARow.employee_id, a1Row.employee_id].sort());
+      await call('PATCH', `/api/partner/team/${b1Row.employee_id}`, { phone: '0800000000' }, leadA, 404); // คนของบริษัทอื่น
+      await call('PATCH', `/api/partner/team/${leadARow.employee_id}`, { phone: '0800000000' }, leadA, 403); // แก้หัวหน้าเองไม่ได้
+
+      // ---- คนของพาร์ทเนอร์ไม่อยู่ในหน้าพนักงาน/ตัวเลือกจับคู่ของ KIN · จับคู่ตรงไม่ได้ ----
+      for (const q of [a1Row.employee_id, leadARow.employee_id]) {
+        assert.deepEqual((await get(`/api/employees?q=${q}`, MANAGER)).body.data, [], `${q} ไม่ควรอยู่ในรายชื่อพนักงาน KIN`);
+      }
+      const assignable = (await get('/api/cases/assignable-employees', MANAGER)).body.map((e) => e.employee_id);
+      assert.ok(!assignable.includes(a1Row.employee_id));
+      const c = await newCase();
+      await post(`/api/cases/${c.case_id}/assign`, { employee_id: FIELD.employee_id });
+      await call('POST', `/api/cases/${c.case_id}/visits/bulk`, { dates: [await day(2)], assigned_to: a1Row.employee_id }, MANAGER, 409);
+      const sched = await call('POST', `/api/cases/${c.case_id}/visits/bulk`,
+        { dates: [await day(2), await day(3), await day(4)], assigned_to: FIELD.employee_id, planned_start: '10:00', planned_end: '11:00' }, MANAGER, 201);
+      const [v1, v2, v3] = sched.visits.sort((x, y) => x.visit_date.localeCompare(y.visit_date)).map((v) => v.visit_id);
+
+      // ---- ส่งกะให้ A ----
+      await call('POST', `/api/partners/visits/${v1}/send`, { partner_id: A.partner_id });
+      let row = await visitRow(v1);
+      assert.equal(row.assigned_to, null);
+      assert.equal(row.partner_id, A.partner_id);
+      assert.equal(row.partner_status, 'pending');
+      assert.equal(Number(row.partner_rate), 600);
+      assert.ok((await get('/api/my/notifications', leadA)).body.items.some((n) => n.kind === 'partner_job' && n.visit_id === v1));
+      // ปฏิทินของคนดูแลเคสไม่เห็นกะที่ส่งไปแล้ว (ไม่ตกกลับเป็นของผู้รับผิดชอบเคส)
+      const d1 = await day(2);
+      const cal = (await get(`/api/cases/calendar?year=${d1.slice(0, 4)}&month=${d1.slice(5, 7)}&employee_id=${FIELD.employee_id}`, MANAGER)).body;
+      assert.ok(!cal.some((v) => v.visit_id === v1));
+
+      // ---- บริษัท B มองไม่เห็น/แตะไม่ได้ ----
+      assert.ok(!(await call('GET', '/api/partner/visits?tab=pending', undefined, leadB)).some((v) => v.visit_id === v1));
+      await call('GET', `/api/partner/visits/${v1}/candidates`, undefined, leadB, 404);
+      await call('POST', `/api/partner/visits/${v1}/accept`, { employee_id: b1Row.employee_id }, leadB, 404);
+      await call('POST', `/api/partner/visits/${v1}/reject`, {}, leadB, 404);
+      // หัวหน้าพาร์ทเนอร์เข้าหลังบ้าน KIN ไม่ได้ · พนักงานพาร์ทเนอร์เข้าหน้าหัวหน้าไม่ได้
+      assert.equal((await get('/api/cases', leadA)).status, 403);
+      assert.equal((await get('/api/employees', leadA)).status, 403);
+      assert.equal((await get('/api/partners', leadA)).status, 403);
+      assert.equal((await get('/api/partner/me', staffA1)).status, 403);
+
+      // ---- A เห็นงาน: ไม่มีราคา/ค่าจ้าง ----
+      const pending = await call('GET', '/api/partner/visits?tab=pending', undefined, leadA);
+      const job = pending.find((v) => v.visit_id === v1);
+      assert.equal(job.client_name, 'Workflow patient');
+      for (const k of ['fee', 'staff_pay', 'partner_rate', 'medical_history', 'current_symptoms']) assert.ok(!(k in job), `ไม่ควรมี ${k}`);
+      const cands = await call('GET', `/api/partner/visits/${v1}/candidates`, undefined, leadA);
+      assert.deepEqual(cands.map((x) => x.employee_id), [a1Row.employee_id]);
+
+      // ---- รับงาน: เลือกคนของบริษัทอื่นไม่ได้ · เลือกคนของตัวเองได้ ----
+      await call('POST', `/api/partner/visits/${v1}/accept`, { employee_id: b1Row.employee_id }, leadA, 400);
+      await call('POST', `/api/partner/visits/${v1}/accept`, { employee_id: a1Row.employee_id }, leadA);
+      row = await visitRow(v1);
+      assert.equal(row.assigned_to, a1Row.employee_id);
+      assert.equal(row.partner_status, 'accepted');
+      assert.ok((await get('/api/my/notifications', staffA1)).body.items.some((n) => n.kind === 'visits_added' && n.visit_id === v1));
+
+      // ---- พนักงานพาร์ทเนอร์: เห็นเคสของกะตัวเอง · ไม่เห็นแชทญาติ/ค่าตอบแทน ----
+      assert.ok((await get('/api/my/cases', staffA1)).body.some((x) => x.case_id === c.case_id));
+      assert.equal((await get(`/api/my/cases/${c.case_id}`, staffA1)).status, 200);
+      assert.equal((await get(`/api/my/cases/${c.case_id}/family-messages`, staffA1)).status, 403);
+      assert.equal((await get('/api/my/attendance/report', staffA1)).status, 403);
+      // ประวัติรายงาน: เคสนี้เห็น · เคสอื่นของผู้รับบริการคนเดียวกันไม่เห็น (ผู้ใช้เลือก 21 พ.ย. 2569) — พนักงาน KIN ยังเห็นทั้งชุด
+      const pt = await sql.one('SELECT patient_id FROM patients LIMIT 1');
+      const other = await newCase();
+      await sql.run('UPDATE cases SET patient_id = :p WHERE case_id IN (:a, :b)', { p: pt.patient_id, a: c.case_id, b: other.case_id });
+      const [rHere, rOther] = await Promise.all([c.case_id, other.case_id].map((cid) => sql.one(
+        `INSERT INTO case_reports (case_id, report_date, pulse) VALUES (:cid, :d, 80) RETURNING report_id`, { cid, d: d1 })));
+      const seen = (await get(`/api/my/cases/${c.case_id}/patient-reports`, staffA1)).body;
+      const seenIds = (seen.data ?? seen.items ?? seen.reports ?? []).map((r) => r.report_id);
+      assert.ok(seenIds.includes(rHere.report_id) && !seenIds.includes(rOther.report_id), JSON.stringify(seenIds));
+      await post(`/api/cases/${c.case_id}/team`, { employee_id: FIELD.employee_id }).catch(() => {});
+      const kin = (await get(`/api/my/cases/${c.case_id}/patient-reports`, FIELD)).body;
+      const kinIds = (kin.data ?? kin.items ?? kin.reports ?? []).map((r) => r.report_id);
+      assert.ok(kinIds.includes(rOther.report_id), 'พนักงาน KIN ยังเห็นประวัติทั้งตัวผู้รับบริการ');
+      assert.equal((await get(`/api/my/cases/${c.case_id}/reports/${rOther.report_id}/photo`, staffA1)).status, 404);
+      assert.equal((await get('/api/my/payslips', staffA1)).status, 403);
+
+      // ---- เปลี่ยนคนดูแลเคส: กะของพาร์ทเนอร์ไม่ถูกย้ายตาม ----
+      await post(`/api/cases/${c.case_id}/assign`, { employee_id: 'EMP-0004' });
+      assert.equal((await visitRow(v1)).assigned_to, a1Row.employee_id);
+      assert.equal((await visitRow(v2)).assigned_to, 'EMP-0004');
+
+      // ---- ค่าจ้างของเคส: คนของพาร์ทเนอร์ไม่อยู่ในการแบ่ง ----
+      const pay = (await get(`/api/cases/${c.case_id}/pay`, MANAGER)).body;
+      assert.ok(!pay.shares.some((x) => x.employee_id === a1Row.employee_id), JSON.stringify(pay.shares));
+
+      // ---- ปิดบัญชีคนที่ยังถือกะข้างหน้าไม่ได้ ----
+      await call('PATCH', `/api/partner/team/${a1Row.employee_id}`, { status: 'resigned' }, leadA, 409);
+
+      // ---- ปฏิเสธ: กะกลับมาหา KIN + กระดิ่งหลังบ้าน ----
+      await call('POST', `/api/partner/visits/${v1}/reject`, { reason: 'คนไม่พอ' }, leadA);
+      row = await visitRow(v1);
+      assert.equal(row.assigned_to, null);
+      assert.equal(row.partner_id, null);
+      assert.equal(row.partner_reject_reason, 'คนไม่พอ');
+      assert.ok((await call('GET', '/api/partners/attention')).some((x) => x.visit_id === v1 && x.reason === 'rejected'));
+      assert.ok((await get('/api/notify/alerts', MANAGER)).body.groups.attendance.partner_attention >= 1);
+      assert.ok((await get('/api/my/notifications', staffA1)).body.items.some((n) => n.kind === 'visit_removed' && n.visit_id === v1));
+
+      // ---- ส่งอีกกะแล้ว KIN ดึงคืนให้คนของ KIN · ดึงคืนให้คนของพาร์ทเนอร์ไม่ได้ ----
+      await call('POST', `/api/partners/visits/${v2}/send`, { partner_id: B.partner_id });
+      await call('POST', `/api/partners/visits/${v2}/pull`, { assigned_to: b1Row.employee_id }, MANAGER, 409);
+      await call('POST', `/api/partners/visits/${v2}/pull`, { assigned_to: FIELD.employee_id });
+      row = await visitRow(v2);
+      assert.equal(row.partner_id, null);
+      assert.equal(row.assigned_to, FIELD.employee_id);
+      // หลังบ้านเปลี่ยนคนเองในตารางนัด = ดึงคืนเหมือนกัน
+      await call('POST', `/api/partners/visits/${v3}/send`, { partner_id: A.partner_id });
+      await call('PATCH', `/api/cases/${c.case_id}/visits/${v3}`, { assigned_to: FIELD.employee_id });
+      assert.equal((await visitRow(v3)).partner_id, null);
+
+      // ---- เงิน: กะที่ไปจริง × เรท · ต้นทุนในรายงานกำไร · บันทึกจ่ายเดือนที่จบแล้ว ----
+      const last = await sql.one(`SELECT to_char((now() AT TIME ZONE 'Asia/Bangkok')::date - interval '1 month', 'YYYY-MM') AS m`);
+      const doneRow = await sql.one(
+        `INSERT INTO case_visits (case_id, visit_date, status, assigned_to, checked_in_by, check_in_at, check_out_at,
+                                  partner_id, partner_status, partner_rate, planned_start, planned_end)
+         VALUES (:cid, :d, 'done', :e, :e, (:ts_in)::timestamptz, (:ts_out)::timestamptz, :pid, 'accepted', 600, '10:00', '11:00')
+         RETURNING visit_id`,
+        { cid: c.case_id, d: `${last.m}-15`, ts_in: `${last.m}-15 10:00+07`, ts_out: `${last.m}-15 11:00+07`,
+          e: a1Row.employee_id, pid: A.partner_id },
+      );
+      const sumA = await call('GET', `/api/partner/summary?month=${last.m}`, undefined, leadA);
+      assert.equal(sumA.done, 1);
+      assert.equal(sumA.amount, 600);
+      assert.equal(sumA.by_staff[0].employee_id, a1Row.employee_id);
+      assert.equal((await call('GET', `/api/partner/summary?month=${last.m}`, undefined, leadB)).done, 0);
+      const margin = (await get(`/api/invoices/revenue-bu/margin?from=${last.m}-01&to=${last.m}-28`, MANAGER)).body;
+      assert.ok(margin.totals.cost >= 600, JSON.stringify(margin.totals));
+      const thisMonth = (await day(0)).slice(0, 7);
+      await call('POST', `/api/partners/${A.partner_id}/payments`, { month: thisMonth }, MANAGER, 409);
+      const paid = await call('POST', `/api/partners/${A.partner_id}/payments`, { month: last.m }, MANAGER, 201);
+      assert.equal(Number(paid.amount), 600);
+      await call('POST', `/api/partners/${A.partner_id}/payments`, { month: last.m }, MANAGER, 409);
+      assert.ok(doneRow.visit_id);
+
+      // ---- ลงนัดแล้วส่งให้พาร์ทเนอร์เลย (แผงลงนัด) — ไม่มีคน · ไม่เติมผู้รับผิดชอบเคส · แจ้งหัวหน้าครั้งเดียว ----
+      await call('POST', `/api/cases/${c.case_id}/visits/bulk`,
+        { dates: [await day(5)], partner_id: A.partner_id, assigned_to: FIELD.employee_id }, MANAGER, 400);
+      const beforeN = (await get('/api/my/notifications', leadA)).body.items.filter((n) => n.kind === 'partner_job').length;
+      const bulk = await call('POST', `/api/cases/${c.case_id}/visits/bulk`,
+        { dates: [await day(5), await day(6), await day(7)], partner_id: A.partner_id, planned_start: '13:00', planned_end: '14:00' }, MANAGER, 201);
+      assert.equal(bulk.added, 3);
+      for (const id of bulk.inserted_ids) {
+        const r = await visitRow(id);
+        assert.equal(r.assigned_to, null);
+        assert.equal(r.partner_id, A.partner_id);
+        assert.equal(r.partner_status, 'pending');
+        assert.equal(Number(r.partner_rate), 600);
+      }
+      const jobs = (await get('/api/my/notifications', leadA)).body.items.filter((n) => n.kind === 'partner_job');
+      assert.equal(jobs.length, beforeN + 1, 'แจ้งหัวหน้าครั้งเดียวสำหรับทั้งชุด');
+      assert.equal(jobs[0].payload.total, 3);
+      assert.ok((await call('GET', '/api/partner/visits?tab=pending', undefined, leadA)).filter((v) => bulk.inserted_ids.includes(v.visit_id)).length === 3);
+      // ---- โลโก้: หลังบ้านอัปโหลด · หัวหน้าพาร์ทเนอร์โหลดรูปได้ · รายการไม่ส่งไบนารีออกไป ----
+      const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+      await call('PUT', `/api/partners/${A.partner_id}/logo`, { image: 'data:text/html;base64,PHNjcmlwdD4=' }, MANAGER, 400);
+      await call('PUT', `/api/partners/${A.partner_id}/logo`, { image: png }, leadA, 403);
+      const withLogo = await call('PUT', `/api/partners/${A.partner_id}/logo`, { image: png });
+      assert.equal(withLogo.has_logo, true);
+      assert.ok(Number(withLogo.logo_version) > 0);
+      assert.ok(!('logo_data' in withLogo));
+      assert.ok(!('logo_data' in (await call('GET', '/api/partners')).find((x) => x.partner_id === A.partner_id)));
+      const img = await fetch(`${base}/api/partner-logos/${A.partner_id}`, { headers: { cookie: `${COOKIE_NAME}=${signToken(leadA)}` } });
+      assert.equal(img.status, 200);
+      assert.equal(img.headers.get('content-type'), 'image/png');
+      assert.equal((await call('GET', '/api/partner/me', undefined, leadA)).has_logo, true);
+      await call('PUT', `/api/partners/${A.partner_id}/logo`, { image: null });
+      assert.equal((await fetch(`${base}/api/partner-logos/${A.partner_id}`, { headers: { cookie: `${COOKIE_NAME}=${signToken(leadA)}` } })).status, 404);
+
+      // บริษัทที่ไม่มีหัวหน้า ส่งไม่ได้
+      const lonely = await call('POST', '/api/partners', { name: 'ไม่มีหัวหน้า', rate_per_visit: 1 }, MANAGER, 201);
+      await call('POST', `/api/cases/${c.case_id}/visits/bulk`, { dates: [await day(8)], partner_id: lonely.partner_id }, MANAGER, 409);
+
+      // ---- ตรวจ 21 พ.ย. 2569 ----
+      // server กันการเลือกคนที่ชนเวลา (ไม่พึ่งปุ่มบนหน้าเว็บ)
+      const [jobA, jobB] = bulk.inserted_ids;
+      await call('POST', `/api/partner/visits/${jobA}/accept`, { employee_id: a1Row.employee_id }, leadA);
+      await sql.run(`UPDATE case_visits SET visit_date = (SELECT visit_date FROM case_visits WHERE visit_id = :a) WHERE visit_id = :b`, { a: jobA, b: jobB });
+      assert.match((await call('POST', `/api/partner/visits/${jobB}/accept`, { employee_id: a1Row.employee_id }, leadA, 409)).error, /ชนเวลา/);
+      // HR เปิด/แก้บัญชีคนของพาร์ทเนอร์ผ่านหน้าพนักงาน KIN ไม่ได้
+      assert.equal((await get(`/api/employees/${a1Row.employee_id}`, HR)).status, 404);
+      await call('PATCH', `/api/employees/${a1Row.employee_id}`, { position: 'manager' }, HR, 404);
+      // ตัวเลขเงิน: HR (ไม่เห็นค่าจ้าง) ไม่เห็นเรท/สรุป · การเงิน (ไม่มี office) ดูสรุปได้แต่จัดการงานไม่ได้
+      assert.equal((await call('GET', '/api/partners', undefined, HR)).find((x) => x.partner_id === A.partner_id).rate_per_visit, undefined);
+      assert.equal((await get(`/api/partners/summary?month=${last.m}`, HR)).status, 403);
+      await sql.run(`INSERT INTO employees (employee_id, first_name, last_name, position, email, status, password_hash, must_change_password)
+                     VALUES ('EMP-0393', 'Fin', 'Partner', 'finance', 'emp-0393@example.invalid', 'active', 'x', false)`);
+      const FIN = emp('EMP-0393', 'finance');
+      assert.equal((await get(`/api/partners/summary?month=${last.m}`, FIN)).status, 200);
+      assert.equal((await get('/api/partners', FIN)).status, 403);
+      // ปิดใช้งานบริษัท → หัวหน้าทำอะไรไม่ได้ทุกเส้น (ไม่ใช่แค่ /me)
+      await call('PATCH', `/api/partners/${A.partner_id}`, { status: 'inactive' });
+      assert.equal((await get('/api/partner/visits?tab=pending', leadA)).status, 403);
+      await call('POST', `/api/partner/visits/${jobB}/reject`, {}, leadA, 403);
+      await call('PATCH', `/api/partner/team/${a1Row.employee_id}`, { phone: '0811111111' }, leadA, 403);
     });
   });
 

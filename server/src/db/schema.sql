@@ -50,7 +50,9 @@ ALTER TABLE employees ADD CONSTRAINT employees_position_check
                       'manager', 'hr', 'admin', 'finance', 'super_admin',
                       -- หัวหน้าพยาบาล (ดร.ธงชัย 8 พ.ย. 2569) — สายสำนักงาน เห็นงานคลินิก ไม่เห็นเรื่องเงิน
                       'nurse_lead',
-                      'unassigned'));  -- "ว่าง" = ยังไม่ได้กำหนดตำแหน่ง (นำเข้ารายชื่อ 28 ต.ค. 2569)
+                      'unassigned',
+                      -- หัวหน้าพาร์ทเนอร์ (ผู้รับเหมาช่วงรายครั้ง · 21 พ.ย. 2569 · server/src/partners/)
+                      'partner_lead'));  -- "ว่าง" = ยังไม่ได้กำหนดตำแหน่ง (นำเข้ารายชื่อ 28 ต.ค. 2569)
 
 -- ใบรับรอง / ใบประกอบวิชาชีพ ผูกกับพนักงานผ่าน employee_id
 CREATE TABLE IF NOT EXISTS employee_certificates (
@@ -97,6 +99,9 @@ CREATE INDEX IF NOT EXISTS idx_portfolio_employee ON employee_portfolio (employe
 ALTER TABLE employees ADD COLUMN IF NOT EXISTS password_hash        TEXT;
 ALTER TABLE employees ADD COLUMN IF NOT EXISTS role                 TEXT NOT NULL DEFAULT 'staff' CHECK (role IN ('admin', 'staff'));
 ALTER TABLE employees ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT TRUE;
+-- ยังใช้รหัสเริ่มต้นอยู่ไหม (ตรวจครั้งเดียวตอนเข้าสู่ระบบ · lib/auth.js markDefaultPassword · 21 พ.ย. 2569)
+-- NULL = ยังไม่ตรวจ · TRUE = บังคับตั้งรหัสใหม่ · FALSE = ตั้งเองแล้ว ไม่ตรวจอีก
+ALTER TABLE employees ADD COLUMN IF NOT EXISTS uses_default_password BOOLEAN;
 ALTER TABLE employees ADD COLUMN IF NOT EXISTS temp_password_encrypted TEXT;
 -- เวลาที่รหัสผ่านถูกเปลี่ยนล่าสุด — token ที่ออกก่อนหน้านี้ถือว่าใช้ไม่ได้แล้ว (ดู requireAuth)
 -- ไม่มีค่า = ยังไม่เคยเปลี่ยนตั้งแต่มีคอลัมน์นี้ ซึ่งแปลว่าไม่มีอะไรต้องเพิกถอน
@@ -646,11 +651,68 @@ ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS assigned_to TEXT
 ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS planned_start TEXT;
 ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS planned_end   TEXT;
 
+-- ---------- พาร์ทเนอร์ (ผู้รับเหมาช่วงรายครั้ง · 21 พ.ย. 2569) — ชุดเดียวกับ server/src/partners/schema.js ----------
+-- ต้องมาก่อนคำสั่งเติมเจ้าของกะด้านล่าง: กะที่ส่งให้พาร์ทเนอร์ (ยังไม่มีคน) ต้องไม่ถูกเติมเป็นผู้รับผิดชอบเคส
+CREATE TABLE IF NOT EXISTS partners (
+  partner_id     INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  name           TEXT NOT NULL,
+  contact_name   TEXT,
+  phone          TEXT,
+  rate_per_visit NUMERIC(12, 2) NOT NULL DEFAULT 0 CHECK (rate_per_visit >= 0),
+  status         TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
+  note           TEXT,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_by     TEXT,
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+-- โลโก้บริษัท (21 พ.ย. 2569)
+ALTER TABLE partners ADD COLUMN IF NOT EXISTS logo_data BYTEA;
+ALTER TABLE partners ADD COLUMN IF NOT EXISTS logo_mime TEXT;
+ALTER TABLE partners ADD COLUMN IF NOT EXISTS logo_updated_at TIMESTAMPTZ;
+ALTER TABLE employees ADD COLUMN IF NOT EXISTS partner_id INTEGER REFERENCES partners (partner_id) ON DELETE RESTRICT;
+CREATE INDEX IF NOT EXISTS idx_employees_partner ON employees (partner_id) WHERE partner_id IS NOT NULL;
+ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS partner_id INTEGER REFERENCES partners (partner_id) ON DELETE RESTRICT;
+ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS partner_status TEXT CHECK (partner_status IN ('pending', 'accepted'));
+ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS partner_rate NUMERIC(12, 2);
+ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS partner_sent_at TIMESTAMPTZ;
+ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS partner_sent_by TEXT;
+ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS partner_rejected_at TIMESTAMPTZ;
+ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS partner_rejected_by INTEGER;
+ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS partner_reject_reason TEXT;
+CREATE INDEX IF NOT EXISTS idx_case_visits_partner ON case_visits (partner_id, visit_date) WHERE partner_id IS NOT NULL;
+CREATE TABLE IF NOT EXISTS partner_visit_events (
+  id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  visit_id    INTEGER,
+  case_id     TEXT,
+  partner_id  INTEGER NOT NULL,
+  kind        TEXT NOT NULL CHECK (kind IN ('sent', 'accepted', 'reassigned', 'rejected', 'pulled')),
+  employee_id TEXT,
+  reason      TEXT,
+  actor_id    TEXT,
+  actor_name  TEXT,
+  at          TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_partner_visit_events_partner ON partner_visit_events (partner_id, at);
+CREATE TABLE IF NOT EXISTS partner_payments (
+  id           BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  partner_id   INTEGER NOT NULL REFERENCES partners (partner_id) ON DELETE RESTRICT,
+  period_month TEXT NOT NULL CHECK (period_month ~ '^[0-9]{4}-[0-9]{2}$'),
+  visits       INTEGER NOT NULL CHECK (visits >= 0),
+  amount       NUMERIC(12, 2) NOT NULL CHECK (amount >= 0),
+  note         TEXT,
+  paid_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  paid_by      TEXT,
+  paid_by_name TEXT,
+  UNIQUE (partner_id, period_month)
+);
+
 -- วันนัดเดิม (ก่อนมีระบบกะ) ยังไม่มีเจ้าของกะ — เติมด้วยพนักงานที่รับเคสนั้นอยู่
 -- แตะเฉพาะแถวที่ assigned_to ว่าง และเคสมีคนรับ ไม่งั้นวันนัดเก่าจะไม่โผล่ในตารางงานของใครเลย
+-- ยกเว้นกะที่ส่งให้พาร์ทเนอร์ / พาร์ทเนอร์เพิ่งปฏิเสธ (ยังไม่มีคน = ตั้งใจ ไม่ใช่ข้อมูลเก่า)
 UPDATE case_visits v SET assigned_to = c.assigned_to
   FROM cases c
-  WHERE v.case_id = c.case_id AND v.assigned_to IS NULL AND c.assigned_to IS NOT NULL;
+  WHERE v.case_id = c.case_id AND v.assigned_to IS NULL AND c.assigned_to IS NOT NULL
+    AND v.partner_id IS NULL AND v.partner_rejected_at IS NULL;
 
 -- ---------- case_visits: การไปจริง (actual) ----------
 -- checked_in_by = คนที่กดเช็คอินจริง (snapshot) — แยกจาก assigned_to เผื่อสลับคนแล้วคนอื่นไปแทน

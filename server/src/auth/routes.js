@@ -17,6 +17,8 @@ import {
   sessionEmployeeId,
   signToken,
   verifyPassword,
+  DEFAULT_PASSWORD,
+  markDefaultPassword,
 } from '../lib/auth.js';
 import { sendOtpEmail } from '../lib/mailer.js';
 import { claimLineTicket, ensureLineColumn, verifyLineTicket, verifySigned } from '../lib/lineBridge.js';
@@ -77,10 +79,13 @@ const resetSchema = z.object({
   new_password: newPassword,
 });
 
+/* current_password ไม่ส่งได้เฉพาะหน้าบังคับเปลี่ยนรหัสเริ่มต้น — server ตรวจเองว่ารหัสตอนนี้ยังเป็นรหัสเริ่มต้นจริง
+   (พนักงานส่วนใหญ่เข้าทาง LINE ไม่เคยพิมพ์รหัส · รหัสเริ่มต้นรู้กันทั้งบริษัท การให้พิมพ์ซ้ำไม่ได้ยืนยันตัวตนเพิ่ม) */
 const changeSchema = z.object({
-  current_password: z.string().min(1, 'กรุณากรอกรหัสผ่านปัจจุบัน'),
+  current_password: z.string().min(1, 'กรุณากรอกรหัสผ่านปัจจุบัน').optional(),
   new_password: newPassword,
 });
+const DEFAULT_REUSED = 'ห้ามใช้รหัสผ่านเริ่มต้น (12345678) — ตั้งรหัสใหม่ของคุณเอง';
 
 // พนักงานที่ลาออกหรือถูกพักงานเข้าระบบไม่ได้ แม้รหัสผ่านจะถูก
 // นิยามอยู่ที่ lib/auth.js เพราะ requireAuth ใช้ตัวเดียวกันตรวจทุก request หลัง login ด้วย
@@ -132,6 +137,8 @@ authRouter.post(
     const blocked = BLOCKED_STATUSES[employee.status];
     if (blocked) throw new ApiError(403, `${blocked} — ติดต่อผู้ดูแลระบบ`);
 
+    // ยังใช้รหัสเริ่มต้น = บังคับตั้งรหัสใหม่ก่อนใช้งาน (lib/auth.js markDefaultPassword · 21 พ.ย. 2569)
+    await markDefaultPassword(employee, password);
     await sql.run(
       `UPDATE employees SET last_login_at = to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')
        WHERE employee_id = :id`,
@@ -172,6 +179,7 @@ authRouter.get(
     if (sessionEmployeeId(req) !== employee.employee_id && !(await claimLineTicket(req.query.t, employee.employee_id))) {
       return res.redirect(302, '/login?line_error=used');
     }
+    await markDefaultPassword(employee); // เข้าทาง LINE ก็ต้องเปลี่ยนรหัสเริ่มต้น (ไม่งั้นใครรู้รหัสพนักงานก็เข้าทางรหัสผ่านได้)
 
     await sql.run(
       `UPDATE employees SET last_login_at = to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')
@@ -211,6 +219,7 @@ authRouter.get(
     const employee = await sql.one('SELECT * FROM employees WHERE lower(email) = :email LIMIT 1', { email });
     if (!employee || !ADMIN_SSO_POSITIONS.includes(employee.position)) return res.redirect(302, '/login?sso_error=nomatch');
     if (BLOCKED_STATUSES[employee.status]) return res.redirect(302, '/login?sso_error=blocked');
+    await markDefaultPassword(employee);
     await sql.run(
       `UPDATE employees SET last_login_at = to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')
        WHERE employee_id = :id`,
@@ -234,6 +243,7 @@ authRouter.post(
     const lineUserId = verifyLineTicket(t);
     if (!lineUserId) throw new ApiError(400, 'ลิงก์จาก LINE หมดอายุแล้ว กลับไปกดปุ่มในเมนู LINE @kinjobs ใหม่อีกครั้ง');
     const employee = await linkLineByCode(lineUserId, code, { ticket: t });
+    await markDefaultPassword(employee);
     await sql.run(
       `UPDATE employees SET last_login_at = to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI:SS')
        WHERE employee_id = :id`,
@@ -427,6 +437,7 @@ authRouter.post(
     if (new_password === employee.employee_id) {
       throw new ApiError(400, 'ห้ามใช้รหัสพนักงานเป็นรหัสผ่าน เพราะเป็นค่าที่คนอื่นเดาได้');
     }
+    if (new_password === DEFAULT_PASSWORD) throw new ApiError(400, DEFAULT_REUSED);
 
     // ปิด OTP ใบนี้ก่อนเขียนรหัสใหม่ — สองคำขอที่ถือรหัสถูกพร้อมกันจะผ่านได้ตัวเดียว
     const consumed = await sql.run(
@@ -439,7 +450,8 @@ authRouter.post(
        มักเกิดตอน "เข้าไม่ได้เพราะมีคนอื่นเข้าไปแล้ว" เซสชันของคนนั้นต้องตายพร้อมกัน */
     await sql.run(
       `UPDATE employees
-       SET password_hash = :hash, must_change_password = FALSE, temp_password_encrypted = NULL, password_changed_at = :changed_at
+       SET password_hash = :hash, must_change_password = FALSE, uses_default_password = FALSE,
+           temp_password_encrypted = NULL, password_changed_at = :changed_at
        WHERE employee_id = :id`,
       // นาฬิกาฝั่งแอป ไม่ใช่ now() ของ DB — ต้องเป็นนาฬิกาเดียวกับ iat_ms ใน token (ดู requireAuth)
       { hash: await hashPassword(new_password), id: employee.employee_id, changed_at: new Date() },
@@ -461,11 +473,14 @@ authRouter.post(
     const id = req.user.employee_id;
 
     const employee = await sql.one('SELECT * FROM employees WHERE employee_id = :id', { id });
-    if (!employee || !(await verifyPassword(current_password, employee.password_hash))) {
-      throw new ApiError(400, 'รหัสผ่านปัจจุบันไม่ถูกต้อง');
+    // ไม่ส่งรหัสปัจจุบัน = หน้าบังคับเปลี่ยนรหัสเริ่มต้น — ใช้รหัสเริ่มต้นแทน (ถ้ารหัสตอนนี้ไม่ใช่รหัสเริ่มต้นก็ไม่ผ่าน)
+    const current = current_password ?? DEFAULT_PASSWORD;
+    if (!employee || !(await verifyPassword(current, employee.password_hash))) {
+      throw new ApiError(400, current_password ? 'รหัสผ่านปัจจุบันไม่ถูกต้อง' : 'กรุณากรอกรหัสผ่านปัจจุบัน');
     }
 
-    if (new_password === current_password) {
+    if (new_password === DEFAULT_PASSWORD) throw new ApiError(400, DEFAULT_REUSED);
+    if (new_password === current) {
       throw new ApiError(400, 'รหัสผ่านใหม่ต้องไม่ซ้ำกับรหัสเดิม');
     }
     if (new_password === id) {
@@ -474,7 +489,8 @@ authRouter.post(
 
     await sql.run(
       `UPDATE employees
-       SET password_hash = :hash, must_change_password = FALSE, temp_password_encrypted = NULL, password_changed_at = :changed_at
+       SET password_hash = :hash, must_change_password = FALSE, uses_default_password = FALSE,
+           temp_password_encrypted = NULL, password_changed_at = :changed_at
        WHERE employee_id = :id`,
       /* นาฬิกาฝั่งแอป ไม่ใช่ now() ของ DB — token ใบใหม่ข้างล่างออกหลังบรรทัดนี้ด้วยนาฬิกาเดียวกัน
          iat_ms จึง >= password_changed_at เสมอแม้ DB กับแอปเวลาเหลื่อมกัน (ดู requireAuth) */
@@ -498,5 +514,8 @@ const toSession = (e) => ({
   role: roleForPosition(e.position), // สิทธิ์คิดจากตำแหน่ง (กลุ่ม back = admin, ที่เหลือ = field)
   // หมวดที่เข้าได้ (office/billing/money) — หน้าเว็บใช้ซ่อนเมนู ตัวจริงที่กันคือด่านของแต่ละเส้น
   permissions: permissionsFor(e.position),
-  must_change_password: false, // ยกเลิกการบังคับเปลี่ยนรหัสแล้ว (ดู DEFAULT_PASSWORD ใน lib/auth.js)
+  // ยังใช้รหัสเริ่มต้น → หน้าเว็บขึ้นหน้าบังคับตั้งรหัสใหม่ (App.jsx ForcePasswordChange · 21 พ.ย. 2569)
+  must_change_password: e.uses_default_password === true,
+  // พาร์ทเนอร์ (partners/) — หน้าเว็บซ่อนค่าตอบแทน/แชทญาติของพนักงานพาร์ทเนอร์ · หัวหน้าพาร์ทเนอร์ไปหน้า /partner
+  partner_id: e.partner_id ?? null,
 });

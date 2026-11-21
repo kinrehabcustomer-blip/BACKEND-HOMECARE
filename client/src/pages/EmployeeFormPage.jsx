@@ -253,6 +253,7 @@ export default function EmployeeFormPage() {
               {/* Super Admin ตั้งได้เฉพาะ Super Admin (server กันอีกชั้น) — คนอื่นไม่เห็นตัวเลือกนี้ เว้นแต่แฟ้มนี้เป็น Super Admin อยู่แล้ว */}
               {Object.entries(POSITION_LABELS)
                 .filter(([v]) => v !== 'super_admin' || user?.position === 'super_admin' || form.position === 'super_admin')
+                .filter(([v]) => v !== 'partner_lead') // หัวหน้าพาร์ทเนอร์สร้างที่ตั้งค่าระบบ › พาร์ทเนอร์
                 .map(([v, l]) => <option key={v} value={v}>{l}</option>)}
             </SearchSelect>
             {fieldError('position')}

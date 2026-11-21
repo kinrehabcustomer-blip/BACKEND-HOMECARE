@@ -4,6 +4,7 @@ import { permissionsOf, useAuth } from '../auth.jsx';
 import SettingsShell, { SettingsPaneHead } from '../components/SettingsShell.jsx';
 import CategoryManager from '../components/CategoryManager.jsx';
 import RevenueTargetsPane from '../components/RevenueTargetsPane.jsx';
+import PartnersPane from '../components/PartnersPane.jsx';
 
 const PermissionsPage = lazy(() => import('./PermissionsPage.jsx'));
 const AuditLogPage = lazy(() => import('./AuditLogPage.jsx'));
@@ -25,8 +26,9 @@ const PANES = {
   audit: { title: 'บันทึกการใช้งาน', desc: 'ใครทำอะไรในระบบ เมื่อไร จากที่ไหน — เก็บย้อนหลัง 1 ปี' },
   finance: { title: 'บันทึกการเงิน' },
   targets: { title: 'เป้ารายได้' },
+  partners: { title: 'พาร์ทเนอร์', desc: 'บริษัทผู้รับเหมาช่วงรายครั้ง — ส่งกะให้แล้วหัวหน้าบริษัทเลือกคนไปเอง' },
 };
-const PANE_PAGES = { permissions: PermissionsPage, audit: AuditLogPage, finance: FinanceLogPage, targets: RevenueTargetsPane };
+const PANE_PAGES = { permissions: PermissionsPage, audit: AuditLogPage, finance: FinanceLogPage, targets: RevenueTargetsPane, partners: PartnersPane };
 
 export default function SystemSettingsPage() {
   const { user } = useAuth();
@@ -34,6 +36,9 @@ export default function SystemSettingsPage() {
   const isAdmin = SYSTEM_ADMINS.includes(user?.position);
   const canAudit = permissionsOf(user).includes('audit_logs');
   const canFinance = permissionsOf(user).includes('finance_logs');
+  const canOffice = permissionsOf(user).includes('office'); // พาร์ทเนอร์ — งาน = office
+  // การเงิน (ค่าตอบแทน + เห็นค่าจ้าง) เปิดแท็บพาร์ทเนอร์ได้เพื่อดูสรุปและบันทึกจ่าย (ตรวจ 21 พ.ย. 2569)
+  const canPartnerPay = permissionsOf(user).includes('payroll') && permissionsOf(user).includes('see_pay');
 
   const groups = [
     isAdmin && { label: 'เหตุผลยกเลิก', items: [
@@ -46,6 +51,7 @@ export default function SystemSettingsPage() {
       isAdmin && { key: 'permissions', label: 'จัดการสิทธิ์' },
       canAudit && { key: 'audit', label: 'บันทึกการใช้งาน' },
     ].filter(Boolean) },
+    (canOffice || canPartnerPay) && { label: 'งานบริการ', items: [{ key: 'partners', label: 'พาร์ทเนอร์' }] },
     (canFinance || isAdmin) && { label: 'การเงิน', items: [
       canFinance && { key: 'finance', label: 'บันทึกการเงิน' },
       isAdmin && { key: 'targets', label: 'เป้ารายได้' },

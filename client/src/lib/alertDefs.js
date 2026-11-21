@@ -34,6 +34,14 @@ export const ALERT_GROUPS = [
         to: '/calendar',
         urgent: true,
       },
+      /* พาร์ทเนอร์ (21 พ.ย. 2569) — ส่งกะไปแล้วยังไม่มีคน (ใกล้นัด 24 ชม.) หรือพาร์ทเนอร์ปฏิเสธกลับมา */
+      {
+        key: 'partner_attention',
+        label: 'กะของพาร์ทเนอร์ที่ต้องดู',
+        hint: 'ยังไม่เลือกคน (ใกล้นัด 24 ชม.) · พาร์ทเนอร์ปฏิเสธ',
+        to: '/system-settings?tab=partners',
+        urgent: true,
+      },
     ],
   },
   {

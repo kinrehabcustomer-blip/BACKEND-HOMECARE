@@ -15,6 +15,7 @@ export const POSITION_LABELS = {
   finance: 'การเงิน',     // เข้าได้เฉพาะใบแจ้งหนี้ · ค่าตอบแทนพนักงาน · รายได้บริษัท
   nurse_lead: 'หัวหน้าพยาบาล', // สายสำนักงาน — ดูงานคลินิกทุกสาขา ไม่เห็นเรื่องเงิน (ดร. 8 พ.ย. 2569)
   super_admin: 'Super Admin', // ผู้ดูแลระบบสูงสุด — สิทธิ์ครบ และตั้ง/แก้ Super Admin ได้คนเดียว
+  partner_lead: 'หัวหน้าพาร์ทเนอร์', // ผู้รับเหมาช่วงรายครั้ง (21 พ.ย. 2569) — สร้างจากตั้งค่าระบบ › พาร์ทเนอร์ ไม่ใช่ฟอร์ม HR
 };
 
 /** ผู้เขียนรายงาน "ชื่อ (ตำแหน่ง)" — ไม่ซ้ำคำเมื่อชื่อบัญชีคือชื่อตำแหน่งเอง (เช่น บัญชี "Super Admin") */
@@ -34,7 +35,9 @@ export const THERAPY_POSITIONS = ['therapist', 'occupational_therapist', 'speech
 /** กลุ่มพนักงาน — back = สายสำนักงาน · front = ที่เหลือทั้งหมด (ออกไปดูแลผู้รับบริการจริง)
     ต้องตรงกับ BACK_POSITIONS / FRONT_POSITIONS ใน server/src/employees/schema.js */
 export const BACK_POSITIONS = ['super_admin', 'manager', 'hr', 'admin', 'finance', 'nurse_lead'];
-export const FRONT_POSITIONS = Object.keys(POSITION_LABELS).filter((p) => !BACK_POSITIONS.includes(p));
+/** กลุ่มที่สาม — หัวหน้าพาร์ทเนอร์ (หน้าจอ /partner ของตัวเอง) ไม่ใช่ทั้ง back และ front */
+export const PARTNER_POSITIONS = ['partner_lead'];
+export const FRONT_POSITIONS = Object.keys(POSITION_LABELS).filter((p) => !BACK_POSITIONS.includes(p) && !PARTNER_POSITIONS.includes(p));
 
 /**
  * ระดับพนักงานในตารางราคา -> ตำแหน่งของพนักงานที่ตรงกับระดับนั้น

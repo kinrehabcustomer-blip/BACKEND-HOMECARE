@@ -140,6 +140,19 @@ export const ACTION_LABELS = {
   'my.cases.reports': 'ส่งรายงานการดูแล',
   'my.cases.reports.update': 'แก้รายงานการดูแล (พนักงาน)',
   'my.cases.family-messages': 'พนักงานส่งข้อความถึงญาติ',
+  // พาร์ทเนอร์ (partners/ · 21 พ.ย. 2569) — หลังบ้าน KIN
+  'partners.create': 'เพิ่มบริษัทพาร์ทเนอร์',
+  'partners.update': 'แก้ข้อมูลพาร์ทเนอร์',
+  'partners.leads': 'สร้างบัญชีหัวหน้าพาร์ทเนอร์',
+  'partners.people.update': 'แก้บัญชีคนของพาร์ทเนอร์',
+  'partners.visits.send': 'ส่งกะให้พาร์ทเนอร์',
+  'partners.visits.pull': 'ดึงกะคืนจากพาร์ทเนอร์',
+  'partners.payments': 'บันทึกจ่ายพาร์ทเนอร์',
+  // พาร์ทเนอร์ — หัวหน้าพาร์ทเนอร์
+  'partner.visits.accept': 'พาร์ทเนอร์รับงาน/เลือกคน',
+  'partner.visits.reject': 'พาร์ทเนอร์ปฏิเสธงาน',
+  'partner.team': 'พาร์ทเนอร์เพิ่มคนในทีม',
+  'partner.team.update': 'พาร์ทเนอร์แก้คนในทีม',
   // แจ้งเตือนบนมือถือ (notify/webPush.js · 20 พ.ย. 2569)
   'my.push': 'เปิดแจ้งเตือนบนมือถือ',
   'my.push.delete': 'ปิดแจ้งเตือนบนมือถือ',

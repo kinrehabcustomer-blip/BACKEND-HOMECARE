@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { api } from '../api.js';
 import { useToast } from '../toast.jsx';
 import {
@@ -12,6 +13,7 @@ import { useConfirm } from './ConfirmDialog.jsx';
 import ReasonPicker, { useHasReasons } from './ReasonPicker.jsx';
 import MoveVisitDialog from './MoveVisitDialog.jsx';
 import ChangeVisitPersonDialog from './ChangeVisitPersonDialog.jsx';
+import PartnerLogo from './PartnerLogo.jsx';
 import PackSummary from './PackSummary.jsx';
 
 const WEEKDAYS = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
@@ -122,6 +124,20 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
   const [allStaff, setAllStaff] = useState([]);
   // เปลี่ยนคนไปนัด (กดชื่อพนักงานในแถวนัด) · { visit, error }
   const [swapping, setSwapping] = useState(null);
+  const [partnering, setPartnering] = useState(null); // กะที่กำลังเลือกบริษัทพาร์ทเนอร์ (21 พ.ย. 2569)
+  /* ลงนัดแล้วส่งให้พาร์ทเนอร์เลย (ผู้ใช้ขอ 21 พ.ย. 2569) — ชิปบริษัทต่อจากชิปพนักงานในแผงลงนัด
+     เลือกบริษัท = ไม่ลงให้พนักงานคนไหน · บริษัทที่เปิดใช้และมีบัญชีหัวหน้าแล้วเท่านั้น (สิทธิ์ไม่พอ = ไม่มีชิป) */
+  const [toPartner, setToPartner] = useState(null);
+  const [partnerList, setPartnerList] = useState([]);
+  useEffect(() => {
+    if (readOnly) return undefined;
+    let off = false;
+    api.partners()
+      .then((rows) => !off && setPartnerList(rows.filter((p) => p.status === 'active' && p.leads > 0)))
+      .catch(() => {});
+    return () => { off = true; };
+  }, [readOnly]);
+  const pickPerson = (id) => { setWho(id); setToPartner(null); };
 
   // ร่างที่ยังไม่บันทึก — เลือก/ยกเลิกได้อิสระ ไม่มีอะไรถูกเขียนลงฐานข้อมูลจนกว่าจะกดบันทึก
   const [picked, setPicked] = useState(() => new Set());
@@ -275,6 +291,34 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
   const followUpsOf = (v) => visits.filter((o) => o.visit_id !== v.visit_id && canSwap(o)
     && o.assigned_to === v.assigned_to && o.visit_date >= v.visit_date);
 
+  /* พาร์ทเนอร์ (ผู้รับเหมาช่วงรายครั้ง · 21 พ.ย. 2569) — ส่งกะให้บริษัท / ดึงคืน (ให้ผู้รับผิดชอบเคสถ้ามี) */
+  async function sendToPartner(v, partner) {
+    setBusy(true);
+    try {
+      await api.sendVisitToPartner(v.visit_id, partner.partner_id);
+      setVisits(await api.listVisits(caseId));
+      setPartnering(null);
+      toast(`ส่งให้ ${partner.name} แล้ว — หัวหน้าบริษัทได้แจ้งเตือน รอเลือกคน`);
+    } catch (e) {
+      setPartnering((cur) => (cur ? { ...cur, error: e.message } : cur));
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function pullFromPartner(v) {
+    setBusy(true);
+    try {
+      const lead = caseItem?.assigned_to ?? null;
+      await api.pullVisitFromPartner(v.visit_id, lead);
+      setVisits(await api.listVisits(caseId));
+      toast(lead ? `ดึงกะคืนให้ ${caseItem?.assigned_name ?? 'ผู้รับผิดชอบเคส'} แล้ว` : 'ดึงกะคืนแล้ว — ยังไม่มีคนไป เลือกคนได้ที่ชื่อในนัด');
+    } catch (e) {
+      toast(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function confirmSwap(to, targets) {
     const name = [...staff, ...allStaff].find((s) => s.employee_id === to);
     const label = name ? `${name.first_name} ${name.last_name}`.trim() : to;
@@ -301,7 +345,7 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
    */
   const previewRef = useRef(0);
   useEffect(() => {
-    if (pickedList.length === 0) {
+    if (pickedList.length === 0 || toPartner) {
       setPreview({ conflicts: [], duplicates: [] });
       return undefined;
     }
@@ -322,7 +366,7 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
     }, 300);
 
     return () => clearTimeout(timer);
-  }, [caseId, pickedList, who, plannedStart, plannedEnd]);
+  }, [caseId, pickedList, who, plannedStart, plannedEnd, toPartner]);
 
   /**
    * ทุกคำสั่งคืน "รายการกะล่าสุด" มาให้เสมอ จึงไม่ต้องดึงซ้ำเอง
@@ -550,7 +594,7 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
       () =>
         api.addVisits(caseId, {
           dates: pickedList,
-          assigned_to: who || null,
+          ...(toPartner ? { partner_id: toPartner.partner_id } : { assigned_to: who || null }),
           planned_start: plannedStart || null,
           planned_end: plannedEnd || null,
         }),
@@ -795,10 +839,10 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
                   key={s.employee_id}
                   type="button"
                   role="radio"
-                  aria-checked={who === s.employee_id}
-                  className={`btn tiny ${who === s.employee_id ? 'primary' : ''}`}
+                  aria-checked={!toPartner && who === s.employee_id}
+                  className={`btn tiny ${!toPartner && who === s.employee_id ? 'primary' : ''}`}
                   disabled={busy}
-                  onClick={() => setWho(s.employee_id)}
+                  onClick={() => pickPerson(s.employee_id)}
                 >
                   <i className={`vp-dot ${dotClass(s.employee_id)}`} aria-hidden="true" />
                   {s.first_name} {s.last_name}
@@ -809,7 +853,7 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
 
           {/* คนเดียว / เกิน 6 คน: ช่องค้นหาชื่อแบบเดิม — คนเดียวของนัดกายภาพไม่ต้องเลือก (ผู้รับผิดชอบหลักเสมอ) */}
           {!isAppt && !(multi && staff.length <= MAX_PERSON_CHIPS) && (
-            <SearchSelect value={who} disabled={busy} onChange={(e) => setWho(e.target.value)}>
+            <SearchSelect value={toPartner ? '' : who} disabled={busy} onChange={(e) => pickPerson(e.target.value)}>
               {!multi && <option value="">— ไม่ระบุคน —</option>}
               {staff.map((s) => (
                 <option key={s.employee_id} value={s.employee_id}>
@@ -817,6 +861,36 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
                 </option>
               ))}
             </SearchSelect>
+          )}
+
+          {partnerList.length > 0 && (
+            <div className="time-chips who-chips" role="radiogroup" aria-label="หรือส่งให้พาร์ทเนอร์">
+              <span className="muted time-chips-label">หรือส่งให้พาร์ทเนอร์</span>
+              {partnerList.map((p) => {
+                const on = toPartner?.partner_id === p.partner_id;
+                return (
+                  <button
+                    key={p.partner_id}
+                    type="button"
+                    role="radio"
+                    aria-checked={on}
+                    className={`btn tiny ${on ? 'primary' : ''}`}
+                    disabled={busy}
+                    title={`ลงนัดแล้วส่งให้ ${p.name} — หัวหน้าบริษัทเลือกคนไปเอง`}
+                    onClick={() => setToPartner(on ? null : p)}
+                  >
+                    <PartnerLogo partner={p} size={18} />
+                    {p.name}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          {toPartner && (
+            <p className="muted visit-hint">
+              {unit}ที่ลงจะยังไม่มีคน — {toPartner.name} ได้แจ้งเตือนครั้งเดียว แล้วหัวหน้าบริษัทเลือกคนไปเอง
+              (ยังไม่มีคน 24 ชม. ก่อนนัด/ถูกปฏิเสธ ขึ้นในกระดิ่งหลังบ้าน)
+            </p>
           )}
 
           {!isAppt && staff.length === 0 && (
@@ -908,7 +982,7 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
 
           <div className="pick-actions">
             <button type="button" className="btn primary" disabled={busy || overPick} onClick={save}>
-              บันทึก {picked.size} {unit}{multi && who ? ` ให้ ${nameOf(who)}` : ''}
+              บันทึก {picked.size} {unit}{toPartner ? ` · ส่งให้ ${toPartner.name}` : multi && who ? ` ให้ ${nameOf(who)}` : ''}
             </button>
             {pickedWithVisits.length > 0 && (
               <button
@@ -985,7 +1059,7 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
                         onClick={() => setSwapping({ visit: v, error: null })}
                       >
                         {multi && <i className={`vp-dot ${dotClass(v.assigned_to)}`} aria-hidden="true" />}
-                        {v.assigned_name ?? 'ไม่ระบุคน'}
+                        {v.assigned_name ?? (v.partner_id ? 'รอพาร์ทเนอร์เลือกคน' : 'ไม่ระบุคน')}
                         <span className="visit-person-act">เปลี่ยน</span>
                       </button>
                     ) : (
@@ -993,6 +1067,15 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
                         {multi && <i className={`vp-dot ${dotClass(v.assigned_to)}`} aria-hidden="true" />}
                         {v.assigned_name ?? 'ไม่ระบุคน'}
                       </span>
+                    )}
+                    {/* ส่งให้พาร์ทเนอร์ / พาร์ทเนอร์ปฏิเสธกลับมา (21 พ.ย. 2569) */}
+                    {v.partner_id && (
+                      <span className={`pt-tag ${v.partner_status === 'accepted' ? 'is-ok' : 'is-warn'}`}>
+                        {v.partner_name} · {v.partner_status === 'accepted' ? 'พาร์ทเนอร์' : 'รอเลือกคน'}
+                      </span>
+                    )}
+                    {!v.partner_id && v.partner_rejected_at && !v.assigned_to && v.state === 'scheduled' && (
+                      <span className="nw vc-warn"><LineIcon name="alert" className="text-ico" />{v.partner_rejected_name ?? 'พาร์ทเนอร์'} ปฏิเสธ{v.partner_reject_reason ? ` — ${v.partner_reject_reason}` : ''}</span>
                     )}
                     <span className="nw">{unit}ที่ {idx + 1 + (isAppt ? carried : 0)}</span>
                     {/* กายภาพ: หนึ่งนัดหนึ่ง VN (ระบบออกตอนลงนัด) · Homecare ไม่มี VN รายกะ ใช้ VN ของเคส */}
@@ -1020,6 +1103,23 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
                       <LineIcon name="calendar" className="vc-ico" />
                       <span>เลื่อนนัด</span>
                     </button>
+                  )}
+                  {canSwap(v) && (
+                    v.partner_id ? (
+                      <button type="button" className="vc-act" disabled={busy}
+                        title="ดึงกะคืนจากพาร์ทเนอร์ — ให้ผู้รับผิดชอบเคส (คนของพาร์ทเนอร์ที่ถูกเลือกไว้ได้แจ้งถอนงาน)"
+                        onClick={() => pullFromPartner(v)}>
+                        <LineIcon name="refresh" className="vc-ico" />
+                        <span>ดึงคืน</span>
+                      </button>
+                    ) : (
+                      <button type="button" className="vc-act" disabled={busy}
+                        title="ส่งกะนี้ให้บริษัทพาร์ทเนอร์ — หัวหน้าบริษัทเลือกคนไปเอง"
+                        onClick={() => setPartnering({ visit: v, error: null })}>
+                        <LineIcon name="download" className="vc-ico" />
+                        <span>ส่งพาร์ทเนอร์</span>
+                      </button>
+                    )
                   )}
                   {!readOnly && v.state === 'scheduled' && v.visit_date >= today && (
                     <button
@@ -1119,6 +1219,16 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
         />
       )}
 
+      {partnering && (
+        <SendPartnerDialog
+          visit={partnering.visit}
+          busy={busy}
+          error={partnering.error}
+          onConfirm={(p) => sendToPartner(partnering.visit, p)}
+          onCancel={() => !busy && setPartnering(null)}
+        />
+      )}
+
       {moving && (
         <MoveVisitDialog
           move={{ visit: moving.visit }}
@@ -1131,5 +1241,65 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
         />
       )}
     </>
+  );
+}
+
+/** เลือกบริษัทพาร์ทเนอร์ที่จะส่งกะให้ (21 พ.ย. 2569) — เฉพาะบริษัทที่เปิดใช้และมีบัญชีหัวหน้าแล้ว */
+function SendPartnerDialog({ visit, busy, error, onConfirm, onCancel }) {
+  const [list, setList] = useState(null);
+  const [pick, setPick] = useState(null);
+  const [loadError, setLoadError] = useState(null);
+  useEffect(() => {
+    api.partners().then((rows) => setList(rows.filter((p) => p.status === 'active'))).catch((e) => setLoadError(e.message));
+  }, []);
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') { e.stopPropagation(); onCancel(); } };
+    document.addEventListener('keydown', onKey, true);
+    return () => document.removeEventListener('keydown', onKey, true);
+  }, [onCancel]);
+  const when = [visit.planned_start, visit.planned_end].filter(Boolean).join('-');
+  return createPortal(
+    <div className="modal-backdrop modal-stacked" onClick={onCancel}>
+      <div className="modal modal-narrow" role="dialog" aria-modal="true" aria-labelledby="send-partner-title" onClick={(e) => e.stopPropagation()}>
+        <header className="modal-head">
+          <div>
+            <h2 id="send-partner-title">ส่งกะให้พาร์ทเนอร์</h2>
+            <p className="muted">{formatDate(visit.visit_date)}{when ? ` · ${when}` : ''} · ตอนนี้: {visit.assigned_name ?? 'ยังไม่มีคน'}</p>
+          </div>
+          <button type="button" className="modal-close" onClick={onCancel} aria-label="ปิด" disabled={busy}>×</button>
+        </header>
+        <div className="modal-body">
+          {loadError && <p className="error">{loadError}</p>}
+          {!list ? (!loadError && <p className="muted">กำลังโหลด…</p>) : list.length === 0 ? (
+            <p className="muted">ยังไม่มีพาร์ทเนอร์ที่เปิดใช้ — เพิ่มที่ตั้งค่าระบบ › พาร์ทเนอร์</p>
+          ) : (
+            <div className="pt-people" role="radiogroup" aria-label="บริษัทพาร์ทเนอร์">
+              {list.map((p) => (
+                <label key={p.partner_id} className={`pt-person${pick?.partner_id === p.partner_id ? ' is-on' : ''}${p.leads ? '' : ' is-busy'}`}>
+                  <input type="radio" name="send-partner" checked={pick?.partner_id === p.partner_id} disabled={!p.leads || busy}
+                    onChange={() => setPick(p)} />
+                  <PartnerLogo partner={p} size={36} />
+                  <span className="pt-person-main">
+                    <b>{p.name}</b>
+                    <span className="muted">{p.rate_per_visit != null && `${formatBaht(p.rate_per_visit)}/ครั้ง · `}ทีม {p.staff} คน · งานค้าง {p.open_visits}{p.leads ? '' : ' · ยังไม่มีบัญชีหัวหน้า'}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
+          )}
+          {error && <p className="error" role="alert">{error}</p>}
+          <p className="move-note"><LineIcon name="bell" className="text-ico" />
+            {visit.assigned_to ? `${visit.assigned_name ?? 'คนเดิม'} ได้แจ้งว่ากะถูกย้าย · ` : ''}หัวหน้าบริษัทได้แจ้งเตือนแล้วเลือกคนเอง · ญาติได้แจ้งตอนมีคนรับ
+          </p>
+        </div>
+        <footer className="modal-foot">
+          <button type="button" className="btn" onClick={onCancel} disabled={busy}>ยกเลิก</button>
+          <button type="button" className="btn primary" disabled={!pick || busy} onClick={() => onConfirm(pick)}>
+            {busy ? 'กำลังส่ง…' : pick ? `ส่งให้ ${pick.name}` : 'ส่ง'}
+          </button>
+        </footer>
+      </div>
+    </div>,
+    document.body,
   );
 }

@@ -1,3 +1,4 @@
+import { costRows as partnerCostRows } from '../partners/repo.js';
 import { sql, transaction } from '../db/index.js';
 import { ApiError } from '../lib/errors.js';
 import { todayTh } from '../lib/dates.js';
@@ -489,7 +490,10 @@ export async function margin({ from, to }) {
   checkRange(from, to);
   await ensureReportTables();
   const cases = await loadCases();
-  const [cash, delivered, payouts] = await Promise.all([cashRows(from, to), deliveredUnits(cases, to), payoutRows(from, to)]);
+  /* ต้นทุน = ค่าจ้างที่ปล่อยจ่าย + ค่าพาร์ทเนอร์ (กะที่ไปจริง × เรท ณ ตอนส่ง · นับตามวันกะ — partners/repo.js costRows) */
+  const [cash, delivered, payouts, partnerCost] = await Promise.all([
+    cashRows(from, to), deliveredUnits(cases, to), payoutRows(from, to), partnerCostRows(from, to),
+  ]);
   const recognized = await recognizedRows(from, to, cases, delivered);
 
   const dims = { bu: new Map(), package: new Map(), staff: new Map() };
@@ -508,7 +512,7 @@ export async function margin({ from, to }) {
   };
   for (const r of cash) feed(r, 'cash', r.case_id);
   for (const r of recognized) feed(r, 'recognized', r.case_id);
-  for (const p of payouts) {
+  for (const p of [...payouts, ...partnerCost]) {
     const c = cases.get(p.case_id);
     if (!c) continue;
     feed({ bu: c.bu, kind: 'service', case_id: p.case_id, amount: p.amount }, 'cost', p.case_id);

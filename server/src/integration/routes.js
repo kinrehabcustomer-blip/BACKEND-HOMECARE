@@ -26,6 +26,7 @@ import {
 } from '../notify/visitReminders.js';
 import { ensureStaffInbox, materializeReminders } from '../notify/staffInbox.js';
 import { flushPending, pushReady } from '../notify/webPush.js';
+import { ensurePartnerSchema } from '../partners/schema.js';
 import { claimCaseEventOutbox, ackCaseEventOutbox, claimDueFamily3hReminders } from '../notify/caseEvents.js';
 import { ensureCustomerLineColumns as ensureCustomerLineColumnsSafe, findByPhones, linkFromChat } from '../lib/customerLine.js';
 
@@ -576,6 +577,7 @@ integrationRouter.post(
     if (!p || !Number.isInteger(p.since) || p.since < 0) throw new ApiError(401, 'ลายเซ็นไม่ถูกต้องหรือหมดอายุ');
     await family.ensureFamilyTable();
     await ensureLineColumn();
+    await ensurePartnerSchema(); // employees.partner_id (กรองคนของพาร์ทเนอร์ออกจากผู้รับ)
     if (p.since === 0) {
       const last = await sql.one('SELECT COALESCE(MAX(message_id), 0)::int AS id FROM case_family_messages');
       return res.json({ cursor: last.id, messages: [] });
@@ -589,6 +591,7 @@ integrationRouter.post(
                 WHERE e.line_user_id IS NOT NULL AND e.employee_id IS DISTINCT FROM m.employee_id
                   -- คนที่ลาออก/ถูกพักงานต้องไม่ได้รับแจ้งเตือนข้อความของครอบครัวผู้รับบริการต่อ (ดู BLOCKED_STATUSES)
                   AND COALESCE(e.status, '') NOT IN (${BLOCKED_SQL})
+                  AND e.partner_id IS NULL  -- พนักงานพาร์ทเนอร์ไม่อยู่ในแชทญาติ (partners/)
                   AND (e.employee_id = c.assigned_to
                        OR EXISTS (SELECT 1 FROM case_team t WHERE t.case_id = c.case_id AND t.employee_id = e.employee_id)
                        OR EXISTS (SELECT 1 FROM case_visits v WHERE v.case_id = c.case_id AND v.assigned_to = e.employee_id
@@ -1053,8 +1056,11 @@ integrationRouter.post(
     if (!p) throw new ApiError(401, 'ลายเซ็นไม่ถูกต้องหรือหมดอายุ');
     const month = typeof p.month === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(p.month) ? p.month : null;
     await ensureLineColumn();
+    await ensurePartnerSchema();
     const emps = (await sql.all(
-      `SELECT employee_id, first_name, status, line_user_id FROM employees WHERE line_user_id IS NOT NULL ORDER BY employee_id`,
+      // คนของพาร์ทเนอร์ไม่ได้ประกาศระดับ/ค่าจ้างของ KIN (partners/)
+      `SELECT employee_id, first_name, status, line_user_id FROM employees
+       WHERE line_user_id IS NOT NULL AND partner_id IS NULL ORDER BY employee_id`,
     )).filter((e) => !BLOCKED_STATUSES[e.status] && isLineUserId(e.line_user_id));
     const report = month ? new Map((await cases.attendanceReport(month)).map((r) => [r.employee_id, r])) : null;
     const out = [];

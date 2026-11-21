@@ -482,7 +482,10 @@ export async function claimVisitChanges() {
         payload: { type: 'staff_change', data: change, recipient: person },
       });
     }
-    for (const uid of change.family.slice(0, 6)) {
+    /* เปลี่ยนคนเป็น "ยังไม่มีคน" (ส่งกะให้พาร์ทเนอร์รอเลือกคน · ถอดคนออก) ไม่แจ้งญาติ — ยังไม่รู้ว่าใครจะไป
+       ญาติได้ข้อความตอนมีคนรับจริง (partners/ · 21 พ.ย. 2569) */
+    const familyTargets = r.kind === 'reassigned' && !r.new_assignee ? [] : change.family.slice(0, 6);
+    for (const uid of familyTargets) {
       await queueVisitNotification({
         key: `visit-change:${r.change_id}:family:${uid}`,
         channel: 'family', recipient: uid, eventKind: r.kind, visitId: r.visit_id,

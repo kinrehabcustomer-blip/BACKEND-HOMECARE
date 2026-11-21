@@ -42,6 +42,7 @@ import { geocode, reverseGeocode, searchPlaces } from '../lib/geocode.js';
 import { resolveMapLink } from '../lib/maplink.js';
 import { can, canSeeStaffPay, requirePermission } from '../lib/auth.js';
 import { FRONT_POSITIONS } from '../employees/schema.js';
+import * as partners from '../partners/repo.js';
 import { ApiError, asyncRoute, notFound } from '../lib/errors.js';
 import { ensureFamilyTable } from '../lib/family.js';
 import { reasonText, resolveReason } from '../categories/repo.js';
@@ -988,6 +989,18 @@ casesRouter.post(
   asyncRoute(async (req, res) => {
     ensureSchedulable(req.case);
     const input = bulkVisitSchema.parse(req.body);
+    /* ลงนัดแล้วส่งให้พาร์ทเนอร์เลย (21 พ.ย. 2569) — ตรวจบริษัทก่อน ไม่ผ่านผู้รับผิดชอบเคส แล้วแจ้งหัวหน้าบริษัทครั้งเดียว */
+    if (input.partner_id) {
+      const send = await partners.prepareSend(input.partner_id);
+      const result = await repo.addVisits(req.params.id, input.dates, {
+        ...input, assigned_to: null,
+        partner: {
+          partner_id: send.partner.partner_id, rate: send.partner.rate_per_visit, sent_by: req.user.employee_id,
+          after: (tx, ids) => partners.afterBulkSend(tx, req.params.id, ids, send, req.user),
+        },
+      });
+      return res.status(201).json(result);
+    }
     await ensureVisitAssignee(req.case, input.assigned_to);
     const before = await caseEvents.visitIdsOf(req.params.id);
     const result = await repo.addVisits(req.params.id, input.dates, input);
@@ -1314,7 +1327,7 @@ casesRouter.delete(
   }),
 );
 
-async function ensureAssignable(employeeId) {
+export async function ensureAssignable(employeeId) {
   const employee = await employees.findById(employeeId);
   if (!employee) throw new ApiError(400, `ไม่พบพนักงานรหัส ${employeeId}`);
 
@@ -1323,6 +1336,11 @@ async function ensureAssignable(employeeId) {
       409,
       `${employee.first_name} ${employee.last_name} รับเคสไม่ได้ เพราะสถานะปัจจุบันคือ "${employee.status}"`,
     );
+  }
+  /* คนของพาร์ทเนอร์ (partners/ · 21 พ.ย. 2569) รับงานผ่าน "ส่งกะให้พาร์ทเนอร์" เท่านั้น — หัวหน้าบริษัทเลือกคนเอง
+     จับคู่ตรงจากหลังบ้าน KIN = ข้ามบริษัทเขา และคนนี้จะเข้าไปอยู่ในการแบ่งค่าจ้างของเคสด้วย */
+  if (employee.partner_id) {
+    throw new ApiError(409, `${employee.first_name} ${employee.last_name} เป็นพนักงานของพาร์ทเนอร์ — ส่งกะให้บริษัทพาร์ทเนอร์แล้วให้หัวหน้าเลือกคนแทน`);
   }
   // กันที่ server ด้วย ไม่ใช่แค่ซ่อนใน dropdown — endpoint เรียกตรงได้
   if (!FRONT_POSITIONS.includes(employee.position)) {

@@ -10,7 +10,7 @@ import {
   decodeImage,
   portfolioSchema,
   portfolioUpdateSchema,
-  POSITIONS,
+  STAFF_POSITIONS,
   BACK_POSITIONS,
   EMPLOYMENT_TYPES,
   STATUSES,
@@ -41,6 +41,9 @@ employeesRouter.param('id', (req, res, next, id) => {
     .findById(id)
     .then((employee) => {
       if (!employee) return next(notFound(`ไม่พบพนักงานรหัส ${id}`));
+      /* คนของพาร์ทเนอร์ (หัวหน้า + ทีม) จัดการที่ตั้งค่าระบบ › พาร์ทเนอร์ เท่านั้น — HR แก้ตำแหน่งเป็นสายสำนักงานผ่านเส้นนี้
+         = คนนอกได้สิทธิ์หลังบ้าน KIN (ตรวจ 21 พ.ย. 2569) */
+      if (employee.partner_id) return next(notFound(`ไม่พบพนักงานรหัส ${id}`));
       req.employee = employee;
       next();
     })
@@ -49,7 +52,7 @@ employeesRouter.param('id', (req, res, next, id) => {
 
 /** ค่า enum สำหรับให้ฝั่ง React เอาไปทำ dropdown โดยไม่ต้อง hard-code */
 employeesRouter.get('/meta', (req, res) => {
-  res.json({ positions: POSITIONS, employment_types: EMPLOYMENT_TYPES, statuses: STATUSES });
+  res.json({ positions: STAFF_POSITIONS, employment_types: EMPLOYMENT_TYPES, statuses: STATUSES }); // ไม่รวมหัวหน้าพาร์ทเนอร์ (partners/)
 });
 
 employeesRouter.get(

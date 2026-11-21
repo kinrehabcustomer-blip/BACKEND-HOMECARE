@@ -3,8 +3,11 @@ import { api } from '../api.js';
 import { useAuth } from '../auth.jsx';
 import PasswordInput from './PasswordInput.jsx';
 
-/** ฟอร์มเปลี่ยนรหัสผ่าน — ใช้ในหน้าตั้งค่า */
-export default function ChangePasswordForm() {
+/**
+ * ฟอร์มเปลี่ยนรหัสผ่าน — ใช้ในหน้าตั้งค่า และหน้าบังคับเปลี่ยนรหัสเริ่มต้น (forced)
+ * forced = ไม่ถามรหัสปัจจุบัน (server ตรวจเองว่ายังเป็นรหัสเริ่มต้น · พนักงานส่วนใหญ่เข้าทาง LINE ไม่เคยพิมพ์รหัส)
+ */
+export default function ChangePasswordForm({ forced = false }) {
   const { user, setUser } = useAuth();
 
   const [current, setCurrent] = useState('');
@@ -17,11 +20,12 @@ export default function ChangePasswordForm() {
   async function handleSubmit(e) {
     e.preventDefault();
     if (password !== confirm) return setError('รหัสผ่านใหม่ทั้งสองช่องไม่ตรงกัน');
+    if (password === '12345678') return setError('ห้ามใช้รหัสผ่านเริ่มต้น (12345678) — ตั้งรหัสใหม่ของคุณเอง');
 
     setBusy(true);
     setError(null);
     try {
-      await api.changePassword({ current_password: current, new_password: password });
+      await api.changePassword(forced ? { new_password: password } : { current_password: current, new_password: password });
       setUser({ ...user, must_change_password: false }); // แถบเตือนบนหน้าจอจะหายไปทันที
       setCurrent('');
       setPassword('');
@@ -39,7 +43,7 @@ export default function ChangePasswordForm() {
       {done && <p className="notice">เปลี่ยนรหัสผ่านเรียบร้อยแล้ว ครั้งต่อไปเข้าสู่ระบบด้วยรหัสผ่านใหม่</p>}
       {error && <p className="error">{error}</p>}
 
-      <label>
+      {!forced && <label>
         รหัสผ่านปัจจุบัน
         <PasswordInput
           autoComplete="current-password"
@@ -50,7 +54,7 @@ export default function ChangePasswordForm() {
             setDone(false);
           }}
         />
-      </label>
+      </label>}
 
       <label>
         รหัสผ่านใหม่

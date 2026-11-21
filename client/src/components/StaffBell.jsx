@@ -37,13 +37,18 @@ function describe(n) {
       return { icon: 'bell', title: 'พรุ่งนี้มีกะ', body: `${who} · ${whenText(p.date, p.start)}` };
     case 'remind_3h':
       return { icon: 'bell', title: 'ใกล้ถึงเวลากะ', body: `${who} · เริ่ม ${p.start} น.` };
+    case 'partner_job': // หัวหน้าพาร์ทเนอร์ — KIN ส่งงานมา รอเลือกคน (21 พ.ย. 2569)
+      return p.total > 1
+        ? { icon: 'calendar', title: `งานใหม่จาก KIN ${p.total} งาน`, body: `${who} · ${dayText(p.date)} ถึง ${dayText(p.last_date)} — เลือกคนที่จะไป`, urgent: true }
+        : { icon: 'calendar', title: 'งานใหม่จาก KIN', body: `${who} · ${whenText(p.date, p.start)} — เลือกคนที่จะไป`, urgent: true };
     default:
       return { icon: 'bell', title: 'แจ้งเตือน', body: who };
   }
 }
 
 /** กดแจ้งเตือนแล้วไปไหน — กะวันนี้ไปหน้างานวันนี้ (เช็คอินได้เลย) ที่เหลือไปตารางงาน */
-const targetOf = (n) => (n.payload?.date === todayTH() && !['visit_cancelled', 'visit_removed'].includes(n.kind) ? '/my-today' : '/my-calendar');
+const targetOf = (n) => (n.kind === 'partner_job' ? '/partner'
+  : n.payload?.date === todayTH() && !['visit_cancelled', 'visit_removed'].includes(n.kind) ? '/my-today' : '/my-calendar');
 
 function agoText(at) {
   const mins = Math.floor((Date.now() - new Date(at).getTime()) / 60_000);

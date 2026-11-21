@@ -91,7 +91,7 @@ function QuickEdit({ employee, onDone, onCancel }) {
         </label>
         <label>ตำแหน่ง
           <SearchSelect {...field('position')}>
-            {Object.entries(POSITION_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            {Object.entries(POSITION_LABELS).filter(([v]) => v !== 'partner_lead').map(([v, l]) => <option key={v} value={v}>{l}</option>)}
           </SearchSelect>
         </label>
         <label className="span-2">เบอร์โทร

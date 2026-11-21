@@ -71,6 +71,8 @@ export const unstaffedToday = ({ today }) =>
   sql.all(
     `${VISIT_ROW}
      WHERE v.status = 'scheduled' AND v.visit_date = :today AND v.assigned_to IS NULL
+       -- กะที่ส่งให้พาร์ทเนอร์/พาร์ทเนอร์ปฏิเสธ นับในแถว partner_attention แทน (partners/repo.js) ไม่นับซ้ำ
+       AND v.partner_id IS NULL AND v.partner_rejected_at IS NULL
      ORDER BY v.planned_start NULLS FIRST`,
     { today },
   );

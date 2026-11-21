@@ -26,7 +26,13 @@ export const POSITIONS = [
   'nurse_lead',
   // super_admin = บัญชีดูแลระบบสูงสุด (ใช้ login หลังล้างระบบ) — สิทธิ์ครบทุกหมวด และเป็นคนเดียวที่ตั้ง/แก้ super admin ได้
   'super_admin',
+  // หัวหน้าพาร์ทเนอร์ (21 พ.ย. 2569 · partners/) — กลุ่มที่สาม ไม่ใช่ back ไม่ใช่ front: เห็นเฉพาะกะที่ KIN ส่งให้บริษัทตัวเอง
+  'partner_lead',
 ];
+/** ตำแหน่งของคนนอก (พาร์ทเนอร์) — สร้างจากหน้าพาร์ทเนอร์เท่านั้น HR ตั้งให้พนักงาน KIN ไม่ได้ */
+export const PARTNER_POSITIONS = ['partner_lead'];
+/** ตำแหน่งที่หน้าพนักงาน (HR) เลือกได้ */
+export const STAFF_POSITIONS = POSITIONS.filter((p) => !PARTNER_POSITIONS.includes(p));
 /**
  * พนักงานแบ่งเป็นสองกลุ่ม (ต้องตรงกับ client/src/labels.js)
  *   back  = สายสำนักงาน: Super Admin · ผู้จัดการ · HR · Admin HC · การเงิน
@@ -35,7 +41,7 @@ export const POSITIONS = [
  * ประกาศ front เป็น "ทุกอย่างที่ไม่ใช่ back" — เพิ่มตำแหน่งหน้างานใหม่ที่ POSITIONS แล้วตามมาเอง
  */
 export const BACK_POSITIONS = ['super_admin', 'manager', 'hr', 'admin', 'finance', 'nurse_lead'];
-export const FRONT_POSITIONS = POSITIONS.filter((p) => !BACK_POSITIONS.includes(p));
+export const FRONT_POSITIONS = POSITIONS.filter((p) => !BACK_POSITIONS.includes(p) && !PARTNER_POSITIONS.includes(p));
 
 export const EMPLOYMENT_TYPES = ['fulltime', 'parttime', 'contract', 'daily'];
 export const STATUSES = ['active', 'probation', 'on_leave', 'suspended', 'resigned'];
@@ -89,7 +95,7 @@ export const createEmployeeSchema = z.object({
   address: optionalText,
   education: optionalLongText,
 
-  position: z.enum(POSITIONS, { errorMap: () => ({ message: 'ตำแหน่งไม่ถูกต้อง' }) }),
+  position: z.enum(STAFF_POSITIONS, { errorMap: () => ({ message: 'ตำแหน่งไม่ถูกต้อง' }) }),
   employment_type: z.enum(EMPLOYMENT_TYPES).default('fulltime'),
   status: z.enum(STATUSES).default('active'),
 

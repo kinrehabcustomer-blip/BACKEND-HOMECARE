@@ -1,3 +1,4 @@
+import { ensurePartnerSchema } from '../partners/schema.js';
 import { sql, nextEmployeeId, transaction } from '../db/index.js';
 import { hashPassword, DEFAULT_PASSWORD } from '../lib/auth.js';
 import { encryptTempPassword, tryDecryptTempPassword } from '../lib/tempPassword.js';
@@ -41,6 +42,7 @@ const PUBLIC = [
   'employee_id',
   ...COLUMNS,
   'must_change_password',
+  'partner_id', // คนของพาร์ทเนอร์ (partners/) — ensureAssignable ใช้กันไม่ให้ KIN จับคู่ตรง
   'last_login_at',
   'created_at',
   'updated_at',
@@ -51,7 +53,9 @@ const PUBLIC = [
 ].join(', ');
 
 export async function list({ q, status, position, page, per_page, sort, order }) {
-  const where = [];
+  await ensurePartnerSchema();
+  /* คนของพาร์ทเนอร์ (หัวหน้า + ทีม) ไม่อยู่ในรายชื่อพนักงาน KIN — ดูได้ที่ตั้งค่าระบบ › พาร์ทเนอร์ (21 พ.ย. 2569) */
+  const where = ['partner_id IS NULL'];
   const params = {};
 
   if (q) {
@@ -170,18 +174,22 @@ export const codeOwner = (db, code, exceptId = null) =>
  * (พิสูจน์แล้ว: A6901002 ผูก LINE · A6901003 line_user_id = null)
  * ใส่ในคำสั่งเดียวกัน ดัชนีจึงปฏิเสธทั้ง INSERT ไม่เหลือแถวกำพร้า
  */
-export function create(input, { lineUserId = null } = {}) {
+export async function create(input, { lineUserId = null, partnerId = null } = {}) {
+  if (partnerId) await ensurePartnerSchema();
   return transaction(async (tx) => {
     if (input.employee_id) await ensureEmployeeCodeFree(tx, input.employee_id);
     const employeeId = input.employee_id || (await nextEmployeeId(tx));
     const values = { employee_id: employeeId };
     for (const col of COLUMNS) values[col] = input[col] ?? null;
 
-    /* พนักงานใหม่ทุกคนเริ่มที่รหัสเริ่มต้น (DEFAULT_PASSWORD) และไม่ถูกบังคับเปลี่ยน — ไม่มีรหัสชั่วคราว/สำเนาเข้ารหัสอีกแล้ว */
+    /* พนักงานใหม่ทุกคนเริ่มที่รหัสเริ่มต้น (DEFAULT_PASSWORD) — ไม่มีรหัสชั่วคราว/สำเนาเข้ารหัสอีกแล้ว
+       เข้าสู่ระบบครั้งแรกถูกบังคับตั้งรหัสใหม่ (lib/auth.js markDefaultPassword · 21 พ.ย. 2569) */
     values.password_hash = await hashPassword(DEFAULT_PASSWORD);
 
     const extra = lineUserId ? ['line_user_id'] : [];
     if (lineUserId) values.line_user_id = lineUserId;
+    // คนของพาร์ทเนอร์ — สร้างจาก partners/repo.js เท่านั้น (ฟอร์ม HR ไม่ส่งช่องนี้)
+    if (partnerId) { extra.push('partner_id'); values.partner_id = partnerId; }
     const cols = [...COLUMNS, ...extra];
     return tx.one(
       `INSERT INTO employees (employee_id, password_hash, must_change_password, ${cols.join(', ')})
@@ -328,10 +336,11 @@ export async function activeManagerCount(excludeId = null) {
 }
 
 export async function summary() {
+  await ensurePartnerSchema();
   const [byStatus, byPosition, totals] = await Promise.all([
-    sql.all('SELECT status, COUNT(*) AS count FROM employees GROUP BY status'),
-    sql.all('SELECT position, COUNT(*) AS count FROM employees GROUP BY position'),
-    sql.one('SELECT COUNT(*) AS total FROM employees'),
+    sql.all('SELECT status, COUNT(*) AS count FROM employees WHERE partner_id IS NULL GROUP BY status'),
+    sql.all('SELECT position, COUNT(*) AS count FROM employees WHERE partner_id IS NULL GROUP BY position'),
+    sql.one('SELECT COUNT(*) AS total FROM employees WHERE partner_id IS NULL'),
   ]);
 
   const toNumber = (rows) => rows.map((row) => ({ ...row, count: Number(row.count) }));

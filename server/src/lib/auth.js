@@ -3,7 +3,8 @@ import jwt from 'jsonwebtoken';
 import { randomBytes } from 'node:crypto';
 import { ApiError } from './errors.js';
 import { sql } from '../db/index.js';
-import { BACK_POSITIONS } from '../employees/schema.js';
+import { BACK_POSITIONS, PARTNER_POSITIONS } from '../employees/schema.js';
+import { ensurePartnerSchema } from '../partners/schema.js';
 import { permissionsFor, loadPermissions } from './permissions.js';
 
 const SECRET = process.env.JWT_SECRET;
@@ -20,7 +21,9 @@ export const COOKIE_NAME = 'kin_session';
 // = พนักงานกลุ่ม back (ประกาศที่ employees/schema.js ที่เดียว คู่กับกลุ่ม front)
 export const ADMIN_POSITIONS = BACK_POSITIONS;
 // role 'admin' = ใช้หน้าจอหลังบ้าน (ไม่ใช่แอปพนักงานภาคสนาม) — เข้าหน้าไหนได้บ้างดูที่ permissions ด้านล่าง
-export const roleForPosition = (position) => (ADMIN_POSITIONS.includes(position) ? 'admin' : 'field');
+// role 'partner' = หัวหน้าพาร์ทเนอร์ (partners/) — หน้าจอของตัวเอง ไม่ใช่หลังบ้าน KIN และไม่ใช่แอปภาคสนาม
+export const roleForPosition = (position) =>
+  (ADMIN_POSITIONS.includes(position) ? 'admin' : PARTNER_POSITIONS.includes(position) ? 'partner' : 'field');
 
 /**
  * สิทธิ์ของพนักงานกลุ่ม back — ตั้งรายตำแหน่งได้จากหน้า "จัดการสิทธิ์" (ดู lib/permissions.js)
@@ -52,8 +55,9 @@ if (!SECRET || SECRET.length < 32) {
 export const hashPassword = (plain) => bcrypt.hash(plain, 10);
 
 /* รหัสผ่านเริ่มต้นของพนักงานทุกคน (ดร.ธงชัย 2 พ.ย. 2569 "เอา one time password ออก ตั้งรหัสผ่านทุกคนเป็น 12345678")
-   เดิมสุ่มรหัสชั่วคราวรายคนแล้วบังคับเปลี่ยนตอน login ครั้งแรก — ยกเลิกแล้ว เจ้าตัวเปลี่ยนเองเมื่อไหร่ก็ได้
-   ⚠ รู้กันทั้งบริษัท = ใครรู้อีเมลพนักงานก็เข้าบัญชีนั้นได้จนกว่าเจ้าตัวจะเปลี่ยนรหัส */
+   เดิมสุ่มรหัสชั่วคราวรายคนแล้วบังคับเปลี่ยนตอน login ครั้งแรก — ยกเลิกไป 2 พ.ย.
+   ⚠ รู้กันทั้งบริษัท — 21 พ.ย. 2569 ผู้ใช้ขอให้บังคับเปลี่ยนอีกครั้ง: เข้าสู่ระบบด้วยรหัสนี้ (ทุกทาง) = ต้องตั้งรหัสใหม่ก่อนใช้งาน
+   (ดู markDefaultPassword / requirePasswordChanged ด้านล่าง) */
 export const DEFAULT_PASSWORD = '12345678';
 
 /* ตัวอักษรของรหัสชั่วคราว — ตัด 0/O/1/I/l ออก เพราะรหัสนี้ถูกอ่านออกเสียง/จดใส่กระดาษส่งต่อกัน
@@ -76,6 +80,37 @@ export function generateTempPassword(length = 12) {
   return out;
 }
 export const verifyPassword = (plain, hash) => bcrypt.compare(plain, hash ?? '');
+
+/* ---------- บังคับเปลี่ยนรหัสเริ่มต้น (ผู้ใช้ขอ 21 พ.ย. 2569) ----------
+   ตรวจ "ครั้งเดียว" ต่อบัญชี ตอนเข้าสู่ระบบ (ทุกทาง: รหัสผ่าน · LINE · SSO · รหัสผูก LINE) — ผู้ใช้ขอให้ไม่ต้องเช็คทุกครั้ง
+   uses_default_password:
+     NULL  = ยังไม่เคยตรวจ → ตรวจตอนเข้าสู่ระบบครั้งถัดไป
+     TRUE  = ยังเป็นรหัสเริ่มต้น → ทุกเส้นใน /api ตอบ 403 จนกว่าจะตั้งรหัสใหม่ (requirePasswordChanged) · ไม่ตรวจซ้ำ
+     FALSE = ตั้งรหัสเองแล้ว (หรือตรวจแล้วไม่ใช่รหัสเริ่มต้น) → จบ ไม่ตรวจอีกเลย
+   เซสชันที่ค้างอยู่ก่อนวันนี้โดนตอนเข้าสู่ระบบครั้งถัดไป
+   คอลัมน์แยกจาก must_change_password (ของยุครหัสชั่วคราวรายคน ยังผูกกับการซ่อน/เปิดรหัสชั่วคราวให้ HR ดู) */
+let defaultPwReady = null;
+export const ensureDefaultPasswordColumn = () =>
+  (defaultPwReady ??= sql
+    .run('ALTER TABLE employees ADD COLUMN IF NOT EXISTS uses_default_password BOOLEAN')
+    .catch((err) => { defaultPwReady = null; throw err; }));
+
+/**
+ * ตรวจว่าบัญชีนี้ยังใช้รหัสเริ่มต้นไหม — เฉพาะบัญชีที่ยังไม่เคยตรวจ (NULL) · ตรวจแล้วคืนผลเดิมทันที ไม่แตะรหัส
+ * plain = รหัสที่เพิ่งพิมพ์ตอน login (รู้ผลทันทีไม่ต้อง bcrypt) · ไม่ส่ง (เข้าทาง LINE/SSO) = เทียบ hash หนึ่งครั้ง
+ * คืนค่าและเขียนลง employee ที่ส่งมาด้วย (toSession อ่านต่อ)
+ */
+export async function markDefaultPassword(employee, plain = null) {
+  if (employee.uses_default_password === true || employee.uses_default_password === false) return employee.uses_default_password;
+  const uses = plain != null
+    ? plain === DEFAULT_PASSWORD
+    : Boolean(employee.password_hash) && (await verifyPassword(DEFAULT_PASSWORD, employee.password_hash));
+  await ensureDefaultPasswordColumn();
+  await sql.run('UPDATE employees SET uses_default_password = :uses WHERE employee_id = :id AND uses_default_password IS NULL',
+    { uses, id: employee.employee_id });
+  employee.uses_default_password = uses;
+  return uses;
+}
 
 export function signToken(employee) {
   return jwt.sign(
@@ -143,11 +178,13 @@ export function requireAuth(req, res, next) {
 
   // สิทธิ์รายตำแหน่ง (แคช 15 วินาที) — ด่านถัดไปทุกตัวอ่านแบบ sync จากแคชนี้
   loadPermissions()
+    .then(() => ensureDefaultPasswordColumn())
+    .then(() => ensurePartnerSchema()) // employees.partner_id ถูกอ่านในคิวรีด้านล่าง
     .then(() => sql.one(
       /* เช็คใบที่ถูกตัดในคิวรีเดียวกับที่อ่านพนักงานอยู่แล้ว — ไม่เพิ่มรอบไปฐานข้อมูล
          ตารางต้องมีอยู่ก่อนเสมอ (ensureRevokedSessions ด้านล่าง ถูกเรียกตั้งแต่ตอนสร้างแอป)
          เพราะ Postgres ตรวจชื่อตารางตั้งแต่ตอนแปลคำสั่ง — to_regclass กันตรงนี้ไม่ได้ */
-      `SELECT e.position, e.status, e.must_change_password,
+      `SELECT e.position, e.status, e.uses_default_password, e.partner_id,
               EXTRACT(EPOCH FROM e.password_changed_at) AS password_changed_epoch,
               -- created_at เป็นข้อความเวลาไทย — แปลงเฉพาะที่รูปแบบถูก (ข้อมูลเพี้ยนแถวเดียวต้องไม่ทำให้ทุกคำขอพัง)
               CASE WHEN e.created_at ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}$'
@@ -209,7 +246,11 @@ export function requireAuth(req, res, next) {
         // ตำแหน่ง/สิทธิ์อ่านสดจาก DB ไม่ใช่จาก token — เลื่อนหรือลดตำแหน่งแล้วมีผลทันที
         position: emp.position,
         role: roleForPosition(emp.position),
-        must_change_password: emp.must_change_password,
+        // ยังใช้รหัสเริ่มต้น (ตรวจตอนเข้าสู่ระบบ — markDefaultPassword) → requirePasswordChanged ปิดทุกเส้นจนกว่าจะเปลี่ยน
+        must_change_password: emp.uses_default_password === true,
+        /* พาร์ทเนอร์ (partners/) — หัวหน้าพาร์ทเนอร์เห็นเฉพาะของบริษัทนี้ · พนักงานพาร์ทเนอร์เห็นเคสแคบกว่าพนักงาน KIN
+           อ่านสดจาก DB เหมือนตำแหน่ง ไม่เชื่อ token */
+        partner_id: emp.partner_id ?? null,
       };
       next();
     })
@@ -269,7 +310,12 @@ export function requireBackOffice(req, res, next) {
  */
 export function requirePasswordChanged(req, res, next) {
   if (!req.user) return next(new ApiError(401, 'กรุณาเข้าสู่ระบบ'));
-  // ยกเลิกการบังคับเปลี่ยนรหัสแล้ว (ทุกคนใช้รหัสเริ่มต้นได้ — ดู DEFAULT_PASSWORD) คงฟังก์ชันไว้เพราะหลายเส้นอ้างอยู่
+  /* เปิดใช้อีกครั้ง 21 พ.ย. 2569 — บัญชีที่ยังใช้รหัสเริ่มต้น (12345678 รู้กันทั้งบริษัท) ทำอะไรไม่ได้จนกว่าจะตั้งรหัสใหม่
+     หน้าเว็บเห็น must_change_password แล้วขึ้นหน้าตั้งรหัส (App.jsx ForcePasswordChange) · ด่านนี้กันคนยิง API ตรง
+     /api/auth/* ไม่ผ่านด่านนี้ — เปลี่ยนรหัส/ออกจากระบบ/ผูก LINE ยังทำได้ */
+  if (req.user.must_change_password) {
+    return next(new ApiError(403, 'บัญชีนี้ยังใช้รหัสผ่านเริ่มต้น กรุณาตั้งรหัสผ่านใหม่ก่อนใช้งาน'));
+  }
   next();
 }
 
@@ -278,6 +324,18 @@ export function requirePasswordChanged(req, res, next) {
  * ค่าจ้าง/กำไร, คำสั่งที่ทำให้เงินออกจากบริษัท, และรายได้รวมของบริษัท (ผู้จัดการ · การเงิน)
  * ชื่อเดิมคงไว้เพราะถูกเรียกหลายที่ — ความหมายคือ "มีสิทธิ์เรื่องเงิน" ไม่ใช่ตำแหน่งผู้จัดการ
  */
+/**
+ * หัวหน้าพาร์ทเนอร์ (partners/routes.js) — ต้องเป็นตำแหน่ง partner_lead และผูกกับบริษัทอยู่
+ * ทุกเส้นใต้ /api/partner กรองด้วย req.user.partner_id เสมอ (บริษัท A มองไม่เห็นของบริษัท B)
+ */
+export function requirePartnerLead(req, res, next) {
+  if (!req.user) return next(new ApiError(401, 'กรุณาเข้าสู่ระบบ'));
+  if (!PARTNER_POSITIONS.includes(req.user.position) || !req.user.partner_id) {
+    return next(new ApiError(403, 'หน้านี้สำหรับหัวหน้าพาร์ทเนอร์เท่านั้น'));
+  }
+  next();
+}
+
 export const requireManager = requirePermission('money', 'เฉพาะผู้จัดการหรือฝ่ายการเงินเท่านั้นที่เข้าถึงข้อมูลส่วนนี้ได้');
 
 /**

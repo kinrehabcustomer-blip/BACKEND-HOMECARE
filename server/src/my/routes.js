@@ -178,6 +178,7 @@ myRouter.get(
 myRouter.get(
   '/attendance/report',
   asyncRoute(async (req, res) => {
+    notPartnerStaff(req);
     const { month } = attendanceQuerySchema.parse({ month: req.query.month || undefined });
     const ym = month ?? todayTH().slice(0, 7);
     const me = req.user.employee_id;
@@ -218,7 +219,10 @@ myRouter.get(
  */
 myRouter.get(
   '/payslips',
-  asyncRoute(async (req, res) => res.json(await payroll.payslipsFor(req.user.employee_id))),
+  asyncRoute(async (req, res) => {
+    notPartnerStaff(req);
+    res.json(await payroll.payslipsFor(req.user.employee_id));
+  }),
 );
 
 /**
@@ -420,9 +424,11 @@ myRouter.get(
     if (!(await myCaseRow(req))) return next(notFound('ไม่พบเคสนี้ หรือไม่ใช่เคสที่คุณรับผิดชอบ'));
 
     const query = reportQuerySchema.parse(req.query);
+    /* พนักงานพาร์ทเนอร์ (ไปรายครั้ง · ผู้ใช้เลือก 21 พ.ย. 2569) เห็นประวัติเฉพาะเคสนี้ ไม่รวมเคสอื่นของผู้รับบริการคนเดียวกัน */
+    const patientWide = !req.user.partner_id;
     const [pageData, months] = await Promise.all([
-      cases.listReports(req.params.id, query, { patientWide: true }),
-      cases.reportMonths(req.params.id, { patientWide: true }),
+      cases.listReports(req.params.id, query, { patientWide }),
+      cases.reportMonths(req.params.id, { patientWide }),
     ]);
     res.json({ ...pageData, months });
   }),
@@ -494,7 +500,8 @@ myRouter.get(
     if (!(await myCaseRow(req))) return next(notFound('ไม่พบเคสนี้ หรือไม่ใช่เคสที่คุณรับผิดชอบ'));
     // ใบในประวัติการรักษาอาจลงไว้ในเคสก่อนหน้าของคนเดียวกัน — หา case_id จริงของใบ (คนละผู้รับบริการ = ไม่เจอ)
     const reportCase = await cases.reportCaseInPatientScope(req.params.id, Number(req.params.reportId));
-    if (!reportCase) return next(notFound('ไม่พบรูปนี้'));
+    // พนักงานพาร์ทเนอร์ — รูปของรายงานในเคสนี้เท่านั้น (เหมือนรายการประวัติด้านบน)
+    if (!reportCase || (req.user.partner_id && reportCase !== req.params.id)) return next(notFound('ไม่พบรูปนี้'));
     const row = await cases.findReportImage(reportCase, Number(req.params.reportId), Number(req.params.imageId));
     if (!row) return next(notFound('ไม่พบรูปนี้'));
     res.setHeader('Content-Type', row.mime);
@@ -511,7 +518,7 @@ myRouter.get(
     if (!(await myCaseRow(req))) return next(notFound('ไม่พบเคสนี้ หรือไม่ใช่เคสที่คุณรับผิดชอบ'));
 
     const reportCase = await cases.reportCaseInPatientScope(req.params.id, Number(req.params.reportId));
-    if (!reportCase) return next(notFound('รายงานนี้ไม่มีรูปแผล'));
+    if (!reportCase || (req.user.partner_id && reportCase !== req.params.id)) return next(notFound('รายงานนี้ไม่มีรูปแผล'));
     const row = await cases.findReportPhoto(Number(req.params.reportId), reportCase);
     if (!row) return next(notFound('รายงานนี้ไม่มีรูปแผล'));
     res.setHeader('Content-Type', row.mime);
@@ -594,7 +601,14 @@ async function myCaseOr404(req) {
   if (!caseRow || !(await cases.hasFieldAccess(req.user.employee_id, req.params.id))) {
     throw notFound('ไม่พบเคสนี้ หรือไม่ใช่เคสที่คุณรับผิดชอบ');
   }
+  /* แชทญาติเป็นของทีม KIN ที่ดูแลเคสต่อเนื่อง — พนักงานพาร์ทเนอร์ (ไปรายครั้ง) ไม่เห็น (partners/ · 21 พ.ย. 2569) */
+  if (req.user.partner_id) throw new ApiError(403, 'แชทกับญาติใช้ได้เฉพาะทีมดูแลของ KIN');
   return caseRow;
+}
+
+/** ค่าตอบแทนของพนักงานพาร์ทเนอร์ บริษัทจ่ายเอง — ระบบ KIN ไม่มีตัวเลขของเขา */
+function notPartnerStaff(req) {
+  if (req.user.partner_id) throw new ApiError(403, 'ค่าตอบแทนของพนักงานพาร์ทเนอร์ดูได้จากบริษัทของคุณ');
 }
 
 myRouter.get(

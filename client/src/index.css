@@ -7647,3 +7647,224 @@ h1, h2, h3, h4, .page-hero-title, .cal-title, .login-heading h1 {
 }
 .staff-push-hint:hover { background: var(--brand-soft); }
 .staff-push-hint svg { flex: none; width: 1rem; height: 1rem; }
+
+/* ---------- หัวหน้าพาร์ทเนอร์ (PartnerJobsPage · PartnerTeamPage · PartnerSummaryPage · 21 พ.ย. 2569) ---------- */
+.pt-page { display: flex; flex-direction: column; gap: 0.875rem; max-width: 46rem; }
+.pt-head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; }
+.pt-head h1 { margin: 0; font-size: 1.375rem; color: var(--heading); }
+.pt-head p { margin: 0.125rem 0 0; font-size: 0.8125rem; }
+.pt-tabs { width: 100%; }
+.pt-tabs > button { flex: 1; }
+.pt-list { display: flex; flex-direction: column; gap: 0.75rem; }
+.pt-card { display: flex; flex-direction: column; gap: 0.625rem; padding: 0.875rem; border: 1px solid var(--border); border-radius: 1rem; background: var(--surface); }
+.pt-card-top { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap; }
+.pt-tag { display: inline-flex; align-items: center; padding: 0.125rem 0.625rem; border-radius: 999px; font-size: 0.75rem; font-weight: 600; white-space: nowrap; }
+.pt-tag.is-sub { background: #fdecd2; color: #8a4b00; }
+.pt-tag.is-once { background: #e3edf9; color: #1d4f91; }
+.pt-tag.is-ok { background: #e3f1e6; color: #1f6b35; }
+.pt-tag.is-warn { background: #fdecd2; color: #8a4b00; }
+.pt-tag.is-muted { background: var(--surface-2); color: var(--text); }
+:root[data-theme='dark'] .pt-tag.is-sub, :root[data-theme='dark'] .pt-tag.is-warn { background: #3a2a12; color: #f3c27a; }
+:root[data-theme='dark'] .pt-tag.is-once { background: #16273d; color: #9cc2f0; }
+:root[data-theme='dark'] .pt-tag.is-ok { background: #15301d; color: #8fd3a2; }
+.pt-due { font-size: 0.75rem; font-weight: 600; color: #9a3412; }
+:root[data-theme='dark'] .pt-due { color: #f0a070; }
+.pt-when { display: flex; flex-direction: column; gap: 0.125rem; }
+.pt-when strong { font-size: 1rem; color: var(--heading); }
+.pt-when span { font-size: 0.875rem; }
+.pt-where { display: flex; flex-direction: column; gap: 0.25rem; padding: 0.625rem; border-radius: 0.625rem; background: var(--surface-2); font-size: 0.8125rem; }
+.pt-where b { color: var(--heading); font-weight: 600; }
+.pt-map { align-self: flex-start; font-weight: 600; }
+.pt-who { margin: 0; font-size: 0.875rem; color: var(--heading); }
+.pt-actions { display: flex; gap: 0.5rem; }
+.pt-actions > .btn { flex: 1; min-height: 2.75rem; justify-content: center; }
+.pt-actions > .btn.primary { flex: 2; }
+.pt-actions.is-end { justify-content: flex-end; }
+.pt-actions.is-end > .btn { flex: 0 0 auto; }
+.pt-foot { margin: 0; font-size: 0.75rem; text-align: center; }
+.pt-people { display: flex; flex-direction: column; gap: 0.5rem; }
+.pt-person { display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem; border: 1px solid var(--border); border-radius: 0.75rem; cursor: pointer; }
+.pt-person.is-on { border: 2px solid var(--brand); background: var(--brand-soft); padding: calc(0.75rem - 1px); }
+.pt-person.is-busy { cursor: not-allowed; background: var(--surface-2); }
+.pt-person input { width: 1.25rem; height: 1.25rem; margin: 0; accent-color: var(--brand); flex: none; }
+.pt-person-main { flex: 1; display: flex; flex-direction: column; gap: 0.125rem; min-width: 0; }
+.pt-person-main b { color: var(--heading); font-weight: 600; }
+.pt-person-main .muted { font-size: 0.75rem; }
+.pt-field { display: flex; flex-direction: column; gap: 0.375rem; font-size: 0.875rem; }
+.pt-field textarea { font: inherit; }
+.pt-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem 0.75rem; }
+.pt-form-grid label { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.75rem; color: var(--muted); }
+.pt-form-grid .pt-span { grid-column: 1 / -1; }
+.pt-form { border-color: var(--brand); }
+.pt-form p { margin: 0; font-size: 0.75rem; }
+.pt-team { padding: 0; gap: 0; overflow: hidden; }
+.pt-member { display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem 0.875rem; border-bottom: 1px solid var(--divider, var(--border)); }
+.pt-member:last-child { border-bottom: 0; }
+.pt-member.is-off { background: var(--surface-2); }
+.pt-member.is-off b { color: var(--muted); }
+.pt-avatar { width: 2.5rem; height: 2.5rem; border-radius: 50%; display: grid; place-items: center; flex: none; background: var(--brand-soft); color: var(--brand); font-weight: 700; }
+.pt-member-main { flex: 1; display: flex; flex-direction: column; gap: 0.125rem; min-width: 0; }
+.pt-member-main b { color: var(--heading); font-weight: 600; }
+.pt-member-main .muted { font-size: 0.75rem; }
+.pt-month { display: flex; align-items: center; gap: 0.375rem; font-weight: 600; color: var(--heading); }
+.pt-month span { min-width: 6rem; text-align: center; font-size: 0.875rem; }
+.pt-total .pt-amount { font-family: 'Prompt', sans-serif; font-size: 2rem; line-height: 1.15; color: var(--heading); }
+.pt-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.5rem; }
+.pt-stats > div { display: flex; flex-direction: column; gap: 0.125rem; padding: 0.625rem; border-radius: 0.625rem; background: var(--surface-2); }
+.pt-stats span { font-size: 0.75rem; }
+.pt-stats b { font-size: 1.125rem; color: var(--heading); }
+.pt-stats b.is-warn, .pt-row .is-warn { color: #9a3412; }
+.pt-total-foot { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap; padding-top: 0.5rem; border-top: 1px solid var(--divider, var(--border)); font-size: 0.8125rem; }
+.pt-paid { color: #1f6b35; font-weight: 600; }
+.pt-unpaid { color: #8a4b00; }
+.pt-bar-row { display: flex; flex-direction: column; gap: 0.25rem; }
+.pt-bar-label { display: flex; justify-content: space-between; font-size: 0.8125rem; }
+.pt-bar { height: 0.5rem; border-radius: 0.25rem; background: var(--surface-2); overflow: hidden; }
+.pt-bar > span { display: block; height: 100%; border-radius: 0.25rem; background: var(--brand); }
+.pt-card > p.muted { margin: 0; font-size: 0.75rem; }
+.pt-rows { padding: 0; gap: 0; overflow: hidden; }
+.pt-rows > p { padding: 0.875rem; }
+.pt-row { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.75rem 0.875rem; border-bottom: 1px solid var(--divider, var(--border)); }
+.pt-row:last-child { border-bottom: 0; }
+.pt-row > span:first-child { display: flex; flex-direction: column; gap: 0.125rem; min-width: 0; font-size: 0.75rem; }
+.pt-row b { font-size: 0.875rem; color: var(--heading); font-weight: 600; }
+.pt-money { font-weight: 600; color: #1f6b35; white-space: nowrap; }
+
+/* ---------- ตั้งค่าระบบ › พาร์ทเนอร์ (PartnersPane · 21 พ.ย. 2569) ---------- */
+.pa { display: flex; flex-direction: column; gap: 1rem; }
+.pa h3 { margin: 0; font-size: 1.0625rem; color: var(--heading); display: flex; align-items: center; gap: 0.5rem; }
+.pa-count { display: inline-grid; place-items: center; min-width: 1.5rem; height: 1.5rem; padding: 0 0.375rem; border-radius: 999px; background: var(--danger); color: #fff; font-size: 0.75rem; }
+.pa-attention { border-color: #e7b46a; }
+.pa-attention > p { margin: 0.25rem 0 0.75rem; font-size: 0.8125rem; }
+.pa-list, .pa-partners, .pa-people ul { list-style: none; margin: 0; padding: 0; }
+.pa-list li, .pa-people li { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.625rem 0; border-top: 1px solid var(--divider, var(--border)); }
+.pa-list li > span { display: flex; flex-direction: column; gap: 0.125rem; min-width: 0; font-size: 0.8125rem; }
+.pa-list b { color: var(--heading); font-weight: 600; font-size: 0.875rem; }
+.pa-bad { color: var(--danger); }
+.pa-partners > li { border-top: 1px solid var(--divider, var(--border)); padding: 0.75rem 0; }
+.pa-partners > li.is-off .pa-partner-name b { color: var(--muted); }
+.pa-partner-row { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; }
+.pa-partner-name { display: flex; flex-direction: column; gap: 0.125rem; flex: 1 1 18rem; min-width: 0; padding: 0; border: 0; background: none; font: inherit; text-align: left; cursor: pointer; }
+.pa-partner-name b { color: var(--heading); font-size: 0.9375rem; }
+.pa-partner-name .muted { font-size: 0.75rem; }
+.pa-partner-name:hover b { color: var(--brand); }
+.pa-partner-tools { display: flex; align-items: center; gap: 0.375rem; }
+.pa-people { margin-top: 0.625rem; padding: 0.625rem 0.875rem; border-radius: 0.75rem; background: var(--surface-2); display: flex; flex-direction: column; gap: 0.5rem; align-items: flex-start; }
+.pa-people ul { width: 100%; }
+.pa-people li { font-size: 0.8125rem; }
+.pa-people li:first-child { border-top: 0; }
+.pa-people li.is-off b { color: var(--muted); }
+.pa-people b { color: var(--heading); font-weight: 600; }
+.pa-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: 0.5rem 0.75rem; width: 100%; padding: 0.75rem 0; }
+.pa-form label { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.75rem; color: var(--muted); }
+.pa-form-actions { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 0.5rem; }
+
+/* ---------- หัวหน้าพาร์ทเนอร์ บนจอคอม (ผู้ใช้ขอ UI สำหรับ PC · 21 พ.ย. 2569) ----------
+   มือถือเหมือนเดิม (คอลัมน์เดียว) · จอคอมใช้ความกว้าง: ไทล์สรุป · การ์ดงานเป็นกริด · ทีมเป็นตาราง + ฟอร์มข้าง · สรุปสองคอลัมน์ */
+.pt-tiles { display: none; }
+.pt-col, .pt-col-act, .pt-team-head, .pt-rows-title { display: none; }
+.pt-member-phone { display: none; }
+@media (min-width: 901px) {
+  .pt-page { max-width: none; gap: 1rem; } /* เต็มความกว้างจอ (ผู้ใช้ขอ 21 พ.ย. 2569) */
+  .pt-head h1 { font-size: 1.625rem; }
+  .pt-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .pt-tiles .tile { text-align: left; font: inherit; background: var(--surface); cursor: pointer; }
+  .pt-tiles .tile:hover { border-color: var(--border-hover); }
+  .pt-tiles .tile.is-static { cursor: default; }
+  .pt-tiles .tile.is-alert { border-color: #e7b46a; background: #fdf3e2; }
+  .pt-tiles .tile.is-alert .tile-value { color: #9a3412; }
+  :root[data-theme='dark'] .pt-tiles .tile.is-alert { background: #2e2213; border-color: #6b4a1c; }
+  :root[data-theme='dark'] .pt-tiles .tile.is-alert .tile-value { color: #f0a070; }
+  .pt-tabs { max-width: 32rem; }
+
+  /* งานที่ส่งมา: การ์ดเรียงเป็นกริด (2–3 ใบต่อแถวตามความกว้าง) */
+  .pt-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(22rem, 1fr)); gap: 1rem; align-items: start; }
+  .pt-card { padding: 1.125rem; }
+  .pt-card.pt-rows, .pt-card.pt-team { padding: 0; }
+  .pt-list .pt-card:hover { border-color: var(--border-hover); box-shadow: 0 2px 8px rgb(0 0 0 / 5%); }
+  .pt-page > .empty-state { padding: 3rem 1rem; }
+  .pt-foot { text-align: left; }
+
+  /* ทีมของฉัน: ตาราง (ชื่อ · ตำแหน่ง · รหัส · เดือนนี้ · สถานะ) + ฟอร์มเพิ่มคนด้านขวา */
+  .pt-team-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1rem; align-items: start; }
+  .pt-team-layout.has-form { grid-template-columns: minmax(0, 1fr) 22rem; }
+  .pt-team-layout.has-form > .pt-form { order: 2; position: sticky; top: 1rem; }
+  .pt-team-layout .pt-form-grid { grid-template-columns: 1fr; }
+  /* แถวเป็นกริดคอลัมน์เดียวกันทุกแถว — ชื่อได้ที่มากสุด คอลัมน์อื่นพอดีเนื้อหา */
+  .pt-member {
+    display: grid; grid-template-columns: 2.5rem minmax(9rem, 1.6fr) minmax(6rem, 1fr) 6rem 4.5rem 7rem;
+    align-items: center; gap: 0 1rem; padding: 0.75rem 1.125rem;
+  }
+  .pt-team-head { display: grid; background: var(--surface-2); font-size: 0.75rem; font-weight: 600; color: var(--muted); padding-block: 0.625rem; }
+  .pt-avatar.is-blank { visibility: hidden; height: 0; }
+  .pt-member-main { min-width: 0; }
+  .pt-member-sub { display: none; }
+  .pt-member-phone { display: inline; font-size: 0.75rem; }
+  .pt-col { display: block; min-width: 0; font-size: 0.8125rem; color: var(--text); overflow-wrap: anywhere; }
+  .pt-col.is-num { text-align: right; }
+  .pt-col-act { display: flex; justify-content: flex-end; }
+
+  /* สรุปรายเดือน: ยอด + แยกตามคน (ซ้าย) · รายการครั้งที่ไป (ขวา) */
+  .pt-sum-grid { display: grid; grid-template-columns: minmax(20rem, 26rem) minmax(0, 1fr); gap: 1rem; align-items: start; }
+  .pt-sum-side { display: flex; flex-direction: column; gap: 1rem; position: sticky; top: 1rem; }
+  .pt-rows-title { display: flex; align-items: baseline; gap: 0.5rem; margin: 0; padding: 0.875rem 1.125rem; font-size: 1rem; color: var(--heading); border-bottom: 1px solid var(--divider, var(--border)); }
+  .pt-rows-title .muted { font-size: 0.8125rem; font-weight: 400; }
+  .pt-row { padding: 0.75rem 1.125rem; }
+}
+@media (max-width: 900px) {
+  .pt-sum-grid, .pt-sum-side, .pt-team-layout { display: flex; flex-direction: column; gap: 0.875rem; }
+}
+
+/* ---------- สรุปรายเดือนของพาร์ทเนอร์ — จัดหน้าใหม่ (ผู้ใช้ขอจัด layout 21 พ.ย. 2569) ----------
+   บน: แถบตัวเลข (ยอดเงินช่องใหญ่ + 4 ไทล์) · ล่าง: แยกตามคน | ตารางครั้งที่ไป · มือถือเรียงลงคอลัมน์เดียว */
+.pt-head-tools { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.pt-kpis { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.625rem; }
+.pt-kpi-main { grid-column: 1 / -1; gap: 0.25rem; }
+.pt-kpi-main .pt-amount { font-family: 'Prompt', sans-serif; font-size: 2rem; line-height: 1.15; color: var(--heading); }
+.pt-kpi-main .pt-paid, .pt-kpi-main .pt-unpaid { font-size: 0.8125rem; }
+.pt-kpi { gap: 0.125rem; padding: 0.75rem 0.875rem; }
+.pt-kpi b { font-size: 1.375rem; line-height: 1.3; color: var(--heading); }
+.pt-kpi b.is-warn { color: #9a3412; }
+.pt-kpi .muted { font-size: 0.75rem; }
+.pt-card-title { display: flex; align-items: baseline; gap: 0.5rem; margin: 0; font-size: 1rem; color: var(--heading); }
+.pt-card-title .muted { font-size: 0.8125rem; font-weight: 400; }
+.pt-empty { align-items: center; text-align: center; gap: 0.5rem; padding: 2.5rem 1rem; }
+.pt-empty strong { color: var(--heading); font-size: 1rem; }
+.pt-empty .muted { font-size: 0.8125rem; }
+.pt-empty-ico { width: 2rem; height: 2rem; color: var(--brand); }
+.pt-sum-body { display: flex; flex-direction: column; gap: 0.875rem; }
+.pt-visits { padding: 0; gap: 0; overflow: hidden; }
+.pt-visits > .pt-card-title { padding: 0.875rem; border-bottom: 1px solid var(--divider, var(--border)); }
+.pt-table-wrap { display: none; }
+.pt-staff > p.muted { margin: 0; font-size: 0.75rem; }
+@media (min-width: 901px) {
+  .pt-kpis { grid-template-columns: minmax(17rem, 1.7fr) repeat(4, minmax(0, 1fr)); gap: 1rem; }
+  .pt-kpi-main { grid-column: auto; justify-content: center; }
+  .pt-kpi { justify-content: center; padding: 1rem 1.125rem; }
+  .pt-kpi b { font-size: 1.75rem; }
+  .pt-sum-body { display: grid; grid-template-columns: minmax(18rem, 24rem) minmax(0, 1fr); gap: 1rem; align-items: start; }
+  .pt-staff { position: sticky; top: 1rem; }
+  .pt-visits > .pt-card-title { padding: 1rem 1.125rem; }
+  .pt-table-wrap { display: block; margin: 0; border: 0; }
+  .pt-visits .pt-rows { display: none; }
+  .pt-table th, .pt-table td { padding: 0.6875rem 1.125rem; }
+  .pt-table thead th { background: var(--surface-2); font-size: 0.75rem; color: var(--muted); }
+  .pt-table tbody tr:hover { background: var(--surface-2); }
+  .pt-table tfoot td { font-weight: 600; color: var(--heading); border-bottom: 0; background: var(--surface-2); }
+}
+
+/* ---------- โลโก้พาร์ทเนอร์ (PartnerLogo · 21 พ.ย. 2569) ---------- */
+.partner-logo { flex: none; display: inline-block; object-fit: contain; border-radius: 0.375rem; background: #fff; vertical-align: middle; }
+.partner-logo.is-blank { display: inline-grid; place-items: center; border-radius: 50%; background: var(--brand-soft); color: var(--brand); font-weight: 700; }
+.who-chips .btn .partner-logo { margin-right: 0.125rem; border-radius: 0.25rem; }
+.pa-logo { border: 1px solid var(--border); border-radius: 0.625rem; padding: 0.125rem; }
+.pa-partner-row > .pa-logo { align-self: center; }
+.pa-logo-btn { cursor: pointer; }
+.pt-head-brand { display: flex; align-items: center; gap: 0.75rem; }
+.pt-head-brand .partner-logo { border: 1px solid var(--border); border-radius: 0.75rem; padding: 0.125rem; }
+.pt-person > .partner-logo { border: 1px solid var(--border); }
+/* สวิตช์เปิด/ปิดบริษัทพาร์ทเนอร์ — สีทองแบบหน้าจัดการสิทธิ์ (ผู้ใช้ขอ 21 พ.ย. 2569) */
+.pa-switch { --perm-accent: var(--brand); order: 9; margin-left: 0.25rem; }
+.pa-switch.is-on { color: var(--brand); }
+:root[data-theme='dark'] .pa-switch { --perm-accent: var(--brand); }
+:root[data-theme='dark'] .pa-switch.is-on { color: var(--brand); }
