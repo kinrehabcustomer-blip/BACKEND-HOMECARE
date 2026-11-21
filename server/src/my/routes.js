@@ -135,7 +135,10 @@ myRouter.get(
     if (!caseRow || !(await cases.hasFieldAccess(req.user.employee_id, req.params.id))) {
       return next(notFound('ไม่พบเคสนี้ หรือไม่ใช่เคสที่คุณรับผิดชอบ'));
     }
-    const visits = await cases.listVisits(req.params.id);
+    let visits = await cases.listVisits(req.params.id);
+    /* พนักงานพาร์ทเนอร์ (ไปรายครั้ง) ไม่เห็นตารางนัดทั้งเคส — ได้เฉพาะกะของตัวเอง (ใช้ลงรายงานย้อนหลัง)
+       หน้าเคสของพาร์ทเนอร์ไม่มีส่วน "รายละเอียดการให้บริการ" และ "ตารางนัด" (ผู้ใช้ขอ 21 พ.ย. 2569) */
+    if (req.user.partner_id) visits = visits.filter((v) => v.assigned_to === req.user.employee_id);
     res.json({ ...stripFinancial(caseRow), visits: visits.map((v) => forViewer(v, req.user.employee_id)) });
   }),
 );

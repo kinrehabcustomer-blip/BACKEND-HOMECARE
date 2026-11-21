@@ -3525,7 +3525,11 @@ if (process.env.RUN_DB_TESTS !== '1') {
 
       // ---- พนักงานพาร์ทเนอร์: เห็นเคสของกะตัวเอง · ไม่เห็นแชทญาติ/ค่าตอบแทน ----
       assert.ok((await get('/api/my/cases', staffA1)).body.some((x) => x.case_id === c.case_id));
-      assert.equal((await get(`/api/my/cases/${c.case_id}`, staffA1)).status, 200);
+      const partnerCase = await get(`/api/my/cases/${c.case_id}`, staffA1);
+      assert.equal(partnerCase.status, 200);
+      // พนักงานพาร์ทเนอร์ไม่เห็นตารางนัดทั้งเคส — เฉพาะกะของตัวเอง
+      assert.ok(partnerCase.body.visits.length >= 1);
+      assert.ok(partnerCase.body.visits.every((v) => v.assigned_to === a1Row.employee_id));
       assert.equal((await get(`/api/my/cases/${c.case_id}/family-messages`, staffA1)).status, 403);
       assert.equal((await get('/api/my/attendance/report', staffA1)).status, 403);
       // ประวัติรายงาน: เคสนี้เห็น · เคสอื่นของผู้รับบริการคนเดียวกันไม่เห็น (ผู้ใช้เลือก 21 พ.ย. 2569) — พนักงาน KIN ยังเห็นทั้งชุด

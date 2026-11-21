@@ -34,7 +34,10 @@ function Field({ label, value }) {
 export default function MyCaseModal({ caseId, onClose }) {
   const sheetRef = useSheetSwipe(onClose); // จอแคบ: ปัดลงเพื่อปิด
   // รหัสของผู้ใช้ที่ล็อกอินอยู่ — ใช้ตัดสินว่ารายงานใบไหนเป็นของตัวเอง (จึงจะกดแก้ได้)
-  const me = useAuth()?.user?.employee_id ?? null;
+  const authUser = useAuth()?.user;
+  const me = authUser?.employee_id ?? null;
+  // พนักงานพาร์ทเนอร์: ไม่มี "รายละเอียดการให้บริการ" และ "ตารางนัด" (ผู้ใช้ขอ 21 พ.ย. 2569 · server ส่งเฉพาะกะของตัวเอง)
+  const isPartnerStaff = Boolean(authUser?.partner_id);
   const [item, setItem] = useState(null);
   const [error, setError] = useState(null);
   const [visitsOpen, setVisitsOpen] = useState(false);   // ตารางนัดเต็มใน popup แยก
@@ -153,6 +156,7 @@ export default function MyCaseModal({ caseId, onClose }) {
                 />
               </section>
 
+              {!isPartnerStaff && (<>
               <section>
                 <h3>รายละเอียดการให้บริการ</h3>
                 <div className="field-grid">
@@ -195,6 +199,7 @@ export default function MyCaseModal({ caseId, onClose }) {
                   )}
                 </div>
               </section>
+              </>)}
 
               {/* ประวัติการรักษาของผู้รับบริการคนนี้ทั้งหมด — ทุกเคส (รวมรอบก่อนๆ) ไม่ว่าใครเป็นคนลง
                   คนที่ไปดูแลต้องรู้ว่าก่อนหน้านี้เจออะไรมา ไม่ใช่เห็นแค่ใบของตัวเอง
