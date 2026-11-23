@@ -7653,8 +7653,24 @@ h1, h2, h3, h4, .page-hero-title, .cal-title, .login-heading h1 {
 .pt-head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; }
 .pt-head h1 { margin: 0; font-size: 1.375rem; color: var(--heading); }
 .pt-head p { margin: 0.125rem 0 0; font-size: 0.8125rem; }
-.pt-tabs { width: 100%; }
-.pt-tabs > button { flex: 1; }
+/* แถบแท็บงานที่ส่งมา — เส้นใต้เต็มความกว้าง · ตัวเลขเป็นป้าย (ออกแบบใหม่ 23 พ.ย. 2569) */
+.pt-tabbar { display: flex; gap: 0.25rem; border-bottom: 1px solid var(--border); overflow-x: auto; scrollbar-width: none; }
+.pt-tabbar::-webkit-scrollbar { display: none; }
+.pt-tab {
+  position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem;
+  flex: 1; min-height: 2.75rem; padding: 0.625rem 0.75rem; margin-bottom: -1px;
+  font: inherit; font-size: 0.9375rem; font-weight: 500; color: var(--muted); white-space: nowrap;
+  background: none; border: none; border-bottom: 2px solid transparent; cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+.pt-tab:hover { color: var(--heading); }
+.pt-tab.on { color: var(--heading); font-weight: 700; border-bottom-color: var(--brand); }
+.pt-tab:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; border-radius: 0.5rem 0.5rem 0 0; }
+.pt-tab-count {
+  min-width: 1.375rem; padding: 0.0625rem 0.4375rem; border-radius: 999px;
+  font-size: 0.75rem; font-weight: 700; line-height: 1.25rem; text-align: center; font-variant-numeric: tabular-nums;
+  color: #fff; background: #dc2626; /* ป้ายจำนวนเป็นสีแดงทุกแท็บ (ผู้ใช้ขอ 23 พ.ย. 2569) */
+}
 .pt-list { display: flex; flex-direction: column; gap: 0.75rem; }
 .pt-card { display: flex; flex-direction: column; gap: 0.625rem; padding: 0.875rem; border: 1px solid var(--border); border-radius: 1rem; background: var(--surface); }
 .pt-card-top { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap; }
@@ -7668,7 +7684,17 @@ h1, h2, h3, h4, .page-hero-title, .cal-title, .login-heading h1 {
 .pt-detail dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .pt-detail .pt-map { display: inline-flex; margin-top: 0.25rem; }
 .pt-pre { white-space: pre-line; }
-.pt-detail-others { margin-top: 1rem; padding-top: 0.875rem; border-top: 1px solid var(--divider, var(--border)); }
+/* รายละเอียดผู้รับบริการในกล่องงานของหัวหน้าพาร์ทเนอร์ (23 พ.ย. 2569) — หน้าตาเดียวกับหน้าเคสของ KIN */
+.pt-patient { display: flex; flex-direction: column; gap: 0.75rem; }
+.pt-patient h3 { margin-bottom: 0; }
+.pt-patient-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.75rem 1rem; }
+.pt-pfield { display: flex; flex-direction: column; gap: 0.125rem; min-width: 0; }
+.pt-pfield-label { font-size: 0.75rem; color: var(--muted); }
+.pt-pfield-value { font-size: 0.9375rem; color: var(--heading); white-space: pre-line; overflow-wrap: anywhere; }
+.pt-pfield-value.is-empty { color: var(--muted); font-size: 0.8125rem; opacity: 0.8; }
+.pt-patient .allergy-alert { margin: 0; padding: 0.5rem 0.75rem; border-radius: 0.5rem; font-size: 0.875rem; font-weight: 600; }
+@media (max-width: 520px) { .pt-patient-grid { grid-template-columns: 1fr 1fr; } .pt-patient-grid > :first-child { grid-column: 1 / -1; } }
+.pt-detail-others, .modal-body section.pt-detail-others { margin-top: 1rem; padding: 0.875rem 0 0; border-top: 1px solid var(--divider, var(--border)); border-bottom: 0; }
 .pt-detail-others h3 { margin: 0 0 0.5rem; font-size: 0.8125rem; color: var(--heading); }
 .pt-detail-others ul { display: flex; flex-direction: column; gap: 0.375rem; margin: 0; padding: 0; list-style: none; font-size: 0.8125rem; }
 .pt-detail-others li { display: flex; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; }
@@ -7710,6 +7736,31 @@ h1, h2, h3, h4, .page-hero-title, .cal-title, .login-heading h1 {
 .pt-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem 0.75rem; }
 .pt-form-grid label { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.75rem; color: var(--muted); }
 .pt-form-grid .pt-span { grid-column: 1 / -1; }
+/* popup เพิ่ม/แก้คนในทีม (23 พ.ย. 2569) — ช่องกรอกใหญ่ขึ้น อ่านง่ายบนมือถือ */
+.pt-person-modal .pt-form-grid { gap: 0.875rem 1rem; }
+.pt-person-modal .pt-form-grid label { font-size: 0.8125rem; font-weight: 500; }
+.pt-person-note { margin: 0.875rem 0 0; font-size: 0.75rem; }
+/* แถวคนในทีมแตะดูรายละเอียดได้ + popup รายละเอียด (23 พ.ย. 2569) */
+.pt-member.is-clickable { cursor: pointer; transition: background 0.15s; }
+.pt-member.is-clickable:hover { background: var(--surface-2); }
+.pt-member.is-clickable:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }
+.pt-pd-head { display: flex; align-items: center; gap: 0.875rem; min-width: 0; }
+.pt-pd-head h2 { margin: 0 0 0.25rem; }
+.pt-pd-head p { margin: 0; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.pt-pd-head .pt-avatar { width: 3rem; height: 3rem; font-size: 1.125rem; }
+.pt-pv-list { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+.pt-pv-list li { display: grid; grid-template-columns: 12.5rem minmax(0, 1fr) auto; align-items: center; gap: 0.75rem;
+  padding: 0.5rem 0; border-bottom: 1px solid var(--divider, var(--border)); font-size: 0.8125rem; }
+.pt-pv-list li:last-child { border-bottom: 0; }
+.pt-pv-when { font-variant-numeric: tabular-nums; color: var(--heading); white-space: nowrap; }
+.pt-pv-what { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 520px) {
+  .pt-pv-list li { grid-template-columns: minmax(0, 1fr) auto; gap: 0.125rem 0.5rem; }
+  .pt-pv-when { grid-column: 1; }
+  .pt-pv-what { grid-column: 1; grid-row: 2; }
+  .pt-pv-list .pt-tag { grid-column: 2; grid-row: 1 / span 2; }
+}
+@media (max-width: 420px) { .pt-person-modal .pt-form-grid { grid-template-columns: 1fr; } }
 .pt-form { border-color: var(--brand); }
 .pt-form p { margin: 0; font-size: 0.75rem; }
 .pt-team { padding: 0; gap: 0; overflow: hidden; }
@@ -7777,7 +7828,10 @@ h1, h2, h3, h4, .page-hero-title, .cal-title, .login-heading h1 {
 /* ---------- หัวหน้าพาร์ทเนอร์ บนจอคอม (ผู้ใช้ขอ UI สำหรับ PC · 21 พ.ย. 2569) ----------
    มือถือเหมือนเดิม (คอลัมน์เดียว) · จอคอมใช้ความกว้าง: ไทล์สรุป · การ์ดงานเป็นกริด · ทีมเป็นตาราง + ฟอร์มข้าง · สรุปสองคอลัมน์ */
 .pt-tiles { display: none; }
-.pt-col, .pt-col-act, .pt-team-head, .pt-rows-title { display: none; }
+.pt-col, .pt-team-head, .pt-rows-title { display: none; }
+/* ปุ่มของแถวคนในทีม (แก้ไข · ปิดบัญชี) — มือถือเดิมถูกซ่อนไปด้วย (แก้ 23 พ.ย. 2569) */
+.pt-col-act { display: flex; flex: none; align-items: center; justify-content: flex-end; gap: 0.375rem; flex-wrap: wrap; }
+.pt-col-act .btn.is-on { border-color: var(--brand); color: var(--brand); background: var(--brand-soft); }
 .pt-member-phone { display: none; }
 @media (min-width: 901px) {
   .pt-page { max-width: none; gap: 1rem; } /* เต็มความกว้างจอ (ผู้ใช้ขอ 21 พ.ย. 2569) */
@@ -7790,7 +7844,9 @@ h1, h2, h3, h4, .page-hero-title, .cal-title, .login-heading h1 {
   .pt-tiles .tile.is-alert .tile-value { color: #9a3412; }
   :root[data-theme='dark'] .pt-tiles .tile.is-alert { background: #2e2213; border-color: #6b4a1c; }
   :root[data-theme='dark'] .pt-tiles .tile.is-alert .tile-value { color: #f0a070; }
-  .pt-tabs { max-width: 32rem; }
+  /* จอคอม: แท็บชิดซ้ายขนาดตามเนื้อหา เส้นใต้ยาวเต็มจอ */
+  .pt-tabbar { gap: 0.5rem; }
+  .pt-tab { flex: 0 0 auto; padding: 0.75rem 1.25rem; }
 
   /* งานที่ส่งมา: การ์ดเรียงเป็นกริด (2–3 ใบต่อแถวตามความกว้าง) */
   .pt-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(22rem, 1fr)); gap: 1rem; align-items: start; }
@@ -7801,13 +7857,9 @@ h1, h2, h3, h4, .page-hero-title, .cal-title, .login-heading h1 {
   .pt-foot { text-align: left; }
 
   /* ทีมของฉัน: ตาราง (ชื่อ · ตำแหน่ง · รหัส · เดือนนี้ · สถานะ) + ฟอร์มเพิ่มคนด้านขวา */
-  .pt-team-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1rem; align-items: start; }
-  .pt-team-layout.has-form { grid-template-columns: minmax(0, 1fr) 22rem; }
-  .pt-team-layout.has-form > .pt-form { order: 2; position: sticky; top: 1rem; }
-  .pt-team-layout .pt-form-grid { grid-template-columns: 1fr; }
   /* แถวเป็นกริดคอลัมน์เดียวกันทุกแถว — ชื่อได้ที่มากสุด คอลัมน์อื่นพอดีเนื้อหา */
   .pt-member {
-    display: grid; grid-template-columns: 2.5rem minmax(9rem, 1.6fr) minmax(6rem, 1fr) 6rem 4.5rem 7rem;
+    display: grid; grid-template-columns: 2.5rem minmax(9rem, 1.6fr) minmax(6rem, 1fr) 6rem 4.5rem 11rem;
     align-items: center; gap: 0 1rem; padding: 0.75rem 1.125rem;
   }
   .pt-team-head { display: grid; background: var(--surface-2); font-size: 0.75rem; font-weight: 600; color: var(--muted); padding-block: 0.625rem; }
@@ -7817,7 +7869,7 @@ h1, h2, h3, h4, .page-hero-title, .cal-title, .login-heading h1 {
   .pt-member-phone { display: inline; font-size: 0.75rem; }
   .pt-col { display: block; min-width: 0; font-size: 0.8125rem; color: var(--text); overflow-wrap: anywhere; }
   .pt-col.is-num { text-align: right; }
-  .pt-col-act { display: flex; justify-content: flex-end; }
+  .pt-col-act { flex-wrap: nowrap; }
 
   /* สรุปรายเดือน: ยอด + แยกตามคน (ซ้าย) · รายการครั้งที่ไป (ขวา) */
   .pt-sum-grid { display: grid; grid-template-columns: minmax(20rem, 26rem) minmax(0, 1fr); gap: 1rem; align-items: start; }
@@ -7827,7 +7879,7 @@ h1, h2, h3, h4, .page-hero-title, .cal-title, .login-heading h1 {
   .pt-row { padding: 0.75rem 1.125rem; }
 }
 @media (max-width: 900px) {
-  .pt-sum-grid, .pt-sum-side, .pt-team-layout { display: flex; flex-direction: column; gap: 0.875rem; }
+  .pt-sum-grid, .pt-sum-side { display: flex; flex-direction: column; gap: 0.875rem; }
 }
 
 /* ---------- สรุปรายเดือนของพาร์ทเนอร์ — จัดหน้าใหม่ (ผู้ใช้ขอจัด layout 21 พ.ย. 2569) ----------

@@ -112,7 +112,7 @@ export async function people(partnerId) {
   await ensurePartnerSchema();
   const month = todayTH().slice(0, 7);
   return sql.all(
-    `SELECT e.employee_id, e.first_name, e.last_name, e.nickname, e.phone, e.position, e.status,
+    `SELECT e.employee_id, e.first_name, e.last_name, e.nickname, e.phone, e.email, e.position, e.status,
             e.last_login_at, (e.uses_default_password IS NOT FALSE) AS default_password,
             (SELECT COUNT(*)::int FROM case_visits v WHERE v.checked_in_by = e.employee_id
                AND v.check_out_at IS NOT NULL AND v.status <> 'cancelled' AND v.visit_date LIKE :month) AS done_this_month
@@ -123,6 +123,43 @@ export async function people(partnerId) {
   );
 }
 
+/**
+ * รายละเอียดคนในทีม (หัวหน้ากดแถวในหน้าทีมของฉัน · ผู้ใช้ขอ 23 พ.ย. 2569)
+ * ข้อมูลบัญชี + กะที่บริษัทนี้ให้คนนี้ไป (ล่าสุด 30 กะ) — ไม่มีค่าจ้าง/ราคา · เฉพาะกะของบริษัทตัวเอง
+ */
+export async function personDetail(partnerId, employeeId) {
+  await ensurePartnerSchema();
+  const person = (await people(partnerId)).find((p) => p.employee_id === employeeId);
+  if (!person) throw new ApiError(404, 'ไม่พบคนนี้ในทีม');
+  const visits = await sql.all(
+    `SELECT v.visit_id, v.visit_date, v.planned_start, v.planned_end, v.status, v.check_in_at, v.check_out_at,
+            c.client_name, COALESCE(pp.name, f.name) AS service_name
+     FROM case_visits v
+     JOIN cases c ON c.case_id = v.case_id
+     LEFT JOIN physio_packages pp ON pp.physio_package_id = c.physio_package_id
+     LEFT JOIN pkg_service_formats f ON f.format_id = c.pkg_format_id
+     WHERE v.assigned_to = :id AND v.partner_id = :pid
+     ORDER BY v.visit_date DESC, v.planned_start DESC NULLS LAST LIMIT 30`,
+    { id: employeeId, pid: partnerId },
+  );
+  const { done_total } = await sql.one(
+    `SELECT COUNT(*)::int AS done_total FROM case_visits
+     WHERE checked_in_by = :id AND check_out_at IS NOT NULL AND status <> 'cancelled' AND partner_id = :pid`,
+    { id: employeeId, pid: partnerId },
+  );
+  return { ...person, done_total, visits };
+}
+
+/** อีเมลใช้เข้าระบบ — ห้ามซ้ำกับบัญชีอื่น (ดัชนี unique มีอยู่แล้ว แต่ตอบเป็นภาษาคนก่อนชน) */
+async function ensureEmailFree(email, exceptId = null) {
+  if (!email) return;
+  const taken = await sql.one(
+    'SELECT employee_id FROM employees WHERE lower(email) = lower(:email) AND employee_id IS DISTINCT FROM :except LIMIT 1',
+    { email, except: exceptId },
+  );
+  if (taken) throw new ApiError(409, 'อีเมลนี้มีบัญชีอื่นใช้เข้าระบบอยู่แล้ว — ใช้อีเมลอื่น');
+}
+
 /** สร้างบัญชี — หลังบ้าน KIN สร้างหัวหน้า (asLead) · หัวหน้าเพิ่มคนในทีม · เข้าครั้งแรกด้วยรหัสเริ่มต้นแล้วถูกบังคับเปลี่ยน */
 export async function createPerson(partnerId, input, { asLead = false } = {}) {
   const partner = await findPartner(partnerId);
@@ -130,9 +167,10 @@ export async function createPerson(partnerId, input, { asLead = false } = {}) {
   if (partner.status !== 'active') throw new ApiError(409, 'พาร์ทเนอร์นี้ปิดใช้งานอยู่');
   const position = asLead ? LEAD : input.position;
   if (!asLead && !TEAM_POSITIONS.includes(position)) throw new ApiError(400, 'ตำแหน่งไม่ถูกต้อง');
+  await ensureEmailFree(input.email);
   return employees.create(
     { first_name: input.first_name, last_name: input.last_name, nickname: input.nickname ?? null,
-      phone: input.phone ?? null, position, employment_type: 'contract', status: 'active' },
+      phone: input.phone ?? null, email: input.email ?? null, position, employment_type: 'contract', status: 'active' },
     { partnerId },
   );
 }
@@ -145,7 +183,8 @@ export async function updatePerson(partnerId, employeeId, input, { allowLead = f
   if (person.position === LEAD && !allowLead) throw new ApiError(403, 'แก้บัญชีหัวหน้าพาร์ทเนอร์ได้จากหลังบ้าน KIN เท่านั้น');
   if (input.position && person.position !== LEAD && !TEAM_POSITIONS.includes(input.position)) throw new ApiError(400, 'ตำแหน่งไม่ถูกต้อง');
   const patch = {};
-  for (const c of ['first_name', 'last_name', 'nickname', 'phone']) if (c in input) patch[c] = input[c];
+  for (const c of ['first_name', 'last_name', 'nickname', 'phone', 'email']) if (c in input) patch[c] = input[c];
+  if ('email' in patch) await ensureEmailFree(patch.email, employeeId);
   if (input.position && person.position !== LEAD) patch.position = input.position;
   if (input.status) {
     if (!['active', 'resigned'].includes(input.status)) throw new ApiError(400, 'สถานะไม่ถูกต้อง');
@@ -388,15 +427,20 @@ async function partnerVisitOr404(partnerId, visitId) {
 }
 
 /**
- * รายละเอียดเคสคร่าวๆ ของกะที่ส่งมา (ผู้ใช้ขอ 21 พ.ย. 2569 — กดการ์ดงานเพื่อดู)
- * ให้เท่าที่ใช้เตรียมตัวไปหน้างาน: เพศ/อายุ/น้ำหนัก/ส่วนสูง · อุปกรณ์ที่ติดตัวผู้รับบริการ · ช่วงเคส · ครั้งที่เท่าไรของเคส
- * ไม่ให้: อาการ/โรคประจำตัว (ผู้ใช้สั่งตัดอาการออก) · เบอร์โทร · ราคา · กะของ KIN หรือของบริษัทอื่น
+ * รายละเอียดเคสของกะที่ส่งมา (ผู้ใช้ขอ 21 พ.ย. 2569 — กดการ์ดงานเพื่อดู)
+ * ให้: ช่วงเคส · ครั้งที่เท่าไรของเคส · รายละเอียดผู้รับบริการชุดเดียวกับที่พนักงานภาคสนามเห็น
+   (เพศ/อายุ/น้ำหนัก/ส่วนสูง · แพ้ยา/แพ้อาหาร · โรคประจำตัว · อาการปัจจุบัน · อุปกรณ์ · จุดประสงค์ — ผู้ใช้ขอเพิ่ม 23 พ.ย. 2569
+   หัวหน้าต้องรู้อาการเพื่อเลือกคนที่เหมาะ) · โรคประจำตัว/แพ้ยาอ่านสดจากแฟ้มผู้รับบริการ เหมือน cases/repo.js PATIENT_LIVE
+ * ไม่ให้: เบอร์โทรญาติ · ราคา · หมายเหตุภายในของเคส · กะของ KIN หรือของบริษัทอื่น
  */
 export async function partnerVisitDetail(partnerId, visitId) {
   await partnerVisitOr404(partnerId, visitId);
   const v = await sql.one(
     `${PARTNER_VISIT.replace('c.service_kind,', `c.service_kind, c.patient_gender, c.patient_age, c.weight_kg, c.height_cm,
-         c.medical_devices, c.start_date, c.end_date,`)}
+         c.medical_devices, c.start_date, c.end_date, c.current_symptoms, c.care_goal,
+         COALESCE(pt.medical_history, c.medical_history) AS medical_history,
+         pt.allergies AS patient_allergies, pt.food_allergies AS patient_food_allergies, pt.blood_type AS patient_blood_type,`)
+      .replace('LEFT JOIN employees e ON', 'LEFT JOIN patients pt ON pt.patient_id = c.patient_id LEFT JOIN employees e ON')}
      WHERE v.visit_id = :id`,
     { id: visitId },
   );

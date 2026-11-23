@@ -32,6 +32,9 @@ const personSchema = z.object({
   last_name: text(80).min(1, 'กรุณากรอกนามสกุล'),
   nickname: optText(40),
   phone: optText(30),
+  // อีเมล = ชื่อเข้าระบบอีกทางนอกจากรหัสพนักงาน (หน้า login รับทั้งสองแบบ · ผู้ใช้ขอ 23 พ.ย. 2569) — ช่องว่าง = ไม่ใช้
+  email: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? null : v),
+    z.string().trim().toLowerCase().max(254, 'อีเมลยาวเกินไป').email('อีเมลไม่ถูกต้อง').nullable().optional()),
 });
 const personPatch = personSchema.partial().extend({
   position: z.string().optional(),
@@ -191,6 +194,10 @@ partnerRouter.get('/team', asyncRoute(async (req, res) => {
 partnerRouter.post('/team', asyncRoute(async (req, res) => {
   const input = personSchema.extend({ position: z.string().min(1, 'เลือกตำแหน่ง') }).parse(req.body ?? {});
   res.status(201).json(await repo.createPerson(mine(req), input));
+}));
+
+partnerRouter.get('/team/:employeeId', asyncRoute(async (req, res) => {
+  res.json(await repo.personDetail(mine(req), req.params.employeeId));
 }));
 
 partnerRouter.patch('/team/:employeeId', asyncRoute(async (req, res) => {

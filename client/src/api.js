@@ -337,6 +337,7 @@ export const api = {
   partnerReject: (visitId, reason) => request(`/partner/visits/${visitId}/reject`, { method: 'POST', body: { reason: reason || null } }),
   partnerTeam: () => request('/partner/team'),
   partnerAddPerson: (body) => request('/partner/team', { method: 'POST', body }),
+  partnerPerson: (employeeId) => request(`/partner/team/${employeeId}`),
   partnerUpdatePerson: (employeeId, body) => request(`/partner/team/${employeeId}`, { method: 'PATCH', body }),
   partnerSummary: (month) => request(`/partner/summary?month=${month}`),
 

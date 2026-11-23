@@ -3460,7 +3460,35 @@ if (process.env.RUN_DB_TESTS !== '1') {
       const team = await call('GET', '/api/partner/team', undefined, leadA);
       assert.deepEqual(team.people.map((p) => p.employee_id).sort(), [leadARow.employee_id, a1Row.employee_id].sort());
       await call('PATCH', `/api/partner/team/${b1Row.employee_id}`, { phone: '0800000000' }, leadA, 404); // คนของบริษัทอื่น
+      await call('GET', `/api/partner/team/${b1Row.employee_id}`, undefined, leadA, 404);
+      const a1Detail = await call('GET', `/api/partner/team/${a1Row.employee_id}`, undefined, leadA);
+      assert.equal(a1Detail.employee_id, a1Row.employee_id);
+      assert.ok(Array.isArray(a1Detail.visits) && typeof a1Detail.done_total === 'number');
+      assert.ok(!('password_hash' in a1Detail));
       await call('PATCH', `/api/partner/team/${leadARow.employee_id}`, { phone: '0800000000' }, leadA, 403); // แก้หัวหน้าเองไม่ได้
+      // หัวหน้าแก้ข้อมูลคนในทีมได้ (ฟอร์มแก้ไขส่งครบทุกช่อง) · ตำแหน่งนอกหน้างานไม่ได้
+      const edited = await call('PATCH', `/api/partner/team/${a1Row.employee_id}`,
+        { first_name: 'กภ', last_name: 'เอหนึ่ง', nickname: 'เอ', phone: '0812345678', position: 'therapist' }, leadA);
+      assert.equal(edited.nickname, 'เอ');
+      assert.equal(edited.employee_id, a1Row.employee_id);
+      await call('PATCH', `/api/partner/team/${a1Row.employee_id}`, { position: 'manager' }, leadA, 400);
+      // อีเมลเป็นชื่อเข้าระบบอีกทาง: ตั้งได้ · ผิดรูปแบบไม่ได้ · ซ้ำบัญชีอื่นไม่ได้ · ล็อกอินด้วยอีเมลได้ · ช่องว่าง = ลบ
+      await call('PATCH', `/api/partner/team/${a1Row.employee_id}`, { email: 'not-an-email' }, leadA, 400);
+      await call('PATCH', `/api/partner/team/${b1Row.employee_id}`, { email: 'b1-partner@example.invalid' }, leadB);
+      assert.match((await call('PATCH', `/api/partner/team/${a1Row.employee_id}`, { email: 'B1-Partner@example.invalid' }, leadA, 409)).error, /อีเมลนี้/);
+      const withMail = await call('PATCH', `/api/partner/team/${a1Row.employee_id}`, { email: ' A1-Partner@Example.invalid ' }, leadA);
+      assert.equal(withMail.email, 'a1-partner@example.invalid');
+      assert.equal((await call('GET', '/api/partner/team', undefined, leadA)).people.find((x) => x.employee_id === a1Row.employee_id).email, 'a1-partner@example.invalid');
+      const { DEFAULT_PASSWORD: PW } = await import('../src/lib/auth.js');
+      const byMail = await fetch(`${base}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email: 'a1-partner@example.invalid', password: PW }) });
+      assert.equal(byMail.status, 200, 'ล็อกอินด้วยอีเมลได้');
+      assert.equal((await byMail.json()).user?.employee_id ?? a1Row.employee_id, a1Row.employee_id);
+      // ล็อกอินด้วยรหัสเริ่มต้นทำให้บัญชีถูกบังคับเปลี่ยนรหัส — คืนสถานะไว้ เทสส่วนถัดไปใช้บัญชีนี้ต่อ
+      await sql.run('UPDATE employees SET uses_default_password = FALSE WHERE employee_id = :id', { id: a1Row.employee_id });
+      assert.equal((await call('PATCH', `/api/partner/team/${b1Row.employee_id}`, { email: '' }, leadB)).email, null);
+      const c1Row = await call('POST', '/api/partner/team', { first_name: 'ค', last_name: 'อีเมล', position: 'therapist', email: 'a1-partner@example.invalid' }, leadA, 409);
+      assert.match(c1Row.error, /อีเมลนี้/);
 
       // ---- คนของพาร์ทเนอร์ไม่อยู่ในหน้าพนักงาน/ตัวเลือกจับคู่ของ KIN · จับคู่ตรงไม่ได้ ----
       for (const q of [a1Row.employee_id, leadARow.employee_id]) {
@@ -3510,7 +3538,9 @@ if (process.env.RUN_DB_TESTS !== '1') {
       assert.equal(detail.client_name, 'Workflow patient');
       assert.ok(detail.visit_no >= 1 && detail.visit_total >= detail.visit_no);
       assert.ok(Array.isArray(detail.others));
-      for (const k of ['fee', 'staff_pay', 'partner_rate', 'medical_history', 'current_symptoms', 'client_phone', 'note', 'case_id']) assert.ok(!(k in detail), `ไม่ควรมี ${k}`);
+      // รายละเอียดผู้รับบริการมาด้วย (ผู้ใช้ขอ 23 พ.ย. 2569) แต่ยังไม่มีเงิน/เบอร์ญาติ/หมายเหตุภายใน
+      for (const k of ['current_symptoms', 'medical_history', 'care_goal', 'patient_allergies']) assert.ok(k in detail, `ควรมี ${k}`);
+      for (const k of ['fee', 'staff_pay', 'partner_rate', 'client_phone', 'note', 'case_id']) assert.ok(!(k in detail), `ไม่ควรมี ${k}`);
       assert.equal((await get(`/api/partner/visits/${v1}`, staffA1)).status, 403);
       const cands = await call('GET', `/api/partner/visits/${v1}/candidates`, undefined, leadA);
       assert.deepEqual(cands.map((x) => x.employee_id), [a1Row.employee_id]);
@@ -3522,6 +3552,7 @@ if (process.env.RUN_DB_TESTS !== '1') {
       assert.equal(row.assigned_to, a1Row.employee_id);
       assert.equal(row.partner_status, 'accepted');
       assert.ok((await get('/api/my/notifications', staffA1)).body.items.some((n) => n.kind === 'visits_added' && n.visit_id === v1));
+      assert.ok((await call('GET', `/api/partner/team/${a1Row.employee_id}`, undefined, leadA)).visits.some((x) => x.visit_id === v1));
 
       // ---- พนักงานพาร์ทเนอร์: เห็นเคสของกะตัวเอง · ไม่เห็นแชทญาติ/ค่าตอบแทน ----
       assert.ok((await get('/api/my/cases', staffA1)).body.some((x) => x.case_id === c.case_id));

@@ -97,12 +97,15 @@ export default function PartnerJobsPage() {
           </div>
         )}
 
-        <div className="seg pt-tabs" role="tablist" aria-label="สถานะงาน">
+        {/* แถบแท็บแบบเส้นใต้ เต็มความกว้าง + ตัวเลขเป็นป้าย (ผู้ใช้ขอออกแบบใหม่ 23 พ.ย. 2569) */}
+        <div className="pt-tabbar" role="tablist" aria-label="สถานะงาน">
           {TABS.map((t) => {
             const n = t.key === 'past' ? null : me?.counts?.[t.key];
             return (
-              <button key={t.key} type="button" role="tab" aria-selected={tab === t.key} className={tab === t.key ? 'on' : ''} onClick={() => setTab(t.key)}>
-                {t.label}{n ? ` · ${n}` : ''}
+              <button key={t.key} type="button" role="tab" aria-selected={tab === t.key}
+                className={`pt-tab${tab === t.key ? ' on' : ''}`} onClick={() => setTab(t.key)}>
+                <span>{t.label}</span>
+                {n > 0 && <span className="pt-tab-count">{n}</span>}
               </button>
             );
           })}
@@ -187,7 +190,7 @@ function useEsc(onCancel) {
   }, [onCancel]);
 }
 
-/** รายละเอียดเคสคร่าวๆ — server ให้เท่าที่ใช้เตรียมตัว (ไม่มีอาการ/โรค/เบอร์โทร/ราคา · partners/repo.js partnerVisitDetail) */
+/** รายละเอียดเคส + ผู้รับบริการ — server ให้ชุดเดียวกับพนักงานภาคสนาม ไม่มีเบอร์ญาติ/ราคา (partners/repo.js partnerVisitDetail) */
 function DetailDialog({ visit, tab, onCancel, onAssign, onReject }) {
   const [d, setD] = useState(null);
   const [error, setError] = useState(null);
@@ -197,12 +200,9 @@ function DetailDialog({ visit, tab, onCancel, onAssign, onReject }) {
   }, [visit.visit_id]);
   const v = d ?? visit;
   const map = mapUrl(v);
-  const body = [
-    v.patient_gender && GENDER_LABELS[v.patient_gender],
-    v.patient_age != null && `${v.patient_age} ปี`,
-    v.weight_kg && `${v.weight_kg} กก.`,
-    v.height_cm && `${v.height_cm} ซม.`,
-  ].filter(Boolean).join(' · ');
+  const genderAge = [v.patient_gender && GENDER_LABELS[v.patient_gender], v.patient_age != null && `${v.patient_age} ปี`]
+    .filter(Boolean).join(' / ');
+  const weightHeight = [v.weight_kg && `${v.weight_kg} กก.`, v.height_cm && `${v.height_cm} ซม.`].filter(Boolean).join(' / ');
   // ต้องโหลดรายละเอียดสำเร็จก่อน — KIN ดึงกะคืนไประหว่างนั้น (404) ไม่ควรเหลือปุ่มที่กดแล้วพัง
   const canAct = Boolean(d) && tab !== 'past' && v.status !== 'cancelled' && !v.check_in_at && v.visit_date >= todayTH();
   return createPortal(
@@ -229,8 +229,6 @@ function DetailDialog({ visit, tab, onCancel, onAssign, onReject }) {
                 <dd>{d.start_date ? formatDate(d.start_date) : '—'} – {d.end_date ? formatDate(d.end_date) : 'ยังไม่กำหนด'}</dd>
               </>
             )}
-            {body && (<><dt>ผู้รับบริการ</dt><dd>{body}</dd></>)}
-            {d?.medical_devices && (<><dt>อุปกรณ์ที่ติดตัว</dt><dd className="pt-pre">{d.medical_devices}</dd></>)}
             <dt>สถานที่</dt>
             <dd>
               {v.address || <span className="muted">ไม่ได้ระบุที่อยู่</span>}
@@ -243,6 +241,28 @@ function DetailDialog({ visit, tab, onCancel, onAssign, onReject }) {
             </dd>
           </dl>
           {!d && !error && <p className="muted">กำลังโหลดรายละเอียด…</p>}
+          {/* รายละเอียดผู้รับบริการ — ชุดเดียวกับหน้าเคสของ KIN (ผู้ใช้ขอ 23 พ.ย. 2569) */}
+          {d && (
+            <section className="pt-detail-others pt-patient">
+              <h3>รายละเอียดผู้รับบริการ</h3>
+              <div className="pt-patient-grid">
+                <PField label="ชื่อผู้รับบริการ" value={d.client_name} />
+                <PField label="เพศ / อายุ" value={genderAge} />
+                <PField label="น้ำหนัก / ส่วนสูง" value={weightHeight} />
+              </div>
+              {(d.patient_allergies || d.patient_food_allergies) && (
+                <p className="allergy-alert">
+                  {d.patient_allergies && <>แพ้ยา: {d.patient_allergies}</>}
+                  {d.patient_allergies && d.patient_food_allergies && ' · '}
+                  {d.patient_food_allergies && <>แพ้อาหาร: {d.patient_food_allergies}</>}
+                </p>
+              )}
+              <PField label="โรคประจำตัว" value={d.medical_history} />
+              <PField label="อาการปัจจุบัน" value={d.current_symptoms} />
+              {d.medical_devices && <PField label="อุปกรณ์ / สายต่างๆ" value={d.medical_devices} />}
+              <PField label="จุดประสงค์ในการดูแล" value={d.care_goal} />
+            </section>
+          )}
           {d?.others?.length > 0 && (
             <section className="pt-detail-others">
               <h3>กะอื่นของเคสนี้ที่ส่งให้บริษัทคุณ</h3>
@@ -279,6 +299,16 @@ function DetailDialog({ visit, tab, onCancel, onAssign, onReject }) {
       </div>
     </div>,
     document.body,
+  );
+}
+
+function PField({ label, value }) {
+  const empty = value == null || value === '';
+  return (
+    <div className="pt-pfield">
+      <span className="pt-pfield-label">{label}</span>
+      <span className={`pt-pfield-value${empty ? ' is-empty' : ''}`}>{empty ? 'ไม่ได้ระบุ' : value}</span>
+    </div>
   );
 }
 
