@@ -110,6 +110,12 @@ function toImage(dataUrl) {
 async function myVisit(req) {
   const visit = await cases.findVisit(Number(req.params.id));
   if (!visit || visit.assigned_to !== req.user.employee_id) return null;
+  /* พนักงานพาร์ทเนอร์: กะเก่าเกินหน้าต่าง (วันกะ + 3 วัน) = ไม่ใช่ของเขาแล้ว (ตรวจ 23 พ.ย. 2569)
+     เดิมเส้นนี้ไม่มีหน้าต่าง — อ่าน/เขียนรายงาน และเช็คอินกะที่พลาดไปหลายสัปดาห์ให้กลายเป็นกะที่ต้องจ่ายได้ */
+  if (req.user.partner_id) {
+    const cutoff = new Date(Date.now() + 7 * 3.6e6 - cases.PARTNER_ACCESS_WINDOW_DAYS * 864e5).toISOString().slice(0, 10);
+    if (visit.visit_date < cutoff) return null;
+  }
   return visit;
 }
 

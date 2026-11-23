@@ -144,7 +144,10 @@ export default function PartnerTeamPage() {
                   {lead ? (
                     <span className="pt-tag is-muted">หัวหน้า</span>
                   ) : !on ? (
-                    <button type="button" className="btn tiny" onClick={() => setStatus(p, 'active')}>เปิดบัญชี</button>
+                    p.status === 'suspended'
+                      // KIN ระงับไว้ — หัวหน้าเปิดคืนเองไม่ได้ (server กันด้วย · ตรวจ 23 พ.ย. 2569)
+                      ? <span className="pt-tag is-warn">KIN ระงับ</span>
+                      : <button type="button" className="btn tiny" onClick={() => setStatus(p, 'active')}>เปิดบัญชี</button>
                   ) : (
                     <>
                       {p.default_password && !p.last_login_at && <span className="pt-tag is-warn">รอเข้าครั้งแรก</span>}
@@ -220,7 +223,8 @@ function PersonDetailDialog({ person, onCancel, onEdit, onReopen }) {
   const visits = d?.visits ?? [];
   const upcoming = visits.filter((v) => v.status !== 'cancelled' && !v.check_out_at && v.visit_date >= today).reverse();
   const history = visits.filter((v) => !upcoming.includes(v));
-  const status = !on ? { text: 'ปิดบัญชีแล้ว', cls: 'is-muted' }
+  const status = p.status === 'suspended' ? { text: 'KIN ระงับ — ติดต่อ KIN เพื่อเปิดคืน', cls: 'is-warn' }
+    : !on ? { text: 'ปิดบัญชีแล้ว', cls: 'is-muted' }
     : p.default_password && !p.last_login_at ? { text: 'รอเข้าครั้งแรก', cls: 'is-warn' }
       : { text: 'ใช้งานอยู่', cls: 'is-ok' };
   return createPortal(
@@ -270,7 +274,7 @@ function PersonDetailDialog({ person, onCancel, onEdit, onReopen }) {
           <button type="button" className="btn" onClick={onCancel}>ปิด</button>
           {!lead && (on
             ? <button type="button" className="btn primary" onClick={() => onEdit(p)}>แก้ไขข้อมูล</button>
-            : <button type="button" className="btn primary" onClick={() => onReopen(p)}>เปิดบัญชี</button>)}
+            : p.status !== 'suspended' && <button type="button" className="btn primary" onClick={() => onReopen(p)}>เปิดบัญชี</button>)}
         </footer>
       </div>
     </div>,

@@ -11,6 +11,9 @@ import ConfirmButton from './ConfirmButton.jsx';
 import { useConfirm } from './ConfirmDialog.jsx';
 import PartnerLogo, { logoDataUrl } from './PartnerLogo.jsx';
 
+/** เวลา timestamptz → วันที่ไทย (YYYY-MM-DD) — ตัดสตริง UTC ตรงๆ ได้วันก่อนหน้าช่วงตี 0–7 */
+const dateTH = (ts) => new Date(ts).toLocaleDateString('sv-SE', { timeZone: 'Asia/Bangkok' });
+
 /**
  * ตั้งค่าระบบ › พาร์ทเนอร์ (ผู้รับเหมาช่วงรายครั้ง · 21 พ.ย. 2569) — สิทธิ์งานหลังบ้าน (office)
  *   กะที่ต้องดู · บริษัท (เรทต่อครั้ง · บัญชีหัวหน้า · คนในทีม) · สรุปรายเดือน + บันทึกจ่าย (สิทธิ์ค่าตอบแทน)
@@ -320,7 +323,7 @@ function MonthlySummary({ canPay }) {
                   <td className="num strong">{formatBaht(r.amount)}</td>
                   <td>
                     {r.payment ? (
-                      <span className="pt-paid">จ่ายแล้ว {formatBaht(r.payment.amount)}<span className="cell-sub">{formatDate(String(r.payment.paid_at).slice(0, 10))} · {r.payment.paid_by_name ?? ''}</span></span>
+                      <span className="pt-paid">จ่ายแล้ว {formatBaht(r.payment.amount)}<span className="cell-sub">{formatDate(dateTH(r.payment.paid_at))} · {r.payment.paid_by_name ?? ''}</span></span>
                     ) : canPay && finished && r.done > 0 ? (
                       <ConfirmButton className="btn tiny" danger={false} title={`บันทึกจ่าย ${r.name}?`}
                         detail={`${monthName(month)} · ${r.done} ครั้ง · ${formatBaht(r.amount)} — ตรึงยอดไว้ แก้ทีหลังไม่ได้`}

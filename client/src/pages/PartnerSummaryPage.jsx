@@ -6,6 +6,9 @@ import ErrorBar from '../components/ErrorBar.jsx';
 import PageRefresh from '../components/PageRefresh.jsx';
 import LineIcon from '../components/LineIcon.jsx';
 
+/** เวลา timestamptz → วันที่ไทย (YYYY-MM-DD) — ตัดสตริง UTC ตรงๆ ได้วันก่อนหน้าช่วงตี 0–7 */
+const dateTH = (ts) => new Date(ts).toLocaleDateString('sv-SE', { timeZone: 'Asia/Bangkok' });
+
 /**
  * หัวหน้าพาร์ทเนอร์ — สรุปรายเดือน (21 พ.ย. 2569)
  * ยอดที่บริษัทจะได้รับ = กะที่ไปจริง (เช็คอิน+เช็คเอาท์) × เรท ณ ตอนที่ KIN ส่งงาน · ขาดงาน = ฿0
@@ -77,7 +80,7 @@ export default function PartnerSummaryPage() {
                 <span className="muted">ยอดที่บริษัทจะได้รับ</span>
                 <strong className="pt-amount">{formatBaht(data.amount)}</strong>
                 {data.payment ? (
-                  <span className="pt-paid"><LineIcon name="check" className="text-ico" />KIN จ่ายแล้ว {formatBaht(data.payment.amount)} · {formatDate(String(data.payment.paid_at).slice(0, 10))}</span>
+                  <span className="pt-paid"><LineIcon name="check" className="text-ico" />KIN จ่ายแล้ว {formatBaht(data.payment.amount)} · {formatDate(dateTH(data.payment.paid_at))}</span>
                 ) : (
                   <span className="pt-unpaid">{month >= now ? 'เดือนนี้ยังไม่จบ · ยอดยังเพิ่มได้' : 'ยังไม่จ่าย · KIN ตรวจยอดหลังสิ้นเดือน'}</span>
                 )}

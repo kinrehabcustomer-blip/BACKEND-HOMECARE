@@ -289,7 +289,9 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
   const teamChips = staff.map((s) => ({ ...s, dotClass: multi ? dotClass(s.employee_id) : null }));
   // นัดถัดไปของคนเดิมในเคสนี้ที่ยังเปลี่ยนได้ — ตัวเลือก "เปลี่ยนทั้งชุด" ในกล่อง
   const followUpsOf = (v) => visits.filter((o) => o.visit_id !== v.visit_id && canSwap(o)
-    && o.assigned_to === v.assigned_to && o.visit_date >= v.visit_date);
+    && o.assigned_to === v.assigned_to && o.visit_date >= v.visit_date
+    // กะที่ส่งพาร์ทเนอร์อยู่ไม่ติดไปกับ "ทั้งชุด" (ตรวจ 23 พ.ย. 2569) — เปลี่ยนคนกะพวกนั้น = ดึงคืนจากบริษัทเงียบๆ
+    && (o.partner_id ?? null) === (v.partner_id ?? null));
 
   /* พาร์ทเนอร์ (ผู้รับเหมาช่วงรายครั้ง · 21 พ.ย. 2569) — ส่งกะให้บริษัท / ดึงคืน (ให้ผู้รับผิดชอบเคสถ้ามี) */
   async function sendToPartner(v, partner) {

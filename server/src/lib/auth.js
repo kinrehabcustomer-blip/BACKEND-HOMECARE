@@ -90,11 +90,16 @@ export const verifyPassword = (plain, hash) => bcrypt.compare(plain, hash ?? '')
    เซสชันที่ค้างอยู่ก่อนวันนี้โดนตอนเข้าสู่ระบบครั้งถัดไป
    คอลัมน์แยกจาก must_change_password (ของยุครหัสชั่วคราวรายคน ยังผูกกับการซ่อน/เปิดรหัสชั่วคราวให้ HR ดู) */
 let defaultPwReady = null;
+/* ตรวจ 23 พ.ย. 2569: ALTER ... ADD COLUMN IF NOT EXISTS ขอล็อก ACCESS EXCLUSIVE แม้คอลัมน์มีอยู่แล้ว
+   อยู่ในด่าน requireAuth = ทุก instance ใหม่ต้องรอคิวล็อกก่อนตอบคำขอแรก (รายงานยาวๆ ถือตารางอยู่ → ทั้งแอปค้าง)
+   จึงอ่าน catalog ก่อน (ไม่ล็อก) และแตะ DDL เฉพาะตอนที่ยังไม่มีจริง */
 export const ensureDefaultPasswordColumn = () =>
-  (defaultPwReady ??= sql
-    .run('ALTER TABLE employees ADD COLUMN IF NOT EXISTS uses_default_password BOOLEAN')
-    .then(() => normalizeDefaultPasswordColumn())
-    .catch((err) => { defaultPwReady = null; throw err; }));
+  (defaultPwReady ??= (async () => {
+    const col = await sql.one(`SELECT 1 AS ok FROM information_schema.columns
+       WHERE table_schema = current_schema() AND table_name = 'employees' AND column_name = 'uses_default_password'`);
+    if (!col) await sql.run('ALTER TABLE employees ADD COLUMN IF NOT EXISTS uses_default_password BOOLEAN');
+    await normalizeDefaultPasswordColumn();
+  })().catch((err) => { defaultPwReady = null; throw err; }));
 
 /**
  * แก้คอลัมน์รูปแบบเก่า (ตรวจ 21 พ.ย. 2569) — รุ่นแรกของฟีเจอร์ (ตอนยังตรวจทุกครั้ง) สร้างเป็น NOT NULL DEFAULT FALSE
@@ -205,6 +210,7 @@ export function requireAuth(req, res, next) {
          ตารางต้องมีอยู่ก่อนเสมอ (ensureRevokedSessions ด้านล่าง ถูกเรียกตั้งแต่ตอนสร้างแอป)
          เพราะ Postgres ตรวจชื่อตารางตั้งแต่ตอนแปลคำสั่ง — to_regclass กันตรงนี้ไม่ได้ */
       `SELECT e.position, e.status, e.uses_default_password, e.partner_id,
+              (SELECT p.status FROM partners p WHERE p.partner_id = e.partner_id) AS partner_status,
               EXTRACT(EPOCH FROM e.password_changed_at) AS password_changed_epoch,
               -- created_at เป็นข้อความเวลาไทย — แปลงเฉพาะที่รูปแบบถูก (ข้อมูลเพี้ยนแถวเดียวต้องไม่ทำให้ทุกคำขอพัง)
               CASE WHEN e.created_at ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}$'
@@ -258,6 +264,12 @@ export function requireAuth(req, res, next) {
       if (!emp || BLOCKED_STATUSES[emp.status]) {
         res.clearCookie(COOKIE_NAME, clearCookieOptions);
         return next(new ApiError(401, emp ? `${BLOCKED_STATUSES[emp.status]} — ติดต่อผู้ดูแลระบบ` : 'บัญชีนี้ใช้งานไม่ได้แล้ว'));
+      }
+      /* บริษัทพาร์ทเนอร์ที่ KIN ปิดใช้งาน = ทุกบัญชีของบริษัทใช้ระบบไม่ได้ (ตรวจ 23 พ.ย. 2569 — เดิมกันแค่หน้าหัวหน้า
+         พนักงานยังเปิดเคส/ประวัติการรักษา/เช็คอินได้) */
+      if (emp.partner_id && emp.partner_status !== 'active') {
+        res.clearCookie(COOKIE_NAME, clearCookieOptions);
+        return next(new ApiError(401, 'บริษัทพาร์ทเนอร์ของคุณปิดใช้งานอยู่ — ติดต่อ KIN'));
       }
 
       req.user = {

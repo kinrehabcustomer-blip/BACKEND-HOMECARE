@@ -96,6 +96,16 @@ export async function createPartner(input, actor) {
 
 export async function updatePartner(partnerId, input) {
   await ensurePartnerSchema();
+  if (input.status === 'inactive') {
+    /* ตรวจ 23 พ.ย. 2569: ปิดบริษัทแล้วกะที่ส่งไปค้างอยู่ — หัวหน้าปฏิเสธ/เปลี่ยนคนไม่ได้แล้ว KIN ก็ไม่ได้รับแจ้ง
+       ให้ดึงกะคืนก่อน (ปุ่ม "ดึงคืน" ในตารางนัดของเคส) */
+    const { n } = await sql.one(
+      `SELECT COUNT(*)::int AS n FROM case_visits WHERE partner_id = :id AND status <> 'cancelled'
+         AND check_out_at IS NULL AND (visit_date >= :today OR check_in_at IS NOT NULL)`,
+      { id: partnerId, today: todayTH() },
+    );
+    if (n > 0) throw new ApiError(409, `บริษัทนี้ยังมีงานที่ส่งไปค้างอยู่ ${n} กะ — ดึงคืนก่อนแล้วจึงปิดใช้งาน`);
+  }
   const cols = ['name', 'contact_name', 'phone', 'rate_per_visit', 'status', 'note'].filter((c) => c in input);
   if (!cols.length) return findPartner(partnerId);
   const row = await sql.one(
@@ -178,7 +188,7 @@ export async function createPerson(partnerId, input, { asLead = false } = {}) {
 /** แก้คนในทีม — ชื่อ/เบอร์/ตำแหน่ง · ปิดบัญชี (resigned) / เปิดคืน (active) · เฉพาะคนของบริษัทตัวเอง */
 export async function updatePerson(partnerId, employeeId, input, { allowLead = false } = {}) {
   await ensurePartnerSchema();
-  const person = await sql.one('SELECT employee_id, position, partner_id FROM employees WHERE employee_id = :id', { id: employeeId });
+  const person = await sql.one('SELECT employee_id, position, status, partner_id FROM employees WHERE employee_id = :id', { id: employeeId });
   if (!person || person.partner_id !== partnerId) throw new ApiError(404, 'ไม่พบคนนี้ในทีม');
   if (person.position === LEAD && !allowLead) throw new ApiError(403, 'แก้บัญชีหัวหน้าพาร์ทเนอร์ได้จากหลังบ้าน KIN เท่านั้น');
   if (input.position && person.position !== LEAD && !TEAM_POSITIONS.includes(input.position)) throw new ApiError(400, 'ตำแหน่งไม่ถูกต้อง');
@@ -188,14 +198,20 @@ export async function updatePerson(partnerId, employeeId, input, { allowLead = f
   if (input.position && person.position !== LEAD) patch.position = input.position;
   if (input.status) {
     if (!['active', 'resigned'].includes(input.status)) throw new ApiError(400, 'สถานะไม่ถูกต้อง');
-    patch.status = input.status;
+    /* ตรวจ 23 พ.ย. 2569: เดิมหัวหน้าเปิดบัญชีที่ KIN ปิด (เช่น ทำผิดวินัย) คืนได้ทันที
+       KIN ปิด → 'suspended' · หัวหน้าปิด → 'resigned' · หัวหน้าเปิดคืนได้เฉพาะที่ตัวเองปิด (resigned) */
+    if (input.status === 'active' && !allowLead && person.status !== 'resigned') {
+      throw new ApiError(403, 'บัญชีนี้ถูก KIN ระงับไว้ — ติดต่อ KIN เพื่อเปิดคืน');
+    }
+    patch.status = input.status === 'resigned' && allowLead ? 'suspended' : input.status;
     patch.resign_date = input.status === 'resigned' ? todayTH() : null;
   }
-  if (patch.status === 'resigned') {
+  if (patch.status === 'resigned' || patch.status === 'suspended') {
     // คนที่ยังถือกะข้างหน้าอยู่ ปิดบัญชีไม่ได้ — ให้หัวหน้าเปลี่ยนคนในกะนั้นก่อน (ไม่งั้นกะค้างเป็นของคนที่เข้าระบบไม่ได้)
     const { n } = await sql.one(
+      /* รวมกะที่เช็คอินแล้วแต่ยังไม่เช็คเอาท์ (ตรวจ 23 พ.ย. 2569) — ปิดกลางกะ = เช็คเอาท์ไม่ได้ กะไม่นับว่าไปแล้ว */
       `SELECT COUNT(*)::int AS n FROM case_visits WHERE assigned_to = :id AND status <> 'cancelled'
-         AND check_in_at IS NULL AND visit_date >= :today`,
+         AND ((check_in_at IS NULL AND visit_date >= :today) OR (check_in_at IS NOT NULL AND check_out_at IS NULL))`,
       { id: employeeId, today: todayTH() },
     );
     if (n > 0) throw new ApiError(409, `คนนี้ยังมีกะข้างหน้า ${n} กะ — เปลี่ยนคนในกะเหล่านั้นก่อนปิดบัญชี`);
@@ -234,7 +250,27 @@ const lockedGuard = (what, owner) => (v) => {
 };
 
 /** ช่วงเวลาของกะ (ไม่ระบุเวลา = ทั้งวัน) — ใช้ตรวจชนตอนเลือกคน */
-const slotOf = (s, e) => [s ?? '00:00', e && e > (s ?? '00:00') ? e : '24:00'];
+/**
+ * ช่วงเวลาของกะเป็น "นาทีต่อเนื่องข้ามวัน" — หลักเดียวกับ cases/repo.js (SPAN/SPAN_END) ของระบบหลัก (ตรวจ 23 พ.ย. 2569)
+ * กะดึก 20:00–08:00 (เวลาจบ ≤ เวลาเริ่ม) = จบ 08:00 ของวันถัดไป · ไม่ระบุเวลา = ทั้งวัน
+ * เดิมตัดกะดึกที่ 24:00 และเทียบเฉพาะวันเดียวกัน → กะดึกเมื่อคืนไม่ชนกับนัด 06:00 เช้านี้
+ * ชนกัน = ทับกันจริง (ต่อกันพอดี เช่น 08:00–20:00 แล้ว 20:00–08:00 ไม่นับว่าชน)
+ */
+const toMin = (t) => { const [h, m] = String(t).split(':').map(Number); return h * 60 + (m || 0); };
+const spanOf = (date, s, e) => {
+  const day = Date.parse(`${date}T00:00:00Z`) / 60000;
+  const a = s ? toMin(s) : 0;
+  let b = e ? toMin(e) : 1440;
+  if (s && e && b <= a) b += 1440;
+  return [day + a, day + b];
+};
+const overlaps = ([a1, a2], [b1, b2]) => a1 < b2 && b1 < a2;
+/** วันก่อน–วันนั้น–วันถัดไป (กะดึกยาวไม่เกิน 24 ชม. จึงชนได้แค่วันข้างเคียง) */
+const nearDays = (date) => {
+  const d = Date.parse(`${date}T00:00:00Z`);
+  const f = (n) => new Date(d + n * 864e5).toISOString().slice(0, 10);
+  return { d0: f(-1), d2: f(1) };
+};
 
 /** ส่งกะให้พาร์ทเนอร์ — คน KIN ที่ถืออยู่เดิม (ถ้ามี) ได้แจ้ง "กะถูกย้าย" · หัวหน้าทุกคนของบริษัทได้แจ้งงานใหม่ */
 export async function sendVisit(visitId, partnerId, user) {
@@ -388,16 +424,18 @@ const withDeadline = (v) => {
 export async function partnerVisits(partnerId, tab = 'pending') {
   await ensurePartnerSchema();
   const where = {
-    pending: `v.partner_status = 'pending' AND v.status <> 'cancelled' AND v.check_in_at IS NULL`,
+    // รอรับ = ยังรับได้จริง (ถึงวันนี้) · เลยวันแล้วไปอยู่ "ที่ผ่านมา" (ตรวจ 23 พ.ย. 2569 — เดิมค้างในรอรับ/ด่วนตลอดไป)
+    pending: `v.partner_status = 'pending' AND v.status <> 'cancelled' AND v.check_in_at IS NULL AND v.visit_date >= :today`,
     accepted: `v.partner_status = 'accepted' AND v.status <> 'cancelled' AND v.check_out_at IS NULL AND v.visit_date >= :yesterday`,
-    past: `(v.check_out_at IS NOT NULL OR v.status = 'cancelled' OR v.visit_date < :yesterday)`,
+    past: `(v.check_out_at IS NOT NULL OR v.status = 'cancelled' OR v.visit_date < :yesterday
+            OR (v.partner_status = 'pending' AND v.check_in_at IS NULL AND v.visit_date < :today))`,
   }[tab];
   if (!where) throw new ApiError(400, 'แท็บไม่ถูกต้อง');
   const order = tab === 'past' ? 'v.visit_date DESC, v.planned_start DESC NULLS LAST' : 'v.visit_date, v.planned_start NULLS FIRST';
   const yesterday = new Date(Date.now() + 7 * 3.6e6 - 864e5).toISOString().slice(0, 10);
   const rows = await sql.all(
     `${PARTNER_VISIT} WHERE v.partner_id = :pid AND ${where} ORDER BY ${order} LIMIT 200`,
-    { pid: partnerId, yesterday },
+    { pid: partnerId, yesterday, today: todayTH() },
   );
   return rows.map(withDeadline);
 }
@@ -406,16 +444,17 @@ export async function partnerCounts(partnerId) {
   await ensurePartnerSchema();
   const yesterday = new Date(Date.now() + 7 * 3.6e6 - 864e5).toISOString().slice(0, 10);
   return sql.one(
-    `SELECT COUNT(*) FILTER (WHERE v.partner_status = 'pending' AND v.status <> 'cancelled' AND v.check_in_at IS NULL)::int AS pending,
+    `SELECT COUNT(*) FILTER (WHERE v.partner_status = 'pending' AND v.status <> 'cancelled' AND v.check_in_at IS NULL
+                               AND v.visit_date >= :today)::int AS pending,
             COUNT(*) FILTER (WHERE v.partner_status = 'accepted' AND v.status <> 'cancelled' AND v.check_out_at IS NULL
                                AND v.visit_date >= :yesterday)::int AS accepted,
             -- รอรับและใกล้นัดภายใน 24 ชม. (ไทล์ "ต้องเลือกคนด่วน" บนจอคอม)
             COUNT(*) FILTER (WHERE v.partner_status = 'pending' AND v.status <> 'cancelled' AND v.check_in_at IS NULL
-                               AND ${START_AT} < now() + interval '24 hours')::int AS urgent,
+                               AND v.visit_date >= :today AND ${START_AT} < now() + interval '24 hours')::int AS urgent,
             COUNT(*) FILTER (WHERE v.check_in_at IS NOT NULL AND v.check_out_at IS NOT NULL AND v.status <> 'cancelled'
-                               AND v.visit_date LIKE :month)::int AS done_month
+                               AND v.pay_status IS DISTINCT FROM 'rejected' AND v.visit_date LIKE :month)::int AS done_month
      FROM case_visits v WHERE v.partner_id = :pid`,
-    { pid: partnerId, yesterday, month: `${todayTH().slice(0, 7)}%` },
+    { pid: partnerId, yesterday, today: todayTH(), month: `${todayTH().slice(0, 7)}%` },
   );
 }
 
@@ -479,20 +518,23 @@ export async function candidates(partnerId, visitId) {
     { pid: partnerId, positions: TEAM_POSITIONS },
   );
   const busy = await sql.all(
-    `SELECT v.assigned_to, v.visit_id, v.planned_start, v.planned_end
+    `SELECT v.assigned_to, v.visit_id, v.visit_date, v.planned_start, v.planned_end
      FROM case_visits v
-     WHERE v.visit_date = :date AND v.status <> 'cancelled' AND v.visit_id <> :id
+     WHERE v.visit_date BETWEEN :d0 AND :d2 AND v.status <> 'cancelled' AND v.visit_id <> :id
        AND v.assigned_to = ANY(:ids::text[])`,
-    { date: visit.visit_date, id: visitId, ids: team.map((t) => t.employee_id) },
+    { ...nearDays(visit.visit_date), id: visitId, ids: team.map((t) => t.employee_id) },
   );
-  const [a1, a2] = slotOf(full.planned_start, full.planned_end);
+  const me = spanOf(visit.visit_date, full.planned_start, full.planned_end);
   return team.map((t) => {
-    const mine = busy.filter((b) => b.assigned_to === t.employee_id);
-    const conflict = mine.some((b) => {
-      const [b1, b2] = slotOf(b.planned_start, b.planned_end);
-      return a1 < b2 && b1 < a2;
-    });
-    return { ...t, busy: mine.map((b) => ({ start: b.planned_start, end: b.planned_end })), conflict };
+    // โชว์งานของวันนั้น + งานวันข้างเคียงที่ทับเวลาจริง (กะดึกเมื่อคืน / กะเช้าพรุ่งนี้)
+    const mine = busy.filter((b) => b.assigned_to === t.employee_id)
+      .map((b) => ({ ...b, hit: overlaps(me, spanOf(b.visit_date, b.planned_start, b.planned_end)) }))
+      .filter((b) => b.visit_date === visit.visit_date || b.hit);
+    return {
+      ...t,
+      busy: mine.map((b) => ({ start: b.planned_start, end: b.planned_end, date: b.visit_date === visit.visit_date ? null : b.visit_date })),
+      conflict: mine.some((b) => b.hit),
+    };
   });
 }
 
@@ -511,15 +553,15 @@ export async function acceptVisit(partnerId, visitId, employeeId, user) {
   if (visit.partner_status === 'accepted' && visit.assigned_to === employeeId) throw new ApiError(409, `${person.first_name} รับกะนี้อยู่แล้ว`);
   /* ชนเวลากับกะอื่นของคนนี้ในวันเดียวกัน = ไม่ให้รับ (หน้าเว็บกันไว้แล้ว แต่ server ต้องกันด้วย — เรียก API ตรง/สองหัวหน้ากดพร้อมกัน) */
   const mine = await sql.one('SELECT planned_start, planned_end FROM case_visits WHERE visit_id = :id', { id: visitId });
-  const others = await sql.all(
-    `SELECT planned_start, planned_end FROM case_visits
-     WHERE assigned_to = :emp AND visit_date = :date AND status <> 'cancelled' AND visit_id <> :id`,
-    { emp: employeeId, date: visit.visit_date, id: visitId },
-  );
-  const [a1, a2] = slotOf(mine.planned_start, mine.planned_end);
-  const clash = others.find((o) => { const [b1, b2] = slotOf(o.planned_start, o.planned_end); return a1 < b2 && b1 < a2; });
+  const CLASH_SQL = `SELECT visit_date, planned_start, planned_end FROM case_visits
+     WHERE assigned_to = :emp AND visit_date BETWEEN :d0 AND :d2 AND status <> 'cancelled' AND visit_id <> :id`;
+  const clashParams = { emp: employeeId, ...nearDays(visit.visit_date), id: visitId };
+  const me = spanOf(visit.visit_date, mine.planned_start, mine.planned_end);
+  const findClash = (rows) => rows.find((o) => overlaps(me, spanOf(o.visit_date, o.planned_start, o.planned_end)));
+  const clash = findClash(await sql.all(CLASH_SQL, clashParams));
   if (clash) {
-    throw new ApiError(409, `${person.first_name} มีงานอื่นชนเวลานี้ (${clash.planned_start ?? 'ทั้งวัน'}${clash.planned_end ? `–${clash.planned_end}` : ''}) — เลือกคนอื่น`);
+    const when = `${clash.visit_date !== visit.visit_date ? `${clash.visit_date} ` : ''}${clash.planned_start ?? 'ทั้งวัน'}${clash.planned_end ? `–${clash.planned_end}` : ''}`;
+    throw new ApiError(409, `${person.first_name} มีงานอื่นชนเวลานี้ (${when}) — เลือกคนอื่น`);
   }
   const kind = visit.partner_status === 'accepted' ? 'reassigned' : 'accepted';
   const actor = actorOf(user);
@@ -528,7 +570,14 @@ export async function acceptVisit(partnerId, visitId, employeeId, user) {
     note: `พาร์ทเนอร์${kind === 'accepted' ? 'รับงาน' : 'เปลี่ยนคน'}`,
     guard: lockedGuard('รับงาน', (v) => v.partner_id === partnerId),
     extra: { partner_status: 'accepted' },
-    after: (tx) => logPartnerEvent(tx, { visitId, caseId: visit.case_id, partnerId, kind, employeeId, actor }),
+    after: async (tx) => {
+      /* ตรวจชนเวลาซ้ำหลังล็อกรายคน (ตรวจ 23 พ.ย. 2569) — ตัวตรวจด้านบนอ่านนอกธุรกรรม สองคำขอพร้อมกันผ่านได้ทั้งคู่
+         ล็อกตาม employee_id: คำขอที่สองรอจนคำขอแรก commit แล้วเห็นกะนั้น → ชน → rollback ทั้งก้อน */
+      await tx.one('SELECT pg_advisory_xact_lock(hashtext(:k)) AS ok', { k: `partner-assign:${employeeId}` });
+      const hit = findClash(await tx.all(CLASH_SQL, clashParams));
+      if (hit) throw new ApiError(409, `${person.first_name} เพิ่งได้งานอื่นชนเวลานี้ — เลือกคนอื่น`);
+      await logPartnerEvent(tx, { visitId, caseId: visit.case_id, partnerId, kind, employeeId, actor });
+    },
   });
 }
 
@@ -559,20 +608,23 @@ export async function summary(partnerId, month) {
   await ensurePartnerSchema();
   const rows = await sql.all(
     `SELECT v.visit_id, v.case_id, v.visit_date, v.planned_start, v.check_in_at, v.check_out_at, v.status,
-            v.partner_rate, c.client_name,
+            v.partner_rate, v.partner_status, c.client_name,
             COALESCE(v.checked_in_by, v.assigned_to) AS employee_id,
             e.first_name || ' ' || e.last_name AS employee_name
      FROM case_visits v
      JOIN cases c ON c.case_id = v.case_id
      LEFT JOIN employees e ON e.employee_id = COALESCE(v.checked_in_by, v.assigned_to)
      WHERE v.partner_id = :pid AND v.visit_date LIKE :month AND v.status <> 'cancelled'
+       -- KIN ไม่อนุมัติกะนี้ (เช็คอินนอกพื้นที่ ฯลฯ) = ไม่นับจ่าย เหมือนค่าจ้างพนักงาน KIN (ตรวจ 23 พ.ย. 2569)
+       AND v.pay_status IS DISTINCT FROM 'rejected'
      ORDER BY v.visit_date DESC, v.planned_start DESC NULLS LAST`,
     { pid: partnerId, month: `${month}%` },
   );
   const today = todayTH();
   const visits = rows.map((r) => {
     const done = Boolean(r.check_in_at && r.check_out_at);
-    const missed = !r.check_in_at && r.visit_date < today;
+    // ขาดงาน = รับไปแล้วแต่ไม่มีใครไป · กะที่ยังไม่มีใครรับจนเลยวัน ไม่ใช่ความผิดของบริษัท (ตรวจ 23 พ.ย. 2569)
+    const missed = !r.check_in_at && r.visit_date < today && r.partner_status === 'accepted';
     return { ...r, done, missed, amount: done ? Number(r.partner_rate ?? 0) : 0 };
   });
   const { rejected } = await sql.one(
@@ -642,7 +694,7 @@ export async function costRows(from, to) {
     `SELECT v.case_id, COALESCE(v.partner_rate, 0)::float AS amount, v.visit_date AS date
      FROM case_visits v
      WHERE v.partner_id IS NOT NULL AND v.check_in_at IS NOT NULL AND v.check_out_at IS NOT NULL
-       AND v.status <> 'cancelled' AND v.visit_date BETWEEN :from AND :to`,
+       AND v.status <> 'cancelled' AND v.pay_status IS DISTINCT FROM 'rejected' AND v.visit_date BETWEEN :from AND :to`,
     { from, to },
   );
 }

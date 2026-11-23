@@ -3681,6 +3681,14 @@ if (process.env.RUN_DB_TESTS !== '1') {
       await call('POST', `/api/partner/visits/${jobA}/accept`, { employee_id: a1Row.employee_id }, leadA);
       await sql.run(`UPDATE case_visits SET visit_date = (SELECT visit_date FROM case_visits WHERE visit_id = :a) WHERE visit_id = :b`, { a: jobA, b: jobB });
       assert.match((await call('POST', `/api/partner/visits/${jobB}/accept`, { employee_id: a1Row.employee_id }, leadA, 409)).error, /ชนเวลา/);
+      // กะดึกข้ามคืน (ตรวจ 23 พ.ย. 2569): 20:00–08:00 คืนนี้ ชนกับ 06:00 เช้าพรุ่งนี้ · ต่อกันพอดี 08:00 ไม่ชน
+      await sql.run(`UPDATE case_visits SET planned_start = '20:00', planned_end = '08:00' WHERE visit_id = :a`, { a: jobA });
+      await sql.run(`UPDATE case_visits SET visit_date = to_char(visit_date::date + 1, 'YYYY-MM-DD'), planned_start = '06:00', planned_end = '10:00'
+                     WHERE visit_id = :b`, { b: jobB });
+      assert.match((await call('POST', `/api/partner/visits/${jobB}/accept`, { employee_id: a1Row.employee_id }, leadA, 409)).error, /ชนเวลา/);
+      assert.equal((await call('GET', `/api/partner/visits/${jobB}/candidates`, undefined, leadA)).find((x) => x.employee_id === a1Row.employee_id).conflict, true);
+      await sql.run(`UPDATE case_visits SET planned_start = '08:00', planned_end = '20:00' WHERE visit_id = :b`, { b: jobB });
+      assert.equal((await call('GET', `/api/partner/visits/${jobB}/candidates`, undefined, leadA)).find((x) => x.employee_id === a1Row.employee_id).conflict, false);
       // HR เปิด/แก้บัญชีคนของพาร์ทเนอร์ผ่านหน้าพนักงาน KIN ไม่ได้
       assert.equal((await get(`/api/employees/${a1Row.employee_id}`, HR)).status, 404);
       await call('PATCH', `/api/employees/${a1Row.employee_id}`, { position: 'manager' }, HR, 404);
@@ -3692,11 +3700,30 @@ if (process.env.RUN_DB_TESTS !== '1') {
       const FIN = emp('EMP-0393', 'finance');
       assert.equal((await get(`/api/partners/summary?month=${last.m}`, FIN)).status, 200);
       assert.equal((await get('/api/partners', FIN)).status, 403);
-      // ปิดใช้งานบริษัท → หัวหน้าทำอะไรไม่ได้ทุกเส้น (ไม่ใช่แค่ /me)
+      // KIN ปิดบัญชีคนของพาร์ทเนอร์ = ระงับ · หัวหน้าเปิดคืนเองไม่ได้ · KIN เปิดคืนได้ (ตรวจ 23 พ.ย. 2569)
+      const x1 = await call('POST', '/api/partner/team', { first_name: 'ระงับ', last_name: 'ทดสอบ', position: 'therapist' }, leadA, 201);
+      assert.equal((await call('PATCH', `/api/partners/${A.partner_id}/people/${x1.employee_id}`, { status: 'resigned' })).status, 'suspended');
+      assert.match((await call('PATCH', `/api/partner/team/${x1.employee_id}`, { status: 'active' }, leadA, 403)).error, /KIN/);
+      assert.equal((await call('PATCH', `/api/partners/${A.partner_id}/people/${x1.employee_id}`, { status: 'active' })).status, 'active');
+      // หัวหน้าปิดเอง → เปิดคืนเองได้
+      await call('PATCH', `/api/partner/team/${x1.employee_id}`, { status: 'resigned' }, leadA);
+      assert.equal((await call('PATCH', `/api/partner/team/${x1.employee_id}`, { status: 'active' }, leadA)).status, 'active');
+      // ปิดคนที่เช็คอินอยู่ (ยังไม่เช็คเอาท์) ไม่ได้
+      await sql.run(`UPDATE case_visits SET check_in_at = now(), checked_in_by = :e WHERE visit_id = :v`, { e: a1Row.employee_id, v: jobA });
+      await call('PATCH', `/api/partner/team/${a1Row.employee_id}`, { status: 'resigned' }, leadA, 409);
+      await sql.run(`UPDATE case_visits SET check_in_at = NULL, checked_in_by = NULL WHERE visit_id = :v`, { v: jobA });
+      // ปิดบริษัทที่ยังมีงานค้างไม่ได้ → ดึงคืนก่อน
+      assert.match((await call('PATCH', `/api/partners/${A.partner_id}`, { status: 'inactive' }, MANAGER, 409)).error, /ดึงคืน/);
+      const open = await sql.all(`SELECT visit_id FROM case_visits WHERE partner_id = :p AND status <> 'cancelled' AND check_out_at IS NULL`, { p: A.partner_id });
+      for (const o of open) await call('POST', `/api/partners/visits/${o.visit_id}/pull`, {});
+      // เก็บกวาด: กะที่ดึงคืนไปตกที่ผู้รับผิดชอบเคส — ยกเลิกทิ้ง ไม่ให้ไปเพิ่มภาระงานในเทสหน้าภาพรวม
+      await sql.run(`UPDATE case_visits SET status = 'cancelled' WHERE visit_id = ANY(:ids::int[])`, { ids: open.map((o) => o.visit_id) });
+      // ปิดใช้งานบริษัท → ทุกบัญชีของบริษัท (หัวหน้า + พนักงาน) ใช้ระบบไม่ได้
       await call('PATCH', `/api/partners/${A.partner_id}`, { status: 'inactive' });
-      assert.equal((await get('/api/partner/visits?tab=pending', leadA)).status, 403);
-      await call('POST', `/api/partner/visits/${jobB}/reject`, {}, leadA, 403);
-      await call('PATCH', `/api/partner/team/${a1Row.employee_id}`, { phone: '0811111111' }, leadA, 403);
+      assert.equal((await get('/api/partner/visits?tab=pending', leadA)).status, 401);
+      await call('POST', `/api/partner/visits/${jobB}/reject`, {}, leadA, 401);
+      assert.equal((await get('/api/my/cases', staffA1)).status, 401);
+      assert.equal((await get('/api/auth/me', staffA1)).status, 401);
     });
   });
 

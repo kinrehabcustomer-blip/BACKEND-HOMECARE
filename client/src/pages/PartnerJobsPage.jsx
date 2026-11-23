@@ -30,6 +30,7 @@ const mapUrl = (v) => (v.geo_lat && v.geo_lng
 function pastLabel(v) {
   if (v.status === 'cancelled') return { text: 'ยกเลิก', cls: 'pt-tag is-muted' };
   if (v.check_out_at) return { text: 'ไปแล้ว', cls: 'pt-tag is-ok' };
+  if (!v.check_in_at && v.partner_status === 'pending') return { text: 'ไม่มีคนรับ', cls: 'pt-tag is-muted' };
   if (!v.check_in_at) return { text: 'ขาดงาน', cls: 'pt-tag is-warn' };
   return { text: 'ยังไม่เช็คเอาท์', cls: 'pt-tag is-warn' };
 }
@@ -357,7 +358,7 @@ function AssignDialog({ visit, onCancel, onDone }) {
                     <b>{p.first_name} {p.last_name}{p.nickname ? ` (${p.nickname})` : ''}</b>
                     <span className="muted">
                       {POSITION_LABELS[p.position] ?? p.position}
-                      {p.busy.length > 0 ? ` · มีงาน ${p.busy.map((b) => (b.start ? `${b.start}${b.end ? `–${b.end}` : ''}` : 'ทั้งวัน')).join(', ')}` : ' · ว่างทั้งวัน'}
+                      {p.busy.length > 0 ? ` · มีงาน ${p.busy.map((b) => `${b.date ? `${formatDate(b.date)} ` : ''}${b.start ? `${b.start}${b.end ? `–${b.end}` : ''}` : 'ทั้งวัน'}`).join(', ')}` : ' · ว่างทั้งวัน'}
                     </span>
                   </span>
                   <span className={`pt-tag ${p.conflict ? 'is-warn' : 'is-ok'}`}>{p.conflict ? 'ชนเวลา' : 'ว่าง'}</span>

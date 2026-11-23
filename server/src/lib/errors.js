@@ -49,6 +49,10 @@ export function errorHandler(err, req, res, next) {
 
   // 23505 = unique_violation ของ Postgres (เช่น เลขบัตรประชาชนซ้ำ)
   // ทั้งพนักงานและลูกค้าห้ามเลขบัตรซ้ำ — ต้องบอกให้ตรงว่าไปชนกับใคร ไม่งั้นคนอ่านตามหาผิดที่
+  // อีเมลซ้ำ (ดัชนี idx_employees_email_unique) — อีเมลใช้เข้าระบบได้ จึงต้องบอกตรงๆ ว่าชนกับบัญชีอื่น
+  if (err?.code === '23505' && err.constraint?.includes('email')) {
+    return res.status(409).json({ error: 'อีเมลนี้มีบัญชีอื่นใช้เข้าระบบอยู่แล้ว — ใช้อีเมลอื่น' });
+  }
   if (err?.code === '23505' && err.constraint?.includes('national_id')) {
     /* ต้องไล่ทีละแฟ้ม ไม่ใช่ "ลูกค้า หรือไม่ก็พนักงาน" (ตรวจรอบ 18)
        ดัชนีของผู้รับบริการคือ idx_patients_national_id ซึ่งไม่มีคำว่า customer

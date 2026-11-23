@@ -82,9 +82,27 @@ async function ensurePositionCheck() {
   await sql.run(`ALTER TABLE employees ADD CONSTRAINT employees_position_check CHECK (position IN (${list}))`);
 }
 
+/* ทุกชิ้นของ PARTNER_DDL มีอยู่แล้วหรือยัง — อ่าน catalog อย่างเดียว ไม่ล็อกตาราง (ตรวจ 23 พ.ย. 2569)
+   ALTER ... IF NOT EXISTS ขอล็อก ACCESS EXCLUSIVE ทุกครั้งแม้ไม่มีอะไรเปลี่ยน และ ensurePartnerSchema อยู่ใน requireAuth
+   → instance ใหม่ต้องรอคิวล็อก case_visits ก่อนตอบคำขอแรก ถ้ามีรายงานยาวถือตารางอยู่ คำขออื่นทั้งหมดจะต่อคิวหลังมัน
+   เช็คคอลัมน์ "ตัวท้ายสุด" ของแต่ละตาราง + ดัชนี/ตาราง — เพิ่มชิ้นใหม่ใน PARTNER_DDL ต้องเพิ่มที่นี่ด้วย */
+const SCHEMA_PROBE = `
+  SELECT (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = current_schema() AND (
+            (table_name = 'partners' AND column_name = 'logo_updated_at') OR
+            (table_name = 'employees' AND column_name = 'partner_id') OR
+            (table_name = 'case_visits' AND column_name IN ('partner_id', 'partner_status', 'partner_rate', 'partner_sent_at',
+              'partner_sent_by', 'partner_rejected_at', 'partner_rejected_by', 'partner_reject_reason'))))::int AS cols,
+         to_regclass('partner_visit_events') IS NOT NULL AND to_regclass('partner_payments') IS NOT NULL
+           AND to_regclass('idx_employees_partner') IS NOT NULL AND to_regclass('idx_case_visits_partner') IS NOT NULL
+           AND to_regclass('idx_partner_visit_events_partner') IS NOT NULL AS rels`;
+const PROBE_COLS = 10;
+
 let ready = null;
 export const ensurePartnerSchema = () =>
   (ready ??= (async () => {
-    for (const ddl of PARTNER_DDL) await sql.run(ddl);
-    await ensurePositionCheck();
+    const probe = await sql.one(SCHEMA_PROBE).catch(() => null);
+    if (!(probe && probe.cols === PROBE_COLS && probe.rels)) {
+      for (const ddl of PARTNER_DDL) await sql.run(ddl);
+    }
+    await ensurePositionCheck(); // อ่าน pg_constraint ก่อน แก้เฉพาะตอนยังไม่มี partner_lead
   })().catch((err) => { ready = null; throw err; }));
