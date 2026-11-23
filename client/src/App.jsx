@@ -59,6 +59,74 @@ const PartnerJobsPage = lazy(() => import('./pages/PartnerJobsPage.jsx'));
 const PartnerTeamPage = lazy(() => import('./pages/PartnerTeamPage.jsx'));
 const PartnerSummaryPage = lazy(() => import('./pages/PartnerSummaryPage.jsx'));
 
+/*
+ * โหลดไฟล์ของหน้าล่วงหน้า (optimize 23 พ.ย. 2569 — workflow เดิมทุกอย่าง แค่ไฟล์มาถึงเร็วขึ้น)
+ *
+ * เดิมเปิดแอปแล้วรอเป็นทอดๆ: ไฟล์หลัก → ถาม /auth/me (cold start ของ Vercel อาจเป็นวินาที) → ค่อยเริ่มโหลดไฟล์ของหน้า → ค่อยดึงข้อมูล
+ * ไฟล์ของหน้าไม่ขึ้นกับคำตอบ /auth/me เลย จึงเริ่มโหลดพร้อมกันตั้งแต่เปิดแอป
+ * import() ตัวเดียวกับใน lazy() ด้านบน — เบราว์เซอร์แชร์โมดูลก้อนเดียว lazy() เจอว่ามาแล้วก็แสดงผลทันที
+ * สิทธิ์ไม่เปลี่ยน: แค่ดาวน์โหลดโค้ดหน้าเว็บ (ไม่มีข้อมูล) · หน้าที่ไม่มีสิทธิ์ยังถูกด่าน AppLayout/API กันเหมือนเดิม
+ */
+const PAGE_CHUNKS = {
+  '/dashboard': () => import('./pages/DashboardPage.jsx'),
+  '/employees': () => import('./pages/EmployeeListPage.jsx'),
+  '/cases': () => import('./pages/CaseListPage.jsx'),
+  '/calendar': () => import('./pages/CalendarPage.jsx'),
+  '/attendance': () => import('./pages/AttendancePage.jsx'),
+  '/invoices': () => import('./pages/InvoiceListPage.jsx'),
+  '/payroll': () => import('./pages/PayrollPage.jsx'),
+  '/procedures': () => import('./pages/CategoriesPage.jsx'),
+  '/equipment': () => import('./pages/CategoriesPage.jsx'),
+  '/revenue': () => import('./pages/RevenuePage.jsx'),
+  '/revenue-bu': () => import('./pages/RevenueBuPage.jsx'),
+  '/customers': () => import('./pages/CustomerListPage.jsx'),
+  '/patients': () => import('./pages/PatientListPage.jsx'),
+  '/reviews': () => import('./pages/ReviewsPage.jsx'),
+  '/packages': () => import('./pages/PackagesPage.jsx'),
+  '/physio-packages': () => import('./pages/PhysioPackagesPage.jsx'),
+  '/settings': () => import('./pages/SettingsPage.jsx'),
+  '/system-settings': () => import('./pages/SystemSettingsPage.jsx'),
+  '/my-today': () => import('./pages/MyTodayPage.jsx'),
+  '/my-cases': () => import('./pages/MyCasesPage.jsx'),
+  '/my-chat': () => import('./pages/MyChatPage.jsx'),
+  '/my-reports': () => import('./pages/MyReportsPage.jsx'),
+  '/my-calendar': () => import('./pages/MyCalendarPage.jsx'),
+  '/my-attendance': () => import('./pages/MyAttendancePage.jsx'),
+  '/partner': () => import('./pages/PartnerJobsPage.jsx'),
+  '/partner/team': () => import('./pages/PartnerTeamPage.jsx'),
+  '/partner/summary': () => import('./pages/PartnerSummaryPage.jsx'),
+};
+const HOME_HINT = 'kin-home'; // หน้าแรกของผู้ใช้คนล่าสุดในเครื่องนี้ — "/" ยังไม่รู้ตำแหน่งจนกว่า /auth/me ตอบ
+function preloadPage(path) {
+  const fn = PAGE_CHUNKS[path] ?? PAGE_CHUNKS[`/${path.split('/')[1] ?? ''}`];
+  // โหลดไม่สำเร็จ (เน็ตหลุด) ไม่เป็นไร — lazy() ลองใหม่เองตอนแสดงหน้าจริง
+  if (fn) fn().catch(() => {});
+}
+// เริ่มทันทีที่ไฟล์หลักโหลด — ขนานไปกับการถาม /auth/me
+try {
+  let start = window.location.pathname;
+  if (start === '/') start = window.localStorage.getItem(HOME_HINT) ?? '';
+  if (start) preloadPage(start);
+} catch { /* localStorage ใช้ไม่ได้ (โหมดส่วนตัว) — ข้ามไป */ }
+
+/* เมนูอื่นๆ ของผู้ใช้ — โหลดตอนเครื่องว่างหลังหน้าแรกขึ้นแล้ว กดเปลี่ยนหน้าแล้วขึ้นทันทีไม่ต้องรอไฟล์
+   ไม่ทำตอนเปิดโหมดประหยัดเน็ต/เน็ต 2G · ทำครั้งเดียวต่อการเปิดแอป */
+let navWarmed = false;
+function warmNav(paths) {
+  if (navWarmed) return;
+  navWarmed = true;
+  const conn = navigator.connection;
+  if (conn && (conn.saveData || /(^|-)2g$/.test(conn.effectiveType ?? ''))) return;
+  const idle = window.requestIdleCallback ?? ((cb) => setTimeout(cb, 1500));
+  idle(() => {
+    // ทีละไฟล์ ไม่แย่งเน็ตกับข้อมูลของหน้าที่กำลังใช้อยู่
+    paths.reduce((chain, path) => chain.then(() => {
+      const fn = PAGE_CHUNKS[path];
+      return fn ? fn().catch(() => {}) : null;
+    }), Promise.resolve());
+  });
+}
+
 /* ไอคอนเมนูแบบเส้น (Lucide-style) — stroke=currentColor จึง tint ตามสีเมนู (จาง → ทองตอน active) เอง */
 const NAV_ICONS = {
   bars: (<><path d="M3 21h18" /><rect x="5" y="11" width="3" height="7" rx="1" /><rect x="10.5" y="6" width="3" height="12" rx="1" /><rect x="16" y="9" width="3" height="9" rx="1" /></>),
@@ -448,6 +516,11 @@ function LayoutInner({ children, perm, positions }) {
   const [menuOpen, setMenuOpen] = useState(false);
   // เลื่อนจนสุดหน้าแล้วเด้งกลับนิดหนึ่ง (มือถือ) — ต้องเรียกก่อน return ด้านล่างตามกติกาของ hook
   const bounceRef = useBottomBounce();
+  // โหลดไฟล์ของเมนูอื่นๆ ที่ผู้ใช้คนนี้เข้าได้ ตอนเครื่องว่าง (optimize 23 พ.ย. 2569)
+  useEffect(() => {
+    if (!user) return;
+    warmNav((user.role === 'admin' ? navFor(user) : fieldNavFor(user)).map((i) => i.to).concat('/settings'));
+  }, [user]);
 
   // หน้าที่ต้องมีหมวดสิทธิ์ (office/billing/money) — ไม่มีก็เด้งไปหน้าแรกของตัวเอง
   // เป็นแค่การกันฝั่งหน้าเว็บ ตัวจริงกันที่ด่านของแต่ละเส้น API อีกชั้น
@@ -484,7 +557,10 @@ function AppLayout({ children, perm = null, positions = null }) {
 /** "/" และ "/home" — พาไปหน้าแรกตามตำแหน่ง */
 function HomeRedirect() {
   const { user } = useAuth();
-  return <Navigate to={homePath(user)} replace />;
+  const to = homePath(user);
+  // จำไว้ให้ครั้งหน้าที่เปิด "/" โหลดไฟล์ของหน้านี้ล่วงหน้าได้ (แค่ชื่อหน้า ไม่มีข้อมูลผู้ใช้)
+  try { window.localStorage.setItem(HOME_HINT, to); } catch { /* ไม่เป็นไร */ }
+  return <Navigate to={to} replace />;
 }
 
 /** ตำแหน่งหลังบ้านที่ยังไม่ได้กำหนดสิทธิ์ — บอกตรงๆ แทนการเด้งวนหรือหน้าว่าง (ตอนนี้ทุกตำแหน่งมีสิทธิ์แล้ว เผื่อเพิ่มตำแหน่งใหม่) */
