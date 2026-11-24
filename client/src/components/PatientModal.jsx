@@ -15,6 +15,21 @@ import SearchSelect from './SearchSelect.jsx';
 
 const FOCUSABLE = 'a[href], button:not(:disabled), input, select, textarea, [tabindex]:not([tabindex="-1"])';
 
+/* ดีไซน์ v2: ไอคอนเส้นตกแต่งหน้าหัวข้อในป๊อปอัป (aria-hidden) — ชุดเดียวกับดีไซน์ ไม่มีใน LineIcon จึงวาดไว้ที่นี่ */
+const SEC_ICONS = {
+  phone: <><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2" /></>,
+  idcard: <><rect x="3" y="5" width="18" height="14" rx="2" /><circle cx="9" cy="11" r="2" /><path d="M6.5 16a3 3 0 0 1 5 0M14 10h4M14 14h3" /></>,
+  heart: <><path d="M12 20s-7-4.35-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.65-7 10-7 10z" /></>,
+  pencil: <><path d="M4 20h4L18.5 9.5a2.1 2.1 0 0 0-4-4L4 16v4z" /></>,
+};
+function SecIco({ name, className = 'rec-ico' }) {
+  return (
+    <span className={className} aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">{SEC_ICONS[name]}</svg>
+    </span>
+  );
+}
+
 /** อายุจากวันเกิดแม่นกว่าเลขที่กรอกไว้เมื่อหลายปีก่อน — ใช้ช่อง age เป็นตัวสำรองเมื่อไม่รู้วันเกิด */
 function displayAge(p) {
   const age = ageFromBirthDate(p.birth_date) ?? p.age;
@@ -206,7 +221,7 @@ export default function PatientModal({ patientId, siblings = [], onNavigate, onC
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div
-        className="modal detail-modal"
+        className="modal detail-modal rec-modal"
         role="dialog"
         aria-modal="true"
         aria-label="ข้อมูลผู้รับการดูแล"
@@ -221,12 +236,15 @@ export default function PatientModal({ patientId, siblings = [], onNavigate, onC
           <>
             <header className="modal-head">
               <div>
-                <p className="mono muted">{patient.patient_id}</p>
+                {/* ดีไซน์ v2: รหัส + สถานะแถวบน แล้วค่อยชื่อ (ข้อมูลเดิม สลับลำดับ) */}
+                <div className="rec-head-top">
+                  <p className="mono muted">{patient.patient_id}</p>
+                  <span className={`badge ${patient.status}`}>{PATIENT_STATUS_LABELS[patient.status]}</span>
+                </div>
                 <h2>
                   {[TITLE_LABELS[patient.title], patient.name].filter(Boolean).join('')}
                   {patient.nickname && <span className="muted"> ({patient.nickname})</span>}
                 </h2>
-                <span className={`badge ${patient.status}`}>{PATIENT_STATUS_LABELS[patient.status]}</span>
               </div>
 
               <div className="modal-head-actions">
@@ -241,7 +259,10 @@ export default function PatientModal({ patientId, siblings = [], onNavigate, onC
               </div>
             </header>
 
-            <div className="modal-body">
+            {/* ดีไซน์ v2 (จอกว้าง): ซ้าย = แพ้ยา + ข้อมูลของผู้รับการดูแล · ขวา (พื้นเทา) = เคส + หมายเหตุ + วันที่สร้าง/แก้ไข
+                wrapper จัดวางอย่างเดียว · จอแคบเรียงลงคอลัมน์เดียว */}
+            <div className="modal-body rec-body">
+              <div className="rec-main">
               {/* error ที่เกิดหลังโหลดข้อมูลได้แล้ว (เช่น ลบไม่สำเร็จ) — ต้องมีที่ยืนของตัวเอง
                   ไม่งั้นจะถูกกลืนหายไปเพราะเงื่อนไขด้านบนแสดงเฉพาะตอนยังไม่มีข้อมูล */}
               {error && <p className="error">{error}</p>}
@@ -262,8 +283,8 @@ export default function PatientModal({ patientId, siblings = [], onNavigate, onC
               {/* ผู้ว่าจ้างขึ้นก่อน — ผู้รับการดูแลไม่มีเบอร์ของตัวเอง เบอร์ที่โทรจริงคือเบอร์คนนี้ */}
               <section>
                 <div className="section-head">
-                  <h3>ผู้ว่าจ้าง &amp; การติดต่อ</h3>
-                  {!editing && <button className="btn tiny" onClick={() => setEditing(true)}>แก้ด่วน</button>}
+                  <h3><SecIco name="phone" />ผู้ว่าจ้าง &amp; การติดต่อ</h3>
+                  {!editing && <button className="btn tiny rec-quick" onClick={() => setEditing(true)}><SecIco name="pencil" className="rec-btn-ico" />แก้ด่วน</button>}
                 </div>
 
                 {editing ? (
@@ -300,7 +321,7 @@ export default function PatientModal({ patientId, siblings = [], onNavigate, onC
               </section>
 
               <section>
-                <h3>ข้อมูลพื้นฐาน</h3>
+                <h3><SecIco name="idcard" />ข้อมูลพื้นฐาน</h3>
                 <div className="field-grid">
                   <Field label="เพศ / อายุ" value={genderAge} />
                   <Field label="วันเกิด" value={patient.birth_date && formatDate(patient.birth_date)} />
@@ -310,7 +331,7 @@ export default function PatientModal({ patientId, siblings = [], onNavigate, onC
               </section>
 
               <section>
-                <h3>ข้อมูลสุขภาพ</h3>
+                <h3><SecIco name="heart" />ข้อมูลสุขภาพ</h3>
                 <div className="field-grid">
                   <Field
                     label="น้ำหนัก / ส่วนสูง"
@@ -327,22 +348,26 @@ export default function PatientModal({ patientId, siblings = [], onNavigate, onC
                 <Field label="แพ้อาหาร" value={patient.food_allergies} />
                 <Field label="ที่อยู่สถานที่ดูแล" value={fullAddress(patient)} />
               </section>
+              </div>
 
-              <section>
-                <h3>หมายเหตุ</h3>
-                <Field label="บันทึกภายใน" value={patient.note} />
-              </section>
-
+              <aside className="rec-side">
               <section>
                 <h3>เคสที่ผูกกับผู้รับการดูแลรายนี้ ({patient.cases.length})</h3>
                 {/* popup เป็นตัวอย่างย่อ — โชว์ 3 เคสล่าสุด ที่เหลือดูที่หน้าเต็ม */}
                 <PatientCases cases={patient.cases} limit={3} />
               </section>
 
+              {/* ดีไซน์ v2: หมายเหตุย้ายไปแผงขวา (กล่องบันทึกภายใน) */}
+              <section className="rec-note">
+                <h3>หมายเหตุ</h3>
+                <Field label="บันทึกภายใน" value={patient.note} />
+              </section>
+
               <section className="modal-meta">
                 <Field label="สร้างเมื่อ" value={formatDate(patient.created_at)} />
                 <Field label="แก้ไขล่าสุด" value={formatDate(patient.updated_at)} />
               </section>
+              </aside>
             </div>
 
             <footer className="modal-foot">

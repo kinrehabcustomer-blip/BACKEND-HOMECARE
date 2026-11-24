@@ -46,9 +46,9 @@ export default function MyChatPage() {
 
   return (
     <>
-      <header className="page-head">
+      <header className="page-head fp-head fp-chat-head">
         <div>
-          <h1>แชทญาติ</h1>
+          <h1 className="fp-title">แชทญาติ</h1>
           <p className="muted">คุยและส่งรูปความคืบหน้าถึงญาติของเคสที่คุณดูแล — ญาติเห็นผ่าน LINE ทีม KIN เห็นข้อความเดียวกัน</p>
         </div>
       </header>

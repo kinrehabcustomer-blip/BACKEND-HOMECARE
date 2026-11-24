@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { dayLabel, timeRange } from '../lib/calendarUi.js';
+import { VISIT_STATE_LABELS } from '../labels.js';
 
 /**
  * ปฏิทินบนมือถือ (ผู้ใช้ขอ 10 พ.ย. 2569 — แบบแอปปฏิทินบนโทรศัพท์)
@@ -175,11 +176,22 @@ export default function MobileCalendar({ days, byDay, today, selected, onSelect,
                 return (
                   <button key={c.visit_id} type="button" className="mcal-item" onClick={() => onOpen(c)}>
                     <i className={`mcal-dot visit-${c.state}`} aria-hidden="true" />
+                    {/* ดีไซน์ v2: เวลาเริ่ม/เลิกซ้อนสองบรรทัดเป็นคอลัมน์ซ้าย (ของตกแต่ง — ข้อความเวลาเต็มยังอยู่ใน .mcal-item-time ให้โปรแกรมอ่านหน้าจอ) */}
+                    <span className="mcal-item-when" aria-hidden="true">
+                      {c.planned_start ? (
+                        <>
+                          <strong>{c.planned_start}</strong>
+                          {c.planned_end && <span>{c.planned_end}</span>}
+                        </>
+                      ) : <span>ไม่ระบุเวลา</span>}
+                    </span>
                     <span className="mcal-item-body">
                       <span className="mcal-item-time">{timeRange(c) ?? 'ไม่ระบุเวลา'}</span>
                       <span className="mcal-item-title">{title}</span>
                       {sub && <span className="mcal-item-sub">{sub}</span>}
                     </span>
+                    {/* ป้ายสถานะกะท้ายแถว (ดีไซน์ v2) — ข้อความชุดเดียวกับสถานะกะทั้งระบบ */}
+                    <span className={`badge visit-${c.state} mcal-item-badge`}>{VISIT_STATE_LABELS[c.state] ?? c.state}</span>
                   </button>
                 );
               })}

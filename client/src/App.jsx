@@ -8,6 +8,7 @@ import ChangePasswordForm from './components/ChangePasswordForm.jsx';
 import NotificationBell from './components/NotificationBell.jsx';
 import StaffBell from './components/StaffBell.jsx';
 import { useBottomBounce } from './lib/edgeBounce.js';
+import { prefetchStart } from './lib/prefetch.js';
 
 /*
  * ทุกหน้ายกเว้นหน้า login ถูกโหลดตอนกดเข้าไปดูจริง ไม่ใช่ตอนเปิดเว็บ
@@ -107,6 +108,11 @@ try {
   let start = window.location.pathname;
   if (start === '/') start = window.localStorage.getItem(HOME_HINT) ?? '';
   if (start) preloadPage(start);
+  /* ข้อมูลหลักของหน้าแรก + กระดิ่ง — ขนานไปกับ /auth/me ด้วย (lib/prefetch.js · ตรวจความเร็ว 24 พ.ย. 2569)
+     เฉพาะหน้าในแอปที่รู้จัก (มีไฟล์หน้าใน PAGE_CHUNKS) — หน้า login/ลิงก์สาธารณะไม่ยิงอะไรล่วงหน้า */
+  if (start && (PAGE_CHUNKS[start] ?? PAGE_CHUNKS[`/${start.split('/')[1] ?? ''}`])) {
+    prefetchStart(start, window.location.search);
+  }
 } catch { /* localStorage ใช้ไม่ได้ (โหมดส่วนตัว) — ข้ามไป */ }
 
 /* เมนูอื่นๆ ของผู้ใช้ — โหลดตอนเครื่องว่างหลังหน้าแรกขึ้นแล้ว กดเปลี่ยนหน้าแล้วขึ้นทันทีไม่ต้องรอไฟล์
@@ -127,21 +133,22 @@ function warmNav(paths) {
   });
 }
 
-/* ไอคอนเมนูแบบเส้น (Lucide-style) — stroke=currentColor จึง tint ตามสีเมนู (จาง → ทองตอน active) เอง */
+/* ไอคอนเมนูแบบเส้น (Lucide-style) — stroke=currentColor จึง tint ตามสีเมนู (จาง → ทองตอน active) เอง
+   ดีไซน์ v2 (23 พ.ย. 2569): ปรับรูป กราฟ/ใบแจ้งหนี้/หัวใจ/ค่าตอบแทน(ธนบัตร)/ปฏิทิน ตามแบบ · งานวันนี้ = นาฬิกา ค่าตอบแทน = ธนบัตร */
 const NAV_ICONS = {
-  bars: (<><path d="M3 21h18" /><rect x="5" y="11" width="3" height="7" rx="1" /><rect x="10.5" y="6" width="3" height="12" rx="1" /><rect x="16" y="9" width="3" height="9" rx="1" /></>),
+  bars: (<><path d="M4 20h16" /><rect x="5.5" y="11" width="3" height="6" /><rect x="10.5" y="6" width="3" height="11" /><rect x="15.5" y="13" width="3" height="4" /></>),
   dashboard: (<><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /></>),
   cases: (<><rect x="8" y="2" width="8" height="4" rx="1" /><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" /><path d="M9 12h6M9 16h6" /></>),
-  calendar: (<><rect x="3" y="4" width="18" height="18" rx="2" /><path d="M3 10h18M8 2v4M16 2v4" /></>),
+  calendar: (<><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M3 10h18M8 3v4M16 3v4" /></>),
   clock: (<><circle cx="12" cy="12" r="9" /><path d="M12 8v4l3 2" /></>),
-  invoice: (<><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /><path d="M9 13h6M9 17h6" /></>),
+  invoice: (<><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z" /><path d="M9 8h6M9 12h6" /></>),
   users: (<><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" /></>),
-  heart: (<path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.29 1.5 4.04 3 5.5l7 7z" />),
+  heart: (<path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z" />),
   home: (<><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><path d="M9 22V12h6v10" /></>),
   activity: (<path d="M22 12h-4l-3 9L9 3l-3 9H2" />),
   user: (<><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></>),
   today: (<><rect x="3" y="4" width="18" height="18" rx="2" /><path d="M3 10h18M8 2v4M16 2v4" /><path d="M9 15l2 2 4-4" /></>),
-  wallet: (<><path d="M3 7a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><path d="M3 9h18" /><path d="M16 13.5h2.5" /></>),
+  wallet: (<><rect x="2" y="6" width="20" height="13" rx="2" /><circle cx="12" cy="12.5" r="2.5" /></>),
   star: (<path d="M12 2.6l2.9 5.9 6.5.9-4.7 4.6 1.1 6.5-5.8-3.1-5.8 3.1 1.1-6.5L2.6 9.4l6.5-.9z" />),
   package: (<><path d="M21 8 12 3 3 8v8l9 5 9-5z" /><path d="M3 8l9 5 9-5M12 13v8" /></>),
   shield: (<><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /><path d="M9 12l2 2 4-4" /></>),
@@ -223,12 +230,12 @@ const homePath = (user) => {
 
 // short = ชื่อสั้นบนแถบเมนูล่างของมือถือ (6 ช่องบนจอ 390px ชื่อเต็มไม่พอที่)
 const FIELD_NAV = [
-  { to: '/my-today', icon: 'today', label: 'งานวันนี้', short: 'วันนี้' },
+  { to: '/my-today', icon: 'clock', label: 'งานวันนี้', short: 'วันนี้' },
   { to: '/my-cases', icon: 'cases', label: 'เคสของฉัน', short: 'เคส' },
   { to: '/my-chat', icon: 'chat', label: 'แชทญาติ', short: 'แชท' },
   { to: '/my-reports', icon: 'activity', label: 'รายงานของฉัน', short: 'รายงาน' },
   { to: '/my-calendar', icon: 'calendar', label: 'ตารางงานของฉัน', short: 'ตาราง' },
-  { to: '/my-attendance', icon: 'clock', label: 'ค่าตอบแทนของฉัน', short: 'ค่าตอบแทน' },
+  { to: '/my-attendance', icon: 'wallet', label: 'ค่าตอบแทนของฉัน', short: 'ค่าตอบแทน' },
 ];
 /* แถบล่างของพนักงาน (ผู้ใช้ขอ 9 พ.ย. 2569): ไม่มี ☰ บนแถบบนแล้ว — ช่องขวาสุดเป็นปุ่ม "ตั้งค่า"
    ที่กางแผงเมนูขึ้นจากล่าง ในแผงมีแชทญาติ + ตั้งค่า/ออกจากระบบ · เมนูที่อยู่บนแถบแล้วไม่ซ้ำในแผง */
@@ -358,7 +365,8 @@ function Sidebar({ menuOpen, setMenuOpen }) {
           หลังบ้าน = ของค้างทั้ง 4 กลุ่ม (NotificationBell · /api/notify/alerts เป็น requireAdmin)
           พนักงานภาคสนาม = กะใหม่/เลื่อน/ยกเลิก/เตือนก่อนถึงกะของตัวเอง (StaffBell · /api/my/notifications) */}
       <div className="brand">
-        {/* โลโก้ 2 ไฟล์ — CSS เลือกตาม data-theme (ไฟล์ -dark: ตัวอักษร HOME CARE สีครีม พื้นโปร่ง ไม่มีขอบขาว) */}
+        {/* โลโก้ KIN HOME CARE (ผู้ใช้ขอ 24 พ.ย. 2569 แทนตรา "K" ของดีไซน์ v2)
+            2 ไฟล์ — CSS เลือกตาม data-theme (ไฟล์ -dark: ตัวอักษร HOME CARE สีครีม พื้นโปร่ง) */}
         <img className="brand-logo logo-light" src="/logo-navbar.webp" alt="KIN Home Care" />
         <img className="brand-logo logo-dark" src="/logo-navbar-dark.webp" alt="" aria-hidden="true" />
         {/* ตำแหน่งที่ยังไม่มีสิทธิ์หมวดไหนเลย ไม่มีของค้างให้ดู (และ /api/notify/alerts ตอบ 403) */}
@@ -444,9 +452,16 @@ function Sidebar({ menuOpen, setMenuOpen }) {
 
         <div className="sidebar-foot">
           <div className="who-row">
+            {/* ดีไซน์ v2: วงอักษรย่อชื่อ (หลังบ้าน) + ตำแหน่ง · รหัส — ข้อมูลเดิมของ user ไม่ได้ดึงอะไรเพิ่ม */}
+            {isAdmin && (
+              <span className="who-avatar" aria-hidden="true">{`${user.first_name?.[0] ?? ''}${user.last_name?.[0] ?? ''}`}</span>
+            )}
             <div className="who">
               <strong>{user.first_name} {user.last_name}</strong>
-              <span className="mono muted">{user.employee_id}</span>
+              <span className="who-meta">
+                {isAdmin && POSITION_LABELS[user.position] && <span className="who-pos">{POSITION_LABELS[user.position]} · </span>}
+                <span className="mono muted">{user.employee_id}</span>
+              </span>
             </div>
             {/* ตั้งค่า + ออกจากระบบ เป็นปุ่มไอคอนคู่กันท้ายแถวชื่อผู้ใช้ — ทั้งคู่คือ "เรื่องของบัญชีนี้"
                 ไม่ใช่เมนูของระบบ · ออกจากระบบเดิมเป็นปุ่มข้อความเต็มความกว้างอยู่บรรทัดล่าง

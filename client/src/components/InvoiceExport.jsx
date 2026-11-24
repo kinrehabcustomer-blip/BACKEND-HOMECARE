@@ -9,9 +9,10 @@ import { placeUnder } from '../lib/popover.js';
 /**
  * ดาวน์โหลดใบแจ้งหนี้เป็น CSV แบบรายวัน / รายสัปดาห์ / รายเดือน (ผู้ใช้ขอ 6 พ.ย. 2569)
  *
- * ช่วงคิดจาก "วันที่ออกใบ" · สัปดาห์ = จันทร์–อาทิตย์ของวันที่เลือก · เดือน = วันที่ 1 ถึงสิ้นเดือน
+ * ช่วงที่เลือก = ช่วงบริการ (24 พ.ย. 2569 · เดิมคิดจากวันที่ออกใบ) · สัปดาห์ = จันทร์–อาทิตย์ของวันที่เลือก · เดือน = วันที่ 1 ถึงสิ้นเดือน
  * ใช้ตัวกรองที่เลือกอยู่บนหน้า (ค้นหา / บริการ / สถานะ / ซ่อนใบยกเลิก) ชุดเดียวกับตาราง — ไฟล์จึงตรงกับที่เห็น
- * แถวสุดท้ายเป็นยอดรวม ไม่นับใบที่ยกเลิก (ใบยกเลิกยังอยู่ในไฟล์ให้เห็นว่าเลขที่ไม่ขาดช่วง)
+ * แถวละหนึ่งบรรทัดของใบ (ไม่มีแถวยอดรวมท้ายไฟล์ — ไฟล์รายบรรทัดใช้ทำ pivot ต่อ แถวรวมจะถูกนับซ้ำ)
+ * ใบยกเลิก (ถ้าตัวกรองให้แสดง) อยู่ในไฟล์ แต่ยอดในช่วง/ชำระ/ค้าง = 0
  *
  * filters = เงื่อนไขของรายการตอนนี้ (ไม่มี page/per_page/sort) · filterNote = ข้อความบอกว่าใช้ตัวกรองอะไรอยู่
  */
@@ -43,6 +44,14 @@ function periodRange(kind, value) {
 }
 
 const num = (v) => (v == null || v === '' ? '' : Math.round(Number(v) * 100) / 100);
+
+/** ประเภทใบ — billing_kind ของใบ (มัดจำ/ส่วนที่เหลือ/ค่าใช้จ่ายเพิ่มเติม) · ใบแตกรายครั้งบอกไว้ด้วย */
+function billingKindText(r) {
+  if (r.billing_kind === 'deposit') return 'ใบมัดจำ';
+  if (r.billing_kind === 'balance') return 'ใบส่วนที่เหลือ';
+  if (r.billing_kind === 'extra') return 'ค่าใช้จ่ายเพิ่มเติม';
+  return r.has_items ? 'ใบแจ้งหนี้ (รายครั้ง)' : 'ใบแจ้งหนี้';
+}
 
 export default function InvoiceExport({ filters, filterNote }) {
   const today = todayTH();
@@ -93,40 +102,49 @@ export default function InvoiceExport({ filters, filterNote }) {
     setBusy(true);
     setMsg(null);
     try {
-      const { data, truncated } = await api.exportInvoices({ ...filters, issued_from: range.from, issued_to: range.to });
+      /* รายบรรทัด + เฉลี่ยตามช่วงบริการ (ผู้ใช้ขอ 24 พ.ย. 2569 — หัวคอลัมน์ตามไฟล์ตัวอย่างของผู้ใช้)
+         ใบเข้าไฟล์ = ช่วงบริการคาบเกี่ยวช่วงที่เลือก · ไม่จด VAT = ทุกบรรทัด "ไม่มี VAT" · สาขา = ประเภทบริการ · สัญญา = ว่าง
+         ตัวเลขทั้งหมดคิดที่ server (server/src/invoices/exportLines.js) หน้านี้แค่เรียงลงคอลัมน์ */
+      const { data, truncated } = await api.exportInvoiceLines({ ...filters, from: range.from, to: range.to });
       if (data.length === 0) {
-        setMsg({ tone: 'error', text: `ไม่มีใบแจ้งหนี้ที่ออกในช่วง ${rangeText} ตามตัวกรองนี้` });
+        setMsg({ tone: 'error', text: `ไม่มีรายการที่ช่วงบริการคาบเกี่ยว ${rangeText} ตามตัวกรองนี้` });
         return;
       }
       const header = [
-        'ลำดับ', 'เลขที่ใบ', 'วันที่ออก', 'ครบกำหนด', 'วันที่ชำระ', 'สถานะ', 'รหัสเคส', 'ผู้รับบริการ', 'ผู้จ่าย',
-        'เบอร์ติดต่อ', 'รายการ', 'ยอดหน้าใบ', 'ลดหนี้/เพิ่มหนี้', 'ยอดสุทธิ', 'รับชำระแล้ว', 'คงค้าง',
+        'วันที่', 'เลขที่เอกสาร', 'สัญญา', 'HN', 'ชื่อผู้รับบริการ', 'สาขา', 'ประเภทใบ', 'รหัสสินค้า', 'รายการ',
+        'หมวดในใบเสร็จ', 'จำนวน', 'ยอดในใบ (รวม VAT)', 'ประเภทภาษี', 'ช่วงบริการ เริ่ม', 'ช่วงบริการ สิ้นสุด',
+        'วันทั้งหมดของช่วงบริการ', 'วันที่อยู่ในช่วงที่เลือก', 'มูลค่าที่มี VAT (ก่อน VAT) ในช่วงที่เลือก',
+        'VAT 7% ในช่วงที่เลือก', 'มูลค่าที่ไม่มี VAT ในช่วงที่เลือก', 'รวม (รวม VAT) ในช่วงที่เลือก',
+        'ชำระแล้วของรายการ (รวม VAT)', 'ค้างชำระของรายการ (รวม VAT)', 'สถานะ', 'วันที่รับชำระ', 'ชำระด้วย', 'ค้างชำระ (วัน)',
       ];
-      const lines = data.map((v, i) => [
-        i + 1,
-        v.invoice_id,
-        v.issue_date ?? '',
-        v.due_date ?? '',
-        v.paid_at ? String(v.paid_at).slice(0, 10) : '',
-        v.is_overdue ? 'เกินกำหนด' : invoiceStatusLabel(v),
-        v.case_id ?? '',
-        v.patient_name ?? '',
-        v.bill_to_name ?? '',
-        v.contact_phone ?? '',
-        v.service_description ?? '',
-        num(v.total),
-        num(v.adjustment_total),
-        num(v.net_total ?? v.total),
-        num(v.paid_amount),
-        num(v.status === 'cancelled' ? 0 : v.balance),
-      ]);
-      // ยอดรวมท้ายไฟล์ — ไม่นับใบยกเลิก (ยกเลิกแล้วไม่ใช่เงินที่ต้องเก็บ)
-      const live = data.filter((v) => v.status !== 'cancelled');
-      const sum = (f) => num(live.reduce((s, v) => s + Number(f(v) ?? 0), 0));
-      lines.push([
-        '', `รวม ${live.length} ใบ (ไม่นับใบยกเลิก)`, '', '', '', '', '', '', '', '', '',
-        sum((v) => v.total), sum((v) => v.adjustment_total), sum((v) => v.net_total ?? v.total),
-        sum((v) => v.paid_amount), sum((v) => v.balance),
+      const lines = data.map((r) => [
+        r.issue_date,
+        r.invoice_id,
+        '',
+        r.patient_id,
+        r.patient_name,
+        r.branch,
+        billingKindText(r),
+        r.code,
+        r.description,
+        r.category,
+        num(r.quantity),
+        num(r.amount),
+        'ไม่มี VAT',
+        r.service_start,
+        r.service_end,
+        r.total_days,
+        r.days_in_range,
+        num(r.vat_base),
+        num(r.vat),
+        num(r.non_vat),
+        num(r.in_range_total),
+        num(r.paid),
+        num(r.outstanding),
+        r.is_overdue ? 'เกินกำหนด' : invoiceStatusLabel(r),
+        r.paid_on,
+        r.payment_methods,
+        r.overdue_days || '',
       ]);
 
       const name = kind === 'month'
@@ -138,8 +156,8 @@ export default function InvoiceExport({ filters, filterNote }) {
       setMsg({
         tone: truncated ? 'error' : 'ok',
         text: truncated
-          ? `ดาวน์โหลดแล้ว ${data.length} ใบแรก — ช่วงนี้มีมากกว่านั้น ลองแบ่งช่วงให้สั้นลง`
-          : `ดาวน์โหลดแล้ว ${data.length} ใบ`,
+          ? `ดาวน์โหลดแล้ว ${data.length} รายการ — ใบตามตัวกรองนี้มีเกิน 5,000 ใบ ลองใส่ตัวกรองเพิ่ม`
+          : `ดาวน์โหลดแล้ว ${data.length} รายการ จาก ${new Set(data.map((r) => r.invoice_id)).size} ใบ`,
       });
     } catch (e) {
       setMsg({ tone: 'error', text: e.message });
@@ -200,7 +218,7 @@ export default function InvoiceExport({ filters, filterNote }) {
             ) : (
               <input
                 type="date"
-                aria-label={kind === 'week' ? 'วันใดก็ได้ในสัปดาห์นั้น' : 'วันที่ออกใบ'}
+                aria-label={kind === 'week' ? 'วันใดก็ได้ในสัปดาห์นั้น' : 'วันที่'}
                 value={day}
                 max={today}
                 onChange={(e) => { setDay(e.target.value || today); setMsg(null); }}

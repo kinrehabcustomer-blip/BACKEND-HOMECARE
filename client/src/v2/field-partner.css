@@ -1,0 +1,690 @@
+/* ดีไซน์ใหม่ (v2) · field-partner — แบบร่าง https://claude.ai/artifact/UYErtp3CaW8hEqXBRiHT3d
+   แอปพนักงานภาคสนาม (มือถือ 390) + หน้าหัวหน้าพาร์ทเนอร์ (จอคอม 1440 + มือถือ)
+   เปลี่ยนหน้าตาอย่างเดียว — ทุกกฎผูกกับ class ของหน้า/คอมโพเนนต์ตัวเอง ไม่ทับ class กลาง (.btn .badge .modal …)
+   สีตายตัวจากดีไซน์มีคู่โหมดมืด (:root[data-theme='dark']) ไว้เสมอ */
+
+/* ---------- ตัวแปรของพื้นที่นี้ (ชุดสีสถานะ 6 สีของดีไซน์ Main) ---------- */
+:root {
+  --fp-blue-bg: #e6eefa;  --fp-blue: #1d4f91;  --fp-blue-dot: #2f6cc0;
+  --fp-gold-bg: #f5ebd3;  --fp-gold: #6f4e0f;  --fp-gold-dot: #8e6516;
+  --fp-green-bg: #e3f1e6; --fp-green: #1f6b35; --fp-green-dot: #2e8b4a;
+  --fp-orange-bg: #fdebdd; --fp-orange: #9a3412; --fp-orange-dot: #d9631e;
+  --fp-red-bg: #fde8e6;   --fp-red: #b42318;   --fp-red-dot: #d9362a; --fp-red-ink: #8f1d14; --fp-red-line: #f6c9c2;
+  --fp-gray-bg: #efece6;  --fp-gray: #5f584d;  --fp-gray-dot: #8f877a;
+  --fp-shadow: 0 2px 10px rgba(31, 28, 23, 0.05);
+}
+:root[data-theme='dark'] {
+  --fp-blue-bg: #16273d;  --fp-blue: #9cc2f0;  --fp-blue-dot: #6fa3e6;
+  --fp-gold-bg: #33260f;  --fp-gold: #f0c06a;  --fp-gold-dot: #d7a63f;
+  --fp-green-bg: #15301d; --fp-green: #8fd3a2; --fp-green-dot: #4fb06d;
+  --fp-orange-bg: #3a2412; --fp-orange: #f3b07a; --fp-orange-dot: #e07a3a;
+  --fp-red-bg: #3a1d1a;   --fp-red: #f2a097;   --fp-red-dot: #ff6b5e; --fp-red-ink: #f2a097; --fp-red-line: #5c322c;
+  --fp-gray-bg: #26231d;  --fp-gray: #c4bcae;  --fp-gray-dot: #8f877a;
+  --fp-shadow: none;
+}
+
+/* =====================================================================================
+   ส่วนที่ 1 — แอปพนักงานภาคสนาม
+   ===================================================================================== */
+
+/* ---------- หัวข้อหน้า (ดีไซน์โชว์ชื่อหน้าตัวใหญ่ทุกหน้า) ----------
+   warm-clarity ซ่อน .page-head h1 ทั้งระบบ — h1 ที่ติด .fp-title คืนให้เห็นเฉพาะหน้าของพื้นที่นี้ */
+h1.fp-title,
+.page-head h1.fp-title {
+  position: static;
+  width: auto; height: auto;
+  margin: 0 0 0.25rem; padding: 0;
+  overflow: visible; clip-path: none; white-space: normal;
+  font-family: var(--font-heading); font-size: 1.625rem; font-weight: 600; line-height: 1.3;
+  color: var(--heading); letter-spacing: 0;
+}
+.page-head.fp-head { align-items: flex-start; margin-bottom: 1rem; }
+:is(.content, .pull-content) > h1.fp-title { margin-bottom: 0.875rem; }
+.page-head.fp-head > div > .muted { font-size: 0.875rem; line-height: 1.55; }
+@media (min-width: 901px) {
+  h1.fp-title, .page-head h1.fp-title { font-size: 1.875rem; }
+}
+
+/* ---------- งานวันนี้ (MyTodayPage) ---------- */
+/* แถวสรุปบนสุด — ดีไซน์เป็นหัวหน้าโล่งบนพื้นหลัง ไม่ใช่การ์ด: วันที่ · จำนวนกะ · ช่องตัวเลขเล็ก */
+.today-summary.hero-card {
+  background: none; border: 0; box-shadow: none; padding: 0;
+  gap: 0.75rem;
+}
+.today-summary .today-top { align-items: center; padding-bottom: 0; margin-bottom: 0; border-bottom: 0; }
+.today-summary .today-date { font-size: 0.875rem; color: var(--muted); font-weight: 500; }
+.today-summary .today-date .page-hero-icon { display: none; }
+.today-summary .hero { flex-direction: row; align-items: baseline; justify-content: flex-start; gap: 0.5rem; border: 0; padding: 0 1rem 0 0; min-width: 0; white-space: nowrap; }
+.today-summary .hero-label { margin: 0; font-family: var(--font-heading); font-size: 1.625rem; font-weight: 600; color: var(--heading); }
+.today-summary .hero-value { font-family: var(--font-heading); font-size: 1.625rem; font-weight: 600; color: var(--heading); letter-spacing: 0; }
+.today-summary .tiles { gap: 0.5rem; }
+.today-summary .tile {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 0.875rem;
+  padding: 0.625rem 0.75rem; gap: 0.125rem;
+}
+.today-summary .tile.is-static:hover { background: var(--surface); border-color: var(--border); }
+.today-summary .tile-label { font-size: 0.8125rem; }
+.today-summary .tile-value { margin: 0; font-family: var(--font-heading); font-size: 1.375rem; font-weight: 600; color: var(--heading); }
+@media (max-width: 900px) {
+  .today-summary.hero-card { padding: 0; gap: 0.625rem; }
+  .today-summary .hero { flex-direction: row; align-items: baseline; justify-content: flex-start; gap: 0.5rem; padding: 0; border: 0; }
+  .today-summary .tile { padding: 0.5625rem 0.625rem; }
+  .today-summary .tile-label { font-size: 0.75rem; }
+}
+
+/* การ์ดกะ — ทรงการ์ดเด่นของดีไซน์: มุม 18 · เงาจาง · ไม่มีแถบสีข้าง (สถานะบอกด้วยป้ายแล้ว) */
+.shift-list { gap: 1rem; }
+.shift-card.card {
+  padding: 1.125rem; gap: 0.875rem;
+  border: 1px solid var(--border); border-radius: 1.125rem;
+  background: var(--surface); box-shadow: var(--fp-shadow);
+}
+.shift-card::before { display: none; }
+.shift-card.visit-working { border-color: var(--brand); }
+.shift-card.visit-done { opacity: 1; }
+.shift-card .shift-main { display: flex; flex-direction: column; gap: 0.25rem; }
+/* แถวบน: ป้ายสถานะขึ้นก่อน เวลานัดตัวใหญ่บรรทัดถัดไป (ลำดับด้วย order — markup เดิม) */
+.shift-card .shift-when { gap: 0.375rem 0.5rem; }
+.shift-card .shift-when .badge { order: 1; }
+.shift-card .shift-time {
+  order: 2; flex-basis: 100%; margin-top: 0.5rem;
+  font-family: var(--font-heading); font-size: 1.375rem; font-weight: 600; line-height: 1.3;
+  color: var(--heading); font-variant-numeric: tabular-nums;
+}
+.shift-card .shift-main > .shift-title { margin: 0.125rem 0 0; font-size: 1.0625rem; font-weight: 600; line-height: 1.4; }
+.shift-card .shift-main > p.muted { margin: 0; font-size: 0.875rem; color: var(--text); }
+/* ที่อยู่ — กล่องพื้นอ่อนมีหมุด (ดีไซน์: แถวนำทาง) */
+.shift-card .shift-addr {
+  display: flex; align-items: flex-start; gap: 0.625rem;
+  margin: 0.625rem 0 0; padding: 0.75rem;
+  border-radius: 0.75rem; background: var(--surface-2);
+  font-size: 0.875rem; color: var(--heading); line-height: 1.5;
+}
+.shift-card .shift-addr .text-ico { flex: none; width: 1.125rem; height: 1.125rem; margin: 0.0625rem 0 0; color: var(--brand); }
+/* แพ้ยา — กล่องแดงอ่อน ตัวหนา */
+.shift-card .allergy-alert {
+  display: flex; align-items: flex-start; gap: 0.5rem; flex-wrap: wrap;
+  margin: 0.625rem 0 0; padding: 0.625rem 0.75rem;
+  border: 0; border-radius: 0.75rem;
+  background: var(--fp-red-bg); color: var(--fp-red-ink);
+  font-size: 0.875rem; font-weight: 600; line-height: 1.5;
+}
+.shift-card .allergy-alert .text-ico { flex: none; width: 1rem; height: 1rem; margin-top: 0.1875rem; }
+.shift-card .shift-times { margin: 0.5rem 0 0; font-size: 0.8125rem; color: var(--muted); }
+/* ปุ่ม: ปุ่มรองกว้าง 1 ส่วน ปุ่มหลัก 2 ส่วน สูง 52px */
+.shift-card .shift-actions { gap: 0.625rem; }
+.shift-card .shift-actions .btn,
+.shift-card .shift-confirm-actions .btn { min-height: 3.25rem; border-radius: 0.75rem; font-size: 1rem; }
+.shift-card .shift-actions .btn.primary { font-weight: 600; }
+.shift-card .shift-actions .btn .btn-ico { width: 1.125rem; height: 1.125rem; }
+.shift-card .shift-done { color: var(--fp-green); }
+.shift-card .shift-confirm {
+  padding: 0.875rem; border-radius: 0.875rem; background: var(--surface-2);
+}
+.shift-card .shift-confirm-when { font-size: 0.9375rem; color: var(--heading); }
+@media (max-width: 900px) {
+  .shift-card .shift-actions .btn { flex: 1 0 auto; white-space: nowrap; padding-inline: 1rem; }
+  .shift-card .shift-actions .btn.primary { flex: 2 1 0; }
+}
+@media (min-width: 901px) {
+  .shift-card.card { padding: 1.25rem 1.375rem; }
+  .shift-card .shift-actions .btn, .shift-card .shift-confirm-actions .btn { min-height: 2.75rem; padding-inline: 1.25rem; }
+}
+
+/* ---------- เคสของฉัน (MyCasesPage) ---------- */
+/* หัวรายการ = ชื่อหน้าตัวใหญ่ + บรรทัดสรุปใต้ */
+.my-list-head { flex-direction: column; align-items: flex-start; gap: 0.25rem; margin: 0 0 1rem; }
+.my-list-head strong {
+  font-family: var(--font-heading); font-size: 1.625rem; font-weight: 600; line-height: 1.3; color: var(--heading);
+}
+.my-list-head .muted { font-size: 0.875rem; }
+.my-case-list { gap: 0.875rem; }
+.my-case-card {
+  border-radius: 1rem; padding: 1rem 1.125rem 0.875rem;
+  box-shadow: var(--fp-shadow); gap: 0.375rem;
+}
+.my-case-card .my-case-name { font-size: 1.125rem; }
+.my-case-card .my-case-meta { color: var(--text); }
+.my-case-card .my-case-foot { margin-top: 0.375rem; padding-top: 0.75rem; }
+.my-case-card .my-case-foot .mono { font-size: 0.8125rem; font-weight: 600; color: var(--heading); }
+@media (min-width: 901px) {
+  .my-list-head strong { font-size: 1.875rem; }
+}
+
+/* ---------- ตารางงานของฉัน (MyCalendarPage) ----------
+   ชุดสีจุดตามดีไซน์ (รอเช็คอิน=ฟ้า · กำลังทำงาน=ทอง · เสร็จ=เขียว · ค้าง=ส้ม · ขาด=แดง)
+   ผูกเฉพาะหน้านี้ด้วย :has(.fp-cal-head) — ตารางย่อของหลังบ้านใช้คอมโพเนนต์เดียวกันแต่ไม่โดน */
+.pull-content:has(> .fp-cal-head) {
+  --fp-v-scheduled: var(--fp-blue-dot);
+  --fp-v-working: var(--fp-gold-dot);
+  --fp-v-done: var(--fp-green-dot);
+  --fp-v-stale: var(--fp-orange-dot);
+  --fp-v-missed: var(--fp-red-dot);
+}
+.pull-content:has(> .fp-cal-head) :is(.mcal-dot, .cal-swatch).visit-scheduled { background: var(--fp-v-scheduled); }
+.pull-content:has(> .fp-cal-head) :is(.mcal-dot, .cal-swatch).visit-working   { background: var(--fp-v-working); }
+.pull-content:has(> .fp-cal-head) :is(.mcal-dot, .cal-swatch).visit-done      { background: var(--fp-v-done); }
+.pull-content:has(> .fp-cal-head) :is(.mcal-dot, .cal-swatch).visit-stale     { background: var(--fp-v-stale); }
+.pull-content:has(> .fp-cal-head) :is(.mcal-dot, .cal-swatch).visit-missed    { background: var(--fp-v-missed); }
+/* ชิปในตารางเดือนจอคอม — สีชุดเดียวกับจุด/คำอธิบายสีด้านบน */
+.pull-content:has(> .fp-cal-head) .cal-chip.visit-scheduled { background: var(--fp-blue-bg); color: var(--fp-blue); }
+.pull-content:has(> .fp-cal-head) .cal-chip.visit-working   { background: var(--fp-gold-bg); color: var(--fp-gold); }
+.pull-content:has(> .fp-cal-head) .cal-chip.visit-done      { background: var(--fp-green-bg); color: var(--fp-green); }
+.pull-content:has(> .fp-cal-head) .cal-chip.visit-stale     { background: var(--fp-orange-bg); color: var(--fp-orange); }
+.pull-content:has(> .fp-cal-head) .cal-chip.visit-missed    { background: var(--fp-red-bg); color: var(--fp-red); }
+/* ชื่อเดือนเป็นหัวข้อใหญ่ของหน้า */
+.pull-content:has(> .fp-cal-head) > .cal-title {
+  margin: 0 0 0.5rem; font-family: var(--font-heading); font-size: 1.625rem; font-weight: 600; color: var(--heading);
+}
+.pull-content:has(> .fp-cal-head) > .cal-legend { gap: 0.25rem 0.875rem; margin-bottom: 1rem; font-size: 0.8125rem; color: var(--text); }
+.pull-content:has(> .fp-cal-head) > .cal-legend .cal-swatch { width: 0.5625rem; height: 0.5625rem; border-radius: 50%; }
+.page-head.fp-cal-head { margin-bottom: 0.25rem; }
+/* ตารางเดือนย่อ — การ์ดมุม 18 · วันเสาร์อาทิตย์ไม่แยกสี · วันที่เลือก = พื้นทองจาง */
+.pull-content:has(> .fp-cal-head) .mcal-grid { padding: 0.75rem 0.5rem 0.625rem; border-radius: 1.125rem; row-gap: 0.25rem; }
+.pull-content:has(> .fp-cal-head) .mcal-head { font-size: 0.75rem; font-weight: 500; }
+.pull-content:has(> .fp-cal-head) .mcal-head.is-weekend,
+.pull-content:has(> .fp-cal-head) .mcal-day.is-weekend .mcal-num { color: inherit; }
+.pull-content:has(> .fp-cal-head) .mcal-head.is-weekend { color: var(--muted); }
+.pull-content:has(> .fp-cal-head) .mcal-day { min-height: 3.25rem; border-radius: 0.75rem; gap: 0.25rem; }
+.pull-content:has(> .fp-cal-head) .mcal-num { font-size: 1rem; font-weight: 500; }
+.pull-content:has(> .fp-cal-head) .mcal-day.is-selected { background: var(--brand-soft); }
+.pull-content:has(> .fp-cal-head) .mcal-dots { gap: 0.1875rem; height: 0.375rem; }
+.pull-content:has(> .fp-cal-head) .mcal-dots .mcal-dot { width: 0.375rem; height: 0.375rem; }
+/* รายการงานของวัน — เวลาเป็นคอลัมน์ซ้ายตัวหนา · ชื่อ + รายละเอียดทางขวา */
+.pull-content:has(> .fp-cal-head) .mcal-agenda { border-radius: 1.125rem; }
+.pull-content:has(> .fp-cal-head) .mcal-dayhead { min-height: 3rem; padding: 0.5rem 1.125rem; font-size: 0.9375rem; }
+.pull-content:has(> .fp-cal-head) .mcal-dayhead-count { font-size: 0.8125rem; font-weight: 500; }
+.pull-content:has(> .fp-cal-head) .mcal-item { gap: 0.875rem; padding: 0.875rem 1.125rem; align-items: center; }
+.pull-content:has(> .fp-cal-head) .mcal-item > .mcal-dot { order: 2; margin: 0; width: 0.5rem; height: 0.5rem; }
+.pull-content:has(> .fp-cal-head) .mcal-item-body {
+  display: grid; grid-template-columns: 4.75rem minmax(0, 1fr); column-gap: 0.75rem; row-gap: 0.0625rem;
+}
+.pull-content:has(> .fp-cal-head) .mcal-item-time {
+  grid-row: 1 / span 2; align-self: start;
+  font-family: var(--font-heading); font-size: 0.9375rem; font-weight: 600; line-height: 1.4; color: var(--heading);
+  white-space: normal; overflow-wrap: anywhere;
+}
+.pull-content:has(> .fp-cal-head) .mcal-item-title { font-size: 1rem; }
+.pull-content:has(> .fp-cal-head) .mcal-item-sub { font-size: 0.8125rem; }
+
+/* ---------- ค่าตอบแทนของฉัน (MyAttendancePage) ---------- */
+.pull-content:has(> .fp-att-head) > .att-filter { margin-bottom: 1rem; font-weight: 600; color: var(--heading); }
+.pull-content:has(> .fp-att-head) > .att-filter input[type='month'] { min-height: 3rem; border-radius: 0.75rem; padding-inline: 0.875rem; font-size: 1rem; }
+.pull-content:has(> .fp-att-head) > .hero-card {
+  border-radius: 1.125rem; box-shadow: var(--fp-shadow); padding: 1.25rem;
+}
+.pull-content:has(> .fp-att-head) > .hero-card .hero { border: 0; }
+.pull-content:has(> .fp-att-head) > .hero-card .hero-label { font-size: 0.9375rem; color: var(--text); }
+.pull-content:has(> .fp-att-head) > .hero-card .hero-value {
+  font-family: var(--font-heading); font-weight: 600; color: var(--heading); letter-spacing: 0;
+}
+.pull-content:has(> .fp-att-head) > .hero-card .tile {
+  border-radius: 0.875rem; background: var(--surface-2); border-color: var(--divider); padding: 0.875rem;
+}
+.pull-content:has(> .fp-att-head) > .hero-card .tile.is-static:hover { background: var(--surface-2); border-color: var(--divider); }
+.pull-content:has(> .fp-att-head) > .hero-card .tile-label { font-size: 0.875rem; color: var(--text); }
+.pull-content:has(> .fp-att-head) > .hero-card .tile-value { font-family: var(--font-heading); font-weight: 600; color: var(--heading); }
+.pull-content:has(> .fp-att-head) > .notice {
+  border-radius: 0.875rem; border-color: #f2cfa9; background: var(--fp-orange-bg); color: var(--fp-orange); font-weight: 500;
+}
+:root[data-theme='dark'] .pull-content:has(> .fp-att-head) > .notice { border-color: #5a3a1c; }
+.pull-content:has(> .fp-att-head) > .card { border-radius: 1.125rem; }
+.pull-content:has(> .fp-att-head) > .cal-title { font-family: var(--font-heading); font-size: 1.125rem; font-weight: 600; color: var(--heading); }
+@media (max-width: 900px) {
+  .pull-content:has(> .fp-att-head) > .hero-card .hero { padding: 0 0 0.25rem; border: 0; }
+  .pull-content:has(> .fp-att-head) > .hero-card .hero-value { font-size: 2.375rem; }
+  .pull-content:has(> .fp-att-head) > .hero-card .tile-value { font-size: 1.5rem; }
+}
+
+/* ---------- รายงานของฉัน (MyReportsPage) ---------- */
+.my-card.my-reports { border-radius: 1.125rem; box-shadow: var(--fp-shadow); }
+.my-reports .my-reports-pick { padding: 1.125rem; gap: 0.5rem; font-size: 0.9375rem; color: var(--heading); }
+.my-reports .my-reports-pick small { font-size: 0.8125rem; line-height: 1.5; }
+.my-reports .my-reports-body { padding: 1.125rem; }
+
+/* ---------- แชทญาติ (MyChatPage) ---------- */
+:is(.content, .pull-content):has(> .fp-chat-head) .mychat-list { background: var(--surface); }
+@media (max-width: 900px) {
+  :is(.content, .pull-content):has(> .fp-chat-head) .mychat:not(.has-room) {
+    border: 1px solid var(--border); border-radius: 1.125rem; overflow: hidden; background: var(--surface);
+  }
+  :is(.content, .pull-content):has(> .fp-chat-head) .mychat:not(.has-room) .mychat-list ul { padding: 0; }
+  :is(.content, .pull-content):has(> .fp-chat-head) .mychat:not(.has-room) .mychat-list li + li .mychat-item { border-top: 1px solid var(--divider); }
+  :is(.content, .pull-content):has(> .fp-chat-head) .mychat:not(.has-room) .mychat-item { border-radius: 0; padding: 0.75rem 1rem; }
+}
+:is(.content, .pull-content):has(> .fp-chat-head) .mychat-search {
+  min-height: 2.75rem; border-radius: 0.75rem; background: var(--surface-2);
+  padding-left: 2.5rem;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236e665a' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='M20 20l-3.5-3.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: 0.875rem center; background-size: 1.125rem;
+}
+:is(.content, .pull-content):has(> .fp-chat-head) .mychat-item { align-items: center; }
+:is(.content, .pull-content):has(> .fp-chat-head) .mychat-avatar {
+  width: 2.75rem; height: 2.75rem; background: var(--brand-soft); color: var(--brand);
+  font-family: var(--font-heading); font-weight: 600; font-size: 1.0625rem; box-shadow: none; text-shadow: none;
+}
+:is(.content, .pull-content):has(> .fp-chat-head) .mychat-avatar.is-closed { background: var(--fp-gray-bg); color: var(--fp-gray); }
+:is(.content, .pull-content):has(> .fp-chat-head) .mychat-meta strong { font-size: 1rem; color: var(--heading); }
+:is(.content, .pull-content):has(> .fp-chat-head) .mychat-meta .mono { font-family: inherit; font-size: 0.8125rem; }
+/* ลูกศรท้ายแถวของเคสที่ยังคุยได้ (เคสจบแล้วมีป้าย "จบแล้ว" แทน) */
+:is(.content, .pull-content):has(> .fp-chat-head) .mychat-item:not(:has(.badge))::after {
+  content: ''; flex: none; width: 1.125rem; height: 1.125rem; margin-left: auto;
+  background: var(--muted);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M9 6l6 6-6 6'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M9 6l6 6-6 6'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+:is(.content, .pull-content):has(> .fp-chat-head) .mychat-item .badge { margin-left: auto; }
+
+/* ---------- popup เคสของฉัน (MyCaseModal) ---------- */
+.my-case-modal .modal-head h2 { font-family: var(--font-heading); font-size: 1.375rem; font-weight: 600; }
+.my-case-modal .modal-body > section {
+  border-radius: 1rem; border-color: var(--border); padding: 1.125rem;
+}
+.my-case-modal .modal-body > section > h3 { font-family: var(--font-heading); font-size: 1.0625rem; font-weight: 600; color: var(--heading); }
+.my-case-modal .allergy-alert {
+  display: flex; align-items: flex-start; gap: 0.5rem;
+  margin: 0 0 0.875rem; padding: 0.75rem 0.875rem;
+  border: 1px solid var(--fp-red-line); border-radius: 0.75rem;
+  background: var(--fp-red-bg); color: var(--fp-red);
+  font-size: 0.9375rem; font-weight: 600; line-height: 1.5;
+}
+.my-case-modal .field-label { color: var(--muted); }
+
+/* ---------- popup เช็คอิน (CheckInModal) ---------- */
+.checkin-modal .modal-head h2 { font-family: var(--font-heading); font-size: 1.375rem; font-weight: 600; }
+.checkin-modal .gps-status {
+  gap: 0.75rem; padding: 0.875rem 1rem; margin-bottom: 0.875rem;
+  border-radius: 0.875rem; font-size: 0.9375rem; font-weight: 600;
+}
+.checkin-modal .gps-status.is-ok { border-color: transparent; background: var(--fp-green-bg); color: var(--fp-green); }
+.checkin-modal .gps-status.is-warn { border-color: var(--fp-red-line); background: var(--fp-red-bg); color: var(--fp-red); }
+.checkin-modal .gps-status > .text-ico {
+  flex: none; box-sizing: content-box; width: 1.125rem; height: 1.125rem; padding: 0.6875rem;
+  border-radius: 0.625rem; background: var(--surface); margin: 0;
+}
+.checkin-modal .gps-status .muted { font-weight: 400; color: inherit; opacity: 0.85; }
+.checkin-modal .location-map { height: 11.25rem; border-radius: 0.875rem; margin-bottom: 0.875rem; }
+.checkin-modal .checkin-photo h3 { font-size: 1rem; font-weight: 600; color: var(--heading); margin-bottom: 0.625rem; }
+/* ปุ่มเปิดกล้อง (ยังไม่มีรูป) — กล่องเส้นประพื้นทองจาง มีไอคอนกล้อง */
+.checkin-modal .checkin-photo > .btn.checkin-camera-btn {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.5rem;
+  width: 100%; min-height: 7.5rem; padding: 1rem;
+  border: 1.5px dashed #d9c08a; border-radius: 0.875rem;
+  background: #fdf8ee; color: var(--heading); font-size: 1rem; font-weight: 600;
+}
+.checkin-modal .checkin-photo > .btn.checkin-camera-btn:hover:not(:disabled) { background: var(--brand-soft); }
+.checkin-modal .checkin-camera-ico {
+  box-sizing: content-box; width: 1.25rem; height: 1.25rem; padding: 0.625rem;
+  border-radius: 50%; background: var(--brand-soft); color: var(--brand);
+}
+:root[data-theme='dark'] .checkin-modal .checkin-photo > .btn.checkin-camera-btn { background: #241d12; border-color: #5a4724; }
+:root[data-theme='dark'] .checkin-modal .checkin-camera-ico { background: #33260f; }
+.checkin-modal .checkin-photo > p.muted { margin: 0.625rem 0 0; font-size: 0.875rem; line-height: 1.55; }
+.checkin-modal .checkin-photo-preview img { border-radius: 0.875rem; }
+@media (max-width: 900px) {
+  .checkin-modal .modal-foot .btn { flex: 1; min-height: 3.25rem; border-radius: 0.75rem; font-size: 1rem; justify-content: center; }
+}
+
+/* ---------- popup รายงานอาการ (VisitReportModal) + ฟอร์มบันทึกการดูแล (DailyCareForm) ---------- */
+.visit-report-modal .modal-head h2 { font-family: var(--font-heading); font-size: 1.375rem; font-weight: 600; }
+.visit-report-modal .modal-head .mono { font-family: inherit; font-size: 0.875rem; }
+/* แต่ละหมวดของฟอร์มเป็นการ์ดขาวมุม 14 · ปุ่ม +/− เป็นช่องสี่เหลี่ยมพื้นอ่อน */
+.care-form .care-section {
+  margin-top: 0.875rem; padding: 0 1rem 1rem;
+  border: 1px solid var(--border); border-radius: 0.875rem; background: var(--surface);
+}
+.care-form .care-section:first-of-type { margin-top: 0.875rem; border-top: 1px solid var(--border); }
+.care-form .care-section-head {
+  min-height: 3.5rem; padding: 0.75rem 0;
+  font-family: var(--font-heading); font-size: 1rem; font-weight: 600; color: var(--heading);
+}
+.care-form .care-section.is-key .care-section-head { color: var(--heading); }
+.care-form .care-toggle {
+  display: inline-grid; place-items: center; flex: none;
+  width: 1.875rem; height: 1.875rem; border-radius: 0.5rem;
+  background: var(--fp-gray-bg); color: var(--heading); font-size: 1.125rem; font-weight: 600;
+}
+.care-form .care-section:has(> .care-section-head[aria-expanded='false']) { padding-bottom: 0; }
+/* ชิปตัวเลือก — ทรงเม็ดยา สูง 40 · ที่เลือกแล้ว = พื้นทองจาง ขอบทอง มีเครื่องหมายถูก */
+.care-form .chip-row { gap: 0.5rem; }
+.care-form .chip {
+  min-height: 2.5rem; padding: 0.375rem 0.9375rem;
+  border-radius: 999px; border-color: var(--field-border); background: var(--surface);
+  font-size: 0.9375rem; color: var(--heading);
+}
+.care-form .chip.is-on {
+  display: inline-flex; align-items: center; gap: 0.375rem;
+  background: var(--brand-soft); border-color: var(--brand); color: var(--fp-gold); font-weight: 600;
+}
+.care-form .chip.is-on::before {
+  content: ''; flex: none; width: 0.875rem; height: 0.875rem; background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12l5 5L20 7'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12l5 5L20 7'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+.care-form .field-label { font-weight: 600; color: var(--heading); }
+.care-form .quick-edit-actions .btn { min-height: 3rem; border-radius: 0.75rem; }
+@media (max-width: 900px) {
+  .care-form .quick-edit-actions .btn { flex: 1; justify-content: center; font-size: 1rem; }
+  .care-form .quick-edit-actions .btn.primary { flex: 1.4; }
+}
+
+/* =====================================================================================
+   ส่วนที่ 2 — หัวหน้าพาร์ทเนอร์ (PartnerJobsPage · PartnerTeamPage · PartnerSummaryPage)
+   ===================================================================================== */
+.pt-page .pt-head h1 { font-family: var(--font-heading); font-weight: 600; font-size: 1.625rem; line-height: 1.3; }
+.pt-page .pt-head p { font-size: 0.875rem; }
+
+/* ป้ายของการ์ดงาน: ประเภทงาน = ป้ายเหลี่ยมมนพื้นเทา (ไปแทนทีม = ทองจาง) · ด่วน = เม็ดแดงมีจุด */
+.pt-page .pt-tag,
+.pt-sheet .pt-tag,
+.pt-person-detail .pt-tag,
+.pt-people .pt-tag { gap: 0.3125rem; min-height: 1.5rem; padding: 0 0.625rem; font-size: 0.75rem; }
+.pt-page .pt-card-top .pt-tag.is-once,
+.pt-page .pt-card-top .pt-tag.is-sub { min-height: 1.625rem; border-radius: 0.5rem; font-size: 0.8125rem; }
+.pt-page .pt-card-top .pt-tag.is-once { background: var(--fp-gray-bg); color: var(--text); }
+.pt-page .pt-card-top .pt-tag.is-sub { background: var(--fp-gold-bg); color: var(--fp-gold); }
+/* ป้ายสถานะ (ไปแล้ว ว่าง รอวันนัด ขาดงาน …) — มีจุดสีนำหน้าแบบชุดสถานะของดีไซน์ */
+:is(.pt-page, .pt-sheet, .pt-person-detail, .pt-people) .pt-tag:is(.is-ok, .is-warn, .is-muted),
+:is(.pt-person-detail) .pt-tag.is-once,
+.pt-pv-list .pt-tag { border-radius: 999px; }
+:is(.pt-page, .pt-sheet, .pt-person-detail, .pt-people) .pt-tag:is(.is-ok, .is-warn, .is-muted)::before,
+.pt-pv-list .pt-tag::before,
+.pt-pd-head .pt-tag::before,
+.pt-due::before {
+  content: ''; flex: none; width: 0.375rem; height: 0.375rem; border-radius: 50%; background: currentColor;
+}
+:is(.pt-page, .pt-sheet, .pt-person-detail, .pt-people) .pt-tag.is-ok { background: var(--fp-green-bg); color: var(--fp-green); }
+:is(.pt-page, .pt-sheet, .pt-person-detail, .pt-people) .pt-tag.is-warn { background: var(--fp-orange-bg); color: var(--fp-orange); }
+:is(.pt-page, .pt-sheet, .pt-person-detail, .pt-people) .pt-tag.is-muted { background: var(--fp-gray-bg); color: var(--fp-gray); }
+.pt-pv-list .pt-tag.is-once { background: var(--fp-blue-bg); color: var(--fp-blue); }
+.pt-due {
+  display: inline-flex; align-items: center; gap: 0.3125rem;
+  min-height: 1.5rem; padding: 0 0.625rem; border-radius: 999px;
+  background: var(--fp-red-bg); color: var(--fp-red); font-size: 0.75rem; white-space: nowrap;
+}
+:root[data-theme='dark'] .pt-due { color: var(--fp-red); }
+.pt-page .pt-more { color: var(--brand); font-size: 0.8125rem; }
+
+/* การ์ดงาน (มือถือ) — มุม 16 · เงาจาง · การ์ดด่วนขอบส้มอ่อน */
+.pt-page .pt-card { border-radius: 1rem; box-shadow: var(--fp-shadow); }
+.pt-page .pt-list .pt-card { padding: 1rem; gap: 0.75rem; }
+.pt-page .pt-list .pt-card:has(.pt-due) { border-color: #f2cfa9; }
+:root[data-theme='dark'] .pt-page .pt-list .pt-card:has(.pt-due) { border-color: #6b4a1c; }
+.pt-page .pt-when strong { font-family: var(--font-heading); font-size: 1.1875rem; font-weight: 600; line-height: 1.35; font-variant-numeric: tabular-nums; }
+.pt-page .pt-when > span { color: var(--text); font-size: 0.875rem; }
+.pt-page .pt-when strong span { font-size: inherit; color: inherit; }
+.pt-page .pt-card-top { justify-content: flex-start; }
+.pt-page .pt-where { gap: 0.375rem; padding: 0.875rem; border-radius: 0.75rem; font-size: 0.875rem; line-height: 1.5; }
+.pt-page .pt-where b { font-size: 1rem; }
+.pt-page .pt-map,
+.pt-sheet .pt-map {
+  display: inline-flex; align-items: center; gap: 0.25rem;
+  color: var(--brand); font-weight: 600; text-decoration: none;
+}
+.pt-page .pt-map:hover, .pt-sheet .pt-map:hover { text-decoration: underline; }
+.pt-page .pt-map .text-ico, .pt-sheet .pt-map .text-ico { width: 1rem; height: 1rem; margin: 0; }
+.pt-page .pt-actions { gap: 0.625rem; }
+.pt-page .pt-actions > .btn { min-height: 3.25rem; border-radius: 0.75rem; font-size: 1rem; }
+.pt-page .pt-actions > .btn.primary { font-weight: 600; }
+/* การ์ดที่ยังไม่ด่วน — ปุ่มหลักเป็นทองจาง (ดีไซน์ให้ปุ่มทึบเฉพาะงานด่วน) */
+.pt-page .pt-list .pt-card:not(:has(.pt-due)) .pt-actions > .btn.primary:not(:disabled) {
+  background: var(--brand-soft); border-color: var(--brand-soft); color: var(--fp-gold);
+}
+.pt-page .pt-list .pt-card:not(:has(.pt-due)) .pt-actions > .btn.primary:hover:not(:disabled) {
+  background: var(--brand); border-color: var(--brand); color: var(--brand-ink);
+}
+.pt-page .pt-foot { display: flex; align-items: center; justify-content: center; gap: 0.375rem; font-size: 0.8125rem; }
+.pt-foot-ico { flex: none; width: 1rem; height: 1rem; }
+
+/* แท็บ (มือถือ) */
+.pt-page .pt-tab { min-height: 3rem; font-size: 1rem; }
+
+/* ไทล์สรุปงาน (จอคอม) */
+.pt-page .pt-tiles { gap: 0.875rem; }
+.pt-page .pt-tiles .tile { border-radius: 0.875rem; padding: 1.125rem 1.25rem; gap: 0.375rem; }
+.pt-page .pt-tiles .tile-label { font-size: 0.875rem; font-weight: 500; }
+.pt-page .pt-tiles .tile-value { margin: 0; font-family: var(--font-heading); font-size: 1.875rem; font-weight: 600; line-height: 1.2; color: var(--heading); }
+.pt-page .pt-tiles .tile-share { font-size: 0.8125rem; color: var(--muted); }
+.pt-page .pt-tiles .tile.is-alert { border-color: #f2cfa9; background: #fffaf3; }
+.pt-page .pt-tiles .tile.is-alert :is(.tile-label, .tile-value, .tile-share) { color: #9a3412; }
+:root[data-theme='dark'] .pt-page .pt-tiles .tile.is-alert { background: #2e2213; border-color: #6b4a1c; }
+:root[data-theme='dark'] .pt-page .pt-tiles .tile.is-alert :is(.tile-label, .tile-value, .tile-share) { color: #f0a070; }
+
+@media (min-width: 901px) {
+  .pt-page { gap: 1.375rem; }
+  .pt-page .pt-head h1 { font-size: 1.875rem; }
+  .pt-page .pt-head p { font-size: 0.9375rem; }
+  .pt-page .pt-tab { flex: 0 0 auto; min-height: 3rem; padding: 0 1.125rem; }
+
+  /* งานที่ส่งมา (จอคอม) — การ์ดแถวยาวเต็มความกว้าง: วัน-เวลา | ประเภท ชื่อ ที่อยู่ | ปุ่ม */
+  .pt-page .pt-list { display: flex; flex-direction: column; align-items: stretch; gap: 0.75rem; }
+  .pt-page .pt-list .pt-card {
+    position: relative;
+    display: grid; grid-template-columns: 13.125rem minmax(0, 1fr) auto;
+    grid-template-areas: 'when top act' 'when where act' 'when who act' 'when note act';
+    grid-template-rows: auto auto auto 1fr;
+    column-gap: 1.75rem; row-gap: 0.375rem; align-items: center;
+    padding: 1.125rem 1.375rem;
+  }
+  .pt-page .pt-list .pt-card:hover { box-shadow: 0 2px 10px rgba(31, 28, 23, 0.07); }
+  .pt-page .pt-list .pt-card-top { grid-area: top; justify-content: flex-start; }
+  .pt-page .pt-list .pt-more { position: absolute; top: 1.125rem; right: 1.375rem; }
+  .pt-page .pt-list .pt-when {
+    grid-area: when; align-self: stretch; justify-content: center; gap: 0.1875rem;
+    padding-right: 1.25rem; border-right: 1px solid var(--divider);
+  }
+  .pt-page .pt-list .pt-when strong { font-size: 1.125rem; }
+  .pt-page .pt-list .pt-when-sep { display: none; }
+  .pt-page .pt-list .pt-when-time { display: block; font-family: 'Anuphan', 'Segoe UI', system-ui, sans-serif; margin-top: 0.125rem; font-size: 0.9375rem; font-weight: 400; color: var(--heading); }
+  .pt-page .pt-list .pt-when > span { font-size: 0.8125rem; color: var(--muted); }
+  .pt-page .pt-list .pt-where {
+    grid-area: where; flex-direction: row; flex-wrap: wrap; align-items: center; column-gap: 0.75rem; row-gap: 0.25rem;
+    padding: 0; background: none; font-size: 0.875rem; min-width: 0;
+  }
+  .pt-page .pt-list .pt-where b { flex-basis: 100%; font-size: 1.0625rem; }
+  .pt-page .pt-list .pt-where .muted { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; }
+  .pt-page .pt-list .pt-where .pt-map { flex: none; align-self: center; }
+  .pt-page .pt-list .pt-who { grid-area: who; }
+  .pt-page .pt-list .pt-card > .pt-who:nth-of-type(2) { grid-area: note; }
+  .pt-page .pt-list .pt-actions { grid-area: act; align-self: end; margin-top: 1.75rem; }
+  .pt-page .pt-list .pt-actions > .btn { flex: 0 0 auto; min-height: 2.75rem; padding-inline: 1.125rem; border-radius: 0.625rem; font-size: 0.9375rem; }
+  .pt-page .pt-list .pt-actions > .btn.primary { padding-inline: 1.25rem; }
+  .pt-page > .pt-foot { justify-content: flex-start; }
+}
+
+/* ---------- ทีมของฉัน ---------- */
+.pt-page .pt-head .btn.primary { gap: 0.375rem; }
+.pt-page .pt-team { border-radius: 1rem; }
+.pt-page .pt-avatar { font-family: var(--font-heading); font-weight: 600; }
+.pt-page .pt-member.is-off .pt-avatar { background: var(--fp-gray-bg); color: var(--fp-gray); }
+.pt-page .pt-member-main b { font-size: 0.9375rem; }
+.pt-page .pt-col-act .pt-tag.is-muted { color: var(--fp-gray); }
+@media (min-width: 901px) {
+  .pt-page .pt-head .btn.primary { min-height: 2.75rem; padding-inline: 1.25rem; border-radius: 0.625rem; font-size: 0.9375rem; }
+  /* หัวตาราง: "ชื่อ" เริ่มตรงขอบรูปวงกลม (ดีไซน์) */
+  .pt-page .pt-team-head { padding-block: 0.75rem; font-size: 0.8125rem; }
+  .pt-page .pt-team-head .pt-avatar.is-blank { display: none; }
+  .pt-page .pt-team-head .pt-member-main { grid-column: 1 / span 2; }
+  .pt-page .pt-member { padding: 0.875rem 1.25rem; min-height: 4.25rem; }
+  .pt-page .pt-member-phone { font-size: 0.8125rem; }
+  .pt-page .pt-col { font-size: 0.875rem; color: var(--text); }
+  .pt-page .pt-col.is-num { color: var(--heading); }
+}
+
+/* ---------- สรุปรายเดือน ---------- */
+.pt-page .pt-month {
+  gap: 0.25rem; min-height: 2.75rem; padding: 0.25rem;
+  border: 1px solid var(--border); border-radius: 0.75rem; background: var(--surface);
+}
+.pt-page .pt-month .btn.tiny { min-height: 2.125rem; min-width: 2.125rem; border: 0; background: none; justify-content: center; }
+.pt-page .pt-month .btn.tiny:hover:not(:disabled) { background: var(--surface-2); }
+.pt-page .pt-month span { min-width: 8.5rem; font-size: 0.9375rem; }
+.pt-page .pt-head-tools > .btn { min-height: 2.75rem; border-radius: 0.75rem; }
+.pt-page .pt-kpis .pt-card { border-radius: 1rem; box-shadow: none; }
+.pt-page .pt-kpi-main { border-left: 3px solid var(--brand); }
+.pt-page .pt-kpi-main .pt-amount,
+.pt-page .pt-kpi b { font-family: var(--font-heading); font-weight: 600; }
+.pt-page .pt-kpi b.is-warn { color: var(--fp-orange); }
+.pt-page .pt-kpi-main .pt-unpaid {
+  align-self: flex-start; display: inline-flex; align-items: center;
+  min-height: 1.625rem; padding: 0 0.625rem; border-radius: 999px;
+  background: var(--fp-blue-bg); color: var(--fp-blue); font-weight: 600; font-size: 0.8125rem;
+}
+.pt-page .pt-kpi-main .pt-paid { color: var(--fp-green); }
+.pt-page .pt-card-title { font-family: var(--font-heading); font-weight: 600; font-size: 1.125rem; }
+.pt-page .pt-staff { gap: 1rem; padding: 1.25rem; }
+.pt-page .pt-bar-label { font-size: 0.875rem; color: var(--heading); }
+.pt-page .pt-bar { height: 0.5rem; border-radius: 999px; }
+.pt-page .pt-bar > span { border-radius: 999px; }
+.pt-page .pt-staff > p.muted { padding-top: 0.875rem; border-top: 1px solid var(--divider); font-size: 0.8125rem; }
+.pt-page .pt-money { color: var(--heading); }
+.pt-page .pt-row .muted.is-warn, .pt-page .pt-row .is-warn { color: var(--fp-orange); }
+@media (min-width: 901px) {
+  .pt-page .pt-kpis { gap: 0.875rem; }
+  .pt-page .pt-kpi { padding: 1.125rem 1.25rem; gap: 0.25rem; }
+  .pt-page .pt-kpi-main { padding: 1.125rem 1.25rem; }
+  .pt-page .pt-kpi b { font-size: 1.875rem; }
+  .pt-page .pt-kpi-main .pt-amount { font-size: 2.25rem; }
+  .pt-page .pt-sum-body { grid-template-columns: minmax(18rem, 21.25rem) minmax(0, 1fr); }
+  .pt-page .pt-visits > .pt-card-title { padding: 1.25rem 1.25rem 1rem; border-bottom: 0; }
+  .pt-page .pt-table th, .pt-page .pt-table td { padding: 0.8125rem 1rem; font-size: 0.875rem; vertical-align: middle; }
+  .pt-page .pt-table :is(th, td):first-child { padding-left: 1.25rem; }
+  .pt-page .pt-table :is(th, td):last-child { padding-right: 1.25rem; }
+  .pt-page .pt-table thead th { font-size: 0.8125rem; font-weight: 600; }
+  .pt-page .pt-table td.num { font-weight: 600; }
+  .pt-page .pt-table tfoot td { padding-block: 1.125rem; background: var(--surface); border-top: 1px solid var(--border); font-weight: 500; }
+  .pt-page .pt-table tfoot td.num { font-family: var(--font-heading); font-size: 1.25rem; font-weight: 600; }
+}
+
+/* ---------- popup ของพาร์ทเนอร์ ---------- */
+:is(.pt-sheet, .pt-person-detail, .pt-person-modal, .pt-reject-modal) .modal-head h2 { font-family: var(--font-heading); font-weight: 600; font-size: 1.375rem; }
+
+/* รายละเอียดงาน (DetailDialog) — จอคอม: ซ้าย = นัด/สถานที่/คนที่ไป + กะอื่น · ขวา = การ์ดผู้รับบริการ */
+.pt-detail-dialog .pt-detail-kind { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin: 0 0 0.375rem; }
+.pt-detail-dialog .pt-detail-kind .pt-tag { min-height: 1.625rem; border-radius: 0.5rem; font-size: 0.8125rem; padding: 0 0.625rem; }
+.pt-detail-dialog .pt-detail-kind .pt-tag.is-once { background: var(--fp-gray-bg); color: var(--text); }
+.pt-detail-dialog .pt-detail-kind .pt-tag.is-sub { background: var(--fp-gold-bg); color: var(--fp-gold); }
+.pt-detail-dialog .pt-detail {
+  grid-template-columns: 6.5rem minmax(0, 1fr); gap: 0; padding: 0.25rem 1rem;
+  border: 1px solid var(--border); border-radius: 0.875rem; background: var(--surface-2); font-size: 0.9375rem;
+}
+.pt-detail-dialog .pt-detail > dt,
+.pt-detail-dialog .pt-detail > dd { padding: 0.875rem 0; border-bottom: 1px solid var(--border); }
+.pt-detail-dialog .pt-detail > dt:last-of-type,
+.pt-detail-dialog .pt-detail > dd:last-of-type { border-bottom: 0; }
+.pt-detail-dialog .pt-detail > dt { display: flex; align-items: flex-start; gap: 0.5rem; font-size: 0.875rem; }
+.pt-detail-dialog .pt-detail > dd { margin: 0; color: var(--heading); line-height: 1.6; }
+.pt-dt-ico { flex: none; width: 1.0625rem; height: 1.0625rem; margin-top: 0.1875rem; color: var(--muted); }
+.pt-detail-dialog .pt-detail .pt-map {
+  margin-top: 0.5rem; min-height: 2.125rem; padding: 0 0.75rem;
+  border: 1px solid var(--field-border); border-radius: 0.5rem; background: var(--surface);
+}
+.pt-detail-dialog .pt-detail-unassigned { color: var(--brand); font-weight: 600; }
+.pt-detail-dialog .modal-body section.pt-patient {
+  margin-top: 1rem; padding: 1.25rem; gap: 0.875rem;
+  border: 1px solid var(--border); border-radius: 0.875rem;
+}
+.pt-detail-dialog .pt-patient h3,
+.pt-detail-dialog .pt-detail-others h3 { font-family: var(--font-heading); font-size: 1rem; font-weight: 600; color: var(--heading); margin: 0; }
+.pt-detail-dialog .pt-patient .allergy-alert {
+  display: flex; align-items: center; gap: 0.5rem; padding: 0.625rem 0.875rem;
+  border: 1px solid var(--fp-red-line); border-radius: 0.625rem; background: var(--fp-red-bg); color: var(--fp-red);
+}
+.pt-detail-dialog .pt-pfield-label { font-size: 0.8125rem; }
+.pt-detail-dialog .pt-detail-others:not(.pt-patient) h3 { margin-bottom: 0.5rem; }
+.pt-detail-dialog .pt-detail-others:not(.pt-patient) ul { gap: 0; font-size: 0.9375rem; }
+.pt-detail-dialog .pt-detail-others:not(.pt-patient) li {
+  padding: 0.75rem 0; border-bottom: 1px solid var(--divider); flex-direction: column; gap: 0.125rem;
+}
+.pt-detail-dialog .pt-detail-others:not(.pt-patient) li:last-child { border-bottom: 0; }
+.pt-detail-dialog .pt-detail-others:not(.pt-patient) li > span:first-child { color: var(--heading); }
+.pt-detail-dialog .pt-detail-others:not(.pt-patient) li > .muted { font-size: 0.8125rem; }
+@media (min-width: 901px) {
+  .modal.pt-detail-dialog { width: min(58.75rem, calc(100vw - 3rem)); max-width: none; }
+  .pt-detail-dialog .modal-body {
+    display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 1.5rem; align-items: start;
+    grid-template-areas: 'detail patient' 'others patient' 'rest patient';
+  }
+  .pt-detail-dialog .modal-body > .pt-detail { grid-area: detail; }
+  .pt-detail-dialog .modal-body > section.pt-patient { grid-area: patient; grid-row: 1 / span 3; margin-top: 0; }
+  .pt-detail-dialog .modal-body > section.pt-detail-others:not(.pt-patient) { grid-area: others; border-top: 0; margin-top: 1.5rem; padding-top: 0; }
+  .pt-detail-dialog .modal-body > :is(.error, p.muted) { grid-column: 1 / -1; }
+}
+
+/* เลือกคนที่จะไป (AssignDialog) */
+.pt-people { gap: 0.625rem; }
+.pt-people .pt-person { padding: 0.875rem 1rem; border-radius: 0.875rem; gap: 0.875rem; }
+.pt-people .pt-person.is-on { box-shadow: 0 0 0 4px color-mix(in srgb, var(--brand) 14%, transparent); background: #fffaf0; }
+:root[data-theme='dark'] .pt-people .pt-person.is-on { background: var(--brand-soft); }
+.pt-people .pt-person.is-busy { opacity: 0.85; }
+.pt-people .pt-person-avatar {
+  flex: none; display: grid; place-items: center; width: 2.5rem; height: 2.5rem; border-radius: 50%;
+  background: var(--brand-soft); color: var(--brand); font-family: var(--font-heading); font-weight: 600;
+}
+.pt-people .pt-person-main b { font-size: 1rem; }
+.pt-people .pt-person-main .muted { font-size: 0.8125rem; }
+.pt-sheet .move-note {
+  display: flex; align-items: center; gap: 0.5rem;
+  margin: 0.875rem 0 0; padding: 0.75rem 0.875rem; border-radius: 0.75rem;
+  background: var(--surface-2); font-size: 0.8125rem; color: var(--text);
+}
+@media (min-width: 901px) {
+  .modal.pt-assign-dialog { width: min(37.5rem, calc(100vw - 3rem)); max-width: none; }
+}
+
+/* ปฏิเสธงาน (RejectDialog) — ไอคอนเตือนสีแดงหน้าหัวข้อ */
+.pt-reject-modal .pt-reject-head { display: flex; align-items: flex-start; gap: 0.875rem; }
+.pt-reject-ico {
+  flex: none; box-sizing: content-box; width: 1.375rem; height: 1.375rem; padding: 0.6875rem;
+  border-radius: 0.75rem; background: var(--fp-red-bg); color: var(--fp-red);
+}
+.pt-reject-modal .pt-field { font-weight: 600; color: var(--heading); }
+.pt-reject-modal .pt-field textarea { min-height: 6.5rem; border-radius: 0.75rem; font-weight: 400; }
+@media (min-width: 901px) {
+  .modal.pt-reject-modal { width: min(35rem, calc(100vw - 3rem)); max-width: none; }
+}
+
+/* รายละเอียดคนในทีม (PersonDetailDialog) — กล่องข้อมูลบัญชี 2×2 + กล่องทองจำนวนครั้ง */
+.pt-person-detail .pt-pd-head .pt-avatar { width: 3.5rem; height: 3.5rem; font-size: 1.375rem; }
+.pt-person-detail .pt-pd-head h2 { font-size: 1.5rem; }
+.pt-person-detail .pt-pd-head .pt-tag { min-height: 1.5rem; }
+.pt-person-detail .pt-pd-top { display: grid; gap: 0.875rem; }
+.pt-person-detail .pt-detail.pt-pd-info {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 1rem 1.25rem; margin: 0;
+  padding: 1rem 1.125rem; border: 1px solid var(--border); border-radius: 0.875rem;
+}
+.pt-person-detail .pt-pd-info > div { display: flex; flex-direction: column; gap: 0.125rem; min-width: 0; }
+.pt-person-detail .pt-pd-info dt { font-size: 0.8125rem; }
+.pt-person-detail .pt-pd-info dd { margin: 0; font-size: 0.9375rem; color: var(--heading); overflow-wrap: anywhere; }
+.pt-person-detail .pt-pd-info dd .link { font-weight: 600; }
+.pt-person-detail .pt-pd-done {
+  display: flex; flex-direction: column; justify-content: center; gap: 0.25rem; margin: 0;
+  padding: 1rem 1.125rem; border-radius: 0.875rem; background: var(--brand-soft); color: var(--fp-gold);
+}
+.pt-person-detail .pt-pd-done dt { font-size: 0.8125rem; color: var(--fp-gold); }
+.pt-person-detail .pt-pd-done dd { margin: 0; color: var(--heading); font-size: 0.875rem; }
+.pt-person-detail .pt-pd-done .pt-pd-done-n { font-family: var(--font-heading); font-size: 1.875rem; font-weight: 600; line-height: 1.2; }
+.pt-person-detail .pt-pd-done-total { display: block; margin-top: 0.25rem; font-size: 0.8125rem; color: var(--fp-gold); }
+.pt-person-detail .pt-pd-sep { display: none; }
+.pt-person-detail .pt-pd-top:not(:has(.pt-pd-done)) { grid-template-columns: 1fr; }
+.pt-person-detail .modal-body section.pt-detail-others { border-top: 0; margin-top: 1.25rem; padding-top: 0; }
+.pt-person-detail .pt-detail-others h3 { font-family: var(--font-heading); font-size: 1rem; font-weight: 600; }
+.pt-person-detail .pt-detail-others h3 .muted { font-family: var(--font-body, inherit); font-size: 0.8125rem; font-weight: 400; }
+.pt-person-detail .pt-pv-list li { padding: 0.75rem 0; font-size: 0.875rem; }
+.pt-person-detail .pt-pv-list .pt-tag { min-height: 1.5rem; }
+@media (min-width: 521px) {
+  .pt-person-detail .pt-pd-top { grid-template-columns: minmax(0, 1fr) 12.5rem; }
+}
+@media (min-width: 901px) {
+  .modal.pt-person-detail { width: min(48.75rem, calc(100vw - 3rem)); max-width: none; }
+  .pt-person-detail .pt-pv-list li { grid-template-columns: 15.5rem minmax(0, 1fr) auto; }
+}
+
+/* เพิ่ม/แก้คนในทีม (PersonDialog) */
+.pt-person-modal .pt-form-grid label { color: var(--heading); font-weight: 600; font-size: 0.875rem; }
+.pt-person-modal .pt-form-grid input,
+.pt-person-modal .pt-form-grid select { min-height: 2.75rem; border-radius: 0.625rem; font-size: 1rem; }
+.pt-person-modal .pt-person-note { display: flex; align-items: center; gap: 0.375rem; margin-top: 0.625rem; font-size: 0.8125rem; }
+@media (min-width: 901px) {
+  .modal.pt-person-modal { width: min(37.5rem, calc(100vw - 3rem)); max-width: none; }
+}

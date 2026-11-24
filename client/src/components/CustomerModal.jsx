@@ -14,6 +14,22 @@ import ConfirmButton from './ConfirmButton.jsx';
 
 const FOCUSABLE = 'a[href], button:not(:disabled), input, select, textarea, [tabindex]:not([tabindex="-1"])';
 
+/* ดีไซน์ v2: ไอคอนเส้นตกแต่งหน้าหัวข้อในป๊อปอัป (aria-hidden) — ชุดเดียวกับดีไซน์ ไม่มีใน LineIcon จึงวาดไว้ที่นี่ */
+const SEC_ICONS = {
+  phone: <><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2" /></>,
+  idcard: <><rect x="3" y="5" width="18" height="14" rx="2" /><circle cx="9" cy="11" r="2" /><path d="M6.5 16a3 3 0 0 1 5 0M14 10h4M14 14h3" /></>,
+  users: <><circle cx="9" cy="8" r="3.5" /><path d="M2.5 20a6.5 6.5 0 0 1 13 0" /><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14a6 6 0 0 1 3.5 6" /></>,
+  note: <><rect x="5" y="3" width="14" height="18" rx="2" /><path d="M9 8h6M9 12h6M9 16h4" /></>,
+  pencil: <><path d="M4 20h4L18.5 9.5a2.1 2.1 0 0 0-4-4L4 16v4z" /></>,
+};
+function SecIco({ name, className = 'rec-ico' }) {
+  return (
+    <span className={className} aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">{SEC_ICONS[name]}</svg>
+    </span>
+  );
+}
+
 /** อายุจากวันเกิดแม่นกว่าเลขที่กรอกไว้เมื่อหลายปีก่อน — ใช้ช่อง age เป็นตัวสำรองเมื่อไม่รู้วันเกิด */
 function displayAge(c) {
   const age = ageFromBirthDate(c.birth_date) ?? c.age;
@@ -192,7 +208,7 @@ export default function CustomerModal({ customerId, siblings = [], onNavigate, o
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div
-        className="modal detail-modal"
+        className="modal detail-modal rec-modal"
         role="dialog"
         aria-modal="true"
         aria-label="ข้อมูลลูกค้า"
@@ -227,7 +243,10 @@ export default function CustomerModal({ customerId, siblings = [], onNavigate, o
               </div>
             </header>
 
-            <div className="modal-body">
+            {/* ดีไซน์ v2 (จอกว้าง): ซ้าย = ข้อมูลของลูกค้า · ขวา (พื้นเทา) = ผู้รับการดูแล + เคส + วันที่สร้าง/แก้ไข
+                wrapper จัดวางอย่างเดียว · จอแคบเรียงลงคอลัมน์เดียวตามลำดับเดิม */}
+            <div className="modal-body rec-body">
+              <div className="rec-main">
               {/* error ที่เกิดหลังโหลดข้อมูลได้แล้ว (เช่น ลบไม่สำเร็จ) — ต้องมีที่ยืนของตัวเอง
                   ไม่งั้นจะถูกกลืนหายไปเพราะเงื่อนไขด้านบนแสดงเฉพาะตอนยังไม่มีข้อมูล */}
               {error && <p className="error">{error}</p>}
@@ -235,8 +254,8 @@ export default function CustomerModal({ customerId, siblings = [], onNavigate, o
               {/* ข้อมูลติดต่อขึ้นก่อนทุกอย่าง — คนส่วนใหญ่เปิด popup นี้มาหาเบอร์โทร */}
               <section>
                 <div className="section-head">
-                  <h3>ข้อมูลติดต่อ</h3>
-                  {!editing && <button className="btn tiny" onClick={() => setEditing(true)}>แก้ด่วน</button>}
+                  <h3><SecIco name="phone" />ข้อมูลติดต่อ</h3>
+                  {!editing && <button className="btn tiny rec-quick" onClick={() => setEditing(true)}><SecIco name="pencil" className="rec-btn-ico" />แก้ด่วน</button>}
                 </div>
 
                 {editing ? (
@@ -264,7 +283,7 @@ export default function CustomerModal({ customerId, siblings = [], onNavigate, o
               </section>
 
               <section>
-                <h3>ข้อมูลพื้นฐาน</h3>
+                <h3><SecIco name="idcard" />ข้อมูลพื้นฐาน</h3>
                 <div className="field-grid">
                   <Field label="เพศ / อายุ" value={genderAge} />
                   <Field label="วันเกิด" value={customer.birth_date && formatDate(customer.birth_date)} />
@@ -276,8 +295,9 @@ export default function CustomerModal({ customerId, siblings = [], onNavigate, o
                 </div>
               </section>
 
+              <div className="rec-pair">
               <section>
-                <h3>ผู้ดูแล / ญาติที่ติดต่อได้</h3>
+                <h3><SecIco name="users" />ผู้ดูแล / ญาติที่ติดต่อได้</h3>
                 <div className="field-grid">
                   <Field label="ชื่อผู้ดูแล" value={customer.emergency_contact_name} />
                   <Field
@@ -291,13 +311,17 @@ export default function CustomerModal({ customerId, siblings = [], onNavigate, o
               </section>
 
               <section>
-                <h3>อื่นๆ</h3>
+                <h3><SecIco name="note" />อื่นๆ</h3>
                 <div className="field-grid">
                   <Field label="ประเภทลูกค้า" value={customer.customer_type} />
                   <Field label="รู้จักผ่านช่องทาง" value={customer.referral_source} />
                 </div>
                 <Field label="หมายเหตุ" value={customer.note} />
               </section>
+              </div>
+              </div>
+
+              <aside className="rec-side">
 
               {/* ผู้รับการดูแลใต้ลูกค้ารายนี้ — ลูกค้าหนึ่งคนดูแลได้หลายคน (พ่อ+แม่) */}
               <section>
@@ -342,6 +366,7 @@ export default function CustomerModal({ customerId, siblings = [], onNavigate, o
                 <Field label="สร้างเมื่อ" value={formatDate(customer.created_at)} />
                 <Field label="แก้ไขล่าสุด" value={formatDate(customer.updated_at)} />
               </section>
+              </aside>
             </div>
 
             <footer className="modal-foot">

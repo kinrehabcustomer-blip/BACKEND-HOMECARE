@@ -28,10 +28,10 @@ export default function ReportArchiveModal({ caseId, caseInfo, title, heading = 
     <div className="modal-backdrop modal-stacked" onClick={(e) => { e.stopPropagation(); onClose(); }}>
       <div className="modal modal-wide is-subsheet report-archive" ref={sheetRef} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
         <header className="modal-head">
+          {/* ดีไซน์ v2: หัวข้อก่อน แล้ว "ชื่อผู้รับบริการ · รหัสเคส" บรรทัดเดียว (ข้อมูลเดิม สลับลำดับ) */}
           <div>
-            <p className="mono muted">{caseCode(caseId)}</p>
             <h2>{heading}</h2>
-            {title && <p className="muted">{title}</p>}
+            <p className="muted">{title && <>{title}<span aria-hidden="true"> · </span></>}<span className="mono ra-code">{caseCode(caseId)}</span></p>
           </div>
           <button className="modal-close" onClick={onClose} aria-label="ปิด">×</button>
         </header>

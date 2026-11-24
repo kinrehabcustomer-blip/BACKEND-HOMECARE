@@ -616,6 +616,10 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
 
   return (
     <>
+      {/* ดีไซน์ v2 (จอกว้าง): สองคอลัมน์ — ซ้าย สรุปแพ็ก + ปฏิทิน + เลือกเร็ว · ขวา แถบร่าง (เมื่อเลือกวัน) + รายการนัด
+          จอแคบเรียงลงคอลัมน์เดียวตามลำดับเดิม · wrapper จัดวางอย่างเดียว ไม่มีผลกับการทำงาน */}
+      <div className="cv-layout">
+      <div className="cv-main">
       {/* สรุปแพ็ก/ตาราง (ผู้ใช้ขอ 16 พ.ย. 2569) — เหลือแค่ "ใช้ไปแล้ว X / ทั้งหมด N" + แถบเดียว + วันหมดอายุ
           (รอบแรกมีตัวเลขแยก ไปแล้ว/ขาดงาน/รอไป/ยังไม่ลงนัด ผู้ใช้ขอเอาออก)
           ใช้ไปแล้ว = นัดที่ไปจริง (เช็คอินแล้ว) · ทั้งหมด = จำนวนครั้งของแพ็ก (Homecare ไม่มีเพดาน = กะที่นัดไว้) */}
@@ -630,9 +634,9 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
 
       <div className="visit-head">
         <div className="visit-nav">
-          <button type="button" className="btn tiny" onClick={() => shiftMonth(-1)} aria-label="เดือนก่อนหน้า">←</button>
+          <button type="button" className="btn tiny" onClick={() => shiftMonth(-1)} aria-label="เดือนก่อนหน้า"><LineIcon name="chevron-left" className="cv-nav-ico" /></button>
           <span className="visit-month">{MONTH_LABELS[mm]} {toBuddhistYear(year)}</span>
-          <button type="button" className="btn tiny" onClick={() => shiftMonth(1)} aria-label="เดือนถัดไป">→</button>
+          <button type="button" className="btn tiny" onClick={() => shiftMonth(1)} aria-label="เดือนถัดไป"><LineIcon name="chevron-right" className="cv-nav-ico" /></button>
         </div>
         {canCancelAll && !onFootAction && (
           <button
@@ -760,6 +764,14 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
           );
         })}
       </div>
+      {/* ดีไซน์ v2: คำอธิบายสีของช่องวัน (ตกแต่งอย่างเดียว · สีจริงมาจาก class เดิมของช่องวัน) */}
+      <div className="cv-legend" aria-hidden="true">
+        <span><i className="cv-sw is-done" />ไปแล้ว</span>
+        <span className="cv-legend-sched"><i className="cv-sw is-sched" />รอวันนัด</span>
+        <span><i className="cv-sw is-cancel" />ยกเลิก</span>
+        <span><i className="cv-sw is-picked" />เลือกไว้</span>
+        <span><i className="cv-sw is-today" />วันนี้</span>
+      </div>
 
       {!readOnly && (
         <div className="pick-presets">
@@ -778,7 +790,7 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
         <div className="pick-presets">
           <span className="muted">ลงนัดทั้งแพ็ก:</span>
           {['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'].map((label, d) => (
-            <label key={d} className="btn tiny" style={{ opacity: packDays.includes(d) ? 1 : 0.45 }}>
+            <label key={d} className={`btn tiny cv-day${packDays.includes(d) ? ' is-on' : ''}`}>
               <input
                 type="checkbox"
                 style={{ display: 'none' }}
@@ -790,7 +802,7 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
           ))}
           <button
             type="button"
-            className="btn tiny primary"
+            className="btn tiny primary cv-fill"
             disabled={busy || packDays.length === 0}
             onClick={() => pickPattern(packDays, { fill: true })}
           >
@@ -819,10 +831,14 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
         </p>
       )}
 
+      </div>
+
+      <div className="cv-side">
       {/* แถบสรุปร่าง — โผล่เมื่อเลือกวันแล้วเท่านั้น จอเล็กจึงไม่ถูกฟอร์มบังปฏิทินตั้งแต่แรก */}
       {!readOnly && picked.size > 0 && (
         <div className="pick-bar">
           <p className="pick-count">
+            <LineIcon name="check" className="text-ico cv-check" />
             เลือกไว้ <strong>{picked.size}</strong> วัน
             {overPick && <span className="cell-sub">เลือกเกินแพ็กเกจ {pickedNew - quotaLeft} วัน — เอาออกก่อนบันทึก</span>}
             {duplicateDates.size > 0 && (
@@ -913,6 +929,7 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
                 disabled={busy}
                 onClick={() => setTimeKey(p.key)}
               >
+                {timeKey === p.key && <LineIcon name="check" className="text-ico cv-check" />}
                 {p.label}
               </button>
             ))}
@@ -1049,6 +1066,8 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
                     <span className="sr-only">{formatDate(v.visit_date)}</span>
                     <span className={`vc-time${t ? '' : ' is-none'}`}>{t || 'ไม่ระบุเวลา'}</span>
                     <span className={`badge visit-${v.state}`}>{VISIT_STATE_LABELS[v.state]}</span>
+                    {/* ดีไซน์ v2: "ครั้งที่ N" ชิดขวาของแถวบน (เดิมอยู่ในแถวรอง) */}
+                    <span className="nw vc-seq">{unit}ที่ {idx + 1 + (isAppt ? carried : 0)}</span>
                   </span>
                   <span className="vc-meta">
                     {/* ชื่อคนไป = ปุ่มเปลี่ยนคน (นัดที่ยังเปลี่ยนได้) · ที่เหลือเป็นข้อความเฉยๆ */}
@@ -1079,7 +1098,6 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
                     {!v.partner_id && v.partner_rejected_at && !v.assigned_to && v.state === 'scheduled' && (
                       <span className="nw vc-warn"><LineIcon name="alert" className="text-ico" />{v.partner_rejected_name ?? 'พาร์ทเนอร์'} ปฏิเสธ{v.partner_reject_reason ? ` — ${v.partner_reject_reason}` : ''}</span>
                     )}
-                    <span className="nw">{unit}ที่ {idx + 1 + (isAppt ? carried : 0)}</span>
                     {/* กายภาพ: หนึ่งนัดหนึ่ง VN (ระบบออกตอนลงนัด) · Homecare ไม่มี VN รายกะ ใช้ VN ของเคส */}
                     {v.vn && <span className="mono nw">{v.vn}</span>}
                     {(v.check_in_at || v.check_out_at) && (
@@ -1206,6 +1224,8 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
           })}
         </ol>
       )}
+      </div>
+      </div>
 
       {swapping && (
         <ChangeVisitPersonDialog
@@ -1262,11 +1282,15 @@ function SendPartnerDialog({ visit, busy, error, onConfirm, onCancel }) {
   const when = [visit.planned_start, visit.planned_end].filter(Boolean).join('-');
   return createPortal(
     <div className="modal-backdrop modal-stacked" onClick={onCancel}>
-      <div className="modal modal-narrow" role="dialog" aria-modal="true" aria-labelledby="send-partner-title" onClick={(e) => e.stopPropagation()}>
+      <div className="modal modal-narrow sp-dialog" role="dialog" aria-modal="true" aria-labelledby="send-partner-title" onClick={(e) => e.stopPropagation()}>
         <header className="modal-head">
           <div>
             <h2 id="send-partner-title">ส่งกะให้พาร์ทเนอร์</h2>
-            <p className="muted">{formatDate(visit.visit_date)}{when ? ` · ${when}` : ''} · ตอนนี้: {visit.assigned_name ?? 'ยังไม่มีคน'}</p>
+            {/* ดีไซน์ v2: วัน·เวลาในชิปกรอบ + "ตอนนี้: ชื่อ" ตัวหนา (ข้อมูลเดิม) */}
+            <p className="muted sp-meta">
+              <span className="sp-when"><LineIcon name="calendar" className="text-ico" />{formatDate(visit.visit_date)}{when ? ` · ${when}` : ''}</span>
+              <span>ตอนนี้: <strong>{visit.assigned_name ?? 'ยังไม่มีคน'}</strong></span>
+            </p>
           </div>
           <button type="button" className="modal-close" onClick={onCancel} aria-label="ปิด" disabled={busy}>×</button>
         </header>
@@ -1275,6 +1299,8 @@ function SendPartnerDialog({ visit, busy, error, onConfirm, onCancel }) {
           {!list ? (!loadError && <p className="muted">กำลังโหลด…</p>) : list.length === 0 ? (
             <p className="muted">ยังไม่มีพาร์ทเนอร์ที่เปิดใช้ — เพิ่มที่ตั้งค่าระบบ › พาร์ทเนอร์</p>
           ) : (
+            <>
+            <p className="move-label sp-label" aria-hidden="true">บริษัทพาร์ทเนอร์</p>
             <div className="pt-people" role="radiogroup" aria-label="บริษัทพาร์ทเนอร์">
               {list.map((p) => (
                 <label key={p.partner_id} className={`pt-person${pick?.partner_id === p.partner_id ? ' is-on' : ''}${p.leads ? '' : ' is-busy'}`}>
@@ -1283,11 +1309,14 @@ function SendPartnerDialog({ visit, busy, error, onConfirm, onCancel }) {
                   <PartnerLogo partner={p} size={36} />
                   <span className="pt-person-main">
                     <b>{p.name}</b>
-                    <span className="muted">{p.rate_per_visit != null && `${formatBaht(p.rate_per_visit)}/ครั้ง · `}ทีม {p.staff} คน · งานค้าง {p.open_visits}{p.leads ? '' : ' · ยังไม่มีบัญชีหัวหน้า'}</span>
+                    <span className="muted">{p.rate_per_visit != null && <><strong className="sp-rate">{formatBaht(p.rate_per_visit)}</strong>/ครั้ง · </>}ทีม {p.staff} คน · งานค้าง {p.open_visits}</span>
                   </span>
+                  {/* ดีไซน์ v2: "ยังไม่มีบัญชีหัวหน้า" เป็นป้ายส้มชิดขวา (เดิมต่อท้ายบรรทัดรอง) */}
+                  {!p.leads && <span className="sp-nolead">ยังไม่มีบัญชีหัวหน้า</span>}
                 </label>
               ))}
             </div>
+            </>
           )}
           {error && <p className="error" role="alert">{error}</p>}
           <p className="move-note"><LineIcon name="bell" className="text-ico" />

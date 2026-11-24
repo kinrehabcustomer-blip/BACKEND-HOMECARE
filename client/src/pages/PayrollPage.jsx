@@ -709,22 +709,34 @@ export default function PayrollPage() {
 
   return (
     <PageRefresh onRefresh={() => setReloadKey((k) => k + 1)}>
-      {/* ไม่มีหัวหน้าบนจอ (การ์ดแท็บเป็นส่วนบนสุด) — คง h1 ไว้ให้โปรแกรมอ่านหน้าจอ */}
-      <h1 className="sr-only">ค่าตอบแทนพนักงาน</h1>
+      {/* ดีไซน์ v2 (23 พ.ย. 2569): หัวหน้า = ชื่อหน้า + คำอธิบายสั้นว่าหน้านี้ไว้ทำอะไร */}
+      <header className="page-head ops-head pay-head">
+        <div>
+          <h1>ค่าตอบแทนพนักงาน</h1>
+          <p className="muted">ปล่อยค่าจ้างรายเคส → อนุมัติจ่าย → สรุปเงินได้ของพนักงาน</p>
+        </div>
+      </header>
 
       {/* แท็บ + ตัวกรอง + รายการ อยู่ในการ์ดขาวใบเดียว — โครงเดียวกับหน้าการมาทำงาน (ดู .att-card) */}
-      <div className="list-card att-card">
-        <div className="att-tabs" role="tablist" aria-label="มุมมองค่าตอบแทน">
-          {Object.entries(TABS).map(([key, label]) => (
-            <button
-              key={key}
-              role="tab"
-              aria-selected={tab === key}
-              className={`att-tab ${tab === key ? 'is-active' : ''}`}
-              onClick={() => patch({ tab: key === TAB_ORDER[0] ? '' : key })}
-            >
-              {label}
-            </button>
+      <div className="list-card att-card ops-card pay-page">
+        {/* แท็บแบบขั้นตอน 1 › 2 › 3 (ดีไซน์ v2) — เลขขั้นกับลูกศรเป็นของตกแต่ง ปุ่มแท็บยังเป็นตัวเดิม */}
+        <div className="att-tabs pay-steps" role="tablist" aria-label="มุมมองค่าตอบแทน">
+          {Object.entries(TABS).map(([key, label], i) => (
+            <Fragment key={key}>
+              {i > 0 && (
+                <svg className="pay-step-sep" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                  strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
+              )}
+              <button
+                role="tab"
+                aria-selected={tab === key}
+                className={`att-tab ${tab === key ? 'is-active' : ''}`}
+                onClick={() => patch({ tab: key === TAB_ORDER[0] ? '' : key })}
+              >
+                <span className="pay-step-no" aria-hidden="true">{i + 1}</span>
+                {label}
+              </button>
+            </Fragment>
           ))}
         </div>
 

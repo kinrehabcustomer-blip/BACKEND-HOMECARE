@@ -58,7 +58,7 @@ export default function MyReportsPage() {
   return (
     <PageRefresh onRefresh={() => Promise.all([loadCases(), loadCase()])} busy={loading}>
       {/* ไม่มีหัวหน้าบนจอ — ช่องเลือกเคสเป็นหัวการ์ด รายงานของเคสอยู่ในการ์ดใบเดียวกัน · h1 คงไว้ให้โปรแกรมอ่านหน้าจอ */}
-      <h1 className="sr-only">รายงานของฉัน</h1>
+      <h1 className="fp-title">รายงานของฉัน</h1>
 
       <ErrorBar message={error} onRetry={loadCases} busy={loading} />
 

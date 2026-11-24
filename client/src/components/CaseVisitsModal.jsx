@@ -23,12 +23,12 @@ export default function CaseVisitsModal({ caseItem, readOnly = false, mode = 'sh
 
   return (
     <div className="modal-backdrop modal-stacked" onClick={onClose}>
-      <div className="modal modal-narrow is-subsheet" ref={sheetRef} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+      <div className="modal modal-narrow is-subsheet cv-modal" ref={sheetRef} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
         <header className="modal-head">
+          {/* ดีไซน์ v2: หัวข้อก่อน แล้ว "ชื่อผู้รับบริการ · รหัสเคส" บรรทัดเดียว (ข้อมูลเดิม สลับลำดับ) */}
           <div>
-            <p className="mono muted">{caseCode(caseItem.case_id)}</p>
             <h2>{title}</h2>
-            <p className="muted">{caseItem.client_name}</p>
+            <p className="muted">{caseItem.client_name}<span className="cv-head-sep" aria-hidden="true"> · </span><span className="mono cv-head-code">{caseCode(caseItem.case_id)}</span></p>
           </div>
           <button className="modal-close" onClick={onClose} aria-label="ปิด">×</button>
         </header>

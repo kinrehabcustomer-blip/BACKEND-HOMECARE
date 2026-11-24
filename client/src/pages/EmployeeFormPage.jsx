@@ -178,8 +178,9 @@ export default function EmployeeFormPage() {
 
   return (
     <>
-      <header className="page-head">
+      <header className="page-head ad-head ad-head-form">
         <div>
+          <p className="ad-crumb" aria-hidden="true"><b>พนักงาน</b><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>{isEdit ? 'แก้ไขข้อมูล' : 'เพิ่มใหม่'}</p>
           <h1>{isEdit ? `แก้ไขข้อมูล ${id}` : 'เพิ่มพนักงานใหม่'}</h1>
           {!isEdit && <p className="muted">กรอกแค่ชื่อกับตำแหน่งก็บันทึกได้ — ที่เหลือมาเติมทีหลังได้</p>}
         </div>
@@ -221,15 +222,20 @@ export default function EmployeeFormPage() {
         </section>
       )}
 
-      <form className="card form" ref={formEl} onSubmit={handleSubmit}>
+      {/* ดีไซน์ v2 (23 พ.ย. 2569): เพิ่มใหม่ = สองคอลัมน์ (ซ้าย ช่องที่ต้องกรอก + หมายเหตุรหัสผ่าน · ขวา ข้อมูลเพิ่มเติมแบบพับ)
+          แก้ไข = เรียงลงคอลัมน์เดียวเหมือนเดิม — โครงฟอร์ม/ช่อง/ชื่อช่องเดิมทั้งหมด */}
+      <form className={`form ad-form${isEdit ? ' is-edit' : ''}`} ref={formEl} onSubmit={handleSubmit}>
+        <div className="ad-form-main">
+        <section className="card ad-card">
         {/* สามช่องที่ระบบบังคับจริงๆ อยู่บนสุดและเปิดค้างไว้เสมอ — เพิ่มคนใหม่จึงจบได้ในหน้าจอเดียว */}
         <h2>ข้อมูลที่ต้องกรอก</h2>
+        <p className="ad-card-sub">ชื่อ นามสกุล และตำแหน่ง — แค่นี้ก็บันทึกได้</p>
         <div className="grid">
-          <label>ชื่อ (ไทย) *
+          <label><span className="ad-label">ชื่อ (ไทย) <span className="ad-req">*</span></span>
             <input required name="first_name" {...field('first_name')} />
             {fieldError('first_name')}
           </label>
-          <label>นามสกุล (ไทย) *
+          <label><span className="ad-label">นามสกุล (ไทย) <span className="ad-req">*</span></span>
             <input required name="last_name" {...field('last_name')} />
             {fieldError('last_name')}
           </label>
@@ -248,7 +254,7 @@ export default function EmployeeFormPage() {
               setFieldErrors((prev) => (prev.employee_id ? { ...prev, employee_id: undefined } : prev));
             }}
           />
-          <label>ตำแหน่ง *
+          <label><span className="ad-label">ตำแหน่ง <span className="ad-req">*</span></span>
             <SearchSelect required name="position" {...field('position')}>
               {/* Super Admin ตั้งได้เฉพาะ Super Admin (server กันอีกชั้น) — คนอื่นไม่เห็นตัวเลือกนี้ เว้นแต่แฟ้มนี้เป็น Super Admin อยู่แล้ว */}
               {Object.entries(POSITION_LABELS)
@@ -269,11 +275,26 @@ export default function EmployeeFormPage() {
             {fieldError('status')}
           </label>
         </div>
+        </section>
+        {/* บอกล่วงหน้าว่าหลังบันทึกจะได้อะไร (ตรงกับกล่องรหัสผ่านชั่วคราวที่โผล่หลังบันทึก) — ข้อความเฉยๆ ไม่มีการทำงาน */}
+        {!isEdit && (
+          <div className="ad-note">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></svg>
+            <div>
+              <strong>หลังบันทึก จะได้รหัสผ่านชั่วคราว</strong>
+              <p>ใช้เข้าสู่ระบบครั้งแรก — ผู้จัดการ Admin HC และ HR ดูได้ในประวัติพนักงานจนกว่าเจ้าตัวจะเปลี่ยนรหัสผ่าน เจ้าตัวจะถูกบังคับให้ตั้งรหัสใหม่ก่อนใช้งานระบบ</p>
+            </div>
+          </div>
+        )}
+        </div>
 
+        <section className="card ad-card ad-form-more">
+        <h2>ข้อมูลเพิ่มเติม</h2>
+        <p className="ad-card-sub">ไม่บังคับ · กดหัวข้อเพื่อเปิดกรอก เติมทีหลังได้</p>
         {/* ที่เหลือพับไว้ — ตอนเพิ่มคนใหม่ไม่ต้องเจอทั้ง 20 ช่องพร้อมกัน
             ตอนแก้ไขเปิดค้างไว้หมด เพราะคนที่เข้ามาแก้มักรู้อยู่แล้วว่าจะแก้ช่องไหน */}
         <details className="form-section" open={isEdit}>
-          <summary>ข้อมูลส่วนตัวเพิ่มเติม</summary>
+          <summary><span className="ad-sum"><b>ข้อมูลส่วนตัวเพิ่มเติม</b><span className="ad-sum-hint">ชื่อ-นามสกุล (อังกฤษ) · เลขบัตรประชาชน · เพศ · วันเกิด · อีเมล · ที่อยู่ · ประวัติการศึกษา</span></span><span className="ad-sum-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6" /></svg></span></summary>
           <div className="grid">
             <label>ชื่อ (อังกฤษ)
               <input name="first_name_en" placeholder="Phupha" {...field('first_name_en')} />
@@ -314,7 +335,7 @@ export default function EmployeeFormPage() {
         </details>
 
         <details className="form-section" open={isEdit}>
-          <summary>ข้อมูลการจ้างงาน</summary>
+          <summary><span className="ad-sum"><b>ข้อมูลการจ้างงาน</b><span className="ad-sum-hint">ประเภทการจ้าง · วันเริ่มงาน</span></span><span className="ad-sum-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6" /></svg></span></summary>
           <div className="grid">
             <label>ประเภทการจ้าง
               <SearchSelect name="employment_type" {...field('employment_type')}>
@@ -329,7 +350,7 @@ export default function EmployeeFormPage() {
         </details>
 
         <details className="form-section" open={isEdit}>
-          <summary>ผู้ติดต่อฉุกเฉิน &amp; หมายเหตุ</summary>
+          <summary><span className="ad-sum"><b>ผู้ติดต่อฉุกเฉิน &amp; หมายเหตุ</b><span className="ad-sum-hint">ชื่อผู้ติดต่อ · เบอร์โทร · หมายเหตุ</span></span><span className="ad-sum-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6" /></svg></span></summary>
           <div className="grid">
             <label>ชื่อผู้ติดต่อ<input name="emergency_contact_name" {...field('emergency_contact_name')} /></label>
             <label>เบอร์โทร<input name="emergency_contact_phone" inputMode="tel" {...field('emergency_contact_phone')} /></label>
@@ -340,15 +361,18 @@ export default function EmployeeFormPage() {
         {/* อยู่ในการ์ดและฟอร์มเดียวกัน — ใช้ปุ่มบันทึกร่วมกันด้านล่าง
             (ยังคงอยู่ใน DOM แม้ยังไม่กางออก ref จึงเรียก save() ได้ตามปกติ) */}
         <details className="form-section" open={isEdit}>
-          <summary>รูป · ใบรับรอง · ผลงาน</summary>
+          <summary><span className="ad-sum"><b>รูป · ใบรับรอง · ผลงาน</b><span className="ad-sum-hint">รูปพนักงาน · ใบรับรอง · ผลงาน</span></span><span className="ad-sum-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6" /></svg></span></summary>
           <h3 className="form-sub">รูปพนักงาน</h3>
           <PhotoField ref={photo} employeeId={id ?? null} saved={savedPhoto} />
           <CertificateSection ref={certificates} employeeId={id ?? null} />
           <PortfolioSection ref={portfolio} employeeId={id ?? null} />
         </details>
+        </section>
 
         {/* ติดขอบล่างจอ — แก้คำเดียวก็ไม่ต้องเลื่อนผ่านใบรับรองกับผลงานไปกดปุ่ม */}
         <div className="form-actions sticky">
+          {/* ดีไซน์ v2: คำบอกช่องบังคับชิดซ้าย · ปุ่มชิดขวา (ยกเลิก → บันทึก เรียงด้วย CSS order) */}
+          <span className="ad-req-hint"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h.01" /></svg>ช่องที่มี <b>*</b> ต้องกรอก</span>
           <button className="btn primary" type="submit" disabled={saving}>
             {saving ? 'กำลังบันทึก…' : isEdit ? 'บันทึกการแก้ไข' : 'บันทึกพนักงานใหม่'}
           </button>

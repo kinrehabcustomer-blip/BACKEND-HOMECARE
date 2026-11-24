@@ -138,7 +138,10 @@ export default function PartnerJobsPage() {
                     <span className="pt-more">ดูรายละเอียด ›</span>
                   </div>
                   <div className="pt-when">
-                    <strong>{formatDate(v.visit_date)}{timeRange(v) ? ` · ${timeRange(v)} น.` : ''}</strong>
+                    <strong>
+                      {formatDate(v.visit_date)}
+                      {timeRange(v) && <><span className="pt-when-sep"> · </span><span className="pt-when-time">{timeRange(v)} น.</span></>}
+                    </strong>
                     {v.service_name && <span>{v.service_name}</span>}
                   </div>
                   <div className="pt-where">
@@ -168,7 +171,11 @@ export default function PartnerJobsPage() {
             })}
           </div>
         )}
-        <p className="muted pt-foot">ไม่เห็นราคาที่ลูกค้าจ่าย · เห็นเฉพาะกะที่ส่งให้บริษัทคุณ</p>
+        <p className="muted pt-foot">
+          <svg className="pt-foot-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V8a4 4 0 0 1 8 0v3" />
+          </svg>
+          ไม่เห็นราคาที่ลูกค้าจ่าย · เห็นเฉพาะกะที่ส่งให้บริษัทคุณ</p>
       </div>
 
       {viewing && (
@@ -208,36 +215,40 @@ function DetailDialog({ visit, tab, onCancel, onAssign, onReject }) {
   const canAct = Boolean(d) && tab !== 'past' && v.status !== 'cancelled' && !v.check_in_at && v.visit_date >= todayTH();
   return createPortal(
     <div className="modal-backdrop modal-stacked" onClick={onCancel}>
-      <div className="modal modal-narrow pt-sheet" role="dialog" aria-modal="true" aria-labelledby="pt-detail-title" onClick={(e) => e.stopPropagation()}>
+      <div className="modal modal-narrow pt-sheet pt-detail-dialog" role="dialog" aria-modal="true" aria-labelledby="pt-detail-title" onClick={(e) => e.stopPropagation()}>
         <header className="modal-head">
           <div>
+            {/* ประเภทงานเป็นป้ายเหนือชื่อ (ดีไซน์ใหม่) */}
+            <p className="muted pt-detail-kind">
+              <span className={`pt-tag ${v.substitute ? 'is-sub' : 'is-once'}`}>{v.substitute ? 'ไปแทนทีม KIN' : 'งานรายครั้ง'}</span>
+              {v.service_name && <span>{v.service_name}</span>}
+            </p>
             <h2 id="pt-detail-title">{v.client_name}</h2>
-            <p className="muted">{v.substitute ? 'ไปแทนทีม KIN' : 'งานรายครั้ง'}{v.service_name ? ` · ${v.service_name}` : ''}</p>
           </div>
           <button type="button" className="modal-close" onClick={onCancel} aria-label="ปิด">×</button>
         </header>
         <div className="modal-body">
           {error && <p className="error" role="alert">{error}</p>}
           <dl className="pt-detail">
-            <dt>นัดครั้งนี้</dt>
+            <dt><LineIcon name="calendar" className="pt-dt-ico" />นัดครั้งนี้</dt>
             <dd>
               {formatDate(v.visit_date)}{timeRange(v) ? ` · ${timeRange(v)} น.` : ''}
               {d?.visit_no && d?.visit_total ? <span className="muted"> · ครั้งที่ {d.visit_no} จาก {d.visit_total} ของเคส</span> : null}
             </dd>
             {d && (d.start_date || d.end_date) && (
               <>
-                <dt>ช่วงเคส</dt>
+                <dt><ClockIcon />ช่วงเคส</dt>
                 <dd>{d.start_date ? formatDate(d.start_date) : '—'} – {d.end_date ? formatDate(d.end_date) : 'ยังไม่กำหนด'}</dd>
               </>
             )}
-            <dt>สถานที่</dt>
+            <dt><LineIcon name="pin" className="pt-dt-ico" />สถานที่</dt>
             <dd>
               {v.address || <span className="muted">ไม่ได้ระบุที่อยู่</span>}
               {map && <><br /><a href={map} target="_blank" rel="noopener noreferrer" className="pt-map"><LineIcon name="pin" className="text-ico" />เปิดแผนที่</a></>}
             </dd>
-            <dt>คนที่ไป</dt>
+            <dt><PersonIcon />คนที่ไป</dt>
             <dd>
-              {v.assigned_name || <span className="muted">ยังไม่ได้เลือกคน</span>}
+              {v.assigned_name || <span className="pt-detail-unassigned">ยังไม่ได้เลือกคน</span>}
               {v.check_in_at && <span className="muted"> · เข้า {hhmm(v.check_in_at)}{v.check_out_at ? ` · ออก ${hhmm(v.check_out_at)}` : ''}</span>}
             </dd>
           </dl>
@@ -253,6 +264,7 @@ function DetailDialog({ visit, tab, onCancel, onAssign, onReject }) {
               </div>
               {(d.patient_allergies || d.patient_food_allergies) && (
                 <p className="allergy-alert">
+                  <LineIcon name="alert" className="text-ico" />
                   {d.patient_allergies && <>แพ้ยา: {d.patient_allergies}</>}
                   {d.patient_allergies && d.patient_food_allergies && ' · '}
                   {d.patient_food_allergies && <>แพ้อาหาร: {d.patient_food_allergies}</>}
@@ -303,6 +315,22 @@ function DetailDialog({ visit, tab, onCancel, onAssign, onReject }) {
   );
 }
 
+/* ไอคอนตกแต่งหน้าหัวข้อในกล่องรายละเอียด — LineIcon ไม่มีนาฬิกา/คน */
+function ClockIcon() {
+  return (
+    <svg className="pt-dt-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" />
+    </svg>
+  );
+}
+function PersonIcon() {
+  return (
+    <svg className="pt-dt-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="8" r="4" /><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7" />
+    </svg>
+  );
+}
+
 function PField({ label, value }) {
   const empty = value == null || value === '';
   return (
@@ -337,7 +365,7 @@ function AssignDialog({ visit, onCancel, onDone }) {
   };
   return createPortal(
     <div className="modal-backdrop modal-stacked" onClick={onCancel}>
-      <div className="modal modal-narrow pt-sheet" role="dialog" aria-modal="true" aria-labelledby="pt-assign-title" onClick={(e) => e.stopPropagation()}>
+      <div className="modal modal-narrow pt-sheet pt-assign-dialog" role="dialog" aria-modal="true" aria-labelledby="pt-assign-title" onClick={(e) => e.stopPropagation()}>
         <header className="modal-head">
           <div>
             <h2 id="pt-assign-title">เลือกคนที่จะไป</h2>
@@ -354,6 +382,7 @@ function AssignDialog({ visit, onCancel, onDone }) {
                 <label key={p.employee_id} className={`pt-person${pick === p.employee_id ? ' is-on' : ''}${p.conflict ? ' is-busy' : ''}`}>
                   <input type="radio" name="pt-who" value={p.employee_id} checked={pick === p.employee_id}
                     disabled={p.conflict || busy} onChange={() => setPick(p.employee_id)} />
+                  <span className="pt-person-avatar" aria-hidden="true">{p.first_name?.[0] ?? '?'}</span>
                   <span className="pt-person-main">
                     <b>{p.first_name} {p.last_name}{p.nickname ? ` (${p.nickname})` : ''}</b>
                     <span className="muted">
@@ -400,11 +429,14 @@ function RejectDialog({ visit, onCancel, onDone }) {
   };
   return createPortal(
     <div className="modal-backdrop modal-stacked" onClick={onCancel}>
-      <div className="modal modal-narrow" role="alertdialog" aria-modal="true" aria-labelledby="pt-reject-title" onClick={(e) => e.stopPropagation()}>
+      <div className="modal modal-narrow pt-reject-modal" role="alertdialog" aria-modal="true" aria-labelledby="pt-reject-title" onClick={(e) => e.stopPropagation()}>
         <header className="modal-head">
-          <div>
-            <h2 id="pt-reject-title">ปฏิเสธงานนี้?</h2>
-            <p className="muted">{formatDate(visit.visit_date)}{timeRange(visit) ? ` · ${timeRange(visit)}` : ''} · {visit.client_name}</p>
+          <div className="pt-reject-head">
+            <LineIcon name="alert" className="pt-reject-ico" />
+            <div>
+              <h2 id="pt-reject-title">ปฏิเสธงานนี้?</h2>
+              <p className="muted">{formatDate(visit.visit_date)}{timeRange(visit) ? ` · ${timeRange(visit)}` : ''} · {visit.client_name}</p>
+            </div>
           </div>
           <button type="button" className="modal-close" onClick={onCancel} aria-label="ปิด" disabled={busy}>×</button>
         </header>

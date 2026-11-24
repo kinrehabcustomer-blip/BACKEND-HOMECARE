@@ -2,6 +2,8 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { prepaidCovered } from '../cases/addonLink.js';
 import * as repo from './repo.js';
+import { exportLines } from './exportLines.js';
+import { salesTaxReport } from './salesTax.js';
 import * as cases from '../cases/repo.js';
 import * as customers from '../customers/repo.js';
 import * as patients from '../patients/repo.js';
@@ -182,6 +184,51 @@ invoicesRouter.put(
 invoicesRouter.get(
   '/',
   asyncRoute(async (req, res) => res.json(await repo.list(listQuerySchema.parse(req.query)))),
+);
+
+/**
+ * รายงานภาษีขาย (ผู้ใช้ขอ 24 พ.ย. 2569 — ดู salesTax.js) · month = YYYY-MM หรือ from + to = ช่วงวันที่
+ * อยู่เหนือ '/:id' เหมือน /export
+ */
+invoicesRouter.get(
+  '/sales-tax',
+  asyncRoute(async (req, res) => {
+    // ทั้งเดือน (month) หรือช่วงวันที่ที่เลือกเอง (from + to · ไม่เกิน 1 ปี) — เพิ่มช่วงวันที่ 24 พ.ย. 2569
+    const { month, from, to } = req.query;
+    const DATE = /^\d{4}-\d{2}-\d{2}$/;
+    if (from != null || to != null) {
+      if (!DATE.test(from ?? '') || !DATE.test(to ?? '')) throw new ApiError(400, 'กรุณาระบุช่วงวันที่ (from และ to รูปแบบ YYYY-MM-DD)');
+      const days = (Date.parse(to) - Date.parse(from)) / 86_400_000;
+      if (Number.isNaN(days)) throw new ApiError(400, 'วันที่ไม่ถูกต้อง');
+      if (days < 0) throw new ApiError(400, 'วันสิ้นสุดต้องไม่มาก่อนวันเริ่ม');
+      if (days > 366) throw new ApiError(400, 'เลือกช่วงได้ครั้งละไม่เกิน 1 ปี');
+      res.set('Cache-Control', 'no-store');
+      return res.json(await salesTaxReport({ from, to }));
+    }
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(String(month ?? ''))) throw new ApiError(400, 'กรุณาระบุเดือน (month รูปแบบ YYYY-MM) หรือช่วงวันที่ (from, to)');
+    res.set('Cache-Control', 'no-store');
+    res.json(await salesTaxReport({ month }));
+  }),
+);
+
+/**
+ * CSV รายบรรทัด + เฉลี่ยตามช่วงบริการ (ผู้ใช้ขอ 24 พ.ย. 2569 — ดู exportLines.js)
+ * from/to = ช่วงที่เลือก (ไม่ใช่วันที่ออกใบ) · ตัวกรองอื่นชุดเดียวกับรายการ · ช่วงไม่เกิน 1 ปี
+ */
+invoicesRouter.get(
+  '/export-lines',
+  asyncRoute(async (req, res) => {
+    const { from, to } = req.query;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(from ?? '') || !/^\d{4}-\d{2}-\d{2}$/.test(to ?? '')) {
+      throw new ApiError(400, 'กรุณาระบุช่วงวันที่ (from และ to รูปแบบ YYYY-MM-DD)');
+    }
+    const days = (Date.parse(to) - Date.parse(from)) / 86_400_000;
+    if (days < 0) throw new ApiError(400, 'วันสิ้นสุดต้องไม่มาก่อนวันเริ่ม');
+    if (days > 366) throw new ApiError(400, 'ส่งออกได้ครั้งละไม่เกิน 1 ปี');
+    const query = listQuerySchema.parse(req.query);
+    res.set('Cache-Control', 'no-store');
+    res.json(await exportLines(query, from, to));
+  }),
 );
 
 /**

@@ -179,11 +179,16 @@ export default function AttendancePage() {
 
   return (
     <PageRefresh onRefresh={refreshAll}>
-      {/* ไม่มีหัวหน้าบนจอ (การ์ดแท็บเป็นส่วนบนสุด) — คง h1 ไว้ให้โปรแกรมอ่านหน้าจอ */}
-      <h1 className="sr-only">การมาทำงาน</h1>
+      {/* ดีไซน์ v2 (23 พ.ย. 2569): หัวหน้า = ชื่อหน้า + คำอธิบายสั้นว่าหน้านี้ไว้ทำอะไร */}
+      <header className="page-head ops-head att-head">
+        <div>
+          <h1>การมาทำงาน</h1>
+          <p className="muted">กะที่เช็คอินผิดปกติ ขาดงาน หรือค้างเช็คเอาท์ — ตรวจแล้วเคลียร์ทีละรายการ</p>
+        </div>
+      </header>
 
       {/* แท็บ + ตัวกรอง + รายการ อยู่ในการ์ดขาวใบเดียว (โครงเดียวกับหน้ารายการอื่น — ดู .att-card) */}
-      <div className="list-card att-card">
+      <div className="list-card att-card ops-card att-page">
         <div className="att-tabs" role="tablist" aria-label="มุมมองการมาทำงาน">
           {Object.entries(visibleTabs).map(([key, label]) => (
             <button
@@ -408,7 +413,7 @@ function TimeFix({ visit, busy, onClose, onSave, lateOnly = false }) {
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal modal-narrow" ref={sheetRef} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+      <div className="modal modal-narrow timefix-modal" ref={sheetRef} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
         <header className="modal-head">
           <div>
             <h2>{lateOnly ? 'บันทึกเวลามาถึงจริง' : 'บันทึกเวลาจริง'}</h2>
@@ -583,7 +588,7 @@ function Exceptions({ rows, error, onReload, filters }) {
               <col style={{ width: '29%' }} />
             </colgroup>
             <thead>
-              <tr><th>วันที่</th><th>พนักงาน / เคส</th><th>ปัญหา</th><th>หลักฐาน</th><th></th></tr>
+              <tr><th>วันที่</th><th>พนักงาน / เคส</th><th>ปัญหา</th><th>หลักฐาน</th><th className="th-actions">จัดการ</th></tr>
             </thead>
             <tbody>
               {rows.map((v) => (

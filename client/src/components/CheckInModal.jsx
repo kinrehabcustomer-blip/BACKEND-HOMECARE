@@ -71,7 +71,7 @@ export default function CheckInModal({ visit, onDone, onClose }) {
 
   return (
     <div className="modal-backdrop modal-stacked" onClick={() => !busy && onClose()}>
-      <div className="modal modal-narrow" ref={sheetRef} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+      <div className="modal modal-narrow checkin-modal" ref={sheetRef} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
         <header className="modal-head">
           <div>
             <p className="mono muted">{caseCode(visit.case_id)}</p>
@@ -118,7 +118,13 @@ export default function CheckInModal({ visit, onDone, onClose }) {
                 <button type="button" className="btn" onClick={() => setCameraOn(true)}>ถ่ายใหม่</button>
               </div>
             ) : (
-              <button type="button" className="btn" onClick={() => setCameraOn(true)}>เปิดกล้องถ่ายรูป</button>
+              <button type="button" className="btn checkin-camera-btn" onClick={() => setCameraOn(true)}>
+                <svg className="checkin-camera-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z" />
+                  <circle cx="12" cy="13.5" r="3.5" />
+                </svg>
+                เปิดกล้องถ่ายรูป
+              </button>
             )}
             <p className="muted">
               {photo

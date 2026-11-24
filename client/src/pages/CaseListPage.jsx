@@ -82,6 +82,8 @@ export default function CaseListPage() {
   const effPage = mobile ? 1 : page;
   // เงื่อนไขของผลหน้า 1 ชุดล่าสุด — ใช้ขอหน้าถัดไปด้วยเงื่อนไขเดียวกันเป๊ะ
   const lastQuery = useRef({});
+  // คำค้นของรอบก่อน — หน่วง 250ms เฉพาะตอนคำค้นเปลี่ยน (กำลังพิมพ์) เปิดหน้า/เปลี่ยนหน้า/เรียง/ตัวกรองยิงทันที
+  const prevQ = useRef(q);
   const openId = params.get('open');
 
   const filtered = Boolean(q || status || serviceKind || assignedTo || year || pseudo);
@@ -127,6 +129,9 @@ export default function CaseListPage() {
     setLoading(true);
 
     // หน่วงเล็กน้อยระหว่างพิมพ์ค้นหา จะได้ไม่ยิง API ทุกตัวอักษร
+    // เดิมหน่วงทุกครั้ง (รวมเปิดหน้าแรก/เปลี่ยนหน้า/เรียง) ทำให้ช้าเปล่าๆ 250ms — ตรวจความเร็ว 24 พ.ย. 2569
+    const typing = q !== prevQ.current;
+    prevQ.current = q;
     const timer = setTimeout(() => {
       const query = Object.fromEntries(
         Object.entries({
@@ -146,7 +151,7 @@ export default function CaseListPage() {
         })
         .catch((err) => !cancelled && setError(err.message))
         .finally(() => !cancelled && setLoading(false));
-    }, 250);
+    }, typing ? 250 : 0);
 
     return () => {
       cancelled = true;
@@ -227,11 +232,17 @@ export default function CaseListPage() {
 
   return (
     <PageRefresh onRefresh={() => setReloadKey((k) => k + 1)} busy={loading}>
-      {/* ไม่มีหัวหน้าบนจอ (แถบตัวกรองเป็นส่วนบนสุด) — คง h1 ไว้ให้โปรแกรมอ่านหน้าจอ */}
-      <h1 className="sr-only">เคส</h1>
+      {/* ดีไซน์ v2 (23 พ.ย. 2569): หัวหน้า = ชื่อหน้า + จำนวนเคสตามตัวกรองตอนนี้ (ตัวเลขเดียวกับที่ server ส่งมากับรายการ)
+          มือถือซ่อนทั้งหัว (ดีไซน์มือถือเริ่มที่แถบค้นหา) — h1 ยังอยู่ให้โปรแกรมอ่านหน้าจอ */}
+      <header className="page-head ops-head case-head">
+        <div>
+          <h1>เคส</h1>
+          {result && <p className="muted">ทั้งหมด {Number(result.pagination.total).toLocaleString('th-TH')} เคส{filtered ? ' (ตามตัวกรอง)' : ''}</p>}
+        </div>
+      </header>
 
       {/* แถบตัวกรอง + ตาราง อยู่ในการ์ดใบเดียวกัน (จอเล็กแยกกลับเป็นแถบตัวกรอง + การ์ดรายแถว — ดู .list-card) */}
-      <div className="list-card">
+      <div className="list-card ops-list case-list">
         {/* แถบค้นหา + ตัวกรอง — บนมือถือ dropdown ย้ายไปอยู่ในแผ่น "ตัวกรอง" (ดู FilterBar) */}
         <FilterBar
           search={(

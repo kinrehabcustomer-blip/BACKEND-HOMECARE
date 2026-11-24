@@ -204,14 +204,14 @@ function Donut({ slices, centerLabel, ariaLabel }) {
       text: num(total),
       subtext: centerLabel,
       left: 'center',
-      top: '34%',
+      top: '33%',
       itemGap: 2,
-      textStyle: { color: tokens.text, fontFamily: tokens.font, fontSize: 24, fontWeight: 700 },
+      textStyle: { color: tokens.heading || tokens.text, fontFamily: tokens.font, fontSize: 28, fontWeight: 600 }, // ดีไซน์ v2: ตัวเลขกลางวงใหญ่ขึ้น
       subtextStyle: { color: tokens.muted, fontFamily: tokens.font, fontSize: 11 },
     },
     series: [{
       type: 'pie',
-      radius: ['64%', '84%'],
+      radius: ['70%', '92%'], // ดีไซน์ v2: วงหนาขึ้น เต็มกรอบ
       avoidLabelOverlap: false,
       label: { show: false },
       labelLine: { show: false },
@@ -226,7 +226,7 @@ function Donut({ slices, centerLabel, ariaLabel }) {
   return (
     <div className="donut">
       <div className="donut-chart">
-        <EChart option={option} height={168} ariaLabel={ariaLabel} />
+        <EChart option={option} height={150} ariaLabel={ariaLabel} />
       </div>
       <ul className="donut-legend">
         {slices.map((s) => (

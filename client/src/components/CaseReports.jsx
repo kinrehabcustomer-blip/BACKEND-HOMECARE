@@ -553,7 +553,8 @@ export default function CaseReports({
           </SearchSelect>
           <button
             type="button"
-            className={`chip ${filters.type === 'abnormal' ? 'is-on' : ''}`}
+            className={`chip chip-filter${filters.type === 'abnormal' ? ' is-on' : ''}`}
+            aria-pressed={filters.type === 'abnormal'}
             onClick={() => setFilters((f) => ({ ...f, type: f.type === 'abnormal' ? '' : 'abnormal' }))}
           >
             เฉพาะที่ผิดปกติ

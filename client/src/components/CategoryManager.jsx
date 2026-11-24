@@ -298,7 +298,8 @@ function MainCard({ main, busy, labels, kind, meta, info, editorFor, onPatch, on
           ) : (
             foldable ? (
               <button type="button" className="set-fold-btn" aria-expanded={shownOpen} onClick={() => setOpen(!shownOpen)}>
-                <LineIcon name="chevron" className={`set-fold-ico${shownOpen ? ' is-open' : ''}`} />
+                {/* กรอบสี่เหลี่ยมรอบลูกศร (ดีไซน์ v2) — พื้นทองอ่อนตอนกางอยู่ */}
+                <span className="set-fold-box" aria-hidden="true"><LineIcon name="chevron" className={`set-fold-ico${shownOpen ? ' is-open' : ''}`} /></span>
                 <h3>{main.name_th} <span className="mono set-code">{main.code}</span></h3>
               </button>
             ) : <h3>{main.name_th} <span className="mono set-code">{main.code}</span></h3>
@@ -423,7 +424,8 @@ export default function CategoryManager({ domain }) {
   const head = (
     <SettingsPaneHead
       title={info.title}
-      desc={info.desc}
+      /* หัตถการ/อุปกรณ์ไม่มีคำอธิบายตายตัว — ดีไซน์ v2 ให้บอกจำนวนหมวด (นับจากข้อมูลที่โหลดมาแล้ว) */
+      desc={info.desc || (data && kind ? `${tree.length} หมวดหลัก · ${subs.length} หมวดย่อย · เฉพาะหมวดที่เปิดใช้งานจะขึ้นให้เลือก${info.pick}` : info.desc)}
       action={meta?.editable && (
         <button type="button" className="btn" disabled={busy || !data} onClick={() => setAddingMain((v) => !v)}>+ เพิ่มหมวดหลัก</button>
       )}

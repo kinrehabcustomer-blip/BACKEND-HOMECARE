@@ -85,18 +85,33 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="login-page">
+    <div className="login-page login-v2">
+      {/* ดีไซน์ v2 (23 พ.ย. 2569): การ์ดสองฝั่ง — แผงแบรนด์ทองจาง (ซ้าย) + ฟอร์ม (ขวา)
+          มือถือ: แผงแบรนด์เป็นแถบบน ฟอร์มเป็นการ์ดลอยทับขอบล่างของแถบ · ฟอร์ม/ลำดับการกรอกเหมือนเดิมทุกอย่าง */}
+      <div className="login-shell">
+        <aside className="login-aside" aria-hidden="true">
+          <svg className="login-aside-art" viewBox="0 0 360 220" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M10 150 L150 40 L230 100" /><path d="M120 150 L230 62 L350 150" /><path d="M215 76 V40 H235 V92" />
+          </svg>
+          <div className="login-aside-brand">
+            {/* โลโก้ KIN HOME CARE (ผู้ใช้ขอ 24 พ.ย. 2569) — สลับไฟล์ตามธีมด้วยกฎ .logo-light/.logo-dark */}
+            <img className="brand-logo login-logo logo-light" src="/logo-navbar.webp" alt="KIN Home Care" />
+            <img className="brand-logo login-logo logo-dark" src="/logo-navbar-dark.webp" alt="" aria-hidden="true" />
+          </div>
+          <div className="login-aside-main">
+            <p className="login-aside-title">ระบบงาน<br />เจ้าหน้าที่ KIN</p>
+            <ul className="login-aside-list">
+              <li><span className="login-aside-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12l5 5L20 7" /></svg></span>เช็คอิน</li>
+              <li><span className="login-aside-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M6 3h9l4 4v14H6z" /><path d="M9 12h7M9 16h5" /></svg></span>ส่งรายงาน</li>
+              <li><span className="login-aside-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M3 10h18M8 3v4M16 3v4" /></svg></span>ตารางงาน</li>
+            </ul>
+          </div>
+          <p className="login-aside-foot">KIN HOME CARE · STAFF PORTAL</p>
+        </aside>
       <form className="login-card" onSubmit={handleSubmit}>
-        {/* โลโก้ KIN Home Care ชุดเดียวกับแถบเมนู (11 พ.ย. 2569 · แทนตัวอักษร "KIN Jobs" ที่ใช้ตั้งแต่ 23 ต.ค. 2569)
-            สองรูปสลับตามธีม — กฎ .brand-logo.logo-light/.logo-dark ใน warm-clarity.css */}
-        <div className="login-brand">
-          <img className="brand-logo login-logo logo-light" src="/logo-navbar.webp" alt="KIN Home Care" />
-          <img className="brand-logo login-logo logo-dark" src="/logo-navbar-dark.webp" alt="" aria-hidden="true" />
-        </div>
-
         <div className="login-heading">
           <h1>เข้าสู่ระบบ</h1>
-          <p className="login-description">ระบบงานเจ้าหน้าที่ KIN<br />เช็คอิน · ส่งรายงาน · ตารางงาน</p>
+          <p className="login-description">ระบบงานเจ้าหน้าที่ KIN<span className="login-desc-more"> · เช็คอิน · ส่งรายงาน · ตารางงาน</span></p>
         </div>
 
         {/* ข้อความส่งต่อมาจากหน้าตั้งรหัสผ่านใหม่ */}
@@ -185,21 +200,28 @@ export default function LoginPage() {
           {busy ? 'กำลังเข้าสู่ระบบ…' : 'เข้าสู่ระบบ'}
         </button>
 
+        {/* ดีไซน์ v2: ลิงก์ลืมรหัสผ่านอยู่ใต้ปุ่มเข้าสู่ระบบ (เดิมอยู่ท้ายการ์ด) */}
+        <p className="muted login-note">
+          <Link to="/forgot-password">ลืมรหัสผ่าน?</Link>
+        </p>
+
         {/* ดร.ธงชัย 2 พ.ย. 2569 สั่งให้เขียนรหัสเริ่มต้นไว้หน้า login เลย (เปลี่ยนจากเดิมที่ไม่บอกรหัส) */}
         <div className="notice login-hint">
-          <b>เข้าใช้งานครั้งแรก</b>
-          <div>Username : รหัสพนักงาน</div>
-          <div>Password : 12345678</div>
+          <div className="login-hint-head">
+            <b>เข้าใช้งานครั้งแรก</b>
+            <dl className="login-hint-list">
+              <dt>Username</dt><dd>รหัสพนักงาน</dd>
+              <dt>Password</dt><dd className="login-hint-pw">12345678</dd>
+            </dl>
+          </div>
           {/* รหัสเริ่มต้นเหมือนกันทุกคน — ย้ำให้เปลี่ยนหลังเข้าได้แล้ว (11 พ.ย. 2569) */}
           <p className="login-hint-warn">
             <LineIcon name="alert" className="text-ico" />
             <span>กรุณาเปลี่ยนรหัสผ่านเมื่อเข้าใช้งานแล้ว<br />เปลี่ยนรหัสผ่านได้ที่ เมนูตั้งค่า</span>
           </p>
         </div>
-        <p className="muted login-note">
-          <Link to="/forgot-password">ลืมรหัสผ่าน?</Link>
-        </p>
       </form>
+      </div>
       <p className="login-footer">KIN HOME CARE · STAFF PORTAL</p>
     </div>
   );

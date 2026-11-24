@@ -32,7 +32,7 @@ export default function VisitReportModal({ visit, onSaved, onClose }) {
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal modal-wide" ref={sheetRef} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+      <div className="modal modal-wide visit-report-modal" ref={sheetRef} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
         <header className="modal-head">
           <div>
             <p className="mono muted">

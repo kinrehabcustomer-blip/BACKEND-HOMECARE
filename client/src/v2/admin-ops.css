@@ -1,0 +1,675 @@
+/* ดีไซน์ใหม่ (v2) · admin-ops — แบบร่าง https://claude.ai/artifact/UYErtp3CaW8hEqXBRiHT3d */
+/* หน้างานหลังบ้าน: ภาพรวม · รายได้ · รายได้ตาม BU · เคส · เปิด/แก้เคส · ตารางงาน · ใบแจ้งหนี้ · การมาทำงาน · ค่าตอบแทน
+   แตะหน้าตาอย่างเดียว · ทุก selector ผูกกับ class รากของหน้า/คอมโพเนนต์ในส่วนนี้ ไม่ทับ class กลาง (.btn .badge .modal …) แบบกว้าง */
+
+/* =====================================================================================
+   หัวหน้า (ชื่อหน้า + คำอธิบาย) — ดีไซน์ v2 แสดงชื่อหน้ากลับมา
+   warm-clarity ซ่อน .page-head h1 ทั้งระบบ (6 พ.ย.) — เปิดคืนเฉพาะหัวที่ติด .ops-head ของหน้าในส่วนนี้
+   ===================================================================================== */
+.page-head.ops-head { align-items: flex-end; gap: 0.75rem 1rem; flex-wrap: wrap; margin-bottom: 1rem; }
+.page-head.ops-head h1 {
+  position: static;
+  width: auto; height: auto;
+  margin: 0 0 0.125rem; padding: 0;
+  overflow: visible;
+  clip-path: none;
+  white-space: normal;
+  font-size: 1.75rem;
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+  color: var(--heading);
+}
+.page-head.ops-head > div > .muted { font-size: 0.9375rem; line-height: 1.5; margin: 0; }
+.page-head.ops-head > .actions { display: flex; align-items: center; gap: 0.625rem; flex-wrap: wrap; margin-left: auto; }
+@media (max-width: 768px) {
+  .page-head.ops-head { align-items: stretch; }
+  .page-head.ops-head h1 { font-size: 1.5rem; }
+  .page-head.ops-head > div > .muted { font-size: 0.875rem; }
+}
+
+/* ป้ายจำนวนแบบเม็ดยา (จุดส้ม + "7 เคส") — ข้างหัวการ์ด */
+.ops-count-pill {
+  display: inline-flex; align-items: center; gap: 0.375rem;
+  padding: 0.125rem 0.625rem;
+  border-radius: 999px;
+  background: #fdf0e6;
+  color: #b4541a;
+  font-size: 0.8125rem; font-weight: 600; line-height: 1.6;
+  white-space: nowrap;
+}
+.ops-count-pill::before { content: ''; width: 0.4375rem; height: 0.4375rem; border-radius: 50%; background: currentColor; }
+:root[data-theme='dark'] .ops-count-pill { background: #3a2414; color: #f0a26a; }
+
+/* =====================================================================================
+   ภาพรวม (DashboardPage + DashboardCharts)
+   ===================================================================================== */
+/* สีวงแหวนผลการเข้างาน/แท่ง KPI ตามดีไซน์ v2: กำลังทำ = ทอง · เสร็จ = เขียว · ขาด = แดง · ค้างเช็คเอาท์/นัดล่วงหน้า = ส้ม
+   ตัวแปรชุดนี้ใช้ที่ DashboardCharts.jsx เท่านั้น (อ่านผ่าน lib/chartTheme.js) */
+:root {
+  --viz-visit-working: #8e6516;
+  --viz-visit-done: #2e8b4a;
+  --viz-visit-missed: #d9362a;
+  --viz-visit-stale: #d9631e;
+  --viz-visit-scheduled: #d9631e;
+}
+:root[data-theme='dark'] {
+  --viz-visit-working: #d7a63f;
+  --viz-visit-done: #3fae62;
+  --viz-visit-missed: #e5534b;
+  --viz-visit-stale: #e07b3c;
+  --viz-visit-scheduled: #e07b3c;
+}
+
+.kpi-row { gap: 0.875rem; }
+/* การ์ด KPI: ชื่อ · ตัวเลขซ้าย + กราฟเล็กขวา · บรรทัดสรุป (จอแคบ = กราฟลงใต้ตัวเลข) */
+.kpi-row .kpi {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-areas: 'label label' 'value spark' 'sub sub';
+  align-items: end;
+  gap: 0.375rem 0.5rem;
+  padding: 1rem 1.125rem;
+  border-radius: 1rem;
+}
+.kpi-row .kpi-label { grid-area: label; font-size: 0.875rem; font-weight: 400; color: var(--muted); }
+.kpi-row .kpi-value { grid-area: value; font-size: 2rem; font-weight: 600; line-height: 1.1; }
+.kpi-row .kpi-value small { font-weight: 400; }
+.kpi-row .spark { grid-area: spark; justify-self: end; width: 7.5rem; max-width: 100%; height: 2.75rem; margin: 0; }
+.kpi-row .kpi-sub { grid-area: sub; font-size: 0.8125rem; }
+@media (max-width: 1100px) {
+  .kpi-row .kpi { grid-template-areas: 'label label' 'value value' 'spark spark' 'sub sub'; }
+  .kpi-row .spark { justify-self: stretch; width: 100%; height: 2.25rem; }
+}
+
+/* การ์ดวงแหวน/ภาระงาน/รอจับคู่ — มุมมน 16px · หัวการ์ด 18px */
+.dash-columns { gap: 1rem; margin-bottom: 1rem; }
+.dash-columns > .card { border-radius: 1rem; padding: 1.125rem 1.5rem; margin-bottom: 0; }
+.dash-columns > .card h2 { margin: 0; font-size: 1.125rem; font-weight: 600; line-height: 1.4; color: var(--heading); }
+.dash-columns > .card .viz-note { margin: 0.125rem 0 0.75rem; }
+.dash-columns > .card .card-head { align-items: flex-start; }
+.dash-columns > .card .card-head .link { font-size: 0.875rem; font-weight: 600; text-decoration: none; padding: 0.25rem 0; }
+.dash-columns .donut { gap: 2rem; flex-wrap: nowrap; }
+.dash-columns .donut-chart { flex: 0 0 9.5rem; }
+.dash-columns .donut-legend { gap: 0; }
+.dash-columns .donut-legend li {
+  grid-template-columns: 0.75rem 1fr auto 2.75rem; gap: 0.625rem;
+  padding: 0.5rem 0; border-bottom: 1px solid var(--divider);
+  font-size: 0.9375rem; color: var(--heading);
+}
+.dash-columns .donut-legend li:last-child { border-bottom: none; padding-bottom: 0.5rem; }
+.dash-columns .donut-legend strong { font-weight: 600; }
+
+/* ภาระงาน: ชื่อ | แถบ | จำนวน — แถวชิด มีเส้นคั่น */
+.dash-columns .load-list { gap: 0; }
+.dash-columns .load-list li {
+  grid-template-columns: 9.375rem minmax(0, 1fr) 5.25rem; gap: 1rem;
+  padding: 0.3125rem 0; border-bottom: 1px solid var(--divider);
+}
+.dash-columns .load-list li:last-child { border-bottom: none; }
+.dash-columns .load-name strong { font-size: 0.875rem; font-weight: 600; color: var(--heading); }
+.dash-columns .load-name .muted, .dash-columns .load-count .muted { font-size: 0.75rem; }
+.dash-columns .load-count strong { font-size: 0.875rem; font-weight: 600; }
+.dash-columns .load-track { background: var(--divider); }
+
+/* รอจับคู่พนักงาน: หัวการ์ดมีป้ายจำนวน · แถวชื่อเคสหนา + รหัสตัวพิมพ์ดีด */
+.dash-pending-head { justify-content: flex-start; gap: 0.625rem; margin-bottom: 0.25rem; }
+.dash-pending { margin-bottom: 0.5rem; }
+.dash-pending li { padding: 0.625rem 0; }
+.dash-pending li:first-child { padding-top: 0.25rem; }
+.dash-pending strong { font-size: 0.9375rem; font-weight: 600; color: var(--heading); }
+.dash-pending p.muted { font-size: 0.8125rem; }
+.dash-columns > .card > .link { font-size: 0.9375rem; font-weight: 600; text-decoration: none; }
+
+@media (max-width: 768px) {
+  .dash-columns > .card { padding: 1rem 1.125rem; }
+  .dash-columns .donut { gap: 1.25rem; }
+  .dash-columns .donut-chart { flex-basis: 7.5rem; }
+  .dash-columns .donut-legend { min-width: 0; }
+  .dash-columns .load-list li { grid-template-columns: 6.5rem minmax(0, 1fr) 4.75rem; gap: 0.75rem; }
+}
+
+/* =====================================================================================
+   รายได้บริษัท (RevenuePage + RevenueChart — การ์ดเดียวกันอยู่ท้ายหน้าภาพรวมด้วย)
+   ===================================================================================== */
+.rev-card { border-radius: 1rem; padding: 1.25rem 1.5rem 1.5rem; }
+.rev-card .card-head { align-items: flex-start; }
+.rev-card .card-head h2 { font-size: 1.125rem; font-weight: 600; color: var(--heading); }
+.rev-card .chart-total { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0.25rem 0.625rem; margin: 0.25rem 0 0.75rem; }
+.rev-card .chart-total strong { font-size: 2rem; font-weight: 600; line-height: 1.15; color: var(--heading); letter-spacing: -0.01em; }
+.rev-card .chart-total .muted { font-size: 0.875rem; }
+/* หน้ารายได้ของตัวเอง — กราฟสูงเต็มการ์ด (ECharts ปรับขนาดตามกล่องเองผ่าน ResizeObserver) */
+.rev-head + .rev-card .rev-chart { height: 25rem !important; }
+@media (max-width: 768px) {
+  .rev-card { padding: 1rem 1.125rem 1.125rem; }
+  .rev-card .chart-total strong { font-size: 1.625rem; }
+  .rev-head + .rev-card .rev-chart { height: 18rem !important; }
+}
+
+/* =====================================================================================
+   รายได้ตาม BU (RevenueBuPage + RevenueBuTabs + RevenueTargetsPane)
+   ===================================================================================== */
+.rbu-head .bu-filters { margin: 0; gap: 0.625rem; }
+.rbu-head .bu-range-ctl { border-radius: 0.75rem; min-height: 2.75rem; }
+.rbu-head .bu-export-slot .btn { min-height: 2.75rem; border-radius: 0.75rem; }
+/* แท็บแบบเส้นใต้ (ตัวกรองแบบ D ในระบบดีไซน์) */
+.rbu-tabbar { margin: 0 0 1rem; border-bottom: 1px solid var(--border); }
+.rbu-utabs { display: flex; align-items: stretch; gap: 0.25rem; flex-wrap: nowrap; }
+.rbu-utabs button {
+  position: relative;
+  padding: 0.625rem 1rem 0.75rem;
+  border: 0; background: none;
+  font: inherit; font-size: 0.9375rem; color: var(--muted);
+  white-space: nowrap; cursor: pointer;
+}
+.rbu-utabs button:hover { color: var(--heading); }
+.rbu-utabs button.on { color: var(--heading); font-weight: 600; }
+.rbu-utabs button.on::after {
+  content: ''; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px;
+  border-radius: 2px 2px 0 0; background: var(--brand);
+}
+.rbu-utabs button:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; border-radius: 0.375rem; }
+@media (max-width: 768px) {
+  .rbu-head > .actions { width: 100%; }
+  .rbu-head .bu-range-ctl { flex: 1 1 auto; }
+  .rbu-tabs .rbu-utabs { width: max-content; }
+}
+/* การ์ดตัวเลขต่อ BU · การ์ดกราฟ — มุมมน 16px · หัวการ์ด 18px · การ์ดรวมพื้นทองจาง + ขอบทอง */
+.bu-tiles { gap: 0.875rem; }
+.bu-tile { border-radius: 1rem; padding: 1rem 1.125rem; gap: 0.3125rem; }
+.bu-tile.is-total { border-color: color-mix(in srgb, var(--brand) 30%, transparent); }
+.bu-tile .kpi-label { font-size: 0.8125rem; font-weight: 600; color: var(--heading); }
+.bu-tile .kpi-value { font-size: 1.5rem; font-weight: 600; }
+.bu-tile .kpi-sub { font-size: 0.75rem; line-height: 1.5; }
+.rbu-panel { border-radius: 1rem; padding: 1.125rem 1.5rem; }
+.rbu-panel-head h2 { font-size: 1.125rem; font-weight: 600; color: var(--heading); }
+.rbu-panel .rbu-foot { font-size: 0.8125rem; }
+@media (max-width: 768px) {
+  .rbu-panel { padding: 1rem 1.125rem; }
+}
+
+/* =====================================================================================
+   หน้ารายการของส่วนนี้ (จอคอม ≥ 901px)
+   .ops-list (เคส)     = แถบค้นหา/ตัวกรองวางบนพื้น · ตาราง + แถบเลื่อนหน้าเป็นการ์ดมุมมน 16px
+   .ops-card (ใบแจ้งหนี้ · การมาทำงาน · ค่าตอบแทน) = การ์ดมุมมนใบเดียวครอบตัวกรอง/แท็บ + ตาราง
+   เดิมการ์ดรายการชนขอบซ้าย-ขวาเต็มกรอบ (index.css) — ดีไซน์ v2 เป็นการ์ดลอยมีขอบครบสี่ด้าน
+   selector ยาวกว่ากฎชนขอบใน index.css (:is(.content …) > .page-head + .list-card) จึงทับได้
+   ===================================================================================== */
+@media (min-width: 901px) {
+  :is(.content, .content > .pull-zone > .pull-content) > .page-head.ops-head:has(+ .list-card) { margin-bottom: 1rem; }
+  :is(.content, .content > .pull-zone > .pull-content) > .list-card:is(.ops-list, .ops-card),
+  :is(.content, .content > .pull-zone > .pull-content) > .page-head.ops-head + .list-card:is(.ops-list, .ops-card) {
+    margin: 0 0 1.375rem;
+    border: 1px solid var(--border);
+    border-radius: 1rem;
+  }
+
+  /* ---- .ops-list: ตัวกรองบนพื้น ตารางเป็นการ์ด ---- */
+  :is(.content, .content > .pull-zone > .pull-content) > .page-head.ops-head + .list-card.ops-list,
+  :is(.content, .content > .pull-zone > .pull-content) > .list-card.ops-list {
+    position: relative;
+    background: none; border: 0; border-radius: 0; overflow: visible;
+  }
+  .list-card.ops-list > .toolbar { margin: 0 0 1rem; padding: 0; gap: 0.625rem; align-items: center; background: none; border: 0; }
+  .list-card.ops-list > .table-wrap {
+    background: var(--surface);
+    border: 1px solid var(--border); border-bottom: 0;
+    border-radius: 1rem 1rem 0 0;
+    /* ต้องเป็น auto ไม่ใช่ hidden — ตารางในการ์ดรายการเลื่อนในกล่องนี้ (กฎ "ตารางล็อกพอดีจอ" ของ warm-clarity)
+       hidden ทำให้แถวที่เกินจอถูกตัดทิ้ง เลื่อนตารางไม่ได้ (ผู้ใช้แจ้ง 24 พ.ย. 2569) · auto ยังตัดมุมโค้งให้เหมือนเดิม */
+    overflow: auto;
+  }
+  .list-card.ops-list > .table-wrap:last-child { border-bottom: 1px solid var(--border); border-radius: 1rem; }
+  .list-card.ops-list > .pager {
+    margin: 0; padding: 0.625rem 1.25rem;
+    background: var(--surface);
+    border: 1px solid var(--border); border-top-color: var(--divider);
+    border-radius: 0 0 1rem 1rem;
+  }
+  .list-card.ops-list > .error { margin: 0 0 0.75rem; }
+
+  /* ---- .ops-card: ตัวกรองในการ์ด ---- */
+  .list-card.ops-card > .toolbar { padding: 0.875rem 1rem; gap: 0.625rem; align-items: center; }
+  .list-card.ops-card > .pager { padding: 0.625rem 1.25rem; }
+
+  /* ช่องค้นหา/ปุ่มในแถบตัวกรอง สูง 44 มุม 10px · ช่องค้นหามีแว่นขยาย */
+  .list-card:is(.ops-list, .ops-card) > .toolbar > input.search {
+    height: 2.75rem; border-radius: 0.625rem; padding-left: 2.625rem;
+    background: var(--surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236e665a' stroke-width='1.8' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='M20 20l-3.5-3.5'/%3E%3C/svg%3E") no-repeat 0.875rem 50% / 1.125rem;
+  }
+  .list-card:is(.ops-list, .ops-card) > .toolbar > .btn { min-height: 2.75rem; border-radius: 0.625rem; }
+
+  /* ตาราง: หัวพื้นเทาอุ่น ตัว 13px · เส้นคั่นจาง · ไม่มีเส้นแนวตั้งระหว่างคอลัมน์ (ดีไซน์ v2) */
+  .list-card:is(.ops-list, .ops-card) .table thead th {
+    height: 2.75rem;
+    background: var(--surface-2);
+    font-size: 0.8125rem; font-weight: 600; letter-spacing: 0; color: var(--muted);
+    border-bottom: 1px solid var(--border);
+  }
+  .list-card:is(.ops-list, .ops-card) .table th + th,
+  .list-card:is(.ops-list, .ops-card) .table td + td { border-left: 0; }
+  .list-card:is(.ops-list, .ops-card) .table tbody td { border-color: var(--divider); color: var(--heading); }
+  .list-card:is(.ops-list, .ops-card) .table tbody td.row-index { color: var(--muted); }
+  .list-card:is(.ops-list, .ops-card) .table tbody td .cell-sub { font-size: 0.8125rem; color: var(--muted); }
+  /* รหัสเคส / เลขที่ใบ — ตัวหนาสีทองเข้ม แทนตัวพิมพ์ดีด */
+  .list-card:is(.ops-list, .ops-card) .table tbody td.mono.link {
+    font-family: inherit; font-weight: 600; letter-spacing: 0.01em; font-variant-numeric: tabular-nums;
+    color: color-mix(in srgb, var(--brand) 78%, var(--heading));
+  }
+  .list-card:is(.ops-list, .ops-card) .table tbody .cell-sub a.link.mono { font-family: inherit; font-weight: 400; color: var(--muted); text-decoration: none; font-variant-numeric: tabular-nums; }
+  .list-card:is(.ops-list, .ops-card) .table tbody .cell-sub a.link.mono:hover { color: var(--brand); text-decoration: underline; }
+}
+
+/* ---------- เคส (CaseListPage) ---------- */
+/* มือถือ: ดีไซน์เริ่มที่แถบค้นหา ไม่มีหัวหน้า */
+@media (max-width: 900px) {
+  .page-head.case-head {
+    position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%);
+  }
+  /* หัวซ่อนแล้ว = การ์ดรายการชิดขอบบนเหมือนเดิม (กติกาเดียวกับ .sr-only + .list-card ใน index.css) */
+  :is(.content, .content > .pull-zone > .pull-content) > .page-head.case-head + .list-card { margin-top: calc(-1 * var(--gt, 1.25rem)); }
+}
+@media (min-width: 901px) {
+  /* ปุ่ม "+ เปิดเคสใหม่" (ตัวเดิมในแถบตัวกรอง) ยกขึ้นไปมุมขวาของหัวหน้า */
+  .page-head.case-head { padding-right: 13rem; min-height: 3.25rem; }
+  .page-head.case-head + .list-card.ops-list > .toolbar > .toolbar-action {
+    position: absolute;
+    top: calc(-1rem - 2.75rem);
+    right: 0;
+    height: 2.75rem; min-height: 2.75rem;
+    margin: 0; padding: 0 1.25rem 0 1rem;
+    border-radius: 0.625rem;
+    font-size: 0.9375rem; font-weight: 600;
+  }
+  .case-list .table.case-table tbody td { padding-block: 0.875rem; }
+  /* ป้ายสถานะยาวสุด ("ยังไม่จับคู่พนักงาน") ต้องไม่โดน … ตัด — คอลัมน์สถานะกว้างขึ้นเล็กน้อย (คอลัมน์บริการยืดหดแทน) */
+  .case-list .table.case-table col:last-child { width: 12rem !important; }
+  .case-list .table.case-table tbody td[data-label='บริการ'] { font-weight: 500; }
+  .case-list .table.case-table tbody td[data-label='บริการ'] > .muted { font-weight: 400; }
+  .case-list .table.case-table tbody td[data-label='บริการ'] .cell-sub { margin-top: 0.125rem; font-weight: 400; }
+  .case-list .table.case-table tbody tr.row-clickable:hover td { background: var(--surface-2); }
+}
+
+/* ---------- ใบแจ้งหนี้ (InvoiceListPage) ---------- */
+@media (min-width: 901px) {
+  /* ปุ่ม "ดาวน์โหลด CSV" + "รอออกใบ" (ตัวเดิมในแถบตัวกรอง) ยกขึ้นไปมุมขวาของหัวหน้า */
+  .page-head.inv-head { padding-right: 22rem; min-height: 3.25rem; }
+  .inv-list.ops-card { position: relative; overflow: visible; }
+  .inv-list.ops-card > .table-wrap { overflow: auto; } /* เลื่อนตารางในการ์ด — ห้าม hidden (ดูหน้าเคส) */
+  .page-head.inv-head + .inv-list > .toolbar > .todo-btn,
+  .page-head.inv-head + .inv-list > .toolbar > .inv-csv-btn {
+    position: absolute;
+    top: calc(-1rem - 2.75rem);
+    height: 2.75rem; min-height: 2.75rem;
+    margin: 0;
+    border-radius: 0.625rem;
+    font-size: 0.9375rem;
+  }
+  .page-head.inv-head + .inv-list > .toolbar > .todo-btn { right: 0; padding: 0 1.125rem 0 1rem; }
+  .page-head.inv-head + .inv-list > .toolbar > .inv-csv-btn { right: 0; padding: 0 1rem; }
+  /* มีปุ่มรอออกใบ = ปุ่ม CSV ขยับไปทางซ้ายของมัน (ไม่มีงานค้าง ปุ่มรอออกใบไม่ขึ้น CSV ชิดขวาเอง) */
+  .page-head.inv-head + .inv-list > .toolbar:has(> .todo-btn) > .inv-csv-btn { right: 9.75rem; }
+  /* ปุ่มรอออกใบ = ปุ่มหลักสีทอง ตัวเลขแดงขอบขาว */
+  .page-head.inv-head + .inv-list > .toolbar > .todo-btn {
+    background: var(--brand); border-color: var(--brand); color: var(--brand-ink); font-weight: 600;
+  }
+  .page-head.inv-head + .inv-list > .toolbar > .todo-btn:hover:not(:disabled),
+  .page-head.inv-head + .inv-list > .toolbar > .todo-btn.is-open { background: var(--brand-hover); border-color: var(--brand-hover); color: var(--brand-ink); }
+  .page-head.inv-head + .inv-list > .toolbar > .todo-btn.is-open { box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 25%, transparent); }
+  .page-head.inv-head + .inv-list > .toolbar > .todo-btn .todo-count { box-shadow: 0 0 0 2px var(--brand-ink); background: #dc2626; }
+  .inv-list .table tbody td { padding-block: 0.625rem; }
+  .inv-list .table tbody td[data-label='ผู้รับบริการ'] { font-weight: 500; }
+  .inv-list .table tbody td[data-label='ผู้รับบริการ'] .cell-sub { font-weight: 400; }
+  /* ยอดสุทธิชิดขวา ตัวหนา (หัวคอลัมน์ชิดขวาตาม) */
+  .inv-list .table thead th:nth-child(6) { text-align: right; }
+  .inv-list .table tbody td[data-label='ยอดสุทธิ'] { text-align: right; font-size: 1rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .inv-list .table thead th:nth-child(7),
+  .inv-list .table tbody td[data-label='สถานะ'] { padding-left: 1.5rem; text-align: left; }
+}
+
+/* แผงงานรอออกใบ (popup จากปุ่ม "รอออกใบ") — ยอดชิดขวา · ปุ่มออกใบสีทองอ่อน */
+.inv-todo-panel { width: min(31.25rem, calc(100vw - 1.5rem)); padding: 0.75rem 0.5rem 0.5rem; border-radius: 1rem; }
+.inv-todo-panel h3 { padding: 0 0.625rem; font-size: 0.875rem; font-weight: 600; color: var(--heading); }
+.inv-todo-panel .todo-sub-count { background: #fdf0e6; color: #b4541a; font-weight: 600; }
+:root[data-theme='dark'] .inv-todo-panel .todo-sub-count { background: #3a2414; color: #f0a26a; }
+.inv-todo-panel .todo-row { padding: 0.625rem; border-radius: 0; border-bottom: 1px solid var(--divider); }
+.inv-todo-panel section > .todo-row:last-child { border-bottom: 0; }
+.inv-todo-panel .todo-row-text strong { font-size: 0.9375rem; font-weight: 600; }
+.inv-todo-panel .todo-row-text .muted .link.mono { font-family: inherit; font-weight: 600; text-decoration: none; }
+.todo-row-amount { flex: none; font-size: 0.9375rem; font-weight: 600; color: var(--heading); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.todo-row-amount.is-empty { font-size: 0.8125rem; font-weight: 400; color: var(--muted); }
+.inv-todo-panel .todo-issue {
+  min-width: 4rem; justify-content: center;
+  background: var(--brand-soft); border-color: transparent; color: var(--brand); font-weight: 600;
+}
+.inv-todo-panel .todo-issue:hover:not(:disabled) { background: color-mix(in srgb, var(--brand) 18%, var(--brand-soft)); border-color: transparent; color: var(--brand); }
+.inv-todo-panel section + section {
+  margin: 0.25rem -0.5rem -0.5rem; padding: 0.75rem 0.5rem 0.5rem;
+  border-top: 1px solid var(--divider); background: var(--surface-2); border-radius: 0 0 1rem 1rem;
+}
+@media (max-width: 600px) {
+  .inv-todo-panel .todo-row { flex-wrap: wrap; }
+  .inv-todo-panel .todo-row-text { flex-basis: 100%; }
+  .todo-row-amount { margin-right: auto; }
+}
+
+/* =====================================================================================
+   การมาทำงาน (AttendancePage) + ค่าตอบแทน (PayrollPage · PayQueue · CasePay · PayrollTabs)
+   ทั้งสองหน้าใช้โครง .att-card (แท็บ + ตัวกรอง + ตาราง ในการ์ดเดียว) — การ์ดลอยมุมมนผ่าน .ops-card ด้านบน
+   ===================================================================================== */
+/* แท็บเส้นใต้: ตัวที่เลือกสีหมึกเข้ม ขีดทอง · ป้ายจำนวนแดงเม็ดยา */
+.att-card.ops-card > .att-tabs { padding: 0.25rem 0.875rem 0; gap: 0.25rem; }
+.att-card.ops-card .att-tab { padding: 0.875rem 0.875rem 0.8125rem; font-size: 0.9375rem; font-weight: 400; color: var(--muted); }
+.att-card.ops-card .att-tab:hover { color: var(--heading); background: none; }
+.att-card.ops-card .att-tab.is-active { color: var(--heading); font-weight: 600; }
+.att-card.ops-card .att-tab::after { left: 0; right: 0; height: 2px; }
+.att-card.ops-card .att-tab.is-active::after { background: var(--brand); }
+.att-card.ops-card .att-tab .tab-count {
+  min-width: 1.375rem; padding: 0 0.4375rem; margin-left: 0.5rem;
+  font-size: 0.75rem; font-weight: 700; line-height: 1.375rem; border-radius: 999px;
+  background: #d92d20;
+}
+.att-card.ops-card .att-filter { padding: 0.875rem 1rem; gap: 0.625rem; }
+.att-card.ops-card .att-filter > .btn { min-height: 2.75rem; border-radius: 0.625rem; margin-left: auto; }
+@media (min-width: 901px) {
+  .att-card.ops-card .att-filter select,
+  .att-card.ops-card .att-filter .picker-btn { min-height: 2.75rem; border-radius: 0.625rem; }
+}
+
+/* ---- ตารางรายการต้องตรวจ ---- */
+@media (min-width: 901px) {
+  /* ป้ายปัญหายาว ("ตำแหน่งเข้า: GPS คลาดเคลื่อน ±150 ม.") ต้องอ่านครบ — ยืมความกว้างจากคอลัมน์วันที่/ปุ่ม */
+  .att-page .table.att-review col:nth-child(1) { width: 12% !important; }
+  .att-page .table.att-review col:nth-child(2) { width: 18% !important; }
+  .att-page .table.att-review col:nth-child(3) { width: 19% !important; }
+  .att-page .table.att-review col:nth-child(4) { width: 16% !important; }
+  .att-page .table.att-review col:nth-child(5) { width: 35% !important; }
+  .att-page .table.att-review th.th-actions,
+  .att-page .table.att-review td.row-actions { text-align: right; }
+  /* ปุ่มท้ายแถวมีได้ถึง 3–5 ปุ่ม (บันทึกเวลาจริง · ปิดกะ · เคลียร์ธง · ยกเลิกกะ) — ช่องต้องกว้างพอ 3 ปุ่ม
+     และถ้าเกินให้ขึ้นบรรทัดใหม่ ห้ามตัดทิ้งเป็น "…" (ผู้ใช้แจ้ง 24 พ.ย. 2569: ปุ่ม "ยกเลิกกะ" หายเหลือแต่จุด)
+     ปุ่มกว้างเท่ากันทุกปุ่มตามที่ผู้ใช้ขอ 6 พ.ย. (ตำแหน่งปุ่มตรงกันทุกแถว) แค่ย่อให้ 3 ปุ่มพอดีจอ 1366 */
+  .att-page .table.att-review td.row-actions {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+  }
+  .att-page .table.att-review td[data-label='พนักงาน / เคส'] { font-weight: 600; }
+  .att-page .table.att-review td[data-label='พนักงาน / เคส'] .cell-sub { font-weight: 400; }
+  /* ป้ายปัญหายาวขึ้นบรรทัดใหม่ในป้าย แทนการตัดเป็น "…" — อ่านได้ครบทุกคำ (คอลัมน์ปัญหาแคบลงเพื่อให้ปุ่มท้ายแถวพอ) */
+  .att-page .table.att-review td .badge { max-width: 100%; white-space: normal; height: auto; min-height: 1.625rem; padding-block: 0.25rem; line-height: 1.35; text-align: left; }
+  .att-page .table.att-review td:has(> .badge, > * > .badge) { white-space: normal; overflow: visible; text-overflow: clip; }
+}
+.att-page .att-evidence { flex-direction: row; align-items: center; gap: 0.5rem; }
+.att-page .att-thumb { width: 2.5rem; height: 2.5rem; border-radius: 0.5rem; }
+.att-page .att-distance { font-size: 0.8125rem; }
+.att-page .table.att-review td.row-actions .btn { width: 6.5rem; min-height: 2.25rem; border-radius: 0.5rem; padding-inline: 0.5rem; font-size: 0.8125rem; }
+
+/* ---- popup บันทึกเวลาจริง (TimeFix) ---- */
+.timefix-modal { border-radius: 1.25rem; }
+.timefix-modal .modal-head h2 { font-size: 1.375rem; font-weight: 600; margin-bottom: 0.25rem; }
+.timefix-modal .modal-head .muted { font-size: 0.875rem; }
+.timefix-modal .modal-body { padding-top: 1.25rem; }
+.timefix-modal .timefix-hint.muted {
+  position: relative;
+  margin: 0 0 1.125rem; padding: 0.75rem 1rem 0.75rem 2.625rem;
+  border: 1px solid var(--border); border-radius: 0.75rem;
+  background: var(--surface-2);
+  font-size: 0.875rem; line-height: 1.55;
+}
+.timefix-modal .timefix-hint.muted::before {
+  content: ''; position: absolute; left: 1rem; top: 0.9rem; width: 1.125rem; height: 1.125rem;
+  background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='M12 11v5M12 8h.01'/%3E%3C/svg%3E") center / contain no-repeat;
+          mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='M12 11v5M12 8h.01'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+.timefix-modal .timefix-times { gap: 1.25rem; margin-bottom: 1rem; }
+.timefix-modal label { font-size: 0.875rem; font-weight: 600; color: var(--heading); }
+.timefix-modal .modal-body > label { display: flex; flex-direction: column; gap: 0.375rem; }
+.timefix-modal .modal-body > label > input { width: 100%; font-weight: 400; }
+.timefix-modal input[type='text'] { min-height: 2.75rem; border-radius: 0.625rem; font-size: 0.9375rem; }
+.timefix-modal .timefix-times .picker-btn { min-height: 2.75rem; border-radius: 0.625rem; }
+.timefix-modal .timefix-sum.notice {
+  display: flex; gap: 0.625rem; align-items: center;
+  margin-top: 1.125rem; padding: 0.875rem 1rem;
+  border: 0; border-radius: 0.75rem;
+  background: var(--brand-soft); color: var(--heading);
+  font-size: 0.9375rem; font-weight: 600;
+}
+.timefix-modal .timefix-sum.notice::before {
+  content: ''; flex: none; width: 1.125rem; height: 1.125rem;
+  background: var(--brand);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='M12 7v5l3 2'/%3E%3C/svg%3E") center / contain no-repeat;
+          mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='M12 7v5l3 2'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+.timefix-modal .modal-foot .btn { min-height: 2.75rem; padding-inline: 1.25rem; border-radius: 0.625rem; }
+
+/* ---- ค่าตอบแทน: แท็บแบบขั้นตอน 1 › 2 › 3 ---- */
+.att-tabs.pay-steps { align-items: center; }
+.pay-steps .pay-step-sep { flex: none; width: 1rem; height: 1rem; color: var(--border-hover); }
+.pay-steps .att-tab { display: inline-flex; align-items: center; gap: 0.5rem; }
+.pay-step-no {
+  display: inline-grid; place-items: center;
+  width: 1.375rem; height: 1.375rem; border-radius: 50%;
+  background: var(--surface-2); border: 1px solid var(--border);
+  font-size: 0.75rem; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums;
+}
+.pay-steps .att-tab.is-active .pay-step-no { background: var(--brand); border-color: var(--brand); color: var(--brand-ink); }
+
+/* ---- ตารางค่าจ้างรอปล่อย (PayQueue) ---- */
+@media (min-width: 901px) {
+  .pay-page .att-filter .date-range input[type='date'] { min-height: 2.75rem; min-width: 13.5rem; border-radius: 0.625rem; }
+}
+.pay-page .att-filter .seg { border-radius: 0.75rem; }
+.pay-page .table tbody td { color: var(--heading); }
+.pay-page .table tbody .run-id strong { font-weight: 600; }
+.pay-page .table tbody td[data-label='คงเหลือ'] strong { font-size: 1rem; font-weight: 600; }
+.pay-page .table tbody .cell-sub .mono { font-family: inherit; }
+@media (min-width: 901px) {
+  .pay-page .table tbody td { padding-block: 0.75rem; }
+}
+
+/* ---- popup ปล่อยค่าจ้าง (PayModal + CasePayPanel) ---- */
+.pay-modal { border-radius: 1.25rem; }
+/* กล่อง popup รับโฟกัสตอนเปิด (ไว้ขังโฟกัส) — ไม่ต้องมีกรอบโฟกัสหนารอบทั้งกล่อง ปุ่ม/ช่องข้างในยังมีกรอบของตัวเอง */
+.pay-modal:focus { outline: none; }
+.pay-modal .modal-head h2 { margin: 0.375rem 0 0.25rem; font-size: 1.5rem; font-weight: 600; }
+.pay-modal-meta { display: flex; align-items: center; gap: 0.625rem; flex-wrap: wrap; margin: 0; font-size: 0.8125rem; }
+.pay-modal-meta .mono { font-family: inherit; letter-spacing: 0.01em; }
+.pay-modal .modal-body { padding-top: 1.25rem; }
+/* กล่องตัวเลขสามช่อง */
+.pay-stats {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+  border: 1px solid var(--border); border-radius: 0.875rem; overflow: hidden;
+  background: var(--surface-2);
+}
+.pay-stat { display: flex; flex-direction: column; gap: 0.125rem; min-width: 0; padding: 0.875rem 1.125rem; }
+.pay-stat + .pay-stat { border-left: 1px solid var(--border); }
+.pay-stat > span { font-size: 0.8125rem; color: var(--muted); }
+.pay-stat > strong { font-size: 1.5rem; font-weight: 600; line-height: 1.25; color: var(--heading); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.pay-stat.is-left > strong { color: var(--brand); }
+.pay-totals > p.muted { margin-top: 0.5rem; }
+.pay-totals > p.muted:empty { display: none; }
+@media (max-width: 480px) {
+  .pay-stat { padding: 0.75rem; }
+  .pay-stat > strong { font-size: 1.125rem; }
+}
+/* หัวงวด: วงเลขงวดสีทองอ่อน */
+.pay-round-title { display: flex; align-items: center; flex-wrap: wrap; gap: 0.25rem 0.625rem; }
+.pay-round-title > strong { font-size: 1.0625rem; font-weight: 600; color: var(--heading); }
+.pay-round-title > .cell-sub { flex-basis: 100%; }
+.pay-round-no {
+  display: inline-grid; place-items: center; width: 2rem; height: 2rem; border-radius: 0.5rem;
+  background: var(--brand-soft); color: var(--brand); font-weight: 600; font-variant-numeric: tabular-nums;
+}
+.pay-modal .pay-block { border-top-style: solid; }
+.pay-modal .pay-parts { flex-direction: column; align-items: stretch; gap: 0.375rem; max-width: 17.5rem; }
+.pay-modal .pay-release-form { max-width: none; gap: 1rem; }
+.pay-modal .pay-release-form input { min-height: 2.75rem; border-radius: 0.625rem; }
+/* ปุ่มปล่อยงวด = ท้ายกล่อง ชิดขวา มีเส้นคั่นเต็มความกว้าง (แบบแถบปุ่มท้าย popup) */
+.pay-modal .pay-block > .approve-row:last-child {
+  display: flex; justify-content: flex-end;
+  margin: 1.25rem -1.5rem 0; padding: 1rem 1.5rem 0;
+  border-top: 1px solid var(--border);
+}
+.pay-modal .pay-block > .approve-row:last-child .btn { min-height: 2.75rem; padding-inline: 1.375rem; border-radius: 0.625rem; }
+@media (max-width: 600px) {
+  .pay-modal .pay-block > .approve-row:last-child { margin-inline: -1rem; padding-inline: 1rem; }
+  .pay-modal .pay-block > .approve-row:last-child .btn { flex: 1; justify-content: center; }
+}
+
+/* =====================================================================================
+   ตารางงาน (CalendarPage) — สีสถานะกะตามระบบดีไซน์ v2 (ตัวแปร --tone-* ของ shell.css · สลับธีมมืดเอง)
+   รอเช็คอิน = ฟ้า · กำลังทำงาน = ทอง · เสร็จแล้ว = เขียว · ค้างเช็คเอาท์ = ส้ม · ขาดงาน = แดง · ยังไม่จับคู่ = ขอบประส้ม
+   ผูกกับหน้าหลังบ้านเท่านั้น (.cal-hero ที่ตามด้วยแถบ .cal-bar / ตารางที่ตามหลังแถบ) — ปฏิทินของพนักงานใช้ชิปชุดเดียวกันแต่ไม่โดน
+   ===================================================================================== */
+.cal-hero:has(+ .cal-bar) .cal-swatch.visit-scheduled { background: var(--tone-blue-dot); }
+.cal-hero:has(+ .cal-bar) .cal-swatch.visit-working   { background: var(--tone-gold-dot); }
+.cal-hero:has(+ .cal-bar) .cal-swatch.visit-done      { background: var(--tone-green-dot); }
+.cal-hero:has(+ .cal-bar) .cal-swatch.visit-stale     { background: var(--tone-orange-dot); }
+.cal-hero:has(+ .cal-bar) .cal-swatch.visit-missed    { background: var(--tone-red-dot); }
+.cal-hero:has(+ .cal-bar) .cal-swatch.is-unassigned   { background: none; border: 1.5px dashed var(--tone-orange-dot) !important; }
+.cal-hero:has(+ .cal-bar) .cal-legend { font-size: 0.875rem; color: var(--text); }
+.cal-hero:has(+ .cal-bar) .cal-title { font-size: 1.75rem; font-weight: 600; color: var(--heading); }
+.cal-hero:has(+ .cal-bar) .cal-hero-year { color: inherit; }
+.cal-hero:has(+ .cal-bar) .cal-hero-icon { border-radius: 0.875rem; }
+
+@media (min-width: 901px) {
+  /* แถบตัวกรอง + ตาราง = การ์ดใบเดียวมุมมน 16px (เดิมชนขอบซ้าย-ขวาเต็มกรอบ) */
+  :is(.content, .content > .pull-zone > .pull-content) > .toolbar.cal-bar {
+    margin: 0; padding: 0.875rem 1rem;
+    flex-wrap: nowrap; align-items: center; gap: 0.5rem;
+    background: var(--surface);
+    border: 1px solid var(--border); border-bottom-color: var(--divider);
+    border-radius: 1rem 1rem 0 0;
+  }
+  .toolbar.cal-bar > * { min-width: 0; }
+  .toolbar.cal-bar select,
+  .toolbar.cal-bar .picker,
+  .toolbar.cal-bar .ss { flex: 0 1 9.5rem; width: auto; min-width: 0; }
+  .toolbar.cal-bar > .cal-print-btn { flex: none; }
+  .toolbar.cal-bar > .toolbar-action.cal-hero-nav { flex: none; margin: 0 0 0 auto; border-radius: 0.625rem; }
+  .toolbar.cal-bar .cal-hero-nav button { min-height: 2.75rem; min-width: 2.75rem; }
+  :is(.content, .content > .pull-zone > .pull-content) > .toolbar.cal-bar ~ .table-wrap.cal-print {
+    margin: 0 0 1.375rem;
+  }
+  :is(.content, .content > .pull-zone > .pull-content) > .toolbar.cal-bar ~ .table-wrap.cal-print > .cal-grid {
+    border: 1px solid var(--border); border-top: 0; border-radius: 0 0 1rem 1rem; overflow: hidden;
+  }
+  .cal-bar ~ .cal-print .cal-head { font-size: 0.8125rem; }
+  .cal-bar ~ .cal-print .cal-grid:not(.is-week) > .cal-head:nth-child(1),
+  .cal-bar ~ .cal-print .cal-grid:not(.is-week) > .cal-head:nth-child(7) { color: var(--muted); }
+  .cal-bar ~ .cal-print .cal-date { font-size: 0.875rem; }
+  .cal-bar ~ .cal-print .cal-cell { padding: 0.375rem 0.4375rem 0.4375rem; gap: 0.1875rem; }
+  .cal-bar ~ .cal-print .cal-chips { gap: 0.1875rem; }
+  /* จำนวนกะ: ตัวเลข + "กะ" สีจาง ไม่มีพื้น */
+  .cal-bar ~ .cal-print .cal-count { background: none; padding: 0; font-size: 0.75rem; font-weight: 400; color: var(--muted); }
+  .cal-bar ~ .cal-print .cal-count::after { content: ' กะ'; white-space: pre; }
+  .cal-bar ~ .cal-print .cal-cell.is-today { box-shadow: inset 0 0 0 2px var(--brand); background: color-mix(in srgb, var(--brand-soft) 35%, var(--surface)) !important; }
+
+  /* ชิปกะ: แถบสีซ้าย 3px + พื้นอ่อน (ไม่มีจุด) · บรรทัดบน เวลา+ชื่อ ตัวหนาสีเข้มของสถานะ · บรรทัดล่าง ผู้รับบริการ */
+  .cal-bar ~ .cal-print .cal-chip {
+    padding: 0.1875rem 0.4375rem 0.1875rem 0.5rem;
+    line-height: 1.3;
+    border-left: 3px solid var(--chip-bar, currentColor);
+    border-radius: 0.375rem;
+    font-weight: 600;
+  }
+  .cal-bar ~ .cal-print .cal-chip::before { display: none; }
+  .cal-bar ~ .cal-print .cal-chip-time { font-weight: 600; }
+  .cal-bar ~ .cal-print .cal-chip .cal-chip-sub { font-weight: 400; color: var(--text); opacity: 1; }
+  .cal-bar ~ .cal-print .cal-more { padding: 0.125rem 0; background: none; font-size: 0.75rem; font-weight: 600; color: var(--heading); }
+  .cal-bar ~ .cal-print .cal-more:hover { background: none; color: var(--brand); }
+}
+.cal-bar ~ .cal-print .cal-chip.visit-scheduled { background: var(--tone-blue-bg);   color: var(--tone-blue-ink);   --chip-bar: var(--tone-blue-dot); }
+.cal-bar ~ .cal-print .cal-chip.visit-working   { background: var(--tone-gold-bg);   color: var(--tone-gold-ink);   --chip-bar: var(--tone-gold-dot); }
+.cal-bar ~ .cal-print .cal-chip.visit-done      { background: var(--tone-green-bg);  color: var(--tone-green-ink);  --chip-bar: var(--tone-green-dot); }
+.cal-bar ~ .cal-print .cal-chip.visit-stale     { background: var(--tone-orange-bg); color: var(--tone-orange-ink); --chip-bar: var(--tone-orange-dot); }
+.cal-bar ~ .cal-print .cal-chip.visit-missed    { background: var(--tone-red-bg);    color: var(--tone-red-ink);    --chip-bar: var(--tone-red-dot); }
+/* ยังไม่มีคนรับกะ: ขอบประส้มรอบชิป */
+.cal-bar ~ .cal-print .cal-chip.is-unassigned {
+  border: 1.5px dashed var(--tone-orange-dot);
+  background: color-mix(in srgb, var(--tone-orange-bg) 45%, var(--surface));
+  color: var(--tone-orange-ink);
+}
+/* มือถือ (MobileCalendar ในหน้าหลังบ้าน): จุดสีใต้วัน/หน้ารายการ ใช้สีชุดเดียวกับชิป */
+.cal-bar ~ .mcal .mcal-dot.visit-scheduled { background: var(--tone-blue-dot); }
+.cal-bar ~ .mcal .mcal-dot.visit-working   { background: var(--tone-gold-dot); }
+.cal-bar ~ .mcal .mcal-dot.visit-done      { background: var(--tone-green-dot); }
+.cal-bar ~ .mcal .mcal-dot.visit-stale     { background: var(--tone-orange-dot); }
+.cal-bar ~ .mcal .mcal-dot.visit-missed    { background: var(--tone-red-dot); }
+
+/* =====================================================================================
+   เปิดเคส / แก้ไขเคส / ต่อเคส (CaseFormPage)
+   หัวข้อแต่ละส่วน (h2 ลูกตรงของฟอร์ม) มีวงเลขลำดับ 1 2 3 … และเส้นคั่นเต็มกว้างระหว่างส่วน — ไม่แยกการ์ด (โครงฟอร์มเดิม)
+   ===================================================================================== */
+.casef-form { counter-reset: casef; border-radius: 1rem; padding: 1.5rem 1.5rem 0; }
+.casef-form > h2 {
+  counter-increment: casef;
+  display: flex; align-items: center; gap: 0.75rem;
+  margin: 2rem -1.5rem 1.125rem; padding: 1.5rem 1.5rem 0;
+  border-top: 1px solid var(--border);
+  font-size: 1.125rem; font-weight: 600; color: var(--heading);
+}
+.casef-form > h2:first-of-type,
+.casef-form > .renew-summary + h2,
+.casef-form > :first-child + h2 { margin-top: 0; padding-top: 0; border-top: 0; }
+.casef-form > h2::before {
+  content: counter(casef);
+  flex: none; display: inline-grid; place-items: center;
+  width: 1.875rem; height: 1.875rem; border-radius: 50%;
+  background: var(--brand-soft); color: var(--brand);
+  font-size: 0.875rem; font-weight: 600; font-variant-numeric: tabular-nums;
+}
+.casef-form label { font-weight: 600; color: var(--heading); }
+.casef-form .addons-field { border-radius: 0.875rem; }
+/* แถบปุ่มล่าง (sticky เดิม): ปุ่มชิดขวา — ปุ่มหลักขวาสุด ยกเลิกถัดเข้ามา (ลำดับใน DOM คงเดิม) */
+.casef-form > .form-actions.sticky {
+  display: flex; flex-direction: row-reverse; justify-content: flex-start; gap: 0.625rem;
+  margin: 1.75rem -1.5rem 0; padding: 0.875rem 1.5rem;
+  border-radius: 0 0 1rem 1rem;
+}
+.casef-form > .form-actions.sticky .btn { min-width: 6.5rem; justify-content: center; }
+.casef-form > .form-actions.sticky .btn.primary { padding-inline: 1.5rem; }
+@media (max-width: 768px) {
+  .casef-form { padding: 1.125rem 1rem 0; }
+  .casef-form > h2 { margin-inline: -1rem; padding-inline: 1rem; }
+  .casef-form > .form-actions.sticky { margin-inline: -1rem; padding-inline: 1rem; }
+  .casef-form > .form-actions.sticky .btn { flex: 1; }
+}
+
+/* =====================================================================================
+   ปฏิทินมือถือ (MobileCalendar — ใช้ทั้งตารางงานหลังบ้านและ "ตารางงาน" ของพนักงาน)
+   แถวงานของวันที่เลือก: คอลัมน์เวลาเริ่ม/เลิกซ้อนสองบรรทัด · ชื่อ + บรรทัดรอง · ป้ายสถานะท้ายแถว (ไม่มีจุดสีนำหน้าแล้ว)
+   ===================================================================================== */
+.mcal-item { align-items: center; gap: 0.875rem; }
+.mcal-item > .mcal-dot { display: none; }
+.mcal-item-when {
+  flex: none; display: flex; flex-direction: column; min-width: 3.25rem;
+  font-variant-numeric: tabular-nums; line-height: 1.25;
+}
+.mcal-item-when > strong { font-size: 1rem; font-weight: 600; color: var(--heading); }
+.mcal-item-when > span { font-size: 0.8125rem; color: var(--muted); }
+/* เวลาแบบเต็มในบรรทัดบนซ่อนจากสายตา (คอลัมน์ซ้ายบอกแล้ว) แต่ยังให้โปรแกรมอ่านหน้าจออ่าน */
+.mcal-item-body > .mcal-item-time {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+}
+.mcal-item-badge { flex: none; align-self: center; }
+/* เนื้อหาแถว = ชื่อบน บรรทัดรองล่าง (ทับกริดสองคอลัมน์เดิมที่เคยวางเวลาไว้ในตัวเนื้อหา) */
+.mcal .mcal-agenda .mcal-item > .mcal-item-body { display: flex; flex-direction: column; gap: 0.0625rem; flex: 1; min-width: 0; }
+/* ป้ายสถานะกะที่ shell.css ยังไม่มีโทนให้ — เสร็จแล้ว = เขียว · ค้างเช็คเอาท์ = ส้ม · ขาดงาน = แดง */
+.mcal-item-badge.visit-done   { background: var(--tone-green-bg);  color: var(--tone-green-ink);  --dot: var(--tone-green-dot); }
+.mcal-item-badge.visit-stale  { background: var(--tone-orange-bg); color: var(--tone-orange-ink); --dot: var(--tone-orange-dot); }
+.mcal-item-badge.visit-missed { background: var(--tone-red-bg);    color: var(--tone-red-ink);    --dot: var(--tone-red-dot); }
+
+/* ปุ่ม "รายงานภาษีขาย" ในหัวหน้าใบแจ้งหนี้ (24 พ.ย. 2569) — ชิดขวาก่อนพื้นที่ของปุ่ม CSV / รอออกใบ (padding-right ของ .inv-head) */
+.page-head.inv-head > .inv-tax-btn { margin-left: auto; align-self: center; gap: 0.5rem; white-space: nowrap; }
+/* ปุ่ม CSV / รอออกใบ ลอยอยู่มุมขวาของหัว (absolute จากแถบตัวกรอง) — กันที่ให้มันด้วย margin ของปุ่มนี้
+   (padding-right ของหัวถูกกฎอื่นทับเป็น 0) · มีปุ่มรอออกใบ = กันสองปุ่ม · ไม่มี = กันแค่ปุ่ม CSV */
+@media (min-width: 901px) {
+  .page-head.inv-head > .inv-tax-btn { margin-right: 10.75rem; }
+  .page-head.inv-head:has(+ .inv-list > .toolbar > .todo-btn) > .inv-tax-btn { margin-right: 20.5rem; }
+}
+@media (max-width: 900px) {
+  .page-head.inv-head > .inv-tax-btn { min-height: 2.5rem; padding-inline: 0.875rem; font-size: 0.875rem; }
+}

@@ -11,6 +11,8 @@ import { priceRefreshText } from '../lib/customerInvoice.js';
 import SearchSelect from '../components/SearchSelect.jsx';
 
 const TIERS = ['CG', 'NA', 'PN', 'RN'];
+/* ชื่อเต็มของระดับ ใต้ตัวย่อในหัวคอลัมน์ (ดีไซน์ v2 23 พ.ย. 2569) — ป้ายอย่างเดียว ไม่ได้ใช้คำนวณอะไร */
+const TIER_NAMES = { CG: 'ผู้ดูแล', NA: 'ผู้ช่วยพยาบาล', PN: 'พยาบาลเทคนิค', RN: 'พยาบาลวิชาชีพ' };
 const CATEGORY_LABELS = { daily: 'รายวัน', weekly: 'รายสัปดาห์', monthly: 'รายเดือน' };
 
 /**
@@ -69,8 +71,9 @@ function RateCell({ tier, editing, rate, draft, changed, onPatch, seePay }) {
     if (!dv.available) {
       return (
         <td className={`rate-off${mark}`} data-tier={tier}>
-          <button type="button" className="btn tiny" onClick={() => onPatch({ available: true })}>
-            เปิดช่องนี้
+          <span className="rate-off-label">ให้บริการไม่ได้</span>
+          <button type="button" className="btn tiny rate-open-btn" onClick={() => onPatch({ available: true })}>
+            <svg className="ad-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>เปิดช่องนี้
           </button>
         </td>
       );
@@ -87,18 +90,13 @@ function RateCell({ tier, editing, rate, draft, changed, onPatch, seePay }) {
       <td className={`rate-input${mark}`} data-tier={tier}>
         <div className="rate-edit">
           {/* รหัสแพ็คเกจ (20 พ.ย. 2569) — ว่างไว้ = ระบบตั้งรหัสตั้งต้นให้ (HC-รูปแบบ-เกรด-ระดับ) */}
+          {/* ดีไซน์ v2: ปุ่มปิดช่องย้ายมาข้างรหัส · ราคาคู่ค่าจ้าง · ป้ายชื่อช่องอยู่ในกรอบ (เดิมเป็น placeholder) */}
           <div className="rate-edit-row">
             <input
               className="rate-code-input" type="text" maxLength={20} placeholder="รหัส (ว่าง = ตั้งให้)"
               title="รหัสแพ็คเกจ — A-Z 0-9 และ - ห้ามซ้ำกับแพ็คอื่น" spellCheck={false} autoCapitalize="characters"
               value={dv.code ?? ''}
               onChange={(e) => onPatch({ code: e.target.value.toUpperCase() })}
-            />
-          </div>
-          <div className="rate-edit-row">
-            <input
-              type="number" min="0" step="100" placeholder="ราคา" value={dv.customer_price}
-              onChange={(e) => onPatch({ customer_price: e.target.value })}
             />
             <button
               type="button" className="btn tiny ghost" title="ปิดช่องนี้ (ให้บริการไม่ได้)"
@@ -107,28 +105,44 @@ function RateCell({ tier, editing, rate, draft, changed, onPatch, seePay }) {
               <LineIcon name="close" />
             </button>
           </div>
-          {/* ค่าจ้างพนักงาน — ตัวตั้งของสรุปค่าตอบแทนรายเดือน ไม่มีช่องนี้ระบบคำนวณค่าแรงให้ใครไม่ได้เลย
-              เห็นเฉพาะผู้จัดการ · คนอื่นแก้ราคาลูกค้า/ส่วนลดได้ตามปกติ ค่าจ้างเดิมไม่ถูกแตะ */}
-          {seePay && (
-            <div className="rate-edit-row">
-              <input
-                type="number" min="0" step="100" placeholder="ค่าจ้าง" title="ค่าจ้างพนักงานต่อรอบบริการ"
-                value={dv.staff_pay}
-                onChange={(e) => onPatch({ staff_pay: e.target.value })}
-              />
-            </div>
-          )}
           <div className="rate-edit-row">
-            <input
-              type="number" min="0" max="100" step="1" placeholder="ลด %" title="ส่วนลดเป็นเปอร์เซ็นต์"
-              value={dv.discount_percent}
-              onChange={(e) => onPatch({ discount_percent: e.target.value })}
-            />
-            <input
-              type="number" min="0" step="100" placeholder="ลด ฿" title="ส่วนลดเป็นจำนวนเงิน (ใช้เมื่อไม่ได้กรอก %)"
-              value={dv.discount_amount}
-              onChange={(e) => onPatch({ discount_amount: e.target.value })}
-            />
+            <label className="rate-field">
+              <span className="rate-field-label">ราคา</span>
+              <input
+                type="number" min="0" step="100" placeholder="–" value={dv.customer_price}
+                onChange={(e) => onPatch({ customer_price: e.target.value })}
+              />
+            </label>
+            {/* ค่าจ้างพนักงาน — ตัวตั้งของสรุปค่าตอบแทนรายเดือน ไม่มีช่องนี้ระบบคำนวณค่าแรงให้ใครไม่ได้เลย
+                เห็นเฉพาะผู้จัดการ · คนอื่นแก้ราคาลูกค้า/ส่วนลดได้ตามปกติ ค่าจ้างเดิมไม่ถูกแตะ */}
+            {seePay && (
+              <label className="rate-field">
+                <span className="rate-field-label">ค่าจ้าง</span>
+                <input
+                  type="number" min="0" step="100" placeholder="–" title="ค่าจ้างพนักงานต่อรอบบริการ"
+                  value={dv.staff_pay}
+                  onChange={(e) => onPatch({ staff_pay: e.target.value })}
+                />
+              </label>
+            )}
+          </div>
+          <div className="rate-edit-row">
+            <label className="rate-field">
+              <span className="rate-field-label">ลด %</span>
+              <input
+                type="number" min="0" max="100" step="1" placeholder="–" title="ส่วนลดเป็นเปอร์เซ็นต์"
+                value={dv.discount_percent}
+                onChange={(e) => onPatch({ discount_percent: e.target.value })}
+              />
+            </label>
+            <label className="rate-field">
+              <span className="rate-field-label">ลด ฿</span>
+              <input
+                type="number" min="0" step="100" placeholder="–" title="ส่วนลดเป็นจำนวนเงิน (ใช้เมื่อไม่ได้กรอก %)"
+                value={dv.discount_amount}
+                onChange={(e) => onPatch({ discount_amount: e.target.value })}
+              />
+            </label>
           </div>
           {/* คำนวณให้เห็นทันทีระหว่างพิมพ์ — สูตรเดียวกับที่ server ใช้ */}
           {price != null && (
@@ -150,11 +164,14 @@ function RateCell({ tier, editing, rate, draft, changed, onPatch, seePay }) {
     <td className="rate-price" data-tier={tier}>
       {/* ห่อด้วยบรรทัดของตัวเอง — ป้ายเป็น inline-block จึงจัดแนวตามเซลล์เหมือนราคา (กลาง/ซ้ายตามธีม) */}
       {rate.code && <span className="rate-code-row"><span className="pkg-code rate-code" title="รหัสแพ็คเกจ">{rate.code}</span></span>}
-      {discounted && <span className="rate-was">{formatBaht(rate.customer_price)}</span>}
-      {formatBaht(discounted ? rate.net_price : rate.customer_price)}
+      {/* ดีไซน์ v2: ราคาที่ขายจริงขึ้นก่อนตัวใหญ่ · ราคาเต็มขีดฆ่ากับส่วนลดอยู่บรรทัดเดียวกันข้างล่าง */}
+      <b className="rate-amount">{formatBaht(discounted ? rate.net_price : rate.customer_price)}</b>
       {discounted && (
-        <span className="rate-cut">
-          −{rate.discount_percent > 0 ? `${rate.discount_percent}%` : formatBaht(rate.discount_value)}
+        <span className="rate-disc">
+          <span className="rate-was">{formatBaht(rate.customer_price)}</span>
+          <span className="rate-cut">
+            −{rate.discount_percent > 0 ? `${rate.discount_percent}%` : formatBaht(rate.discount_value)}
+          </span>
         </span>
       )}
       {/* ค่าจ้างพนักงาน + กำไรที่เหลือ — ช่องที่ยังไม่ได้ตั้งต้องเห็นชัด เพราะสรุปค่าตอบแทนจะคิดไม่ได้
@@ -251,7 +268,10 @@ function RateTable({ label, formats, gradeId, editing, rateMap, draft, dirty, on
           <tr>
             <th className="rate-format-head">{label}</th>
             {TIERS.map((t) => (
-              <th key={t} className={`tier-head tier-${t}`}>{t}</th>
+              <th key={t} className={`tier-head tier-${t}`}>
+                <span className="tier-dot" aria-hidden="true" /><b>{t}</b>
+                {TIER_NAMES[t] && <span className="tier-name">{TIER_NAMES[t]}</span>}
+              </th>
             ))}
           </tr>
         </thead>
@@ -435,7 +455,7 @@ export default function PackagesPage() {
     <PageRefresh onRefresh={reload} busy={loading}>
       {/* ทั้งหน้าอยู่ในการ์ดขาวใบเดียวชิดขอบ (ธีมเดียวกับหน้ารายการอื่น) — แถบบนสุด = หัวแบบ hero + ปุ่ม
           ตารางเรทแต่ละกลุ่มยังเป็นรูปแบบเดิม แค่คั่นกันด้วยเส้นแทนการลอยบนพื้นครีม */}
-      <div className="list-card packages-card">
+      <div className="list-card packages-card ad-pkg">
       <div className="toolbar">
         {/* หัวแบบเดียวกับหัวปฏิทิน: ไอคอนในกรอบสีทองอ่อน + คำเล็กด้านบน + ชื่อหน้าตัวใหญ่ */}
         <div className="page-hero toolbar-note">
@@ -461,15 +481,17 @@ export default function PackagesPage() {
                 ยกเลิก
               </button>
               <button className="btn primary" disabled={busy} onClick={saveRates}>
+                {!busy && <LineIcon name="check" />}
                 {busy ? 'กำลังบันทึก…' : dirtyKeys.length > 0 ? `บันทึก ${dirtyKeys.length} ช่อง` : 'บันทึกราคา'}
               </button>
             </>
           ) : (
             <>
-              <button className="btn" onClick={() => setManaging((v) => !v)}>
+              <button className={`btn${managing ? ' is-on' : ''}`} onClick={() => setManaging((v) => !v)}>
+                <LineIcon name={managing ? 'close' : 'settings'} />
                 {managing ? 'ปิดการจัดการ' : 'จัดการเกรด/รูปแบบ'}
               </button>
-              <button className="btn primary" onClick={startEdit}>แก้ไขราคา</button>
+              <button className="btn primary" onClick={startEdit}><svg className="ad-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16z" /><path d="m13.5 6.5 4 4" /></svg>แก้ไขราคา</button>
             </>
           )}
         </div>
@@ -612,7 +634,7 @@ function ManagePanel({ matrix, onChanged, setError }) {
           </div>
           <div className="set-card-tools">
             <button type="button" className="btn tiny set-add-btn" disabled={busy} onClick={() => setAddingGrade((v) => !v)}>
-              + เพิ่มเกรด
+              <svg className="ad-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>เพิ่มเกรด
             </button>
           </div>
         </header>
@@ -648,6 +670,7 @@ function ManagePanel({ matrix, onChanged, setError }) {
         ) : <p className="muted set-empty">ยังไม่มีเกรด</p>}
         {addingGrade && (
           <form className="set-add" onSubmit={addGrade}>
+            <p className="set-add-title">เพิ่มเกรดใหม่</p>
             <input autoFocus placeholder="ชื่อเกรด เช่น เกรด 4" aria-label="ชื่อเกรด" value={gradeForm.name}
               onChange={(e) => setGradeForm((p) => ({ ...p, name: e.target.value }))} />
             <input placeholder="คำอธิบาย (ไม่บังคับ)" aria-label="คำอธิบายเกรด" value={gradeForm.description}
@@ -667,7 +690,7 @@ function ManagePanel({ matrix, onChanged, setError }) {
           </div>
           <div className="set-card-tools">
             <button type="button" className="btn tiny set-add-btn" disabled={busy} onClick={() => setAddingFormat((v) => !v)}>
-              + เพิ่มรูปแบบ
+              <svg className="ad-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>เพิ่มรูปแบบ
             </button>
           </div>
         </header>
@@ -731,6 +754,7 @@ function ManagePanel({ matrix, onChanged, setError }) {
         ))}
         {addingFormat && (
           <form className="set-add pkg-format-add" onSubmit={addFormat}>
+            <p className="set-add-title">เพิ่มรูปแบบใหม่</p>
             <input autoFocus placeholder="ชื่อรูปแบบ เช่น รายเดือน 8 ชม." aria-label="ชื่อรูปแบบบริการ" value={formatForm.name}
               onChange={(e) => setFormatForm((p) => ({ ...p, name: e.target.value }))} />
             <SearchSelect value={formatForm.category} aria-label="ประเภท"

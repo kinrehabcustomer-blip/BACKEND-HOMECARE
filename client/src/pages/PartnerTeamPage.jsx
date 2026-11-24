@@ -242,17 +242,24 @@ function PersonDetailDialog({ person, onCancel, onEdit, onReopen }) {
         </header>
         <div className="modal-body">
           {error && <p className="error" role="alert">{error}</p>}
-          <dl className="pt-detail">
-            <dt>รหัสเข้าระบบ</dt><dd className="mono">{p.employee_id}</dd>
-            <dt>อีเมล</dt><dd>{p.email || <span className="muted">ไม่ได้ใส่ — เข้าระบบด้วยรหัสพนักงาน</span>}</dd>
-            <dt>เบอร์โทร</dt>
-            <dd>{p.phone ? <a className="link" href={`tel:${String(p.phone).replace(/[^\d+]/g, '')}`}>{p.phone}</a> : <span className="muted">ไม่ได้ใส่</span>}</dd>
-            <dt>เข้าระบบล่าสุด</dt><dd>{loginAt(p.last_login_at) ?? <span className="muted">ยังไม่เคยเข้า</span>}</dd>
-            {!lead && (<>
-              <dt>ไปแล้ว</dt>
-              <dd>เดือนนี้ {p.done_this_month ?? 0} ครั้ง{d ? <span className="muted"> · รวมทั้งหมด {d.done_total} ครั้ง</span> : null}</dd>
-            </>)}
-          </dl>
+          {/* ข้อมูลบัญชีเป็นกล่อง 2×2 · จำนวนครั้งที่ไปเป็นกล่องทองด้านข้าง (ดีไซน์ใหม่ — ข้อมูลชุดเดิม) */}
+          <div className="pt-pd-top">
+            <dl className="pt-detail pt-pd-info">
+              <div><dt>รหัสเข้าระบบ</dt><dd className="mono">{p.employee_id}</dd></div>
+              <div><dt>อีเมล</dt><dd>{p.email || <span className="muted">ไม่ได้ใส่ — เข้าระบบด้วยรหัสพนักงาน</span>}</dd></div>
+              <div>
+                <dt>เบอร์โทร</dt>
+                <dd>{p.phone ? <a className="link" href={`tel:${String(p.phone).replace(/[^\d+]/g, '')}`}>{p.phone}</a> : <span className="muted">ไม่ได้ใส่</span>}</dd>
+              </div>
+              <div><dt>เข้าระบบล่าสุด</dt><dd>{loginAt(p.last_login_at) ?? <span className="muted">ยังไม่เคยเข้า</span>}</dd></div>
+            </dl>
+            {!lead && (
+              <dl className="pt-pd-done">
+                <dt>ไปแล้ว</dt>
+                <dd>เดือนนี้ <span className="pt-pd-done-n">{p.done_this_month ?? 0}</span> ครั้ง{d ? <span className="muted pt-pd-done-total"><span className="pt-pd-sep"> · </span>รวมทั้งหมด {d.done_total} ครั้ง</span> : null}</dd>
+              </dl>
+            )}
+          </div>
           {!lead && !d && !error && <p className="muted">กำลังโหลดงาน…</p>}
           {!lead && d && (
             <>
@@ -322,7 +329,14 @@ function PersonDialog({ editing, form, set, positions, busy, error, onSubmit, on
               </select>
             </label>
           </div>
-          {editing && <p className="muted pt-person-note">เปลี่ยนตำแหน่งแล้ว มีผลกับงานที่เลือกคนครั้งถัดไป</p>}
+          {editing && (
+            <p className="muted pt-person-note">
+              <svg className="text-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h.01" />
+              </svg>
+              เปลี่ยนตำแหน่งแล้ว มีผลกับงานที่เลือกคนครั้งถัดไป
+            </p>
+          )}
           {error && <p className="error" role="alert">{error}</p>}
         </div>
         <footer className="modal-foot">

@@ -106,16 +106,23 @@ export default function PhysioPackagesPage() {
           ตารางนี้มี 6 คอลัมน์ที่เป็นตัวเลขเกือบทั้งหมด บนจอ 390px ต้องปัดแนวนอนไปอ่านทีละคอลัมน์
           ซึ่งทำให้เทียบ "ราคาสุทธิ vs ตกเฉลี่ย" ของแพ็คเกจเดียวกันไม่ได้เลย ทั้งที่เป็นสองเลขที่ใช้ตัดสินใจ */}
       {/* แถบบน (คำอธิบาย + ปุ่มเพิ่ม) + ตาราง อยู่ในการ์ดใบเดียวกัน — โครงเดียวกับหน้ารายการอื่น */}
-      <div className="list-card">
+      {/* ดีไซน์ v2 (23 พ.ย. 2569): หัว hero + ปุ่มวางบนพื้น · ตารางเป็นการ์ดของตัวเอง (admin-data.css .ad-physio) */}
+      <div className="list-card ad-physio">
         <div className="toolbar">
           {/* หัวแบบ hero (ไอคอน + คำเล็ก + ชื่อตัวใหญ่) อยู่ในแถบบนของการ์ด — เข้าชุดกับหน้าแพ็คเกจ Homecare */}
           <div className="page-hero toolbar-note">
             <span className="page-hero-icon" aria-hidden="true"><LineIcon name="activity" /></span>
             <div>
               <h1 className="page-hero-title">กายภาพบำบัด</h1>
+              {/* นับจากรายการที่โหลดมาแล้ว — ไม่ได้ขอข้อมูลเพิ่ม */}
+              <p className="muted">
+                แพ็คเกจตามจำนวนครั้ง · {items.length} แพ็คเกจ
+                {items.some((p) => !p.active) && ` (ปิดขาย ${items.filter((p) => !p.active).length})`}
+                {' '}· ถ้าแค่หยุดขายชั่วคราว ให้ปิดขายแทนการลบ
+              </p>
             </div>
           </div>
-          <button className="btn primary toolbar-action" onClick={() => setEditing({ ...BLANK })}>+ เพิ่มแพ็คเกจ</button>
+          <button className="btn primary toolbar-action" onClick={() => setEditing({ ...BLANK })}><svg className="ad-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>เพิ่มแพ็คเกจ</button>
         </div>
         <div className="table-wrap">
           <table className="table physio-table table-cards">
@@ -308,9 +315,10 @@ function PackageForm({ initial, onClose, onSaved }) {
         <div className="modal-body">
           {error && <p className="error">{error}</p>}
 
-          <div className="grid cols-2">
+          {/* ดีไซน์ v2: กริดหกส่วน — รหัส 1/3 + ชื่อ 2/3 · ครั้ง/เดือน ครึ่งต่อครึ่ง · ราคาเต็ม/ส่วนลด สามช่อง (คลาส pf-* ใน admin-data.css) */}
+          <div className="grid cols-2 ad-physio-grid">
             {/* รหัสแพ็คเกจ (20 พ.ย. 2569) — ป้ายให้คนอ้างอิง เคสยังผูกกับแพ็คเดิมแม้เปลี่ยนรหัส */}
-            <label className="span-2">รหัสแพ็คเกจ
+            <label className="span-2 pf-code">รหัสแพ็คเกจ
               <input
                 className="pkg-code-input" maxLength={20} spellCheck={false} autoCapitalize="characters"
                 value={form.code}
@@ -319,7 +327,7 @@ function PackageForm({ initial, onClose, onSaved }) {
               />
               <span className="form-hint muted">ใช้ได้ A-Z, 0-9 และ - · ห้ามซ้ำกับแพ็คอื่น (รวมแพ็ค Homecare)</span>
             </label>
-            <label className="span-2">ชื่อแพ็กเกจ *
+            <label className="span-2 pf-name"><span className="ad-label">ชื่อแพ็กเกจ <span className="ad-req">*</span></span>
               <input
                 value={form.name}
                 placeholder="เช่น ทดลองครั้งแรก / แพ็ค 10 ครั้ง"
@@ -327,13 +335,13 @@ function PackageForm({ initial, onClose, onSaved }) {
               />
             </label>
 
-            <label>จำนวนครั้ง *
+            <label className="pf-half"><span className="ad-label">จำนวนครั้ง <span className="ad-req">*</span></span>
               <input
                 type="number" min="1" step="1" value={form.sessions}
                 onChange={(e) => set('sessions', e.target.value)}
               />
             </label>
-            <label>ระยะเวลา (เดือน)
+            <label className="pf-half">ระยะเวลา (เดือน)
               <input
                 type="number" min="1" step="1" value={form.duration_months}
                 placeholder="ไม่มีกำหนด"
@@ -341,7 +349,8 @@ function PackageForm({ initial, onClose, onSaved }) {
               />
             </label>
 
-            <label className="span-2">ราคาเต็ม (บาท) *
+            <hr className="pf-sep" aria-hidden="true" />
+            <label className="span-2 pf-third"><span className="ad-label">ราคาเต็ม (บาท) <span className="ad-req">*</span></span>
               <input
                 type="number" min="0" step="100" value={form.original_price}
                 onChange={(e) => set('original_price', e.target.value)}
@@ -349,14 +358,14 @@ function PackageForm({ initial, onClose, onSaved }) {
             </label>
 
             {/* กรอกส่วนลดอย่างใดอย่างหนึ่ง — กรอก % ไว้จะใช้ % ก่อน */}
-            <label>ส่วนลด (%)
+            <label className="pf-third">ส่วนลด (%)
               <input
                 type="number" min="0" max="100" step="1" value={form.discount_percent}
                 placeholder="เช่น 15"
                 onChange={(e) => set('discount_percent', e.target.value)}
               />
             </label>
-            <label>ส่วนลด (บาท)
+            <label className="pf-third">ส่วนลด (บาท)
               <input
                 type="number" min="0" step="100" value={form.discount_amount}
                 placeholder="ใช้เมื่อไม่ได้กรอก %"
@@ -369,7 +378,7 @@ function PackageForm({ initial, onClose, onSaved }) {
                 ไม่กรอก = เคสสายกายภาพจะคำนวณค่าตอบแทนให้พนักงานไม่ได้
                 เห็น/แก้ได้เฉพาะผู้จัดการ · คนอื่นแก้ชื่อ-ราคา-ส่วนลดได้ตามปกติ ค่าจ้างเดิมไม่ถูกแตะ */}
             {seePay && (
-              <label>ค่าจ้างพนักงาน (บาท)
+              <label className="pf-half">ค่าจ้างพนักงาน (บาท)
                 <input
                   type="number" min="0" step="100" value={form.staff_pay}
                   placeholder="ยอดที่พนักงานได้รับต่อแพ็คเกจนี้"
@@ -380,7 +389,7 @@ function PackageForm({ initial, onClose, onSaved }) {
             {/* ค่าภาษาอังกฤษ (ผู้ใช้ขอ 6 พ.ย. 2569) — แบบเดียวกับ Homecare: หน้าเปิดเคสมีกล่องติ๊ก "ภาษาอังกฤษ"
                 ติ๊กแล้วบวกยอดนี้เข้าค่าบริการ · ว่าง = แพ็คนี้ไม่มีตัวเลือก ไม่โชว์กล่องติ๊ก
                 ผู้ไม่เห็นค่าจ้าง = ช่องนี้กินเต็มแถวแทน */}
-            <label className={seePay ? '' : 'span-2'}>ค่าภาษาอังกฤษ (บาท)
+            <label className={seePay ? 'pf-half' : 'span-2 pf-full'}>ค่าภาษาอังกฤษ (บาท)
               <input
                 type="number" min="0" step="100" value={form.english_fee}
                 placeholder="ว่าง = ไม่มีตัวเลือกนี้"
@@ -410,7 +419,7 @@ function PackageForm({ initial, onClose, onSaved }) {
               )}
             </div>
 
-            <label className="span-2">หมายเหตุ
+            <label className="span-2 pf-full">หมายเหตุ
               <textarea rows={2} value={form.note} onChange={(e) => set('note', e.target.value)} />
             </label>
 

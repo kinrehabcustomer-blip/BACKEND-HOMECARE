@@ -22,6 +22,10 @@ import LineIcon from './LineIcon.jsx';
 /* รายงานอาการในหน้าเคส: กางล่าสุดได้ 5 ใบ · เกินนั้นพับรายการเก็บได้ (จำการพับ/กางไว้ในเครื่อง) */
 const REPORT_FOLD_AT = 5;
 const REPORT_FOLD_KEY = 'case.reportsFolded';
+/* ส่วนย่อยของหน้าต่างเคส (รายงาน · ญาติ · LINE ลูกค้า) โผล่หลังข้อมูลเคสมาถึง แล้วจึงเริ่มดึงของตัวเอง = ต้องรอสองรอบ
+   หน้าต่างยิงเส้นเดียวกันล่วงหน้าตั้งแต่เปิด แล้วให้ส่วนย่อยหยิบคำตอบไปใช้ภายในช่วงนี้ (api.js · keep) — ตรวจความเร็ว 24 พ.ย. 2569
+   ส่วนย่อยไม่ต้องแก้: ยิงเส้นเดิมตามปกติ ได้คำตอบที่มาถึงแล้วทันที · บันทึกอะไรก็ตาม = ล้างทิ้ง ดึงใหม่ตามเดิม */
+const PREFETCH = { keep: 10_000 };
 import StaffPicker from './StaffPicker.jsx';
 import { AddonLines, CaseStatus } from './CaseAddons.jsx';
 import { formatPhone, formatPhoneInput } from '../lib/phone.js';
@@ -270,7 +274,8 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
     setChatUrl(null);
     if (!caseId) return;
     let cancelled = false; // สลับเคสเร็ว ๆ — คำตอบของเคสก่อนหน้าห้ามมาทับ
-    api.caseCustomerLine(caseId).then((d) => { if (!cancelled) setChatUrl(d?.chat_url || null); }).catch(() => {});
+    // PREFETCH: ช่อง "LINE ลูกค้า" ในส่วนญาติ (FamilyAccess) ดึงเส้นเดียวกัน — ใช้คำตอบนี้ ไม่ยิงซ้ำ
+    api.caseCustomerLine(caseId, PREFETCH).then((d) => { if (!cancelled) setChatUrl(d?.chat_url || null); }).catch(() => {});
     return () => { cancelled = true; };
   }, [caseId]);
   const [staff, setStaff] = useState([]);
@@ -436,13 +441,21 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
     setError(null);
     setEditing(false); // เปลี่ยนเคสแล้วต้องปิดโหมดแก้ ไม่งั้นค่าที่ค้างอยู่จะไปทับข้อมูลเคสใหม่
 
+    // ยิงล่วงหน้าให้ส่วนญาติ (FamilyAccess · FamilyTimeline) — ดู PREFETCH · ผลไม่ใช้ที่นี่ ล้มก็ปล่อย ส่วนย่อยยิงเองตามเดิม
+    api.familyLinks(caseId, PREFETCH).catch(() => {});
+    api.familyMessages(caseId, PREFETCH).catch(() => {});
+    // โควต้าแพ็กกายภาพ — ตัวดึงจริง (useEffect ของ packQuota) รอข้อมูลเคสก่อน จึงยิงล่วงหน้าไว้ให้หยิบ
+    api.physioQuota(caseId, PREFETCH).catch(() => {});
+
     Promise.all([
       api.getCase(caseId),
       api.assignableEmployees(),
       api.listVisits(caseId),
       api.listInvoices({ case_id: caseId }),
       api.listCaseEvents(caseId),
-      api.listCaseReports(caseId, { per_page: 1 }),
+      /* ใช้แค่ total แต่ขอหน้าแรกแบบเดียวกับรายการรายงาน (CaseReports: page 1 · inlineLimit) เป๊ะ
+         รายการรายงานที่โผล่ทีหลังจะได้หยิบคำตอบนี้ไปใช้ ไม่ต้องยิงรอบสอง (เดิมขอ per_page=1 แยกอีกเส้น) */
+      api.listCaseReports(caseId, { page: 1, per_page: REPORT_FOLD_AT }, PREFETCH),
       api.listCaseTeam(caseId),
       api.unbilledExtras(caseId),
     ])
@@ -546,12 +559,15 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
   /* วันหมดอายุแพ็กกายภาพ — แผงสรุปในช่องตารางนัด (16 พ.ย. 2569 · ตัวเดียวกับในตารางนัด)
      ดึงใหม่ทุกครั้งที่รายการนัดเปลี่ยน: วันหมดอายุนับจากวันเริ่ม/นัดแรก ลงนัดแรกแล้ววันจึงเกิด */
   const [packQuota, setPackQuota] = useState(null);
+  /* รอให้ข้อมูลเคสนี้ (และรายการนัด) โหลดเสร็จก่อน — เดิมยิงตอนเปิด (ยังไม่มีนัด) แล้วยิงซ้ำทันทีที่นัดมาถึง
+     ได้ผลเดียวกันสองรอบ (ตรวจความเร็ว 24 พ.ย. 2569) · นัดเปลี่ยนภายหลัง = ดึงใหม่เหมือนเดิม */
+  const loadedCaseId = item?.case_id;
   useEffect(() => {
-    if (!caseId) { setPackQuota(null); return undefined; }
+    if (!caseId || loadedCaseId !== caseId) { setPackQuota(null); return undefined; }
     let cancelled = false;
     api.physioQuota(caseId).then((q) => !cancelled && setPackQuota(q)).catch(() => !cancelled && setPackQuota(null));
     return () => { cancelled = true; };
-  }, [caseId, visits]);
+  }, [caseId, visits, loadedCaseId]);
   /* (เดิม) ป้าย "เกินแพ็กที่ซื้อ N ครั้ง" — เอาออก 16 พ.ย. 2569: ลงนัดเกินแพ็กถูกล็อกแล้ว (ensurePhysioRoom)
      และช่องตารางนัดเปลี่ยนเป็นแผงสรุป "ใช้ไปแล้ว X / N" (PackSummary) ตามที่ผู้ใช้ขอ */
 
@@ -649,7 +665,7 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
   return (
     <div className="modal-backdrop" onClick={requestClose}>
       <div
-        className="modal detail-modal"
+        className="modal detail-modal case-modal"
         role="dialog"
         aria-modal="true"
         aria-label="รายละเอียดเคส"
@@ -664,14 +680,17 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
           <>
             <header className="modal-head">
               <div>
-                <p className="mono muted">{caseCode(item.case_id)}</p>
+                {/* ดีไซน์ v2: สถานะ + รหัสเคสแถวบนสุด แล้วค่อยชื่อ — ข้อมูลเดิมทุกตัว แค่สลับลำดับ */}
+                <div className="cm-head-top">
+                  <CaseStatus c={item} />
+                  <p className="mono muted">{caseCode(item.case_id)}</p>
+                </div>
                 <h2>
                   {serviceName(item) ?? <span className="muted">ไม่ระบุบริการ</span>}
                   {/* server รุ่นเก่า (ไม่มี physio_addons) — บอกแพ็กที่เก็บเงินรวมแบบเดิม */}
                   {!item.physio_addons && bundledPhysioText(item) && <span className="muted"> + {bundledPhysioText(item)}</span>}
                 </h2>
-                <p className="muted">{item.customer_name ?? item.client_name}</p>
-                <CaseStatus c={item} />
+                <p className="muted cm-head-sub">{item.customer_name ?? item.client_name}</p>
                 {chatUrl && (
                   <a className="btn tiny primary" style={{ marginLeft: 8 }} href={chatUrl} target="_blank" rel="noreferrer">
                     💬 เปิดห้องแชทลูกค้า (Admin)
@@ -804,6 +823,10 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                 </div>
               )}
 
+              {/* ดีไซน์ v2: การ์ดสี่ใบแรกเป็นสองคอลัมน์ — ซ้าย ผู้รับบริการ + ตารางกะ · ขวา การใช้บริการ + รายละเอียดเคส
+                  (จอแคบเรียงเป็นคอลัมน์เดียวตามลำดับนี้) · ส่วนอื่นเต็มความกว้างเหมือนเดิม */}
+              <div className="cm-grid">
+              <div className="cm-col">
               <section>
                 <h3>รายละเอียดผู้รับบริการ</h3>
                 <div className="field-grid">
@@ -814,6 +837,7 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                 {/* แพ้ยา/แพ้อาหาร มีที่แฟ้มผู้รับบริการที่เดียว (ไม่ได้คัดลอกลงเคส) — อ่านสดมาแสดงคู่กัน */}
                 {(item.patient_allergies || item.patient_food_allergies) && (
                   <p className="allergy-alert">
+                    <LineIcon name="alert" className="text-ico" />
                     {item.patient_allergies && <>แพ้ยา: {item.patient_allergies}</>}
                     {item.patient_allergies && item.patient_food_allergies && ' · '}
                     {item.patient_food_allergies && <>แพ้อาหาร: {item.patient_food_allergies}</>}
@@ -828,11 +852,78 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                     {' '}(พนักงานภาคสนามเห็นข้อมูลล่าสุดนี้แล้ว)
                   </p>
                 )}
-                <Field label="อาการปัจจุบัน" value={item.current_symptoms} />
+                {/* ดีไซน์ v2: อาการปัจจุบันอยู่ในกล่องพื้นอ่อน — เป็นข้อมูลที่คนเปิดเคสมาอ่านก่อน */}
+                <div className="cm-soft"><Field label="อาการปัจจุบัน" value={item.current_symptoms} /></div>
                 {item.medical_devices && <Field label="อุปกรณ์ / สายต่างๆ" value={item.medical_devices} />}
                 <Field label="จุดประสงค์ในการดูแล" value={item.care_goal} />
               </section>
 
+              {/* Homecare = ตารางกะ (วัน+เวลา+คน) · กายภาพ = ตารางนัดเข้าคอร์ส (นับ X/N ครั้ง) */}
+              <section>
+                {/* ดีไซน์ v2: ปุ่มเปิดตารางย้ายขึ้นหัวการ์ด (ปุ่มเดิม การทำงานเดิม) */}
+                <div className="section-head">
+                  <h3>{isPhysio ? 'ตารางนัด' : 'ตารางกะ'}</h3>
+                  <button className="btn tiny cm-sched-btn" onClick={() => setVisitsOpen(true)}>
+                    <LineIcon name="calendar" className="text-ico" />
+                    {terminal
+                      ? (isPhysio ? 'ดูตารางนัด' : 'ดูตารางกะ')
+                      : (isPhysio ? 'ลงนัด' : 'นัดกะ')}
+                  </button>
+                </div>
+                {/* แผงสรุปเดียวกับบนสุดของตารางนัด (ผู้ใช้ขอ 16 พ.ย. 2569) — ใช้ไปแล้ว X / N + แถบ + วันหมดอายุ
+                    แพ็กกายภาพโชว์เสมอ (0 / 20 ก็บอกสิทธิ์ที่มี) · Homecare ยังไม่มีกะ = ข้อความเดิม */}
+                <div className="visit-summary pack-row">
+                  {packQuota?.sessions > 0 ? (
+                    /* มีเพดาน: กายภาพ = ครั้ง · Homecare = วันของรูปแบบบริการ (attended = วันที่ไปจริง) */
+                    <PackSummary
+                      plain
+                      used={isPhysio ? doneVisits + (packQuota.carried ?? 0) : packQuota.attended /* server รวมยอดยกมาแล้ว */}
+                      carried={packQuota.carried ?? 0}
+                      total={packQuota.sessions}
+                      unitWord={packQuota.unit ?? (isPhysio ? 'ครั้ง' : 'วัน')}
+                      expiresOn={packQuota?.expires_on ?? null}
+                      today={todayTH()}
+                    />
+                  ) : isPhysio && item.physio_sessions > 0 ? (
+                    <PackSummary plain used={doneVisits} total={item.physio_sessions} unitWord="ครั้ง" today={todayTH()} />
+                  ) : bookedVisits === 0 ? (
+                    <p className="muted">{isPhysio ? 'ยังไม่ได้ลงนัด' : 'ยังไม่ได้นัดกะ'}</p>
+                  ) : (
+                    <PackSummary plain used={doneVisits} total={bookedVisits} unitWord={isPhysio ? 'ครั้ง' : 'กะ'} today={todayTH()} />
+                  )}
+                </div>
+
+                {/* ค่าจ้างของกะที่ทำไปแล้วยังไม่เข้าพนักงานจนกว่าจะอนุมัติ — อนุมัติทั้งเคสได้จากที่นี่
+                    (ไล่ทีละกะได้ที่หน้า "การมาทำงาน → รออนุมัติค่าจ้าง") */}
+                {/* seePay = หมวด money — ปุ่มนี้อนุมัติค่าจ้างทั้งเคสรวดเดียว เส้น API ก็ปิดไว้เหมือนกัน
+                    ถ้าไม่ซ่อน HR/Admin HC จะเห็นปุ่มแล้วกดเจอแถบแดง (ตรวจรอบ 10) */}
+                {seePay && pendingPay.length > 0 && (
+                  <div className="visit-summary approve-row">
+                    <p className="muted">
+                      <strong>รออนุมัติ {pendingPay.length} กะ</strong>
+                      <span className="cell-sub">
+                        กะที่อนุมัติแล้วคือฐานที่ใช้แบ่งค่าจ้างของเคส — ต้องอนุมัติก่อนจึงจะปล่อยเงินได้
+                      </span>
+                    </p>
+                    <button
+                      className="btn primary"
+                      disabled={busy}
+                      onClick={async () => {
+                        if (!(await ask({ title: `อนุมัติ ${pendingPay.length} กะ?`, confirmLabel: 'อนุมัติ' }))) return;
+                        run(async () => {
+                          const { changed } = await api.approveCasePay(item.case_id);
+                          toast(`อนุมัติแล้ว ${changed} กะ`);
+                        });
+                      }}
+                    >
+                      อนุมัติทั้งหมด
+                    </button>
+                  </div>
+                )}
+              </section>
+              </div>
+
+              <div className="cm-col">
               <section>
                 <h3>รายละเอียดการใช้บริการ</h3>
                 {/* 3 ช่องนี้เอาออกจากฟอร์มเปิดเคสแล้ว — โชว์เฉพาะเคสเก่าที่เคยกรอกไว้ ไม่ขึ้น "ไม่ได้ระบุ" ทั้งที่กรอกไม่ได้ */}
@@ -916,6 +1007,8 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                 {item.status === 'cancelled' && <Field label="เหตุผลที่ยกเลิก" value={item.cancel_reason} />}
                 <Field label="หมายเหตุ" value={item.note} />
               </section>
+              </div>
+              </div>
 
               {/* แพ็กกายภาพเสริม (เฉพาะเคส Homecare) — ลูกค้าซื้อคอร์สกายภาพเพิ่มระหว่างใช้ Homecare
                   เปิดเป็นเคสกายภาพแยกที่ผูกกลับมาที่นี่ ไม่ยัดลงเคสนี้ เพราะเคสหนึ่งใบมีได้บริการเดียว:
@@ -1069,66 +1162,6 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                   </div>
                 </section>
               )}
-
-              {/* Homecare = ตารางกะ (วัน+เวลา+คน) · กายภาพ = ตารางนัดเข้าคอร์ส (นับ X/N ครั้ง) */}
-              <section>
-                <h3>{isPhysio ? 'ตารางนัด' : 'ตารางกะ'}</h3>
-                {/* แผงสรุปเดียวกับบนสุดของตารางนัด (ผู้ใช้ขอ 16 พ.ย. 2569) — ใช้ไปแล้ว X / N + แถบ + วันหมดอายุ
-                    แพ็กกายภาพโชว์เสมอ (0 / 20 ก็บอกสิทธิ์ที่มี) · Homecare ยังไม่มีกะ = ข้อความเดิม */}
-                <div className="visit-summary pack-row">
-                  {packQuota?.sessions > 0 ? (
-                    /* มีเพดาน: กายภาพ = ครั้ง · Homecare = วันของรูปแบบบริการ (attended = วันที่ไปจริง) */
-                    <PackSummary
-                      plain
-                      used={isPhysio ? doneVisits + (packQuota.carried ?? 0) : packQuota.attended /* server รวมยอดยกมาแล้ว */}
-                      carried={packQuota.carried ?? 0}
-                      total={packQuota.sessions}
-                      unitWord={packQuota.unit ?? (isPhysio ? 'ครั้ง' : 'วัน')}
-                      expiresOn={packQuota?.expires_on ?? null}
-                      today={todayTH()}
-                    />
-                  ) : isPhysio && item.physio_sessions > 0 ? (
-                    <PackSummary plain used={doneVisits} total={item.physio_sessions} unitWord="ครั้ง" today={todayTH()} />
-                  ) : bookedVisits === 0 ? (
-                    <p className="muted">{isPhysio ? 'ยังไม่ได้ลงนัด' : 'ยังไม่ได้นัดกะ'}</p>
-                  ) : (
-                    <PackSummary plain used={doneVisits} total={bookedVisits} unitWord={isPhysio ? 'ครั้ง' : 'กะ'} today={todayTH()} />
-                  )}
-                  <button className="btn" onClick={() => setVisitsOpen(true)}>
-                    {terminal
-                      ? (isPhysio ? 'ดูตารางนัด' : 'ดูตารางกะ')
-                      : (isPhysio ? 'ลงนัด' : 'นัดกะ')}
-                  </button>
-                </div>
-
-                {/* ค่าจ้างของกะที่ทำไปแล้วยังไม่เข้าพนักงานจนกว่าจะอนุมัติ — อนุมัติทั้งเคสได้จากที่นี่
-                    (ไล่ทีละกะได้ที่หน้า "การมาทำงาน → รออนุมัติค่าจ้าง") */}
-                {/* seePay = หมวด money — ปุ่มนี้อนุมัติค่าจ้างทั้งเคสรวดเดียว เส้น API ก็ปิดไว้เหมือนกัน
-                    ถ้าไม่ซ่อน HR/Admin HC จะเห็นปุ่มแล้วกดเจอแถบแดง (ตรวจรอบ 10) */}
-                {seePay && pendingPay.length > 0 && (
-                  <div className="visit-summary approve-row">
-                    <p className="muted">
-                      <strong>รออนุมัติ {pendingPay.length} กะ</strong>
-                      <span className="cell-sub">
-                        กะที่อนุมัติแล้วคือฐานที่ใช้แบ่งค่าจ้างของเคส — ต้องอนุมัติก่อนจึงจะปล่อยเงินได้
-                      </span>
-                    </p>
-                    <button
-                      className="btn primary"
-                      disabled={busy}
-                      onClick={async () => {
-                        if (!(await ask({ title: `อนุมัติ ${pendingPay.length} กะ?`, confirmLabel: 'อนุมัติ' }))) return;
-                        run(async () => {
-                          const { changed } = await api.approveCasePay(item.case_id);
-                          toast(`อนุมัติแล้ว ${changed} กะ`);
-                        });
-                      }}
-                    >
-                      อนุมัติทั้งหมด
-                    </button>
-                  </div>
-                )}
-              </section>
 
               {/* เรื่องเงินไม่อยู่ในหน้านี้แล้ว — ปล่อยค่าจ้าง/แบ่งส่วน/ดูงวด ทำที่แท็บ "ปล่อยค่าจ้าง"
                   ของหน้ารอบจ่าย ซึ่งเห็นทุกเคสพร้อมกัน ไม่ต้องเปิดทีละใบ
@@ -1448,7 +1481,12 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
             {/* ยืนยันยกเลิกเคส — อยู่เหนือแถบปุ่มเพื่อให้เห็นพร้อมกับปุ่มที่กดไป
                 เหตุผลไม่บังคับ แต่เป็นสิ่งเดียวที่บอกได้ทีหลังว่าทำไมเคสนี้ถึงไม่ได้เกิดขึ้น */}
             {cancelOpen && (
-              <div className="notice pay-form no-print">
+              <div className="notice pay-form no-print cm-cancel">
+                {/* ดีไซน์ v2: หัวกล่องยืนยัน — ไอคอน + ชื่อการกระทำ (ตรงกับปุ่มยืนยันด้านล่าง) */}
+                <div className="cm-cancel-head">
+                  <span className="cm-cancel-ico" aria-hidden="true"><LineIcon name="x-circle" /></span>
+                  <h3>ยกเลิกเคส {caseCode(item.case_id)}</h3>
+                </div>
                 {/* บอกผลเรื่องเงินก่อนกด ไม่ใช่ให้ไปเจอตัวเลขที่ไม่เท่าเดิมในคิวปล่อยค่าจ้างทีหลัง
                     (ดร. 25 ต.ค. 2569 — เคสยกเลิก จ่ายตามกะที่ไปจริง กะที่ยังอยู่ไม่ต้องจ่าย) */}
                 {seePay && visits.length > 0 && (

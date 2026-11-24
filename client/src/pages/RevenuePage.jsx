@@ -9,7 +9,7 @@ import RevenueChart from '../components/RevenueChart.jsx';
 export default function RevenuePage() {
   return (
     <>
-      <header className="page-head">
+      <header className="page-head ops-head rev-head">
         <div>
           <h1>รายได้บริษัท</h1>
           <p className="muted">ยอดรับชำระจากใบแจ้งหนี้ตามช่วงเวลา</p>

@@ -53,6 +53,7 @@ export default function ForgotPasswordPage() {
   return (
     <div className="login-page">
       <form className="login-card" onSubmit={step === 'email' ? requestOtp : submitReset}>
+        {/* โลโก้ KIN HOME CARE ชุดเดียวกับหน้าเข้าสู่ระบบ/แถบเมนู (ผู้ใช้ขอ 24 พ.ย. 2569) */}
         <div className="login-brand">
           <img className="brand-logo login-logo logo-light" src="/logo-navbar.webp" alt="KIN Home Care" />
           <img className="brand-logo login-logo logo-dark" src="/logo-navbar-dark.webp" alt="" aria-hidden="true" />

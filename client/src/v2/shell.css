@@ -1,0 +1,824 @@
+/* =====================================================================================
+   ดีไซน์ใหม่ (v2 · 23 พ.ย. 2569) · shell — โครงแอป + ชิ้นส่วนกลางของระบบดีไซน์
+   แบบร่าง https://claude.ai/artifact/UYErtp3CaW8hEqXBRiHT3d · ระบบดีไซน์ = Main.dc.html
+   โหลดต่อจาก warm-clarity.css (และก่อนไฟล์ v2 ของส่วนอื่น) จึงทับกฎเดิมด้วยลำดับ — แตะหน้าตาอย่างเดียว
+   เจ้าของ class กลาง: .btn · ช่องกรอก · .badge · เปลือก .modal · .seg · แท็บ (.att-tabs) · .table (ฐาน)
+   · .pager · toast · กล่องข้อความ · แถบเมนูซ้าย · แถบบน/แถบล่างมือถือ · หน้าเข้าสู่ระบบ
+   ===================================================================================== */
+
+/* ---------- ตัวแปรเพิ่ม (ให้ส่วนอื่นใช้ต่อได้) ----------
+   --brand-strong = ตัวหนังสือบนพื้นทองจาง (เมนูที่เลือก · ปุ่มรองทอง · ป้าย "กำลังทำงาน")
+   --notify       = แดงของตัวเลขแจ้งเตือน (กระดิ่ง · เลขบนแท็บ · เลขในเมนู) — แดงสดกว่า --danger ตั้งใจให้เด่น
+   --tone-*       = ป้ายสถานะ 6 สี ความหมายเดียวทั้งระบบ (bg · ตัวหนังสือ · จุด) */
+:root {
+  --brand-strong: #6f4e0f;
+  --notify: #dc2626;
+  --track: #f1eee8;              /* รางของ .seg */
+  --disabled-bg: #ece8e0;
+  --disabled-ink: #9a9184;
+  --radius-ctl: 0.625rem;        /* 10px — ปุ่ม/ช่องกรอกขนาดปกติ */
+  --radius-ctl-sm: 0.5625rem;    /* 9px — ปุ่มในตาราง */
+
+  --tone-blue-bg: #e6eefa;   --tone-blue-ink: #1d4f91;   --tone-blue-dot: #2f6cc0;
+  --tone-gold-bg: #f5ebd3;   --tone-gold-ink: #6f4e0f;   --tone-gold-dot: #8e6516;
+  --tone-green-bg: #e3f1e6;  --tone-green-ink: #1f6b35;  --tone-green-dot: #2e8b4a;
+  --tone-orange-bg: #fdebdd; --tone-orange-ink: #9a3412; --tone-orange-dot: #d9631e;
+  --tone-red-bg: #fde8e6;    --tone-red-ink: #b42318;    --tone-red-dot: #d9362a;
+  --tone-gray-bg: #efece6;   --tone-gray-ink: #5f584d;   --tone-gray-dot: #8f877a;
+}
+:root[data-theme='dark'] {
+  --brand-strong: #e6b954;
+  --notify: #ef4444;
+  --track: #241f18;
+  --disabled-bg: #2a251d;
+  --disabled-ink: #7d7466;
+
+  --tone-blue-bg: #182a40;   --tone-blue-ink: #8fbaf0;   --tone-blue-dot: #6ea4ea;
+  --tone-gold-bg: #33260f;   --tone-gold-ink: #f0c06a;   --tone-gold-dot: #d7a63f;
+  --tone-green-bg: #16301f;  --tone-green-ink: #7ad3a0;  --tone-green-dot: #4fbf7d;
+  --tone-orange-bg: #38220f; --tone-orange-ink: #f4a76a; --tone-orange-dot: #e8853f;
+  --tone-red-bg: #3a1d1a;    --tone-red-ink: #f2a097;    --tone-red-dot: #f0675c;
+  --tone-gray-bg: #26231d;   --tone-gray-ink: #c4bcae;   --tone-gray-dot: #8f877a;
+}
+
+/* =====================================================================================
+   ปุ่ม — ขนาดปกติ 44px · ในตาราง (.tiny) 36px · เต็มแถวบนมือถือ (.block) 52px
+   หน้าจอหนึ่งมีปุ่มทองได้ปุ่มเดียว = สิ่งที่ควรกดต่อ
+   ===================================================================================== */
+.btn {
+  min-height: 2.75rem;
+  padding: 0.5rem 1.25rem;
+  border-color: var(--field-border);
+  border-radius: var(--radius-ctl);
+  color: var(--heading);
+  font-size: 0.9375rem;
+  font-weight: 500;
+  line-height: 1.3;
+  transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease, color 0.15s ease;
+}
+.btn:hover:not(:disabled) { background: var(--surface-2); border-color: var(--border-hover); }
+.btn.primary { padding-inline: 1.375rem; font-weight: 600; }
+.btn.primary:hover:not(:disabled) { background: var(--brand-hover); border-color: var(--brand-hover); box-shadow: 0 0 0 3px var(--brand-soft); }
+.btn.danger { background: var(--danger); border-color: var(--danger); color: #fff; font-weight: 600; }
+.btn.danger:hover:not(:disabled) { background: color-mix(in srgb, var(--danger) 88%, #000); border-color: color-mix(in srgb, var(--danger) 88%, #000); }
+.btn.danger-ghost { font-weight: 600; border-color: #f3c5c0; background: var(--surface); }
+:root[data-theme='dark'] .btn.danger-ghost { border-color: color-mix(in srgb, var(--danger) 45%, transparent); }
+/* ปุ่มข้อความทอง (ดูทั้งหมด) — ไม่มีกรอบ */
+.btn.ghost { border-color: transparent; background: transparent; color: var(--brand); font-weight: 600; }
+.btn.ghost:hover:not(:disabled) { background: var(--brand-soft); border-color: transparent; }
+/* ปุ่มรองทอง (ส่งพาร์ทเนอร์) — opt-in: เพิ่ม class "soft" */
+.btn.soft { border-color: transparent; background: var(--brand-soft); color: var(--brand-strong); font-weight: 600; }
+.btn.soft:hover:not(:disabled) { background: color-mix(in srgb, var(--brand) 22%, var(--brand-soft)); border-color: transparent; }
+/* ปุ่มเต็มแถวบนมือถือ (ปฏิเสธ / เช็คอิน) — opt-in: เพิ่ม class "block" */
+.btn.block { width: 100%; min-height: 3.25rem; border-radius: 0.75rem; font-size: 1rem; }
+/* ปิดอยู่ = พื้นเทาทึบ ไม่ใช่จางทั้งปุ่ม (อ่านออกว่า "ยังกดไม่ได้" ไม่ใช่ "โหลดไม่เสร็จ") */
+.btn:disabled,
+.btn.primary:disabled,
+.btn.danger:disabled {
+  opacity: 1;
+  background: var(--disabled-bg);
+  border-color: var(--disabled-bg);
+  color: var(--disabled-ink);
+  box-shadow: none;
+}
+.btn.danger-ghost:disabled,
+.btn.ghost:disabled { background: transparent; border-color: var(--disabled-bg); }
+.btn.link-btn:disabled { background: none; border-color: transparent; opacity: 0.6; }
+/* ปุ่มในตาราง/แถว 36px */
+.btn.tiny {
+  min-height: 2.25rem;
+  padding: 0.25rem 0.875rem;
+  border-radius: var(--radius-ctl-sm);
+  font-size: 0.875rem;
+}
+.btn.tiny:disabled { background: var(--surface-2); border-color: var(--disabled-bg); }
+/* ปุ่มไอคอนล้วน 36px สี่เหลี่ยม · ปุ่มแบบลิงก์คงเล็ก */
+.btn.icon-btn { min-height: 0; width: 2.25rem; height: 2.25rem; padding: 0; border-radius: var(--radius-ctl-sm); color: var(--text); }
+.btn.icon-btn .btn-ico { width: 1.125rem; height: 1.125rem; }
+.btn.link-btn { min-height: 0; padding: 0.25rem; font-weight: 600; }
+.btn-ico { width: 1.125rem; height: 1.125rem; }
+:root[data-theme='dark'] .btn { color: var(--text); }
+:root[data-theme='dark'] .btn.primary { color: var(--brand-ink); }
+:root[data-theme='dark'] .btn.ghost { color: var(--brand); }
+
+/* =====================================================================================
+   ช่องกรอก — สูง 44px มุม 10px ตัวอักษร 15px · โฟกัส = ขอบทอง 2px + วงทองจาง · ผิด = ขอบแดงพื้นชมพูจาง
+   ===================================================================================== */
+/* :where() = specificity ต่ำสุด — กฎเฉพาะหน้า (เช่น ช่องในแถบตัวกรอง 36px) ยังทับได้ตามเดิม */
+input:where(:not([type='checkbox'], [type='radio'], [type='range'], [type='file'], [type='color'])),
+select,
+textarea {
+  border-color: var(--field-border);
+  border-radius: var(--radius-ctl);
+  font-size: 0.9375rem;
+  color: var(--heading);
+}
+input:where(:not([type='checkbox'], [type='radio'], [type='range'], [type='file'], [type='color'])),
+select {
+  min-height: 2.75rem;
+  padding-block: 0.5rem;
+  padding-inline: 0.875rem;
+}
+select { padding-right: 2.375rem; background-position: right 0.875rem center; }
+textarea { padding: 0.625rem 0.875rem; line-height: 1.5; }
+input::placeholder, textarea::placeholder { color: color-mix(in srgb, var(--muted) 80%, transparent); }
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: var(--brand);
+  box-shadow: 0 0 0 1px var(--brand), 0 0 0 4px var(--brand-soft);
+}
+input[aria-invalid='true'],
+select[aria-invalid='true'],
+textarea[aria-invalid='true'] { border-color: #d9493b; background-color: #fffafa; }
+input[aria-invalid='true']:focus,
+textarea[aria-invalid='true']:focus { box-shadow: 0 0 0 1px #d9493b, 0 0 0 4px var(--tone-red-bg); }
+:root[data-theme='dark'] :is(input, select, textarea)[aria-invalid='true'] { border-color: var(--danger); background-color: color-mix(in srgb, var(--danger) 8%, var(--surface)); }
+/* select ขนาดย่อ (ตัวเลือกต่อหน้า ฯลฯ) — คงขนาดของตัวเอง แต่มุมตามชุดใหม่ */
+.per-page select,
+.att-filter select,
+.visit-list select,
+.shift-form select { min-height: 2.25rem; border-radius: var(--radius-ctl-sm); }
+input[type='checkbox'], input[type='radio'] { accent-color: var(--brand); }
+
+/* =====================================================================================
+   ป้ายสถานะ — 6 สี ความหมายเดียวทั้งระบบ (เม็ดยา 28px · จุดสีนำหน้า)
+     ฟ้า = รอวันนัด · ทอง = กำลังทำงาน · เขียว = ไปแล้ว/เรียบร้อย · ส้ม = ต้องดู · แดง = ด่วน/ปัญหา · เทา = ยกเลิก/ปิด
+   ไอคอนสถานะเคส (นาฬิกา/ธง/ติ๊ก/กากบาท) จาก warm-clarity ยังอยู่ — รูปทรงตามเดิม สีตามชุดใหม่
+   ===================================================================================== */
+.badge {
+  min-height: 1.75rem;
+  padding: 0 0.75rem;
+  gap: 0.375rem;
+  border-radius: 999px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  background: var(--tone-gray-bg);
+  color: var(--tone-gray-ink);
+}
+.badge::before { width: 0.4375rem; height: 0.4375rem; background: var(--dot, currentColor); }
+/* ในตาราง: ตัวอักษร 12px สูง 26px — คอลัมน์สถานะของหลายหน้ากว้างพอดีป้ายยาวสุด ("ยังไม่จับคู่พนักงาน") อยู่แล้ว
+   (หน้าที่คอลัมน์กว้างพอ เจ้าของหน้าขยายเป็น 13px ได้) */
+.table td .badge { min-height: 1.625rem; font-size: 0.75rem; }
+/* ทอง — กำลังทำงาน (เช็คอินแล้ว ยังไม่เช็คเอาท์ · เคสกำลังให้บริการ · จ่ายบางส่วน/ตามจ่าย) */
+.badge:is(.case-in_progress, .case-active, .visit-working, .payout-partial) {
+  background: var(--tone-gold-bg); color: var(--tone-gold-ink); --dot: var(--tone-gold-dot);
+}
+/* เขียว — ไปแล้ว/เรียบร้อย */
+.badge:is(.active, .invoice-paid, .payout-full, .visit-done) {
+  background: var(--tone-green-bg); color: var(--tone-green-ink); --dot: var(--tone-green-dot);
+}
+/* ฟ้า — รอวันนัด/รอเริ่ม */
+.badge:is(.case-assigned, .case-pending_start, .invoice-issued, .visit-scheduled, .probation) {
+  background: var(--tone-blue-bg); color: var(--tone-blue-ink); --dot: var(--tone-blue-dot);
+}
+/* ส้ม — ต้องดู (ยังไม่มีคน · รอปิดเคส · เลยกำหนด · พักงาน) */
+.badge:is(.case-unassigned, .case-awaiting_close, .invoice-overdue, .suspended, .visit-stale) {
+  background: var(--tone-orange-bg); color: var(--tone-orange-ink); --dot: var(--tone-orange-dot);
+}
+/* แดง — ด่วน/ความปลอดภัย (ค้างจ่ายนาน · ธงปัญหา) */
+.badge:is(.flag, .pay-wait.is-late, .visit-missed) {
+  background: var(--tone-red-bg); color: var(--tone-red-ink); --dot: var(--tone-red-dot);
+}
+/* เทา — ยกเลิก/ปิด/จบ */
+.badge:is(.case-closed, .case-cancelled, .invoice-draft, .invoice-cancelled, .resigned, .inactive, .on_leave) {
+  background: var(--tone-gray-bg); color: var(--tone-gray-ink); --dot: var(--tone-gray-dot);
+}
+/* ไอคอนสถานะเคสเป็นรูปทรง (mask) — ใช้สีตัวหนังสือ ไม่ใช่สีจุด จะได้คมชัดเท่าข้อความ */
+.badge:is(.case-unassigned, .case-assigned, .case-pending_start, .case-awaiting_close, .case-closed, .case-cancelled)::before { background: currentColor; }
+/* ป้ายข้อความกำกับ (ไม่ใช่สถานะ) — ไม่มีจุด */
+.badge.pay-wait::before,
+.badge.muted-badge::before,
+.badge.deposit-tag::before,
+.badge.adj-reason-tag::before { display: none; }
+/* ธีมมืด: ตัวแปร --tone-* สลับเองแล้ว — ล้างกฎสีตายตัวของ warm-clarity (specificity สูงกว่า) */
+:root[data-theme='dark'] :is(.badge.active, .badge.invoice-paid, .badge.payout-full, .badge.visit-done) { background: var(--tone-green-bg); color: var(--tone-green-ink); }
+:root[data-theme='dark'] :is(.badge.case-in_progress, .badge.case-active, .badge.visit-working, .badge.payout-partial) { background: var(--tone-gold-bg); color: var(--tone-gold-ink); }
+:root[data-theme='dark'] :is(.badge.case-assigned, .badge.case-pending_start, .badge.invoice-issued, .badge.visit-scheduled, .badge.probation) { background: var(--tone-blue-bg); color: var(--tone-blue-ink); }
+:root[data-theme='dark'] :is(.badge.case-unassigned, .badge.case-awaiting_close, .badge.invoice-overdue, .badge.suspended, .badge.visit-stale) { background: var(--tone-orange-bg); color: var(--tone-orange-ink); }
+:root[data-theme='dark'] :is(.badge.flag, .badge.pay-wait.is-late, .badge.visit-missed) { background: var(--tone-red-bg); color: var(--tone-red-ink); }
+:root[data-theme='dark'] :is(.badge.case-closed, .badge.case-cancelled, .badge.invoice-draft, .badge.invoice-cancelled, .badge.resigned, .badge.inactive, .badge.on_leave) { background: var(--tone-gray-bg); color: var(--tone-gray-ink); }
+/* class ช่วยสำหรับส่วนอื่น (opt-in): .tone-blue/.tone-gold/.tone-green/.tone-orange/.tone-red/.tone-gray */
+.badge.tone-blue { background: var(--tone-blue-bg); color: var(--tone-blue-ink); --dot: var(--tone-blue-dot); }
+.badge.tone-gold { background: var(--tone-gold-bg); color: var(--tone-gold-ink); --dot: var(--tone-gold-dot); }
+.badge.tone-green { background: var(--tone-green-bg); color: var(--tone-green-ink); --dot: var(--tone-green-dot); }
+.badge.tone-orange { background: var(--tone-orange-bg); color: var(--tone-orange-ink); --dot: var(--tone-orange-dot); }
+.badge.tone-red { background: var(--tone-red-bg); color: var(--tone-red-ink); --dot: var(--tone-red-dot); }
+.badge.tone-gray { background: var(--tone-gray-bg); color: var(--tone-gray-ink); --dot: var(--tone-gray-dot); }
+
+/* =====================================================================================
+   ปุ่มสลับมุมมอง (.seg) — รางเทาอุ่นไม่มีกรอบ ตัวที่เลือกเป็นแผ่นขาวยก (36px)
+   ===================================================================================== */
+.seg {
+  gap: 0.25rem;
+  padding: 0.25rem;
+  border: 0;
+  border-radius: 0.75rem;
+  background: var(--track);
+}
+.seg button {
+  min-height: 2.25rem;
+  padding: 0 1rem;
+  border-radius: var(--radius-ctl-sm);
+  color: var(--muted);
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+.seg button:hover { color: var(--heading); background: rgb(255 255 255 / 50%); }
+.seg button.on {
+  background: var(--surface);
+  color: var(--heading);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgb(31 28 23 / 12%);
+}
+.seg-count {
+  min-width: 1.625rem; height: 1.375rem; padding: 0 0.4375rem;
+  background: var(--disabled-bg); color: var(--text);
+  font-size: 0.75rem;
+}
+.seg button.on .seg-count { background: var(--brand-soft); color: var(--brand-strong); }
+:root[data-theme='dark'] .seg button.on { box-shadow: 0 0 0 1px var(--border-hover); }
+
+/* =====================================================================================
+   แท็บแบบเส้นใต้ (.att-tabs — การมาทำงาน · ค่าตอบแทน) — 44px · ที่เลือก = ตัวหนาสีหมึก + เส้นทอง 2px
+   ตัวเลขบนแท็บ (.tab-count) = เม็ดแดงตัวขาว
+   ===================================================================================== */
+/* flex-shrink: 0 — ในการ์ดที่ล็อกความสูงพอดีจอ (flex column) แถบแท็บต้องไม่ถูกบีบจนตัวหนังสือโดนตัด */
+.att-tabs { flex-shrink: 0; gap: 0.25rem; border-bottom: 1px solid var(--border); }
+.att-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 2.75rem;
+  padding: 0 0.875rem;
+  border-radius: 0;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  background: none !important;
+  color: var(--muted);
+  font-size: 0.9375rem;
+  font-weight: 500;
+}
+.att-tab::after { display: none; }
+.att-tab:hover { color: var(--heading); }
+.att-tab.is-active { color: var(--heading); font-weight: 700; border-bottom-color: var(--brand); }
+.tab-count,
+.att-tab .tab-count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  margin-left: 0;
+  padding: 0 0.375rem;
+  border-radius: 999px;
+  background: var(--notify);
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+/* =====================================================================================
+   ตาราง (ฐาน) — หัวตาราง 13px ตัวหนา สีจาง พื้นเทาอุ่น · เส้นแถวจาง
+   ความสูงแถว/คอลัมน์ของแต่ละหน้าเป็นของเจ้าของหน้านั้น
+   ===================================================================================== */
+.table th {
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+.table td { border-bottom-color: var(--divider); }
+.table tbody tr:hover { background: color-mix(in srgb, var(--brand-soft) 40%, var(--surface)); }
+/* หัวคอลัมน์ที่กดเรียง — ตัวที่ใช้อยู่เป็นเม็ดทองจาง (32px) · ตัวอื่นเป็นข้อความหัวตารางธรรมดา */
+.sort-head,
+.th-sort-pick {
+  min-height: 2rem;
+  padding: 0 0.5rem;
+  margin-inline: -0.5rem;
+  border-radius: 0.5rem;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.sort-head.on,
+.th-sort-pick.on { background: var(--brand-soft); color: var(--brand-strong); }
+.th-sort-pick.on > span:first-child,
+.th-sort-pick.on .th-sort-pick-value { color: var(--brand-strong); }
+.th-sort-pick-icon { stroke: currentColor; }
+.sort-head:hover:not(.on),
+.th-sort-pick:hover:not(.on) { background: var(--track); color: var(--heading); }
+
+/* =====================================================================================
+   แถบเลื่อนหน้า (.pager) — ปุ่ม 36px · "หน้า x / y" · แสดง [20] ต่อหน้า
+   ===================================================================================== */
+.pager { color: var(--muted); font-size: 0.875rem; }
+.pager .btn { min-height: 2.25rem; padding: 0 0.875rem; border-radius: var(--radius-ctl-sm); font-size: 0.875rem; }
+.pager .btn:disabled { background: var(--surface-2); border-color: var(--disabled-bg); color: var(--disabled-ink); }
+.pager .per-page select { min-height: 2.25rem; }
+@media (min-width: 901px) {
+  .list-card > .pager { padding: 0.625rem 1.25rem; }
+  .list-card > .pager .btn { min-height: 2.25rem; padding-block: 0; }
+  .list-card > .pager .per-page select { min-height: 2.25rem; }
+}
+
+/* =====================================================================================
+   เปลือก popup — มุม 20px เงานุ่มอุ่น · หัว/ท้ายคั่นด้วยเส้นจาง · ปุ่มปิด 40px พื้นเทาอุ่น
+   (เนื้อในของแต่ละ popup เป็นของเจ้าของ popup นั้น)
+   ===================================================================================== */
+.modal-backdrop { background: rgb(31 28 23 / 52%); }
+.modal {
+  border-radius: 1.25rem;
+  box-shadow: 0 1.5rem 4rem rgb(31 28 23 / 28%);
+}
+:root[data-theme='dark'] .modal { box-shadow: 0 1.5rem 4rem rgb(0 0 0 / 55%); }
+.modal-head { padding: 1.375rem 1.5rem 1.125rem 1.75rem; border-bottom-color: var(--divider); }
+.modal-head h2 { color: var(--heading); font-family: var(--font-heading); font-weight: 600; }
+.modal-foot { padding: 1rem 1.75rem; gap: 0.625rem; border-top-color: var(--divider); }
+/* ปุ่มปิด (×) — กล่อง 40px มุม 10px พื้นเทาอุ่น วาดกากบาทเส้นแทนตัวอักษร × (ทุก popup ใช้ class เดียวกันนี้) */
+.modal-close {
+  position: relative;
+  flex: none;
+  width: 2.5rem;
+  height: 2.5rem;
+  min-width: 2.5rem;
+  min-height: 2.5rem;
+  padding: 0;
+  border-radius: var(--radius-ctl);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 0;
+  line-height: 0;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.modal-close::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 1.25rem;
+  height: 1.25rem;
+  background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M6 6l12 12M18 6L6 18'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M6 6l12 12M18 6L6 18'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+.modal-close:hover:not(:disabled) { background: var(--track); color: var(--heading); }
+.modal-close:disabled { opacity: 0.5; cursor: not-allowed; }
+@media (max-width: 900px) {
+  .modal-close { min-width: 2.75rem; min-height: 2.75rem; width: 2.75rem; height: 2.75rem; display: grid; }
+}
+/* มือถือ: แผ่นเลื่อนขึ้นจากล่าง มุมบน 22px ขีดจับสีอุ่น */
+@media (max-width: 600px) {
+  .modal { border-radius: 1.375rem 1.375rem 0 0; }
+  .modal::before { width: 2.5rem; height: 0.25rem; margin: 0.625rem auto 0.25rem; background: #ddd5c6; }
+  :root[data-theme='dark'] .modal::before { background: var(--border-hover); }
+  .modal-head { padding: 0.75rem 1.25rem 1rem; }
+  .modal-foot { padding: 0.875rem 1.25rem; }
+  .modal-foot .btn { min-height: 3.25rem; border-radius: 0.75rem; font-size: 1rem; }
+}
+
+/* =====================================================================================
+   toast — สำเร็จ = แผ่นหมึกเข้ม ติ๊กเขียว · ผิดพลาด = แผ่นแดงจาง ไอคอนวงกลมตกใจ
+   ===================================================================================== */
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  max-width: 24rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid transparent;
+  border-radius: 0.75rem;
+  background: #1f1c17;
+  color: #fff;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  box-shadow: 0 0.5rem 1.5rem rgb(31 28 23 / 18%);
+}
+.toast-ico { flex: none; width: 1.125rem; height: 1.125rem; color: #7fd39a; }
+.toast-text { min-width: 0; }
+.toast-error { background: var(--tone-red-bg); border-color: #f6c4be; color: #8f1d14; align-items: flex-start; }
+.toast-error .toast-ico { color: currentColor; margin-top: 0.125rem; }
+:root[data-theme='dark'] .toast { background: var(--heading); color: var(--brand-ink); box-shadow: 0 0.5rem 1.5rem rgb(0 0 0 / 50%); }
+:root[data-theme='dark'] .toast .toast-ico { color: #1f6b35; }
+:root[data-theme='dark'] .toast-error { background: var(--tone-red-bg); border-color: #5c322c; color: var(--tone-red-ink); }
+:root[data-theme='dark'] .toast-error .toast-ico { color: currentColor; }
+
+/* =====================================================================================
+   กล่องข้อความ — .error = แจ้งเตือนแดง (มีไอคอน) · .notice = หมายเหตุทองจาง · .banner = เตือนส้ม
+   ===================================================================================== */
+.error, .notice, .banner { border-radius: 0.75rem; padding: 0.75rem 1rem; }
+:root:not([data-theme='dark']) .error { background: var(--tone-red-bg); border-color: #f6c4be; color: #8f1d14; }
+:root:not([data-theme='dark']) .banner { background: var(--tone-orange-bg); border-color: #f2cfa9; color: var(--tone-orange-ink); }
+:root:not([data-theme='dark']) .banner a { color: var(--tone-orange-ink); }
+/* ไอคอนวงกลมตกใจหน้ากล่องแดง — เฉพาะกล่องบล็อก (p/div) ไม่ใช่ข้อความแดงในบรรทัด */
+:is(p, div).error { position: relative; padding-left: 2.625rem; }
+:is(p, div).error::before {
+  content: '';
+  position: absolute;
+  left: 1rem;
+  top: calc(0.75rem + 0.1875rem);
+  width: 1.125rem;
+  height: 1.125rem;
+  background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='M12 8v5M12 16h.01'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='M12 8v5M12 16h.01'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+.error-bar .btn { min-height: 2.25rem; }
+
+/* =====================================================================================
+   ตรา "K" + ชื่อระบบ — ใช้ทั้งแถบเมนู แถบบนมือถือ และหน้าเข้าสู่ระบบ
+   ===================================================================================== */
+.brand-k {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: var(--radius-ctl);
+  background: var(--brand);
+  color: var(--brand-ink);
+  font-family: var(--font-heading);
+  font-weight: 700;
+  font-size: 1rem;
+  line-height: 1;
+}
+.brand-text { display: flex; flex-direction: column; min-width: 0; flex: 1; line-height: 1.35; }
+.brand-name { font-family: var(--font-heading); font-size: 0.9375rem; font-weight: 600; color: var(--heading); white-space: nowrap; }
+.brand-text .brand-sub { font-size: 0.75rem; color: var(--muted); }
+
+/* =====================================================================================
+   แถบเมนูซ้าย (จอคอม) — กว้าง 260px · เมนูสูง 40px · ที่เลือก = พื้นทองจาง ตัวหนังสือทองเข้ม
+   ===================================================================================== */
+@media (min-width: 901px) {
+  .sidebar {
+    width: 16.25rem;
+    padding: 1.125rem 0.875rem 1rem;
+    gap: 0.75rem;
+  }
+  .sidebar .brand {
+    gap: 0.625rem;
+    margin: 0;
+    padding: 0 0.125rem 0 0.5rem;
+    border-bottom: 0;
+  }
+  .sidebar > .sidebar-panel > nav {
+    gap: 0.125rem;
+    padding-bottom: 0.5rem;
+  }
+  .sidebar nav a,
+  .sidebar nav .nav-group-btn {
+    min-height: 2.5rem;
+    padding: 0 0.75rem;
+    gap: 0.75rem;
+    border-radius: var(--radius-ctl);
+    font-size: 0.9375rem;
+    line-height: 1.3;
+  }
+  .sidebar nav .nav-sub a { min-height: 2.25rem; padding-block: 0; }
+  .nav-section-label,
+  .sidebar nav .nav-section-label { padding: 0.75rem 0.75rem 0.25rem; }
+  .sidebar nav .nav-section-label:first-child { padding-top: 0.375rem; }
+  .sidebar-foot { padding-top: 0.875rem; }
+}
+/* พนักงาน/พาร์ทเนอร์บนจอคอม (แบบ new-partner-partner): หัวมีเส้นคั่นล่าง · เมนูสูง 44px */
+@media (min-width: 901px) {
+  .app.tabbar-field .sidebar { padding-top: 1.25rem; gap: 1.25rem; }
+  .app.tabbar-field .sidebar .brand { padding-bottom: 1rem; border-bottom: 1px solid var(--border); }
+  .app.tabbar-field .sidebar nav a { min-height: 2.75rem; }
+}
+/* ทุกขนาดจอ (รวมแผ่นเมนูบนมือถือ) */
+.sidebar .nav-ico { width: 1.125rem; height: 1.125rem; }
+.nav-section-label { font-size: 0.75rem; font-weight: 600; letter-spacing: 0.06em; color: var(--muted); }
+.sidebar nav a,
+.sidebar nav .nav-group-btn { color: var(--text); font-weight: 400; }
+.sidebar nav a:hover,
+.sidebar nav .nav-group-btn:hover { background: var(--surface-2); color: var(--heading); }
+.sidebar nav a:hover .nav-ico,
+.sidebar nav .nav-group-btn:hover .nav-ico { color: currentColor; }
+.sidebar nav a.active {
+  background: var(--brand-soft);
+  color: var(--brand-strong);
+  font-weight: 600;
+  box-shadow: none;
+}
+.sidebar nav a.active .nav-ico { color: currentColor; }
+.sidebar nav .nav-group-btn.has-active { color: var(--heading); font-weight: 600; }
+.sidebar nav .nav-group-btn.has-active .nav-ico { color: var(--brand-strong); }
+.sidebar nav .nav-caret { width: 1rem; height: 1rem; color: var(--muted); }
+.nav-sub { padding-left: 1.5rem; gap: 0.125rem; }
+.sidebar nav .nav-sub .nav-ico { width: 1rem; height: 1rem; }
+
+/* ส่วนท้าย — ชื่อผู้ใช้ + ปุ่มไอคอน 44px */
+.sidebar-foot { border-top: 1px solid var(--border); }
+.sidebar .who-row { gap: 0.625rem; padding: 0 0.25rem; }
+.sidebar .who { flex: 1; min-width: 0; gap: 0; line-height: 1.4; }
+.sidebar .who strong { font-size: 0.875rem; font-weight: 600; color: var(--heading); }
+.sidebar .who-meta { display: block; min-width: 0; font-size: 0.75rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sidebar .who-meta .mono { font-size: 0.75rem; color: var(--muted); }
+.who-avatar {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 50%;
+  background: var(--brand-soft);
+  color: var(--brand-strong);
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+.sidebar .who-actions { gap: 0.5rem; }
+.sidebar .who-actions .btn.icon-btn {
+  width: 2.75rem;
+  height: 2.75rem;
+  border-color: var(--field-border);
+  border-radius: var(--radius-ctl);
+  background: var(--surface);
+  color: var(--text);
+}
+.sidebar .who-actions .btn.icon-btn:hover:not(:disabled) { background: var(--surface-2); color: var(--heading); }
+/* อยู่หน้าตั้งค่า/ตั้งค่าระบบ — ปุ่มนั้นติดพื้นทองจางแบบเมนูที่เลือก */
+.sidebar .who-actions .btn.icon-btn.active { background: var(--brand-soft); border-color: transparent; color: var(--brand-strong); }
+.sidebar .who-actions .btn-ico { width: 1.125rem; height: 1.125rem; }
+/* หลังบ้าน: แถวชื่อ (อักษรย่อ · ชื่อ · ตำแหน่ง · รหัส) แล้วปุ่ม 3 ปุ่มเต็มแถวด้านล่าง */
+.app:not(.tabbar-field) .sidebar .who-row { flex-wrap: wrap; row-gap: 0.625rem; padding: 0; }
+.app:not(.tabbar-field) .sidebar .who-avatar { margin-left: 0.25rem; }
+.app:not(.tabbar-field) .sidebar .who-actions { flex: 1 0 100%; }
+.app:not(.tabbar-field) .sidebar .who-actions .btn.icon-btn { flex: 1; width: auto; }
+
+/* กระดิ่ง — 44px ขอบจาง · เลขแดงเกาะมุม */
+.sidebar .bell-btn {
+  width: 2.75rem;
+  height: 2.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-ctl);
+  background: var(--surface);
+  color: var(--text);
+}
+.sidebar .bell-btn .btn-ico { width: 1.25rem; height: 1.25rem; }
+.sidebar .bell-count {
+  top: -0.4375rem;
+  right: -0.5625rem;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  padding: 0 0.3125rem;
+  display: grid;
+  place-items: center;
+  border: 2px solid var(--surface);
+  background: var(--notify);
+  font-size: 0.6875rem;
+  line-height: 1;
+}
+
+/* =====================================================================================
+   มือถือ: แถบบน 60px (ตรา K 32px + "KIN Homecare" · กระดิ่ง 44px มุม 12px)
+   ===================================================================================== */
+@media (max-width: 900px) {
+  .sidebar {
+    min-height: 3.75rem;
+    padding: 0.5rem 1rem;
+    gap: 0.75rem;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+  .sidebar .brand { gap: 0.625rem; }
+  .sidebar .brand .brand-k { width: 2rem; height: 2rem; border-radius: 0.5625rem; font-size: 0.875rem; }
+  .sidebar .brand .brand-name { font-size: 1rem; }
+  .sidebar .bell-btn { border-radius: 0.75rem; }
+  .sidebar .bell-count { top: -0.3125rem; right: -0.3125rem; min-width: 1.125rem; height: 1.125rem; border: 0; font-size: 0.6875rem; }
+
+  /* แผ่นเมนู (ปุ่ม "เมนู"/"ตั้งค่า" บนแถบล่าง) — การ์ดมุม 22px ลอยเหนือแถบล่าง */
+  .app.tabbar-sheet .sidebar.is-open .sidebar-panel {
+    bottom: calc(5.75rem + env(safe-area-inset-bottom));
+    max-height: calc(100dvh - 5.75rem - 5rem - env(safe-area-inset-bottom));
+    padding: 0.625rem;
+    border-radius: 1.375rem;
+    box-shadow: 0 0.75rem 2rem rgb(31 28 23 / 22%);
+  }
+  .app.tabbar-sheet .sidebar-panel nav a { min-height: 2.75rem; border-radius: 0.75rem; }
+  .app.tabbar-sheet .sidebar-panel .sidebar-foot { padding: 0.75rem 0.25rem 0.125rem; }
+}
+
+/* =====================================================================================
+   แถบเมนูล่างบนมือถือ — การ์ดลอย 68px มุม 22px · ช่องที่เลือก = ทั้งช่องเป็นพื้นทองจาง มุม 16px
+   ===================================================================================== */
+@media (max-width: 900px) {
+  .tabbar {
+    left: 0.75rem;
+    right: 0.75rem;
+    bottom: calc(0.875rem + env(safe-area-inset-bottom));
+    height: 4.25rem;
+    padding: 0.375rem;
+    gap: 0.125rem;
+    border-radius: 1.375rem;
+    box-shadow: 0 0.5rem 1.75rem rgb(31 28 23 / 12%);
+  }
+  .tabbar > :is(a, button) {
+    gap: 0.1875rem;
+    border-radius: 1rem;
+    color: var(--muted);
+    font-size: 0.75rem;
+    font-weight: 500;
+    transition: background-color 160ms ease, color 160ms ease;
+  }
+  /* พนักงาน 6 ช่อง — ชิดกันขึ้นให้ "ค่าตอบแทน" เต็มคำในช่อง ~59px */
+  .app.tabbar-field .tabbar { gap: 0; }
+  .app.tabbar-field .tabbar > :is(a, button) { font-size: 0.71875rem; }
+  .app.tabbar-field .tabbar .tab-label { padding-inline: 0; letter-spacing: -0.01em; }
+  .tabbar .tab-ico { width: auto; height: auto; background: none !important; border-radius: 0; }
+  .tabbar .nav-ico { width: 1.375rem; height: 1.375rem; }
+  .tabbar > .active { background: var(--brand-soft); color: var(--brand-strong); font-weight: 600; }
+  .tabbar > :is(a, button):focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; border-radius: 1rem; }
+
+  /* ระยะที่แถบกิน: ลอย 0.875rem + สูง 4.25rem = ขอบบนของแถบอยู่ที่ 5.125rem จากล่าง */
+  .app.has-tabbar .content { padding-bottom: calc(6.375rem + env(safe-area-inset-bottom)); }
+  .app.has-tabbar :is(.form-actions.sticky, .approve-bar) { bottom: calc(5.125rem + env(safe-area-inset-bottom)); }
+  .app.has-tabbar ~ .toasts,
+  body:has(.app.has-tabbar) .toasts { bottom: calc(5.75rem + env(safe-area-inset-bottom)); }
+  .app.has-tabbar .content:has(> .cal-print),
+  .app.has-tabbar .content:has(> .pull-zone > .pull-content > .cal-print) { padding-bottom: calc(6.375rem + env(safe-area-inset-bottom)); }
+}
+@media (max-width: 380px) {
+  .tabbar { left: 0.5rem; right: 0.5rem; padding: 0.25rem; }
+  .tabbar .tab-label { font-size: 0.65625rem; letter-spacing: -0.01em; }
+}
+@media (prefers-reduced-motion: reduce) { .tabbar > :is(a, button) { transition: none; } }
+
+/* =====================================================================================
+   หน้าเข้าสู่ระบบ (.login-v2 · LoginPage.jsx) — การ์ดสองฝั่ง 1040px: แผงแบรนด์ทองจาง 440px + ฟอร์ม
+   มือถือ: แผงแบรนด์เป็นแถบบนสูง 196px ฟอร์มเป็นการ์ดลอยทับ (top 150px)
+   ===================================================================================== */
+.login-v2 { justify-content: center; }
+.login-shell { display: contents; }
+.login-aside { display: none; }
+.login-v2 .login-card { gap: 1.25rem; }
+.login-v2 .login-heading { display: flex; flex-direction: column; gap: 0.375rem; }
+.login-v2 .login-heading h1 { margin: 0; font-family: var(--font-heading); font-size: 1.875rem; font-weight: 600; color: var(--heading); }
+.login-v2 .login-description { margin: 0; font-size: 0.9375rem; line-height: 1.5; color: var(--muted); }
+.login-v2 .login-card label { gap: 0.375rem; font-size: 0.875rem; font-weight: 500; color: var(--heading); }
+.login-v2 .login-card input:not([type='checkbox']) { min-height: 3rem; font-size: 1rem; }
+.login-v2 .login-submit { min-height: 3.125rem; margin-top: 0.25rem; font-size: 1rem; font-weight: 600; }
+.login-v2 .login-note { margin: -0.375rem 0; padding: 0; border: 0; text-align: center; }
+.login-v2 .login-note a { display: inline-block; padding: 0.375rem 0.5rem; font-size: 0.9375rem; font-weight: 600; }
+/* กล่อง "เข้าใช้งานครั้งแรก" — พื้นเทาอุ่น · ป้าย/ค่าเรียงเป็นตาราง · คำเตือนเป็นกล่องส้มจางข้างใน */
+.login-v2 .login-hint {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1rem 1.125rem;
+  border: 1px solid var(--border);
+  border-radius: 0.875rem;
+  background: var(--surface-2);
+  color: var(--text);
+}
+.login-hint-head { display: flex; align-items: flex-start; gap: 1.125rem; }
+.login-hint-head > b { flex: none; width: 7.5rem; font-size: 0.875rem; color: var(--heading); }
+.login-hint-list { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 0.25rem 0.75rem; font-size: 0.875rem; }
+.login-hint-list dt { color: var(--muted); }
+.login-hint-list dd { margin: 0; color: var(--heading); }
+.login-hint-list .login-hint-pw { font-family: var(--font-heading); letter-spacing: 0.04em; font-weight: 600; }
+.login-v2 .login-hint-warn {
+  margin: 0;
+  padding: 0.625rem 0.75rem;
+  border: 0;
+  border-radius: var(--radius-ctl);
+  background: var(--tone-orange-bg);
+  color: var(--tone-orange-ink);
+  font-size: 0.875rem;
+  font-weight: 400;
+  line-height: 1.5;
+}
+.login-v2 .login-hint-warn .text-ico { width: 1.125rem; height: 1.125rem; margin-top: 0.125rem; }
+:root[data-theme='dark'] .login-v2 .login-hint-warn { color: var(--tone-orange-ink); }
+.login-v2 .login-footer { color: var(--muted); font-size: 0.75rem; letter-spacing: 0.14em; }
+
+/* แผงแบรนด์ (ใช้ทั้งสองขนาดจอ — จัดวางต่างกันใน media ด้านล่าง) */
+.login-aside { position: relative; overflow: hidden; background: var(--brand-soft); color: var(--heading); }
+.login-aside-art { position: absolute; width: 22.5rem; height: 13.75rem; color: color-mix(in srgb, var(--brand) 28%, var(--brand-soft)); pointer-events: none; }
+.login-aside-brand { position: relative; display: flex; align-items: center; gap: 0.75rem; }
+.login-aside-brand .brand-sub { display: block; color: var(--brand-strong); }
+.login-aside-main { position: relative; display: flex; flex-direction: column; gap: 1.375rem; }
+.login-aside-title { margin: 0; font-family: var(--font-heading); font-size: 2rem; font-weight: 600; line-height: 1.3; color: var(--heading); }
+.login-aside-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 0.75rem; }
+.login-aside-list li { display: flex; align-items: center; gap: 0.75rem; font-size: 1rem; color: var(--heading); }
+.login-aside-ico { display: grid; place-items: center; width: 2.25rem; height: 2.25rem; border-radius: var(--radius-ctl); background: var(--surface); color: var(--brand); }
+.login-aside-ico svg { width: 1.125rem; height: 1.125rem; }
+.login-aside-foot { position: relative; margin: 0; font-size: 0.75rem; letter-spacing: 0.14em; color: var(--brand-strong); }
+
+@media (min-width: 761px) {
+  .login-v2 { padding: 2rem; }
+  .login-v2 .login-shell {
+    display: flex;
+    width: 100%;
+    max-width: 65rem;
+    min-height: 42.5rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 1.25rem;
+    overflow: hidden;
+    box-shadow: 0 0.75rem 2.5rem rgb(31 28 23 / 8%);
+  }
+  .login-v2 .login-aside {
+    flex: none;
+    width: 27.5rem;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: 2.75rem 2.75rem 2.25rem;
+  }
+  .login-aside-art { right: -3.75rem; bottom: 4.375rem; }
+  .login-aside-brand .brand-k { width: 2.75rem; height: 2.75rem; border-radius: 0.75rem; font-size: 1.25rem; }
+  .login-aside-brand .brand-name { font-size: 1.1875rem; }
+  .login-aside-brand .brand-sub { font-size: 0.8125rem; }
+  .login-v2 .login-card {
+    flex: 1;
+    max-width: none;
+    justify-content: center;
+    padding: 3rem 4.5rem;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+  .login-v2 > .login-footer { display: none; }
+}
+@media (max-width: 760px) {
+  .login-v2 { justify-content: flex-start; gap: 1.375rem; padding: 0 0 1.5rem; }
+  .login-v2 .login-shell { display: flex; flex-direction: column; width: 100%; }
+  .login-v2 .login-aside {
+    display: flex;
+    flex-direction: column;
+    gap: 1.125rem;
+    height: 12.25rem;
+    padding: 1.75rem 1.5rem 0;
+  }
+  .login-aside-art { right: -5rem; top: 1.25rem; opacity: 0.9; }
+  .login-aside-brand { gap: 0.625rem; }
+  .login-aside-brand .brand-k { width: 2.5rem; height: 2.5rem; border-radius: 0.6875rem; font-size: 1.125rem; }
+  .login-aside-brand .brand-name { font-size: 1.0625rem; }
+  /* หัวข้อใหญ่กับรายการไอคอน → ชิปขาว 3 อันเรียงแถวเดียว */
+  .login-aside-title, .login-aside-foot, .login-aside-ico { display: none; }
+  .login-aside-list { flex-direction: row; gap: 0.5rem; }
+  .login-aside-list li {
+    height: 1.875rem;
+    padding: 0 0.75rem;
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--brand-strong);
+    font-size: 0.8125rem;
+    font-weight: 600;
+  }
+  .login-v2 .login-card {
+    position: relative;
+    max-width: none;
+    margin: -2.875rem 0.75rem 0;
+    padding: 1.5rem 1.25rem 1.25rem;
+    gap: 1rem;
+    border-radius: 1.25rem;
+    box-shadow: 0 0.5rem 1.75rem rgb(31 28 23 / 8%);
+  }
+  .login-v2 .login-heading { gap: 0.25rem; }
+  .login-v2 .login-heading h1 { font-size: 1.625rem; }
+  .login-v2 .login-description { font-size: 0.875rem; }
+  .login-desc-more { display: none; }
+  .login-v2 .login-card input:not([type='checkbox']) { min-height: 3.125rem; border-radius: 0.75rem; }
+  .login-v2 .login-submit { min-height: 3.25rem; border-radius: 0.75rem; margin-top: 0.125rem; }
+  .login-v2 .login-note a { min-height: 2.75rem; display: inline-flex; align-items: center; padding: 0 0.75rem; }
+  .login-v2 .login-hint { padding: 0.875rem 1rem; gap: 0.625rem; }
+  .login-hint-head { flex-direction: column; gap: 0.625rem; }
+  .login-hint-head > b { width: auto; }
+}
+/* หน้าลืมรหัสผ่าน / ตั้งรหัสใหม่ — การ์ดเดี่ยว ตรา K แทนรูปโลโก้ */
+.login-brand.login-brand-k { flex-direction: row; align-items: center; gap: 0.75rem; }
+.login-brand-k .brand-k { width: 2.75rem; height: 2.75rem; border-radius: 0.75rem; font-size: 1.25rem; }
+.login-brand-k .brand-name { font-size: 1.1875rem; }
+.login-brand-k .brand-sub { display: block; }
+.login-card { border-radius: 1.25rem; }
+.login-card h1 { font-family: var(--font-heading); font-weight: 600; color: var(--heading); }
+
+/* =====================================================================================
+   dropdown ค้นหาได้ (SearchSelect · .ss-pop) — การ์ดมุม 12px เงานุ่มอุ่น · แถวมุม 8px · ตัวที่เลือกสีทองเข้ม
+   ===================================================================================== */
+.ss-pop { border-radius: 0.75rem; border-color: var(--border); box-shadow: 0 0.75rem 2rem rgb(31 28 23 / 16%); }
+.ss-item { border-radius: 0.5rem; color: var(--heading); }
+.ss-item.is-selected { color: var(--brand-strong); }
+.ss-group { letter-spacing: 0.04em; }
+
+/* ---------- เก็บงานรวม (main) ---------- */
+/* กล่อง popup รับโฟกัสด้วย tabIndex=-1 ตอนเปิด (ให้ Esc/Tab ทำงาน) — ไม่ต้องโชว์กรอบดำรอบทั้งกล่อง
+   ปุ่มข้างในยังมีวงโฟกัสของตัวเองตามเดิม */
+.modal:focus { outline: none; }
+/* ปุ่มแดงแบบเส้นที่กดไม่ได้ (เช่น "ยกเลิกเคส" ระหว่างฟอร์มยืนยันเปิดอยู่) — คงโทนแดงจางตามดีไซน์ ไม่กลายเป็นปุ่มเทา */
+.btn.danger-ghost:disabled {
+  background: color-mix(in srgb, var(--danger) 5%, var(--surface));
+  border-color: color-mix(in srgb, var(--danger) 22%, var(--surface));
+  color: color-mix(in srgb, var(--danger) 50%, var(--surface));
+}
+
+/* ---------- โลโก้ KIN HOME CARE แทนตรา "K" (ผู้ใช้ขอ 24 พ.ย. 2569) ----------
+   รูปสองไฟล์สลับตามธีมด้วยกฎ .brand-logo.logo-light/.logo-dark เดิมใน warm-clarity.css
+   แถวบนสุดของเมนู: โลโก้ชิดซ้าย กระดิ่งดันไปขวาด้วย margin-right: auto */
+.sidebar .brand .brand-logo { height: 2.5rem; width: auto; max-width: 9rem; margin-right: auto; flex: none; }
+@media (max-width: 900px) {
+  .sidebar .brand .brand-logo { height: 2rem; }
+}
+.login-aside-brand .brand-logo { height: 3rem; width: auto; }
+.login-brand .brand-logo.login-logo { height: 3.25rem; width: auto; }

@@ -274,7 +274,8 @@ export default function CalendarPage() {
       type="button"
       /* สีตามสถานะ "กะ" (เช็คอินแล้วหรือยัง) ไม่ใช่สถานะ "เคส" — คนดูตารางงาน
          อยากรู้ว่ากะนี้เรียบร้อยไหม ไม่ใช่ว่าเคสอยู่ขั้นไหนของสัญญา */
-      className={`cal-chip visit-${c.state}${canMove(c, today) ? ' is-movable' : ''}${dragging?.visit_id === c.visit_id ? ' is-dragging' : ''}`}
+      /* is-unassigned = ยังไม่มีคนรับกะนี้ — ดีไซน์ v2 วาดขอบประ (หน้าตาอย่างเดียว) */
+      className={`cal-chip visit-${c.state}${c.assigned_name ? '' : ' is-unassigned'}${canMove(c, today) ? ' is-movable' : ''}${dragging?.visit_id === c.visit_id ? ' is-dragging' : ''}`}
       onClick={() => patch({ open: c.case_id })}
       draggable={canMove(c, today)}
       onDragStart={(e) => {
@@ -348,12 +349,17 @@ export default function CalendarPage() {
               {VISIT_STATE_LABELS[s]}
             </span>
           ))}
+          {/* คู่กับชิปขอบประ (กะที่ยังไม่มีคนรับ) — ดีไซน์ v2 */}
+          <span className="cal-legend-item">
+            <i className="cal-swatch is-unassigned" aria-hidden="true" />
+            ยังไม่จับคู่พนักงาน
+          </span>
         </div>
       </div>
 
       {/* แถบตัวกรอง — บนมือถือ: [เดือน|สัปดาห์] [ตัวกรอง] [พิมพ์] แถวเดียว dropdown อยู่ในแผ่น "ตัวกรอง" (ดู FilterBar) */}
       <FilterBar
-        className="no-print"
+        className="no-print cal-bar"
         lead={(
           <span className="seg">
             <button className={view === 'month' ? 'on' : ''} onClick={() => patch({ view: '' })}>เดือน</button>

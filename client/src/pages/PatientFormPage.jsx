@@ -274,8 +274,9 @@ export default function PatientFormPage() {
 
   return (
     <>
-      <header className="page-head">
+      <header className="page-head ad-head ad-head-form">
         <div>
+          <p className="ad-crumb" aria-hidden="true"><b>ผู้รับบริการ</b><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>{isEdit ? 'แก้ไขข้อมูล' : 'เพิ่มใหม่'}</p>
           <h1>{isEdit ? `แก้ไขผู้รับการดูแล ${id}` : 'เพิ่มผู้รับการดูแลใหม่'}</h1>
           <p className="muted">
             {isEdit
@@ -288,8 +289,13 @@ export default function PatientFormPage() {
 
       {error && <pre className="error">{error}</pre>}
 
-      <form className="card form" ref={formEl} onSubmit={handleSubmit}>
+      {/* ดีไซน์ v2 (23 พ.ย. 2569): เพิ่มใหม่ = สองคอลัมน์ (ซ้าย ผู้ว่าจ้าง + ช่องที่ต้องกรอก · ขวา ข้อมูลเพิ่มเติมแบบพับ)
+          แก้ไข = เรียงลงคอลัมน์เดียวเหมือนเดิม — โครงฟอร์ม/ช่อง/ชื่อช่องเดิมทั้งหมด */}
+      <form className={`form ad-form${isEdit ? ' is-edit' : ''}`} ref={formEl} onSubmit={handleSubmit}>
+        <div className="ad-form-main">
+        <section className="card ad-card">
         <h2>ผู้ว่าจ้าง</h2>
+        <p className="ad-card-sub">ผูกผู้รับบริการกับลูกค้าที่จ่ายเงิน — ไม่ผูกก็บันทึกได้</p>
         {/* ผู้จ่ายเงินของแฟ้มนี้ — ผู้ว่าจ้างหนึ่งคนดูแลได้หลายคน · เพิ่ม/แก้ได้ที่นี่ (ไม่มีหน้าลูกค้าแยกแล้ว)
             ชื่อ/เลขผู้เสียภาษี/ที่อยู่ออกใบเสร็จ ไปขึ้นเป็นผู้จ่ายในใบแจ้งหนี้ */}
         <div className="customer-picker">
@@ -368,9 +374,13 @@ export default function PatientFormPage() {
 
         {/* ช่องที่บังคับจริงมีแค่ชื่อ — ที่เหลือในบล็อกนี้คือช่องที่กรอกกันแทบทุกครั้ง
             แพ้ยาอยู่ในนี้ด้วยทั้งที่ไม่บังคับ เพราะเป็นข้อมูลความปลอดภัยที่ห้ามถูกฝังอยู่ในส่วนที่พับไว้ */}
+        </section>
+
+        <section className="card ad-card">
         <h2>ข้อมูลที่ต้องกรอก</h2>
+        <p className="ad-card-sub">รหัสผู้รับบริการ (KN) และชื่อ — ที่เหลือเว้นว่างไว้ก่อนได้</p>
         <div className="grid">
-          <label>รหัสผู้รับบริการ {isEdit ? '' : '*'}
+          <label><span className="ad-label">รหัสผู้รับบริการ {isEdit ? '' : <span className="ad-req">*</span>}</span>
             <PatientCodeInput
               name="patient_id"
               // แฟ้มที่กำลังแก้ ไม่นับว่ารหัสเดิมของตัวเองซ้ำ
@@ -395,7 +405,7 @@ export default function PatientFormPage() {
               {Object.entries(TITLE_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
             </SearchSelect>
           </label>
-          <label>ชื่อ - นามสกุล *
+          <label><span className="ad-label">ชื่อ - นามสกุล <span className="ad-req">*</span></span>
             <input required name="name" {...field('name')} />
             {fieldError('name')}
           </label>
@@ -415,18 +425,23 @@ export default function PatientFormPage() {
 
           {/* แยกสองช่อง — แพ้ยาเป็นเรื่องของคนให้ยา แพ้อาหารเป็นเรื่องของคนเตรียมอาหาร
               รวมช่องเดียวแล้วคนกรอกมักใส่มาแค่อย่างเดียว และคนอ่านต้องเดาว่าอันไหนเป็นอันไหน */}
-          <label className="span-2">แพ้ยา
+          <label className="span-2 ad-allergy"><span className="ad-label ad-label-alert">แพ้ยา</span>
             <textarea rows={2} name="allergies" placeholder="เช่น เพนิซิลลิน แอสไพริน — ไม่มีให้เว้นว่าง" {...field('allergies')} />
           </label>
-          <label className="span-2">แพ้อาหาร
+          <label className="span-2 ad-allergy"><span className="ad-label ad-label-alert">แพ้อาหาร</span>
             <textarea rows={2} name="food_allergies" placeholder="เช่น อาหารทะเล ถั่ว นมวัว — ไม่มีให้เว้นว่าง" {...field('food_allergies')} />
           </label>
         </div>
+        </section>
+        </div>
 
+        <section className="card ad-card ad-form-more">
+        <h2>ข้อมูลเพิ่มเติม</h2>
+        <p className="ad-card-sub">ไม่บังคับ · กดหัวข้อเพื่อเปิดกรอก เติมทีหลังได้</p>
         {/* ที่เหลือพับไว้ — ตอนเพิ่มแฟ้มใหม่ไม่ต้องเจอทุกช่องพร้อมกัน
             ตอนแก้ไขเปิดค้างไว้หมด เพราะคนที่เข้ามาแก้มักรู้อยู่แล้วว่าจะแก้ช่องไหน */}
         <details className="form-section" open={isEdit}>
-          <summary>ข้อมูลส่วนตัวเพิ่มเติม</summary>
+          <summary><span className="ad-sum"><b>ข้อมูลส่วนตัวเพิ่มเติม</b><span className="ad-sum-hint">ชื่อ - นามสกุล (ภาษาอังกฤษ) · วันเกิด · อายุ · สัญชาติ · เลขบัตรประชาชน · เลข Passport</span></span><span className="ad-sum-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6" /></svg></span></summary>
           <div className="grid">
             <label>ชื่อ - นามสกุล (ภาษาอังกฤษ)<input name="name_en" {...field('name_en')} /></label>
             <label>วันเกิด
@@ -459,7 +474,7 @@ export default function PatientFormPage() {
         </details>
 
         <details className="form-section" open={isEdit}>
-          <summary>ข้อมูลสุขภาพอื่น</summary>
+          <summary><span className="ad-sum"><b>ข้อมูลสุขภาพอื่น</b><span className="ad-sum-hint">น้ำหนัก · ส่วนสูง · กรุ๊ปเลือด · สิทธิการรักษา · โรคประจำตัว</span></span><span className="ad-sum-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6" /></svg></span></summary>
           <div className="grid">
             <label>น้ำหนัก (กก.)<input type="number" min="0" step="0.1" name="weight_kg" {...field('weight_kg')} /></label>
             <label>ส่วนสูง (ซม.)<input type="number" min="0" step="0.1" name="height_cm" {...field('height_cm')} /></label>
@@ -479,7 +494,7 @@ export default function PatientFormPage() {
         </details>
 
         <details className="form-section" open={isEdit}>
-          <summary>ที่อยู่สถานที่ดูแล</summary>
+          <summary><span className="ad-sum"><b>ที่อยู่สถานที่ดูแล</b><span className="ad-sum-hint">ที่อยู่ · ตำบล / แขวง · อำเภอ / เขต · จังหวัด · รหัสไปรษณีย์</span></span><span className="ad-sum-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6" /></svg></span></summary>
           <div className="grid">
             <label className="span-2">ที่อยู่ (บ้านเลขที่ / หมู่ / ถนน)
               <textarea rows={2} name="address" {...field('address')} />
@@ -493,7 +508,7 @@ export default function PatientFormPage() {
         </details>
 
         <details className="form-section" open={isEdit}>
-          <summary>ญาติ / ผู้ติดต่อกรณีฉุกเฉิน &amp; หมายเหตุ</summary>
+          <summary><span className="ad-sum"><b>ญาติ / ผู้ติดต่อกรณีฉุกเฉิน &amp; หมายเหตุ</b><span className="ad-sum-hint">ชื่อผู้ติดต่อ · เบอร์ผู้ติดต่อ · ความสัมพันธ์ · หมายเหตุ</span></span><span className="ad-sum-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6" /></svg></span></summary>
           <div className="grid">
             <label>ชื่อผู้ติดต่อ<input name="emergency_contact_name" {...field('emergency_contact_name')} /></label>
             <label>เบอร์ผู้ติดต่อ
@@ -504,9 +519,12 @@ export default function PatientFormPage() {
             <label className="span-2">หมายเหตุ<textarea rows={2} name="note" {...field('note')} /></label>
           </div>
         </details>
+        </section>
 
         {/* ติดขอบล่างจอ — แก้คำเดียวก็ไม่ต้องเลื่อนผ่านทุกบล็อกไปกดปุ่ม */}
         <div className="form-actions sticky">
+          {/* ดีไซน์ v2: คำบอกช่องบังคับชิดซ้าย · ปุ่มชิดขวา (ยกเลิก → บันทึก เรียงด้วย CSS order) */}
+          <span className="ad-req-hint"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h.01" /></svg>ช่องที่มี <b>*</b> ต้องกรอก</span>
           <button className="btn primary" type="submit" disabled={saving}>
             {saving ? 'กำลังบันทึก…' : isEdit ? 'บันทึกการแก้ไข' : 'บันทึกผู้รับการดูแล'}
           </button>

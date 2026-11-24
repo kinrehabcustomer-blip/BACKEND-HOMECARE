@@ -18,6 +18,23 @@ const PREVIEW_HISTORY = 3;
 
 const FOCUSABLE = 'a[href], button:not(:disabled), input, select, textarea, [tabindex]:not([tabindex="-1"])';
 
+/* ดีไซน์ v2: ไอคอนเส้นตกแต่งหน้าหัวข้อในป๊อปอัป (aria-hidden) — ชุดเดียวกับดีไซน์ ไม่มีใน LineIcon จึงวาดไว้ที่นี่ */
+const SEC_ICONS = {
+  briefcase: <><rect x="3" y="7" width="18" height="13" rx="2" /><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M3 13h18" /></>,
+  user: <><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></>,
+  calendar: <><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M3 10h18M8 3v4M16 3v4" /></>,
+  phone: <><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2" /></>,
+  note: <><rect x="5" y="3" width="14" height="18" rx="2" /><path d="M9 8h6M9 12h6M9 16h4" /></>,
+  pencil: <><path d="M4 20h4L18.5 9.5a2.1 2.1 0 0 0-4-4L4 16v4z" /></>,
+};
+function SecIco({ name, className = 'rec-ico' }) {
+  return (
+    <span className={className} aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">{SEC_ICONS[name]}</svg>
+    </span>
+  );
+}
+
 /** อายุงาน/อายุ คำนวณจากวันที่ให้ดูง่าย — ข้อมูลที่ตารางไม่ได้โชว์ */
 function yearsSince(dateStr) {
   if (!dateStr) return null;
@@ -195,7 +212,7 @@ export default function EmployeeModal({ employeeId, siblings = [], onNavigate, o
     <div className="modal-backdrop" onClick={onClose}>
       {/* กันไม่ให้คลิกในกล่องทะลุไปโดน backdrop จนปิดเอง */}
       <div
-        className="modal detail-modal"
+        className="modal detail-modal rec-modal"
         role="dialog"
         aria-modal="true"
         aria-label="ข้อมูลพนักงาน"
@@ -212,12 +229,15 @@ export default function EmployeeModal({ employeeId, siblings = [], onNavigate, o
               <div className="head-identity">
                 <Avatar employee={employee} size="avatar-lg" clickable />
                 <div>
-                  <p className="mono muted">{employee.employee_id}</p>
+                  {/* ดีไซน์ v2: รหัส + สถานะแถวบน แล้วค่อยชื่อ (ข้อมูลเดิม สลับลำดับ) */}
+                  <div className="rec-head-top">
+                    <p className="mono muted">{employee.employee_id}</p>
+                    <span className={`badge ${employee.status}`}>{STATUS_LABELS[employee.status]}</span>
+                  </div>
                   <h2>
                     {employee.first_name} {employee.last_name}
                     {employee.nickname && <span className="muted"> ({employee.nickname})</span>}
                   </h2>
-                  <span className={`badge ${employee.status}`}>{STATUS_LABELS[employee.status]}</span>
                 </div>
               </div>
 
@@ -245,13 +265,16 @@ export default function EmployeeModal({ employeeId, siblings = [], onNavigate, o
               </div>
             </header>
 
-            <div className="modal-body">
+            {/* ดีไซน์ v2 (จอกว้าง): ซ้าย = ข้อมูลพนักงาน · ขวา (พื้นเทา) = ใบรับรอง + ผลงาน + ประวัติการทำงาน + วันที่สร้าง/แก้ไข
+                wrapper จัดวางอย่างเดียว · จอแคบเรียงลงคอลัมน์เดียว */}
+            <div className="modal-body rec-body">
+              <div className="rec-main">
               {/* ข้อมูลติดต่อขึ้นก่อนทุกอย่าง — คนส่วนใหญ่เปิด popup นี้มาหาเบอร์โทร */}
               <section>
                 <div className="section-head">
-                  <h3>ติดต่อ &amp; งานปัจจุบัน</h3>
+                  <h3><SecIco name="briefcase" />ติดต่อ &amp; งานปัจจุบัน</h3>
                   {!editing && (
-                    <button className="btn tiny" onClick={() => setEditing(true)}>แก้ด่วน</button>
+                    <button className="btn tiny rec-quick" onClick={() => setEditing(true)}><SecIco name="pencil" className="rec-btn-ico" />แก้ด่วน</button>
                   )}
                 </div>
 
@@ -274,7 +297,7 @@ export default function EmployeeModal({ employeeId, siblings = [], onNavigate, o
               </section>
 
               <section>
-                <h3>ข้อมูลส่วนตัว</h3>
+                <h3><SecIco name="user" />ข้อมูลส่วนตัว</h3>
                 <div className="field-grid">
                   <Field
                     label="ชื่อ-นามสกุล (อังกฤษ)"
@@ -294,8 +317,9 @@ export default function EmployeeModal({ employeeId, siblings = [], onNavigate, o
                 <Field label="ประวัติการศึกษา" value={employee.education} />
               </section>
 
+              <div className="rec-pair rec-pair-wide">
               <section>
-                <h3>ข้อมูลการจ้างงาน</h3>
+                <h3><SecIco name="calendar" />ข้อมูลการจ้างงาน</h3>
                 <div className="field-grid">
                   {/* ส่ง null เมื่อไม่มีค่า ให้ Field ขึ้น "ไม่ได้ระบุ" แทนที่จะเป็นขีด — */}
                   <Field label="วันเริ่มงาน" value={employee.hire_date && formatDate(employee.hire_date)} />
@@ -305,7 +329,7 @@ export default function EmployeeModal({ employeeId, siblings = [], onNavigate, o
               </section>
 
               <section>
-                <h3>ผู้ติดต่อฉุกเฉิน</h3>
+                <h3><SecIco name="phone" />ผู้ติดต่อฉุกเฉิน</h3>
                 <div className="field-grid">
                   <Field label="ชื่อผู้ติดต่อ" value={employee.emergency_contact_name} />
                   <Field
@@ -317,6 +341,16 @@ export default function EmployeeModal({ employeeId, siblings = [], onNavigate, o
                   />
                 </div>
               </section>
+              </div>
+
+              {/* ดีไซน์ v2: หมายเหตุอยู่ท้ายคอลัมน์ซ้าย */}
+              <section>
+                <h3><SecIco name="note" />หมายเหตุ</h3>
+                <Field label="บันทึกภายใน" value={employee.note} />
+              </section>
+              </div>
+
+              <aside className="rec-side">
 
               <section>
                 <h3>ใบรับรอง / ใบประกอบวิชาชีพ ({employee.certificates.length})</h3>
@@ -390,15 +424,11 @@ export default function EmployeeModal({ employeeId, siblings = [], onNavigate, o
                 <WorkHistory cases={employee.cases} limit={PREVIEW_HISTORY} />
               </section>
 
-              <section>
-                <h3>หมายเหตุ</h3>
-                <Field label="บันทึกภายใน" value={employee.note} />
-              </section>
-
               <section className="modal-meta">
                 <Field label="สร้างเมื่อ" value={formatDate(employee.created_at)} />
                 <Field label="แก้ไขล่าสุด" value={formatDate(employee.updated_at)} />
               </section>
+              </aside>
             </div>
 
             <footer className="modal-foot">

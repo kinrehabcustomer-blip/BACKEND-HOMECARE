@@ -40,7 +40,14 @@ export function ToastProvider({ children }) {
             onClick={() => dismiss(t.id)}
             title="กดเพื่อปิด"
           >
-            {t.message}
+            {/* ดีไซน์ v2: ไอคอนนำหน้า — ติ๊กถูก (สำเร็จ) / วงกลมตกใจ (ผิดพลาด) · ตกแต่งอย่างเดียว */}
+            <svg className="toast-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"
+              strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              {t.kind === 'error'
+                ? <><circle cx="12" cy="12" r="9" /><path d="M12 8v5M12 16h.01" /></>
+                : <path d="M5 12l5 5L20 7" />}
+            </svg>
+            <span className="toast-text">{t.message}</span>
           </button>
         ))}
       </div>

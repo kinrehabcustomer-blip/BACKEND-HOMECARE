@@ -145,8 +145,9 @@ export default function CustomerFormPage() {
 
   return (
     <>
-      <header className="page-head">
+      <header className="page-head ad-head ad-head-form">
         <div>
+          <p className="ad-crumb" aria-hidden="true"><b>ลูกค้า</b><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>{isEdit ? 'แก้ไขข้อมูล' : 'เพิ่มใหม่'}</p>
           <h1>{isEdit ? `แก้ไขลูกค้า ${id}` : 'เพิ่มลูกค้าใหม่'}</h1>
           <p className="muted">
             {isEdit
@@ -159,10 +160,15 @@ export default function CustomerFormPage() {
 
       {error && <pre className="error">{error}</pre>}
 
-      <form className="card form" ref={formEl} onSubmit={handleSubmit}>
+      {/* ดีไซน์ v2 (23 พ.ย. 2569): เพิ่มใหม่ = สองคอลัมน์ (ซ้าย ช่องที่ต้องกรอก · ขวา ข้อมูลเพิ่มเติมแบบพับ)
+          แก้ไข = เรียงลงคอลัมน์เดียวเหมือนเดิม (ทุกส่วนกางอยู่ คอลัมน์ขวาแคบเกินไป) — โครงฟอร์ม/ช่อง/ชื่อช่องเดิมทั้งหมด */}
+      <form className={`form ad-form${isEdit ? ' is-edit' : ''}`} ref={formEl} onSubmit={handleSubmit}>
+        <div className="ad-form-main">
+        <section className="card ad-card">
         {/* ช่องที่บังคับจริงมีแค่ชื่อ — ที่เหลือในบล็อกนี้คือช่องที่กรอกกันแทบทุกครั้ง
             เพิ่มลูกค้าใหม่จึงจบได้ในหน้าจอเดียว ไม่ต้องเลื่อนผ่าน 20 กว่าช่อง */}
         <h2>ข้อมูลที่ต้องกรอก</h2>
+        <p className="ad-card-sub">มีแต่ชื่อ - นามสกุลที่บังคับกรอก</p>
         <div className="grid">
           <label>คำนำหน้า
             <SearchSelect name="title" {...field('title')}>
@@ -170,7 +176,7 @@ export default function CustomerFormPage() {
               {Object.entries(TITLE_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
             </SearchSelect>
           </label>
-          <label>ชื่อ - นามสกุล *
+          <label><span className="ad-label">ชื่อ - นามสกุล <span className="ad-req">*</span></span>
             <input required name="name" {...field('name')} />
             {fieldError('name')}
           </label>
@@ -188,11 +194,16 @@ export default function CustomerFormPage() {
             </SearchSelect>
           </label>
         </div>
+        </section>
+        </div>
 
+        <section className="card ad-card ad-form-more">
+        <h2>ข้อมูลเพิ่มเติม</h2>
+        <p className="ad-card-sub">ไม่บังคับ · กดหัวข้อเพื่อเปิดกรอก เติมทีหลังได้</p>
         {/* ที่เหลือพับไว้ — ตอนเพิ่มลูกค้าใหม่ไม่ต้องเจอทุกช่องพร้อมกัน
             ตอนแก้ไขเปิดค้างไว้หมด เพราะคนที่เข้ามาแก้มักรู้อยู่แล้วว่าจะแก้ช่องไหน */}
         <details className="form-section" open={isEdit}>
-          <summary>ข้อมูลส่วนตัวเพิ่มเติม</summary>
+          <summary><span className="ad-sum"><b>ข้อมูลส่วนตัวเพิ่มเติม</b><span className="ad-sum-hint">ชื่อ-นามสกุล (ภาษาอังกฤษ) · สถานภาพ · อาชีพ · วันเกิด · อายุ · สัญชาติ · เลขบัตรประชาชน · เลข Passport</span></span><span className="ad-sum-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6" /></svg></span></summary>
           <div className="grid">
             <label>ชื่อ - นามสกุล (ภาษาอังกฤษ)<input name="name_en" {...field('name_en')} /></label>
             <label>สถานภาพ
@@ -239,7 +250,7 @@ export default function CustomerFormPage() {
         </details>
 
         <details className="form-section" open={isEdit}>
-          <summary>ช่องทางติดต่ออื่น &amp; ที่อยู่</summary>
+          <summary><span className="ad-sum"><b>ช่องทางติดต่ออื่น &amp; ที่อยู่</b><span className="ad-sum-hint">เบอร์บ้าน · Email · ที่อยู่ · ตำบล / แขวง · อำเภอ / เขต · จังหวัด · รหัสไปรษณีย์</span></span><span className="ad-sum-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6" /></svg></span></summary>
           <div className="grid">
             <label>เบอร์บ้าน<input name="home_phone" inputMode="tel" {...field('home_phone')} /></label>
             <label className="span-2">Email
@@ -259,7 +270,7 @@ export default function CustomerFormPage() {
         </details>
 
         <details className="form-section" open={isEdit}>
-          <summary>ผู้ดูแล / ญาติที่ติดต่อได้ &amp; อื่นๆ</summary>
+          <summary><span className="ad-sum"><b>ผู้ดูแล / ญาติที่ติดต่อได้ &amp; อื่นๆ</b><span className="ad-sum-hint">ชื่อผู้ดูแล · เบอร์ผู้ดูแล · ประเภทลูกค้า · รู้จักผ่านช่องทาง · หมายเหตุ</span></span><span className="ad-sum-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6" /></svg></span></summary>
           <div className="grid">
             <label>ชื่อผู้ดูแล<input name="emergency_contact_name" {...field('emergency_contact_name')} /></label>
             <label className="span-2">เบอร์ผู้ดูแล
@@ -271,9 +282,12 @@ export default function CustomerFormPage() {
             <label className="span-2">หมายเหตุ<textarea rows={2} name="note" {...field('note')} /></label>
           </div>
         </details>
+        </section>
 
         {/* ติดขอบล่างจอ — แก้คำเดียวก็ไม่ต้องเลื่อนผ่านทุกบล็อกไปกดปุ่ม */}
         <div className="form-actions sticky">
+          {/* ดีไซน์ v2: คำบอกช่องบังคับชิดซ้าย · ปุ่มชิดขวา (ยกเลิก → บันทึก เรียงด้วย CSS order) */}
+          <span className="ad-req-hint"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h.01" /></svg>ช่องที่มี <b>*</b> ต้องกรอก</span>
           <button className="btn primary" type="submit" disabled={saving}>
             {saving ? 'กำลังบันทึก…' : isEdit ? 'บันทึกการแก้ไข' : 'บันทึกลูกค้าใหม่'}
           </button>

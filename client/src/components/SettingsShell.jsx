@@ -4,7 +4,7 @@ import SearchSelect from './SearchSelect.jsx';
  * โครงหน้าตั้งค่าแบบเมนูซ้าย + แผงขวา (ผู้ใช้ขอ 19 พ.ย. 2569 — แบบเดียวกับหน้า "บัญชีธนาคาร / เครื่อง EDC")
  * ใช้สองที่: หน้าตั้งค่า (SettingsPage) และเมนู "หมวดหมู่" (CategoriesPage)
  *
- * groups = [{ label, items: [{ key, label }] }] · active = key ที่เลือกอยู่ · onSelect(key)
+ * groups = [{ label, items: [{ key, label, icon? }] }] · icon = svg ตกแต่งหน้าชื่อในเมนูซ้าย (aria-hidden) · active = key ที่เลือกอยู่ · onSelect(key)
  * จอแคบ (≤ 900px): เมนูซ้ายซ่อน ใช้ช่องเลือกหัวข้อ (.set-picker · จัดกลุ่มตามหัวกลุ่ม) แทน — ผู้ใช้ขอ 20 พ.ย. 2569
  *   เดิมเป็นแถบเลื่อนแนวนอนที่หัวข้อท้ายๆ ถูกตัดขอบ ("หมวดเหตุกา…") ไม่รู้ว่ามีอะไรอีก และไม่เห็นหัวกลุ่ม
  *   ช่องเลือกรวมเป็นการ์ดเดียวกับแถบค้นหา/ตัวกรองของแผง (ถ้ามี) — จัดด้วย CSS ไม่ได้ย้ายตัวกรองออกจากแผง
@@ -34,6 +34,8 @@ export default function SettingsShell({ groups, active, onSelect, label = 'ห�
                 aria-current={it.key === active ? 'page' : undefined}
                 onClick={() => onSelect(it.key)}
               >
+                {/* icon = ไอคอนตกแต่งหน้าชื่อ (ไม่บังคับ — หน้าตั้งค่าส่งมา ดีไซน์ v2) */}
+                {it.icon}
                 {it.label}
               </button>
             ))}

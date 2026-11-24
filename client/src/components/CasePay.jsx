@@ -197,15 +197,22 @@ export default function CasePayPanel({ caseId, busy, run, toast }) {
         <>
           {/* แผงนี้พูดเรื่องค่าจ้างพนักงานเท่านั้น — ค่าบริการที่เก็บลูกค้ากับส่วนของบริษัท
               เป็นตัวเลขฝั่งรายได้ ดูได้ที่หน้าเคส/ใบแจ้งหนี้ ไม่ต้องมาซ้ำในขั้นตอนจ่ายเงิน */}
-          <div className="pay-block">
+          <div className="pay-block pay-totals">
+            {/* ดีไซน์ v2: ตัวเลขหลักสามตัวเป็นกล่องเรียงกัน (ค่าจ้าง · ปล่อยแล้ว · เหลือ) — ตัวเลขชุดเดิม จัดวางใหม่ */}
+            <div className="pay-stats">
+              <span className="pay-stat"><span>ค่าจ้างพนักงาน</span><strong>{formatBaht(total)}</strong></span>
+              <span className="pay-stat"><span>ปล่อยแล้ว</span><strong>{formatBaht(released)}</strong></span>
+              <span className="pay-stat is-left"><span>เหลือ</span><strong>{formatBaht(remaining)}</strong></span>
+            </div>
             <p className="muted">
-              <strong>ค่าจ้างพนักงาน {formatBaht(total)}</strong>
-              <span className="cell-sub">
-                ปล่อยแล้ว {formatBaht(released)}
-                {paidOutside > 0 && ` · จ่ายนอกระบบก่อนเข้าระบบ ${formatBaht(paidOutside)}`}
-                {' · '}เหลือ {formatBaht(remaining)}
-                {used > 0 && ` · แบ่งจ่ายแล้ว ${used} งวด`}
-              </span>
+              {(paidOutside > 0 || used > 0) && (
+                <span className="cell-sub">
+                  {[
+                    paidOutside > 0 && `จ่ายนอกระบบก่อนเข้าระบบ ${formatBaht(paidOutside)}`,
+                    used > 0 && `แบ่งจ่ายแล้ว ${used} งวด`,
+                  ].filter(Boolean).join(' · ')}
+                </span>
+              )}
               {/* ยอดที่เสนอไม่เท่ายอดเหมา = ต้องบอกเหตุผลตรงนี้ ไม่งั้นผู้จัดการอ่านว่าตัวเลขเพี้ยน
                   (ดร. 25 ต.ค. 2569 — เคสยกเลิกกลางคัน จ่ายตามกะที่ไปจริง กะที่เหลือไม่ต้องจ่าย) */}
               {prorated && (
@@ -259,7 +266,8 @@ export default function CasePayPanel({ caseId, busy, run, toast }) {
                   {/* ไม่บอกว่า "งวดที่ 1 จาก 3" เพราะเคสไม่ได้ถูกกำหนดจำนวนงวดไว้ล่วงหน้า —
                       ตัวหารแบบนั้นเป็นคำสัญญาที่ระบบให้ไม่ได้ (ผู้จัดการเปลี่ยนใจกลางทางได้ตลอด)
                       บอกแค่ว่านี่คืองวดที่เท่าไหร่ ซึ่งเป็นข้อเท็จจริงที่นับจากของที่ปล่อยไปแล้ว */}
-                  <p className="muted">
+                  <p className="muted pay-round-title">
+                    <span className="pay-round-no" aria-hidden="true">{nextRound}</span>
                     <strong>งวดที่ {nextRound}</strong>
                     {/* งวดสุดท้ายคือจุดที่ตัดสินใจกลับไม่ได้ — กรอกน้อยกว่ายอดคงเหลือแล้วส่วนที่เหลือ
                         จะปล่อยไม่ได้อีก ต้องเตือนก่อนกด ไม่ใช่มารู้ตอนที่ปุ่มหายไปแล้ว */}

@@ -1541,7 +1541,8 @@ export default function CaseFormPage() {
 
   return (
     <>
-      <header className="page-head">
+      {/* ดีไซน์ v2 (23 พ.ย. 2569): หัวหน้าแสดงชื่อหน้า (.ops-head) · หัวข้อในฟอร์มมีเลขลำดับ (CSS counter) · แถบปุ่มล่างชิดขวา */}
+      <header className="page-head ops-head casef-head">
         <div>
           <h1>{isEdit ? `แก้ไขเคส ${caseCode(id)}` : renewFrom ? `ต่อเคส ${caseCode(renewFrom)}` : addonOf ? `เพิ่มแพ็กกายภาพ · เคส Homecare ${caseCode(addonOf)}` : 'เปิดเคสใหม่'}</h1>
           {addonOf && (
@@ -1580,7 +1581,7 @@ export default function CaseFormPage() {
         </div>
       )}
 
-      <form className="card form" ref={formEl} onSubmit={handleSubmit}>
+      <form className="card form casef-form" ref={formEl} onSubmit={handleSubmit}>
         {/* ต่อเคส: สรุปรอบก่อน (อ่านอย่างเดียว) — เรื่องที่ค้างจากรอบก่อนต้องเห็นก่อนต่อ ไม่ใช่รู้ทีหลัง
             เตือนอย่างเดียว ไม่กันการต่อ: ลูกค้าค้างชำระก็ยังต่อบริการได้ แต่คนต่อต้องรู้ตัว */}
         {renewSource && (

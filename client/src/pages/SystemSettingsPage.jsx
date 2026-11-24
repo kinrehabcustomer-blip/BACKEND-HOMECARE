@@ -81,7 +81,7 @@ export default function SystemSettingsPage() {
 
   return (
     <>
-      <header className="page-head">
+      <header className="page-head ad-head">
         <div>
           <h1>ตั้งค่าระบบ</h1>
         </div>

@@ -54,9 +54,9 @@ export default function MyAttendancePage() {
 
   return (
     <PageRefresh onRefresh={load} busy={loading}>
-      <header className="page-head">
+      <header className="page-head fp-head fp-att-head">
         <div>
-          <h1>ค่าตอบแทนของฉัน</h1>
+          <h1 className="fp-title">ค่าตอบแทนของฉัน</h1>
           <p className="muted">ค่าจ้างและชั่วโมงทำงานของคุณ — เห็นเฉพาะของตัวเอง</p>
         </div>
         <RefreshButton onRefresh={load} busy={loading} updatedAt={updatedAt} />

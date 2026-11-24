@@ -66,7 +66,7 @@ export default function PartnerSummaryPage() {
               <button type="button" className="btn tiny" aria-label="เดือนถัดไป" disabled={month >= now} onClick={() => setMonth(shift(month, 1))}>›</button>
             </div>
             <button type="button" className="btn" disabled={!data?.visits.length} onClick={exportCsv}>
-              <LineIcon name="csv" className="btn-ico csv-ico" />ดาวน์โหลด CSV
+              <LineIcon name="download" className="btn-ico" />ดาวน์โหลด CSV
             </button>
           </div>
         </header>

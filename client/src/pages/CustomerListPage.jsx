@@ -51,6 +51,8 @@ export default function CustomerListPage() {
   const effPage = mobile ? 1 : page;
   // เงื่อนไขของผลหน้า 1 ชุดล่าสุด — ใช้ขอหน้าถัดไปด้วยเงื่อนไขเดียวกันเป๊ะ
   const lastQuery = useRef({});
+  // คำค้นของรอบก่อน — หน่วง 250ms เฉพาะตอนคำค้นเปลี่ยน (กำลังพิมพ์) เปิดหน้า/เปลี่ยนหน้า/เรียง/ตัวกรองยิงทันที
+  const prevQ = useRef(q);
   const openId = params.get('open');
 
   const filtered = Boolean(q || hasCases);
@@ -75,6 +77,9 @@ export default function CustomerListPage() {
     setLoading(true);
 
     // หน่วงเล็กน้อยระหว่างพิมพ์ค้นหา จะได้ไม่ยิง API ทุกตัวอักษร
+    // เดิมหน่วงทุกครั้ง (รวมเปิดหน้าแรก/เปลี่ยนหน้า/เรียง) ทำให้ช้าเปล่าๆ 250ms — ตรวจความเร็ว 24 พ.ย. 2569
+    const typing = q !== prevQ.current;
+    prevQ.current = q;
     const timer = setTimeout(() => {
       const query = Object.fromEntries(
         Object.entries({ q, has_cases: hasCases, page: effPage, per_page: perPage, sort, order })
@@ -91,7 +96,7 @@ export default function CustomerListPage() {
         })
         .catch((err) => !cancelled && setError(err.message))
         .finally(() => !cancelled && setLoading(false));
-    }, 250);
+    }, typing ? 250 : 0);
 
     return () => {
       cancelled = true;
@@ -129,11 +134,17 @@ export default function CustomerListPage() {
 
   return (
     <PageRefresh onRefresh={() => setReloadKey((k) => k + 1)} busy={loading}>
-      {/* ไม่มีหัวหน้าบนจอ (แถบตัวกรองเป็นส่วนบนสุด) แบบเดียวกับหน้าเคส — คง h1 ไว้ให้โปรแกรมอ่านหน้าจอ */}
-      <h1 className="sr-only">ลูกค้า</h1>
+      {/* ดีไซน์ v2 (23 พ.ย. 2569): หัวหน้าบนจอคอม (ชื่อ + คำอธิบาย) · มือถือซ่อนแบบ sr-only เหมือนเดิม (admin-data.css)
+          ปุ่มเพิ่มยังอยู่ในแถบตัวกรองเหมือนเดิม — CSS ยกไปวางมุมขวาของหัวนี้ */}
+      <header className="page-head ad-head ad-head-list">
+        <div>
+          <h1>ลูกค้า</h1>
+          <p className="muted">ผู้ว่าจ้างและผู้ชำระเงิน · แตะแถวเพื่อดูรายละเอียด</p>
+        </div>
+      </header>
 
       {/* แถบตัวกรอง + ตาราง + แถบเลื่อนหน้า อยู่ในการ์ดใบเดียวกัน (ดู .list-card) */}
-      <div className="list-card">
+      <div className="list-card ad-list">
         {/* แถบค้นหา + ตัวกรอง — บนมือถือ dropdown ย้ายไปอยู่ในแผ่น "ตัวกรอง" (ดู FilterBar) */}
         <FilterBar
           search={<input
@@ -261,6 +272,12 @@ export default function CustomerListPage() {
         )}
         {result && !mobile && (
           <div className="pager">
+            {/* ช่วงที่กำลังดู — ตัวเลขจาก pagination ที่ได้มาอยู่แล้ว ไม่ได้ขอเพิ่ม (ดีไซน์ v2) */}
+            {result.pagination.total > 0 && (
+              <span className="pager-count muted">
+                แสดง {(result.pagination.page - 1) * result.pagination.per_page + 1}–{Math.min(result.pagination.page * result.pagination.per_page, result.pagination.total)} จาก {result.pagination.total} ราย
+              </span>
+            )}
             {/* มีหน้าเดียวก็ไม่ต้องมีปุ่มเลื่อนหน้าที่กดไม่ได้ — แต่ตัวเลือกจำนวนแถวยังต้องอยู่ */}
             {result.pagination.total_pages > 1 && (
               <>

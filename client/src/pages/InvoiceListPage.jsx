@@ -14,6 +14,8 @@ import { caseCode } from '../lib/patientCode.js';
 import SearchSelect from '../components/SearchSelect.jsx';
 import FilterBar from '../components/FilterBar.jsx';
 import InvoiceExport from '../components/InvoiceExport.jsx';
+import SalesTaxReport from '../components/SalesTaxReport.jsx';
+import LineIcon from '../components/LineIcon.jsx';
 import LoadMore from '../components/LoadMore.jsx';
 import { useIsMobile } from '../lib/mobile.js';
 import { useLoadMore } from '../lib/loadMore.js';
@@ -57,6 +59,7 @@ export default function InvoiceListPage() {
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
   const [reloadKey, setReloadKey] = useState(0);
+  const [taxOpen, setTaxOpen] = useState(false); // กล่องรายงานภาษีขาย
   /* เคสที่ไม่มีใบแจ้งหนี้เหลืออยู่ (เผลอลบ / เคสเก่า) — ออกใบได้ตรงนี้เลย
      เดิมหน้านี้บอกให้ไปหน้าเคส ส่วนหน้าเคสบอกให้มาหน้านี้ วนกันโดยไม่มีปุ่มให้กดสักที่ */
   const [missing, setMissing] = useState([]);
@@ -82,6 +85,8 @@ export default function InvoiceListPage() {
   const effPage = mobile ? 1 : page;
   // เงื่อนไขของผลหน้า 1 ชุดล่าสุด — ใช้ขอหน้าถัดไปด้วยเงื่อนไขเดียวกันเป๊ะ
   const lastQuery = useRef({});
+  // คำค้นของรอบก่อน — หน่วง 250ms เฉพาะตอนคำค้นเปลี่ยน (กำลังพิมพ์) เปิดหน้า/เปลี่ยนหน้า/เรียง/ตัวกรองยิงทันที
+  const prevQ = useRef(q);
   const openId = params.get('open');
   /* ใบยกเลิกลบไม่ได้ (เลขที่เอกสารต้องต่อเนื่อง) จึงซ่อนจากรายการเป็นค่าเริ่มต้น
      เลือกสถานะ "ยกเลิก" ตรง ๆ หรือติ๊กแสดง ก็ยังเห็นครบ (แผนแก้ระบบการเงิน L3) */
@@ -130,6 +135,9 @@ export default function InvoiceListPage() {
     );
 
     // หน่วงเล็กน้อยระหว่างพิมพ์ค้นหา จะได้ไม่ยิง API ทุกตัวอักษร
+    // เดิมหน่วงทุกครั้ง (รวมเปิดหน้าแรก/เปลี่ยนหน้า/เรียง) ทำให้ช้าเปล่าๆ 250ms — ตรวจความเร็ว 24 พ.ย. 2569
+    const typing = q !== prevQ.current;
+    prevQ.current = q;
     const timer = setTimeout(() => {
       api
         .listInvoices(query)
@@ -141,7 +149,7 @@ export default function InvoiceListPage() {
         })
         .catch((err) => !cancelled && setError(err.message))
         .finally(() => !cancelled && setLoading(false));
-    }, 250);
+    }, typing ? 250 : 0);
 
     return () => {
       cancelled = true;
@@ -235,11 +243,24 @@ export default function InvoiceListPage() {
 
   return (
     <PageRefresh onRefresh={() => setReloadKey((k) => k + 1)} busy={loading}>
-      {/* ไม่มีหัวหน้าบนจอ (แถบตัวกรองเป็นส่วนบนสุด) — คง h1 ไว้ให้โปรแกรมอ่านหน้าจอ */}
-      <h1 className="sr-only">ใบแจ้งหนี้</h1>
+      {/* ดีไซน์ v2 (23 พ.ย. 2569): หัวหน้า = ชื่อหน้า + จำนวนใบตามตัวกรองตอนนี้ (ตัวเลขที่ server ส่งมากับรายการ)
+          ปุ่ม CSV / รอออกใบ ยังเป็นตัวเดิมในแถบตัวกรอง — จอคอมยกขึ้นไปวางมุมขวาของหัว (CSS · v2/admin-ops.css) */}
+      <header className="page-head ops-head inv-head">
+        <div>
+          <h1>ใบแจ้งหนี้</h1>
+          <p className="muted">
+            {result && <>ทั้งหมด {Number(result.pagination.total).toLocaleString('th-TH')} ใบ · </>}ระบบออกใบร่างให้เองเมื่อเปิดเคส
+          </p>
+        </div>
+        {/* รายงานภาษีขายรายเดือน (ผู้ใช้ขอ 24 พ.ย. 2569) — ดูก่อนพิมพ์ในกล่อง แล้วพิมพ์ / บันทึก PDF */}
+        <button type="button" className="btn inv-tax-btn" onClick={() => setTaxOpen(true)}>
+          <LineIcon name="printer" className="btn-ico" />รายงานภาษีขาย
+        </button>
+      </header>
+      {taxOpen && <SalesTaxReport onClose={() => setTaxOpen(false)} />}
 
       {/* แถบตัวกรอง + ตาราง อยู่ในการ์ดใบเดียวกัน (เหมือนหน้ารายการอื่น — ดู .list-card) */}
-      <div className="list-card">
+      <div className="list-card ops-card inv-list">
         {/* แถบค้นหา + ตัวกรอง — บนมือถือ dropdown ย้ายไปอยู่ในแผ่น "ตัวกรอง" (ดู FilterBar) */}
         <FilterBar
           search={<input
@@ -557,7 +578,7 @@ function InvoiceTodo({ missing, withExtras, issuing, onIssue, onIssueExtras }) {
       {open && pos && createPortal(
         <div
           ref={panelRef}
-          className="todo-panel"
+          className="todo-panel inv-todo-panel"
           role="dialog"
           aria-label="งานรอออกใบแจ้งหนี้"
           style={pos}
@@ -572,10 +593,13 @@ function InvoiceTodo({ missing, withExtras, issuing, onIssue, onIssueExtras }) {
                     <span className="muted">
                       <OfficeLink className="link mono" to={`/cases?open=${c.case_id}`}>{caseCode(c.case_id)}</OfficeLink>
                       {' · '}{caseStage(c).label}
-                      {' · '}{c.fee != null ? formatBaht(c.fee) : 'ยังไม่ระบุค่าบริการ'}
                     </span>
                   </div>
-                  <button className="btn tiny primary" disabled={issuing != null} onClick={() => onIssue(c.case_id)}>
+                  {/* ดีไซน์ v2: ยอดแยกออกมาชิดขวาหน้าปุ่ม (เดิมต่อท้ายบรรทัดรอง) */}
+                  <span className={`todo-row-amount${c.fee != null ? '' : ' is-empty'}`}>
+                    {c.fee != null ? formatBaht(c.fee) : 'ยังไม่ระบุค่าบริการ'}
+                  </span>
+                  <button className="btn tiny todo-issue" disabled={issuing != null} onClick={() => onIssue(c.case_id)}>
                     {issuing === c.case_id ? 'กำลังออกใบ…' : 'ออกใบ'}
                   </button>
                 </div>
@@ -592,10 +616,10 @@ function InvoiceTodo({ missing, withExtras, issuing, onIssue, onIssueExtras }) {
                     <span className="muted">
                       <OfficeLink className="link mono" to={`/cases?open=${c.case_id}`}>{caseCode(c.case_id)}</OfficeLink>
                       {' · '}{c.items.map((a) => a.name).join(', ')}
-                      {' · '}{formatBaht(c.total)}
                     </span>
                   </div>
-                  <button className="btn tiny primary" disabled={issuing != null} onClick={() => onIssueExtras(c.case_id)}>
+                  <span className="todo-row-amount">{formatBaht(c.total)}</span>
+                  <button className="btn tiny todo-issue" disabled={issuing != null} onClick={() => onIssueExtras(c.case_id)}>
                     {issuing === c.case_id ? 'กำลังออกใบ…' : 'ออกใบเพิ่มเติม'}
                   </button>
                 </div>

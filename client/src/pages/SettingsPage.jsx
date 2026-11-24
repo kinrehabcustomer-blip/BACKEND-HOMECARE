@@ -139,10 +139,11 @@ function PushSetting() {
 /* เมนูซ้ายของหน้าตั้งค่า (ดีไซน์ 19 พ.ย. 2569 — เมนูซ้าย + แผงขวา) · จำหน้าที่เลือกไว้ใน ?tab= · เรื่องของบัญชีนี้เท่านั้น */
 const GROUPS = [
   { label: 'บัญชีของฉัน', items: [
-    { key: 'display', label: 'การแสดงผล' },
-    { key: 'app', label: 'แอปบนมือถือ' },
-    { key: 'password', label: 'เปลี่ยนรหัสผ่าน' },
-    { key: 'help', label: 'ช่วยเหลือ' },
+    // icon = ตกแต่งเมนูซ้ายอย่างเดียว (ดีไซน์ v2 23 พ.ย. 2569)
+    { key: 'display', label: 'การแสดงผล', icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2" /><path d="M8 20h8M12 16v4" /></svg> },
+    { key: 'app', label: 'แอปบนมือถือ', icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="7" y="2" width="10" height="20" rx="2" /><path d="M11 18h2" /></svg> },
+    { key: 'password', label: 'เปลี่ยนรหัสผ่าน', icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></svg> },
+    { key: 'help', label: 'ช่วยเหลือ', icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M9.5 9a2.5 2.5 0 0 1 4.9.7c0 1.7-2.4 2.1-2.4 3.6M12 17h.01" /></svg> },
   ] },
 ];
 
@@ -164,22 +165,33 @@ export default function SettingsPage() {
     pane = (
       <>
         <SettingsPaneHead title="การแสดงผล" desc="ธีมของหน้าจอ — จำไว้ในเครื่องนี้ เปลี่ยนแล้วมีผลทั้งระบบทันที" />
-        <section className="set-card">
+        {/* ดีไซน์ v2: จอคอม = การ์ดตัวอย่างหน้าจอสองใบ (สว่าง/กลางคืน) · มือถือ = ไอคอน + ปุ่มคู่เต็มกว้าง
+            ปุ่มสองตัวเดิม (onClick เดิม) — ตัวอย่างหน้าจอเป็น span ตกแต่ง aria-hidden · ตัวที่เลือกอยู่บอกด้วย aria-pressed */}
+        <section className="set-card ad-theme-card">
           <div className="setting-row">
+            <span className="ad-theme-ico" aria-hidden="true"><LineIcon name="moon" /></span>
             <div>
               <strong>โหมดกลางคืน</strong>
               <p className="muted">พื้นหลังเข้ม สบายตาเวลาใช้งานในที่แสงน้อย</p>
             </div>
             {/* สลับสว่าง/มืด — ปุ่มคู่ให้เห็นชัดว่าตอนนี้อยู่โหมดไหน */}
             <div className="theme-toggle">
-              <button className={`btn ${theme === 'light' ? 'primary' : ''}`} onClick={() => changeTheme('light')}>
-                <LineIcon name="sun" />สว่าง
+              <button className={`btn ${theme === 'light' ? 'primary' : ''}`} aria-pressed={theme === 'light'} onClick={() => changeTheme('light')}>
+                <span className="ad-theme-preview is-light" aria-hidden="true"><i /><i /><i /><i /><b /></span>
+                <span className="ad-theme-label"><LineIcon name="sun" />สว่าง</span>
+                <span className="ad-theme-on" aria-hidden="true"><LineIcon name="check" />ใช้อยู่</span>
               </button>
-              <button className={`btn ${theme === 'dark' ? 'primary' : ''}`} onClick={() => changeTheme('dark')}>
-                <LineIcon name="moon" />กลางคืน
+              <button className={`btn ${theme === 'dark' ? 'primary' : ''}`} aria-pressed={theme === 'dark'} onClick={() => changeTheme('dark')}>
+                <span className="ad-theme-preview is-dark" aria-hidden="true"><i /><i /><i /><i /><b /></span>
+                <span className="ad-theme-label"><LineIcon name="moon" />กลางคืน</span>
+                <span className="ad-theme-on" aria-hidden="true"><LineIcon name="check" />ใช้อยู่</span>
               </button>
             </div>
           </div>
+          <p className="ad-theme-note">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h.01" /></svg>
+            เลือกแล้วเปลี่ยนทันที ไม่ต้องกดบันทึก — จำไว้เฉพาะเครื่องนี้
+          </p>
         </section>
       </>
     );
@@ -223,7 +235,7 @@ export default function SettingsPage() {
 
   return (
     <>
-      <header className="page-head">
+      <header className="page-head ad-head">
         <div>
           <h1>ตั้งค่า</h1>
           <p className="muted">ปรับแต่งการแสดงผล ความปลอดภัยของบัญชี และดูวิธีใช้งาน</p>

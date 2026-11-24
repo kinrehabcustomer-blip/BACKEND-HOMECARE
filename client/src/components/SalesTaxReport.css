@@ -1,0 +1,87 @@
+/* รายงานภาษีขาย (SalesTaxReport.jsx · 24 พ.ย. 2569)
+   กระดาษใช้กติกาเดียวกับใบแจ้งหนี้ (.invoice-doc · .inv-table ใน index.css) — ไฟล์นี้เพิ่มเฉพาะส่วนที่ต่าง */
+
+.tax-modal.modal.modal-wide { max-width: 64rem; }
+.tax-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem 1rem; margin-bottom: 0.875rem; }
+.tax-toolbar p { margin: 0; }
+.tax-month { display: inline-flex; align-items: center; gap: 0.625rem; font-weight: 600; color: var(--heading); }
+.tax-month input { width: auto; min-width: 11rem; }
+
+/* พื้นรองกระดาษ — กระดาษขาวมีเงาบนพื้นทองอ่อน แบบหน้าดูก่อนพิมพ์ */
+.tax-paper-wrap {
+  padding: 1.25rem;
+  border-radius: 0.875rem;
+  background: color-mix(in srgb, var(--brand-soft) 55%, var(--surface-2));
+  overflow-x: auto;
+}
+.tax-paper-wrap > .tax-doc {
+  min-width: 44rem;
+  padding: 1.75rem 1.5rem 1.5rem;
+  border-radius: 0.375rem;
+  box-shadow: 0 1px 2px rgb(31 28 23 / 8%), 0 8px 24px rgb(31 28 23 / 10%);
+}
+
+.tax-doc-head { text-align: center; margin: 0.25rem 0 0.875rem; }
+.tax-doc-head h3 { margin: 0 0 0.25rem; font-size: 1.25rem; color: #000; }
+.tax-doc-org { display: flex; justify-content: space-between; gap: 0.5rem 1.5rem; flex-wrap: wrap; margin-bottom: 0.75rem; }
+.tax-doc-org > div { min-width: 0; flex: 1 1 18rem; }
+.tax-doc-org-right { text-align: right; }
+.tax-doc-org p { margin: 0 0 0.25rem !important; }
+.tax-box { font-size: 1rem; line-height: 1; }
+
+.tax-table { font-size: 0.75rem; }
+.tax-table th { background: #f6f3ec !important; vertical-align: middle !important; }
+.tax-table td { vertical-align: top; }
+.tax-table .tx-no { width: 4.5%; }
+.tax-table .tx-date { width: 9%; }
+.tax-table .tx-id { width: 14%; white-space: nowrap; }
+.tax-table .tx-tax { width: 13%; }
+.tax-table .tx-branch { width: 6%; }
+.tax-table .tx-money { width: 10.5%; }
+.tax-table td.inv-r { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tax-table td.tx-date, .tax-table td:nth-child(2) { white-space: nowrap; }
+.tax-table tfoot td { background: #faf8f3; }
+.tax-table tr.is-cancelled td { color: #8a8174; }
+.tax-table tr.is-cancelled .tax-buyer { text-decoration: line-through; }
+.tax-empty { padding: 1.25rem !important; color: #6e665a; }
+
+.tax-buyer { display: block; }
+.tax-tag {
+  display: inline-block;
+  margin: 0.25rem 0.25rem 0 0;
+  padding: 0 0.5rem;
+  border-radius: 999px;
+  font-size: 0.6875rem;
+  line-height: 1.5rem;
+  background: #f5ebd3;
+  color: #6f4e0f;
+}
+.tax-tag.is-credit { background: #fde8e6; color: #9b2c22; }
+.tax-tag.is-debit { background: #e6eefa; color: #1d4f91; }
+.tax-tag.is-cancel { background: #efece6; color: #5f584d; }
+.tax-ref { display: block; margin-top: 0.125rem; font-size: 0.6875rem; color: #6e665a; }
+
+.tax-note { margin-top: 0.5rem !important; font-size: 0.6875rem; color: #6e665a; }
+.tax-signs { display: flex; justify-content: space-between; gap: 3rem; margin-top: 3rem; }
+.tax-signs > div { flex: 0 1 15rem; text-align: center; }
+.tax-sign-line { display: block; border-top: 1px dotted #000; margin-bottom: 0.375rem; }
+
+/* มือถือ: กระดาษกว้างกว่าจอ เลื่อนดูด้านข้างได้ (ตัวพิมพ์จริงเป็น A4 เต็มแผ่น) — ลดขอบพื้นรองให้กระดาษได้ที่มากขึ้น */
+@media (max-width: 600px) {
+  .tax-paper-wrap { padding: 0.625rem; margin-inline: -0.25rem; }
+  .tax-paper-wrap > .tax-doc { padding: 1.25rem 1rem; }
+}
+
+/* ตอนพิมพ์: ตารางยาวขึ้นแผ่นใหม่ได้ — ห้ามตัดกลางแถว · พื้นเทาของหัว/ท้ายตารางพิมพ์ออกมาด้วย */
+@media print {
+  .print-sheet .tax-doc { padding: 0; box-shadow: none; }
+  .tax-table tr { break-inside: avoid; }
+  .tax-table th, .tax-table tfoot td { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .tax-signs { break-inside: avoid; }
+}
+
+/* เลือกช่วง: รายเดือน / ช่วงวันที่ (24 พ.ย. 2569) */
+.tax-pick { display: flex; flex-wrap: wrap; align-items: center; gap: 0.625rem 1rem; }
+.tax-range { display: inline-flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.tax-range input { width: auto; min-width: 10.5rem; }
+.tax-range > span { color: var(--muted); }

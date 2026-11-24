@@ -1,0 +1,1109 @@
+/* ดีไซน์ใหม่ (v2) · admin-data — แบบร่าง https://claude.ai/artifact/UYErtp3CaW8hEqXBRiHT3d
+   หน้าข้อมูลหลัก/ตั้งค่า: แพ็คเกจ · กายภาพ · หัตถการ/อุปกรณ์ · ลูกค้า · ผู้รับบริการ · พนักงาน · คะแนนประเมิน · ตั้งค่า · ตั้งค่าระบบ
+   แตะหน้าตาอย่างเดียว — ทุก selector ผูกกับคลาสรากของหน้าเหล่านี้ (ad-* / packages-card / set-* / catalog-page)
+   ไม่ทับคลาสกลาง (.btn .badge .modal .table .seg input) แบบกว้างๆ — คลาสกลางเป็นของ shell.css */
+
+/* =====================================================================================
+   1) หัวหน้า (.page-head.ad-head) — ชื่อหน้าตัวใหญ่ Prompt + คำอธิบาย · ปุ่มชิดขวาล่าง
+   warm-clarity ซ่อน h1 ของ .page-head ทุกหน้า (sr-only) — หน้าที่ดีไซน์ใหม่มีชื่อหน้า เปิดกลับเฉพาะ .ad-head
+   ===================================================================================== */
+.page-head.ad-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 1rem;
+  margin: 0 0 1.125rem;
+  padding: 0;
+  border: 0;
+}
+.page-head.ad-head h1 {
+  position: static;
+  width: auto; height: auto;
+  margin: 0;
+  overflow: visible;
+  clip-path: none;
+  white-space: normal;
+  font-family: var(--font-heading);
+  font-size: 1.75rem;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: 0;
+  color: var(--heading);
+}
+.page-head.ad-head > div > .muted,
+.page-head.ad-head > div > p { margin: 0.25rem 0 0; font-size: 0.9375rem; line-height: 1.5; color: var(--muted); }
+/* เส้นทางด้านบนชื่อหน้า (ฟอร์มเพิ่ม/แก้) — ข้อความเฉยๆ ไม่ใช่ลิงก์ (ปุ่มยกเลิกด้านล่างมีตัวถามก่อนทิ้งงานอยู่แล้ว) */
+.ad-crumb { display: flex; align-items: center; gap: 0.5rem; margin: 0 0 0.25rem; font-size: 0.8125rem; color: var(--muted); }
+.ad-crumb > b { font-weight: 600; color: var(--brand); }
+.ad-crumb > svg { width: 0.875rem; height: 0.875rem; flex: none; }
+
+@media (max-width: 600px) {
+  .page-head.ad-head { margin-bottom: 0.875rem; align-items: stretch; } /* index.css ≤600 เรียงหัวแนวตั้ง — flex-end จะดันข้อความไปชิดขวา */
+  .page-head.ad-head h1 { font-size: 1.5rem; }
+  .page-head.ad-head > div > .muted,
+  .page-head.ad-head > div > p { font-size: 0.875rem; }
+}
+/* หน้ารายการบนจอแคบ: คงแบบเดิม (ไม่มีหัวบนจอ ให้รายการขึ้นสูงสุด) — ซ่อนแบบ sr-only โปรแกรมอ่านหน้าจอยังอ่านชื่อได้ */
+@media (max-width: 900px) {
+  .page-head.ad-head.ad-head-list {
+    position: absolute;
+    width: 1px; height: 1px;
+    margin: -1px; padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+
+/* =====================================================================================
+   2) หน้ารายการ ลูกค้า / ผู้รับบริการ / พนักงาน (.list-card.ad-list)
+   ดีไซน์: แถบค้นหา+ตัวกรองวางบนพื้น (ไม่อยู่ในการ์ด) · ตาราง + แถบเลื่อนหน้าเป็นการ์ดใบเดียว
+   ปุ่ม "+ เพิ่ม…" ยังเป็นตัวเดิมในแถบตัวกรอง — จอคอมยกขึ้นไปวางมุมขวาของหัวหน้า (absolute)
+   ===================================================================================== */
+@media (min-width: 601px) {
+  /* selector ยาวเท่ากฎ "การ์ดลอย" ใน warm-clarity (:is(.content …) > .list-card) จึงทับเส้นขอบ/มุมมนของมันได้ */
+  .list-card.ad-list,
+  :is(.content, .content > .pull-zone > .pull-content) > .list-card.ad-list {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    background: none;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    overflow: visible;
+  }
+  .list-card.ad-list > .toolbar {
+    margin: 0 0 1.125rem;
+    padding: 0;
+    gap: 0.625rem;
+    align-items: center;
+    background: none;
+    border: 0;
+  }
+  /* ช่องค้นหา: สูง 44 · ไอคอนแว่นขยายในช่อง */
+  .list-card.ad-list > .toolbar > input.search {
+    flex: 1 1 18rem;
+    min-width: 0;
+    height: 2.75rem;
+    padding-left: 2.625rem;
+    border-radius: 0.625rem;
+    background: var(--surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236e665a' stroke-width='1.8' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='M20 20l-3.5-3.5'/%3E%3C/svg%3E") no-repeat 0.875rem 50% / 1.125rem;
+  }
+  .list-card.ad-list > .toolbar > select { flex: 0 0 13.75rem; width: 13.75rem; min-width: 0; height: 2.75rem; border-radius: 0.625rem; }
+
+  /* ตาราง = ครึ่งบนของการ์ด · แถบเลื่อนหน้า = ท้ายการ์ด */
+  .list-card.ad-list > .table-wrap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-bottom: 0;
+    border-radius: 0.875rem 0.875rem 0 0;
+  }
+  .list-card.ad-list > .table-wrap:last-child { border-bottom: 1px solid var(--border); border-radius: 0.875rem; }
+  .list-card.ad-list > .table-wrap > .table { border: 0; border-radius: 0; }
+  .list-card.ad-list > .pager {
+    margin: 0;
+    padding: 0.625rem 1.25rem;
+    gap: 0.75rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-top-color: var(--divider);
+    border-radius: 0 0 0.875rem 0.875rem;
+  }
+  .list-card.ad-list > .pager > .pager-count { margin-right: auto; font-size: 0.875rem; }
+  .list-card.ad-list > .pager > .per-page { margin-left: 0.75rem; }
+  .list-card.ad-list > .error,
+  .list-card.ad-list > .notice { margin: 0 0 0.75rem; }
+
+  /* หัวตาราง: พื้นเทาอุ่น สูง 44 ตัว 13px */
+  .list-card.ad-list .table thead th {
+    height: 2.75rem;
+    background: var(--surface-2);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--muted);
+    border-bottom: 1px solid var(--border);
+  }
+  /* คอลัมน์ที่กำลังเรียง = ป้ายทองอ่อน (ดีไซน์: "รหัสลูกค้า ⇅ ใหม่สุด") */
+  .list-card.ad-list .table thead .th-sort-pick.on {
+    margin-left: -0.5rem;
+    padding: 0.375rem 0.5rem;
+    border-radius: 0.5rem;
+    background: var(--brand-soft);
+    color: var(--brand);
+  }
+  .list-card.ad-list .table thead .th-sort-pick.on > span:first-child { color: inherit; }
+  /* แถว: สูง 58 · เส้นคั่นจาง */
+  .list-card.ad-list .table tbody td { height: 3.625rem; border-color: var(--divider); color: var(--heading); }
+  .list-card.ad-list .table.table-2line tbody td { height: 3.625rem; }
+  .list-card.ad-list .table tbody td.row-index { color: var(--muted); }
+  /* รหัส (CUS- / KN / EMP-) — ตัวหัวข้อ น้ำหนักกลาง สีทองเข้ม แทนตัวพิมพ์ดีด */
+  .list-card.ad-list .table tbody td.mono.link {
+    font-family: var(--font-heading);
+    font-size: 0.875rem;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    color: var(--brand);
+  }
+  .list-card.ad-list .table tbody td[data-label='ชื่อ'] { font-weight: 600; color: var(--heading); }
+  .list-card.ad-list .table tbody td[data-label='ชื่อ'] > .muted { font-weight: 400; }
+  .list-card.ad-list .table tbody td .cell-sub { font-size: 0.8125rem; font-weight: 400; color: var(--muted); }
+  /* เบอร์โทร = ลิงก์โทร มีไอคอนหูโทรศัพท์นำหน้า */
+  .list-card.ad-list .table tbody a[href^='tel:'] {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    font-family: inherit;
+    font-weight: 500;
+    color: var(--brand);
+    text-decoration: none;
+  }
+  .list-card.ad-list .table tbody a[href^='tel:']::before {
+    content: '';
+    width: 0.875rem;
+    height: 0.875rem;
+    flex: none;
+    background: currentColor;
+    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z'/%3E%3C/svg%3E") center / contain no-repeat;
+            mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z'/%3E%3C/svg%3E") center / contain no-repeat;
+  }
+  .list-card.ad-list .table tbody .cell-sub a[href^='tel:'] { font-size: 0.8125rem; }
+  /* ตัวอักษรย่อแทนรูป (ยังไม่มีรูป) — วงกลมทองอ่อน ตัวทองเข้ม */
+  .list-card.ad-list .table tbody .avatar.is-blank { background: var(--brand-soft); border-color: transparent; color: var(--brand); font-weight: 600; }
+}
+/* จอคอม: ปุ่มเพิ่ม (ตัวเดิมในแถบตัวกรอง) ยกขึ้นไปมุมขวาของหัวหน้า — หัวจัดชิดล่าง ปุ่มสูง 44 จึงลงตัวพอดี */
+@media (min-width: 901px) {
+  .page-head.ad-head-list { padding-right: 15rem; }
+  .page-head.ad-head-list + .list-card.ad-list > .toolbar > .toolbar-action {
+    position: absolute;
+    top: calc(-1.125rem - 2.75rem);
+    right: 0;
+    height: 2.75rem;
+    min-height: 2.75rem;
+    margin: 0;
+    padding: 0 1.25rem 0 1rem;
+    border-radius: 0.625rem;
+    font-size: 0.9375rem;
+    font-weight: 600;
+  }
+}
+
+/* =====================================================================================
+   3) ฟอร์มเพิ่ม/แก้ ลูกค้า · ผู้รับบริการ · พนักงาน (form.ad-form)
+   เพิ่มใหม่ (จอคอม): ซ้าย = การ์ดช่องที่ต้องกรอก · ขวา 372px = การ์ด "ข้อมูลเพิ่มเติม" หัวข้อพับได้
+   แก้ไข (.is-edit) / จอแคบ: เรียงลงคอลัมน์เดียว · แถบบันทึกติดขอบล่างจอ เต็มความกว้างพื้นที่เนื้อหา
+   ===================================================================================== */
+.ad-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto 1fr auto;
+  gap: 1.25rem;
+  align-items: start;
+  margin: 0;
+  padding: 0;
+  background: none;
+  border: 0;
+}
+@media (min-width: 1101px) {
+  .ad-form:not(.is-edit) { grid-template-columns: minmax(0, 1fr) 23.25rem; }
+}
+.ad-form-main { display: flex; flex-direction: column; gap: 1.25rem; min-width: 0; }
+.ad-form .ad-card {
+  margin: 0;
+  padding: 1.25rem 1.5rem 1.375rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  box-shadow: none;
+}
+.ad-form .ad-card > h2 {
+  margin: 0;
+  font-family: var(--font-heading);
+  font-size: 1.125rem;
+  font-weight: 600;
+  line-height: 1.75rem;
+  color: var(--heading);
+}
+.ad-form .ad-card > h2 + .ad-card-sub { margin: 0.125rem 0 1.125rem; font-size: 0.875rem; color: var(--muted); }
+.ad-form .ad-card > .grid { gap: 1.125rem 1rem; }
+/* ป้ายช่อง: 14px ตัวเข้ม (ดีไซน์) แทนป้ายเทาตัวเล็ก · ดอกจันแดง */
+.ad-form .grid label { gap: 0.375rem; font-size: 0.875rem; font-weight: 500; color: var(--heading); }
+.ad-form .grid label .form-hint,
+.ad-form .grid label .muted { font-weight: 400; }
+.ad-req { color: var(--danger); font-weight: 600; }
+.ad-label { display: inline-flex; align-items: center; gap: 0.25rem; }
+/* แพ้ยา / แพ้อาหาร — ไอคอนเตือนแดงหน้าป้าย (ข้อมูลความปลอดภัย) */
+.ad-label-alert { color: var(--danger); }
+.ad-label-alert::before {
+  content: '';
+  width: 1rem;
+  height: 1rem;
+  flex: none;
+  background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z'/%3E%3Cpath d='M12 9v4M12 17h.01'/%3E%3C/svg%3E") center / contain no-repeat;
+          mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z'/%3E%3Cpath d='M12 9v4M12 17h.01'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+.ad-label-alert ~ textarea { color: var(--heading); }
+/* จอคอม: ช่องแพ้ยา/แพ้อาหารวางคู่กันครึ่งต่อครึ่ง (กริดหกส่วน — ช่องปกติกินสอง ช่องแพ้กินสาม) */
+@media (min-width: 1101px) {
+  .ad-form .grid:has(> .ad-allergy) { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .ad-form .grid:has(> .ad-allergy) > * { grid-column: span 2; }
+  .ad-form .grid:has(> .ad-allergy) > .ad-allergy { grid-column: span 3; }
+}
+.ad-form .customer-picker { margin-top: 0; }
+.ad-form .customer-search { display: flex; flex-direction: column; gap: 0.375rem; font-size: 0.875rem; font-weight: 500; color: var(--heading); }
+
+/* การ์ดขวา: หัวข้อพับ = แถว ชื่อตัวหนา + รายชื่อช่องข้างใน (ตัวเล็กเทา) + ปุ่มลูกศรในกรอบ */
+.ad-form-more > .form-section { margin: 0; border-top: 1px solid var(--divider); }
+.ad-form-more > .ad-card-sub + .form-section { border-top: 0; }
+.ad-form-more > .form-section > summary {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.875rem 0;
+  list-style: none;
+  color: var(--heading);
+}
+.ad-form-more > .form-section > summary::-webkit-details-marker { display: none; }
+.ad-sum { display: flex; flex-direction: column; gap: 0.125rem; flex: 1; min-width: 0; }
+.ad-sum > b { font-size: 0.9375rem; font-weight: 600; color: var(--heading); }
+.ad-sum-hint { font-size: 0.8125rem; font-weight: 400; line-height: 1.45; color: var(--muted); }
+.ad-sum-ico {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 2.25rem;
+  height: 2.25rem;
+  border: 1px solid var(--field-border);
+  border-radius: 0.625rem;
+  background: var(--surface);
+  color: var(--text);
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+.ad-sum-ico svg { width: 1.125rem; height: 1.125rem; transition: transform 0.16s ease; }
+.ad-form-more > .form-section[open] > summary .ad-sum-ico { background: var(--brand-soft); border-color: var(--brand); color: var(--brand); }
+.ad-form-more > .form-section[open] > summary .ad-sum-ico svg { transform: rotate(180deg); }
+.ad-form-more > .form-section > summary:hover .ad-sum-ico { border-color: var(--border-hover); }
+.ad-form-more > .form-section > .grid,
+.ad-form-more > .form-section > .notice,
+.ad-form-more > .form-section > :not(summary) { margin-bottom: 1rem; }
+/* คอลัมน์ขวาแคบ — ช่องข้างในเรียงทีละช่อง (ดีไซน์ "ข้อมูลการจ้างงาน" ที่กางอยู่) · แก้ไข = กว้างเต็ม ใช้กริดเดิม */
+@media (min-width: 1101px) {
+  .ad-form:not(.is-edit) .ad-form-more .grid { grid-template-columns: minmax(0, 1fr); }
+  .ad-form:not(.is-edit) .ad-form-more .grid > * { grid-column: auto; }
+}
+
+/* หมายเหตุใต้การ์ด (พนักงาน: หลังบันทึกจะได้รหัสผ่านชั่วคราว) */
+.ad-note {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+  padding: 1rem 1.125rem;
+  border-radius: 0.875rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+.ad-note > svg { width: 1.25rem; height: 1.25rem; flex: none; margin-top: 0.125rem; color: var(--muted); }
+.ad-note strong { display: block; font-size: 0.9375rem; font-weight: 600; color: var(--heading); }
+.ad-note p { margin: 0.25rem 0 0; font-size: 0.8125rem; line-height: 1.55; color: var(--muted); }
+
+/* แถบบันทึกล่างจอ — เต็มกว้าง ชิดขอบพื้นที่เนื้อหา (ชดเชย padding 1rem ของ .content) · ยกเลิก ซ้ายของ บันทึก */
+.ad-form > .form-actions.sticky {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0.25rem -1rem -1rem;
+  padding: 0.875rem 1rem;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+}
+.ad-form > .form-actions.sticky > .ad-req-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-right: auto;
+  font-size: 0.875rem;
+  color: var(--muted);
+}
+.ad-req-hint > svg { width: 1.125rem; height: 1.125rem; flex: none; }
+.ad-req-hint > b { color: var(--danger); font-weight: 600; }
+.ad-form > .form-actions.sticky > .btn { order: 2; min-height: 2.75rem; padding-inline: 1.375rem; }
+.ad-form > .form-actions.sticky > .btn.primary { order: 3; padding-inline: 1.5rem; }
+@media (min-width: 901px) {
+  /* ฟอร์มสั้น = แถบยังอยู่ขอบล่างจอ (ดีไซน์) ไม่ลอยกลางหน้า — แถวกลางของกริดยืดกินที่ว่าง แถบชิดล่างของแถวนั้น */
+  .ad-form { min-height: calc(100dvh - 7rem); }
+  .ad-form > .form-actions.sticky { align-self: end; margin-inline: -1rem; padding-inline: 2rem; }
+}
+@media (max-width: 600px) {
+  .ad-form .ad-card { padding: 1rem 1rem 1.125rem; border-radius: 0.875rem; }
+  .ad-form > .form-actions.sticky > .ad-req-hint { display: none; }
+  .ad-form > .form-actions.sticky > .btn { flex: 1; justify-content: center; }
+}
+
+/* =====================================================================================
+   4) แพ็คเกจ Homecare (.packages-card.ad-pkg) — หัว hero เป็นการ์ดของตัวเอง · กลุ่มเรทเป็นการ์ดแยกใบ
+   หัวคอลัมน์ระดับ: พื้นเทาอุ่น + แถบสีประจำระดับ 3px ด้านบน + จุดสี + ตัวย่อ + ชื่อเต็ม (เดิมพื้นสีเต็มช่อง)
+   ช่องราคา: รหัส (ป้ายกรอบ) → ราคาตัวใหญ่ → ราคาเต็มขีดฆ่า + ส่วนลดแดง → จ้าง · กำไร
+   ===================================================================================== */
+.ad-ico { width: 1.125rem; height: 1.125rem; flex: none; }
+.ad-pkg .btn svg { width: 1.125rem; height: 1.125rem; flex: none; }
+/* ปุ่มหัวหน้าไม่ตัดบรรทัด ("แก้ไขราคา" เคยหักสองบรรทัดที่ 1366px) */
+.ad-pkg > .toolbar .toolbar-action { flex-wrap: nowrap; }
+.ad-pkg > .toolbar .toolbar-action .btn { white-space: nowrap; flex: none; }
+
+@media (min-width: 601px) {
+  .packages-card.ad-pkg,
+  :is(.content, .content > .pull-zone > .pull-content) > .packages-card.ad-pkg {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    padding: 0;
+    background: none;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    overflow: visible;
+  }
+  .ad-pkg > .toolbar {
+    margin: 0;
+    padding: 1rem 1.25rem;
+    gap: 1rem;
+    align-items: center;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 1rem;
+  }
+  .ad-pkg > .toolbar .toolbar-action { margin-right: 0; gap: 0.625rem; }
+  .ad-pkg > .toolbar .toolbar-action .btn { min-height: 2.75rem; padding: 0 1.125rem 0 0.875rem; gap: 0.5rem; border-radius: 0.625rem; font-size: 0.9375rem; }
+  .ad-pkg > .toolbar .toolbar-action .btn.primary { padding: 0 1.25rem 0 1rem; font-weight: 600; }
+  .ad-pkg > .error, .ad-pkg > .notice, .ad-pkg > .packages-empty { margin: 0; }
+}
+/* หัว hero: ไอคอน 48 ในกรอบทองอ่อน · คำเล็ก 13 · ชื่อหน้า Prompt 26 */
+.ad-pkg .page-hero { gap: 1rem; }
+.ad-pkg .page-hero-icon { width: 3rem; height: 3rem; border-radius: 0.75rem; background: var(--brand-soft); color: var(--brand); }
+.ad-pkg .page-hero-kicker { margin: 0 0 0.125rem; font-size: 0.8125rem; font-weight: 600; letter-spacing: 0; color: var(--muted); }
+.ad-pkg .page-hero-title { font-family: var(--font-heading); font-size: 1.625rem; font-weight: 600; letter-spacing: 0; color: var(--heading); }
+/* "แก้ไปแล้ว N ช่อง ยังไม่บันทึก" — จุดส้ม + ตัวส้มเข้ม */
+.ad-pkg .page-hero .muted:has(> .flag-text) { margin-top: 0.25rem; }
+.ad-pkg .page-hero .flag-text { display: inline-flex; align-items: center; gap: 0.375rem; font-size: 0.8125rem; font-weight: 600; color: #9a3412; }
+.ad-pkg .page-hero .flag-text::before { content: ""; width: 0.4375rem; height: 0.4375rem; border-radius: 50%; background: #d9631e; }
+:root[data-theme="dark"] .ad-pkg .page-hero .flag-text { color: #f0a46b; }
+/* ปุ่ม "ปิดการจัดการ" ตอนแผงจัดการเปิดอยู่ — พื้นทองอ่อน บอกว่ากำลังอยู่ในโหมดนี้ */
+.ad-pkg > .toolbar .btn.is-on { background: var(--brand-soft); border-color: color-mix(in srgb, var(--brand) 45%, var(--border)); color: var(--brand); }
+
+/* ---------- กลุ่มเรท = การ์ด ---------- */
+@media (min-width: 601px) {
+  .ad-pkg > .rate-section,
+  .ad-pkg > .rate-section:first-of-type {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: baseline;
+    margin: 0;
+    padding: 0;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 0.875rem;
+    overflow: hidden;
+  }
+  .ad-pkg > .rate-section > h2 {
+    margin: 0;
+    padding: 0.875rem 1.25rem 0.75rem;
+    font-family: var(--font-heading);
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: var(--heading);
+  }
+  .ad-pkg > .rate-section > h2 .muted { margin-left: 0.25rem; font-family: inherit; font-size: 0.875rem; font-weight: 400; color: var(--muted); }
+  /* คำอธิบายเกรด — ชิดขวาบนบรรทัดเดียวกับชื่อกลุ่ม */
+  .ad-pkg > .rate-section > .grade-desc { margin: 0; padding: 0 1.25rem 0 1rem; justify-self: end; text-align: right; font-size: 0.875rem; color: var(--muted); }
+  .ad-pkg > .rate-section > .table-wrap,
+  .ad-pkg > .rate-section > .muted { grid-column: 1 / -1; margin: 0; }
+  .ad-pkg > .rate-section > p.muted { padding: 0 1.25rem 1rem; }
+  .ad-pkg > .rate-section > .table-wrap { max-height: none; overflow-x: auto; overflow-y: visible; }
+  .ad-pkg > .rate-section > .table-wrap > .table { border: 0; border-radius: 0; }
+}
+
+/* ---------- ตารางเรท ---------- */
+@media (min-width: 601px) {
+  .ad-pkg .rate-table { font-size: 0.9375rem; }
+  .ad-pkg .rate-col-format { width: 14.375rem; }
+  .ad-pkg .rate-table th,
+  .ad-pkg .rate-table td { text-align: left; padding: 0.625rem 1rem; vertical-align: middle; border-color: var(--divider); }
+  .ad-pkg .rate-table > thead > tr > th {
+    position: static;
+    height: 2.875rem;
+    padding-block: 0;
+    background: var(--surface-2);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--muted);
+    border-bottom: 0;
+  }
+  .ad-pkg .rate-table > thead > tr > th.rate-format-head { padding-inline: 1.25rem; }
+  .ad-pkg .rate-table > thead > tr > th.tier-head,
+  .ad-pkg .rate-table > thead > tr > th.tier-head.tier-CG,
+  .ad-pkg .rate-table > thead > tr > th.tier-head.tier-NA,
+  .ad-pkg .rate-table > thead > tr > th.tier-head.tier-PN,
+  .ad-pkg .rate-table > thead > tr > th.tier-head.tier-RN {
+    background: var(--surface-2);
+    color: var(--muted);
+    letter-spacing: 0;
+    border-left: 1px solid var(--border);
+    box-shadow: inset 0 3px 0 var(--tier-c, var(--border));
+  }
+  .ad-pkg .rate-table th.tier-CG { --tier-c: var(--tier-CG); }
+  .ad-pkg .rate-table th.tier-NA { --tier-c: var(--tier-NA); }
+  .ad-pkg .rate-table th.tier-PN { --tier-c: var(--tier-PN); }
+  .ad-pkg .rate-table th.tier-RN { --tier-c: var(--tier-RN); }
+  .ad-pkg .rate-table th.tier-head > * { vertical-align: middle; }
+  .ad-pkg .rate-table th.tier-head > b { margin: 0 0.5rem; font-family: var(--font-heading); font-size: 0.875rem; font-weight: 600; color: var(--heading); }
+  .ad-pkg .rate-table th.tier-head > .tier-name { font-weight: 500; color: var(--muted); }
+  .ad-pkg .rate-table tbody td { border-top: 1px solid var(--divider); border-bottom: 0; }
+  .ad-pkg .rate-table tbody td[data-tier] { border-left: 1px solid var(--divider); }
+  .ad-pkg .rate-table td.rate-format { padding: 0.625rem 1.25rem; font-weight: 600; color: var(--heading); }
+}
+.ad-pkg .tier-dot { display: inline-block; width: 0.625rem; height: 0.625rem; border-radius: 3px; background: var(--tier-c, var(--muted)); }
+
+/* ช่องราคา (โหมดดู) */
+.ad-pkg .rate-price { font-weight: 400; }
+.ad-pkg .rate-price > .rate-code-row { margin-bottom: 0.25rem; line-height: 1; }
+.ad-pkg .rate-code {
+  display: inline-flex;
+  align-items: center;
+  height: 1.375rem;
+  padding: 0 0.5rem;
+  border-radius: 0.375rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  font-family: var(--font-heading);
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  color: var(--brand);
+}
+.ad-pkg .rate-amount { display: block; font-family: var(--font-heading); font-size: 1.0625rem; font-weight: 600; line-height: 1.5; color: var(--heading); font-variant-numeric: tabular-nums; }
+.ad-pkg .rate-disc { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.375rem; font-size: 0.75rem; line-height: 1.4; }
+.ad-pkg .rate-disc > .rate-was,
+.ad-pkg .rate-disc > .rate-cut { display: inline; font-size: inherit; }
+.ad-pkg .rate-staff { margin-top: 0.125rem; font-size: 0.75rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.ad-pkg td.rate-off { background: var(--surface-2); font-size: 0.8125rem; font-style: normal; color: var(--muted); }
+
+/* ช่องราคา (โหมดแก้) */
+@media (min-width: 601px) {
+  .ad-pkg .rate-table.is-editing { min-width: 64rem; }
+  .ad-pkg .rate-table.is-editing td[data-tier] { padding: 0.625rem; vertical-align: top; }
+  .ad-pkg .rate-table.is-editing td.rate-off { vertical-align: middle; text-align: center; }
+}
+.ad-pkg .rate-edit { gap: 0.375rem; }
+.ad-pkg .rate-edit-row { gap: 0.375rem; }
+.ad-pkg .rate-edit-row input.rate-code-input {
+  flex: 1;
+  height: 1.875rem;
+  min-height: 0;
+  padding: 0 0.5rem;
+  border-radius: 0.4375rem;
+  background: var(--surface-2);
+  font-family: var(--font-heading);
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  color: var(--brand);
+  text-align: left;
+}
+.ad-pkg .rate-edit-row > .btn.tiny.ghost { width: 1.875rem; height: 1.875rem; min-height: 0; padding: 0; border: 1px solid var(--field-border); border-radius: 0.4375rem; background: var(--surface); color: var(--muted); }
+.ad-pkg .rate-field {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  height: 2.25rem;
+  margin: 0;
+  padding: 0 0.4375rem;
+  border: 1px solid var(--field-border);
+  border-radius: 0.5rem;
+  background: var(--surface);
+  cursor: text;
+}
+.ad-pkg .rate-field:focus-within { border-color: var(--brand); box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 18%, transparent); }
+.ad-pkg .rate-field-label { flex: none; font-size: 0.6875rem; font-weight: 600; white-space: nowrap; color: var(--muted); }
+.ad-pkg .rate-edit-row .rate-field input {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+  height: auto;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  outline: none;
+  text-align: right;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--heading);
+  font-variant-numeric: tabular-nums;
+  -moz-appearance: textfield;
+}
+.ad-pkg .rate-field input::-webkit-outer-spin-button,
+.ad-pkg .rate-field input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.ad-pkg .rate-edit-row:nth-child(2) .rate-field:first-child input { font-weight: 600; }
+.ad-pkg .rate-net { font-size: 0.75rem; font-weight: 400; color: var(--text); text-align: left; font-variant-numeric: tabular-nums; }
+/* ช่องที่แก้แล้วยังไม่บันทึก — พื้นทองจางมาก + เส้นทองซ้าย */
+.ad-pkg .rate-table td.is-changed { background: color-mix(in srgb, var(--brand) 6%, var(--surface)); box-shadow: inset 3px 0 0 var(--brand); }
+/* ช่องที่ปิดอยู่ในโหมดแก้: ข้อความ + ปุ่มเส้นประ "+ เปิดช่องนี้" เรียงกลางช่อง */
+.ad-pkg .rate-off-label { display: block; margin: 0.5rem 0; font-size: 0.8125rem; color: var(--muted); }
+.ad-pkg .rate-open-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  min-height: 2.125rem;
+  margin-bottom: 0.5rem;
+  padding: 0 0.75rem 0 0.625rem;
+  border: 1px dashed var(--border-hover);
+  border-radius: 0.5625rem;
+  background: var(--surface);
+  color: var(--brand);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  font-style: normal;
+}
+.ad-pkg .rate-open-btn .ad-ico { width: 0.875rem; height: 0.875rem; }
+@media (min-width: 601px) {
+  .ad-pkg .rate-table.is-editing td.rate-format { vertical-align: top; padding-top: 1rem; }
+}
+
+/* ---------- แผงจัดการเกรด/รูปแบบ (เปิดจากปุ่ม "จัดการเกรด/รูปแบบ") — การ์ดสองใบเคียงกัน ---------- */
+/* selector ยาวเพื่อชนะกฎ ".packages-card > :not(.toolbar):not(…)" ของ index.css (ใส่ padding + เส้นบนให้ทุกอย่างในการ์ดแม่) */
+.ad-pkg > .pkg-manage,
+.packages-card.ad-pkg > .pkg-manage:not(.toolbar):not(.rate-section):not(.error):not(.notice):not(.packages-empty) { grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 1rem; margin: 0; padding: 0; border: 0; }
+@media (max-width: 1100px) { .ad-pkg > .pkg-manage { grid-template-columns: minmax(0, 1fr); } }
+.ad-pkg .pkg-manage > .set-card { padding: 1.125rem 1.25rem 1.25rem; border-radius: 1rem; }
+.ad-pkg .pkg-manage .set-card-head { flex-wrap: nowrap; align-items: flex-start; margin-bottom: 0.875rem; }
+.ad-pkg .pkg-manage .set-card-title h3 { font-family: var(--font-heading); font-size: 1.125rem; font-weight: 600; }
+.ad-pkg .pkg-manage .set-card-tools { flex: none; padding-right: 0; }
+.ad-pkg .pkg-manage .set-add-btn { display: inline-flex; align-items: center; gap: 0.375rem; min-height: 2.25rem; margin: 0; padding: 0 0.875rem 0 0.625rem; border-radius: 0.5625rem; font-size: 0.875rem; font-weight: 500; }
+.ad-pkg .pkg-manage .set-add-btn .ad-ico { width: 1rem; height: 1rem; }
+/* แถวเกรด: เลขในวงกลมทองอ่อน · ชื่อ + ระดับการดูแล · คำอธิบาย · ลบ */
+.ad-pkg .pkg-manage .set-row { padding: 0.75rem 0.875rem; border-radius: 0.75rem; }
+.ad-pkg .pkg-manage .set-row-ico {
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  background: var(--brand-soft);
+  color: var(--brand);
+  font-family: var(--font-heading);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+.ad-pkg .pkg-manage .set-row-text strong { display: flex; align-items: center; flex-wrap: wrap; gap: 0.375rem; font-family: var(--font-heading); font-weight: 600; }
+.ad-pkg .pkg-manage .set-row-sub { font-size: 0.8125rem; line-height: 1.5; }
+.ad-pkg .pkg-level { margin-left: 0.125rem; padding: 0.0625rem 0.5rem; border-radius: 999px; background: var(--brand-soft); color: var(--brand); font-family: 'Anuphan', system-ui, sans-serif; font-size: 0.75rem; font-weight: 600; }
+.ad-pkg .pkg-group-head { margin: 0 0 0.5rem; font-size: 0.8125rem; font-weight: 600; color: var(--brand); }
+.ad-pkg .pkg-group-head .muted { font-weight: 400; color: var(--brand); }
+.ad-pkg .pkg-chip { margin-top: 0; padding: 0.0625rem 0.5rem; font-size: 0.75rem; font-weight: 600; }
+.ad-pkg .pkg-manage .set-row-text:has(.pkg-chip) { flex-direction: row; align-items: center; flex-wrap: wrap; gap: 0.5rem; }
+.ad-pkg .pkg-manage .format-days { display: inline-flex; align-items: center; gap: 0.5rem; font-size: 0.8125rem; }
+.ad-pkg .pkg-manage .format-days input { width: 5.25rem; height: 2.25rem; min-height: 0; text-align: center; }
+.ad-pkg .pkg-manage .btn.danger-ghost { min-height: 2.25rem; padding: 0 0.75rem; border-radius: 0.5625rem; }
+/* ฟอร์มเพิ่ม: กล่องเส้นประทอง พื้นทองจาง · หัวเล็ก · ช่องเรียงแถว · ปุ่มชิดขวา */
+.ad-pkg .pkg-manage .set-add {
+  margin-top: 0.875rem;
+  padding: 0.875rem 0.875rem 0.75rem;
+  gap: 0.5rem;
+  border: 1px dashed color-mix(in srgb, var(--brand) 45%, var(--border));
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, var(--brand) 5%, var(--surface));
+}
+.ad-pkg .pkg-manage .set-add > .set-add-title { flex: 1 0 100%; margin: 0 0 0.125rem; font-size: 0.8125rem; font-weight: 600; color: var(--heading); }
+.ad-pkg .pkg-manage .set-add > input { flex: 1 1 9rem; min-width: 0; height: 2.75rem; }
+.ad-pkg .pkg-manage .set-add > select { flex: 0 1 9rem; height: 2.75rem; }
+.ad-pkg .pkg-manage .set-add > .checkbox-row { display: inline-flex; align-items: center; gap: 0.375rem; font-size: 0.875rem; }
+.ad-pkg .pkg-manage .set-add > .btn { order: 3; min-height: 2.5rem; }
+.ad-pkg .pkg-manage .set-add > .btn[type="button"] { order: 2; margin-left: auto; }
+.ad-pkg .pkg-manage .set-add > .btn.primary:disabled { background: var(--brand-soft); border-color: transparent; color: var(--brand); opacity: 1; }
+
+/* =====================================================================================
+   5) แพ็คเกจกายภาพบำบัด (.list-card.ad-physio) — หัว hero + ปุ่มบนพื้น · ตารางเป็นการ์ด
+   ตัวเลขชิดขวา · ราคาสุทธิตัวเข้ม (เดิมแดง) + "ลด ฿…" แดงเล็กข้างล่าง · แถวปิดขายพื้นเทาจาง
+   ===================================================================================== */
+@media (min-width: 601px) {
+  .list-card.ad-physio,
+  :is(.content, .content > .pull-zone > .pull-content) > .list-card.ad-physio {
+    display: flex;
+    flex-direction: column;
+    background: none;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    overflow: visible;
+  }
+  .list-card.ad-physio > .toolbar { margin: 0 0 1.125rem; padding: 0; gap: 1rem; align-items: flex-end; background: none; border: 0; }
+  .list-card.ad-physio > .toolbar .toolbar-action {
+    align-self: center;
+    margin-right: 0;
+    min-height: 2.75rem;
+    padding: 0 1.25rem 0 1rem;
+    gap: 0.5rem;
+    border-radius: 0.625rem;
+    font-size: 0.9375rem;
+    font-weight: 600;
+  }
+  .list-card.ad-physio > .table-wrap {
+    flex: 1 1 auto;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 0.875rem;
+  }
+  .list-card.ad-physio > .table-wrap > .table { border: 0; border-radius: 0; }
+  .ad-physio .physio-table thead th {
+    height: 2.75rem;
+    background: var(--surface-2);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--muted);
+    border-bottom: 1px solid var(--border);
+  }
+  .ad-physio .physio-table th,
+  .ad-physio .physio-table td { padding-inline: 1.25rem; border-left: 0; border-color: var(--divider); }
+  .ad-physio .physio-table tbody td { height: 3.625rem; color: var(--heading); }
+  /* คอลัมน์ตัวเลข + จัดการ ชิดขวา (หัวคอลัมน์ด้วย) */
+  .ad-physio .physio-table :is(th, td):nth-child(n+3) { text-align: right; }
+  .ad-physio .physio-table td.physio-was { color: var(--muted); }
+  .ad-physio .physio-table td.physio-special { font-family: var(--font-heading); font-size: 1rem; font-weight: 600; color: var(--heading); }
+  .ad-physio .physio-table td.physio-special .cell-sub { font-family: 'Anuphan', system-ui, sans-serif; font-size: 0.75rem; font-weight: 600; color: var(--danger); }
+  .ad-physio .physio-table td:is(.physio-avg, .physio-english, .physio-pay) { font-weight: 500; }
+  .ad-physio .physio-table td .cell-sub { font-size: 0.8125rem; font-weight: 400; color: var(--muted); }
+  .ad-physio .physio-table :is(th, td) { padding-inline: 0.875rem; }
+  .ad-physio .physio-table :is(th, td):first-child { padding-left: 1.25rem; }
+  .ad-physio .physio-table :is(th, td):last-child { padding-right: 1.25rem; }
+  .ad-physio .physio-table thead th { white-space: normal; line-height: 1.3; }
+  .ad-physio .physio-table td.physio-actions { width: 1%; white-space: nowrap; }
+  .ad-physio .physio-table td.physio-actions .btn { min-height: 2.25rem; padding: 0 0.75rem; margin-left: 0.375rem; border-radius: 0.5625rem; }
+  .ad-physio .physio-table tr.is-inactive { opacity: 1; background: var(--surface-2); }
+  .ad-physio .physio-table tr.is-inactive > td:not(.physio-actions) { color: var(--muted); }
+}
+/* หัว hero ของหน้า: ไอคอน 48 กรอบทองอ่อน · ชื่อ Prompt 28 · คำอธิบาย 15 */
+.ad-physio .page-hero { gap: 1rem; align-items: center; }
+.ad-physio .page-hero-icon { width: 3rem; height: 3rem; border-radius: 0.75rem; background: var(--brand-soft); color: var(--brand); }
+.ad-physio .page-hero-title { font-family: var(--font-heading); font-size: 1.75rem; font-weight: 600; letter-spacing: 0; color: var(--heading); }
+.ad-physio .page-hero .muted { margin: 0.25rem 0 0; font-size: 0.9375rem; color: var(--muted); }
+.ad-physio .physio-code .pkg-code { font-family: var(--font-heading); font-size: 0.875rem; font-weight: 500; letter-spacing: 0.02em; color: var(--brand); }
+.ad-physio .physio-name { color: var(--heading); }
+.ad-physio .physio-name .muted-badge { margin-left: 0.5rem; padding: 0.0625rem 0.5rem; border-radius: 999px; background: var(--brand-soft); color: var(--brand); font-size: 0.75rem; font-weight: 600; }
+.ad-physio .physio-name .cell-sub { font-weight: 400; }
+@media (max-width: 600px) {
+  .ad-physio .page-hero .muted { font-size: 0.8125rem; }
+}
+
+/* ---------- popup เพิ่ม/แก้แพ็คเกจกายภาพ ---------- */
+@media (min-width: 601px) {
+  .ad-physio-grid.grid { grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 1rem; }
+  .ad-physio-grid > * { grid-column: 1 / -1; }
+  .ad-physio-grid > .pf-code { grid-column: span 2; }
+  .ad-physio-grid > .pf-name { grid-column: span 4; }
+  .ad-physio-grid > .pf-code .form-hint { white-space: nowrap; }
+  .ad-physio-grid > .pf-half { grid-column: span 3; }
+  .ad-physio-grid > .pf-third { grid-column: span 2; }
+  .ad-physio-grid > .pf-full { grid-column: 1 / -1; }
+}
+.ad-physio-grid label { font-size: 0.875rem; font-weight: 500; color: var(--heading); }
+.ad-physio-grid label .form-hint { font-size: 0.8125rem; font-weight: 400; }
+.ad-physio-grid > .pf-sep { grid-column: 1 / -1; width: 100%; margin: 0; border: 0; border-top: 1px solid var(--divider); }
+/* ตัวเลขยืนยันก่อนบันทึก: ช่องติดกันในกรอบเดียว · ราคาสุทธิพื้นทองอ่อนตัวใหญ่ */
+.ad-physio-grid > .physio-preview {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 1fr 1.5fr 1.3fr 1.3fr;
+  gap: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.ad-physio-grid > .physio-preview > div { gap: 0.25rem; padding: 0.75rem 1rem; border-left: 1px solid var(--border); }
+.ad-physio-grid > .physio-preview > div:first-child { border-left: 0; }
+.ad-physio-grid > .physio-preview > div:has(.net-price) { background: var(--brand-soft); }
+.ad-physio-grid > .physio-preview .field-label { font-size: 0.75rem; font-weight: 500; color: var(--muted); }
+.ad-physio-grid > .physio-preview strong { font-family: var(--font-heading); font-size: 1.0625rem; font-weight: 600; color: var(--heading); }
+.ad-physio-grid > .physio-preview .net-price { font-size: 1.375rem; color: var(--brand); }
+@media (max-width: 600px) {
+  .ad-physio-grid > .physio-preview { grid-template-columns: 1fr 1fr; }
+  .ad-physio-grid > .physio-preview > div:nth-child(3) { border-left: 0; }
+  .ad-physio-grid > .physio-preview > div:nth-child(n+3) { border-top: 1px solid var(--border); }
+}
+.ad-physio-grid.grid > label.checkbox-row { grid-column: 1 / -1; font-size: 0.875rem; font-weight: 500; color: var(--heading); }
+
+/* =====================================================================================
+   6) โครงหน้าตั้งค่า (SettingsShell: .set-shell / .set-nav / .set-pane-head)
+   + หมวดหมู่ (CategoryManager — หน้าหัตถการ/อุปกรณ์ .catalog-page และแผงเหตุผลยกเลิก/เหตุการณ์ใน .set-main)
+   การ์ดหมวดหลัก = หัวการ์ด + แถวหมวดย่อยคั่นด้วยเส้นจาง (เดิมแต่ละแถวเป็นกล่องมีกรอบ)
+   กฎการ์ดผูกกับ ":is(.set-main, .catalog-page) > .set-card" — ไม่โดนการ์ดในหน้าที่ฝังไว้ (.set-embed) หรือแผงจัดการแพ็คเกจ
+   ===================================================================================== */
+/* เมนูซ้าย: การ์ดขาวมุม 16 · รายการสูง 40 มุม 10 · ตัวที่เลือก = พื้นทองอ่อน ตัวทองเข้ม (ไม่มีเส้นซ้าย) */
+.set-shell { grid-template-columns: 15.5rem minmax(0, 1fr); gap: 1.5rem; }
+.set-shell > .set-nav {
+  padding: 0.875rem 0.75rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  gap: 0.75rem;
+}
+.set-shell .set-nav-head { margin: 0.25rem 0.75rem 0.25rem; font-size: 0.75rem; font-weight: 600; letter-spacing: 0.04em; color: var(--muted); }
+.set-shell .set-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  min-height: 2.5rem;
+  padding: 0 0.75rem;
+  border: 0;
+  border-left: 0;
+  border-radius: 0.625rem;
+  font-size: 0.9375rem;
+  color: var(--text);
+}
+.set-shell .set-nav-item.is-on { background: var(--brand-soft); color: var(--brand); font-weight: 600; }
+.set-shell .set-nav-item > svg { width: 1.125rem; height: 1.125rem; flex: none; }
+/* หัวแผงขวา: ชื่อ Prompt 22 · คำอธิบาย 15 */
+.set-pane-head h2 { font-family: var(--font-heading); font-size: 1.375rem; font-weight: 600; color: var(--heading); }
+.set-pane-head p { margin-top: 0.25rem; font-size: 0.9375rem; color: var(--muted); }
+.set-pane-head > .btn { display: inline-flex; align-items: center; gap: 0.5rem; }
+.set-main { gap: 1rem; }
+
+/* หน้าหัตถการ/อุปกรณ์ — หัวแผงเป็นหัวหน้า (ชื่อ 28 + ปุ่มทอง) · ตัวกรองวางบนพื้น */
+.catalog-page { display: flex; flex-direction: column; gap: 0.625rem; }
+.catalog-page > .set-pane-head { align-items: flex-end; margin-bottom: 0.5rem; }
+.catalog-page > .set-pane-head h2 { font-size: 1.75rem; line-height: 1.2; }
+.catalog-page > .set-pane-head > .btn { min-height: 2.75rem; padding: 0 1.25rem 0 1rem; background: var(--brand); border-color: var(--brand); color: var(--brand-ink); font-weight: 600; }
+.catalog-page > .set-pane-head > .btn:hover:not(:disabled) { background: var(--brand-hover); border-color: var(--brand-hover); }
+:is(.set-main, .catalog-page) > .set-filter { margin: 0 0 0.375rem; padding: 0; gap: 0.625rem; background: none; border: 0; box-shadow: none; }
+:is(.set-main, .catalog-page) > .set-filter .set-filter-search input { height: 2.75rem; padding-left: 2.625rem; border-radius: 0.625rem; }
+:is(.set-main, .catalog-page) > .set-filter .set-filter-search svg { left: 0.875rem; width: 1.125rem; height: 1.125rem; }
+:is(.set-main, .catalog-page) > .set-filter > select { flex: 0 0 16.25rem; height: 2.75rem; }
+.catalog-page > .set-foot { margin-top: 0.25rem; padding-left: 0.25rem; font-size: 0.8125rem; color: var(--muted); }
+
+/* ---------- การ์ดหมวดหลัก ---------- */
+:is(.set-main, .catalog-page) > .set-card:has(> .set-card-head) {
+  padding: 0;
+  border-radius: 1rem;
+  overflow: hidden;
+}
+:is(.set-main, .catalog-page) > .set-card > .set-card-head {
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 1rem;
+  margin: 0;
+  padding: 1rem 1.25rem;
+}
+:is(.set-main, .catalog-page) > .set-card .set-card-title h3 { display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem 0.625rem; font-family: var(--font-heading); font-size: 1.0625rem; font-weight: 600; }
+:is(.set-main, .catalog-page) > .set-card .set-card-title p { margin-top: 0.1875rem; font-size: 0.8125rem; }
+/* รหัสหมวด = ป้ายกรอบเล็ก */
+:is(.set-main, .catalog-page) > .set-card .set-code {
+  display: inline-flex;
+  align-items: center;
+  height: 1.375rem;
+  margin: 0;
+  padding: 0 0.5rem;
+  border-radius: 0.375rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  font-family: var(--font-heading);
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  color: var(--brand);
+}
+:is(.set-main, .catalog-page) > .set-card .set-card-tools { flex: none; flex-wrap: nowrap; padding-right: 0; }
+:is(.set-main, .catalog-page) > .set-card .btn.tiny { min-height: 2.25rem; padding: 0 0.875rem; border-radius: 0.5625rem; font-size: 0.875rem; }
+:is(.set-main, .catalog-page) > .set-card .set-add-btn { margin-right: 0; }
+:is(.set-main, .catalog-page) > .set-card .set-switch { font-size: 0.875rem; font-weight: 600; }
+:is(.set-main, .catalog-page) > .set-card .set-empty,
+:is(.set-main, .catalog-page) > .set-card > .set-add { margin: 0; padding: 0.875rem 1.25rem; border-top: 1px solid var(--divider); }
+/* การ์ดที่พับได้ (หัตถการ/อุปกรณ์): ลูกศรในกรอบ 32 ซ้ายสุด คร่อมชื่อ + คำอธิบาย · กางแล้วกรอบทองอ่อน การ์ดมีเงา */
+:is(.set-main, .catalog-page) > .set-card .set-card-title:has(> .set-fold-btn) { position: relative; min-height: 2.5rem; padding-left: 2.625rem; }
+.set-fold-box {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 0.5rem;
+  transform: translateY(-50%);
+  color: var(--muted);
+}
+.set-fold-box .set-fold-ico { width: 1.125rem; height: 1.125rem; }
+:is(.set-main, .catalog-page) > .set-card:not(.is-folded) .set-fold-box { background: var(--brand-soft); color: var(--brand); }
+:is(.set-main, .catalog-page) > .set-card:not(.is-folded) .set-fold-box .set-fold-ico { color: inherit; }
+:is(.set-main, .catalog-page) > .set-card:has(.set-fold-btn) > .set-card-head { padding: 0.75rem 1.25rem 0.75rem 0.875rem; }
+:is(.set-main, .catalog-page) > .set-card:has(.set-fold-btn):not(.is-folded) { border-color: color-mix(in srgb, var(--brand) 30%, var(--border)); box-shadow: 0 2px 10px rgb(31 28 23 / 5%); }
+.set-fold-btn h3 { color: var(--heading); }
+
+/* ---------- แถวหมวดย่อย: ไม่มีกรอบ คั่นด้วยเส้น · เลขในกล่อง (แคตตาล็อก) / วงกลมทองอ่อน (เหตุผล) ---------- */
+:is(.set-main, .catalog-page) > .set-card > .set-rows { gap: 0; padding: 0; }
+:is(.set-main, .catalog-page) > .set-card > .set-rows > .set-row {
+  padding: 0.625rem 1.25rem;
+  min-height: 3.5rem;
+  border: 0;
+  border-top: 1px solid var(--divider);
+  border-radius: 0;
+  background: none;
+}
+:is(.set-main, .catalog-page) > .set-card > .set-rows > .set-row:hover { border-color: var(--divider); }
+:is(.set-main, .catalog-page) > .set-card .set-row-ico {
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  background: var(--brand-soft);
+  color: var(--brand);
+  font-family: var(--font-heading);
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+:is(.set-main, .catalog-page) > .set-card .set-row-text strong { font-weight: 600; }
+:is(.set-main, .catalog-page) > .set-card .set-row-sub { font-size: 0.75rem; }
+/* แคตตาล็อก: เยื้องเข้าใต้ชื่อหมวดหลัก · เลขในกล่องสี่เหลี่ยมพื้นเทา */
+.catalog-page > .set-card > .set-rows { margin: 0 1.25rem 0.5rem 3.5rem; }
+.catalog-page > .set-card > .set-rows > .set-row { padding-inline: 0; }
+.catalog-page > .set-card > .set-rows > .set-row .set-row-ico,
+.set-main > .set-card > .set-rows > .set-row.is-catalog .set-row-ico {
+  border-radius: 0.5rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+.catalog-page .set-row-sub,
+.set-main .set-row.is-catalog .set-row-sub { font-size: 0.8125rem; }
+.set-fold-link { font-weight: 600; color: var(--brand); }
+@media (max-width: 900px) {
+  .catalog-page > .set-pane-head h2 { font-size: 1.5rem; }
+  :is(.set-main, .catalog-page) > .set-card > .set-card-head { flex-wrap: wrap; padding: 0.875rem; }
+  :is(.set-main, .catalog-page) > .set-card .set-card-tools { flex-wrap: wrap; width: 100%; }
+  :is(.set-main, .catalog-page) > .set-card > .set-rows > .set-row { padding-inline: 0.875rem; }
+  .catalog-page > .set-card > .set-rows { margin: 0 0.875rem 0.5rem; }
+  .catalog-page > .set-card > .set-rows > .set-row { padding-inline: 0; }
+  :is(.set-main, .catalog-page) > .set-filter > select { flex: 1 1 100%; }
+}
+
+/* =====================================================================================
+   7) หน้าตั้งค่า (SettingsPage) — การแสดงผล: เลือกธีมด้วยการ์ดตัวอย่างหน้าจอ (จอคอม) / ปุ่มคู่เต็มกว้าง (มือถือ)
+   ปุ่มเดิมสองตัว (สว่าง/กลางคืน) · ตัวที่ใช้อยู่ = aria-pressed="true"
+   สีในภาพตัวอย่างตั้งตายตัวโดยตั้งใจ — มันคือ "ภาพของธีมนั้น" ต้องเหมือนเดิมไม่ว่าตอนนี้อยู่โหมดไหน
+   ===================================================================================== */
+.page-head.ad-head { position: static; width: auto; height: auto; overflow: visible; clip-path: none; }
+.set-shell .set-card { border-radius: 1rem; }
+.ad-theme-card { padding: 1.5rem; }
+.ad-theme-card > .setting-row { flex-direction: column; align-items: stretch; gap: 1rem; }
+.ad-theme-card > .setting-row strong { font-family: var(--font-heading); font-size: 1.125rem; font-weight: 600; color: var(--heading); }
+.ad-theme-card > .setting-row p { margin-top: 0.25rem; font-size: 0.875rem; }
+.ad-theme-ico { display: none; }
+.ad-theme-card .theme-toggle { gap: 1rem; flex-wrap: wrap; }
+.ad-theme-card .theme-toggle > .btn,
+.ad-theme-card .theme-toggle > .btn.primary {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.75rem;
+  width: 19.125rem;
+  max-width: 100%;
+  height: auto;
+  min-height: 0;
+  padding: 0.75rem;
+  background: var(--surface);
+  border: 2px solid var(--border);
+  border-radius: 0.875rem;
+  color: var(--heading);
+  box-shadow: none;
+}
+.ad-theme-card .theme-toggle > .btn:hover:not(:disabled) { background: var(--surface); border-color: var(--border-hover); }
+.ad-theme-card .theme-toggle > .btn[aria-pressed="true"] { border-color: var(--brand); box-shadow: 0 0 0 4px var(--brand-soft); }
+.ad-theme-label { display: inline-flex; align-items: center; gap: 0.5rem; font-size: 0.9375rem; font-weight: 600; }
+.ad-theme-label svg { width: 1.125rem; height: 1.125rem; }
+.ad-theme-card .theme-toggle > .btn { position: relative; }
+.ad-theme-on {
+  position: absolute;
+  right: 0.75rem;
+  bottom: 0.75rem;
+  display: none;
+  align-items: center;
+  gap: 0.25rem;
+  height: 1.5rem;
+  padding: 0 0.625rem;
+  border-radius: 999px;
+  background: var(--brand-soft);
+  color: var(--brand);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+.ad-theme-on svg { width: 0.875rem; height: 0.875rem; }
+.ad-theme-card .theme-toggle > .btn[aria-pressed="true"] .ad-theme-on { display: inline-flex; }
+/* ภาพตัวอย่างหน้าจอ: แถบซ้าย (โลโก้ + เมนู) · แถบหัว · การ์ด (สองบรรทัด + ปุ่มทอง) */
+.ad-theme-preview {
+  --p-bg: #f6f5f2; --p-side: #ffffff; --p-line: #e8e4dc; --p-card: #ffffff; --p-gold: #8e6516; --p-active: #c9b48a;
+  position: relative;
+  display: block;
+  height: 8.25rem;
+  border-radius: 0.625rem;
+  border: 1px solid var(--p-line);
+  background: var(--p-bg);
+  overflow: hidden;
+}
+.ad-theme-preview.is-dark { --p-bg: #1f1c17; --p-side: #2a2620; --p-line: #3a352d; --p-card: #2a2620; --p-gold: #c9a24a; --p-active: #8a7543; }
+.ad-theme-preview > i { position: absolute; display: block; }
+.ad-theme-preview > i:nth-child(1) {
+  left: 0; top: 0; bottom: 0; width: 3.5rem;
+  background:
+    linear-gradient(var(--p-gold), var(--p-gold)) 0.625rem 0.625rem / 0.875rem 0.875rem no-repeat,
+    linear-gradient(var(--p-line), var(--p-line)) 0.625rem 2.5rem / 2.25rem 0.4375rem no-repeat,
+    linear-gradient(var(--p-active), var(--p-active)) 0.625rem 3.375rem / 2.25rem 0.4375rem no-repeat,
+    linear-gradient(var(--p-line), var(--p-line)) 0.625rem 4.25rem / 2.25rem 0.4375rem no-repeat,
+    linear-gradient(var(--p-line), var(--p-line)) 0.625rem 5.125rem / 2.25rem 0.4375rem no-repeat,
+    var(--p-side);
+  border-right: 1px solid var(--p-line);
+}
+.ad-theme-preview > i:nth-child(2) { left: 4.25rem; top: 0.75rem; width: 7.5rem; height: 0.5rem; border-radius: 0.25rem; background: var(--p-line); }
+.ad-theme-preview > i:nth-child(3) { left: 4.25rem; right: 0.75rem; top: 1.875rem; bottom: 0.75rem; border-radius: 0.375rem; background: var(--p-card); border: 1px solid var(--p-line); }
+.ad-theme-preview > i:nth-child(4) {
+  left: 5rem; top: 2.75rem; width: 9.5rem; height: 0.375rem; border-radius: 0.25rem; background: var(--p-line);
+  box-shadow: 0 0.75rem 0 0 var(--p-line);
+}
+.ad-theme-preview > b { position: absolute; left: 5rem; bottom: 1.5rem; width: 2.75rem; height: 1rem; border-radius: 0.25rem; background: var(--p-gold); }
+.ad-theme-note { display: flex; align-items: center; gap: 0.5rem; margin: 1rem 0 0; font-size: 0.8125rem; color: var(--muted); }
+.ad-theme-note svg { width: 1rem; height: 1rem; flex: none; }
+
+/* มือถือ: ไอคอนพระจันทร์ในกรอบทองอ่อน + ชื่อ · ปุ่มคู่เต็มกว้างบนแถบเทา (ตัวที่เลือก = ทองเต็ม) */
+@media (max-width: 600px) {
+  .ad-theme-card { padding: 1rem; }
+  .ad-theme-card > .setting-row { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; column-gap: 0.75rem; row-gap: 1rem; }
+  .ad-theme-ico { display: grid; place-items: center; width: 2.5rem; height: 2.5rem; border-radius: 0.625rem; background: var(--brand-soft); color: var(--brand); }
+  .ad-theme-ico svg { width: 1.25rem; height: 1.25rem; }
+  .ad-theme-card > .setting-row strong { font-size: 1rem; }
+  .ad-theme-card > .setting-row p { margin-top: 0; font-size: 0.8125rem; }
+  .ad-theme-card .theme-toggle { grid-column: 1 / -1; flex-wrap: nowrap; gap: 0.25rem; padding: 0.25rem; border-radius: 0.75rem; background: var(--surface-2); border: 1px solid var(--border); }
+  .ad-theme-card .theme-toggle > .btn,
+  .ad-theme-card .theme-toggle > .btn.primary {
+    flex: 1 1 0;
+    width: auto;
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    min-height: 3.25rem;
+    padding: 0 0.75rem;
+    border: 0;
+    border-radius: 0.5625rem;
+    background: transparent;
+    color: var(--text);
+    box-shadow: none;
+  }
+  .ad-theme-card .theme-toggle > .btn[aria-pressed="true"],
+  .ad-theme-card .theme-toggle > .btn[aria-pressed="true"]:hover:not(:disabled) { background: var(--brand); color: var(--brand-ink); box-shadow: 0 1px 3px rgb(31 28 23 / 15%); }
+  .ad-theme-card .theme-toggle > .btn:hover:not(:disabled) { background: transparent; }
+  .ad-theme-preview, .ad-theme-card .ad-theme-on, .ad-theme-card .theme-toggle > .btn[aria-pressed="true"] .ad-theme-on, .ad-theme-note { display: none; }
+}
+
+/* แผงตั้งค่าอื่นๆ (แอปบนมือถือ · รหัสผ่าน · ช่วยเหลือ) — การ์ดขาวมุม 16 ระยะใน 24 */
+.set-main > .set-card:not(:has(> .set-card-head)) { padding: 1.5rem; }
+@media (max-width: 600px) { .set-main > .set-card:not(:has(> .set-card-head)) { padding: 1rem; } }
+
+/* จอแคบ — หน้าตั้งค่า (ไม่มีตัวกรอง): ช่องเลือกหมวดอยู่บนสุดแบบไม่มีกรอบ + เส้นคั่น แล้วจึงหัวแผง (ดีไซน์ field-settings) */
+@media (max-width: 900px) {
+  :is(.content, .content > .pull-zone > .pull-content) > .page-head.ad-head { margin-inline: 0; padding-inline: 0; }
+  .set-shell:not(:has(> .set-main > .set-filter)) > .set-picker {
+    order: -5;
+    padding: 0 0 1rem;
+    background: none;
+    border: 0;
+    border-bottom: 1px solid var(--border);
+    border-radius: 0;
+  }
+  .set-shell:not(:has(> .set-main > .set-filter)) .set-picker-label { font-size: 0.8125rem; font-weight: 600; letter-spacing: 0; color: var(--heading); }
+  .set-shell:not(:has(> .set-main > .set-filter)) > .set-main > .set-pane-head { padding-inline: 0; }
+  .set-shell:not(:has(> .set-main > .set-filter)) > .set-main > .set-pane-head h2 { font-size: 1.25rem; }
+}
+
+/* =====================================================================================
+   8) คะแนนประเมินจากญาติ (.list-card.reviews-card.ad-reviews)
+   ตัวเลขสรุปสามใบเป็นการ์ดแยกบนพื้น · แถบค้นหา + ตารางอยู่การ์ดใบเดียวกัน · การ์ด "มีคะแนนแล้ว" มีแถบสัดส่วน
+   ===================================================================================== */
+@media (min-width: 601px) {
+  .list-card.ad-reviews,
+  :is(.content, .content > .pull-zone > .pull-content) > .list-card.ad-reviews {
+    display: flex;
+    flex-direction: column;
+    background: none;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    overflow: visible;
+  }
+  .ad-reviews > .tiles.review-tiles {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.875rem;
+    margin: 0 0 1rem;
+    padding: 0;
+    background: none;
+    border: 0;
+  }
+  .ad-reviews > .review-tiles > .tile,
+  .ad-reviews > .review-tiles > .tile.is-static:hover {
+    display: flex;
+    flex-direction: column;
+    gap: 0.375rem;
+    padding: 1.25rem 1.375rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 1rem;
+  }
+  .ad-reviews > .toolbar {
+    margin: 0;
+    padding: 0.875rem 1rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-bottom: 1px solid var(--divider);
+    border-radius: 1rem 1rem 0 0;
+  }
+  .ad-reviews > .toolbar > input.search { flex: 1 1 18rem; height: 2.75rem; }
+  .ad-reviews > .toolbar > select { flex: 0 0 11.875rem; width: 11.875rem; height: 2.75rem; }
+  .ad-reviews > .table-wrap,
+  .ad-reviews > .empty-state {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-top: 0;
+    border-radius: 0 0 1rem 1rem;
+  }
+  .ad-reviews > .table-wrap:first-child,
+  .ad-reviews > .tiles + .table-wrap,
+  .ad-reviews > .tiles + .empty-state { border-top: 1px solid var(--border); border-radius: 1rem; }
+  .ad-reviews > .table-wrap > .table { border: 0; border-radius: 0; }
+  .ad-reviews .table thead th { height: 2.75rem; background: var(--surface-2); font-size: 0.8125rem; font-weight: 600; color: var(--muted); }
+  .ad-reviews .table :is(th, td) { padding-inline: 1.25rem; border-left: 0; border-color: var(--divider); }
+  .ad-reviews .table tbody td { height: 3.5rem; color: var(--heading); }
+}
+.ad-reviews .tile-label { font-size: 0.875rem; color: var(--muted); }
+.ad-reviews .tile-value { font-family: var(--font-heading); font-size: 2rem; font-weight: 600; line-height: 1.15; color: var(--heading); }
+.ad-reviews .tile-frac { font-family: 'Anuphan', system-ui, sans-serif; font-size: 1rem; font-weight: 500; color: var(--text); }
+.ad-tile-bar { display: block; height: 0.375rem; margin-top: 0.375rem; border-radius: 999px; background: var(--divider); overflow: hidden; }
+.ad-tile-bar > span { display: block; height: 100%; border-radius: inherit; background: var(--brand); }
+/* ชื่อพนักงานสีทองตัวหนา · รหัส · ตำแหน่ง บรรทัดล่าง */
+.ad-reviews .name-cell .link { font-weight: 600; color: var(--brand); }
+.ad-reviews .name-cell .cell-sub { font-size: 0.8125rem; color: var(--muted); }
+.ad-reviews .name-cell .cell-sub .mono { font-family: inherit; }
+.ad-reviews .review-score-cell strong { font-family: var(--font-heading); font-weight: 600; color: var(--heading); }
+.ad-reviews .name-cell { display: flex; flex-wrap: wrap; align-items: center; gap: 0.125rem 0.5rem; }
+.ad-reviews .name-cell > .cell-sub { flex-basis: 100%; order: 2; margin: 0; }
+.ad-reviews .name-cell > .badge { margin: 0; }
+@media (min-width: 601px) {
+  .ad-reviews .table thead th { border-bottom: 1px solid var(--border); }
+  .ad-reviews .table tbody td,
+  .ad-reviews .table tbody tr:last-child td { border-bottom: 1px solid var(--divider); }
+}

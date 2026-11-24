@@ -165,7 +165,7 @@ export default function PayQueue({ reloadKey, openCase, onOpenCase }) {
             {filtering && (
               <button
                 type="button"
-                className="chip"
+                className="chip chip-filter"
                 onClick={clearRange}
                 title="เลิกกรองช่วงวันที่ แสดงทุกวัน"
               >
@@ -390,12 +390,15 @@ function PayModal({ row, busy, run, toast, onClose }) {
       >
         <header className="modal-head">
           <div>
-            <p className="mono muted">
-              {caseCode(row.case_id)}
-              {row.client_name && ` · ${row.client_name}`}
+            {/* ดีไซน์ v2: ป้ายสถานะ + รหัสเคสอยู่บรรทัดบน ชื่อพนักงานตัวใหญ่บรรทัดล่าง */}
+            <p className="muted pay-modal-meta">
+              <span className={`badge case-${caseStage(row).key}`}>{caseStage(row).label}</span>
+              <span className="mono">
+                {caseCode(row.case_id)}
+                {row.client_name && ` · ${row.client_name}`}
+              </span>
             </p>
             <h2>{row.worker_names || 'ยังไม่มีพนักงาน'}</h2>
-            <span className={`badge case-${caseStage(row).key}`}>{caseStage(row).label}</span>
           </div>
           <div className="modal-head-actions">
             <button className="modal-close" onClick={onClose} aria-label="ปิด">×</button>

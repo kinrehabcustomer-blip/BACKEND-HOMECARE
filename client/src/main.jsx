@@ -2,6 +2,13 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import './warm-clarity.css' // ชั้นดีไซน์ Warm Clarity — ลบบรรทัดนี้ = กลับหน้าตาเดิม
+// ดีไซน์ใหม่ v2 (23 พ.ย. 2569) แยกไฟล์ตามส่วน — ทับ warm-clarity ด้วยลำดับ · แตะหน้าตาอย่างเดียว
+import './v2/shell.css'
+import './v2/admin-ops.css'
+import './v2/admin-data.css'
+import './v2/field-partner.css'
+import './v2/popups-case.css'
+import './v2/popups-other.css'
 import App from './App.jsx'
 import { ToastProvider } from './toast.jsx'
 import { ConfirmProvider } from './components/ConfirmDialog.jsx'

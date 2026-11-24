@@ -589,7 +589,7 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
       <div
         /* ยังไม่ได้เลือกวิธีเก็บเงิน = ตัวเอกสารถูกซ่อนอยู่ เหลือแค่กล่องตัวเลือกสองใบ
            ความกว้าง 60rem ที่ไว้วางใบแจ้งหนี้จึงกลายเป็นที่ว่างรอบๆ กล่องเล็กๆ กลางจอ */
-        className={`modal modal-wide ${item?.needs_plan ? 'is-choosing' : ''}`}
+        className={`modal modal-wide inv-modal ${item?.needs_plan ? 'is-choosing' : ''}`}
         role="dialog"
         aria-modal="true"
         aria-label="ใบแจ้งหนี้"
@@ -604,8 +604,8 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
           <>
             <header className="modal-head no-print">
               <div>
-                <p className="mono muted">{item.invoice_id}</p>
-                <h2>{isReceipt ? 'ใบเสร็จรับเงิน' : 'ใบแจ้งหนี้'}</h2>
+                {/* ดีไซน์ v2: สถานะ + เลขที่ใบแถวบน แล้วค่อยหัวข้อ (ข้อมูลเดิม สลับลำดับ) */}
+                <div className="inv-head-top">
                 {/* รับมาบางส่วนแล้วเป็นสถานะที่คนดูต้องรู้ก่อนอย่างอื่น — สำคัญกว่า "ออกใบแล้ว"
                     แต่ยังไม่บังคับเหนือ "เกินกำหนด" ซึ่งเป็นเรื่องที่ต้องตามทวง */}
                 <span
@@ -619,6 +619,9 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                       ? 'ชำระบางส่วน'
                       : invoiceStatusLabel(item)}
                 </span>
+                <p className="mono muted">{item.invoice_id}</p>
+                </div>
+                <h2>{isReceipt ? 'ใบเสร็จรับเงิน' : 'ใบแจ้งหนี้'}</h2>
               </div>
               <div className="modal-head-actions">
                 {/* ไล่ดูทีละใบได้โดยไม่ต้องปิด-เปิดใหม่ (เฉพาะใบที่อยู่ในหน้ารายการปัจจุบัน) */}
@@ -1403,7 +1406,7 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
 
                   <div className="plan-options">
                     <div className="plan-option">
-                      <h4>จ่ายเต็มจำนวน</h4>
+                      <h4><span className="plan-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="5" y="3" width="14" height="18" rx="2" /><path d="M9 8h6M9 12h6M9 16h4" /></svg></span>จ่ายเต็มจำนวน</h4>
                       {/* ป้ายกำกับ + ตัวเลข วางตรงกับป้ายกำกับ + ช่องกรอกของการ์ดขวาแถวต่อแถว
                           สองใบจึงอ่านคู่กันได้ทีละบรรทัด ไม่ใช่สองก้อนที่บังเอิญวางข้างกัน */}
                       <div className="plan-figure">
@@ -1428,8 +1431,8 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                     {/* ใบรายครั้งแบ่งมัดจำไม่ได้ (server ปฏิเสธด้วย 409) — บรรทัดรายกะรวมเต็มยอดจะค้างอยู่ที่ใบมัดจำ
                         บอกเหตุผลแทนการโชว์ช่องกรอกที่กดแล้วยังไงก็ไม่ผ่าน */}
                     {item.has_items ? (
-                    <div className="plan-option">
-                      <h4>มัดจำก่อน แล้วเก็บส่วนที่เหลือ</h4>
+                    <div className="plan-option is-blocked">
+                      <h4><span className="plan-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 5h16M12 9v10M8 15l4 4 4-4" /></svg></span>มัดจำก่อน แล้วเก็บส่วนที่เหลือ</h4>
                       <p className="muted">
                         ใบนี้แตกเป็นรายครั้งตามกะที่ไปจริง จึงแบ่งมัดจำไม่ได้ — ถ้าต้องการเก็บมัดจำ
                         ให้ลบใบนี้แล้วออกใบแบบแพ็คเกจแทน
@@ -1437,7 +1440,7 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                     </div>
                     ) : (
                     <div className="plan-option">
-                      <h4>มัดจำก่อน แล้วเก็บส่วนที่เหลือ</h4>
+                      <h4><span className="plan-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 5h16M12 9v10M8 15l4 4 4-4" /></svg></span>มัดจำก่อน แล้วเก็บส่วนที่เหลือ</h4>
                       <label>
                         ยอดมัดจำ (บาท)
                         <input
@@ -1516,6 +1519,7 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
                   confirmLabel="ลบถาวร"
                   onConfirm={deleteInvoice}
                 >
+                  <LineIcon name="trash" className="text-ico" />
                   ลบใบนี้
                 </ConfirmButton>
               )}

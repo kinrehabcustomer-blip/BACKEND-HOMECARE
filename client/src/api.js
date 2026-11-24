@@ -26,11 +26,26 @@ const TIMEOUT_MS = 30_000;
 /** GET ที่กำลังรอคำตอบอยู่ — path → promise ของ { res, text } (ดูใน request) */
 const inflight = new Map();
 
+/* GET ที่ผู้เรียก "ขอเก็บไว้" (keep: ms) — path → { until, p } · ตรวจความเร็ว 24 พ.ย. 2569
+   ต่างจาก inflight ที่แชร์ได้เฉพาะตอนยิงพร้อมกัน: อันนี้ใช้คำตอบซ้ำได้อีกช่วงสั้นๆ หลังตอบแล้ว
+   เช่นเปิด popup เคส ตัวหน้าต่างยิงข้อมูลญาติ/รายงานล่วงหน้า ส่วนย่อยที่โผล่ทีหลังมาหยิบคำตอบเดียวกันไปใช้
+   เฉพาะเส้นที่ผู้เรียกขอเท่านั้น (opt-in) — เส้นอื่นทุกเส้นยิงใหม่เสมอเหมือนเดิม
+   มีการเขียนข้อมูลใดๆ จากเครื่องนี้ (POST/PATCH/PUT/DELETE) = ล้างทิ้งทั้งหมดทันที กดบันทึกแล้วเห็นของใหม่เสมอ
+   keptGen นับรอบการล้าง — GET ที่ยิงก่อนการเขียนแต่ตอบหลังจากนั้น ห้ามถูกเก็บ (อาจเป็นข้อมูลก่อนเขียน) */
+const kept = new Map();
+let keptGen = 0;
+const dropKept = () => {
+  kept.clear();
+  keptGen += 1;
+};
+
 /**
  * empty = true บอกว่า "เรียกอันนี้แล้วไม่มีอะไรให้คืนกลับมาก็ถูกแล้ว"
  * DELETE เป็นแบบนั้นโดยธรรมชาติอยู่แล้ว จึงไม่ต้องประกาศ (ดูเงื่อนไข 204 ด้านล่าง)
+ * keep = มิลลิวินาทีที่ให้คำขอ GET ถัดไปของเส้นเดียวกันใช้คำตอบนี้ซ้ำได้ (ดู kept ข้างบน)
+ * silent = 401 ไม่ต้องแจ้งว่าเซสชันหลุด — ใช้กับคำขอที่ยิงล่วงหน้าก่อนรู้ว่า login อยู่ไหม (lib/prefetch.js)
  */
-async function request(path, { empty = false, credentialCheck = false, ...options } = {}) {
+async function request(path, { empty = false, credentialCheck = false, keep = 0, silent = false, ...options } = {}) {
   /* พนักงานภาคสนามใช้งานจากมือถือ ซึ่งเข้าจุดอับสัญญาณ/ลิฟต์/ชั้นใต้ดินเป็นเรื่องปกติ
      ในจุดอับ request จะออกไปแล้วเงียบหายไปเลย ไม่ตอบและไม่ error
      ผลคือปุ่มค้างอยู่ที่ "กำลังบันทึก…" และ disabled ตลอดกาล กดซ้ำก็ไม่ได้
@@ -60,21 +75,37 @@ async function request(path, { empty = false, credentialCheck = false, ...option
        ไม่ใช่ cache: ตอบกลับแล้วลบทิ้งทันที คำขอถัดไปยิงใหม่เสมอ ข้อมูลไม่ค้างเก่า */
     let pending;
     if (!options.method || options.method === 'GET') {
-      pending = inflight.get(path);
-      if (!pending) {
-        const mine = fetchOnce();
-        pending = mine;
-        inflight.set(path, mine);
-        // ลบเฉพาะถ้ายังเป็นตัวเดิม — ระหว่างรออาจถูกล้างแล้วมีคำขอใหม่มาแทนที่ไปแล้ว
-        const done = () => inflight.get(path) === mine && inflight.delete(path);
-        mine.then(done, done);
+      const saved = kept.get(path);
+      if (saved && saved.until > Date.now()) {
+        pending = saved.p;
+      } else {
+        if (saved) kept.delete(path);
+        pending = inflight.get(path);
+        if (!pending) {
+          const mine = fetchOnce();
+          pending = mine;
+          inflight.set(path, mine);
+          // ลบเฉพาะถ้ายังเป็นตัวเดิม — ระหว่างรออาจถูกล้างแล้วมีคำขอใหม่มาแทนที่ไปแล้ว
+          const done = () => inflight.get(path) === mine && inflight.delete(path);
+          mine.then(done, done);
+        }
+      }
+      if (keep > 0) {
+        const p = pending;
+        const gen = keptGen;
+        // เก็บเฉพาะคำตอบที่สำเร็จ และไม่มีการเขียนข้อมูลเกิดขึ้นระหว่างรอ
+        p.then(({ res: r }) => {
+          if (r.ok && gen === keptGen) kept.set(path, { until: Date.now() + keep, p });
+        }, () => {});
       }
     } else {
       /* มีการเขียนข้อมูล = GET ที่ค้างอยู่อาจเป็นข้อมูลก่อนเขียน ห้ามให้คำขอใหม่ไปเกาะ
          ล้างทั้งตอนเริ่มและตอนเขียนเสร็จ (GET ที่ยิงระหว่างเขียนก็ยังเป็นของเก่าได้) */
       inflight.clear();
+      dropKept();
       pending = fetchOnce();
-      pending.then(() => inflight.clear(), () => inflight.clear());
+      const after = () => { inflight.clear(); dropKept(); };
+      pending.then(after, after);
     }
     ({ res, text } = await pending);
 
@@ -135,7 +166,7 @@ async function request(path, { empty = false, credentialCheck = false, ...option
          ("เซสชันหมดอายุ" / "บัญชีนี้ใช้งานไม่ได้แล้ว" เป็นคนละเรื่องที่ต้องทำคนละอย่าง)
          credentialCheck = การตรวจรหัสผ่านตอน login ซึ่ง 401 แปลว่า "กรอกผิด" ไม่ใช่ "เซสชันหลุด"
          เหมารวมจะกลายเป็นกรอกรหัสผิดแล้วโดนล้างเซสชันทิ้ง แล้วข้อความบอกผิดเรื่อง */
-      if (!credentialCheck) onUnauthorized?.(err.message);
+      if (!credentialCheck && !silent) onUnauthorized?.(err.message);
       throw err;
     }
 
@@ -185,6 +216,12 @@ async function uploadPublicImage(path, file) {
     clearTimeout(timer);
   }
 }
+
+/**
+ * ยิง GET ล่วงหน้าแล้วเก็บคำตอบไว้ให้ผู้ใช้จริงมาหยิบ (keep ms) — ไม่โยน error และ 401 ไม่ทำให้เด้งออก
+ * ผู้ใช้จริงยิงเส้นเดียวกันทีหลัง = ได้คำตอบนี้ทันที (หรือเกาะคำขอที่ยังวิ่งอยู่) · ใช้ใน lib/prefetch.js
+ */
+export const prefetchGet = (path, keep = 10_000) => request(path, { keep, silent: true }).catch(() => {});
 
 export const api = {
   login: (email, password) =>
@@ -384,7 +421,9 @@ export const api = {
   casePeriods: () => request('/cases/periods'),
   /** ข้อมูลกราฟหน้าภาพรวม — { today, visits[21 วัน], monthly[12 เดือน], workload[8 คน] } */
   caseDashboard: () => request('/cases/dashboard'),
-  assignableEmployees: () => request('/cases/assignable-employees'),
+  /* ใช้ชุดเดียวร่วมกันทั้งแอป 60 วินาที (ตรวจความเร็ว 24 พ.ย. 2569) — เดิมดึงใหม่ทุกหน้า/ทุกครั้งที่เปิดเคส
+     ตัวเลขเคสที่ถืออยู่เปลี่ยนเมื่อจับคู่/ยกเลิก: บันทึกอะไรจากเครื่องนี้แล้วล้างทันที (ดู kept) · คนอื่นแก้จากอีกเครื่อง ช้าไม่เกิน 1 นาที */
+  assignableEmployees: () => request('/cases/assignable-employees', { keep: 60_000 }),
 
   listCases: (params) => request(`/cases?${new URLSearchParams(params)}`),
   getCase: (id) => request(`/cases/${id}`),
@@ -482,6 +521,10 @@ export const api = {
   listInvoices: (params = {}) => request(`/invoices?${new URLSearchParams(params)}`),
   /** ใบแจ้งหนี้ทั้งชุดในช่วงวันที่ออก (issued_from/issued_to) + ตัวกรองเดียวกับรายการ — สำหรับ CSV · คืน { data, truncated } */
   exportInvoices: (params = {}) => request(`/invoices/export?${new URLSearchParams(params)}`),
+  /** CSV รายบรรทัด + เฉลี่ยตามช่วงบริการ — from/to = ช่วงที่เลือก (server/src/invoices/exportLines.js) */
+  exportInvoiceLines: (params = {}) => request(`/invoices/export-lines?${new URLSearchParams(params)}`),
+  /** รายงานภาษีขาย — { month: 'YYYY-MM' } หรือ { from, to } ช่วงวันที่ (server/src/invoices/salesTax.js) */
+  salesTaxReport: (params) => request(`/invoices/sales-tax?${new URLSearchParams(params)}`),
   /** ยอดสรุปใบแจ้งหนี้ — ส่งตัวกรองชุดเดียวกับ listInvoices เพื่อให้ตัวเลขตรงกับรายการที่แสดงอยู่ */
   invoiceSummary: (params = {}) => request(`/invoices/summary?${new URLSearchParams(params)}`),
   /**
@@ -601,7 +644,7 @@ export const api = {
 
   // วันนัดให้บริการของเคส — ทุกตัวคืน "รายการวันนัดล่าสุดทั้งหมด" กลับมา ไม่ต้องดึงซ้ำเอง
   listVisits: (id) => request(`/cases/${id}/visits`),
-  physioQuota: (id) => request(`/cases/${id}/physio-quota`),
+  physioQuota: (id, opts) => request(`/cases/${id}/physio-quota`, opts),
   physioAddons: (id) => request(`/cases/${id}/physio-addons`),
   /** รวมแพ็กกายภาพเสริมที่เปิดแยกไว้ เข้าเป็นส่วนหนึ่งของเคส Homecare (เก็บเงินในใบของ Homecare) */
   bundleIntoParent: (id) => request(`/cases/${id}/bundle`, { method: 'POST' }),
@@ -663,14 +706,14 @@ export const api = {
    * params: { month: 'YYYY-MM', type: 'abnormal'|'incident'|…, page, per_page }
    * คืน { data, page, per_page, total, has_more, months } — months ไว้ทำตัวเลือกดูย้อนหลัง
    */
-  listCaseReports: (id, params = {}) => request(`/cases/${id}/reports?${new URLSearchParams(params)}`),
+  listCaseReports: (id, params = {}, opts) => request(`/cases/${id}/reports?${new URLSearchParams(params)}`, opts),
   // ญาติที่ดูการดูแลผ่าน LINE (เชิญ/ปลด) — server/src/family/routes.js
-  familyLinks: (caseId) => request(`/family/cases/${caseId}`),
+  familyLinks: (caseId, opts) => request(`/family/cases/${caseId}`, opts),
   createFamilyInvite: (caseId) => request(`/family/cases/${caseId}/invites`, { method: 'POST', body: { consent: true } }),
   revokeFamilyLink: (caseId, linkId) => request(`/family/cases/${caseId}/links/${linkId}`, { method: 'DELETE' }),
-  familyMessages: (caseId) => request(`/family/cases/${caseId}/messages`),
+  familyMessages: (caseId, opts) => request(`/family/cases/${caseId}/messages`, opts),
   // LINE ของลูกค้าเจ้าของเคส (ทักสอบถามทาง OA Kin HomeCare) + ผูกเป็นญาติคนแรกโดยไม่ต้องส่งรหัส
-  caseCustomerLine: (caseId) => request(`/family/cases/${caseId}/customer-line`),
+  caseCustomerLine: (caseId, opts) => request(`/family/cases/${caseId}/customer-line`, opts),
   linkCustomerLine: (caseId) => request(`/family/cases/${caseId}/customer-line`, { method: 'POST', body: { consent: true } }),
   postFamilyMessage: (caseId, body) => request(`/family/cases/${caseId}/messages`, { method: 'POST', body }),
   hideFamilyMessage: (caseId, id) => request(`/family/cases/${caseId}/messages/${id}`, { method: 'DELETE' }),

@@ -56,10 +56,13 @@ export default function RevenueChart() {
 
       tooltip: {
         trigger: 'axis',
-        axisPointer: { type: 'line', lineStyle: { color: tokens.border } },
-        backgroundColor: tokens.surface,
-        borderColor: tokens.border,
-        textStyle: { color: tokens.text, fontFamily: tokens.font },
+        axisPointer: { type: 'line', lineStyle: { color: tokens.muted, type: 'dashed' } },
+        // ดีไซน์ v2: ป้ายชี้ค่าพื้นเข้ม ตัวหนังสือสว่าง (สลับตามธีมเองเพราะอ่านจากโทเคน)
+        backgroundColor: tokens.heading,
+        borderColor: tokens.heading,
+        padding: [6, 12],
+        extraCssText: 'border-radius: 8px; box-shadow: none;',
+        textStyle: { color: tokens.surface, fontFamily: tokens.font, fontSize: 13 },
         formatter: ([point]) => {
           const row = data[point.dataIndex];
           // รายได้เป็นเกณฑ์เงินสด (เงินที่รับจริงทุกงวด) — จำนวนใบ = ใบที่มีเงินเข้าในช่วงนั้น ไม่ใช่ใบที่ปิดยอด
@@ -113,7 +116,7 @@ export default function RevenueChart() {
   const current = BUCKETS.find((b) => b.key === bucket);
 
   return (
-    <section className="card">
+    <section className="card rev-card">
       <div className="card-head">
         <h2>รายได้ · {current.note}</h2>
 
@@ -149,6 +152,7 @@ export default function RevenueChart() {
           <EChart
             option={option}
             height={260}
+            className="rev-chart"
             ariaLabel={`กราฟรายได้${current.label} ${current.note} รวม ${formatBaht(result.total)}`}
           />
         </>

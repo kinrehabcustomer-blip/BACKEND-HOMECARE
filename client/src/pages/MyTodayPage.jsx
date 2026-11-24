@@ -266,7 +266,7 @@ function ShiftCard({ visit, busy, onCheckIn, onCheckOut, onReport }) {
             {visit.report_count > 0 ? 'รายงานอาการ' : 'บันทึกอาการ'}
           </button>
           {visit.state === 'scheduled' && (
-            <button className="btn primary" disabled={busy} onClick={onCheckIn}>เช็คอิน</button>
+            <button className="btn primary" disabled={busy} onClick={onCheckIn}><LineIcon name="check" className="btn-ico" />เช็คอิน</button>
           )}
           {canCheckOut && (
             <button className="btn primary" disabled={busy} onClick={() => setConfirming(true)}>

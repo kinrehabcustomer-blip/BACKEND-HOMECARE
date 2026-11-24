@@ -77,31 +77,35 @@ export default function RevenueBuPage() {
   const props = { d: data, tokens };
   return (
     <>
-      <h1 className="sr-only">รายได้ตาม BU</h1>
-
-      <div className="bu-filters" role="toolbar" aria-label="ช่วงเวลาและส่งออก">
-        <div className={`bu-range-ctl${tab.noRange ? ' is-off' : ''}`} title={tab.noRange ? 'แท็บลูกหนี้แสดงยอด ณ วันนี้ ไม่ขึ้นกับช่วงเวลา' : undefined}>
-          <button type="button" className="bu-step" onClick={() => step(-1)} aria-label="ช่วงก่อนหน้า" title="ช่วงก่อนหน้า">‹</button>
-          <RangePicker from={from} to={to} today={today} onApply={(f, t) => setRange({ from: f, to: t })} />
-          <button type="button" className="bu-step" onClick={() => step(1)} disabled={to >= today} aria-label="ช่วงถัดไป" title="ช่วงถัดไป">›</button>
+      {/* ดีไซน์ v2 (23 พ.ย. 2569): หัวหน้า = ชื่อหน้า + คำอธิบาย · ช่วงเวลาและปุ่ม CSV ชิดขวาในหัว · แท็บแบบเส้นใต้แถวถัดไป */}
+      <header className="page-head ops-head rbu-head">
+        <div>
+          <h1>รายได้ตาม BU</h1>
+          <p className="muted">รายได้ต่อ BU · เทียบช่วงก่อน ปีก่อน และเป้า</p>
         </div>
-      </div>
+        <div className="actions bu-filters" role="toolbar" aria-label="ช่วงเวลาและส่งออก">
+          <div className={`bu-range-ctl${tab.noRange ? ' is-off' : ''}`} title={tab.noRange ? 'แท็บลูกหนี้แสดงยอด ณ วันนี้ ไม่ขึ้นกับช่วงเวลา' : undefined}>
+            <button type="button" className="bu-step" onClick={() => step(-1)} aria-label="ช่วงก่อนหน้า" title="ช่วงก่อนหน้า">‹</button>
+            <RangePicker from={from} to={to} today={today} onApply={(f, t) => setRange({ from: f, to: t })} />
+            <button type="button" className="bu-step" onClick={() => step(1)} disabled={to >= today} aria-label="ช่วงถัดไป" title="ช่วงถัดไป">›</button>
+          </div>
+          <div className="bu-export-slot">
+            {/* ไอคอนไฟล์ CSV สีเขียว + "ดาวน์โหลด CSV" แบบเดียวกับทุกหน้า — ส่งออกแท็บที่เปิดอยู่ */}
+            <button type="button" className="btn" disabled={!data} onClick={exportCsv} title={`ส่งออกแท็บ "${tab.label}" เป็น CSV`}>
+              <LineIcon name="csv" className="btn-ico csv-ico" />ดาวน์โหลด CSV
+            </button>
+          </div>
+        </div>
+      </header>
 
-      {/* แถวแท็บ + ปุ่ม CSV ชิดขวา (ผู้ใช้ขอ 20 พ.ย. 2569 "ย้ายปุ่มดาวน์โหลด csv มาอยู่ตรงที่วง") */}
       <div className="rbu-tabbar">
         <div className="rbu-tabs">
-          <div className="seg" role="tablist" aria-label="หัวข้อรายงาน">
+          <div className="rbu-utabs" role="tablist" aria-label="หัวข้อรายงาน">
             {tabs.map((t) => (
               <button key={t.key} type="button" role="tab" aria-selected={t.key === tab.key} className={t.key === tab.key ? 'on' : ''}
                 onClick={() => pickTab(t.key)}>{t.label}</button>
             ))}
           </div>
-        </div>
-        <div className="bu-export-slot">
-          {/* ไอคอนไฟล์ CSV สีเขียว + "ดาวน์โหลด CSV" แบบเดียวกับทุกหน้า — ส่งออกแท็บที่เปิดอยู่ */}
-          <button type="button" className="btn" disabled={!data} onClick={exportCsv} title={`ส่งออกแท็บ "${tab.label}" เป็น CSV`}>
-            <LineIcon name="csv" className="btn-ico csv-ico" />ดาวน์โหลด CSV
-          </button>
         </div>
       </div>
 

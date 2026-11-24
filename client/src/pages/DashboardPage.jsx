@@ -9,6 +9,13 @@ import PageRefresh from '../components/PageRefresh.jsx';
 import { SERVICE_KIND_LABELS, serviceKindOf, formatDate } from '../labels.js';
 import { caseCode } from '../lib/patientCode.js';
 
+/** วันนี้แบบอ่านง่ายใต้ชื่อหน้า เช่น "จันทร์ 23 พ.ย. 2569" — แสดงอย่างเดียว */
+const TODAY_TEXT = () => {
+  const d = new Date();
+  const wd = d.toLocaleDateString('th-TH', { weekday: 'long' }).replace(/^วัน/, '');
+  return `${wd} ${d.toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' })}`;
+};
+
 /**
  * หน้าภาพรวม — การ์ด KPI → วงแหวนสัดส่วนบริการ/ผลการเข้างาน → ภาระงาน/รอจับคู่ → รายได้
  *
@@ -62,8 +69,13 @@ export default function DashboardPage() {
 
   return (
     <PageRefresh onRefresh={reload} busy={loading}>
-      {/* ไม่มีหัวหน้าบนจอ (การ์ด KPI เป็นส่วนบนสุด) — คง h1 ไว้ให้โปรแกรมอ่านหน้าจอ */}
-      <h1 className="sr-only">ภาพรวม</h1>
+      {/* ดีไซน์ v2 (23 พ.ย. 2569): หัวหน้ากลับมาแสดง — ชื่อหน้า + วันนี้ (ตัวหนังสืออย่างเดียว ไม่แตะข้อมูล) */}
+      <header className="page-head ops-head">
+        <div>
+          <h1>ภาพรวม</h1>
+          <p className="muted">{TODAY_TEXT()}</p>
+        </div>
+      </header>
 
       {/* error เป็นแถบเหนือเนื้อหา ไม่ทับทั้งหน้า — มีทางกดกลับมาเองโดยไม่ต้องรีเฟรชเบราว์เซอร์ */}
       <ErrorBar message={error} onRetry={reload} busy={loading} />
@@ -82,21 +94,25 @@ export default function DashboardPage() {
           {chartsError && <p className="error">โหลดกราฟไม่สำเร็จ: {chartsError}</p>}
           {charts && <KpiRow data={charts} />}
 
-          <div className="columns">
+          <div className="columns dash-columns">
             <ServiceDonut byService={summary.by_service ?? []} periodLabel="เคสทั้งหมดในระบบ" />
             {charts && <ShiftDonut data={charts} />}
           </div>
 
-          <div className="columns">
+          <div className="columns dash-columns">
             {charts && <WorkloadList data={charts} />}
 
             <section className="card">
-              <h2>รอจับคู่พนักงาน</h2>
+              <div className="card-head dash-pending-head">
+                <h2>รอจับคู่พนักงาน</h2>
+                {/* ป้ายจำนวน — ตัวเลขเดียวกับลิงก์ "ดูทั้งหมด" ด้านล่าง */}
+                {unassignedTotal > 0 && <span className="ops-count-pill">{unassignedTotal} เคส</span>}
+              </div>
               {unassigned.length === 0 ? (
                 <p className="muted">ทุกเคสมีพนักงานรับผิดชอบแล้ว</p>
               ) : (
                 <>
-                  <ul className="todo">
+                  <ul className="todo dash-pending">
                     {unassigned.map((c) => (
                       <li key={c.case_id}>
                         <div>

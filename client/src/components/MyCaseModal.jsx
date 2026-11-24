@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { useAuth } from '../auth.jsx';
 import CaseLocationLink from './CaseLocationLink.jsx';
+import LineIcon from './LineIcon.jsx';
 import ReportArchiveModal from './ReportArchiveModal.jsx';
 import { useSheetSwipe } from '../lib/sheetSwipe.js';
 import { useScrollLock } from '../lib/scrollLock.js';
@@ -122,9 +123,12 @@ export default function MyCaseModal({ caseId, onClose }) {
                     ถ้ารอให้เคสคัดลอกไว้ ข้อมูลที่พยาบาลเพิ่งอัปเดตจะไปไม่ถึงคนที่กำลังจะเข้าบ้าน */}
                 {(item.patient_allergies || item.patient_food_allergies) && (
                   <p className="allergy-alert">
-                    {item.patient_allergies && <>แพ้ยา: {item.patient_allergies}</>}
-                    {item.patient_allergies && item.patient_food_allergies && ' · '}
-                    {item.patient_food_allergies && <>แพ้อาหาร: {item.patient_food_allergies}</>}
+                    <LineIcon name="alert" className="text-ico" />
+                    <span>
+                      {item.patient_allergies && <>แพ้ยา: {item.patient_allergies}</>}
+                      {item.patient_allergies && item.patient_food_allergies && ' · '}
+                      {item.patient_food_allergies && <>แพ้อาหาร: {item.patient_food_allergies}</>}
+                    </span>
                   </p>
                 )}
 

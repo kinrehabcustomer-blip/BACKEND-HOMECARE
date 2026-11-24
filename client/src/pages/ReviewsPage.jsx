@@ -71,13 +71,18 @@ export default function ReviewsPage() {
 
   return (
     <PageRefresh onRefresh={load} busy={loading}>
-      {/* ไม่มีหัวหน้าบนจอ (การ์ดสรุปเป็นส่วนบนสุด) — คง h1 ไว้ให้โปรแกรมอ่านหน้าจอ */}
-      <h1 className="sr-only">คะแนนประเมินจากญาติ</h1>
+      {/* ดีไซน์ v2 (23 พ.ย. 2569): หัวหน้าบนจอคอม · มือถือซ่อนแบบ sr-only เหมือนเดิม (การ์ดสรุปเป็นส่วนบนสุด) */}
+      <header className="page-head ad-head ad-head-list">
+        <div>
+          <h1>คะแนนประเมินจากญาติ</h1>
+          <p className="muted">แบบประเมินนี้เปิดใช้กับพนักงานที่ออกไปดูแลผู้รับบริการ — CG, NA, PN, RN และสายบำบัด</p>
+        </div>
+      </header>
 
       {error && <p className="error">{error}</p>}
 
       {/* สรุปตัวเลข + ตาราง อยู่ในการ์ดขาวใบเดียว (โครงเดียวกับหน้าการมาทำงาน — ดู .reviews-card) */}
-      <div className="list-card reviews-card">
+      <div className="list-card reviews-card ad-reviews">
         {/* is-static — ช่องตัวเลขพวกนี้กดไม่ได้ ต้องไม่เปลี่ยนสีตอนเอาเมาส์ชี้ ไม่งั้นหลอกว่ากดได้ */}
         <div className="tiles review-tiles">
           <div className="tile is-static">
@@ -93,6 +98,10 @@ export default function ReviewsPage() {
           <div className="tile is-static">
             <span className="tile-label">มีคะแนนแล้ว</span>
             <span className="tile-value">{rated.length} <span className="tile-frac">จาก {rows.length} คน</span></span>
+            {/* แถบสัดส่วนคนที่มีคะแนนแล้ว — ตกแต่ง (ตัวเลขอยู่ข้างบนแล้ว) */}
+            <span className="ad-tile-bar" aria-hidden="true">
+              <span style={{ width: `${rows.length ? Math.round((rated.length / rows.length) * 100) : 0}%` }} />
+            </span>
           </div>
         </div>
 
@@ -184,7 +193,7 @@ export default function ReviewsPage() {
                       {/* has_link บอกว่าเคยออกลิงก์ให้คนนี้แล้วหรือยัง — ยังไม่เคยออกไม่ใช่ปัญหา
                           ลิงก์ถูกออกให้เองตอนเปิดหน้ารายละเอียดครั้งแรก */}
                       {r.has_link ? (
-                        <span className="badge">ออกลิงก์แล้ว</span>
+                        <span className="badge tone-green">ออกลิงก์แล้ว</span>
                       ) : (
                         <span className="muted">ยังไม่ได้ออก</span>
                       )}

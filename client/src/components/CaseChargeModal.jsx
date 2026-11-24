@@ -84,10 +84,10 @@ export default function CaseChargeModal({ item, mode, onClose, onSaved }) {
       <div className="modal modal-narrow charge-modal" ref={sheetRef} role="dialog" aria-modal="true"
         onClick={(e) => e.stopPropagation()}>
         <header className="modal-head">
+          {/* ดีไซน์ v2: หัวข้อก่อน แล้ว "ชื่อผู้รับบริการ · รหัสเคส" บรรทัดเดียว (ข้อมูลเดิม สลับลำดับ) */}
           <div>
-            <p className="mono muted">{caseCode(item.case_id)}</p>
             <h2>{isProc ? 'เพิ่มหัตถการ' : 'เพิ่มอุปกรณ์เสริม'}</h2>
-            <p className="muted">{item.client_name}</p>
+            <p className="muted">{item.client_name}<span aria-hidden="true"> · </span><span className="mono charge-code">{caseCode(item.case_id)}</span></p>
           </div>
           <button className="modal-close" onClick={onClose} disabled={saving} aria-label="ปิด">×</button>
         </header>
@@ -98,6 +98,9 @@ export default function CaseChargeModal({ item, mode, onClose, onSaved }) {
             {isProc ? (
               <>
                 <label>ชื่อหัตถการ
+                  {/* ดีไซน์ v2: ไอคอนค้นหาในช่อง (ตกแต่ง) */}
+                  <span className="charge-search">
+                  <svg className="charge-search-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="M20 20l-4.35-4.35" /></svg>
                   <ProcedureNameInput
                     value={form.name}
                     placeholder="พิมพ์ค้นหา (อย่างน้อย 3 ตัวอักษร) เช่น ทำแผล"
@@ -108,12 +111,15 @@ export default function CaseChargeModal({ item, mode, onClose, onSaved }) {
                       if (price != null) set('unit_price', String(price));
                     }}
                   />
+                  </span>
                 </label>
                 <label>ราคาหัตถการ (บาท)
+                  <span className="charge-money"><span className="charge-money-sign" aria-hidden="true">฿</span>
                   <input type="number" min="0" step="0.01" inputMode="decimal" value={form.unit_price}
                     onChange={(e) => set('unit_price', e.target.value)} />
+                  </span>
                 </label>
-                <p className="muted charge-hint">ระบบออกเลข VN ให้หัตถการนี้ตอนบันทึก (หนึ่งรายการหนึ่งเลข)</p>
+                <p className="muted charge-hint"><svg className="text-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h.01" /></svg>ระบบออกเลข VN ให้หัตถการนี้ตอนบันทึก (หนึ่งรายการหนึ่งเลข)</p>
               </>
             ) : (
               <>
@@ -140,12 +146,16 @@ export default function CaseChargeModal({ item, mode, onClose, onSaved }) {
                   </label>
                 </div>
                 <label>ราคาต่อหน่วย (บาท)
+                  <span className="charge-money"><span className="charge-money-sign" aria-hidden="true">฿</span>
                   <input type="number" min="0" step="0.01" inputMode="decimal" value={form.unit_price}
                     onChange={(e) => set('unit_price', e.target.value)} />
+                  </span>
                 </label>
               </>
             )}
 
+            {/* ดีไซน์ v2: ยอด + คำอธิบายอยู่ในกล่องสรุปใบเดียว */}
+            <div className="charge-sum">
             <div className="charge-total">
               <span>ยอดที่จะเพิ่มในใบแจ้งหนี้</span>
               <strong>{formatBaht(amount)}</strong>
@@ -153,6 +163,7 @@ export default function CaseChargeModal({ item, mode, onClose, onSaved }) {
             <p className="muted charge-hint">
               ใบแจ้งหนี้ร่างของเคสปรับยอดให้เอง · ถ้าออกใบไปแล้ว รายการนี้จะขึ้นเป็นค่าใช้จ่ายเพิ่มเติมให้ออกใบแยก
             </p>
+            </div>
           </div>
 
           <footer className="modal-foot">

@@ -88,7 +88,7 @@ export default function MyCalendarPage() {
 
   return (
     <PageRefresh onRefresh={load} busy={loading}>
-      <header className="page-head">
+      <header className="page-head fp-head fp-cal-head">
         <div>
           <h1>ตารางงานของฉัน</h1>
           <p className="muted">
@@ -140,7 +140,8 @@ export default function MyCalendarPage() {
           onShift={shiftMonth}
           itemText={(c) => ({
             title: c.client_name,
-            sub: [caseCode(c.case_id), SERVICE_KIND_LABELS[serviceKindOf(c)], VISIT_STATE_LABELS[c.state]].filter(Boolean).join(' · '),
+            /* สถานะกะโชว์เป็นป้ายท้ายแถวของ MobileCalendar แล้ว (ดีไซน์ v2) — ไม่ต่อท้ายใน sub ซ้ำ */
+            sub: [caseCode(c.case_id), SERVICE_KIND_LABELS[serviceKindOf(c)]].filter(Boolean).join(' · '),
           })}
           onOpen={(c) => setOpenId(c.case_id)}
         />

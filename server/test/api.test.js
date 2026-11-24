@@ -3125,6 +3125,53 @@ if (process.env.RUN_DB_TESTS !== '1') {
       await post(`/api/invoices/${draft.invoice_id}/billing-plan`, { mode: 'full' });
       assert.equal((await invoice(draft.invoice_id)).total, 14500);
       await pay(draft.invoice_id, { amount: 7250 });
+
+      // ---- CSV รายบรรทัด (export-lines · 24 พ.ย. 2569): ใบเดียวกันแตกเป็นบรรทัดตามกติกาเดียวกับ BU
+      //      เคสไม่มีช่วงสัญญา = ช่วงบริการคือวันที่ออกใบ · ไม่จด VAT = ยอดในช่วงอยู่ช่อง "ไม่มี VAT" ทั้งหมด
+      {
+        const lines = (await get(`/api/invoices/export-lines?${q}`, MANAGER)).body.data
+          .filter((l) => l.invoice_id === draft.invoice_id);
+        const by = Object.fromEntries(lines.map((l) => [l.category, l]));
+        assert.equal(r2(lines.reduce((s, l) => s + l.amount, 0)), 14500, 'บรรทัดรวมกัน = ยอดสุทธิของใบ');
+        assert.equal(by['ค่าเช่าอุปกรณ์'].amount, 3000);
+        assert.equal(by['ค่าเช่าอุปกรณ์'].quantity, 2);
+        assert.equal(by['ค่าอุปกรณ์ (ขาย)'].amount, 1000);
+        assert.equal(by['ค่าหัตถการ'].amount, 500);
+        assert.equal(r2(lines.reduce((s, l) => s + l.paid, 0)), 7250, 'เงินที่รับแบ่งลงบรรทัดครบทุกสตางค์');
+        assert.equal(r2(lines.reduce((s, l) => s + l.outstanding, 0)), 7250);
+        for (const l of lines) {
+          assert.equal(l.days_in_range, l.total_days);
+          assert.equal(l.non_vat, l.amount);
+          assert.equal(l.in_range_total, l.amount);
+          assert.equal(l.vat, 0);
+          assert.equal(l.vat_base, 0);
+        }
+        const tomorrow = new Date(Date.parse(`${today}T00:00:00Z`) + 864e5).toISOString().slice(0, 10);
+        const later = (await get(`/api/invoices/export-lines?from=${tomorrow}&to=${tomorrow}`, MANAGER)).body.data;
+        assert.ok(!later.some((l) => l.invoice_id === draft.invoice_id), 'ช่วงบริการไม่คาบเกี่ยว = ไม่อยู่ในไฟล์');
+        assert.equal((await send('GET', `/api/invoices/export-lines?from=${tomorrow}&to=${today}`)).status, 400);
+
+        // ---- รายงานภาษีขาย (24 พ.ย. 2569): ใบเสร็จของการรับเงินนี้อยู่ในเดือนนี้ · ไม่จด VAT = ภาษี 0
+        const tax = (await get(`/api/invoices/sales-tax?month=${today.slice(0, 7)}`, MANAGER)).body;
+        const mine = tax.data.filter((r) => r.invoice_id === draft.invoice_id);
+        assert.equal(mine.length, 1);
+        assert.equal(mine[0].doc_type, 'receipt');
+        assert.equal(mine[0].total, 7250);
+        assert.equal(mine[0].base, 7250);
+        assert.equal(mine[0].vat, 0);
+        assert.equal(tax.totals.vat, 0);
+        assert.equal(tax.totals.total, r2(tax.data.reduce((s, r) => s + r.total, 0)));
+        assert.equal((await send('GET', '/api/invoices/sales-tax?month=2026-13')).status, 400);
+        // ช่วงวันที่ที่เลือกเอง (from/to) — วันนี้วันเดียวก็ต้องเจอใบเสร็จเดียวกัน · วันพรุ่งนี้ไม่เจอ · กลับด้าน = 400
+        const day = (await get(`/api/invoices/sales-tax?from=${today}&to=${today}`, MANAGER)).body;
+        assert.equal(day.month, null);
+        assert.equal(day.from, today);
+        assert.ok(day.data.some((r) => r.invoice_id === draft.invoice_id && r.total === 7250));
+        const next = (await get(`/api/invoices/sales-tax?from=${tomorrow}&to=${tomorrow}`, MANAGER)).body;
+        assert.ok(!next.data.some((r) => r.invoice_id === draft.invoice_id));
+        assert.equal((await send('GET', `/api/invoices/sales-tax?from=${tomorrow}&to=${today}`)).status, 400);
+      }
+
       let ov = await overview();
       const delta = (k) => r2(ov.current[k] - before.current[k]);
       assert.equal(delta('homecare'), 5000);
