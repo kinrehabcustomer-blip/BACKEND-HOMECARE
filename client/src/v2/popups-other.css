@@ -293,3 +293,11 @@
 .inv-modal .inv-foot .foot-danger { display: inline-flex; align-items: center; gap: 0.375rem; }
 .inv-modal .inv-foot .foot-danger .text-ico { margin: 0; }
 .inv-modal.is-choosing .inv-foot > .foot-danger:only-child { flex: none; margin-right: auto; }
+
+/* ตรวจบนมือถือ (24 พ.ย. 2569): popup พนักงาน — รูปขนาด 88px กินที่จนชื่อตกเป็นคำละบรรทัด → ย่อรูปบนจอแคบ */
+@media (max-width: 600px) {
+  .detail-modal .head-identity .avatar-lg { width: 3.5rem; height: 3.5rem; flex: none; }
+  .detail-modal .head-identity > .avatar-link { flex: none; }
+  .detail-modal .head-identity .avatar-lg.is-blank { font-size: 1.5rem; }
+  .detail-modal.rec-modal .head-identity { gap: 0.75rem; }
+}

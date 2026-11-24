@@ -670,6 +670,9 @@
   .page-head.inv-head > .inv-tax-btn { margin-right: 10.75rem; }
   .page-head.inv-head:has(+ .inv-list > .toolbar > .todo-btn) > .inv-tax-btn { margin-right: 20.5rem; }
 }
+/* มือถือ: ปุ่มอยู่มุมขวาบนข้างชื่อหน้า (เดิม index.css ≤600 เรียงหัวแนวตั้ง ปุ่มตกไปลอยแถวเดี่ยว — ผู้ใช้แจ้ง 24 พ.ย. 2569) */
 @media (max-width: 900px) {
-  .page-head.inv-head > .inv-tax-btn { min-height: 2.5rem; padding-inline: 0.875rem; font-size: 0.875rem; }
+  .page-head.inv-head { flex-direction: row; flex-wrap: nowrap; align-items: flex-start; }
+  .page-head.inv-head > div { flex: 1 1 auto; }
+  .page-head.inv-head > .inv-tax-btn { flex: none; align-self: flex-start; margin-left: 0; min-height: 2.5rem; padding-inline: 0.875rem; font-size: 0.875rem; }
 }

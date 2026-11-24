@@ -1107,3 +1107,34 @@
   .ad-reviews .table tbody td,
   .ad-reviews .table tbody tr:last-child td { border-bottom: 1px solid var(--divider); }
 }
+
+/* ตรวจบนมือถือ (24 พ.ย. 2569)
+   1) หน้าตั้งค่าที่มีตัวกรอง: ช่องเลือกหัวข้อ + ตัวกรองต้องเป็นการ์ดใบเดียว (index.css) — กฎ v2 ด้านบนลบพื้น/ขอบของตัวกรอง
+      การ์ดเลยขาดครึ่งล่าง → คืนพื้นและขอบให้ครึ่งล่างบนจอแคบ
+   2) ปุ่มเพิ่ม (+ เพิ่มหมวดหลัก) ในหัวแผง: เดิมตกไปลอยชิดขวาแถวเดี่ยว → เต็มความกว้างใต้คำอธิบาย (แบบปุ่มเพิ่มแพ็คเกจ) */
+@media (max-width: 900px) {
+  .set-shell { gap: 1rem; } /* กฎ v2 ด้านบน (1.5rem ทุกจอ) ทับระยะจอแคบของ index.css — การ์ดสองครึ่งต่อกันด้วย margin -1rem จึงห่างกัน 8px */
+  .set-shell:has(> .set-main > .set-filter) > .set-main > .set-filter {
+    margin-bottom: 0;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-top: 0;
+    border-radius: 0 0 1rem 1rem;
+  }
+}
+@media (max-width: 600px) {
+  :is(.set-main, .catalog-page) > .set-pane-head > .btn { flex: 1 1 100%; justify-content: center; margin-left: 0; }
+}
+/* 3) หน้าคะแนนประเมิน: รหัส · ตำแหน่ง ขึ้นบรรทัดใหม่แล้ว (flex-basis 100%) — ไม่ต้องมีจุดนำหน้า (index.css ใส่ไว้ตอนต่อบรรทัดเดียวกัน) */
+.ad-reviews .name-cell > .cell-sub::before { content: none; }
+/* 4) หน้ารายการลูกค้า / ผู้รับบริการ / พนักงาน บนจอแคบ: หัวซ่อนแล้ว แต่การ์ดรายการยังเว้นระยะบนไว้ — เห็นแถบพื้นว่างใต้แถบบน
+      ใช้กติกาเดียวกับหน้าเคส (.case-head + .list-card ใน admin-ops.css) */
+@media (max-width: 900px) {
+  :is(.content, .content > .pull-zone > .pull-content) > .page-head.ad-head-list + .list-card { margin-top: calc(-1 * var(--gt, 1.25rem)); }
+}
+/* 5) หน้าแพ็คเกจ Homecare บนจอแคบ: สองปุ่มหัวหน้ากว้างเท่ากันเต็มแถว — เดิมกว้างตามข้อความ โหมดแก้ราคา (ยกเลิก / บันทึกราคา)
+      ปุ่มสั้นลงเลยลอยกลางแถว ไม่ตรงขอบเหมือนโหมดดู */
+@media (max-width: 600px) {
+  .ad-pkg > .toolbar .toolbar-action { width: 100%; }
+  .ad-pkg > .toolbar .toolbar-action .btn { flex: 1 1 0; justify-content: center; }
+}
