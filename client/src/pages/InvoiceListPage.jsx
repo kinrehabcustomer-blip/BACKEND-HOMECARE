@@ -252,10 +252,6 @@ export default function InvoiceListPage() {
             {result && <>ทั้งหมด {Number(result.pagination.total).toLocaleString('th-TH')} ใบ · </>}ระบบออกใบร่างให้เองเมื่อเปิดเคส
           </p>
         </div>
-        {/* รายงานภาษีขายรายเดือน (ผู้ใช้ขอ 24 พ.ย. 2569) — ดูก่อนพิมพ์ในกล่อง แล้วพิมพ์ / บันทึก PDF */}
-        <button type="button" className="btn inv-tax-btn" onClick={() => setTaxOpen(true)}>
-          <LineIcon name="printer" className="btn-ico" />รายงานภาษีขาย
-        </button>
       </header>
 
       {/* แถบตัวกรอง + ตาราง อยู่ในการ์ดใบเดียวกัน (เหมือนหน้ารายการอื่น — ดู .list-card) */}
@@ -291,6 +287,11 @@ export default function InvoiceListPage() {
           /* งานรอออกใบ (เคสที่ยังไม่มีใบ + ค่าใช้จ่ายเพิ่มเติม) — ปุ่มแจ้งเตือนท้ายแถบ กดแล้วกางรายการ
              เดิมเป็นการ์ดสองใบใต้ตาราง กินที่แสดงตาราง (ผู้ใช้ขอย้าย 6 พ.ย. 2569) */
           extra={(<>
+            {/* รายงานภาษีขายรายเดือน (ผู้ใช้ขอ 24 พ.ย. 2569) — ดูก่อนพิมพ์ในกล่อง แล้วพิมพ์ / บันทึก PDF
+                อยู่ในการ์ดท้ายแถบตัวกรอง (ผู้ใช้ขอย้ายจากหัวหน้า 24 พ.ย. 2569) · มือถือย่อเหลือ "ภาษีขาย" */}
+            <button type="button" className="btn inv-tax-btn" onClick={() => setTaxOpen(true)}>
+              <LineIcon name="printer" className="btn-ico" /><span><span className="inv-tax-pre">รายงาน</span>ภาษีขาย</span>
+            </button>
             {/* ดาวน์โหลด CSV รายวัน/สัปดาห์/เดือน — ใช้ตัวกรองชุดเดียวกับตาราง (ผู้ใช้ขอ 6 พ.ย. 2569) */}
             <InvoiceExport filters={exportFilters} filterNote={exportNote} />
             <InvoiceTodo

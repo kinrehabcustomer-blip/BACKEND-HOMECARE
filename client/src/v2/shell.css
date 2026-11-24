@@ -528,8 +528,9 @@ input[type='checkbox'], input[type='radio'] { accent-color: var(--brand); }
 }
 .sidebar .who-actions { gap: 0.5rem; }
 .sidebar .who-actions .btn.icon-btn {
-  width: 2.75rem;
-  height: 2.75rem;
+  width: 2.25rem;
+  height: 2.25rem;
+  min-height: 0;
   border-color: var(--field-border);
   border-radius: var(--radius-ctl);
   background: var(--surface);
@@ -538,12 +539,40 @@ input[type='checkbox'], input[type='radio'] { accent-color: var(--brand); }
 .sidebar .who-actions .btn.icon-btn:hover:not(:disabled) { background: var(--surface-2); color: var(--heading); }
 /* อยู่หน้าตั้งค่า/ตั้งค่าระบบ — ปุ่มนั้นติดพื้นทองจางแบบเมนูที่เลือก */
 .sidebar .who-actions .btn.icon-btn.active { background: var(--brand-soft); border-color: transparent; color: var(--brand-strong); }
-.sidebar .who-actions .btn-ico { width: 1.125rem; height: 1.125rem; }
-/* หลังบ้าน: แถวชื่อ (อักษรย่อ · ชื่อ · ตำแหน่ง · รหัส) แล้วปุ่ม 3 ปุ่มเต็มแถวด้านล่าง */
-.app:not(.tabbar-field) .sidebar .who-row { flex-wrap: wrap; row-gap: 0.625rem; padding: 0; }
+/* ปุ่ม 36px ไอคอน 16px — เดิม 44px/18px ดูใหญ่เกิน (ผู้ใช้แจ้ง 24 พ.ย. 2569)
+   มือถือคงปุ่ม 40px ให้นิ้วกดถนัด */
+.sidebar .who-actions .btn-ico { width: 1rem; height: 1rem; }
+@media (max-width: 900px) {
+  .sidebar .who-actions .btn.icon-btn { width: 2.5rem; height: 2.5rem; }
+}
+/* หลังบ้าน: แถวชื่อ (อักษรย่อ · ชื่อ · ตำแหน่ง · รหัส) แล้วแถบปุ่มบรรทัดล่าง (ผู้ใช้แจ้ง 24 พ.ย. 2569)
+   ปุ่มเป็นแถบเดียวโค้งมน แบ่งช่องเท่ากันด้วยเส้นบาง — เต็มแถวแต่เตี้ย ไม่เป็นกล่องใหญ่ 3 กล่อง
+   และไม่เหลือที่ว่างข้างใดข้างหนึ่ง */
+.app:not(.tabbar-field) .sidebar .who-row { flex-wrap: wrap; row-gap: 0.75rem; padding: 0; }
 .app:not(.tabbar-field) .sidebar .who-avatar { margin-left: 0.25rem; }
-.app:not(.tabbar-field) .sidebar .who-actions { flex: 1 0 100%; }
-.app:not(.tabbar-field) .sidebar .who-actions .btn.icon-btn { flex: 1; width: auto; }
+.app:not(.tabbar-field) .sidebar .who-actions {
+  flex: 1 0 100%;
+  gap: 0;
+  border: 1px solid var(--field-border);
+  border-radius: var(--radius-ctl);
+  background: var(--surface);
+  overflow: hidden;
+}
+.app:not(.tabbar-field) .sidebar .who-actions .btn.icon-btn {
+  flex: 1;
+  width: auto;
+  height: 2.125rem;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+}
+.app:not(.tabbar-field) .sidebar .who-actions .btn.icon-btn + .btn.icon-btn { border-left: 1px solid var(--border); }
+.app:not(.tabbar-field) .sidebar .who-actions .btn.icon-btn:hover:not(:disabled) { background: var(--surface-2); color: var(--heading); }
+.app:not(.tabbar-field) .sidebar .who-actions .btn.icon-btn.active { background: var(--brand-soft); color: var(--brand-strong); }
+@media (max-width: 900px) {
+  .app:not(.tabbar-field) .sidebar .who-actions .btn.icon-btn { height: 2.5rem; }
+}
 
 /* กระดิ่ง — 44px ขอบจาง · เลขแดงเกาะมุม */
 .sidebar .bell-btn {
