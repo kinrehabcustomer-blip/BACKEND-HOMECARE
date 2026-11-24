@@ -106,12 +106,13 @@ function preloadPage(path) {
 // เริ่มทันทีที่ไฟล์หลักโหลด — ขนานไปกับการถาม /auth/me
 try {
   let start = window.location.pathname;
-  if (start === '/') start = window.localStorage.getItem(HOME_HINT) ?? '';
+  const home = window.localStorage.getItem(HOME_HINT) ?? '';
+  if (start === '/') start = home;
   if (start) preloadPage(start);
   /* ข้อมูลหลักของหน้าแรก + กระดิ่ง — ขนานไปกับ /auth/me ด้วย (lib/prefetch.js · ตรวจความเร็ว 24 พ.ย. 2569)
      เฉพาะหน้าในแอปที่รู้จัก (มีไฟล์หน้าใน PAGE_CHUNKS) — หน้า login/ลิงก์สาธารณะไม่ยิงอะไรล่วงหน้า */
   if (start && (PAGE_CHUNKS[start] ?? PAGE_CHUNKS[`/${start.split('/')[1] ?? ''}`])) {
-    prefetchStart(start, window.location.search);
+    prefetchStart(start, window.location.search, home);
   }
 } catch { /* localStorage ใช้ไม่ได้ (โหมดส่วนตัว) — ข้ามไป */ }
 

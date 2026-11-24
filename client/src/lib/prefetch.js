@@ -16,8 +16,8 @@ import { prefetchGet } from '../api.js';
 const LIST = (path, sort, extra = '') => `${path}?page=1&per_page=20&sort=${sort}&order=desc${extra}`;
 const PAGE_DATA = {
   // ภาพรวม (DashboardPage)
-  // ภาพรวม: กราฟรายได้โผล่เฉพาะคนที่มีสิทธิ์ — คนที่ไม่มีสิทธิ์ คำขอล่วงหน้าโดนปฏิเสธเงียบๆ เท่านั้น
-  '/dashboard': ['/cases/dashboard', '/cases/summary', '/cases?status=unassigned&per_page=5&sort=created_at&order=desc', '/invoices/revenue?bucket=day'],
+  // ภาพรวม — ไม่ยิงกราฟรายได้ล่วงหน้า: โผล่เฉพาะคนที่มีสิทธิ์ดูรายได้ คนที่ไม่มีจะได้ 403 ทิ้งไว้ใน console เปล่าๆ (ตรวจ 24 พ.ย. 2569)
+  '/dashboard': ['/cases/dashboard', '/cases/summary', '/cases?status=unassigned&per_page=5&sort=created_at&order=desc'],
   '/cases': [LIST('/cases', 'created_at'), '/cases/assignable-employees', '/cases/periods'],
   '/invoices': [LIST('/invoices', 'invoice_id', '&hide_cancelled=yes'), '/invoices/cases-without-invoice', '/invoices/cases-with-extras'],
   '/customers': [LIST('/customers', 'customer_id')],
@@ -35,12 +35,19 @@ const PAGE_DATA = {
   '/my-reports': ['/my/cases'],
 };
 
-/** start = path ของหน้าที่จะเปิด (หน้าแรกจริง ไม่ใช่ "/" ที่ยังไม่รู้ตำแหน่ง) · search = location.search */
-export function prefetchStart(start, search) {
+const roleOf = (path) => (!path ? null : path.startsWith('/my-') || path.startsWith('/partner') ? 'staff' : 'admin');
+
+/**
+ * start = path ของหน้าที่จะเปิด (หน้าแรกจริง ไม่ใช่ "/" ที่ยังไม่รู้ตำแหน่ง) · search = location.search
+ * home = หน้าแรกของผู้ใช้คนล่าสุดในเครื่องนี้ (App.jsx · HOME_HINT) — บอกได้ว่าเป็นหลังบ้านหรือพนักงาน
+ */
+export function prefetchStart(start, search, home) {
   if (!start) return;
-  // กระดิ่งแจ้งเตือนโหลดทุกหน้า: หลังบ้าน = /notify/alerts · พนักงาน/พาร์ทเนอร์ = /my/notifications
-  const staff = start.startsWith('/my-') || start.startsWith('/partner');
-  prefetchGet(staff ? '/my/notifications' : '/notify/alerts');
+  /* กระดิ่งแจ้งเตือนโหลดทุกหน้า: หลังบ้าน = /notify/alerts · พนักงาน/พาร์ทเนอร์ = /my/notifications
+     ดูบทบาทจากหน้าแรกของผู้ใช้ก่อน — หน้าที่ใช้ร่วมกัน (เช่น /settings) เดาจาก path ไม่ได้
+     เดิมพนักงานเปิด /settings แล้วยิง /notify/alerts ได้ 403 (ตรวจ 24 พ.ย. 2569) · ไม่รู้บทบาทเลย = ไม่ยิงล่วงหน้า */
+  const role = roleOf(home) ?? (PAGE_DATA[start] ? roleOf(start) : null);
+  if (role) prefetchGet(role === 'staff' ? '/my/notifications' : '/notify/alerts');
   if (search) return; // มีตัวกรองใน URL — เส้นที่หน้าจะขอไม่ใช่ค่าเริ่มต้น ไม่เดา
   for (const path of PAGE_DATA[start] ?? []) {
     prefetchGet(path, path === '/cases/assignable-employees' ? 60_000 : 10_000);

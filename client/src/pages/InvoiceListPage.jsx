@@ -257,7 +257,6 @@ export default function InvoiceListPage() {
           <LineIcon name="printer" className="btn-ico" />รายงานภาษีขาย
         </button>
       </header>
-      {taxOpen && <SalesTaxReport onClose={() => setTaxOpen(false)} />}
 
       {/* แถบตัวกรอง + ตาราง อยู่ในการ์ดใบเดียวกัน (เหมือนหน้ารายการอื่น — ดู .list-card) */}
       <div className="list-card ops-card inv-list">
@@ -516,6 +515,9 @@ export default function InvoiceListPage() {
           onClose={closeInvoice}
         />
       )}
+      {/* กล่องรายงานภาษีขาย — วางท้ายหน้า ห้ามวางคั่นระหว่างหัวหน้ากับการ์ดรายการ:
+          ปุ่ม CSV / รอออกใบ / รายงานภาษีขาย จัดตำแหน่งด้วย .page-head.inv-head + .inv-list (ผู้ใช้แจ้งปุ่มเพี้ยนตอนเปิดกล่อง 24 พ.ย. 2569) */}
+      {taxOpen && <SalesTaxReport onClose={() => setTaxOpen(false)} />}
     </PageRefresh>
   );
 }

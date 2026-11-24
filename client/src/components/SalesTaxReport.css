@@ -85,3 +85,5 @@
 .tax-range { display: inline-flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
 .tax-range input { width: auto; min-width: 10.5rem; }
 .tax-range > span { color: var(--muted); }
+/* กำลังโหลดช่วงใหม่ — กระดาษเดิมจางลง แทนการหายไปทั้งแผ่น */
+.tax-paper-wrap.is-stale > .tax-doc { opacity: 0.45; transition: opacity 0.15s; }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from '../api.js';
 import { ISSUER, printStamp } from '../lib/issuer.js';
@@ -46,6 +46,17 @@ const monthEnd = (ym) => {
   const [y, m] = ym.split('-').map(Number);
   return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
 };
+
+/**
+ * ตัดรายงานช่วงที่กว้างกว่าให้เหลือช่วงที่ต้องการ — แถวกรองด้วยวันที่ของเอกสารชุดเดียวกับที่ server ใช้
+ * (ใบเสร็จ = วันที่รับเงิน · ใบลด/เพิ่มหนี้ = วันที่ออก) ผลจึงเท่ากับขอ server ใหม่ทุกแถว ไม่ต้องรอโหลด
+ */
+const r2 = (n) => Math.round(n * 100) / 100;
+function sliceReport(src, from, to, month) {
+  const data = src.data.filter((r) => r.doc_date >= from && r.doc_date <= to);
+  const sum = (k) => r2(data.reduce((s, r) => s + r[k], 0));
+  return { month, from, to, data, totals: { count: data.length, base: sum('base'), vat: sum('vat'), total: sum('total') } };
+}
 
 function TaxDoc({ report }) {
   const isMonth = Boolean(report.month);
@@ -146,17 +157,32 @@ export default function SalesTaxReport({ onClose }) {
   const want = mode === 'month' ? { from: `${month}-01`, to: monthEnd(month) } : { from, to };
   const rangeError = mode === 'range' && from > to ? 'วันเริ่มต้องไม่เกินวันสิ้นสุด' : null;
 
+  /* รายงานที่เคยโหลดในกล่องนี้ (เปิดกล่องใหม่ = โหลดใหม่ ข้อมูลไม่ค้างเก่า) — ผู้ใช้แจ้ง 24 พ.ย. 2569:
+     สลับ "รายเดือน" → "ช่วงวันที่" แล้วต้องรอโหลดใหม่ทั้งที่ช่วงเริ่มต้นอยู่ในเดือนที่โหลดไว้แล้ว
+     ช่วงที่อยู่ในรายงานที่มีอยู่ = ตัดจากของเดิมทันที ไม่ยิงคำขอ · นอกนั้นค่อยถาม server */
+  const loaded = useRef([]);
   useEffect(() => {
     if (rangeError) return undefined;
+    const monthMode = mode === 'month';
+    const cover = loaded.current.find((r) => r.from <= want.from && r.to >= want.to);
+    if (cover) {
+      setReport(sliceReport(cover, want.from, want.to, monthMode ? month : null));
+      setError(null);
+      setLoading(false);
+      return undefined;
+    }
     let cancelled = false;
     setLoading(true);
     setError(null);
-    api.salesTaxReport(mode === 'month' ? { month } : { from, to })
-      .then((r) => { if (!cancelled) setReport(r); })
+    api.salesTaxReport(monthMode ? { month } : { from, to })
+      .then((r) => {
+        loaded.current.push(r);
+        if (!cancelled) setReport(r);
+      })
       .catch((e) => !cancelled && setError(e.message))
       .finally(() => !cancelled && setLoading(false));
     return () => { cancelled = true; };
-  }, [mode, month, from, to, rangeError]);
+  }, [mode, month, from, to, rangeError]); // eslint-disable-line react-hooks/exhaustive-deps -- want มาจากค่าชุดนี้
 
   useEffect(() => {
     const onKey = (e) => { if (e.key === 'Escape') onClose(); };
@@ -206,8 +232,9 @@ export default function SalesTaxReport({ onClose }) {
             )}
           </div>
           {(rangeError || error) && <p className="error">{rangeError ?? error}</p>}
-          <div className="tax-paper-wrap">
-            {loading && !ready ? <p className="muted loading-center">กำลังโหลด…</p> : ready && <TaxDoc report={report} />}
+          {/* ระหว่างโหลดช่วงใหม่ คงกระดาษเดิมไว้แบบจาง (ไม่กระพริบเป็นหน้าว่าง) — ปุ่มพิมพ์ปิดจนกว่าจะได้ช่วงที่เลือกจริง */}
+          <div className={`tax-paper-wrap${report && !ready ? ' is-stale' : ''}`} aria-busy={loading}>
+            {report ? <TaxDoc report={report} /> : loading && <p className="muted loading-center">กำลังโหลด…</p>}
           </div>
         </div>
         <footer className="modal-foot">
