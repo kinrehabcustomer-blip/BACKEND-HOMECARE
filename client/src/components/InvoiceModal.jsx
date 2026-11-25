@@ -514,7 +514,11 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
   /* เนื้อในของเอกสาร — ใช้สองที่: ตัวที่เห็นในกล่องบนจอ กับสำเนาที่พิมพ์ (.print-sheet)
      สร้างครั้งเดียวแล้วใช้ซ้ำ สองที่จึงไม่มีวันพิมพ์ออกมาไม่ตรงกับที่เห็น */
   /* เนื้อในของเอกสาร — ใช้สองที่: ตัวที่เห็นในกล่องบนจอ กับสำเนาที่พิมพ์ (.print-sheet) · ตัวเอกสารอยู่ใน CustomerInvoiceDoc (ใช้ร่วมกับลิงก์ลูกค้า) */
-  const docBody = item && <CustomerInvoiceDoc item={item} signer={printerName} />;
+  /* ผู้ลงนามช่องเจ้าหน้าที่การเงินในใบแจ้งหนี้ = พนักงานที่ออกใบ (ชื่อ account ตอนกดออก) ไม่ใช่คนที่เปิดดู/พิมพ์
+     ใบที่ชำระแล้วกลายเป็นใบเสร็จ → คนที่บันทึกรับเงิน · เกณฑ์เดียวกับลิงก์ลูกค้า (share.js) สองที่จึงพิมพ์ชื่อตรงกัน
+     ใบที่ไม่ได้เก็บชื่อไว้ → ใช้คนที่กำลังพิมพ์แทน */
+  const issuerName = (isReceipt ? item?.paid_by_name : null) || item?.issued_by_name || printerName;
+  const docBody = item && <CustomerInvoiceDoc item={item} signer={issuerName} />;
   // เอกสารที่ถูกเลือกดู — ใบเสร็จรายครั้ง / ใบลดหนี้-เพิ่มหนี้ / ใบเสร็จฝ่ายการเงิน / ใบแจ้งหนี้ ตามลำดับ
   const shownBody = !item
     ? null
