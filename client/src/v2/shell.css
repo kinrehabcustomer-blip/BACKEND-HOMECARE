@@ -545,31 +545,19 @@ input[type='checkbox'], input[type='radio'] { accent-color: var(--brand); }
 @media (max-width: 900px) {
   .sidebar .who-actions .btn.icon-btn { width: 2.5rem; height: 2.5rem; }
 }
-/* หลังบ้าน: แถวชื่อ (อักษรย่อ · ชื่อ · ตำแหน่ง · รหัส) แล้วแถบปุ่มบรรทัดล่าง (ผู้ใช้แจ้ง 24 พ.ย. 2569)
-   ปุ่มเป็นแถบเดียวโค้งมน แบ่งช่องเท่ากันด้วยเส้นบาง — เต็มแถวแต่เตี้ย ไม่เป็นกล่องใหญ่ 3 กล่อง
-   และไม่เหลือที่ว่างข้างใดข้างหนึ่ง */
+/* หลังบ้าน: แถวชื่อ (อักษรย่อ · ชื่อ · ตำแหน่ง · รหัส) แล้วปุ่มบรรทัดล่าง (ผู้ใช้แจ้ง 24 พ.ย. 2569)
+   ปุ่มแยกกันเป็นปุ่มๆ มีกรอบของตัวเอง เว้นช่องไฟ — กว้างเท่ากัน เต็มแถว แต่เตี้ย (ผู้ใช้แจ้ง 25 พ.ย. 2569) */
 .app:not(.tabbar-field) .sidebar .who-row { flex-wrap: wrap; row-gap: 0.75rem; padding: 0; }
 .app:not(.tabbar-field) .sidebar .who-avatar { margin-left: 0.25rem; }
-.app:not(.tabbar-field) .sidebar .who-actions {
-  flex: 1 0 100%;
-  gap: 0;
-  border: 1px solid var(--field-border);
-  border-radius: var(--radius-ctl);
-  background: var(--surface);
-  overflow: hidden;
-}
+.app:not(.tabbar-field) .sidebar .who-actions { flex: 1 0 100%; gap: 0.5rem; }
 .app:not(.tabbar-field) .sidebar .who-actions .btn.icon-btn {
-  flex: 1;
+  flex: 1 1 0;
   width: auto;
   height: 2.125rem;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
   color: var(--muted);
 }
-.app:not(.tabbar-field) .sidebar .who-actions .btn.icon-btn + .btn.icon-btn { border-left: 1px solid var(--border); }
 .app:not(.tabbar-field) .sidebar .who-actions .btn.icon-btn:hover:not(:disabled) { background: var(--surface-2); color: var(--heading); }
-.app:not(.tabbar-field) .sidebar .who-actions .btn.icon-btn.active { background: var(--brand-soft); color: var(--brand-strong); }
+.app:not(.tabbar-field) .sidebar .who-actions .btn.icon-btn.active { background: var(--brand-soft); border-color: transparent; color: var(--brand-strong); }
 @media (max-width: 900px) {
   .app:not(.tabbar-field) .sidebar .who-actions .btn.icon-btn { height: 2.5rem; }
 }
