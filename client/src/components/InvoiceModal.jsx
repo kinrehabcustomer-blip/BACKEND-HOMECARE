@@ -521,7 +521,7 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
   const shownBody = !item
     ? null
     : viewReceipt
-      ? <ReceiptDoc item={item} receipt={viewReceipt} signer={printerName} />
+      ? <ReceiptDoc item={item} receipt={viewReceipt} signer={item.issued_by_name || viewReceipt.issued_by_name || printerName} />
       : viewRefund
         ? (
           <RefundVoucherDoc

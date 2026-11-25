@@ -91,7 +91,7 @@ export default function ReceiptDoc({ item, receipt, signer }) {
         <div className="inv-sign">
           <span className="inv-sign-role">ผู้รับเงิน</span>
           <span className="inv-sign-dots">(...................................................)</span>
-          <span className="inv-sign-name">( {receipt.issued_by_name || signer} )</span>
+          <span className="inv-sign-name">( {signer || receipt.issued_by_name} )</span>
         </div>
       </div>
     </>
