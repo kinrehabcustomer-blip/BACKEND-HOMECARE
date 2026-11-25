@@ -505,19 +505,17 @@ export default function InvoiceModal({ invoiceId, siblings = [], onNavigate, onC
           ]
       ).map((l, i) => (i === 0 ? { ...l, discount: Number(item.discount ?? 0) } : l));
 
-  /* ผู้ลงนามช่องเจ้าหน้าที่การเงิน = คนที่บันทึกรับเงินจริง (ใบเสร็จฝ่ายการเงินเป็นหลักฐานว่าใครรับเงิน)
-     ใบเก่าที่ไม่ได้เก็บชื่อผู้รับเงิน → ใช้คนที่กำลังพิมพ์แทน */
+  /* ผู้ลงนามช่องเจ้าหน้าที่การเงิน (ใบแจ้งหนี้ / ใบเสร็จรวม / ใบเสร็จฝ่ายการเงิน) = พนักงานที่ออกใบ
+     (ชื่อ account ตอนกดออก) ไม่ใช่คนที่เปิดดู/พิมพ์ · เกณฑ์เดียวกับลิงก์ลูกค้า (share.js) สองที่จึงพิมพ์ชื่อตรงกัน
+     ใบที่ไม่ได้เก็บชื่อคนออก → คนที่บันทึกรับเงิน → คนที่กำลังพิมพ์ */
+  const issuerName = item?.issued_by_name || (isReceipt ? item?.paid_by_name : null) || printerName;
   const financeBody = item && isReceipt && (
-    <FinanceReceiptDoc item={item} lines={financeLines} pay={pay} cashier={item.paid_by_name || printerName} />
+    <FinanceReceiptDoc item={item} lines={financeLines} pay={pay} cashier={issuerName} />
   );
 
   /* เนื้อในของเอกสาร — ใช้สองที่: ตัวที่เห็นในกล่องบนจอ กับสำเนาที่พิมพ์ (.print-sheet)
      สร้างครั้งเดียวแล้วใช้ซ้ำ สองที่จึงไม่มีวันพิมพ์ออกมาไม่ตรงกับที่เห็น */
   /* เนื้อในของเอกสาร — ใช้สองที่: ตัวที่เห็นในกล่องบนจอ กับสำเนาที่พิมพ์ (.print-sheet) · ตัวเอกสารอยู่ใน CustomerInvoiceDoc (ใช้ร่วมกับลิงก์ลูกค้า) */
-  /* ผู้ลงนามช่องเจ้าหน้าที่การเงินในใบแจ้งหนี้ = พนักงานที่ออกใบ (ชื่อ account ตอนกดออก) ไม่ใช่คนที่เปิดดู/พิมพ์
-     ใบที่ชำระแล้วกลายเป็นใบเสร็จ → คนที่บันทึกรับเงิน · เกณฑ์เดียวกับลิงก์ลูกค้า (share.js) สองที่จึงพิมพ์ชื่อตรงกัน
-     ใบที่ไม่ได้เก็บชื่อไว้ → ใช้คนที่กำลังพิมพ์แทน */
-  const issuerName = (isReceipt ? item?.paid_by_name : null) || item?.issued_by_name || printerName;
   const docBody = item && <CustomerInvoiceDoc item={item} signer={issuerName} />;
   // เอกสารที่ถูกเลือกดู — ใบเสร็จรายครั้ง / ใบลดหนี้-เพิ่มหนี้ / ใบเสร็จฝ่ายการเงิน / ใบแจ้งหนี้ ตามลำดับ
   const shownBody = !item

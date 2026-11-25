@@ -318,7 +318,8 @@ export function publicInvoice(inv) {
     payment_method: inv.payment_method ?? null,
     payments: (inv.payments ?? []).map((p) => ({ amount: p.amount, method: p.method, paid_at: p.paid_at })),
     note: inv.note ?? null,
-    signer: (Number(inv.paid_amount ?? 0) > 0 ? inv.paid_by_name : null) || inv.issued_by_name || '',
+    // ผู้ลงนาม = พนักงานที่ออกใบ ทั้งใบแจ้งหนี้และใบเสร็จ (ใบที่ไม่ได้เก็บชื่อคนออก → คนที่บันทึกรับเงิน)
+    signer: inv.issued_by_name || (Number(inv.paid_amount ?? 0) > 0 ? inv.paid_by_name : null) || '',
   };
 }
 
