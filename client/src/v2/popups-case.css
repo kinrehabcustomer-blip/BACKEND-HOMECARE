@@ -451,6 +451,11 @@
 .cv-modal .visit-card.is-today .vc-date { background: var(--brand-soft); color: color-mix(in srgb, var(--brand) 78%, var(--heading)); }
 .cv-modal .visit-card .vc-date .vc-dow { color: inherit; }
 
+/* จอแคบ (ปฏิทินอยู่บน รายการนัดอยู่ล่าง): เว้นระยะระหว่างสองส่วน
+   เดิมได้ระยะจากคำอธิบายใต้ปุ่มเลือกเร็ว พอเอาคำอธิบายออก ปุ่ม "เลือกให้ครบ" ชนแถบนัดที่ผ่านไปแล้ว (ผู้ใช้แจ้ง 25 พ.ย. 2569) */
+@media (max-width: 999px) {
+  .cv-modal .cv-main + .cv-side { margin-top: 1.25rem; }
+}
 @media (min-width: 1000px) {
   .modal.modal-narrow.cv-modal { max-width: 65rem; }
   .cv-modal .modal-head { padding: 1.375rem 1.75rem 1.125rem; }
