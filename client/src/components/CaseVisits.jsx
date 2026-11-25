@@ -4,6 +4,7 @@ import { api } from '../api.js';
 import { useToast } from '../toast.jsx';
 import {
   POSITION_LABELS, VISIT_STATE_LABELS, MONTH_LABELS, formatBaht, formatDate, timeText, toBuddhistYear, todayTH, positionsForCase,
+  locationNoteText,
 } from '../labels.js';
 import LineIcon from './LineIcon.jsx';
 import TimeSelect from './TimeSelect.jsx';
@@ -1087,7 +1088,7 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
                         {[v.check_in_at && `เข้า ${timeText(v.check_in_at)}`, v.check_out_at && `ออก ${timeText(v.check_out_at)}`].filter(Boolean).join(' · ')}
                       </span>
                     )}
-                    {v.location_flagged && <span className="nw vc-warn"><LineIcon name="alert" className="text-ico" />{v.location_note ?? 'นอกพื้นที่'}</span>}
+                    {v.location_flagged && <span className="nw vc-warn"><LineIcon name="alert" className="text-ico" />{locationNoteText(v)}</span>}
                     {v.off_schedule && <span className="nw vc-warn"><LineIcon name="alert" className="text-ico" />นอกวันนัด</span>}
                     {/* นัดที่ยกเลิก: หมายเหตุมีเหตุผลที่กรอกตอนกดยกเลิก ("ยกเลิก: …") — เห็นได้โดยไม่ต้องเปิดประวัติเคส */}
                     {v.state === 'cancelled' && v.note && <span className="visit-note">{v.note}</span>}

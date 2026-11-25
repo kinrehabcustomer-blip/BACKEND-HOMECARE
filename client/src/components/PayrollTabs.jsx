@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { useToast } from '../toast.jsx';
-import { formatBaht, formatDate, monthText, timeText, durationText, caseStage } from '../labels.js';
+import { locationNoteText, formatBaht, formatDate, monthText, timeText, durationText, caseStage } from '../labels.js';
 import { useSheetSwipe } from '../lib/sheetSwipe.js';
 import { useScrollLock } from '../lib/scrollLock.js';
 import LineIcon from './LineIcon.jsx';
@@ -118,7 +118,7 @@ export function Approvals({ month, employeeId, patch, employeePicker, reloadKey,
   /** ธงที่ทำให้กะนี้ควรถูกดูก่อนอนุมัติ — ไม่มีเลย = กะปกติ */
   const flags = (v) =>
     [
-      v.location_flagged && (v.location_note ? `ตำแหน่ง: ${v.location_note}` : 'นอกพื้นที่'),
+      v.location_flagged && locationNoteText(v),
       v.off_schedule && 'นอกวันนัด',
       v.check_in_late_minutes > LATE_MINUTES && `สาย ${durationText(v.check_in_late_minutes)}`,
       v.worked_minutes === 0 && 'ทำงาน 0 นาที',

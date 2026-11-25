@@ -5,7 +5,7 @@ import VisitReportModal from '../components/VisitReportModal.jsx';
 import { serviceName } from '../components/MyCaseModal.jsx';
 import { getPosition } from '../lib/geo.js';
 import PageRefresh, { RefreshButton } from '../components/PageRefresh.jsx';
-import { SERVICE_KIND_LABELS, serviceKindOf, VISIT_STATE_LABELS, timeText, durationText, formatDate, todayTH } from '../labels.js';
+import { locationNoteText, SERVICE_KIND_LABELS, serviceKindOf, VISIT_STATE_LABELS, timeText, durationText, formatDate, todayTH } from '../labels.js';
 import LineIcon from '../components/LineIcon.jsx';
 
 /** หน้าหลักของพนักงานภาคสนาม — กะงานวันนี้ พร้อมปุ่มเช็คอิน/เช็คเอาท์ */
@@ -232,7 +232,7 @@ function ShiftCard({ visit, busy, onCheckIn, onCheckOut, onReport }) {
           <p className="shift-times">
             เข้า {timeText(visit.check_in_at)}
             {visit.check_out_at && ` · ออก ${timeText(visit.check_out_at)} · รวม ${durationText(visit.worked_minutes)}`}
-            {visit.location_flagged && <span className="badge flag">{visit.location_note ?? 'นอกพื้นที่'}</span>}
+            {visit.location_flagged && <span className="badge flag">{locationNoteText(visit)}</span>}
           </p>
         )}
       </div>

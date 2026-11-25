@@ -348,6 +348,24 @@ export function distanceText(meters) {
 }
 
 /**
+ * ป้ายเตือนตำแหน่งแบบสั้น — ย่อเฉพาะตอนแสดง ข้อความเต็มในฐานข้อมูลไม่เปลี่ยน (server my/routes.js)
+ * ของเดิม "เข้า: เคสยังไม่ตั้งพิกัด · ออก: เคสยังไม่ตั้งพิกัด" ยาวจนป้ายขึ้นสามบรรทัด
+ * → เหตุเดียวกันทั้งเข้าและออกพูดครั้งเดียว ("เคสไม่มีพิกัด") · ต่างกันคงคำว่าเข้า/ออกไว้
+ */
+const LOCATION_REASON_SHORT = { 'เคสยังไม่ตั้งพิกัด': 'เคสไม่มีพิกัด', 'ไม่ได้ส่งตำแหน่ง': 'ไม่ส่งตำแหน่ง' };
+export function locationNoteText(v) {
+  if (!v?.location_flagged) return '';
+  if (!v.location_note) return 'นอกพื้นที่';
+  const parts = v.location_note.split(' · ').map((p) => {
+    const m = p.match(/^(เข้า|ออก): (.*)$/);
+    const why = m ? m[2] : p;
+    return { side: m?.[1] ?? '', why: LOCATION_REASON_SHORT[why] ?? why };
+  });
+  if (parts.every((p) => p.why === parts[0].why)) return parts[0].why;
+  return parts.map((p) => (p.side ? `${p.side} ${p.why}` : p.why)).join(' · ');
+}
+
+/**
  * อายุ (ปี) จากวันเกิด — คืน null ถ้าไม่มีวันเกิดหรือวันที่ใช้ไม่ได้
  * ใช้คำนวณสดเสมอแทนการอ่านเลขอายุที่เก็บไว้ เพราะเลขที่กรอกเมื่อปีก่อนจะผิดไปเรื่อยๆ
  */

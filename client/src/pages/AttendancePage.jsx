@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../api.js';
 import { useToast } from '../toast.jsx';
-import { VISIT_STATE_LABELS, formatDate, timeText, durationText, distanceText, THERAPY_POSITIONS, TIER_POSITIONS } from '../labels.js';
+import { VISIT_STATE_LABELS, locationNoteText, formatDate, timeText, durationText, distanceText, THERAPY_POSITIONS, TIER_POSITIONS } from '../labels.js';
 import LineIcon from '../components/LineIcon.jsx';
 import PageRefresh from '../components/PageRefresh.jsx';
 import ConfirmButton from '../components/ConfirmButton.jsx';
@@ -325,7 +325,7 @@ function WhoCell({ v }) {
 function reason(v) {
   if (v.state === 'missed') return 'ขาดงาน';
   if (v.state === 'stale') return 'ค้างเช็คเอาท์';
-  if (v.location_flagged) return v.location_note ? `ตำแหน่ง: ${v.location_note}` : 'นอกพื้นที่';
+  if (v.location_flagged) return locationNoteText(v);
   if (v.off_schedule) return 'เช็คอินนอกวันนัด';
   if (v.check_in_late_minutes > LATE_MINUTES) return `มาสาย ${durationText(v.check_in_late_minutes)}`;
   return VISIT_STATE_LABELS[v.state];
