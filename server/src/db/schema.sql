@@ -680,6 +680,8 @@ CREATE TABLE IF NOT EXISTS partners (
 ALTER TABLE partners ADD COLUMN IF NOT EXISTS logo_data BYTEA;
 ALTER TABLE partners ADD COLUMN IF NOT EXISTS logo_mime TEXT;
 ALTER TABLE partners ADD COLUMN IF NOT EXISTS logo_updated_at TIMESTAMPTZ;
+-- ค่าภาษาต่อครั้ง (25 พ.ย. 2569) — บวกเพิ่มจากเรทปกติ เฉพาะกะของเคสที่ขอภาษาอังกฤษ
+ALTER TABLE partners ADD COLUMN IF NOT EXISTS english_rate NUMERIC(12, 2) NOT NULL DEFAULT 0 CHECK (english_rate >= 0);
 ALTER TABLE employees ADD COLUMN IF NOT EXISTS partner_id INTEGER REFERENCES partners (partner_id) ON DELETE RESTRICT;
 CREATE INDEX IF NOT EXISTS idx_employees_partner ON employees (partner_id) WHERE partner_id IS NOT NULL;
 ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS partner_id INTEGER REFERENCES partners (partner_id) ON DELETE RESTRICT;
@@ -690,6 +692,8 @@ ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS partner_sent_by TEXT;
 ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS partner_rejected_at TIMESTAMPTZ;
 ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS partner_rejected_by INTEGER;
 ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS partner_reject_reason TEXT;
+-- ส่วนที่เป็นค่าภาษาใน partner_rate (partner_rate รวมค่าภาษาแล้ว)
+ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS partner_english NUMERIC(12, 2);
 CREATE INDEX IF NOT EXISTS idx_case_visits_partner ON case_visits (partner_id, visit_date) WHERE partner_id IS NOT NULL;
 CREATE TABLE IF NOT EXISTS partner_visit_events (
   id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,

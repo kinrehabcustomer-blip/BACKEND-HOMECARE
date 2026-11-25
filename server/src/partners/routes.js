@@ -25,6 +25,8 @@ const partnerSchema = z.object({
   contact_name: optText(120),
   phone: optText(30),
   rate_per_visit: z.coerce.number().min(0, 'เรทต้องไม่ติดลบ').max(1_000_000).optional(),
+  // ค่าภาษาต่อครั้ง — บวกเพิ่มจากเรทปกติเฉพาะกะของเคสที่ขอภาษาอังกฤษ
+  english_rate: z.coerce.number().min(0, 'ค่าภาษาต้องไม่ติดลบ').max(1_000_000).optional(),
   note: optText(500),
 });
 const personSchema = z.object({
@@ -57,11 +59,11 @@ function officeOrPayroll(req, res, next) {
   return next(new ApiError(403, 'บัญชีของคุณไม่มีสิทธิ์ดูสรุปพาร์ทเนอร์'));
 }
 /** ตัดเรทออกจากข้อมูลบริษัทสำหรับคนที่ไม่เห็นค่าจ้าง */
-const withoutMoney = (req, p) => (canSeeStaffPay(req.user.position) ? p : { ...p, rate_per_visit: undefined });
+const withoutMoney = (req, p) => (canSeeStaffPay(req.user.position) ? p : { ...p, rate_per_visit: undefined, english_rate: undefined });
 /** คนไม่เห็นค่าจ้างตั้ง/แก้เรทไม่ได้ (ส่งมาก็ไม่รับ) */
 const moneyInput = (req, input) => {
   if (canSeeStaffPay(req.user.position)) return input;
-  const { rate_per_visit: _drop, ...rest } = input;
+  const { rate_per_visit: _drop, english_rate: _dropEn, ...rest } = input;
   return rest;
 };
 
@@ -95,6 +97,11 @@ adminPartnersRouter.post('/visits/:visitId/pull', office, asyncRoute(async (req,
 adminPartnersRouter.patch('/:id', office, asyncRoute(async (req, res) => {
   const input = partnerSchema.partial().extend({ status: z.enum(['active', 'inactive']).optional() }).parse(req.body ?? {});
   res.json(withoutMoney(req, await repo.updatePartner(intId.parse(req.params.id), moneyInput(req, input))));
+}));
+
+/** ลบบริษัทถาวร (พร้อมบัญชีของบริษัท) — เฉพาะบริษัทที่ยังไม่มีงานที่ไปจริง/บันทึกจ่าย (ดู repo.removePartner) */
+adminPartnersRouter.delete('/:id', office, asyncRoute(async (req, res) => {
+  res.json(await repo.removePartner(intId.parse(req.params.id)));
 }));
 
 /** โลโก้บริษัท — ส่ง image: null = ลบ (หน้าเว็บย่อเป็น WebP ≤ 512px ก่อนส่ง) */
@@ -158,7 +165,7 @@ partnerRouter.use(asyncRoute(async (req, res, next) => {
 partnerRouter.get('/me', asyncRoute(async (req, res) => {
   const p = await repo.findPartner(mine(req));
   if (!p || p.status !== 'active') throw new ApiError(403, 'บริษัทของคุณปิดใช้งานอยู่ — ติดต่อ KIN');
-  res.json({ partner_id: p.partner_id, name: p.name, rate_per_visit: p.rate_per_visit, has_logo: p.has_logo,
+  res.json({ partner_id: p.partner_id, name: p.name, rate_per_visit: p.rate_per_visit, english_rate: p.english_rate, has_logo: p.has_logo,
     logo_version: p.logo_version, counts: await repo.partnerCounts(p.partner_id) });
 }));
 

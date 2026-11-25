@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
 import { api } from '../api.js';
 import { useCan } from '../auth.jsx';
@@ -10,6 +11,8 @@ import ErrorBar from './ErrorBar.jsx';
 import ConfirmButton from './ConfirmButton.jsx';
 import { useConfirm } from './ConfirmDialog.jsx';
 import PartnerLogo, { logoDataUrl } from './PartnerLogo.jsx';
+import LineIcon from './LineIcon.jsx';
+import { useScrollLock } from '../lib/scrollLock.js';
 
 /** เวลา timestamptz → วันที่ไทย (YYYY-MM-DD) — ตัดสตริง UTC ตรงๆ ได้วันก่อนหน้าช่วงตี 0–7 */
 const dateTH = (ts) => new Date(ts).toLocaleDateString('sv-SE', { timeZone: 'Asia/Bangkok' });
@@ -25,7 +28,7 @@ const shiftMonth = (ym, n) => {
   return new Date(Date.UTC(y, m - 1 + n, 1)).toISOString().slice(0, 7);
 };
 const monthName = (ym) => new Date(`${ym}-01T00:00:00+07:00`).toLocaleDateString('th-TH', { month: 'long', year: 'numeric' });
-const EMPTY_PARTNER = { name: '', contact_name: '', phone: '', rate_per_visit: '' };
+const EMPTY_PARTNER = { name: '', contact_name: '', phone: '', rate_per_visit: '', english_rate: '' };
 const EMPTY_LEAD = { first_name: '', last_name: '', phone: '' };
 
 export default function PartnersPane() {
@@ -41,6 +44,7 @@ export default function PartnersPane() {
   const [error, setError] = useState(null);
   const [form, setForm] = useState(null); // null = ปิด · { partner_id?, ...fields }
   const [busy, setBusy] = useState(false);
+  const [formError, setFormError] = useState(null);
   const [openId, setOpenId] = useState(null);
 
   const load = useCallback(() => (canOffice
@@ -53,16 +57,17 @@ export default function PartnersPane() {
   const save = async (e) => {
     e.preventDefault();
     setBusy(true);
+    setFormError(null);
     try {
       const body = { name: form.name, contact_name: form.contact_name || null, phone: form.phone || null,
-        ...(seePay ? { rate_per_visit: Number(form.rate_per_visit || 0) } : {}) };
+        ...(seePay ? { rate_per_visit: Number(form.rate_per_visit || 0), english_rate: Number(form.english_rate || 0) } : {}) };
       if (form.partner_id) await api.updatePartner(form.partner_id, body);
       else await api.createPartner(body);
       toast(form.partner_id ? 'บันทึกข้อมูลพาร์ทเนอร์แล้ว' : `เพิ่ม ${body.name} แล้ว — สร้างบัญชีหัวหน้าต่อได้เลย`);
       setForm(null);
       load();
     } catch (err) {
-      setError(err.message);
+      setFormError(err.message);
     } finally {
       setBusy(false);
     }
@@ -80,6 +85,17 @@ export default function PartnersPane() {
   const removeLogo = async (p) => {
     try {
       await api.setPartnerLogo(p.partner_id, null);
+      load();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+  /* ลบถาวร — server ตรวจเองว่าลบได้ไหม (มีงานที่ไปจริง/บันทึกจ่าย = ลบไม่ได้ · มีกะค้าง = ดึงคืนก่อน) */
+  const removePartner = async (p) => {
+    try {
+      await api.deletePartner(p.partner_id);
+      toast(`ลบ ${p.name} แล้ว`);
+      if (openId === p.partner_id) setOpenId(null);
       load();
     } catch (err) {
       setError(err.message);
@@ -128,22 +144,27 @@ export default function PartnersPane() {
         <header className="set-card-head">
           <div className="set-card-title">
             <h3>บริษัทพาร์ทเนอร์</h3>
-            <p className="muted">เรทต่อครั้ง = ยอดที่ KIN จ่ายบริษัทต่อกะที่ไปจริง (จดไว้ ณ ตอนส่งกะ เปลี่ยนเรทไม่ย้อนแก้กะเก่า)</p>
+            <p className="muted">เรทต่อครั้ง = ยอดที่ KIN จ่ายบริษัทต่อกะที่ไปจริง · ค่าภาษา = บวกเพิ่มต่อกะ เฉพาะเคสที่ลูกค้าขอภาษาอังกฤษ (จดไว้ ณ ตอนส่งกะ เปลี่ยนเรทไม่ย้อนแก้กะเก่า)</p>
           </div>
-          {!form && <button type="button" className="btn primary" onClick={() => setForm({ ...EMPTY_PARTNER })}>+ เพิ่มพาร์ทเนอร์</button>}
+          <button type="button" className="btn primary" onClick={() => { setFormError(null); setForm({ ...EMPTY_PARTNER }); }}>+ เพิ่มพาร์ทเนอร์</button>
         </header>
 
+        {/* เพิ่ม/แก้ไขบริษัท = popup กลางจอ (ผู้ใช้ขอ 25 พ.ย. 2569) — error ขึ้นในกล่องเอง เพราะแถบ error ของหน้าอยู่หลังกล่อง */}
         {form && (
-          <form className="pa-form" onSubmit={save}>
-            <label>ชื่อบริษัท<input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} disabled={busy} /></label>
-            <label>ผู้ติดต่อ<input value={form.contact_name ?? ''} onChange={(e) => setForm({ ...form, contact_name: e.target.value })} disabled={busy} /></label>
-            <label>เบอร์โทร<input type="tel" value={form.phone ?? ''} onChange={(e) => setForm({ ...form, phone: e.target.value })} disabled={busy} /></label>
-            {seePay && <label>เรทต่อครั้ง (บาท)<input required inputMode="decimal" value={form.rate_per_visit} onChange={(e) => setForm({ ...form, rate_per_visit: e.target.value })} disabled={busy} /></label>}
-            <div className="pa-form-actions">
-              <button type="button" className="btn" onClick={() => setForm(null)} disabled={busy}>ยกเลิก</button>
-              <button type="submit" className="btn primary" disabled={busy}>{busy ? 'กำลังบันทึก…' : 'บันทึก'}</button>
-            </div>
-          </form>
+          <CenterPopup wide title={form.partner_id ? 'แก้ไขพาร์ทเนอร์' : 'เพิ่มพาร์ทเนอร์'} onClose={() => !busy && setForm(null)}>
+            <form className="pa-form pa-form-modal" onSubmit={save}>
+              {formError && <p className="form-error pa-form-error" role="alert">{formError}</p>}
+              <label>ชื่อบริษัท<input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} disabled={busy} /></label>
+              <label>ผู้ติดต่อ<input value={form.contact_name ?? ''} onChange={(e) => setForm({ ...form, contact_name: e.target.value })} disabled={busy} /></label>
+              <label>เบอร์โทร<input type="tel" value={form.phone ?? ''} onChange={(e) => setForm({ ...form, phone: e.target.value })} disabled={busy} /></label>
+              {seePay && <label>เรทต่อครั้ง (บาท)<input required inputMode="decimal" value={form.rate_per_visit} onChange={(e) => setForm({ ...form, rate_per_visit: e.target.value })} disabled={busy} /></label>}
+              {seePay && <label>ค่าภาษาอังกฤษต่อครั้ง (บาท)<input inputMode="decimal" placeholder="0" value={form.english_rate ?? ''} onChange={(e) => setForm({ ...form, english_rate: e.target.value })} disabled={busy} /></label>}
+              <div className="pa-form-actions">
+                <button type="button" className="btn" onClick={() => setForm(null)} disabled={busy}>ยกเลิก</button>
+                <button type="submit" className="btn primary" disabled={busy}>{busy ? 'กำลังบันทึก…' : 'บันทึก'}</button>
+              </div>
+            </form>
+          </CenterPopup>
         )}
 
         {!partners ? <p className="muted">กำลังโหลด…</p> : partners.length === 0 ? (
@@ -158,22 +179,27 @@ export default function PartnersPane() {
                     onClick={() => setOpenId(openId === p.partner_id ? null : p.partner_id)}>
                     <b>{p.name}</b>
                     <span className="muted">
-                      {p.rate_per_visit != null && `${formatBaht(p.rate_per_visit)}/ครั้ง · `}หัวหน้า {p.leads} · ทีม {p.staff} คน · งานค้าง {p.open_visits} · เดือนนี้ไปแล้ว {p.done_this_month}
+                      {p.rate_per_visit != null && `${formatBaht(p.rate_per_visit)}/ครั้ง · `}{Number(p.english_rate) > 0 && `ภาษาอังกฤษ +${formatBaht(p.english_rate)} · `}หัวหน้า {p.leads} · ทีม {p.staff} คน · งานค้าง {p.open_visits} · เดือนนี้ไปแล้ว {p.done_this_month}
                       {p.contact_name ? ` · ${p.contact_name}` : ''}{p.phone ? ` ${p.phone}` : ''}
                     </span>
                   </button>
                   <div className="pa-partner-tools">
-                    {/* โลโก้ — เลือกไฟล์แล้วอัปโหลดทันที (ย่อเป็น WebP ≤ 512px ในเบราว์เซอร์) */}
-                    <label className="btn tiny pa-logo-btn">
-                      {p.has_logo ? 'เปลี่ยนโลโก้' : '+ โลโก้'}
-                      <input type="file" accept="image/png,image/jpeg,image/webp" hidden
-                        onChange={(e) => { uploadLogo(p, e.target.files?.[0]); e.target.value = ''; }} />
-                    </label>
-                    {p.has_logo && (
-                      <ConfirmButton className="btn tiny" title={`ลบโลโก้ ${p.name}?`} confirmLabel="ลบโลโก้" cancelLabel="ไม่ลบ"
-                        onConfirm={() => removeLogo(p)}>ลบโลโก้</ConfirmButton>
-                    )}
-                    <button type="button" className="btn tiny" onClick={() => setForm({ ...p, rate_per_visit: String(p.rate_per_visit ?? '') })}>แก้ไข</button>
+                    {/* ปุ่มตั้งค่าเดียว รวม โลโก้ · แก้ไข · ลบ (ผู้ใช้ขอ 25 พ.ย. 2569) — สวิตช์เปิด/ปิดยังอยู่นอกเมนู ให้เห็นสถานะทันที */}
+                    <PartnerMenu
+                      partner={p}
+                      onEdit={() => { setFormError(null); setForm({ ...p, rate_per_visit: String(p.rate_per_visit ?? ''), english_rate: Number(p.english_rate) > 0 ? String(p.english_rate) : '' }); }}
+                      onLogo={(file) => uploadLogo(p, file)}
+                      onRemoveLogo={async () => {
+                        if (await ask({ title: `ลบโลโก้ ${p.name}?`, confirmLabel: 'ลบโลโก้', cancelLabel: 'ไม่ลบ', danger: true })) removeLogo(p);
+                      }}
+                      onRemove={async () => {
+                        if (await ask({
+                          title: `ลบ ${p.name} ถาวร?`,
+                          detail: 'บัญชีหัวหน้าและทีมของบริษัทนี้จะถูกลบด้วย กู้คืนไม่ได้ · บริษัทที่มีงานที่ไปจริงหรือบันทึกจ่ายแล้วลบไม่ได้ ใช้ปิดใช้งานแทน',
+                          confirmLabel: 'ลบพาร์ทเนอร์', cancelLabel: 'ไม่ลบ', danger: true,
+                        })) removePartner(p);
+                      }}
+                    />
                     {/* สวิตช์เปิด/ปิดใช้งาน (ผู้ใช้ขอ 21 พ.ย. 2569 — แบบเดียวกับหน้าจัดการสิทธิ์) · ปิด = ถามยืนยันก่อน */}
                     <label className={`set-switch pa-switch${p.status === 'active' ? ' is-on' : ''}`}>
                       <input type="checkbox" role="switch" className="perm-check" checked={p.status === 'active'}
@@ -199,6 +225,100 @@ export default function PartnersPane() {
 
       {seePay && <MonthlySummary canPay={canPay} />}
     </div>
+  );
+}
+
+/**
+ * popup กลางจอของหน้าพาร์ทเนอร์ (ผู้ใช้ขอ 25 พ.ย. 2569) — ใช้กับเมนูตั้งค่าและฟอร์มเพิ่ม/แก้ไขบริษัท
+ * กลางจอทุกขนาดจอ (ไม่เป็นแผ่นเลื่อนจากขอบล่างบนมือถือ) · ปิดเมื่อกดพื้นหลัง / Esc / ปุ่มปิด
+ * head = ส่วนหัวแทนชื่อธรรมดา (เมนูตั้งค่าใช้โลโก้ + ชื่อบริษัท)
+ */
+function CenterPopup({ title, head, onClose, wide = false, children }) {
+  const closeRef = useRef(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  useScrollLock(true);
+  useEffect(() => {
+    if (!head) closeRef.current?.focus();
+    const onKey = (e) => { if (e.key === 'Escape') { e.stopPropagation(); onCloseRef.current(); } };
+    document.addEventListener('keydown', onKey, true);
+    return () => document.removeEventListener('keydown', onKey, true);
+  }, [head]);
+  return createPortal(
+    <div className="modal-backdrop modal-stacked pa-menu-backdrop" onClick={onClose}>
+      <div className={`modal modal-narrow pa-menu-modal${wide ? ' is-wide' : ''}`} role="dialog" aria-modal="true" aria-label={title}
+        onClick={(e) => e.stopPropagation()}>
+        <header className="pa-menu-head">
+          {head ?? <div><b>{title}</b></div>}
+          <button type="button" className="btn icon-btn pa-menu-close" ref={closeRef} aria-label="ปิด" onClick={onClose}>
+            <LineIcon name="close" className="btn-ico" />
+          </button>
+        </header>
+        {children}
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+/**
+ * ปุ่มตั้งค่า (เฟือง) ของแถวบริษัท — กดแล้วเปิด popup กลางจอ:
+ * แก้ไขข้อมูล · เพิ่ม/เปลี่ยนโลโก้ · ลบโลโก้ · ลบพาร์ทเนอร์
+ * เลือกรายการแล้ว popup ปิด · การยืนยันลบใช้กล่องยืนยัน (useConfirm) หลัง popup ปิดแล้ว
+ */
+function PartnerMenu({ partner, onEdit, onLogo, onRemoveLogo, onRemove }) {
+  const [open, setOpen] = useState(false);
+  const fileRef = useRef(null);
+  const pick = (fn) => () => { setOpen(false); fn(); };
+  return (
+    <>
+      <button type="button" className="btn tiny pa-menu-btn" aria-haspopup="dialog" aria-expanded={open}
+        aria-label={`ตั้งค่า ${partner.name}`} onClick={() => setOpen(true)}>
+        <LineIcon name="settings" className="btn-ico" /><span>ตั้งค่า</span>
+      </button>
+      {/* อัปโหลดโลโก้ — เลือกไฟล์แล้วอัปโหลดทันที (ย่อเป็น WebP ≤ 512px ในเบราว์เซอร์) */}
+      <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp" hidden
+        onChange={(e) => { onLogo(e.target.files?.[0]); e.target.value = ''; }} />
+      {open && (
+        <CenterPopup
+          title={`ตั้งค่า ${partner.name}`}
+          onClose={() => setOpen(false)}
+          head={(
+            <>
+              <PartnerLogo partner={partner} size={48} className="pa-logo" />
+              <div>
+                <b>{partner.name}</b>
+                <span className="pa-menu-sub">
+                  <span className={`pa-menu-status${partner.status === 'active' ? ' is-on' : ''}`}>{partner.status === 'active' ? 'เปิดใช้งาน' : 'ปิดอยู่'}</span>
+                  {partner.rate_per_visit != null && <span className="muted">{formatBaht(partner.rate_per_visit)}/ครั้ง</span>}
+                </span>
+              </div>
+            </>
+          )}
+        >
+          <div className="pa-menu-list" role="menu">
+            <MenuItem icon="edit" title="แก้ไขข้อมูล" desc="ชื่อ ผู้ติดต่อ เบอร์โทร เรท และค่าภาษา" onClick={pick(onEdit)} />
+            <MenuItem icon="image" title={partner.has_logo ? 'เปลี่ยนโลโก้' : 'เพิ่มโลโก้'} desc="PNG / JPG / WebP — ย่อขนาดให้อัตโนมัติ"
+              onClick={pick(() => fileRef.current?.click())} />
+            {partner.has_logo && <MenuItem icon="image-off" title="ลบโลโก้" desc="กลับไปใช้อักษรย่อแทน" onClick={pick(onRemoveLogo)} />}
+          </div>
+          <div className="pa-menu-list is-danger-zone" role="menu">
+            <MenuItem icon="trash" danger title="ลบพาร์ทเนอร์" desc="ลบพร้อมบัญชีของบริษัท · กู้คืนไม่ได้" onClick={pick(onRemove)} />
+          </div>
+        </CenterPopup>
+      )}
+    </>
+  );
+}
+
+/** แถวในเมนูตั้งค่า — ไอคอนในกรอบ · ชื่อ · คำอธิบายสั้น · ลูกศร */
+function MenuItem({ icon, title, desc, danger = false, onClick }) {
+  return (
+    <button type="button" role="menuitem" className={danger ? 'pa-menu-item is-danger' : 'pa-menu-item'} onClick={onClick}>
+      <span className="pa-menu-ico"><LineIcon name={icon} className="btn-ico" /></span>
+      <span className="pa-menu-text"><b>{title}</b>{desc && <span>{desc}</span>}</span>
+      <LineIcon name="chevron-right" className="btn-ico pa-menu-arrow" />
+    </button>
   );
 }
 
@@ -316,7 +436,7 @@ function MonthlySummary({ canPay }) {
             <tbody>
               {rows.map((r) => (
                 <tr key={r.partner_id}>
-                  <td>{r.name}<span className="cell-sub">{formatBaht(r.rate_per_visit)}/ครั้ง</span></td>
+                  <td>{r.name}<span className="cell-sub">{formatBaht(r.rate_per_visit)}/ครั้ง{Number(r.english_rate) > 0 && ` · ภาษาอังกฤษ +${formatBaht(r.english_rate)}`}</span></td>
                   <td className="num">{r.done}</td>
                   <td className="num">{r.missed}</td>
                   <td className="num">{r.rejected}</td>

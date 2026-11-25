@@ -7,7 +7,8 @@ import { POSITIONS } from '../employees/schema.js';
  *   partners              บริษัทพาร์ทเนอร์ + เรทต่อครั้ง (ค่าเดียวทั้งบริษัท ตามที่ตกลงรุ่นแรก)
  *   employees.partner_id  พนักงานของพาร์ทเนอร์ (ตำแหน่งหน้างานปกติ) และหัวหน้าพาร์ทเนอร์ (partner_lead)
  *   case_visits.partner_* กะที่ KIN ส่งให้พาร์ทเนอร์: pending = รอรับ · accepted = เลือกคนแล้ว
- *                         partner_rate = เรท ณ ตอนส่ง (เปลี่ยนเรททีหลังไม่ย้อนแก้ยอดเก่า)
+ *                         partner_rate = เรท ณ ตอนส่ง (เปลี่ยนเรททีหลังไม่ย้อนแก้ยอดเก่า) — รวมค่าภาษาแล้ว
+ *                         partner_english = ส่วนที่เป็นค่าภาษาใน partner_rate (เคสที่ลูกค้าขอภาษาอังกฤษ · ไม่มี = NULL)
  *                         partner_rejected_* = พาร์ทเนอร์ปฏิเสธล่าสุด (กะกลับมาหา KIN · กระดิ่งหลังบ้านนับ)
  *   partner_visit_events  ประวัติส่ง/รับ/เปลี่ยนคน/ปฏิเสธ/ดึงคืน (นับ "ปฏิเสธ" ในสรุปรายเดือน)
  *   partner_payments      KIN บันทึกว่าจ่ายยอดเดือนไหนให้บริษัทไหนแล้ว (ตรึงจำนวนครั้ง/ยอด ณ วันจ่าย)
@@ -32,6 +33,8 @@ export const PARTNER_DDL = [
   'ALTER TABLE partners ADD COLUMN IF NOT EXISTS logo_data BYTEA',
   'ALTER TABLE partners ADD COLUMN IF NOT EXISTS logo_mime TEXT',
   'ALTER TABLE partners ADD COLUMN IF NOT EXISTS logo_updated_at TIMESTAMPTZ',
+  // ค่าภาษาต่อครั้ง (25 พ.ย. 2569) — บวกเพิ่มจากเรทปกติ เฉพาะกะของเคสที่ลูกค้าขอภาษาอังกฤษ (cases.pkg_english)
+  'ALTER TABLE partners ADD COLUMN IF NOT EXISTS english_rate NUMERIC(12, 2) NOT NULL DEFAULT 0 CHECK (english_rate >= 0)',
   'ALTER TABLE employees ADD COLUMN IF NOT EXISTS partner_id INTEGER REFERENCES partners (partner_id) ON DELETE RESTRICT',
   'CREATE INDEX IF NOT EXISTS idx_employees_partner ON employees (partner_id) WHERE partner_id IS NOT NULL',
   'ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS partner_id INTEGER REFERENCES partners (partner_id) ON DELETE RESTRICT',
@@ -42,6 +45,7 @@ export const PARTNER_DDL = [
   'ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS partner_rejected_at TIMESTAMPTZ',
   'ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS partner_rejected_by INTEGER',
   'ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS partner_reject_reason TEXT',
+  'ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS partner_english NUMERIC(12, 2)',
   'CREATE INDEX IF NOT EXISTS idx_case_visits_partner ON case_visits (partner_id, visit_date) WHERE partner_id IS NOT NULL',
   `CREATE TABLE IF NOT EXISTS partner_visit_events (
     id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -88,14 +92,14 @@ async function ensurePositionCheck() {
    เช็คคอลัมน์ "ตัวท้ายสุด" ของแต่ละตาราง + ดัชนี/ตาราง — เพิ่มชิ้นใหม่ใน PARTNER_DDL ต้องเพิ่มที่นี่ด้วย */
 const SCHEMA_PROBE = `
   SELECT (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = current_schema() AND (
-            (table_name = 'partners' AND column_name = 'logo_updated_at') OR
+            (table_name = 'partners' AND column_name IN ('logo_updated_at', 'english_rate')) OR
             (table_name = 'employees' AND column_name = 'partner_id') OR
             (table_name = 'case_visits' AND column_name IN ('partner_id', 'partner_status', 'partner_rate', 'partner_sent_at',
-              'partner_sent_by', 'partner_rejected_at', 'partner_rejected_by', 'partner_reject_reason'))))::int AS cols,
+              'partner_sent_by', 'partner_rejected_at', 'partner_rejected_by', 'partner_reject_reason', 'partner_english'))))::int AS cols,
          to_regclass('partner_visit_events') IS NOT NULL AND to_regclass('partner_payments') IS NOT NULL
            AND to_regclass('idx_employees_partner') IS NOT NULL AND to_regclass('idx_case_visits_partner') IS NOT NULL
            AND to_regclass('idx_partner_visit_events_partner') IS NOT NULL AS rels`;
-const PROBE_COLS = 10;
+const PROBE_COLS = 12;
 
 let ready = null;
 export const ensurePartnerSchema = () =>

@@ -2323,7 +2323,7 @@ function assertWithinQuota(before, after) {
  * เป็นเรื่องปกติเวลาต่อตารางเดือนถัดไป ไม่ควรได้กะซ้อนสองใบโดยไม่รู้ตัว
  * ส่วนกะคนละเวลา/คนละคนในวันเดียวกันยังลงได้ตามปกติ (ตั้งใจให้ทำได้ตั้งแต่ระบบกะเฟส 2)
  */
-/* partner = { partner_id, rate, sent_by } (partners/repo.js) — ลงนัดแบบ "ส่งให้พาร์ทเนอร์" ในคำสั่งเดียว:
+/* partner = { partner_id, partner_rate, partner_english, sent_by } (partners/repo.js partnerRateOf) — ลงนัดแบบ "ส่งให้พาร์ทเนอร์" ในคำสั่งเดียว:
    ไม่มีคน (ไม่เติมผู้รับผิดชอบเคส) + partner_status pending · ผลมี inserted_ids ให้ผู้เรียกแจ้งหัวหน้าบริษัทต่อ */
 export async function addVisits(caseId, dates, { assigned_to, planned_start, planned_end, staff_pay, note, partner = null } = {}) {
   await ensureFormatDays(); // คอลัมน์ pkg_service_formats.days ต้องมีก่อนเปิดทรานแซกชัน (ตัวล็อกจำนวนวันอ่านมัน)
@@ -2359,7 +2359,8 @@ export async function addVisits(caseId, dates, { assigned_to, planned_start, pla
       staff_pay: staff_pay ?? null,
       note: note ?? null,
       partner_id: partner?.partner_id ?? null,
-      partner_rate: partner?.rate ?? null,
+      partner_rate: partner?.partner_rate ?? null,
+      partner_english: partner?.partner_english ?? null,
       partner_sent_by: partner?.sent_by ?? null,
     };
     const owner = partner ? 'NULL' : 'COALESCE(:assigned_to, (SELECT assigned_to FROM cases WHERE case_id = :case_id))';
@@ -2367,13 +2368,13 @@ export async function addVisits(caseId, dates, { assigned_to, planned_start, pla
       params[`d${i}`] = d;
       return `(:case_id, :d${i}, ${owner}, :planned_start, :planned_end, :staff_pay, :note,
                CAST(:partner_id AS integer), ${partner ? `'pending'` : 'NULL'}, CAST(:partner_rate AS numeric),
-               ${partner ? 'now()' : 'NULL'}, :partner_sent_by)`;
+               CAST(:partner_english AS numeric), ${partner ? 'now()' : 'NULL'}, :partner_sent_by)`;
     });
 
     // ลงนัดแล้วออก VN ในทรานแซกชันเดียวกัน — นัดที่ได้มาต้องมีเลขเสมอ (ดู visitNumbers.js)
     const rows = await tx.all(
       `INSERT INTO case_visits (case_id, visit_date, assigned_to, planned_start, planned_end, staff_pay, note,
-                                partner_id, partner_status, partner_rate, partner_sent_at, partner_sent_by)
+                                partner_id, partner_status, partner_rate, partner_english, partner_sent_at, partner_sent_by)
        VALUES ${values.join(', ')}
        RETURNING visit_id`,
       params,

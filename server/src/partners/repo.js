@@ -24,7 +24,7 @@ export const TEAM_POSITIONS = FRONT_POSITIONS.filter((p) => p !== 'unassigned');
 
 const actorOf = (user) => ({ employee_id: user.employee_id, name: user.name });
 /** คอลัมน์ของบริษัทที่ส่งออกไป — ไม่เอาไบนารีโลโก้ (ส่งแค่ "มีไหม" + เลขรุ่นไว้กันแคช) */
-const PARTNER_COLS = (a = '') => `${a}partner_id, ${a}name, ${a}contact_name, ${a}phone, ${a}rate_per_visit, ${a}status, ${a}note,
+const PARTNER_COLS = (a = '') => `${a}partner_id, ${a}name, ${a}contact_name, ${a}phone, ${a}rate_per_visit, ${a}english_rate, ${a}status, ${a}note,
   ${a}created_at, ${a}created_by, ${a}updated_at,
   (${a}logo_data IS NOT NULL) AS has_logo,
   COALESCE(EXTRACT(EPOCH FROM ${a}logo_updated_at)::bigint, 0) AS logo_version`;
@@ -86,11 +86,12 @@ export async function getLogo(partnerId) {
 export async function createPartner(input, actor) {
   await ensurePartnerSchema();
   return sql.one(
-    `INSERT INTO partners (name, contact_name, phone, rate_per_visit, note, created_by)
-     VALUES (:name, :contact_name, :phone, :rate_per_visit, :note, :created_by)
+    `INSERT INTO partners (name, contact_name, phone, rate_per_visit, english_rate, note, created_by)
+     VALUES (:name, :contact_name, :phone, :rate_per_visit, :english_rate, :note, :created_by)
      RETURNING ${PARTNER_COLS()}`,
     { name: input.name, contact_name: input.contact_name ?? null, phone: input.phone ?? null,
-      rate_per_visit: input.rate_per_visit ?? 0, note: input.note ?? null, created_by: actor.employee_id },
+      rate_per_visit: input.rate_per_visit ?? 0, english_rate: input.english_rate ?? 0, note: input.note ?? null,
+      created_by: actor.employee_id },
   );
 }
 
@@ -106,7 +107,7 @@ export async function updatePartner(partnerId, input) {
     );
     if (n > 0) throw new ApiError(409, `บริษัทนี้ยังมีงานที่ส่งไปค้างอยู่ ${n} กะ — ดึงคืนก่อนแล้วจึงปิดใช้งาน`);
   }
-  const cols = ['name', 'contact_name', 'phone', 'rate_per_visit', 'status', 'note'].filter((c) => c in input);
+  const cols = ['name', 'contact_name', 'phone', 'rate_per_visit', 'english_rate', 'status', 'note'].filter((c) => c in input);
   if (!cols.length) return findPartner(partnerId);
   const row = await sql.one(
     `UPDATE partners SET ${cols.map((c) => `${c} = :${c}`).join(', ')}, updated_at = now()
@@ -115,6 +116,46 @@ export async function updatePartner(partnerId, input) {
   );
   if (!row) throw new ApiError(404, 'ไม่พบพาร์ทเนอร์');
   return row;
+}
+
+/**
+ * ลบบริษัทพาร์ทเนอร์ถาวร (ผู้ใช้ขอ 25 พ.ย. 2569) — พร้อมบัญชีหัวหน้า/ทีมของบริษัท
+ *
+ * ลบได้เฉพาะบริษัทที่ยังไม่มีประวัติเงิน — มีกะที่ไปจริง (เช็คอินแล้ว) หรือบันทึกจ่ายแล้ว = ลบไม่ได้
+ * เพราะยอดสรุป/ต้นทุนตาม BU/สลิปจ่ายอ้างกะพวกนั้นอยู่ ให้ "ปิดใช้งาน" แทน
+ * กะที่ส่งไปแล้วยังไม่มีคนไป (ยังไม่ยกเลิก) = ต้องดึงคืนก่อน (กติกาเดียวกับปิดใช้งาน) ไม่งั้นกะลอยไม่มีเจ้าของ
+ * กะที่ยกเลิกไปแล้วแค่ปลดชื่อบริษัทออก · ประวัติส่ง/รับ/ปฏิเสธลบตาม
+ */
+export async function removePartner(partnerId) {
+  await ensurePartnerSchema();
+  await ensureStaffInbox();
+  return transaction(async (tx) => {
+    const p = await tx.one('SELECT partner_id, name FROM partners WHERE partner_id = :id FOR UPDATE', { id: partnerId });
+    if (!p) throw new ApiError(404, 'ไม่พบพาร์ทเนอร์');
+    const b = await tx.one(
+      `SELECT
+         (SELECT COUNT(*)::int FROM partner_payments WHERE partner_id = :id) AS payments,
+         (SELECT COUNT(*)::int FROM case_visits v
+            WHERE v.check_in_at IS NOT NULL AND (v.partner_id = :id
+               OR v.checked_in_by IN (SELECT employee_id FROM employees WHERE partner_id = :id))) AS worked,
+         (SELECT COUNT(*)::int FROM case_visits WHERE partner_id = :id AND status <> 'cancelled' AND check_in_at IS NULL) AS open`,
+      { id: partnerId },
+    );
+    if (b.payments > 0 || b.worked > 0) {
+      throw new ApiError(409, `${p.name} มีประวัติงานที่ไปจริง${b.payments > 0 ? '/บันทึกจ่ายแล้ว' : ''} — ลบไม่ได้ ใช้ปิดใช้งานแทน`);
+    }
+    if (b.open > 0) throw new ApiError(409, `${p.name} ยังมีกะที่ส่งไปค้างอยู่ ${b.open} กะ — ดึงคืนก่อนแล้วจึงลบ`);
+
+    await tx.run(`UPDATE case_visits SET partner_id = NULL, partner_status = NULL WHERE partner_id = :id`, { id: partnerId });
+    await tx.run('DELETE FROM partner_visit_events WHERE partner_id = :id', { id: partnerId });
+    const people = (await tx.all('SELECT employee_id FROM employees WHERE partner_id = :id', { id: partnerId })).map((r) => r.employee_id);
+    if (people.length) {
+      await tx.run('DELETE FROM staff_notifications WHERE employee_id = ANY(:ids::text[])', { ids: people });
+      await tx.run('DELETE FROM employees WHERE employee_id = ANY(:ids::text[])', { ids: people });
+    }
+    await tx.run('DELETE FROM partners WHERE partner_id = :id', { id: partnerId });
+    return { removed: true, people: people.length };
+  });
 }
 
 /** คนของบริษัท (หัวหน้า + ทีม) — หลังบ้าน KIN ดู/สร้างหัวหน้า · หัวหน้าดูทีมตัวเอง */
@@ -226,7 +267,7 @@ export async function updatePerson(partnerId, employeeId, input, { allowLead = f
 async function visitWithCase(visitId) {
   return sql.one(
     `SELECT v.visit_id, v.case_id, v.visit_date, v.planned_start, v.status, v.assigned_to, v.check_in_at,
-            v.partner_id, v.partner_status, c.client_name, c.status AS case_status
+            v.partner_id, v.partner_status, c.client_name, c.status AS case_status, c.pkg_english
      FROM case_visits v JOIN cases c ON c.case_id = v.case_id
      WHERE v.visit_id = :id`,
     { id: visitId },
@@ -272,6 +313,16 @@ const nearDays = (date) => {
   return { d0: f(-1), d2: f(1) };
 };
 
+/**
+ * เรทของกะ ณ ตอนส่ง = เรทต่อครั้ง + ค่าภาษาต่อครั้ง (เฉพาะเคสที่ลูกค้าขอภาษาอังกฤษ · ผู้ใช้ขอ 25 พ.ย. 2569)
+ * partner_rate เป็นยอดรวมเสมอ — สรุปรายเดือน/บันทึกจ่าย/ต้นทุนตาม BU อ่านช่องนี้ช่องเดียว จึงได้ค่าภาษาด้วยโดยไม่ต้องแก้
+ * partner_english จดส่วนที่เป็นค่าภาษาไว้แยก ใช้แสดงว่ายอดของกะนี้รวมค่าภาษาเท่าไหร่
+ */
+export function partnerRateOf(partner, english) {
+  const extra = english ? Number(partner.english_rate ?? 0) : 0;
+  return { partner_rate: Number(partner.rate_per_visit ?? 0) + extra, partner_english: extra > 0 ? extra : null };
+}
+
 /** ส่งกะให้พาร์ทเนอร์ — คน KIN ที่ถืออยู่เดิม (ถ้ามี) ได้แจ้ง "กะถูกย้าย" · หัวหน้าทุกคนของบริษัทได้แจ้งงานใหม่ */
 export async function sendVisit(visitId, partnerId, user) {
   await ensurePartnerSchema();
@@ -295,7 +346,7 @@ export async function sendVisit(visitId, partnerId, user) {
     note: `ส่งให้พาร์ทเนอร์ ${partner.name}`,
     guard: lockedGuard('ส่งให้พาร์ทเนอร์', (v) => v.partner_id !== partnerId),
     extra: {
-      partner_id: partnerId, partner_status: 'pending', partner_rate: partner.rate_per_visit,
+      partner_id: partnerId, partner_status: 'pending', ...partnerRateOf(partner, visit.pkg_english),
       partner_sent_at: new Date(), partner_sent_by: user.employee_id,
       partner_rejected_at: null, partner_rejected_by: null, partner_reject_reason: null,
     },
@@ -608,7 +659,7 @@ export async function summary(partnerId, month) {
   await ensurePartnerSchema();
   const rows = await sql.all(
     `SELECT v.visit_id, v.case_id, v.visit_date, v.planned_start, v.check_in_at, v.check_out_at, v.status,
-            v.partner_rate, v.partner_status, c.client_name,
+            v.partner_rate, v.partner_english, v.partner_status, c.client_name,
             COALESCE(v.checked_in_by, v.assigned_to) AS employee_id,
             e.first_name || ' ' || e.last_name AS employee_name
      FROM case_visits v
@@ -662,7 +713,7 @@ export async function summaryAll(month) {
   for (const p of partners) {
     const s = await summary(p.partner_id, month);
     if (p.status === 'active' || s.done || s.missed || s.payment) {
-      out.push({ partner_id: p.partner_id, name: p.name, rate_per_visit: p.rate_per_visit, status: p.status,
+      out.push({ partner_id: p.partner_id, name: p.name, rate_per_visit: p.rate_per_visit, english_rate: p.english_rate, status: p.status,
         done: s.done, missed: s.missed, rejected: s.rejected, amount: s.amount, payment: s.payment });
     }
   }

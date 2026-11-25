@@ -995,7 +995,7 @@ casesRouter.post(
       const result = await repo.addVisits(req.params.id, input.dates, {
         ...input, assigned_to: null,
         partner: {
-          partner_id: send.partner.partner_id, rate: send.partner.rate_per_visit, sent_by: req.user.employee_id,
+          partner_id: send.partner.partner_id, ...partners.partnerRateOf(send.partner, req.case.pkg_english), sent_by: req.user.employee_id,
           after: (tx, ids) => partners.afterBulkSend(tx, req.params.id, ids, send, req.user),
         },
       });

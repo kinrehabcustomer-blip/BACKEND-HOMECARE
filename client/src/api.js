@@ -356,6 +356,7 @@ export const api = {
   setPartnerLogo: (id, image) => request(`/partners/${id}/logo`, { method: 'PUT', body: { image } }),
   createPartner: (body) => request('/partners', { method: 'POST', body }),
   updatePartner: (id, body) => request(`/partners/${id}`, { method: 'PATCH', body }),
+  deletePartner: (id) => request(`/partners/${id}`, { method: 'DELETE' }),
   partnerPeople: (id) => request(`/partners/${id}/people`),
   createPartnerLead: (id, body) => request(`/partners/${id}/leads`, { method: 'POST', body }),
   updatePartnerPerson: (id, employeeId, body) => request(`/partners/${id}/people/${employeeId}`, { method: 'PATCH', body }),

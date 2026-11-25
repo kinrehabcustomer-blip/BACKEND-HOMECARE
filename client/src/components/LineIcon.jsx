@@ -162,6 +162,28 @@ const PATHS = {
       <text x="10" y="17.1" textAnchor="middle" fontSize="7.2" fontWeight="700" fill="#fff" stroke="none">CSV</text>
     </>
   ),
+  /* เมนูตั้งค่าพาร์ทเนอร์ (25 พ.ย. 2569) — ดินสอ · รูปภาพ · รูปภาพขีดฆ่า */
+  edit: (
+    <>
+      <path d="M12 20h9" />
+      <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
+    </>
+  ),
+  image: (
+    <>
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <circle cx="9" cy="9" r="2" />
+      <path d="M21 15l-5-5L5 21" />
+    </>
+  ),
+  'image-off': (
+    <>
+      <path d="M3 3l18 18" />
+      <path d="M10.4 5H19a2 2 0 0 1 2 2v8.6" />
+      <path d="M21 19.5A2 2 0 0 1 19 21H5a2 2 0 0 1-2-2V5c0-.6.3-1.2.7-1.5" />
+      <path d="M5 21l7-7" />
+    </>
+  ),
   'x-circle': (
     <>
       <circle cx="12" cy="12" r="9" />

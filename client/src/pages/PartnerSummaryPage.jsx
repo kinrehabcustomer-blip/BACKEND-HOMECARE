@@ -38,7 +38,7 @@ export default function PartnerSummaryPage() {
   const load = useCallback(() => {
     setLoading(true);
     return Promise.all([api.partnerSummary(month), api.partnerMe().catch(() => null)])
-      .then(([d, me]) => { setData(d); setRate(me?.rate_per_visit ?? null); setError(null); })
+      .then(([d, me]) => { setData(d); setRate(me ?? null); setError(null); })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   }, [month]);
@@ -88,7 +88,7 @@ export default function PartnerSummaryPage() {
               <div className="pt-card pt-kpi"><span className="muted">ไปจริง</span><b>{data.done}</b><span className="muted">ครั้ง</span></div>
               <div className="pt-card pt-kpi"><span className="muted">ขาดงาน</span><b className={data.missed ? 'is-warn' : ''}>{data.missed}</b><span className="muted">ครั้ง · ไม่นับเงิน</span></div>
               <div className="pt-card pt-kpi"><span className="muted">ปฏิเสธ</span><b>{data.rejected}</b><span className="muted">งานที่ส่งกลับ KIN</span></div>
-              <div className="pt-card pt-kpi"><span className="muted">เรทต่อครั้ง</span><b>{rate != null ? formatBaht(rate) : '—'}</b><span className="muted">เรทปัจจุบัน</span></div>
+              <div className="pt-card pt-kpi"><span className="muted">เรทต่อครั้ง</span><b>{rate?.rate_per_visit != null ? formatBaht(rate.rate_per_visit) : '—'}</b><span className="muted">{Number(rate?.english_rate) > 0 ? `ภาษาอังกฤษ +${formatBaht(rate.english_rate)}/ครั้ง` : 'เรทปัจจุบัน'}</span></div>
             </section>
 
             {empty ? (
@@ -127,7 +127,7 @@ export default function PartnerSummaryPage() {
                             <td>{v.employee_name ?? '—'}</td>
                             <td className="nw">{v.done ? `${hhmm(v.check_in_at)} – ${hhmm(v.check_out_at)}` : '—'}</td>
                             <td><span className={`pt-tag ${v.done ? 'is-ok' : 'is-warn'}`}>{v.done ? 'ไปแล้ว' : 'ขาดงาน'}</span></td>
-                            <td className={`num ${v.done ? 'pt-money' : 'muted'}`}>{formatBaht(v.amount)}</td>
+                            <td className={`num ${v.done ? 'pt-money' : 'muted'}`}>{formatBaht(v.amount)}{v.done && Number(v.partner_english) > 0 && <span className="cell-sub">รวมค่าภาษา {formatBaht(v.partner_english)}</span>}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -146,7 +146,7 @@ export default function PartnerSummaryPage() {
                             {v.employee_name ?? '—'} · {v.done ? `เข้า ${hhmm(v.check_in_at)} · ออก ${hhmm(v.check_out_at)}` : 'ไม่มีการเช็คอิน (ขาดงาน)'}
                           </span>
                         </span>
-                        <span className={v.done ? 'pt-money' : 'muted'}>{formatBaht(v.amount)}</span>
+                        <span className={v.done ? 'pt-money' : 'muted'}>{formatBaht(v.amount)}{v.done && Number(v.partner_english) > 0 && <span className="cell-sub">รวมค่าภาษา {formatBaht(v.partner_english)}</span>}</span>
                       </div>
                     ))}
                   </div>

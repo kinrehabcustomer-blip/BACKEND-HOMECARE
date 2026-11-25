@@ -3697,11 +3697,37 @@ if (process.env.RUN_DB_TESTS !== '1') {
         assert.equal(r.partner_id, A.partner_id);
         assert.equal(r.partner_status, 'pending');
         assert.equal(Number(r.partner_rate), 600);
+        assert.equal(r.partner_english, null, 'เคสปกติไม่บวกค่าภาษา');
       }
       const jobs = (await get('/api/my/notifications', leadA)).body.items.filter((n) => n.kind === 'partner_job');
       assert.equal(jobs.length, beforeN + 1, 'แจ้งหัวหน้าครั้งเดียวสำหรับทั้งชุด');
       assert.equal(jobs[0].payload.total, 3);
       assert.ok((await call('GET', '/api/partner/visits?tab=pending', undefined, leadA)).filter((v) => bulk.inserted_ids.includes(v.visit_id)).length === 3);
+      // ---- ค่าภาษาอังกฤษต่อครั้ง (25 พ.ย. 2569): เคสที่ขอภาษาอังกฤษ = เรท + ค่าภาษา · จดไว้ ณ ตอนส่ง ทั้งลงนัดแล้วส่งและส่งทีละกะ ----
+      await call('PATCH', `/api/partners/${A.partner_id}`, { english_rate: 150 });
+      await sql.run('UPDATE cases SET pkg_english = TRUE WHERE case_id = :id', { id: c.case_id });
+      const enBulk = await call('POST', `/api/cases/${c.case_id}/visits/bulk`,
+        { dates: [await day(8)], partner_id: A.partner_id, planned_start: '13:00', planned_end: '14:00' }, MANAGER, 201);
+      const enRow = await visitRow(enBulk.inserted_ids[0]);
+      assert.equal(Number(enRow.partner_rate), 750);
+      assert.equal(Number(enRow.partner_english), 150);
+      await call('POST', `/api/partners/visits/${v3}/send`, { partner_id: A.partner_id });
+      assert.equal(Number((await visitRow(v3)).partner_rate), 750, 'ส่งทีละกะก็บวกค่าภาษา');
+      await sql.run('UPDATE cases SET pkg_english = FALSE WHERE case_id = :id', { id: c.case_id });
+      await call('PATCH', `/api/partners/${A.partner_id}`, { english_rate: 0 });
+      // ---- ลบพาร์ทเนอร์ (25 พ.ย. 2569): มีงานที่ไปจริง/บันทึกจ่าย = ลบไม่ได้ · บริษัทว่าง = ลบพร้อมบัญชีของบริษัท ----
+      assert.match((await call('DELETE', `/api/partners/${A.partner_id}`, undefined, MANAGER, 409)).error, /ลบไม่ได้/);
+      await call('DELETE', `/api/partners/${A.partner_id}`, undefined, FIELD, 403);
+      const Z = await call('POST', '/api/partners', { name: 'ซี ทดลอง', rate_per_visit: 100 }, MANAGER, 201);
+      const leadZ = await call('POST', `/api/partners/${Z.partner_id}/leads`, { first_name: 'หัวหน้า', last_name: 'ซี' }, MANAGER, 201);
+      const zVisit = (await call('POST', `/api/cases/${c.case_id}/visits/bulk`,
+        { dates: [await day(9)], partner_id: Z.partner_id }, MANAGER, 201)).inserted_ids[0];
+      assert.match((await call('DELETE', `/api/partners/${Z.partner_id}`, undefined, MANAGER, 409)).error, /ดึงคืนก่อน/);
+      await call('POST', `/api/partners/visits/${zVisit}/pull`, { assigned_to: FIELD.employee_id });
+      assert.equal((await call('DELETE', `/api/partners/${Z.partner_id}`, undefined, MANAGER, 200)).removed, true);
+      assert.equal(await sql.one('SELECT 1 AS x FROM partners WHERE partner_id = :id', { id: Z.partner_id }), null);
+      assert.equal(await sql.one('SELECT 1 AS x FROM employees WHERE employee_id = :id', { id: leadZ.employee_id }), null);
+      assert.equal((await visitRow(zVisit)).partner_id, null);
       // ---- โลโก้: หลังบ้านอัปโหลด · หัวหน้าพาร์ทเนอร์โหลดรูปได้ · รายการไม่ส่งไบนารีออกไป ----
       const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
       await call('PUT', `/api/partners/${A.partner_id}/logo`, { image: 'data:text/html;base64,PHNjcmlwdD4=' }, MANAGER, 400);
