@@ -769,6 +769,13 @@ input[type='checkbox'], input[type='radio'] { accent-color: var(--brand); }
   }
   .login-v2 > .login-footer { display: none; }
 }
+/* แท็บเล็ต: แผงแบรนด์ 440px + ฟอร์ม padding 72px ไม่พอจอ ฟอร์มถูกตัดขวา (25 พ.ย. 2569) — ย่อแผงกับ padding ลง */
+@media (min-width: 761px) and (max-width: 1023px) {
+  .login-v2 .login-aside { width: 17.5rem; padding: 2.25rem 2rem 2rem; }
+  .login-aside-title { font-size: 1.5rem; }
+  .login-aside-foot { font-size: 0.6875rem; letter-spacing: 0.08em; white-space: nowrap; }
+  .login-v2 .login-card { min-width: 0; padding: 2.5rem 2.25rem; }
+}
 @media (max-width: 760px) {
   .login-v2 { justify-content: flex-start; gap: 1.375rem; padding: 0 0 1.5rem; }
   .login-v2 .login-shell { display: flex; flex-direction: column; width: 100%; }
@@ -795,8 +802,11 @@ input[type='checkbox'], input[type='radio'] { accent-color: var(--brand); }
     font-size: 0.8125rem;
     font-weight: 600;
   }
+  /* width: auto — กว้าง 100% บวกขอบซ้ายขวา 0.75rem การ์ดเลยล้นออกขวา ไม่อยู่กลาง (ผู้ใช้แจ้ง 25 พ.ย. 2569) */
   .login-v2 .login-card {
     position: relative;
+    width: auto;
+    align-self: stretch;
     max-width: none;
     margin: -2.875rem 0.75rem 0;
     padding: 1.5rem 1.25rem 1.25rem;
