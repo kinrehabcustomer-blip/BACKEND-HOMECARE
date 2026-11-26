@@ -2471,7 +2471,6 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
 .physio-code { white-space: nowrap; }
 /* คอลัมน์รหัสของตารางกายภาพ: ตัวอักษรเฉยๆ ไม่มีกรอบ/พื้น (ผู้ใช้ขอ 20 พ.ย. 2569) — ป้ายมีกรอบยังใช้ที่อื่นตามเดิม */
 .physio-code .pkg-code { margin: 0; padding: 0; border: 0; background: none; font-size: 0.8125rem; color: var(--text); }
-.pkg-code-input,
 .rate-edit-row input.rate-code-input {
   font-family: ui-monospace, 'Cascadia Mono', monospace;
   letter-spacing: 0.02em;
@@ -2479,7 +2478,6 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
 }
 .rate-edit-row input.rate-code-input { text-align: left; font-size: 0.75rem; }
 /* placeholder ไม่ต้องเป็นตัวพิมพ์ใหญ่/mono — เป็นคำอธิบายภาษาไทย */
-.pkg-code-input::placeholder,
 .rate-code-input::placeholder { font-family: inherit; text-transform: none; letter-spacing: normal; }
 /* ค่าจ้างพนักงานใต้ราคาขาย — เบากว่าราคาเพราะเป็นข้อมูลประกอบ ไม่ใช่ตัวเลขที่ลูกค้าเห็น */
 .rate-staff { display: block; font-size: 0.6875rem; font-weight: 400; color: var(--muted); }
