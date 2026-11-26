@@ -35,6 +35,8 @@ export const PARTNER_DDL = [
   'ALTER TABLE partners ADD COLUMN IF NOT EXISTS logo_updated_at TIMESTAMPTZ',
   // ค่าภาษาต่อครั้ง (25 พ.ย. 2569) — บวกเพิ่มจากเรทปกติ เฉพาะกะของเคสที่ลูกค้าขอภาษาอังกฤษ (cases.pkg_english)
   'ALTER TABLE partners ADD COLUMN IF NOT EXISTS english_rate NUMERIC(12, 2) NOT NULL DEFAULT 0 CHECK (english_rate >= 0)',
+  // ฝั่งงานของบริษัท (26 พ.ย. 2569) — homecare หรือ physio (กายภาพบำบัด) อย่างใดอย่างหนึ่ง · บริษัทเดิม = homecare (แก้ที่ตั้งค่าได้)
+  `ALTER TABLE partners ADD COLUMN IF NOT EXISTS service_kind TEXT NOT NULL DEFAULT 'homecare' CHECK (service_kind IN ('homecare', 'physio'))`,
   'ALTER TABLE employees ADD COLUMN IF NOT EXISTS partner_id INTEGER REFERENCES partners (partner_id) ON DELETE RESTRICT',
   'CREATE INDEX IF NOT EXISTS idx_employees_partner ON employees (partner_id) WHERE partner_id IS NOT NULL',
   'ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS partner_id INTEGER REFERENCES partners (partner_id) ON DELETE RESTRICT',
@@ -92,14 +94,14 @@ async function ensurePositionCheck() {
    เช็คคอลัมน์ "ตัวท้ายสุด" ของแต่ละตาราง + ดัชนี/ตาราง — เพิ่มชิ้นใหม่ใน PARTNER_DDL ต้องเพิ่มที่นี่ด้วย */
 const SCHEMA_PROBE = `
   SELECT (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = current_schema() AND (
-            (table_name = 'partners' AND column_name IN ('logo_updated_at', 'english_rate')) OR
+            (table_name = 'partners' AND column_name IN ('logo_updated_at', 'english_rate', 'service_kind')) OR
             (table_name = 'employees' AND column_name = 'partner_id') OR
             (table_name = 'case_visits' AND column_name IN ('partner_id', 'partner_status', 'partner_rate', 'partner_sent_at',
               'partner_sent_by', 'partner_rejected_at', 'partner_rejected_by', 'partner_reject_reason', 'partner_english'))))::int AS cols,
          to_regclass('partner_visit_events') IS NOT NULL AND to_regclass('partner_payments') IS NOT NULL
            AND to_regclass('idx_employees_partner') IS NOT NULL AND to_regclass('idx_case_visits_partner') IS NOT NULL
            AND to_regclass('idx_partner_visit_events_partner') IS NOT NULL AS rels`;
-const PROBE_COLS = 12;
+const PROBE_COLS = 13;
 
 let ready = null;
 export const ensurePartnerSchema = () =>

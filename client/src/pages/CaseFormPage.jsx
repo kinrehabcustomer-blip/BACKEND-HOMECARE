@@ -13,7 +13,8 @@ import PatientCodeInput from '../components/PatientCodeInput.jsx';
 import { isPatientCode, caseCode } from '../lib/patientCode.js';
 import { PROCEDURE, isProcedure } from '../lib/addons.js';
 import { nextRoundDates, endDateFor, carriesOver, shiftPatterns, countDaysInRange, packQty, packUnit, scaleByQty } from '../lib/caseRounds.js';
-import { useCanSeeStaffPay } from '../auth.jsx';
+import { useCan, useCanSeeStaffPay } from '../auth.jsx';
+import PartnerLogo from '../components/PartnerLogo.jsx';
 import { useScrollLock } from '../lib/scrollLock.js';
 import { formatPhone, formatPhoneInput } from '../lib/phone.js';
 import SearchSelect from '../components/SearchSelect.jsx';
@@ -166,6 +167,9 @@ const shownAge = (p) => {
   return a != null ? `${a} ปี` : null;
 };
 
+/* บริษัทอยู่ฝั่งงานนี้ไหม (partners.service_kind · 26 พ.ย. 2569) — Homecare หรือกายภาพบำบัด อย่างใดอย่างหนึ่ง */
+const partnerServes = (p, kind) => !kind || (p.service_kind ?? 'homecare') === kind;
+
 export default function CaseFormPage() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -296,12 +300,39 @@ export default function CaseFormPage() {
 
   function addStaff(id) {
     if (!id || pickedStaff.includes(id)) return;
+    setSendPartner(null); // เลือกพนักงานแล้ว = ไม่ส่งพาร์ทเนอร์
     if (!form.assigned_to) {
       setForm((prev) => ({ ...prev, assigned_to: id }));
       setFieldErrors((prev) => (prev.assigned_to ? { ...prev, assigned_to: undefined } : prev));
     } else {
       setTeam((prev) => [...prev, id]);
     }
+  }
+
+  /* ส่งให้พาร์ทเนอร์ (ผู้ใช้ขอ 26 พ.ย. 2569) — งานพาร์ทเนอร์ส่งเป็นรายกะ ตอนเปิดเคสยังไม่มีกะ
+     จึงจำบริษัทไว้ แล้วหลังเปิดเคสพาไปตารางลงนัดของเคสนั้นโดยเลือกบริษัทไว้ให้แล้ว (เลือกวัน/เวลาแล้วกดลงนัดเอง)
+     เลือกบริษัท = เคสไม่มีผู้รับผิดชอบ (หัวหน้าบริษัทเลือกคนไปทีละกะ) จึงล้างพนักงานที่เลือกไว้ · บริษัทที่เปิดใช้และมีหัวหน้าเท่านั้น */
+  const canSendPartner = useCan('office');
+  const [partnerOptions, setPartnerOptions] = useState([]);
+  const [sendPartner, setSendPartner] = useState(null);
+  /* เฉพาะบริษัทฝั่งเดียวกับประเภทบริการของเคส (ผู้ใช้ขอ 26 พ.ย. 2569) — ยังไม่เลือกประเภท = ยังไม่แสดงบริษัท
+     เปลี่ยนประเภทจนบริษัทที่เลือกไว้อยู่คนละฝั่ง = ไม่ส่ง (sendTo เป็น null เอง) */
+  const caseKind = form.service_kind || null;
+  const partnerChoices = caseKind ? partnerOptions.filter((p) => partnerServes(p, caseKind)) : [];
+  const sendTo = sendPartner && partnerChoices.some((p) => p.partner_id === sendPartner.partner_id) ? sendPartner : null;
+  useEffect(() => {
+    if (isEdit || !canSendPartner) return undefined;
+    let off = false;
+    api.partners()
+      .then((rows) => !off && setPartnerOptions(rows.filter((p) => p.status === 'active' && p.leads > 0)))
+      .catch(() => {});
+    return () => { off = true; };
+  }, [isEdit, canSendPartner]);
+  function pickPartner(p) {
+    if (sendPartner?.partner_id === p.partner_id) { setSendPartner(null); return; }
+    setSendPartner(p);
+    setForm((prev) => ({ ...prev, assigned_to: '' }));
+    setTeam([]);
   }
 
   /** นำออก — ถ้าเป็นคนหลัก ให้คนถัดไปในทีมขึ้นเป็นหลักแทน (เหมือน unassign ฝั่ง server) */
@@ -1476,7 +1507,8 @@ export default function CaseFormPage() {
             : `เปิดเคส ${caseCode(created.case_id)} แล้ว · ระบบออกใบแจ้งหนี้ (ร่าง) ให้เรียบร้อย`) + teamNote,
         );
         // เด้งกลับรายการพร้อมเปิดเคสที่เพิ่งสร้าง — เห็นผลทันทีและกดจับคู่พนักงานต่อได้เลย
-        navigate(`/cases?open=${created.case_id}`);
+        // เลือกส่งพาร์ทเนอร์ไว้ = เปิดตารางลงนัดของเคสให้เลย โดยเลือกบริษัทนั้นไว้แล้ว (CaseListPage ?partner=)
+        navigate(`/cases?open=${created.case_id}${sendTo ? `&partner=${sendTo.partner_id}` : ''}`);
       }
     } catch (err) {
       setError(err.message);
@@ -2648,12 +2680,42 @@ export default function CaseFormPage() {
                 staff={pickableStaff}
                 value=""
                 wantedPositions={wantedPositions}
-                placeholder={pickedStaff.length ? '+ เพิ่มพนักงานอีกคน' : '— ยังไม่จับคู่ (จับคู่ทีหลังได้) —'}
+                placeholder={pickedStaff.length ? '+ เพิ่มพนักงานอีกคน' : sendTo ? `— ส่งให้ ${sendTo.name} (เลือกพนักงานแทนได้) —` : '— ยังไม่จับคู่ (จับคู่ทีหลังได้) —'}
                 emptyText={pickedStaff.length ? 'เลือกพนักงานที่ตรงกับบริการนี้ครบแล้ว' : 'ยังไม่มีพนักงานตำแหน่งที่ตรงกับบริการนี้'}
                 invalid={Boolean(fieldErrors.assigned_to)}
                 onChange={addStaff}
               />
               {fieldError('assigned_to')}
+              {partnerChoices.length > 0 && (
+                <div className="time-chips who-chips case-partner-chips" role="radiogroup" aria-label="หรือส่งให้พาร์ทเนอร์">
+                  <span className="muted time-chips-label">หรือส่งให้พาร์ทเนอร์</span>
+                  {partnerChoices.map((p) => {
+                    const on = sendTo?.partner_id === p.partner_id;
+                    return (
+                      <button key={p.partner_id} type="button" role="radio" aria-checked={on}
+                        className={`btn tiny ${on ? 'primary' : ''}`}
+                        title={`เปิดเคสแล้วไปลงนัดส่งให้ ${p.name} — หัวหน้าบริษัทเลือกคนไปเอง`}
+                        onClick={() => pickPartner(p)}>
+                        <PartnerLogo partner={p} size={18} />
+                        {p.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              {partnerOptions.length > 0 && partnerChoices.length === 0 && (
+                <p className="form-hint muted">
+                  {caseKind
+                    ? `ส่งให้พาร์ทเนอร์: ยังไม่มีบริษัทฝั่ง${caseKind === 'physio' ? 'กายภาพบำบัด' : ' Homecare'} — ตั้งประเภทบริษัทได้ที่ตั้งค่าระบบ › พาร์ทเนอร์`
+                    : 'ส่งให้พาร์ทเนอร์: เลือกประเภทบริการของเคสก่อน แล้วจะเห็นบริษัทฝั่งนั้น'}
+                </p>
+              )}
+              {sendTo && (
+                <p className="form-hint muted">
+                  เคสจะยังไม่มีผู้รับผิดชอบ — กดเปิดเคสแล้วระบบพาไปตารางลงนัด โดยเลือก {sendTo.name} ไว้ให้ · เลือกวัน/เวลาแล้วกดลงนัด
+                  งานจะส่งถึงหัวหน้าบริษัท แล้วหัวหน้าเลือกคนไปเอง
+                </p>
+              )}
               {renewFrom && !renewTeamReady && renewInfo && (
                 <p className="form-hint muted">
                   <LineIcon name="alert" className="text-ico" />โหลดทีมรอบก่อนไม่สำเร็จ — ระบบจะพาทีมรอบก่อนที่ยังรับงานได้มาให้เองตอนบันทึก

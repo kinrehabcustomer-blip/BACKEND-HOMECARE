@@ -248,7 +248,7 @@ function QuickEdit({ item, onDone, onCancel }) {
   );
 }
 
-export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, onChanged }) {
+export default function CaseModal({ caseId, sendPartnerId = null, siblings = [], onNavigate, onClose, onChanged }) {
   // ค่าจ้างพนักงานเห็นเฉพาะผู้จัดการ เหมือนหน้าแพ็คเกจและหน้าเปิดเคส
   // (server ตัดฟิลด์ออกจาก payload ให้อยู่แล้ว ตรงนี้แค่ไม่วาดช่องเปล่าค้างไว้)
   const seePay = useCanSeeStaffPay();
@@ -284,6 +284,9 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
   const [busy, setBusy] = useState(false);
   const [visits, setVisits] = useState([]);      // ใช้แค่สรุปจำนวนบนปุ่ม การจัดการจริงอยู่ใน popup ย่อย
   const [visitsOpen, setVisitsOpen] = useState(false);
+  /* มาจากหน้าเปิดเคสที่เลือก "ส่งให้พาร์ทเนอร์" (26 พ.ย. 2569) — เปิดตารางลงนัดให้ครั้งเดียวพร้อมเลือกบริษัทไว้ */
+  const autoVisits = useRef(null);
+  const [visitPartnerId, setVisitPartnerId] = useState(null);
   /* รายงานอาการผู้รับบริการ — ตัวรายการกางอยู่ในหน้าแล้ว (ดูส่วน "รายงานอาการผู้รับบริการ" ข้างล่าง)
      ตัวนี้เหลือไว้เป็นจำนวนรวม ใช้ตัดสินว่าจะโชว์ปุ่มพิมพ์ไหม — ขอมาหน้าละใบเดียว ไม่ดึงทั้งคลัง */
   const [reports, setReports] = useState({ total: 0 });
@@ -548,6 +551,14 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
   // สถานะปลายทาง (ปิด/ยกเลิก) = ล็อกการจับคู่/แก้สถานะไว้ ต้องเปิดเคสใหม่ก่อน
   const terminal = item?.status === 'closed' || item?.status === 'cancelled';
   const status = item?.status;
+
+  // เปิดตารางลงนัดให้เองครั้งเดียวต่อเคส เมื่อโหลดเคสที่ขอมาเสร็จแล้ว (มาจากหน้าเปิดเคส ?partner=)
+  useEffect(() => {
+    if (!sendPartnerId || !item || item.case_id !== caseId || terminal || autoVisits.current === caseId) return;
+    autoVisits.current = caseId;
+    setVisitPartnerId(sendPartnerId);
+    setVisitsOpen(true);
+  }, [sendPartnerId, item, caseId, terminal]);
 
   // ระบบนัดกะมีเฉพาะเคส Homecare — กายภาพบำบัดคิดเป็นแพ็คเกจเหมาครั้ง ไม่ต้องจัดกะรายวัน
   // เคสเก่าที่ service_kind ยังว่างถือเป็น Homecare (มีกะได้) — ดูจากแพ็คเกจกายภาพที่ผูกไว้จริงด้วย
@@ -1642,8 +1653,10 @@ export default function CaseModal({ caseId, siblings = [], onNavigate, onClose, 
                 caseItem={item}
                 readOnly={terminal}
                 mode={isPhysio ? 'appointment' : 'shift'}
+                initialPartnerId={visitPartnerId}
                 onClose={() => {
                   setVisitsOpen(false);
+                  setVisitPartnerId(null);
                   load().catch(() => {});
                 }}
               />

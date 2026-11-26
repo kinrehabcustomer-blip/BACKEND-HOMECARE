@@ -85,6 +85,8 @@ export default function CaseListPage() {
   // คำค้นของรอบก่อน — หน่วง 250ms เฉพาะตอนคำค้นเปลี่ยน (กำลังพิมพ์) เปิดหน้า/เปลี่ยนหน้า/เรียง/ตัวกรองยิงทันที
   const prevQ = useRef(q);
   const openId = params.get('open');
+  // เปิดเคสจากหน้าเปิดเคสโดยเลือก "ส่งให้พาร์ทเนอร์" — เปิดตารางลงนัดให้เลยพร้อมเลือกบริษัทไว้
+  const sendPartnerId = Number(params.get('partner')) || null;
 
   const filtered = Boolean(q || status || serviceKind || assignedTo || year || pseudo);
 
@@ -176,7 +178,7 @@ export default function CaseListPage() {
       pushedOpen.current = false;
       navigate(-1);
     } else {
-      patch({ open: '' });
+      patch({ open: '', partner: '' });
     }
   };
 
@@ -505,8 +507,9 @@ export default function CaseListPage() {
       {openId && (
         <CaseModal
           caseId={openId}
+          sendPartnerId={sendPartnerId}
           siblings={visibleIds}
-          onNavigate={(id) => patch({ open: id })}
+          onNavigate={(id) => patch({ open: id, partner: '' })}
           onChanged={() => setReloadKey((k) => k + 1)}
           onClose={closeCase}
         />

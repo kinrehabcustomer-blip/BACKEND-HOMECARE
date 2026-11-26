@@ -9,7 +9,7 @@ import { caseCode } from '../lib/patientCode.js';
  * popup เฉพาะสำหรับลงวันนัดให้บริการ — เปิดซ้อนบน CaseModal อีกที
  * การล็อกหน้าหลังนับชั้นเอง (ดู lib/scrollLock.js) จึงเรียกได้ตามปกติ ไม่ไปปลดล็อกของ popup แม่
  */
-export default function CaseVisitsModal({ caseItem, readOnly = false, mode = 'shift', onClose }) {
+export default function CaseVisitsModal({ caseItem, readOnly = false, mode = 'shift', initialPartnerId = null, onClose }) {
   const title = mode === 'appointment' ? 'ตารางนัด' : 'ตารางกะ';
   const sheetRef = useSheetSwipe(onClose); // จอแคบ: ปัดลงเพื่อปิด
   useScrollLock();
@@ -40,6 +40,7 @@ export default function CaseVisitsModal({ caseItem, readOnly = false, mode = 'sh
             target={caseItem.physio_sessions ?? null}
             readOnly={readOnly}
             mode={mode}
+            initialPartnerId={initialPartnerId}
             onFootAction={setFootAction}
           />
         </div>

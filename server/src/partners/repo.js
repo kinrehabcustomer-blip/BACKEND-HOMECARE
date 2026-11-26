@@ -24,7 +24,7 @@ export const TEAM_POSITIONS = FRONT_POSITIONS.filter((p) => p !== 'unassigned');
 
 const actorOf = (user) => ({ employee_id: user.employee_id, name: user.name });
 /** คอลัมน์ของบริษัทที่ส่งออกไป — ไม่เอาไบนารีโลโก้ (ส่งแค่ "มีไหม" + เลขรุ่นไว้กันแคช) */
-const PARTNER_COLS = (a = '') => `${a}partner_id, ${a}name, ${a}contact_name, ${a}phone, ${a}rate_per_visit, ${a}english_rate, ${a}status, ${a}note,
+const PARTNER_COLS = (a = '') => `${a}partner_id, ${a}name, ${a}contact_name, ${a}phone, ${a}rate_per_visit, ${a}english_rate, ${a}service_kind, ${a}status, ${a}note,
   ${a}created_at, ${a}created_by, ${a}updated_at,
   (${a}logo_data IS NOT NULL) AS has_logo,
   COALESCE(EXTRACT(EPOCH FROM ${a}logo_updated_at)::bigint, 0) AS logo_version`;
@@ -86,11 +86,11 @@ export async function getLogo(partnerId) {
 export async function createPartner(input, actor) {
   await ensurePartnerSchema();
   return sql.one(
-    `INSERT INTO partners (name, contact_name, phone, rate_per_visit, english_rate, note, created_by)
-     VALUES (:name, :contact_name, :phone, :rate_per_visit, :english_rate, :note, :created_by)
+    `INSERT INTO partners (name, contact_name, phone, rate_per_visit, english_rate, service_kind, note, created_by)
+     VALUES (:name, :contact_name, :phone, :rate_per_visit, :english_rate, :service_kind, :note, :created_by)
      RETURNING ${PARTNER_COLS()}`,
     { name: input.name, contact_name: input.contact_name ?? null, phone: input.phone ?? null,
-      rate_per_visit: input.rate_per_visit ?? 0, english_rate: input.english_rate ?? 0, note: input.note ?? null,
+      rate_per_visit: input.rate_per_visit ?? 0, english_rate: input.english_rate ?? 0, service_kind: input.service_kind ?? 'homecare', note: input.note ?? null,
       created_by: actor.employee_id },
   );
 }
@@ -107,7 +107,7 @@ export async function updatePartner(partnerId, input) {
     );
     if (n > 0) throw new ApiError(409, `บริษัทนี้ยังมีงานที่ส่งไปค้างอยู่ ${n} กะ — ดึงคืนก่อนแล้วจึงปิดใช้งาน`);
   }
-  const cols = ['name', 'contact_name', 'phone', 'rate_per_visit', 'english_rate', 'status', 'note'].filter((c) => c in input);
+  const cols = ['name', 'contact_name', 'phone', 'rate_per_visit', 'english_rate', 'service_kind', 'status', 'note'].filter((c) => c in input);
   if (!cols.length) return findPartner(partnerId);
   const row = await sql.one(
     `UPDATE partners SET ${cols.map((c) => `${c} = :${c}`).join(', ')}, updated_at = now()
@@ -267,7 +267,8 @@ export async function updatePerson(partnerId, employeeId, input, { allowLead = f
 async function visitWithCase(visitId) {
   return sql.one(
     `SELECT v.visit_id, v.case_id, v.visit_date, v.planned_start, v.status, v.assigned_to, v.check_in_at,
-            v.partner_id, v.partner_status, c.client_name, c.status AS case_status, c.pkg_english
+            v.partner_id, v.partner_status, c.client_name, c.status AS case_status, c.pkg_english,
+            c.service_kind, c.physio_package_id
      FROM case_visits v JOIN cases c ON c.case_id = v.case_id
      WHERE v.visit_id = :id`,
     { id: visitId },
@@ -313,6 +314,15 @@ const nearDays = (date) => {
   return { d0: f(-1), d2: f(1) };
 };
 
+/** ฝั่งงานของบริษัท (partners.service_kind) — Homecare หรือกายภาพบำบัด อย่างใดอย่างหนึ่ง */
+const KIND_LABEL = { homecare: 'Homecare', physio: 'กายภาพบำบัด' };
+/** เคสเป็นงานประเภทไหน — เกณฑ์เดียวกับหน้าเว็บ (เคสเก่าที่ service_kind ว่างแต่ผูกแพ็คกายภาพ = กายภาพ) */
+export const caseKindOf = (c) => (c?.service_kind === 'physio' || c?.physio_package_id != null ? 'physio' : 'homecare');
+/** ส่งงานให้บริษัทที่ไม่ได้รับงานประเภทนี้ไม่ได้ (26 พ.ย. 2569) */
+function assertServes(partner, kind) {
+  if ((partner.service_kind ?? 'homecare') !== kind) throw new ApiError(409, `${partner.name} ไม่ได้รับงาน${KIND_LABEL[kind]} — เลือกบริษัทอื่น หรือแก้ประเภทของบริษัทที่ตั้งค่าระบบ › พาร์ทเนอร์`);
+}
+
 /**
  * เรทของกะ ณ ตอนส่ง = เรทต่อครั้ง + ค่าภาษาต่อครั้ง (เฉพาะเคสที่ลูกค้าขอภาษาอังกฤษ · ผู้ใช้ขอ 25 พ.ย. 2569)
  * partner_rate เป็นยอดรวมเสมอ — สรุปรายเดือน/บันทึกจ่าย/ต้นทุนตาม BU อ่านช่องนี้ช่องเดียว จึงได้ค่าภาษาด้วยโดยไม่ต้องแก้
@@ -334,6 +344,7 @@ export async function sendVisit(visitId, partnerId, user) {
   if (!partner) throw new ApiError(404, 'ไม่พบพาร์ทเนอร์');
   if (partner.status !== 'active') throw new ApiError(409, `${partner.name} ปิดใช้งานอยู่`);
   if (visit.partner_id === partnerId) throw new ApiError(409, `กะนี้อยู่กับ ${partner.name} อยู่แล้ว`);
+  assertServes(partner, caseKindOf(visit));
   const leads = await sql.all(
     `SELECT employee_id FROM employees WHERE partner_id = :id AND position = '${LEAD}' AND status IN ('active', 'probation')`,
     { id: partnerId },
@@ -363,13 +374,14 @@ export async function sendVisit(visitId, partnerId, user) {
   });
 }
 
-/** ตรวจบริษัทก่อนลงนัดแบบส่งพาร์ทเนอร์ (cases/routes.js /visits/bulk) — เปิดใช้อยู่ + มีบัญชีหัวหน้า */
-export async function prepareSend(partnerId) {
+/** ตรวจบริษัทก่อนลงนัดแบบส่งพาร์ทเนอร์ (cases/routes.js /visits/bulk) — เปิดใช้อยู่ + รับงานประเภทนี้ + มีบัญชีหัวหน้า */
+export async function prepareSend(partnerId, kind = null) {
   await ensurePartnerSchema();
   await ensureStaffInbox();
   const partner = await findPartner(partnerId);
   if (!partner) throw new ApiError(404, 'ไม่พบพาร์ทเนอร์');
   if (partner.status !== 'active') throw new ApiError(409, `${partner.name} ปิดใช้งานอยู่`);
+  if (kind) assertServes(partner, kind);
   const leads = await sql.all(
     `SELECT employee_id FROM employees WHERE partner_id = :id AND position = '${LEAD}' AND status IN ('active', 'probation')`,
     { id: partnerId },
@@ -713,7 +725,7 @@ export async function summaryAll(month) {
   for (const p of partners) {
     const s = await summary(p.partner_id, month);
     if (p.status === 'active' || s.done || s.missed || s.payment) {
-      out.push({ partner_id: p.partner_id, name: p.name, rate_per_visit: p.rate_per_visit, english_rate: p.english_rate, status: p.status,
+      out.push({ partner_id: p.partner_id, name: p.name, rate_per_visit: p.rate_per_visit, english_rate: p.english_rate, service_kind: p.service_kind, status: p.status,
         done: s.done, missed: s.missed, rejected: s.rejected, amount: s.amount, payment: s.payment });
     }
   }

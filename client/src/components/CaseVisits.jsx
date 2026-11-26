@@ -105,7 +105,10 @@ function dayClass(list) {
  */
 /* onFootAction = popup แม่วาดปุ่ม "ยกเลิกนัดทั้งหมด" เองที่มุมซ้ายของ footer (ผู้ใช้ขอ 19 พ.ย. 2569 — ย้ายจากแถวเลือกเดือน)
    ได้ค่า { label, title, busy, onClick } หรือ null (ไม่มีนัดให้ยกเลิก) · ไม่ส่งมา = วาดปุ่มไว้บนแถวเดือนตามเดิม */
-export default function CaseVisits({ caseId, caseItem = null, target = null, readOnly = false, mode = 'shift', onFootAction = null }) {
+/* บริษัทอยู่ฝั่งงานนี้ไหม (partners.service_kind · 26 พ.ย. 2569) — Homecare หรือกายภาพบำบัด อย่างใดอย่างหนึ่ง */
+const partnerServes = (p, kind) => !kind || (p.service_kind ?? 'homecare') === kind;
+
+export default function CaseVisits({ caseId, caseItem = null, target = null, readOnly = false, mode = 'shift', initialPartnerId = null, onFootAction = null }) {
   const toast = useToast();
   const ask = useConfirm();
   // หมวดเหตุผลยกเลิกนัด (categories · cancel_visit) — มีให้เลือก = กล่องยกเลิกถามเหตุผลเป็นช่องเลือก
@@ -134,10 +137,18 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
     if (readOnly) return undefined;
     let off = false;
     api.partners()
-      .then((rows) => !off && setPartnerList(rows.filter((p) => p.status === 'active' && p.leads > 0)))
+      .then((rows) => {
+        if (off) return;
+        // เฉพาะบริษัทที่รับงานประเภทนี้ (ตารางนัด = กายภาพ · ตารางกะ = Homecare · 26 พ.ย. 2569)
+        const list = rows.filter((p) => p.status === 'active' && p.leads > 0 && partnerServes(p, isAppt ? 'physio' : 'homecare'));
+        setPartnerList(list);
+        // เปิดมาจากหน้าเปิดเคสที่เลือกส่งพาร์ทเนอร์ — เลือกบริษัทนั้นไว้ให้ (ยังเปลี่ยน/เอาออกได้)
+        const pre = initialPartnerId && list.find((p) => p.partner_id === initialPartnerId);
+        if (pre) setToPartner(pre);
+      })
       .catch(() => {});
     return () => { off = true; };
-  }, [readOnly]);
+  }, [readOnly, initialPartnerId, isAppt]);
   const pickPerson = (id) => { setWho(id); setToPartner(null); };
 
   // ร่างที่ยังไม่บันทึก — เลือก/ยกเลิกได้อิสระ ไม่มีอะไรถูกเขียนลงฐานข้อมูลจนกว่าจะกดบันทึก
@@ -894,7 +905,7 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
             </p>
           )}
 
-          {!isAppt && staff.length === 0 && (
+          {!isAppt && staff.length === 0 && !toPartner && (
             <p className="muted visit-hint">
               เคสนี้ยังไม่มีพนักงานให้เลือก — เพิ่มคนเข้าเคสที่หัวข้อ “พนักงานที่รับเคส” ก่อน
             </p>
@@ -1227,6 +1238,7 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
       {partnering && (
         <SendPartnerDialog
           visit={partnering.visit}
+          kind={isAppt ? 'physio' : 'homecare'}
           busy={busy}
           error={partnering.error}
           onConfirm={(p) => sendToPartner(partnering.visit, p)}
@@ -1250,13 +1262,13 @@ export default function CaseVisits({ caseId, caseItem = null, target = null, rea
 }
 
 /** เลือกบริษัทพาร์ทเนอร์ที่จะส่งกะให้ (21 พ.ย. 2569) — เฉพาะบริษัทที่เปิดใช้และมีบัญชีหัวหน้าแล้ว */
-function SendPartnerDialog({ visit, busy, error, onConfirm, onCancel }) {
+function SendPartnerDialog({ visit, kind, busy, error, onConfirm, onCancel }) {
   const [list, setList] = useState(null);
   const [pick, setPick] = useState(null);
   const [loadError, setLoadError] = useState(null);
   useEffect(() => {
-    api.partners().then((rows) => setList(rows.filter((p) => p.status === 'active'))).catch((e) => setLoadError(e.message));
-  }, []);
+    api.partners().then((rows) => setList(rows.filter((p) => p.status === 'active' && partnerServes(p, kind)))).catch((e) => setLoadError(e.message));
+  }, [kind]);
   useEffect(() => {
     const onKey = (e) => { if (e.key === 'Escape') { e.stopPropagation(); onCancel(); } };
     document.addEventListener('keydown', onKey, true);

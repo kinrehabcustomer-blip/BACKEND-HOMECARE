@@ -3728,6 +3728,17 @@ if (process.env.RUN_DB_TESTS !== '1') {
       assert.equal(await sql.one('SELECT 1 AS x FROM partners WHERE partner_id = :id', { id: Z.partner_id }), null);
       assert.equal(await sql.one('SELECT 1 AS x FROM employees WHERE employee_id = :id', { id: leadZ.employee_id }), null);
       assert.equal((await visitRow(zVisit)).partner_id, null);
+      // ---- ฝั่งงานของบริษัท (26 พ.ย. 2569): ไม่ระบุ = Homecare · บริษัทกายภาพส่งงาน Homecare ไม่ได้ ----
+      assert.equal((await call('GET', '/api/partners', undefined, MANAGER)).find((p) => p.partner_id === A.partner_id).service_kind, 'homecare');
+      await call('POST', '/api/partners', { name: 'ผิดประเภท', rate_per_visit: 1, service_kind: 'both' }, MANAGER, 400);
+      const P = await call('POST', '/api/partners', { name: 'พี กายภาพ', rate_per_visit: 300, service_kind: 'physio' }, MANAGER, 201);
+      assert.equal(P.service_kind, 'physio');
+      await call('POST', `/api/partners/${P.partner_id}/leads`, { first_name: 'หัวหน้า', last_name: 'พี' }, MANAGER, 201);
+      assert.match((await call('POST', `/api/cases/${c.case_id}/visits/bulk`,
+        { dates: [await day(10)], partner_id: P.partner_id }, MANAGER, 409)).error, /ไม่ได้รับงานHomecare/);
+      assert.match((await call('POST', `/api/partners/visits/${v1}/send`, { partner_id: P.partner_id }, MANAGER, 409)).error, /ไม่ได้รับงาน/);
+      assert.equal((await call('PATCH', `/api/partners/${P.partner_id}`, { service_kind: 'homecare' })).service_kind, 'homecare');
+      assert.equal((await call('DELETE', `/api/partners/${P.partner_id}`, undefined, MANAGER, 200)).removed, true);
       // ---- โลโก้: หลังบ้านอัปโหลด · หัวหน้าพาร์ทเนอร์โหลดรูปได้ · รายการไม่ส่งไบนารีออกไป ----
       const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
       await call('PUT', `/api/partners/${A.partner_id}/logo`, { image: 'data:text/html;base64,PHNjcmlwdD4=' }, MANAGER, 400);

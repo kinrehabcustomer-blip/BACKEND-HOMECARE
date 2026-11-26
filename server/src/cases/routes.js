@@ -991,7 +991,7 @@ casesRouter.post(
     const input = bulkVisitSchema.parse(req.body);
     /* ลงนัดแล้วส่งให้พาร์ทเนอร์เลย (21 พ.ย. 2569) — ตรวจบริษัทก่อน ไม่ผ่านผู้รับผิดชอบเคส แล้วแจ้งหัวหน้าบริษัทครั้งเดียว */
     if (input.partner_id) {
-      const send = await partners.prepareSend(input.partner_id);
+      const send = await partners.prepareSend(input.partner_id, partners.caseKindOf(req.case));
       const result = await repo.addVisits(req.params.id, input.dates, {
         ...input, assigned_to: null,
         partner: {

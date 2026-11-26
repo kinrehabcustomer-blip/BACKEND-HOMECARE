@@ -28,7 +28,27 @@ const shiftMonth = (ym, n) => {
   return new Date(Date.UTC(y, m - 1 + n, 1)).toISOString().slice(0, 7);
 };
 const monthName = (ym) => new Date(`${ym}-01T00:00:00+07:00`).toLocaleDateString('th-TH', { month: 'long', year: 'numeric' });
-const EMPTY_PARTNER = { name: '', contact_name: '', phone: '', rate_per_visit: '', english_rate: '' };
+const EMPTY_PARTNER = { name: '', contact_name: '', phone: '', rate_per_visit: '', english_rate: '', service_kind: 'homecare' };
+/* ฝั่งงานของบริษัท (26 พ.ย. 2569) — Homecare หรือกายภาพบำบัด อย่างใดอย่างหนึ่ง · ป้ายต่อท้ายชื่อ + ปุ่มสลับใน popup/ฟอร์ม */
+const KIND_OPTIONS = [['homecare', 'Homecare'], ['physio', 'กายภาพบำบัด']];
+const kindOf = (p) => p?.service_kind ?? 'homecare';
+function KindBadge({ partner }) {
+  const k = kindOf(partner);
+  return <span className={`pa-kind is-${k}`}>{KIND_OPTIONS.find(([x]) => x === k)[1]}</span>;
+}
+/** ปุ่มสลับ Homecare | กายภาพบำบัด — เลือกได้อย่างเดียว */
+function KindSwitch({ value, disabled = false, onChange }) {
+  return (
+    <div className="pa-kind-switch" role="radiogroup" aria-label="ประเภทงาน">
+      {KIND_OPTIONS.map(([k, label]) => (
+        <button key={k} type="button" role="radio" aria-checked={value === k} disabled={disabled}
+          className={`pa-kind-seg is-${k}${value === k ? ' is-on' : ''}`} onClick={() => value !== k && onChange(k)}>
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
 const EMPTY_LEAD = { first_name: '', last_name: '', phone: '' };
 
 export default function PartnersPane() {
@@ -59,7 +79,7 @@ export default function PartnersPane() {
     setBusy(true);
     setFormError(null);
     try {
-      const body = { name: form.name, contact_name: form.contact_name || null, phone: form.phone || null,
+      const body = { name: form.name, contact_name: form.contact_name || null, phone: form.phone || null, service_kind: kindOf(form),
         ...(seePay ? { rate_per_visit: Number(form.rate_per_visit || 0), english_rate: Number(form.english_rate || 0) } : {}) };
       if (form.partner_id) await api.updatePartner(form.partner_id, body);
       else await api.createPartner(body);
@@ -97,6 +117,16 @@ export default function PartnersPane() {
       toast(`ลบ ${p.name} แล้ว`);
       if (openId === p.partner_id) setOpenId(null);
       load();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+  /* สลับฝั่งงาน Homecare/กายภาพบำบัด จาก popup ตั้งค่า — บันทึกทันที (26 พ.ย. 2569) */
+  const setKind = async (p, kind) => {
+    try {
+      await api.updatePartner(p.partner_id, { service_kind: kind });
+      toast(`${p.name} เป็นพาร์ทเนอร์ฝั่ง${kind === 'physio' ? 'กายภาพบำบัด' : ' Homecare'} แล้ว`);
+      await load();
     } catch (err) {
       setError(err.message);
     }
@@ -155,6 +185,10 @@ export default function PartnersPane() {
             <form className="pa-form pa-form-modal" onSubmit={save}>
               {formError && <p className="form-error pa-form-error" role="alert">{formError}</p>}
               <label>ชื่อบริษัท<input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} disabled={busy} /></label>
+              <div className="pa-kind-field">
+                <span>ประเภทงาน</span>
+                <KindSwitch value={kindOf(form)} disabled={busy} onChange={(k) => setForm({ ...form, service_kind: k })} />
+              </div>
               <label>ผู้ติดต่อ<input value={form.contact_name ?? ''} onChange={(e) => setForm({ ...form, contact_name: e.target.value })} disabled={busy} /></label>
               <label>เบอร์โทร<input type="tel" value={form.phone ?? ''} onChange={(e) => setForm({ ...form, phone: e.target.value })} disabled={busy} /></label>
               {seePay && <label>เรทต่อครั้ง (บาท)<input required inputMode="decimal" value={form.rate_per_visit} onChange={(e) => setForm({ ...form, rate_per_visit: e.target.value })} disabled={busy} /></label>}
@@ -177,7 +211,7 @@ export default function PartnersPane() {
                   <PartnerLogo partner={p} size={44} className="pa-logo" />
                   <button type="button" className="pa-partner-name" aria-expanded={openId === p.partner_id}
                     onClick={() => setOpenId(openId === p.partner_id ? null : p.partner_id)}>
-                    <b>{p.name}</b>
+                    <b>{p.name}<KindBadge partner={p} /></b>
                     <span className="muted">
                       {p.rate_per_visit != null && `${formatBaht(p.rate_per_visit)}/ครั้ง · `}{Number(p.english_rate) > 0 && `ภาษาอังกฤษ +${formatBaht(p.english_rate)} · `}หัวหน้า {p.leads} · ทีม {p.staff} คน · งานค้าง {p.open_visits} · เดือนนี้ไปแล้ว {p.done_this_month}
                       {p.contact_name ? ` · ${p.contact_name}` : ''}{p.phone ? ` ${p.phone}` : ''}
@@ -187,8 +221,9 @@ export default function PartnersPane() {
                     {/* ปุ่มตั้งค่าเดียว รวม โลโก้ · แก้ไข · ลบ (ผู้ใช้ขอ 25 พ.ย. 2569) — สวิตช์เปิด/ปิดยังอยู่นอกเมนู ให้เห็นสถานะทันที */}
                     <PartnerMenu
                       partner={p}
-                      onEdit={() => { setFormError(null); setForm({ ...p, rate_per_visit: String(p.rate_per_visit ?? ''), english_rate: Number(p.english_rate) > 0 ? String(p.english_rate) : '' }); }}
+                      onEdit={() => { setFormError(null); setForm({ ...p, service_kind: kindOf(p), rate_per_visit: String(p.rate_per_visit ?? ''), english_rate: Number(p.english_rate) > 0 ? String(p.english_rate) : '' }); }}
                       onLogo={(file) => uploadLogo(p, file)}
+                      onKind={(k) => setKind(p, k)}
                       onRemoveLogo={async () => {
                         if (await ask({ title: `ลบโลโก้ ${p.name}?`, confirmLabel: 'ลบโลโก้', cancelLabel: 'ไม่ลบ', danger: true })) removeLogo(p);
                       }}
@@ -266,8 +301,10 @@ function CenterPopup({ title, head, onClose, wide = false, children }) {
  * แก้ไขข้อมูล · เพิ่ม/เปลี่ยนโลโก้ · ลบโลโก้ · ลบพาร์ทเนอร์
  * เลือกรายการแล้ว popup ปิด · การยืนยันลบใช้กล่องยืนยัน (useConfirm) หลัง popup ปิดแล้ว
  */
-function PartnerMenu({ partner, onEdit, onLogo, onRemoveLogo, onRemove }) {
+function PartnerMenu({ partner, onEdit, onLogo, onKind, onRemoveLogo, onRemove }) {
   const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const changeKind = async (k) => { setSaving(true); try { await onKind(k); } finally { setSaving(false); } };
   const fileRef = useRef(null);
   const pick = (fn) => () => { setOpen(false); fn(); };
   return (
@@ -296,6 +333,11 @@ function PartnerMenu({ partner, onEdit, onLogo, onRemoveLogo, onRemove }) {
             </>
           )}
         >
+          {/* ฝั่งงานของบริษัท — เลือกได้อย่างเดียว · กดแล้วบันทึกทันที */}
+          <div className="pa-menu-kind">
+            <span>ประเภทงาน</span>
+            <KindSwitch value={kindOf(partner)} disabled={saving} onChange={changeKind} />
+          </div>
           <div className="pa-menu-list" role="menu">
             <MenuItem icon="edit" title="แก้ไขข้อมูล" desc="ชื่อ ผู้ติดต่อ เบอร์โทร เรท และค่าภาษา" onClick={pick(onEdit)} />
             <MenuItem icon="image" title={partner.has_logo ? 'เปลี่ยนโลโก้' : 'เพิ่มโลโก้'} desc="PNG / JPG / WebP — ย่อขนาดให้อัตโนมัติ"

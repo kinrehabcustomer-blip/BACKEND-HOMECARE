@@ -682,6 +682,8 @@ ALTER TABLE partners ADD COLUMN IF NOT EXISTS logo_mime TEXT;
 ALTER TABLE partners ADD COLUMN IF NOT EXISTS logo_updated_at TIMESTAMPTZ;
 -- ค่าภาษาต่อครั้ง (25 พ.ย. 2569) — บวกเพิ่มจากเรทปกติ เฉพาะกะของเคสที่ขอภาษาอังกฤษ
 ALTER TABLE partners ADD COLUMN IF NOT EXISTS english_rate NUMERIC(12, 2) NOT NULL DEFAULT 0 CHECK (english_rate >= 0);
+-- ฝั่งงานของบริษัท (26 พ.ย. 2569) — homecare หรือ physio อย่างใดอย่างหนึ่ง · บริษัทเดิม = homecare
+ALTER TABLE partners ADD COLUMN IF NOT EXISTS service_kind TEXT NOT NULL DEFAULT 'homecare' CHECK (service_kind IN ('homecare', 'physio'));
 ALTER TABLE employees ADD COLUMN IF NOT EXISTS partner_id INTEGER REFERENCES partners (partner_id) ON DELETE RESTRICT;
 CREATE INDEX IF NOT EXISTS idx_employees_partner ON employees (partner_id) WHERE partner_id IS NOT NULL;
 ALTER TABLE case_visits ADD COLUMN IF NOT EXISTS partner_id INTEGER REFERENCES partners (partner_id) ON DELETE RESTRICT;
