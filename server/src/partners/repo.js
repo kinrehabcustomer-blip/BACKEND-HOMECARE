@@ -2,7 +2,7 @@ import { sql, transaction } from '../db/index.js';
 import { ApiError } from '../lib/errors.js';
 import { FRONT_POSITIONS } from '../employees/schema.js';
 import * as employees from '../employees/repo.js';
-import { updateVisit, withVisitState } from '../cases/repo.js';
+import { updateVisit, withVisitState, addReport, recordPartnerVisit, undoPartnerVisit } from '../cases/repo.js';
 import { ensureStaffInbox, inboxPartnerJob } from '../notify/staffInbox.js';
 import { ensurePartnerSchema } from './schema.js';
 
@@ -468,7 +468,7 @@ const PARTNER_VISIT = `
          e.first_name || ' ' || e.last_name AS assigned_name, e.nickname AS assigned_nickname,
          c.client_name, c.address, c.geo_lat, c.geo_lng,
          COALESCE(pp.name, f.name) AS service_name,
-         c.service_kind,
+         c.service_kind, c.case_type, c.physio_package_id,
          -- เคสมีคน KIN ดูแลอยู่ = ไปแทน · ไม่มี = งานรายครั้ง
          (c.assigned_to IS NOT NULL) AS substitute
   FROM case_visits v
@@ -567,6 +567,41 @@ export async function partnerVisitDetail(partnerId, visitId) {
   // กะที่ยกเลิกไม่อยู่ในลำดับ — ไม่โชว์ "ครั้งที่ x" ที่จริงเป็นของกะอื่น
   const cancelled = v.status === 'cancelled';
   return { ...rest, visit_no: cancelled ? null : order?.no ?? null, visit_total: cancelled ? null : order?.total ?? null, others };
+}
+
+/**
+ * หัวหน้าพาร์ทเนอร์ลงรายงานของกะ พร้อมเวลาเริ่ม–จบที่ไปจริง (ผู้ใช้ขอ 27 พ.ย. 2569)
+ * แทนเช็คอิน/เช็คเอาท์/ลงรายงานของพนักงานพาร์ทเนอร์ — ลงแล้วกะนับว่า "ไปจริง" และนับเงิน
+ * start/end = 'HH:MM' ของวันนัด · จบ ≤ เริ่ม = จบวันถัดไป (กะดึก) · เวลาจบต้องไม่อยู่ในอนาคต
+ * report = ช่องรายงานชุดเดียวกับพนักงาน KIN (createReportSchema แล้ว) · ผู้บันทึก = หัวหน้า
+ */
+export async function reportVisit(partnerId, visitId, { start, end, report }, user) {
+  await ensurePartnerSchema();
+  const visit = await partnerVisitOr404(partnerId, visitId);
+  const full = await sql.one(
+    'SELECT status, partner_status, assigned_to, check_in_at, visit_date FROM case_visits WHERE visit_id = :id', { id: visitId },
+  );
+  if (full.status === 'cancelled') throw new ApiError(409, 'กะนี้ถูกยกเลิกแล้ว');
+  if (full.check_in_at) throw new ApiError(409, 'กะนี้ลงรายงาน/เวลาไปแล้ว');
+  if (full.partner_status !== 'accepted' || !full.assigned_to) throw new ApiError(409, 'ต้องรับงานและเลือกคนที่ไปก่อน จึงลงรายงานได้');
+  if (full.visit_date > todayTH()) throw new ApiError(409, 'ยังไม่ถึงวันนัด — ลงรายงานได้ตั้งแต่วันที่นัด');
+  if (!['unassigned', 'assigned', 'in_progress'].includes(visit.case_status)) throw new ApiError(409, 'เคสนี้จบไปแล้ว ลงรายงานไม่ได้');
+
+  const checkIn = new Date(`${full.visit_date}T${start}:00+07:00`);
+  const checkOut = new Date(`${full.visit_date}T${end}:00+07:00`);
+  if (checkOut <= checkIn) checkOut.setUTCDate(checkOut.getUTCDate() + 1);
+  if (checkOut.getTime() > Date.now() + 60_000) throw new ApiError(400, 'เวลาจบยังมาไม่ถึง — ลงรายงานหลังจบงานแล้ว');
+  if (checkOut.getTime() - checkIn.getTime() > 24 * 3.6e6) throw new ApiError(400, 'ช่วงเวลาทำงานยาวเกิน 24 ชม.');
+
+  const actor = actorOf(user);
+  const recorded = await recordPartnerVisit(visitId, { checkIn: checkIn.toISOString(), checkOut: checkOut.toISOString() }, actor);
+  if (!recorded) throw new ApiError(409, 'กะนี้ถูกเปลี่ยนไประหว่างนั้น — โหลดหน้าใหม่แล้วลองอีกครั้ง');
+  try {
+    return await addReport(visit.case_id, { ...report, visit_id: visitId, report_date: full.visit_date }, actor);
+  } catch (err) {
+    await undoPartnerVisit(visitId, checkIn.toISOString()).catch(() => {});
+    throw err;
+  }
 }
 
 /** คนในทีมที่เลือกให้กะนี้ได้ + กะอื่นของแต่ละคนในวันเดียวกัน (หน้าเว็บโชว์ "ชนเวลา") */

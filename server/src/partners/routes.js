@@ -5,6 +5,7 @@ import { can, canSeeStaffPay, requirePermission } from '../lib/auth.js';
 import { ensureAssignable } from '../cases/routes.js';
 import { decodeImage, imageSchema } from '../employees/schema.js';
 import * as repo from './repo.js';
+import { createReportSchema } from '../cases/schema.js';
 
 /**
  * พาร์ทเนอร์ (ผู้รับเหมาช่วงรายครั้ง · 21 พ.ย. 2569) — repo.js อธิบายขั้นตอน
@@ -194,6 +195,14 @@ partnerRouter.post('/visits/:id/reject', asyncRoute(async (req, res) => {
   const { reason } = z.object({ reason: optText(300) }).parse(req.body ?? {});
   await repo.rejectVisit(mine(req), intId.parse(req.params.id), reason, req.user);
   res.json({ ok: true });
+}));
+
+/* หัวหน้าลงรายงานของกะ + เวลาเริ่ม–จบที่ไปจริง (27 พ.ย. 2569) — แทนเช็คอิน/รายงานของพนักงานพาร์ทเนอร์ */
+const hhmm = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'เวลาไม่ถูกต้อง (HH:MM)');
+partnerRouter.post('/visits/:id/report', asyncRoute(async (req, res) => {
+  const { start, end, ...rest } = z.object({ start: hhmm, end: hhmm }).passthrough().parse(req.body ?? {});
+  const report = createReportSchema.parse(rest);
+  res.status(201).json(await repo.reportVisit(mine(req), intId.parse(req.params.id), { start, end, report }, req.user));
 }));
 
 partnerRouter.get('/team', asyncRoute(async (req, res) => {

@@ -397,6 +397,17 @@ export function familyChangeText(change) {
         '', 'หากต้องการนัดวันใหม่ ตอบกลับในแชทนี้ได้เลยค่ะ 🙏'].filter((x) => x !== null).join('\n'),
     };
   }
+  /* กะที่ยังไม่เคยมีคน แล้วเพิ่งได้คนไป (หัวหน้าพาร์ทเนอร์เลือกคน · ผู้ใช้ขอ 27 พ.ย. 2569)
+     ไม่ใช่การ "เปลี่ยน" — เดิมขึ้น "จาก: เจ้าหน้าที่ → คุณเอ" ลูกค้าเข้าใจว่าเปลี่ยนตัว จึงแจ้งว่าใครจะไปแทน */
+  if (kind === 'reassigned' && !o.staff && n.staff) {
+    const role = roleTH(n.staff);
+    return {
+      title: `แจ้ง${role}ที่จะไป`,
+      message: [`👤 แจ้ง${role}ที่จะไปค่ะ`, `นัด: ${slotTH(n)}`,
+        `${whoTH(n.staff)} จะไปถึงบ้าน${n.start ? `ประมาณ ${n.start} น.` : 'ตามเวลานัด'}`,
+        '', 'หากมีข้อสงสัย ตอบกลับในแชทนี้ได้เลยค่ะ 🙏'].join('\n'),
+    };
+  }
   if (kind === 'reassigned') {
     const role = roleTH(n.staff ?? o.staff);
     return {
@@ -409,10 +420,13 @@ export function familyChangeText(change) {
   }
   // moved — เลื่อนวัน/เวลา (ถ้าเปลี่ยนคนพร้อมกัน บอกด้วยอีกบรรทัด)
   const role = roleTH(n.staff ?? o.staff);
+  // เดิมยังไม่มีคน แล้วได้คนพร้อมเลื่อน = บอกว่าใครจะไป ไม่ใช่ "เปลี่ยน" (เหตุผลเดียวกับด้านบน)
+  const firstStaff = staffChanged && !o.staff && n.staff;
   return {
-    title: staffChanged ? `แจ้งเลื่อนนัดและเปลี่ยน${role}` : 'แจ้งเลื่อนนัด',
+    title: staffChanged && !firstStaff ? `แจ้งเลื่อนนัดและเปลี่ยน${role}` : 'แจ้งเลื่อนนัด',
     message: [`📅 แจ้งเลื่อนนัดค่ะ`, `จากเดิม: ${slotTH(o)}`, `เป็น: ${slotTH(n)}`,
-      staffChanged ? `เปลี่ยน${role}: ${whoTH(o.staff)} → ${whoTH(n.staff)}` : null,
+      firstStaff ? `${role}ที่จะไป: ${whoTH(n.staff)}`
+        : staffChanged ? `เปลี่ยน${role}: ${whoTH(o.staff)} → ${whoTH(n.staff)}` : null,
       `${role} (${whoTH(n.staff)}) จะไปถึงบ้าน${n.start ? `ประมาณ ${n.start} น.` : 'ตามเวลานัด'}`,
       '', 'หากวันเวลาใหม่ไม่สะดวก ตอบกลับในแชทนี้ได้เลยค่ะ 🙏'].filter((x) => x !== null).join('\n'),
   };

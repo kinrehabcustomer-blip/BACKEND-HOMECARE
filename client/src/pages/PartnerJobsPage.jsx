@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from '../api.js';
 import { useToast } from '../toast.jsx';
@@ -9,12 +9,15 @@ import ErrorBar from '../components/ErrorBar.jsx';
 import PageRefresh from '../components/PageRefresh.jsx';
 import LineIcon from '../components/LineIcon.jsx';
 import PartnerLogo from '../components/PartnerLogo.jsx';
+import DailyCareForm from '../components/DailyCareForm.jsx';
+import { usesPhysioRecord, DAILY_SECTIONS, PHYSIO_SECTIONS } from '../lib/dailyCare.js';
 
 /**
  * หัวหน้าพาร์ทเนอร์ — งานที่ KIN ส่งมา (ผู้ใช้ขอ 21 พ.ย. 2569 · ดีไซน์ที่ตกลงกัน "หลังบ้านพาร์ทเนอร์")
  *   รอรับ   → รับงาน + เลือกคนในทีม / ปฏิเสธ (กะกลับไปหา KIN)
- *   รับแล้ว → เปลี่ยนคน / ปฏิเสธ (ก่อนเช็คอิน)
- *   ที่ผ่านมา → ไปแล้ว / ขาดงาน / ยกเลิก
+ *   รับแล้ว → เปลี่ยนคน / ปฏิเสธ (ก่อนวันนัด) · ถึงวันนัดแล้ว → ลงรายงาน + เวลาเริ่ม–จบ (27 พ.ย. 2569)
+ *   ที่ผ่านมา → ไปแล้ว / ยังไม่ลงรายงาน (ลงย้อนหลังได้) / ยกเลิก
+ * พนักงานพาร์ทเนอร์ไม่ได้เข้าระบบ — ไม่มีเช็คอินของเขา หัวหน้าเป็นคนลงรายงาน แล้วกะนับว่าไปจริง (นับเงิน)
  * server กรองด้วยบริษัทใน session — ไม่มีราคาที่ลูกค้าจ่าย ไม่มีอาการ ไม่มีกะอื่นของเคส (partners/repo.js)
  */
 const TABS = [
@@ -31,9 +34,13 @@ function pastLabel(v) {
   if (v.status === 'cancelled') return { text: 'ยกเลิก', cls: 'pt-tag is-muted' };
   if (v.check_out_at) return { text: 'ไปแล้ว', cls: 'pt-tag is-ok' };
   if (!v.check_in_at && v.partner_status === 'pending') return { text: 'ไม่มีคนรับ', cls: 'pt-tag is-muted' };
-  if (!v.check_in_at) return { text: 'ขาดงาน', cls: 'pt-tag is-warn' };
-  return { text: 'ยังไม่เช็คเอาท์', cls: 'pt-tag is-warn' };
+  if (!v.check_in_at) return { text: 'ยังไม่ลงรายงาน', cls: 'pt-tag is-warn' };
+  return { text: 'ไปแล้ว', cls: 'pt-tag is-ok' };
 }
+
+/** ลงรายงานได้ไหม — รับงานแล้ว มีคนไป ยังไม่ลง ไม่ถูกยกเลิก และถึงวันนัดแล้ว (เกณฑ์เดียวกับ server reportVisit) */
+const canReport = (v) => v.partner_status === 'accepted' && Boolean(v.assigned_to) && !v.check_in_at
+  && v.status !== 'cancelled' && v.visit_date <= todayTH();
 
 const hhmm = (ts) => (ts ? new Date(ts).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Bangkok' }) : '');
 
@@ -47,6 +54,7 @@ export default function PartnerJobsPage() {
   const [assigning, setAssigning] = useState(null);
   const [rejecting, setRejecting] = useState(null);
   const [viewing, setViewing] = useState(null);
+  const [reporting, setReporting] = useState(null);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -57,7 +65,7 @@ export default function PartnerJobsPage() {
   }, [tab]);
   useEffect(() => { setList(null); load(); }, [load]);
 
-  const done = (msg) => { setAssigning(null); setRejecting(null); toast(msg); load(); };
+  const done = (msg) => { setAssigning(null); setRejecting(null); setReporting(null); toast(msg); load(); };
 
   return (
     <PageRefresh onRefresh={load} busy={loading}>
@@ -93,7 +101,7 @@ export default function PartnerJobsPage() {
             <div className="tile is-static">
               <span className="tile-label">เดือนนี้ไปแล้ว</span>
               <span className="tile-value">{me.counts.done_month}</span>
-              <span className="tile-share">ครั้ง (เช็คอิน+เช็คเอาท์)</span>
+              <span className="tile-share">ครั้ง (ลงรายงานแล้ว)</span>
             </div>
           </div>
         )}
@@ -155,10 +163,14 @@ export default function PartnerJobsPage() {
                       {v.check_in_at && <span className="muted"> · เข้า {hhmm(v.check_in_at)}{v.check_out_at ? ` · ออก ${hhmm(v.check_out_at)}` : ''}</span>}
                     </p>
                   )}
-                  {tab !== 'past' && !v.check_in_at && v.visit_date < todayTH() && (
-                    <p className="pt-who"><span className="pt-tag is-warn">เลยวันแล้ว · ยังไม่มีการเช็คอิน</span></p>
+                  {canReport(v) && (
+                    <div className="pt-actions">
+                      <span className="pt-report-hint muted">ไปแล้ว? ลงรายงานพร้อมเวลาเริ่ม–จบ เพื่อนับเป็นงานที่ไปจริง</span>
+                      <button type="button" className="btn primary" onClick={() => setReporting(v)}>ลงรายงาน</button>
+                    </div>
                   )}
-                  {tab !== 'past' && !v.check_in_at && v.visit_date >= todayTH() && (
+                  {/* ถึงวันนัดแล้ว = การ์ดมีแค่ปุ่มลงรายงาน (ปฏิเสธ/เปลี่ยนคนวันนี้ยังทำได้ในรายละเอียด) */}
+                  {tab !== 'past' && !v.check_in_at && v.visit_date >= todayTH() && !canReport(v) && (
                     <div className="pt-actions">
                       <button type="button" className="btn" onClick={() => setRejecting(v)}>ปฏิเสธ</button>
                       <button type="button" className="btn primary" onClick={() => setAssigning(v)}>
@@ -180,10 +192,12 @@ export default function PartnerJobsPage() {
 
       {viewing && (
         <DetailDialog visit={viewing} tab={tab} onCancel={() => setViewing(null)}
+          onReport={(v) => { setViewing(null); setReporting(v); }}
           onAssign={(v) => { setViewing(null); setAssigning(v); }}
           onReject={(v) => { setViewing(null); setRejecting(v); }} />
       )}
       {assigning && <AssignDialog visit={assigning} onCancel={() => setAssigning(null)} onDone={done} />}
+      {reporting && <ReportDialog visit={reporting} onCancel={() => setReporting(null)} onDone={done} />}
       {rejecting && <RejectDialog visit={rejecting} onCancel={() => setRejecting(null)} onDone={done} />}
     </PageRefresh>
   );
@@ -199,7 +213,7 @@ function useEsc(onCancel) {
 }
 
 /** รายละเอียดเคส + ผู้รับบริการ — server ให้ชุดเดียวกับพนักงานภาคสนาม ไม่มีเบอร์ญาติ/ราคา (partners/repo.js partnerVisitDetail) */
-function DetailDialog({ visit, tab, onCancel, onAssign, onReject }) {
+function DetailDialog({ visit, tab, onCancel, onAssign, onReject, onReport }) {
   const [d, setD] = useState(null);
   const [error, setError] = useState(null);
   useEsc(onCancel);
@@ -244,7 +258,12 @@ function DetailDialog({ visit, tab, onCancel, onAssign, onReject }) {
             <dt><LineIcon name="pin" className="pt-dt-ico" />สถานที่</dt>
             <dd>
               {v.address || <span className="muted">ไม่ได้ระบุที่อยู่</span>}
-              {map && <><br /><a href={map} target="_blank" rel="noopener noreferrer" className="pt-map"><LineIcon name="pin" className="text-ico" />เปิดแผนที่</a></>}
+              {map && (
+                <span className="pt-map-row">
+                  <a href={map} target="_blank" rel="noopener noreferrer" className="pt-map"><LineIcon name="pin" className="text-ico" />เปิดแผนที่</a>
+                  <CopyMapButton url={map} />
+                </span>
+              )}
             </dd>
             <dt><PersonIcon />คนที่ไป</dt>
             <dd>
@@ -283,9 +302,8 @@ function DetailDialog({ visit, tab, onCancel, onAssign, onReject }) {
                 {d.others.map((o) => {
                   const past = o.visit_date < todayTH();
                   const tag = o.status === 'cancelled' ? 'ยกเลิก'
-                    : o.check_out_at ? 'ไปแล้ว'
-                      : o.check_in_at ? (past ? 'ยังไม่เช็คเอาท์' : 'กำลังทำงาน')
-                        : past ? 'ขาดงาน' : 'รอวันนัด';
+                    : o.check_in_at ? 'ไปแล้ว'
+                      : past ? 'ยังไม่ลงรายงาน' : 'รอวันนัด';
                   return (
                     <li key={o.visit_id}>
                       <span>{formatDate(o.visit_date)}{timeRange(o) ? ` · ${timeRange(o)}` : ''}</span>
@@ -298,7 +316,17 @@ function DetailDialog({ visit, tab, onCancel, onAssign, onReject }) {
           )}
         </div>
         <footer className="modal-foot">
-          {canAct ? (
+          {d && canReport(v) ? (
+            <>
+              {canAct ? (
+                <>
+                  <button type="button" className="btn" onClick={() => onReject(visit)}>ปฏิเสธ</button>
+                  <button type="button" className="btn" onClick={() => onAssign(visit)}>เปลี่ยนคน</button>
+                </>
+              ) : <button type="button" className="btn" onClick={onCancel}>ปิด</button>}
+              <button type="button" className="btn primary" onClick={() => onReport(visit)}>ลงรายงาน</button>
+            </>
+          ) : canAct ? (
             <>
               <button type="button" className="btn" onClick={() => onReject(visit)}>ปฏิเสธ</button>
               <button type="button" className="btn primary" onClick={() => onAssign(visit)}>
@@ -312,6 +340,35 @@ function DetailDialog({ visit, tab, onCancel, onAssign, onReject }) {
       </div>
     </div>,
     document.body,
+  );
+}
+
+/** คัดลอกลิงก์แผนที่ (ผู้ใช้ขอ 27 พ.ย. 2569) — ส่งต่อให้คนในทีมทางแชทได้ · ปุ่มบอกผลเองแล้วกลับเป็นปกติ */
+function CopyMapButton({ url }) {
+  const [state, setState] = useState(null); // null · 'ok' · 'fail'
+  useEffect(() => {
+    if (!state) return undefined;
+    const t = setTimeout(() => setState(null), 2000);
+    return () => clearTimeout(t);
+  }, [state]);
+  const copy = async () => {
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('clipboard unavailable');
+      await navigator.clipboard.writeText(url);
+      setState('ok');
+    } catch {
+      setState('fail');
+    }
+  };
+  return (
+    <button type="button" className={state === 'ok' ? 'pt-map pt-map-copy is-done' : 'pt-map pt-map-copy'} onClick={copy} aria-live="polite">
+      {state === 'ok' ? <LineIcon name="check" className="text-ico" /> : (
+        <svg className="text-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15V5a2 2 0 0 1 2-2h8" />
+        </svg>
+      )}
+      {state === 'ok' ? 'คัดลอกแล้ว' : state === 'fail' ? 'คัดลอกไม่ได้' : 'คัดลอกลิงก์'}
+    </button>
   );
 }
 
@@ -357,7 +414,7 @@ function AssignDialog({ visit, onCancel, onDone }) {
     setError(null);
     try {
       await api.partnerAccept(visit.visit_id, pick);
-      onDone(`ส่งงานให้ ${chosen?.first_name ?? ''} แล้ว — เขาได้แจ้งเตือนในแอป`);
+      onDone(`ให้ ${chosen?.first_name ?? ''} ไปงานนี้แล้ว`);
     } catch (e) {
       setError(e.message);
       setBusy(false);
@@ -396,7 +453,7 @@ function AssignDialog({ visit, onCancel, onDone }) {
             </div>
           )}
           {error && <p className="error" role="alert">{error}</p>}
-          <p className="move-note"><LineIcon name="bell" className="text-ico" />คนที่เลือกได้แจ้งเตือน "กะใหม่" ทันที · เปลี่ยนคนได้จนถึงก่อนเช็คอิน</p>
+          <p className="move-note"><LineIcon name="bell" className="text-ico" />เปลี่ยนคนได้จนถึงก่อนวันนัด · ไปแล้วให้กด "ลงรายงาน" ที่การ์ดงาน</p>
         </div>
         <footer className="modal-foot">
           <button type="button" className="btn" onClick={onCancel} disabled={busy}>ยกเลิก</button>
@@ -404,6 +461,63 @@ function AssignDialog({ visit, onCancel, onDone }) {
             {busy ? 'กำลังส่ง…' : chosen ? `ยืนยัน · ส่งให้ ${chosen.first_name}` : 'ยืนยัน'}
           </button>
         </footer>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+/**
+ * ลงรายงานของกะ + เวลาเริ่ม–จบที่ไปจริง (ผู้ใช้ขอ 27 พ.ย. 2569)
+ * ฟอร์มรายงานชุดเดียวกับพนักงาน KIN (กายภาพ = บันทึกการรักษา · อื่น = บันทึกการดูแลประจำวัน)
+ * บันทึกแล้วกะนับว่าไปจริง (นับเงิน) — แก้ทีหลังไม่ได้จากหน้านี้ ถ้าลงผิดให้แจ้ง KIN
+ */
+function ReportDialog({ visit, onCancel, onDone }) {
+  const [start, setStart] = useState(visit.planned_start ?? '');
+  const [end, setEnd] = useState(visit.planned_end ?? '');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const requestId = useRef(crypto.randomUUID());
+  useEsc(() => { if (!busy) onCancel(); });
+  const physio = usesPhysioRecord(visit);
+  const submit = async (form) => {
+    if (!start || !end) { setError('กรอกเวลาเริ่มและเวลาจบที่ไปจริงก่อน'); return; }
+    setBusy(true);
+    setError(null);
+    try {
+      await api.partnerReport(visit.visit_id, { ...form, start, end, request_id: requestId.current });
+      onDone(`ลงรายงานแล้ว — นับเป็นงานที่ไปจริง (${start}–${end} น.)`);
+    } catch (e) {
+      setError(e.message);
+      setBusy(false);
+    }
+  };
+  return createPortal(
+    <div className="modal-backdrop modal-stacked" onClick={() => !busy && onCancel()}>
+      <div className="modal pt-sheet pt-report-dialog" role="dialog" aria-modal="true" aria-labelledby="pt-report-title" onClick={(e) => e.stopPropagation()}>
+        <header className="modal-head">
+          <div>
+            <h2 id="pt-report-title">ลงรายงาน</h2>
+            <p className="muted">{formatDate(visit.visit_date)} · {visit.client_name}{visit.assigned_name ? ` · ${visit.assigned_name}` : ''}</p>
+          </div>
+          <button type="button" className="modal-close" onClick={onCancel} aria-label="ปิด" disabled={busy}>×</button>
+        </header>
+        <div className="modal-body">
+          <fieldset className="pt-report-time" disabled={busy}>
+            <legend>เวลาที่ไปจริง <span className="muted">(ใช้คิดว่าไปจริง · ตั้งต้นเป็นเวลานัด)</span></legend>
+            <label>เริ่ม<input type="time" value={start} onChange={(e) => setStart(e.target.value)} required /></label>
+            <span aria-hidden="true">–</span>
+            <label>จบ<input type="time" value={end} onChange={(e) => setEnd(e.target.value)} required /></label>
+          </fieldset>
+          <DailyCareForm
+            initial={{ report_date: visit.visit_date }} // server บันทึกเป็นวันนัดเสมอ — ให้ช่องวันที่ตรงกัน
+            sections={physio ? PHYSIO_SECTIONS : DAILY_SECTIONS}
+            busy={busy}
+            error={error}
+            onSubmit={submit}
+            onCancel={onCancel}
+          />
+        </div>
       </div>
     </div>,
     document.body,

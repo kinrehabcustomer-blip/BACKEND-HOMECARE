@@ -11,7 +11,7 @@ const dateTH = (ts) => new Date(ts).toLocaleDateString('sv-SE', { timeZone: 'Asi
 
 /**
  * หัวหน้าพาร์ทเนอร์ — สรุปรายเดือน (21 พ.ย. 2569)
- * ยอดที่บริษัทจะได้รับ = กะที่ไปจริง (เช็คอิน+เช็คเอาท์) × เรท ณ ตอนที่ KIN ส่งงาน · ขาดงาน = ฿0
+ * ยอดที่บริษัทจะได้รับ = กะที่ไปจริง (หัวหน้าลงรายงาน + เวลาเริ่ม–จบแล้ว) × เรท ณ ตอนที่ KIN ส่งงาน · ขาดงาน = ฿0
  * KIN จ่ายให้บริษัท ค่าจ้างของแต่ละคนบริษัทจ่ายเอง · server: partners/repo.js summary
  *
  * วางหน้า (ผู้ใช้ขอจัด layout 21 พ.ย. 2569):
@@ -47,7 +47,7 @@ export default function PartnerSummaryPage() {
   const max = Math.max(1, ...(data?.by_staff ?? []).map((s) => s.done));
   const empty = data && data.visits.length === 0;
   const exportCsv = () => downloadCsv(`สรุปงานพาร์ทเนอร์_${month}.csv`,
-    ['วันที่', 'ผู้รับบริการ', 'คนที่ไป', 'เช็คอิน', 'เช็คเอาท์', 'ผล', 'ยอด'],
+    ['วันที่', 'ผู้รับบริการ', 'คนที่ไป', 'เวลาเริ่ม', 'เวลาจบ', 'ผล', 'ยอด'],
     data.visits.map((v) => [v.visit_date, v.client_name, v.employee_name ?? '', hhmm(v.check_in_at), hhmm(v.check_out_at),
       v.done ? 'ไปแล้ว' : 'ขาดงาน', v.amount]));
 
@@ -57,7 +57,7 @@ export default function PartnerSummaryPage() {
         <header className="pt-head">
           <div>
             <h1>สรุปรายเดือน</h1>
-            <p className="muted">กะที่ไปจริง (เช็คอิน+เช็คเอาท์) × เรทต่อครั้ง · KIN จ่ายให้บริษัทหลังสิ้นเดือน</p>
+            <p className="muted">กะที่ไปจริง (ลงรายงานแล้ว) × เรทต่อครั้ง · KIN จ่ายให้บริษัทหลังสิ้นเดือน</p>
           </div>
           <div className="pt-head-tools">
             <div className="pt-month" role="group" aria-label="เลือกเดือน">
@@ -95,7 +95,7 @@ export default function PartnerSummaryPage() {
               <section className="pt-card pt-empty">
                 <LineIcon name="calendar" className="pt-empty-ico" />
                 <strong>{monthName(month)} ยังไม่มีงานที่ไปแล้ว</strong>
-                <span className="muted">งานที่ทีมไปเช็คอินและเช็คเอาท์ครบจะนับเข้ายอดของเดือนนี้</span>
+                <span className="muted">งานที่ลงรายงานพร้อมเวลาเริ่ม–จบแล้วจะนับเข้ายอดของเดือนนี้</span>
                 <button type="button" className="btn" onClick={() => setMonth(shift(month, -1))}>‹ ดูเดือนก่อน</button>
               </section>
             ) : (
@@ -143,7 +143,7 @@ export default function PartnerSummaryPage() {
                         <span>
                           <b>{formatDate(v.visit_date)} · {v.client_name}</b>
                           <span className={v.done ? 'muted' : 'is-warn'}>
-                            {v.employee_name ?? '—'} · {v.done ? `เข้า ${hhmm(v.check_in_at)} · ออก ${hhmm(v.check_out_at)}` : 'ไม่มีการเช็คอิน (ขาดงาน)'}
+                            {v.employee_name ?? '—'} · {v.done ? `เข้า ${hhmm(v.check_in_at)} · ออก ${hhmm(v.check_out_at)}` : 'ยังไม่ลงรายงาน (ไม่นับเงิน)'}
                           </span>
                         </span>
                         <span className={v.done ? 'pt-money' : 'muted'}>{formatBaht(v.amount)}{v.done && Number(v.partner_english) > 0 && <span className="cell-sub">รวมค่าภาษา {formatBaht(v.partner_english)}</span>}</span>

@@ -373,6 +373,8 @@ export const api = {
   partnerVisit: (visitId) => request(`/partner/visits/${visitId}`),
   partnerAccept: (visitId, employeeId) => request(`/partner/visits/${visitId}/accept`, { method: 'POST', body: { employee_id: employeeId } }),
   partnerReject: (visitId, reason) => request(`/partner/visits/${visitId}/reject`, { method: 'POST', body: { reason: reason || null } }),
+  // หัวหน้าพาร์ทเนอร์ลงรายงาน + เวลาเริ่ม–จบที่ไปจริง (27 พ.ย. 2569) — แทนเช็คอินของพนักงานพาร์ทเนอร์
+  partnerReport: (visitId, body) => request(`/partner/visits/${visitId}/report`, { method: 'POST', body }),
   partnerTeam: () => request('/partner/team'),
   partnerAddPerson: (body) => request('/partner/team', { method: 'POST', body }),
   partnerPerson: (employeeId) => request(`/partner/team/${employeeId}`),

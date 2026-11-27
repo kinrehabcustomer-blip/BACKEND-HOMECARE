@@ -3529,10 +3529,13 @@ if (process.env.RUN_DB_TESTS !== '1') {
       const { DEFAULT_PASSWORD: PW } = await import('../src/lib/auth.js');
       const byMail = await fetch(`${base}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ email: 'a1-partner@example.invalid', password: PW }) });
-      assert.equal(byMail.status, 200, 'ล็อกอินด้วยอีเมลได้');
-      assert.equal((await byMail.json()).user?.employee_id ?? a1Row.employee_id, a1Row.employee_id);
-      // ล็อกอินด้วยรหัสเริ่มต้นทำให้บัญชีถูกบังคับเปลี่ยนรหัส — คืนสถานะไว้ เทสส่วนถัดไปใช้บัญชีนี้ต่อ
-      await sql.run('UPDATE employees SET uses_default_password = FALSE WHERE employee_id = :id', { id: a1Row.employee_id });
+      // พนักงานพาร์ทเนอร์ไม่ต้องเข้าระบบแล้ว (27 พ.ย. 2569) — รหัสถูกก็เข้าไม่ได้ · เซสชันเก่าก็ใช้ต่อไม่ได้
+      assert.equal(byMail.status, 403, 'พนักงานพาร์ทเนอร์เข้าระบบไม่ได้');
+      assert.match((await byMail.json()).error, /ไม่ต้องเข้าระบบ/);
+      const byId = await fetch(`${base}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email: a1Row.employee_id, password: PW }) });
+      assert.equal(byId.status, 403);
+      assert.equal((await get('/api/my/today', staffA1)).status, 401);
       assert.equal((await call('PATCH', `/api/partner/team/${b1Row.employee_id}`, { email: '' }, leadB)).email, null);
       const c1Row = await call('POST', '/api/partner/team', { first_name: 'ค', last_name: 'อีเมล', position: 'therapist', email: 'a1-partner@example.invalid' }, leadA, 409);
       assert.match(c1Row.error, /อีเมลนี้/);
@@ -3573,7 +3576,7 @@ if (process.env.RUN_DB_TESTS !== '1') {
       assert.equal((await get('/api/cases', leadA)).status, 403);
       assert.equal((await get('/api/employees', leadA)).status, 403);
       assert.equal((await get('/api/partners', leadA)).status, 403);
-      assert.equal((await get('/api/partner/me', staffA1)).status, 403);
+      assert.equal((await get('/api/partner/me', staffA1)).status, 401); // เข้าระบบไม่ได้เลยแล้ว (27 พ.ย. 2569)
 
       // ---- A เห็นงาน: ไม่มีราคา/ค่าจ้าง ----
       const pending = await call('GET', '/api/partner/visits?tab=pending', undefined, leadA);
@@ -3588,7 +3591,7 @@ if (process.env.RUN_DB_TESTS !== '1') {
       // รายละเอียดผู้รับบริการมาด้วย (ผู้ใช้ขอ 23 พ.ย. 2569) แต่ยังไม่มีเงิน/เบอร์ญาติ/หมายเหตุภายใน
       for (const k of ['current_symptoms', 'medical_history', 'care_goal', 'patient_allergies']) assert.ok(k in detail, `ควรมี ${k}`);
       for (const k of ['fee', 'staff_pay', 'partner_rate', 'client_phone', 'note', 'case_id']) assert.ok(!(k in detail), `ไม่ควรมี ${k}`);
-      assert.equal((await get(`/api/partner/visits/${v1}`, staffA1)).status, 403);
+      assert.equal((await get(`/api/partner/visits/${v1}`, staffA1)).status, 401);
       const cands = await call('GET', `/api/partner/visits/${v1}/candidates`, undefined, leadA);
       assert.deepEqual(cands.map((x) => x.employee_id), [a1Row.employee_id]);
 
@@ -3598,33 +3601,38 @@ if (process.env.RUN_DB_TESTS !== '1') {
       row = await visitRow(v1);
       assert.equal(row.assigned_to, a1Row.employee_id);
       assert.equal(row.partner_status, 'accepted');
-      assert.ok((await get('/api/my/notifications', staffA1)).body.items.some((n) => n.kind === 'visits_added' && n.visit_id === v1));
       assert.ok((await call('GET', `/api/partner/team/${a1Row.employee_id}`, undefined, leadA)).visits.some((x) => x.visit_id === v1));
+      // ญาติ/ลูกค้าได้ LINE ว่าใครจะไป — ชื่อพนักงานของพาร์ทเนอร์ที่หัวหน้าเลือก (ตรวจ 27 พ.ย. 2569)
+      {
+        const { ensureFamilyTable } = await import('../src/lib/family.js');
+        const { claimVisitChanges } = await import('../src/notify/visitReminders.js');
+        await ensureFamilyTable();
+        await sql.run(`INSERT INTO case_family_links (case_id, line_user_id, invited_by, consent_by, accepted_at)
+                       VALUES (:id, 'U-family-partner-test', 'EMP-0001', 'EMP-0001', now())`, { id: c.case_id });
+        // ตอนส่งกะให้พาร์ทเนอร์ (คน KIN → ยังไม่มีคน) cron รอบ 15 นาทีหยิบไปแล้ว — จำลองว่าหยิบแล้ว เหลือแค่ตอนหัวหน้าเลือกคน
+        // (ถ้าสองจังหวะอยู่ในรอบเดียวกัน ระบบรวมเป็น "เปลี่ยนจากคน KIN → คนของพาร์ทเนอร์" ซึ่งก็ถูกต้อง)
+        await sql.run(`UPDATE visit_change_outbox SET claimed_at = now() WHERE visit_id = :v AND new_assignee IS NULL`, { v: v1 });
+        await sql.run(`UPDATE visit_change_outbox SET created_at = now() - interval '5 minutes' WHERE case_id = :id`, { id: c.case_id });
+        const change = (await claimVisitChanges()).find((x) => x.visit_id === v1 && x.new?.staff?.employee_id === a1Row.employee_id);
+        assert.ok(change, 'มีข้อความเปลี่ยนคนของกะที่พาร์ทเนอร์รับ');
+        assert.ok(change.family.includes('U-family-partner-test'), 'แจ้งญาติ');
+        assert.equal(change.new.staff.name, 'เอ', 'ชื่อที่ญาติเห็น = ชื่อเล่นพนักงานพาร์ทเนอร์');
+        // กะที่ยังไม่มีคนแล้วได้คนครั้งแรก = "แจ้งนักกายภาพบำบัดที่จะไป" ไม่ใช่ "แจ้งเปลี่ยน… จาก เจ้าหน้าที่" (27 พ.ย. 2569)
+        assert.match(change.family_message, /^👤 แจ้งนักกายภาพบำบัดที่จะไปค่ะ/);
+        assert.match(change.family_message, /คุณเอ จะไปถึงบ้าน/);
+        assert.doesNotMatch(change.family_message, /เปลี่ยน|เจ้าหน้าที่/);
+        assert.equal(change.family_title, 'แจ้งนักกายภาพบำบัดที่จะไป');
+        assert.equal(change.new.staff.position, 'therapist');
+        await sql.run('DELETE FROM case_family_links WHERE line_user_id = :u', { u: 'U-family-partner-test' });
+      }
+      // พนักงานพาร์ทเนอร์ไม่ได้เข้าระบบ = ไม่สร้างแจ้งเตือนในแอปให้ (27 พ.ย. 2569) · หัวหน้ายังได้ partner_job
+      assert.equal((await sql.one('SELECT count(*)::int AS n FROM staff_notifications WHERE employee_id = :id', { id: a1Row.employee_id })).n, 0);
+      assert.ok((await sql.one(`SELECT count(*)::int AS n FROM staff_notifications WHERE employee_id = :id AND kind = 'partner_job'`, { id: leadARow.employee_id })).n >= 1);
 
-      // ---- พนักงานพาร์ทเนอร์: เห็นเคสของกะตัวเอง · ไม่เห็นแชทญาติ/ค่าตอบแทน ----
-      assert.ok((await get('/api/my/cases', staffA1)).body.some((x) => x.case_id === c.case_id));
-      const partnerCase = await get(`/api/my/cases/${c.case_id}`, staffA1);
-      assert.equal(partnerCase.status, 200);
-      // พนักงานพาร์ทเนอร์ไม่เห็นตารางนัดทั้งเคส — เฉพาะกะของตัวเอง
-      assert.ok(partnerCase.body.visits.length >= 1);
-      assert.ok(partnerCase.body.visits.every((v) => v.assigned_to === a1Row.employee_id));
-      assert.equal((await get(`/api/my/cases/${c.case_id}/family-messages`, staffA1)).status, 403);
-      assert.equal((await get('/api/my/attendance/report', staffA1)).status, 403);
-      // ประวัติรายงาน: เคสนี้เห็น · เคสอื่นของผู้รับบริการคนเดียวกันไม่เห็น (ผู้ใช้เลือก 21 พ.ย. 2569) — พนักงาน KIN ยังเห็นทั้งชุด
-      const pt = await sql.one('SELECT patient_id FROM patients LIMIT 1');
-      const other = await newCase();
-      await sql.run('UPDATE cases SET patient_id = :p WHERE case_id IN (:a, :b)', { p: pt.patient_id, a: c.case_id, b: other.case_id });
-      const [rHere, rOther] = await Promise.all([c.case_id, other.case_id].map((cid) => sql.one(
-        `INSERT INTO case_reports (case_id, report_date, pulse) VALUES (:cid, :d, 80) RETURNING report_id`, { cid, d: d1 })));
-      const seen = (await get(`/api/my/cases/${c.case_id}/patient-reports`, staffA1)).body;
-      const seenIds = (seen.data ?? seen.items ?? seen.reports ?? []).map((r) => r.report_id);
-      assert.ok(seenIds.includes(rHere.report_id) && !seenIds.includes(rOther.report_id), JSON.stringify(seenIds));
-      await post(`/api/cases/${c.case_id}/team`, { employee_id: FIELD.employee_id }).catch(() => {});
-      const kin = (await get(`/api/my/cases/${c.case_id}/patient-reports`, FIELD)).body;
-      const kinIds = (kin.data ?? kin.items ?? kin.reports ?? []).map((r) => r.report_id);
-      assert.ok(kinIds.includes(rOther.report_id), 'พนักงาน KIN ยังเห็นประวัติทั้งตัวผู้รับบริการ');
-      assert.equal((await get(`/api/my/cases/${c.case_id}/reports/${rOther.report_id}/photo`, staffA1)).status, 404);
-      assert.equal((await get('/api/my/payslips', staffA1)).status, 403);
+      // ---- พนักงานพาร์ทเนอร์ใช้หน้าภาคสนามไม่ได้แล้ว (ไม่มีเช็คอิน/ลงรายงานเอง · 27 พ.ย. 2569) ----
+      for (const path of ['/api/my/cases', `/api/my/cases/${c.case_id}`, '/api/my/payslips']) {
+        assert.equal((await get(path, staffA1)).status, 401, path);
+      }
 
       // ---- เปลี่ยนคนดูแลเคส: กะของพาร์ทเนอร์ไม่ถูกย้ายตาม ----
       await post(`/api/cases/${c.case_id}/assign`, { employee_id: 'EMP-0004' });
@@ -3646,7 +3654,6 @@ if (process.env.RUN_DB_TESTS !== '1') {
       assert.equal(row.partner_reject_reason, 'คนไม่พอ');
       assert.ok((await call('GET', '/api/partners/attention')).some((x) => x.visit_id === v1 && x.reason === 'rejected'));
       assert.ok((await get('/api/notify/alerts', MANAGER)).body.groups.attendance.partner_attention >= 1);
-      assert.ok((await get('/api/my/notifications', staffA1)).body.items.some((n) => n.kind === 'visit_removed' && n.visit_id === v1));
 
       // ---- ส่งอีกกะแล้ว KIN ดึงคืนให้คนของ KIN · ดึงคืนให้คนของพาร์ทเนอร์ไม่ได้ ----
       await call('POST', `/api/partners/visits/${v2}/send`, { partner_id: B.partner_id });
@@ -3683,6 +3690,41 @@ if (process.env.RUN_DB_TESTS !== '1') {
       assert.equal(Number(paid.amount), 600);
       await call('POST', `/api/partners/${A.partner_id}/payments`, { month: last.m }, MANAGER, 409);
       assert.ok(doneRow.visit_id);
+
+      // ---- หัวหน้าพาร์ทเนอร์ลงรายงาน + เวลาเริ่ม–จบ = กะไปจริง (แทนเช็คอินของพนักงาน · 27 พ.ย. 2569) ----
+      const yday = await day(-1);
+      const repVisit = await sql.one(
+        `INSERT INTO case_visits (case_id, visit_date, status, assigned_to, partner_id, partner_status, partner_rate, planned_start, planned_end)
+         VALUES (:cid, :d, 'scheduled', :e, :pid, 'accepted', 600, '10:00', '11:00') RETURNING visit_id`,
+        { cid: c.case_id, d: yday, e: a1Row.employee_id, pid: A.partner_id },
+      );
+      const rid = repVisit.visit_id;
+      const reportBody = { start: '10:15', end: '11:20', report_type: 'routine', note: 'ทำกายภาพครบตามแผน', pulse: 78 };
+      await call('POST', `/api/partner/visits/${rid}/report`, reportBody, leadB, 404);
+      await call('POST', `/api/partner/visits/${rid}/report`, { ...reportBody, start: '25:00' }, leadA, 400);
+      // รายงานบันทึกไม่ผ่าน (ขาดช่องบังคับ) = เวลาที่ลงไว้ถูกถอนคืน กะไม่นับเงินโดยไม่มีรายงาน
+      await call('POST', `/api/partner/visits/${rid}/report`, { start: '10:15', end: '11:20', pulse: 78 }, leadA, 409);
+      assert.equal((await visitRow(rid)).check_in_at, null);
+      const made = await call('POST', `/api/partner/visits/${rid}/report`, reportBody, leadA, 201);
+      assert.equal(made.visit_id, rid);
+      assert.equal(made.reported_by, leadARow.employee_id);
+      const rv = await visitRow(rid);
+      assert.equal(rv.status, 'done');
+      assert.equal(rv.checked_in_by, a1Row.employee_id);
+      assert.equal(rv.location_flagged, false);
+      const mins = await sql.one(
+        `SELECT to_char(check_in_at AT TIME ZONE 'Asia/Bangkok', 'HH24:MI') AS i, to_char(check_out_at AT TIME ZONE 'Asia/Bangkok', 'HH24:MI') AS o,
+                check_in_late_minutes AS late FROM case_visits WHERE visit_id = :id`, { id: rid });
+      assert.deepEqual([mins.i, mins.o, Number(mins.late)], ['10:15', '11:20', 15]);
+      await call('POST', `/api/partner/visits/${rid}/report`, reportBody, leadA, 409);
+      // ยังไม่ถึงวันนัด / ยังไม่เลือกคน = ลงไม่ได้
+      const future = await sql.one(
+        `INSERT INTO case_visits (case_id, visit_date, status, assigned_to, partner_id, partner_status, partner_rate)
+         VALUES (:cid, :d, 'scheduled', :e, :pid, 'accepted', 600) RETURNING visit_id`,
+        { cid: c.case_id, d: await day(12), e: a1Row.employee_id, pid: A.partner_id },
+      );
+      assert.match((await call('POST', `/api/partner/visits/${future.visit_id}/report`, reportBody, leadA, 409)).error, /ยังไม่ถึงวันนัด/);
+      await sql.run('DELETE FROM case_visits WHERE visit_id = :id', { id: future.visit_id });
 
       // ---- ลงนัดแล้วส่งให้พาร์ทเนอร์เลย (แผงลงนัด) — ไม่มีคน · ไม่เติมผู้รับผิดชอบเคส · แจ้งหัวหน้าครั้งเดียว ----
       await call('POST', `/api/cases/${c.case_id}/visits/bulk`,

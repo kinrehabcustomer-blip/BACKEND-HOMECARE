@@ -462,7 +462,7 @@ function MonthlySummary({ canPay }) {
       <header className="set-card-head">
         <div className="set-card-title">
           <h3>สรุปรายเดือน</h3>
-          <p className="muted">กะที่ไปจริง (เช็คอิน+เช็คเอาท์) × เรท · ขาดงานไม่นับเงิน · บันทึกจ่ายได้หลังสิ้นเดือน</p>
+          <p className="muted">กะที่ไปจริง (หัวหน้าพาร์ทเนอร์ลงรายงาน + เวลาแล้ว) × เรท · ไม่ลงรายงานไม่นับเงิน · บันทึกจ่ายได้หลังสิ้นเดือน</p>
         </div>
         <div className="pt-month" role="group" aria-label="เลือกเดือน">
           <button type="button" className="btn tiny" aria-label="เดือนก่อน" onClick={() => setMonth(shiftMonth(month, -1))}>‹</button>

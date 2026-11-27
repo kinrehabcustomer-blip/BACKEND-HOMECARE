@@ -38,16 +38,22 @@ export const ensureStaffInbox = () =>
       ON staff_notifications (created_at) WHERE pushed_at IS NULL`);
   })().catch((err) => { ready = null; throw err; }));
 
+/* พนักงานของพาร์ทเนอร์ (ไม่ใช่หัวหน้า) ไม่ได้เข้าระบบแล้ว (27 พ.ย. 2569) — ไม่สร้างแจ้งเตือนในแอปให้ ไม่มีใครเปิดอ่าน
+   หัวหน้าพาร์ทเนอร์ยังได้ partner_job ตามเดิม · เงื่อนไขเดียวกับ isPartnerStaff (lib/auth.js) */
+const NOT_PARTNER_STAFF = (col) => `NOT EXISTS (SELECT 1 FROM employees pe
+  WHERE pe.employee_id = ${col} AND pe.partner_id IS NOT NULL AND pe.position <> 'partner_lead')`;
+
 /** db = sql หรือ tx — ต้องเรียก ensureStaffInbox() ก่อนเปิด transaction (DDL ใน tx ที่ล็อกแถวอยู่เสี่ยงค้าง) */
 async function push(db, { employeeId, kind, caseId = null, visitId = null, payload, key = null }) {
   if (!employeeId) return;
-  await db.run(
+  const added = await db.run(
     `INSERT INTO staff_notifications (employee_id, kind, case_id, visit_id, payload, dedupe_key)
-     VALUES (:employeeId, :kind, :caseId, :visitId, :payload::jsonb, :key)
+     SELECT :employeeId, :kind, :caseId, :visitId, :payload::jsonb, :key
+     WHERE ${NOT_PARTNER_STAFF('CAST(:employeeId AS text)')}
      ON CONFLICT (dedupe_key) DO NOTHING`,
     { employeeId, kind, caseId, visitId, payload: JSON.stringify(payload), key },
   );
-  markPushPending(); // ส่ง push ก่อนตอบคำขอนี้ (หลัง transaction commit) — notify/webPush.js
+  if (added) markPushPending(); // ส่ง push ก่อนตอบคำขอนี้ (หลัง transaction commit) — notify/webPush.js
 }
 
 const clientOf = async (db, caseId) =>
@@ -120,6 +126,7 @@ export async function inboxPartnerJob(db, leadIds, { caseId, visitId, client, da
 const START_AT = `((v.visit_date || ' ' || COALESCE(v.planned_start, '08:00'))::timestamp AT TIME ZONE 'Asia/Bangkok')`;
 const DAY_AT = `(((v.visit_date)::date - 1 + time '08:00') AT TIME ZONE 'Asia/Bangkok')`;
 const DUE_BASE = `(CAST(:me AS text) IS NULL OR v.assigned_to = :me) AND v.assigned_to IS NOT NULL AND v.status = 'scheduled' AND v.check_in_at IS NULL
+  AND ${NOT_PARTNER_STAFF('v.assigned_to')}
   AND c.status IN ('unassigned', 'assigned', 'in_progress') AND ${START_AT} > now()
   AND v.visit_date BETWEEN to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD')
                        AND to_char((now() AT TIME ZONE 'Asia/Bangkok') + interval '2 days', 'YYYY-MM-DD')`;

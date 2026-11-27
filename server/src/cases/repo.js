@@ -3036,6 +3036,60 @@ export function checkInVisit(
   }).then((ok) => (ok ? findVisit(visitId) : null));
 }
 
+/**
+ * หัวหน้าพาร์ทเนอร์ลงเวลาไปจริงของกะ (ผู้ใช้ขอ 27 พ.ย. 2569) — แทนเช็คอิน/เช็คเอาท์ของพนักงานพาร์ทเนอร์ที่ไม่ได้เข้าระบบแล้ว
+ * เขียนช่องเดียวกับเช็คอิน+เช็คเอาท์ (check_in_at/check_out_at/checked_in_by = คนที่ถูกเลือกให้ไป · status = done)
+ * ยอดจ่ายพาร์ทเนอร์ · หน้าตรวจเวลา · ต้นทุนตาม BU อ่านช่องเหล่านี้อยู่แล้วจึงนับให้เองโดยไม่ต้องแก้
+ * ไม่มีพิกัด/รูป = ไม่ขึ้นธงนอกพื้นที่ (ไม่มีอะไรให้ตรวจ) · สาย/นอกวันนัดคิดจากเวลาที่ลง (กติกาเดียวกับ adjustVisit)
+ * WHERE check_in_at IS NULL กันลงซ้ำ/แข่งกัน · คืน null ถ้ากะถูกลงไปแล้วหรือถูกยกเลิกระหว่างนั้น
+ */
+export function recordPartnerVisit(visitId, { checkIn, checkOut }, actor) {
+  return transaction(async (tx) => {
+    const visit = await tx.one('SELECT case_id, visit_date FROM case_visits WHERE visit_id = :id', { id: visitId });
+    if (!visit) return null;
+    await caseForTransition(tx, visit.case_id, ACTIVE_CASE_STATES);
+    const day = `to_char(:cin::timestamptz AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD')`;
+    const updated = await tx.run(
+      `UPDATE case_visits
+       SET check_in_at = :cin::timestamptz, check_out_at = :cout::timestamptz, checked_in_by = assigned_to,
+           status = 'done', location_flagged = FALSE, location_note = NULL,
+           check_in_late_minutes = CASE WHEN planned_start IS NOT NULL AND ${day} = visit_date
+             THEN GREATEST(0, floor(extract(epoch FROM (:cin::timestamptz
+                   - ((visit_date || ' ' || planned_start)::timestamp AT TIME ZONE 'Asia/Bangkok'))) / 60))::int
+             ELSE NULL END,
+           off_schedule = (${day} <> visit_date),
+           updated_at = ${NOW}
+       WHERE visit_id = :id AND check_in_at IS NULL AND status <> 'cancelled' AND assigned_to IS NOT NULL`,
+      { id: visitId, cin: checkIn, cout: checkOut },
+    );
+    if (updated === 0) return null;
+    // เหมือนเช็คอินกะแรก: เคสที่ยัง 'assigned' = เริ่มให้บริการแล้ว
+    const started = await tx.run(
+      `UPDATE cases
+       SET status = 'in_progress',
+           start_date = COALESCE(start_date, :d), updated_at = ${NOW}
+       WHERE case_id = :cid AND status = 'assigned'`,
+      { cid: visit.case_id, d: visit.visit_date },
+    );
+    if (started > 0) await logEvent(tx, visit.case_id, 'started', 'เริ่มให้บริการ (จากรายงานกะแรกของพาร์ทเนอร์)', actor);
+    const t = (iso) => new Date(iso).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Bangkok' });
+    await logEvent(tx, visit.case_id, 'visit_adjusted',
+      `หัวหน้าพาร์ทเนอร์ลงเวลาไปจริง กะวันที่ ${visit.visit_date} — ${t(checkIn)}–${t(checkOut)} น.`, actor);
+    return visit;
+  }).then((v) => (v ? findVisit(visitId) : null));
+}
+
+/** ถอนเวลาที่ recordPartnerVisit เพิ่งลง — ใช้เมื่อบันทึกรายงานต่อไม่สำเร็จ (กะจะได้ไม่นับเงินโดยไม่มีรายงาน) */
+export function undoPartnerVisit(visitId, checkIn) {
+  return sql.run(
+    `UPDATE case_visits
+     SET check_in_at = NULL, check_out_at = NULL, checked_in_by = NULL, status = 'scheduled',
+         check_in_late_minutes = NULL, off_schedule = FALSE, updated_at = ${NOW}
+     WHERE visit_id = :id AND check_in_at = :cin::timestamptz`,
+    { id: visitId, cin: checkIn },
+  );
+}
+
 /** เช็คเอาท์กะ — route เช็คเงื่อนไขก่อนแล้ว, WHERE กันแข่งกดอีกชั้น; คืน null ถ้าไม่เข้าเงื่อนไข */
 export const checkOutVisit = (visitId, { lat, lng, accuracy = null, distance = null, flagged = false, note = null }) =>
   sql

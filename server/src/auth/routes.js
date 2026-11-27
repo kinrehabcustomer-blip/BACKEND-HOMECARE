@@ -19,6 +19,8 @@ import {
   verifyPassword,
   DEFAULT_PASSWORD,
   markDefaultPassword,
+  isPartnerStaff,
+  PARTNER_STAFF_BLOCKED,
 } from '../lib/auth.js';
 import { sendOtpEmail } from '../lib/mailer.js';
 import { claimLineTicket, ensureLineColumn, verifyLineTicket, verifySigned } from '../lib/lineBridge.js';
@@ -136,6 +138,7 @@ authRouter.post(
 
     const blocked = BLOCKED_STATUSES[employee.status];
     if (blocked) throw new ApiError(403, `${blocked} — ติดต่อผู้ดูแลระบบ`);
+    if (isPartnerStaff(employee)) throw new ApiError(403, PARTNER_STAFF_BLOCKED);
 
     // ยังใช้รหัสเริ่มต้น = บังคับตั้งรหัสใหม่ก่อนใช้งาน (lib/auth.js markDefaultPassword · 21 พ.ย. 2569)
     await markDefaultPassword(employee, password);
@@ -170,7 +173,7 @@ authRouter.get(
     const employee = await sql.one('SELECT * FROM employees WHERE line_user_id = :uid', { uid: lineUserId });
     if (employee) res.locals.audit = { target_type: 'employees', target_id: employee.employee_id };
     if (!employee) return res.redirect(302, `/login?line=${encodeURIComponent(req.query.t)}${to !== '/' ? `&to=${encodeURIComponent(to)}` : ''}`);
-    if (BLOCKED_STATUSES[employee.status]) return res.redirect(302, '/login?line_error=blocked');
+    if (BLOCKED_STATUSES[employee.status] || isPartnerStaff(employee)) return res.redirect(302, '/login?line_error=blocked');
 
     /* ตั๋วใบนี้ออกคุกกี้ได้ครั้งเดียว (ดู claimLineTicket ใน lib/lineBridge.js) — URL ของตั๋วหลุดไปอยู่ใน
        ประวัติเบราว์เซอร์/log/แชทได้ตลอด 10 นาทีที่ตั๋วยังไม่หมดอายุ
@@ -325,7 +328,7 @@ authRouter.post(
     const { email } = forgotSchema.parse(req.body);
 
     const employee = await sql.one(
-      'SELECT employee_id, first_name, last_name, email, status FROM employees WHERE lower(email) = lower(:email)',
+      'SELECT employee_id, first_name, last_name, email, status, position, partner_id FROM employees WHERE lower(email) = lower(:email)',
       { email },
     );
 
@@ -333,8 +336,8 @@ authRouter.post(
     const generic = { message: `ถ้าอีเมลนี้มีอยู่ในระบบ เราได้ส่งรหัสยืนยันไปให้แล้ว (ใช้ได้ภายใน ${OTP_TTL_MINUTES} นาที)` };
     // บันทึกการใช้งานเท่านั้น — คำตอบที่ส่งกลับยังเหมือนกันทุกตัวอักษร (ไม่บอกใบ้ว่าอีเมลไหนมีจริง)
     if (employee) res.locals.audit = { target_type: 'employees', target_id: employee.employee_id };
-    if (!employee || BLOCKED_STATUSES[employee.status]) {
-      if (employee) res.locals.audit.detail = { otp: 'not_issued', reason: employee.status };
+    if (!employee || BLOCKED_STATUSES[employee.status] || isPartnerStaff(employee)) {
+      if (employee) res.locals.audit.detail = { otp: 'not_issued', reason: isPartnerStaff(employee) ? 'partner_staff' : employee.status };
       return res.json(generic);
     }
 

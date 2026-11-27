@@ -178,6 +178,11 @@ export const { maxAge: _maxAge, ...clearCookieOptions } = cookieOptions;
  */
 export const BLOCKED_STATUSES = { resigned: 'บัญชีนี้ลาออกแล้ว', suspended: 'บัญชีนี้ถูกพักงานอยู่' };
 
+/* พนักงานของพาร์ทเนอร์ (ไม่ใช่หัวหน้า) ไม่ต้องเข้าระบบแล้ว (ผู้ใช้ขอ 27 พ.ย. 2569) — ไม่มีเช็คอิน/ลงรายงานเอง
+   หัวหน้าบริษัทเป็นคนลงรายงานพร้อมเวลาเริ่ม–จบแทน (partners/repo.js reportVisit) · บัญชียังอยู่เป็นรายชื่อให้หัวหน้าเลือก */
+export const isPartnerStaff = (e) => Boolean(e?.partner_id) && !PARTNER_POSITIONS.includes(e.position);
+export const PARTNER_STAFF_BLOCKED = 'บัญชีพนักงานพาร์ทเนอร์ไม่ต้องเข้าระบบ — หัวหน้าบริษัทเป็นคนลงรายงานแทน';
+
 /**
  * ทุก request ที่ผ่าน middleware นี้ต้องมี session ที่ยังไม่หมดอายุ "และบัญชียังใช้งานได้อยู่"
  *
@@ -270,6 +275,11 @@ export function requireAuth(req, res, next) {
       if (emp.partner_id && emp.partner_status !== 'active') {
         res.clearCookie(COOKIE_NAME, clearCookieOptions);
         return next(new ApiError(401, 'บริษัทพาร์ทเนอร์ของคุณปิดใช้งานอยู่ — ติดต่อ KIN'));
+      }
+      // เซสชันเก่าของพนักงานพาร์ทเนอร์ (ก่อนปิดการเข้าระบบ) ใช้ต่อไม่ได้
+      if (isPartnerStaff(emp)) {
+        res.clearCookie(COOKIE_NAME, clearCookieOptions);
+        return next(new ApiError(401, PARTNER_STAFF_BLOCKED));
       }
 
       req.user = {

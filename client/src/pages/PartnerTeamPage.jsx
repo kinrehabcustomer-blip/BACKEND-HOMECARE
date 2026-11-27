@@ -43,13 +43,15 @@ export default function PartnerTeamPage() {
     setBusy(true);
     setFormError(null);
     try {
-      const body = { ...form, nickname: form.nickname || null, phone: form.phone || null, email: form.email.trim() || null };
+      // คนในทีมไม่ต้องเข้าระบบแล้ว (27 พ.ย. 2569) — ไม่มีช่องอีเมล จึงไม่ส่ง (อีเมลเดิมที่มีอยู่คงไว้ ไม่ล้าง)
+      const { email: _email, ...rest } = form;
+      const body = { ...rest, nickname: form.nickname || null, phone: form.phone || null };
       if (editing) {
         const p = await api.partnerUpdatePerson(editing.employee_id, body);
         toast(`บันทึกข้อมูล ${p.first_name ?? form.first_name} แล้ว`);
       } else {
         const p = await api.partnerAddPerson(body);
-        toast(`เพิ่ม ${p.first_name} แล้ว — เข้าระบบด้วย ${p.employee_id}${p.email ? ` หรือ ${p.email}` : ''} · รหัสผ่านเริ่มต้น 12345678 (เข้าครั้งแรกต้องตั้งใหม่)`);
+        toast(`เพิ่ม ${p.first_name} เข้าทีมแล้ว — เลือกให้ไปงานได้เลย (ไม่ต้องเข้าระบบ)`);
       }
       closeForm();
       load();
@@ -115,7 +117,7 @@ export default function PartnerTeamPage() {
               <span className="pt-avatar is-blank" />
               <span className="pt-member-main">ชื่อ</span>
               <span className="pt-col">ตำแหน่ง</span>
-              <span className="pt-col">รหัสเข้าระบบ</span>
+              <span className="pt-col">รหัสพนักงาน</span>
               <span className="pt-col is-num">เดือนนี้</span>
               <span className="pt-col-act">สถานะ</span>
             </div>
@@ -150,7 +152,6 @@ export default function PartnerTeamPage() {
                       : <button type="button" className="btn tiny" onClick={() => setStatus(p, 'active')}>เปิดบัญชี</button>
                   ) : (
                     <>
-                      {p.default_password && !p.last_login_at && <span className="pt-tag is-warn">รอเข้าครั้งแรก</span>}
                       {/* ปิดบัญชีอยู่ใน popup แก้ไข (23 พ.ย. 2569) — แถวเหลือปุ่มเดียว */}
                       <button type="button" className={`btn tiny${editing?.employee_id === p.employee_id ? ' is-on' : ''}`}
                         onClick={() => openEdit(p)} aria-label={`แก้ไขข้อมูล ${p.first_name}`}>แก้ไข</button>
@@ -180,9 +181,9 @@ export default function PartnerTeamPage() {
 const visitTag = (v) => {
   const past = v.visit_date < todayTH();
   if (v.status === 'cancelled') return { text: 'ยกเลิก', cls: 'is-muted' };
-  if (v.check_out_at) return { text: 'ไปแล้ว', cls: 'is-ok' };
-  if (v.check_in_at) return past ? { text: 'ยังไม่เช็คเอาท์', cls: 'is-warn' } : { text: 'กำลังทำงาน', cls: 'is-ok' };
-  return past ? { text: 'ขาดงาน', cls: 'is-warn' } : { text: 'รอวันนัด', cls: 'is-once' };
+  if (v.check_in_at) return { text: 'ไปแล้ว', cls: 'is-ok' };
+  // ไม่มีเช็คอินของพนักงานแล้ว — ไปจริง = หัวหน้าลงรายงาน (27 พ.ย. 2569)
+  return past || v.visit_date === todayTH() ? { text: 'ยังไม่ลงรายงาน', cls: 'is-warn' } : { text: 'รอวันนัด', cls: 'is-once' };
 };
 const loginAt = (ts) => (ts ? `${formatDate(ts.slice(0, 10))} ${ts.slice(11, 16)} น.` : null);
 
@@ -225,7 +226,7 @@ function PersonDetailDialog({ person, onCancel, onEdit, onReopen }) {
   const history = visits.filter((v) => !upcoming.includes(v));
   const status = p.status === 'suspended' ? { text: 'KIN ระงับ — ติดต่อ KIN เพื่อเปิดคืน', cls: 'is-warn' }
     : !on ? { text: 'ปิดบัญชีแล้ว', cls: 'is-muted' }
-    : p.default_password && !p.last_login_at ? { text: 'รอเข้าครั้งแรก', cls: 'is-warn' }
+    : lead && p.default_password && !p.last_login_at ? { text: 'รอเข้าครั้งแรก', cls: 'is-warn' }
       : { text: 'ใช้งานอยู่', cls: 'is-ok' };
   return createPortal(
     <div className="modal-backdrop modal-stacked" onClick={onCancel}>
@@ -245,13 +246,13 @@ function PersonDetailDialog({ person, onCancel, onEdit, onReopen }) {
           {/* ข้อมูลบัญชีเป็นกล่อง 2×2 · จำนวนครั้งที่ไปเป็นกล่องทองด้านข้าง (ดีไซน์ใหม่ — ข้อมูลชุดเดิม) */}
           <div className="pt-pd-top">
             <dl className="pt-detail pt-pd-info">
-              <div><dt>รหัสเข้าระบบ</dt><dd className="mono">{p.employee_id}</dd></div>
-              <div><dt>อีเมล</dt><dd>{p.email || <span className="muted">ไม่ได้ใส่ — เข้าระบบด้วยรหัสพนักงาน</span>}</dd></div>
+              <div><dt>{lead ? 'รหัสเข้าระบบ' : 'รหัสพนักงาน'}</dt><dd className="mono">{p.employee_id}</dd></div>
+              {lead && <div><dt>อีเมล</dt><dd>{p.email || <span className="muted">ไม่ได้ใส่ — เข้าระบบด้วยรหัสพนักงาน</span>}</dd></div>}
               <div>
                 <dt>เบอร์โทร</dt>
                 <dd>{p.phone ? <a className="link" href={`tel:${String(p.phone).replace(/[^\d+]/g, '')}`}>{p.phone}</a> : <span className="muted">ไม่ได้ใส่</span>}</dd>
               </div>
-              <div><dt>เข้าระบบล่าสุด</dt><dd>{loginAt(p.last_login_at) ?? <span className="muted">ยังไม่เคยเข้า</span>}</dd></div>
+              {lead && <div><dt>เข้าระบบล่าสุด</dt><dd>{loginAt(p.last_login_at) ?? <span className="muted">ยังไม่เคยเข้า</span>}</dd></div>}
             </dl>
             {!lead && (
               <dl className="pt-pd-done">
@@ -307,8 +308,8 @@ function PersonDialog({ editing, form, set, positions, busy, error, onSubmit, on
             <h2 id="pt-person-title">{editing ? 'แก้ไขข้อมูลคนในทีม' : 'เพิ่มคนในทีม'}</h2>
             <p className="muted">
               {editing
-                ? <>รหัสเข้าระบบ <span className="mono">{editing.employee_id}</span> · รหัสผ่านไม่เปลี่ยน</>
-                : 'ได้รหัสเข้าระบบอัตโนมัติ · เข้าครั้งแรกด้วยรหัสผ่านเริ่มต้น แล้วระบบให้ตั้งใหม่'}
+                ? <>รหัสพนักงาน <span className="mono">{editing.employee_id}</span></>
+                : 'คนในทีมไม่ต้องเข้าระบบ — หัวหน้าเลือกให้ไปงานและลงรายงานแทน'}
             </p>
           </div>
           <button type="button" className="modal-close" onClick={onCancel} aria-label="ปิด" disabled={busy}>×</button>
@@ -319,10 +320,6 @@ function PersonDialog({ editing, form, set, positions, busy, error, onSubmit, on
             <label>นามสกุล<input required value={form.last_name} onChange={set('last_name')} disabled={busy} /></label>
             <label>ชื่อเล่น<input value={form.nickname} onChange={set('nickname')} disabled={busy} placeholder="ไม่บังคับ" /></label>
             <label>เบอร์โทร<input type="tel" inputMode="tel" value={form.phone} onChange={set('phone')} disabled={busy} placeholder="ไม่บังคับ" /></label>
-            <label className="pt-span">อีเมล (ใช้เข้าระบบแทนรหัสพนักงานได้)
-              <input type="email" inputMode="email" autoComplete="off" autoCapitalize="none" spellCheck={false}
-                value={form.email} onChange={set('email')} disabled={busy} placeholder="ไม่บังคับ · เช่น name@example.com" />
-            </label>
             <label className="pt-span">ตำแหน่ง
               <select value={form.position} onChange={set('position')} disabled={busy}>
                 {positions.map((p) => <option key={p} value={p}>{POSITION_LABELS[p] ?? p}</option>)}
@@ -342,7 +339,7 @@ function PersonDialog({ editing, form, set, positions, busy, error, onSubmit, on
         <footer className="modal-foot">
           {editing && (
             <ConfirmButton className="btn danger-ghost foot-danger" disabled={busy} title={`ปิดบัญชี ${editing.first_name}?`}
-              detail="เข้าระบบไม่ได้อีก · เปิดคืนได้ภายหลังจากหน้าทีมของฉัน · ถ้ายังมีกะข้างหน้า ต้องเปลี่ยนคนในกะนั้นก่อน"
+              detail="เลือกให้ไปงานไม่ได้อีก · เปิดคืนได้ภายหลังจากหน้าทีมของฉัน · ถ้ายังมีกะข้างหน้า ต้องเปลี่ยนคนในกะนั้นก่อน"
               confirmLabel="ปิดบัญชี" cancelLabel="ไม่ปิด" onConfirm={onCloseAccount}>ปิดบัญชี</ConfirmButton>
           )}
           <button type="button" className="btn" onClick={onCancel} disabled={busy}>ยกเลิก</button>
