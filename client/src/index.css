@@ -4381,6 +4381,8 @@ a.history-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 
   font-weight: 700;
   color: var(--muted);
 }
+/* "นัดครั้งที่ 2/4" ต่อท้ายวันที่ — สีทองให้เด่นกว่าจำนวนใบ (27 พ.ย. 2569) */
+.report-day-head .report-day-visit { color: var(--brand-strong, var(--brand)); }
 
 /* แถวรายงานหนึ่งใบตอนย่อ — สูงเท่าบรรทัดเดียว ไม่ใช่การ์ดที่มีขอบเต็มใบ
    เคสที่บันทึกวันละ 4 รอบ ครึ่งปีก็เกินเจ็ดร้อยใบ การ์ดใหญ่ใบละ 5 บรรทัดทำให้เลื่อนหาอะไรไม่เจอเลย */

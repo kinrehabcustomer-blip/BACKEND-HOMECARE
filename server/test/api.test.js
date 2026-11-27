@@ -3717,6 +3717,20 @@ if (process.env.RUN_DB_TESTS !== '1') {
                 check_in_late_minutes AS late FROM case_visits WHERE visit_id = :id`, { id: rid });
       assert.deepEqual([mins.i, mins.o, Number(mins.late)], ['10:15', '11:20', 15]);
       await call('POST', `/api/partner/visits/${rid}/report`, reportBody, leadA, 409);
+      // รายการรายงานบอกว่าเป็นนัดครั้งที่เท่าไหร่ของเคส (27 พ.ย. 2569) — Homecare ไม่มีเพดาน = visit_total null
+      {
+        const listed = (await get(`/api/cases/${c.case_id}/reports?per_page=50`, MANAGER)).body;
+        const row = (listed.data ?? listed.items ?? listed.reports ?? []).find((x) => x.report_id === made.report_id);
+        const expected = await sql.one(
+          `SELECT COUNT(*)::int AS n FROM case_visits o, case_visits v
+            WHERE v.visit_id = :id AND o.case_id = v.case_id AND o.status <> 'cancelled'
+              AND (o.check_in_at IS NOT NULL OR o.visit_id = v.visit_id)
+              AND (o.visit_date, COALESCE(o.planned_start, ''), o.visit_id) <= (v.visit_date, COALESCE(v.planned_start, ''), v.visit_id)`,
+          { id: rid });
+        assert.equal(row?.visit_no, expected.n);
+        assert.ok(row.visit_no >= 1);
+        assert.equal(row.visit_total, null);
+      }
       // ยังไม่ถึงวันนัด / ยังไม่เลือกคน = ลงไม่ได้
       const future = await sql.one(
         `INSERT INTO case_visits (case_id, visit_date, status, assigned_to, partner_id, partner_status, partner_rate)

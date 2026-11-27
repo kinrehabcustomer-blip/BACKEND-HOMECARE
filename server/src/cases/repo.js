@@ -5025,7 +5025,20 @@ const REPORT_BASE_COLS = [
   'r.updated_at',
 ].join(', ');
 
-const REPORT_COLS = [REPORT_BASE_COLS, 'v.visit_date', 'v.planned_start', 'v.planned_end'].join(', ');
+/* รายงานนี้เป็นของนัดครั้งที่เท่าไหร่ของเคส (ผู้ใช้ขอ 27 พ.ย. 2569)
+   นับเฉพาะนัดที่ไปจริง (เช็คอินแล้ว) เรียงวัน+เวลา ถึงนัดของรายงานใบนี้ (นับนัดนี้เองด้วยแม้ลงรายงานโดยไม่ได้เช็คอิน)
+   + ครั้งที่ใช้ไปก่อนเข้าระบบของแพ็กกายภาพ · นัดที่ไม่ได้ไป (ขาด) ไม่นับ — ไม่งั้นรายงานครั้งแรกที่ไปจริงขึ้นเป็น "ครั้งที่ 2"
+   นับใหม่ทุกรอบ (คนละเคส) · visit_total = จำนวนครั้งทั้งแพ็กกายภาพ (× จำนวนแพ็ก) · Homecare = null · นัดยกเลิก/ไม่ผูกนัด = null */
+const REPORT_VISIT_NO = `CASE WHEN v.visit_id IS NULL OR v.status = 'cancelled' THEN NULL ELSE
+  (SELECT COUNT(*) FROM case_visits o
+    WHERE o.case_id = v.case_id AND o.status <> 'cancelled' AND (o.check_in_at IS NOT NULL OR o.visit_id = v.visit_id)
+      AND (o.visit_date, COALESCE(o.planned_start, ''), o.visit_id) <= (v.visit_date, COALESCE(v.planned_start, ''), v.visit_id))::int
+  + COALESCE((SELECT CASE WHEN vc.physio_package_id IS NOT NULL THEN COALESCE((to_jsonb(vc) ->> 'carried_used')::int, 0) ELSE 0 END
+              FROM cases vc WHERE vc.case_id = v.case_id), 0) END AS visit_no`;
+const REPORT_VISIT_TOTAL = `(SELECT pp.sessions * COALESCE((to_jsonb(vc) ->> 'pkg_quantity')::int, 1)
+  FROM cases vc JOIN physio_packages pp ON pp.physio_package_id = vc.physio_package_id
+  WHERE vc.case_id = v.case_id) AS visit_total`;
+const REPORT_COLS = [REPORT_BASE_COLS, 'v.visit_date', 'v.planned_start', 'v.planned_end', REPORT_VISIT_NO, REPORT_VISIT_TOTAL].join(', ');
 
 /**
  * รูปแผลเป็นไบนารีหลักแสนไบต์ ส่งกลับไปกับ JSON ทุกครั้งที่โหลดรายการไม่ไหว

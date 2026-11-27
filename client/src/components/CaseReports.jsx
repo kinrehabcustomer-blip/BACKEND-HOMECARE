@@ -90,6 +90,18 @@ export function vitalChips(r) {
   return chips;
 }
 
+/**
+ * "นัดครั้งที่ 2/4" ต่อท้ายวันที่ในหัววัน (ผู้ใช้ขอ 27 พ.ย. 2569) — server คิด visit_no/visit_total ให้ (cases/repo.js REPORT_VISIT_NO)
+ * กายภาพ = ครั้งที่/ทั้งแพ็ก · Homecare = ครั้งที่อย่างเดียว · วันเดียวมีหลายนัด = ไล่ทุกเลข · ไม่ผูกนัด/นัดยกเลิก = ไม่แสดง
+ */
+function visitNoText(rows) {
+  const seen = new Map();
+  for (const r of rows) if (r.visit_no != null && !seen.has(r.visit_no)) seen.set(r.visit_no, r.visit_total);
+  if (!seen.size) return null;
+  const nos = [...seen.entries()].sort((a, b) => a[0] - b[0]);
+  return `นัดครั้งที่ ${nos.map(([n, total]) => (total ? `${n}/${total}` : n)).join(', ')}`;
+}
+
 function ReportForm({ initial, busy, error, onSubmit, onCancel }) {
   const [form, setForm] = useState(() => toForm(initial));
   const set = (key) => (e) => setForm((prev) => ({ ...prev, [key]: e.target.value }));
@@ -574,6 +586,7 @@ export default function CaseReports({
           {!visitId && (
             <h4 className="report-day-head">
               {formatDate(date)}
+              {visitNoText(rows) && <span className="report-day-visit"> · {visitNoText(rows)}</span>}
               {rows.length > 1 && <span className="muted"> · {rows.length} ใบ</span>}
             </h4>
           )}
